@@ -82,7 +82,7 @@ Vitest (jsdom), config in `vite.config.ts`, setup in `src/test/setup.ts`. To tes
 ## EVE domain notes
 
 - **SDE** (what a blueprint produces and its material inputs): download the Fuzzwork prebuilt SQLite
-  (`sqlite-latest.sqlite.bz2`) on first run. Key tables: `industryActivityMaterials` (inputs,
+  (`latest-sqlite.db.gz`, gzip) on first run. Key tables: `industryActivityMaterials` (inputs,
   `activityID=1` manufacturing, `8` invention), `industryActivityProducts` (output type + qty),
   `industryActivityProbabilities` (invention chance), `invTypes` (names/groups).
 - **ESI** (`https://esi.evetech.net`): `/characters/{id}/assets/` and `/blueprints/` (gives ME/TE/runs;

@@ -36,7 +36,7 @@ where
 {
     tokio::fs::create_dir_all(&paths.dir).await?;
 
-    // 1. Stream the bz2 to a temp file so we never hold the whole archive in RAM.
+    // 1. Stream the gzip to a temp file so we never hold the whole archive in RAM.
     let resp = reqwest::Client::new()
         .get(SDE_URL)
         .send()
@@ -44,7 +44,7 @@ where
         .error_for_status()?;
     let total = resp.content_length();
     let mut stream = resp.bytes_stream();
-    let mut file = tokio::fs::File::create(&paths.tmp_bz2).await?;
+    let mut file = tokio::fs::File::create(&paths.tmp_archive).await?;
     let mut downloaded = 0u64;
     progress(SdeProgress::new("downloading", 0, total));
     while let Some(chunk) = stream.next().await {
@@ -58,9 +58,9 @@ where
 
     // 2. Decompress (CPU-bound) on a blocking thread.
     progress(SdeProgress::new("decompressing", downloaded, total));
-    let bz2 = paths.tmp_bz2.clone();
+    let archive = paths.tmp_archive.clone();
     let tmp_db = paths.tmp_db.clone();
-    tokio::task::spawn_blocking(move || decompress(&bz2, &tmp_db))
+    tokio::task::spawn_blocking(move || decompress(&archive, &tmp_db))
         .await
         .map_err(|e| SdeError::Decompress(e.to_string()))??;
 
@@ -73,15 +73,15 @@ where
 
     // 4. Swap into place and clean up.
     tokio::fs::rename(&paths.tmp_db, &paths.db).await?;
-    let _ = tokio::fs::remove_file(&paths.tmp_bz2).await;
+    let _ = tokio::fs::remove_file(&paths.tmp_archive).await;
     progress(SdeProgress::new("done", downloaded, total));
     Ok(())
 }
 
-fn decompress(bz2: &Path, out: &Path) -> Result<(), SdeError> {
+fn decompress(archive: &Path, out: &Path) -> Result<(), SdeError> {
     use std::io::BufReader;
-    let input = std::fs::File::open(bz2)?;
-    let mut decoder = bzip2::read::BzDecoder::new(BufReader::new(input));
+    let input = std::fs::File::open(archive)?;
+    let mut decoder = flate2::read::GzDecoder::new(BufReader::new(input));
     let mut output = std::fs::File::create(out)?;
     std::io::copy(&mut decoder, &mut output)?;
     Ok(())

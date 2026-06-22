@@ -2,7 +2,8 @@
 //!
 //! The SDE is the offline source of truth for "what a blueprint produces and
 //! what it costs in materials". On first run we download the Fuzzwork prebuilt
-//! SQLite SDE, decompress it into the app data dir, and query it read-only.
+//! SQLite SDE (gzip), decompress it into the app data dir, and query it
+//! read-only.
 //!
 //! - [`download_sde`] — fetch + decompress + verify + atomically swap into place
 //! - [`Sde`]          — a read-only connection with typed query helpers
@@ -23,8 +24,8 @@ pub use types::{BlueprintMaterial, BlueprintProduct};
 
 use std::path::PathBuf;
 
-/// Fuzzwork's prebuilt, bz2-compressed SQLite conversion of the SDE.
-pub const SDE_URL: &str = "https://www.fuzzwork.co.uk/dump/sqlite-latest.sqlite.bz2";
+/// Fuzzwork's prebuilt, gzip-compressed SQLite conversion of the SDE.
+pub const SDE_URL: &str = "https://www.fuzzwork.co.uk/dump/latest-sqlite.db.gz";
 
 /// Resolved on-disk locations for the SDE under the app data dir.
 ///
@@ -34,7 +35,7 @@ pub const SDE_URL: &str = "https://www.fuzzwork.co.uk/dump/sqlite-latest.sqlite.
 pub struct SdePaths {
     pub dir: PathBuf,
     pub db: PathBuf,
-    pub tmp_bz2: PathBuf,
+    pub tmp_archive: PathBuf,
     pub tmp_db: PathBuf,
 }
 
@@ -44,7 +45,7 @@ impl SdePaths {
         let dir = app_data_dir.join("sde");
         Self {
             db: dir.join("sde.sqlite"),
-            tmp_bz2: dir.join("sde.sqlite.bz2.part"),
+            tmp_archive: dir.join("sde.db.gz.part"),
             tmp_db: dir.join("sde.sqlite.part"),
             dir,
         }
