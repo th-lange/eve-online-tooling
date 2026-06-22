@@ -69,12 +69,15 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
   daily average, N-day moving average, volume), cached.
 - **Production profit engine** — ME-adjusted material cost + EIV job fee + revenue → profit, margin,
   and per-unit, with a per-material breakdown.
-- **Production UI** — pick blueprints from the SDE, set runs / ME / cost index / facility tax and the
-  price basis, then see a ranked, sortable profit table (profit · margin · per-unit · daily volume)
-  with text + min-volume filters and a per-material cost drill-down. Uses public data — no login yet.
+- **Production UI** — rank **All** manufacturable items (global average prices, one call) or a
+  hand-picked **Selected** set (precise spot/volume pricing), with controls for runs / ME / cost index
+  / facility tax / price basis. Ranked, sortable table (profit · margin · per-unit · daily volume) with
+  text + min-volume filters and a per-material cost drill-down. Public data — no login yet.
+- **Smart SDE caching** — the static data only re-downloads when Fuzzwork's published md5 changes
+  ("Update data" button reports updated vs already-current).
 
-Still to come: SSO login + reading character blueprints (#3/#4) — which adds the "show only owned"
-view — and invention/T2 and reactions/T3 (#9/#10).
+Still to come: SSO login + reading character blueprints (#3/#4) — which lights up the **Owned** view —
+and invention/T2 and reactions/T3 (#9/#10).
 
 ## Status & tracking
 
