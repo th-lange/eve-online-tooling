@@ -15,3 +15,4 @@ mod service;
 mod types;
 
 pub use service::MarketService;
+pub use types::PriceModel;

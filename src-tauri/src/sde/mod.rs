@@ -19,6 +19,7 @@ mod types;
 pub use db::Sde;
 pub use download::download_sde;
 pub use error::SdeError;
+pub use types::{BlueprintMaterial, BlueprintProduct};
 
 use std::path::PathBuf;
 

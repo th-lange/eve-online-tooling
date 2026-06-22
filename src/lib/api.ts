@@ -119,3 +119,49 @@ export function marketPrice(typeId: number): Promise<PriceModel> {
 export function marketPrices(typeIds: number[]): Promise<PriceModel[]> {
   return invoke<PriceModel[]>("market_prices", { typeIds });
 }
+
+// --- Production profit ---
+
+export interface MaterialLine {
+  typeId: number;
+  name: string;
+  requiredQuantity: number;
+  unitPrice: number | null;
+  lineCost: number;
+}
+
+export interface ProfitBreakdown {
+  blueprintTypeId: number;
+  productTypeId: number;
+  productName: string;
+  runs: number;
+  me: number;
+  unitsProduced: number;
+  materialCost: number;
+  jobFee: number;
+  revenue: number;
+  profit: number;
+  /** profit / revenue, or null when revenue is zero. */
+  margin: number | null;
+  profitPerUnit: number;
+  /** Product daily volume (liquidity), or null. */
+  productVolume: number | null;
+  materials: MaterialLine[];
+  /** type ids that couldn't be priced; numbers are incomplete when non-empty. */
+  missingPrices: number[];
+}
+
+export interface ProfitParams {
+  blueprintTypeIds: number[];
+  runs?: number;
+  me?: number;
+  systemCostIndex?: number;
+  facilityTax?: number;
+}
+
+/** Evaluate and rank the given blueprints by build-vs-buy profit (desc). */
+export function productionProfit(
+  params: ProfitParams,
+): Promise<ProfitBreakdown[]> {
+  return invoke<ProfitBreakdown[]>("production_profit", { params });
+}

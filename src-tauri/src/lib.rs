@@ -37,6 +37,7 @@ pub fn run() {
             sde::commands::sde_manufacturable_blueprints,
             market::commands::market_price,
             market::commands::market_prices,
+            modules::production::commands::production_profit,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
