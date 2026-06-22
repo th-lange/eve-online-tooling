@@ -1,0 +1,220 @@
+//! Read-only query layer over the SDE SQLite database.
+
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
+use std::path::Path;
+
+use super::types::{
+    activity, BlueprintMaterial, BlueprintProduct, ManufacturableBlueprint, TypeInfo,
+};
+use super::SdeError;
+
+/// A read-only handle to the SDE database. Opening is cheap, so callers may
+/// open one per request; this also means an SDE update (which swaps the file)
+/// is picked up on the next open.
+pub struct Sde {
+    conn: Connection,
+}
+
+impl Sde {
+    /// Open the SDE database read-only.
+    pub fn open(db_path: &Path) -> Result<Self, SdeError> {
+        if !db_path.exists() {
+            return Err(SdeError::NotInstalled);
+        }
+        let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        Ok(Self { conn })
+    }
+
+    /// Manufacturing inputs (activity 1) for a blueprint, with material names.
+    pub fn blueprint_materials(
+        &self,
+        blueprint_type_id: i64,
+    ) -> Result<Vec<BlueprintMaterial>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT iam.materialTypeID, t.typeName, iam.quantity
+             FROM industryActivityMaterials iam
+             JOIN invTypes t ON t.typeID = iam.materialTypeID
+             WHERE iam.typeID = ?1 AND iam.activityID = ?2
+             ORDER BY iam.materialTypeID",
+        )?;
+        let rows = stmt.query_map(params![blueprint_type_id, activity::MANUFACTURING], |row| {
+            Ok(BlueprintMaterial {
+                material_type_id: row.get(0)?,
+                name: row.get(1)?,
+                quantity: row.get(2)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// What a blueprint manufactures (activity 1), if anything.
+    pub fn blueprint_product(
+        &self,
+        blueprint_type_id: i64,
+    ) -> Result<Option<BlueprintProduct>, SdeError> {
+        let product = self
+            .conn
+            .query_row(
+                "SELECT iap.productTypeID, t.typeName, iap.quantity
+                 FROM industryActivityProducts iap
+                 JOIN invTypes t ON t.typeID = iap.productTypeID
+                 WHERE iap.typeID = ?1 AND iap.activityID = ?2
+                 LIMIT 1",
+                params![blueprint_type_id, activity::MANUFACTURING],
+                |row| {
+                    Ok(BlueprintProduct {
+                        product_type_id: row.get(0)?,
+                        name: row.get(1)?,
+                        quantity: row.get(2)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(product)
+    }
+
+    /// Type name + group + volume for a type id, if it exists.
+    pub fn type_info(&self, type_id: i64) -> Result<Option<TypeInfo>, SdeError> {
+        let info = self
+            .conn
+            .query_row(
+                "SELECT t.typeID, t.typeName, t.groupID, g.groupName, t.volume
+                 FROM invTypes t
+                 LEFT JOIN invGroups g ON g.groupID = t.groupID
+                 WHERE t.typeID = ?1",
+                params![type_id],
+                |row| {
+                    Ok(TypeInfo {
+                        type_id: row.get(0)?,
+                        name: row.get(1)?,
+                        group_id: row.get(2)?,
+                        group_name: row.get(3)?,
+                        volume: row.get(4)?,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(info)
+    }
+
+    /// Every blueprint that has a manufacturing product (activity 1).
+    pub fn manufacturable_blueprints(&self) -> Result<Vec<ManufacturableBlueprint>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT iap.typeID, iap.productTypeID, t.typeName, iap.quantity
+             FROM industryActivityProducts iap
+             JOIN invTypes t ON t.typeID = iap.productTypeID
+             WHERE iap.activityID = ?1
+             ORDER BY t.typeName",
+        )?;
+        let rows = stmt.query_map(params![activity::MANUFACTURING], |row| {
+            Ok(ManufacturableBlueprint {
+                blueprint_type_id: row.get(0)?,
+                product_type_id: row.get(1)?,
+                product_name: row.get(2)?,
+                product_quantity: row.get(3)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    #[cfg(test)]
+    fn from_connection(conn: Connection) -> Self {
+        Self { conn }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A tiny in-memory SDE: blueprint 999 builds 1x Widget (100) from
+    /// 40x Tritanium (200) + 10x Pyerite (300).
+    fn fixture() -> Sde {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE invGroups(groupID INT, categoryID INT, groupName TEXT);
+             CREATE TABLE invTypes(typeID INT, groupID INT, typeName TEXT, volume REAL);
+             CREATE TABLE industryActivityProducts(typeID INT, activityID INT, productTypeID INT, quantity INT);
+             CREATE TABLE industryActivityMaterials(typeID INT, activityID INT, materialTypeID INT, quantity INT);
+
+             INSERT INTO invGroups VALUES (10, 4, 'Widgets'), (18, 4, 'Minerals');
+             INSERT INTO invTypes VALUES
+               (100, 10, 'Widget', 5.0),
+               (200, 18, 'Tritanium', 0.01),
+               (300, 18, 'Pyerite', 0.01),
+               (999, 10, 'Widget Blueprint', 0.01);
+             INSERT INTO industryActivityProducts VALUES (999, 1, 100, 1);
+             INSERT INTO industryActivityMaterials VALUES (999, 1, 200, 40), (999, 1, 300, 10);
+             -- An invention row that must NOT leak into manufacturing queries.
+             INSERT INTO industryActivityMaterials VALUES (999, 8, 5000, 2);",
+        )
+        .unwrap();
+        Sde::from_connection(conn)
+    }
+
+    #[test]
+    fn returns_manufacturing_materials_only() {
+        let sde = fixture();
+        let mats = sde.blueprint_materials(999).unwrap();
+        assert_eq!(
+            mats,
+            vec![
+                BlueprintMaterial {
+                    material_type_id: 200,
+                    name: "Tritanium".into(),
+                    quantity: 40
+                },
+                BlueprintMaterial {
+                    material_type_id: 300,
+                    name: "Pyerite".into(),
+                    quantity: 10
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn returns_product() {
+        let sde = fixture();
+        let product = sde.blueprint_product(999).unwrap().unwrap();
+        assert_eq!(
+            product,
+            BlueprintProduct {
+                product_type_id: 100,
+                name: "Widget".into(),
+                quantity: 1
+            }
+        );
+    }
+
+    #[test]
+    fn product_is_none_for_non_blueprint() {
+        let sde = fixture();
+        assert!(sde.blueprint_product(100).unwrap().is_none());
+    }
+
+    #[test]
+    fn returns_type_info_with_group() {
+        let sde = fixture();
+        let info = sde.type_info(100).unwrap().unwrap();
+        assert_eq!(info.name, "Widget");
+        assert_eq!(info.group_id, 10);
+        assert_eq!(info.group_name.as_deref(), Some("Widgets"));
+        assert_eq!(info.volume, Some(5.0));
+    }
+
+    #[test]
+    fn type_info_is_none_when_missing() {
+        let sde = fixture();
+        assert!(sde.type_info(424242).unwrap().is_none());
+    }
+
+    #[test]
+    fn lists_manufacturable_blueprints() {
+        let sde = fixture();
+        let bps = sde.manufacturable_blueprints().unwrap();
+        assert_eq!(bps.len(), 1);
+        assert_eq!(bps[0].blueprint_type_id, 999);
+        assert_eq!(bps[0].product_type_id, 100);
+    }
+}
