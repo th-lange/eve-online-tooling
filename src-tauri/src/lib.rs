@@ -35,6 +35,7 @@ pub fn run() {
             sde::commands::sde_blueprint_product,
             sde::commands::sde_type_info,
             sde::commands::sde_manufacturable_blueprints,
+            market::commands::market_hubs,
             market::commands::market_price,
             market::commands::market_prices,
             modules::production::commands::production_profit,

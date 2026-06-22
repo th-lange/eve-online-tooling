@@ -1,5 +1,5 @@
 //! Market price service: fetch ESI market data, cache it, and assemble the
-//! multi-vector [`PriceModel`] per type.
+//! multi-vector [`PriceModel`] per type for a chosen [`Market`].
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -9,9 +9,8 @@ use crate::esi::{EsiClient, EsiError};
 
 use super::aggregate::assemble_price_model;
 use super::cache::TtlCache;
-use super::types::{
-    AdjustedPrice, HistoryDay, Order, PriceModel, JITA_STATION_ID, THE_FORGE_REGION_ID,
-};
+use super::markets::Market;
+use super::types::{AdjustedPrice, HistoryDay, Order, PriceModel};
 
 /// Default window for the moving-average vector.
 const MA_DAYS: usize = 7;
@@ -24,11 +23,11 @@ fn is_not_found(err: &EsiError) -> bool {
 
 pub struct MarketService {
     esi: EsiClient,
-    region_id: i64,
-    station_id: i64,
     ma_days: usize,
-    orders: TtlCache<i64, Vec<Order>>,
-    history: TtlCache<i64, Vec<HistoryDay>>,
+    // Orders/history are region-scoped, so cache them by (region_id, type_id).
+    orders: TtlCache<(i64, i64), Vec<Order>>,
+    history: TtlCache<(i64, i64), Vec<HistoryDay>>,
+    // Global adjusted/average prices (one document for all types).
     prices: TtlCache<(), Arc<HashMap<i64, AdjustedPrice>>>,
 }
 
@@ -42,8 +41,6 @@ impl MarketService {
     pub fn new() -> Self {
         Self {
             esi: EsiClient::new(),
-            region_id: THE_FORGE_REGION_ID,
-            station_id: JITA_STATION_ID,
             ma_days: MA_DAYS,
             // TTLs roughly track ESI cache timers.
             orders: TtlCache::new(Duration::from_secs(300)),
@@ -52,12 +49,12 @@ impl MarketService {
         }
     }
 
-    /// Spot orders for a type in the hub region (cached).
-    async fn orders_for(&self, type_id: i64) -> Result<Vec<Order>, EsiError> {
-        if let Some(cached) = self.orders.get(&type_id) {
+    /// Spot orders for a type in a region (cached per region).
+    async fn orders_for(&self, region_id: i64, type_id: i64) -> Result<Vec<Order>, EsiError> {
+        if let Some(cached) = self.orders.get(&(region_id, type_id)) {
             return Ok(cached);
         }
-        let path = format!("/latest/markets/{}/orders/", self.region_id);
+        let path = format!("/latest/markets/{region_id}/orders/");
         let orders: Vec<Order> = match self
             .esi
             .get_paged(
@@ -73,16 +70,16 @@ impl MarketService {
             Err(e) if is_not_found(&e) => Vec::new(),
             Err(e) => return Err(e),
         };
-        self.orders.put(type_id, orders.clone());
+        self.orders.put((region_id, type_id), orders.clone());
         Ok(orders)
     }
 
-    /// Daily history for a type in the hub region (cached).
-    async fn history_for(&self, type_id: i64) -> Result<Vec<HistoryDay>, EsiError> {
-        if let Some(cached) = self.history.get(&type_id) {
+    /// Daily history for a type in a region (cached per region).
+    async fn history_for(&self, region_id: i64, type_id: i64) -> Result<Vec<HistoryDay>, EsiError> {
+        if let Some(cached) = self.history.get(&(region_id, type_id)) {
             return Ok(cached);
         }
-        let path = format!("/latest/markets/{}/history/", self.region_id);
+        let path = format!("/latest/markets/{region_id}/history/");
         let history: Vec<HistoryDay> = match self
             .esi
             .get_json(&path, &[("type_id", type_id.to_string())])
@@ -92,7 +89,7 @@ impl MarketService {
             Err(e) if is_not_found(&e) => Vec::new(),
             Err(e) => return Err(e),
         };
-        self.history.put(type_id, history.clone());
+        self.history.put((region_id, type_id), history.clone());
         Ok(history)
     }
 
@@ -108,44 +105,49 @@ impl MarketService {
         Ok(arc)
     }
 
-    /// Full price model for one type.
-    pub async fn price_model(&self, type_id: i64) -> Result<PriceModel, EsiError> {
+    /// Full price model for one type at the given market.
+    pub async fn price_model(&self, market: &Market, type_id: i64) -> Result<PriceModel, EsiError> {
         let adjusted = self.adjusted_prices().await?;
-        let orders = self.orders_for(type_id).await?;
-        let history = self.history_for(type_id).await?;
+        let orders = self.orders_for(market.region_id, type_id).await?;
+        let history = self.history_for(market.region_id, type_id).await?;
         Ok(assemble_price_model(
             type_id,
             &orders,
             &history,
             adjusted.get(&type_id),
             self.ma_days,
-            self.station_id,
+            market.station_id,
         ))
     }
 
-    /// Price models for many types. Global prices are fetched once and reused.
-    pub async fn price_models(&self, type_ids: &[i64]) -> Result<Vec<PriceModel>, EsiError> {
+    /// Price models for many types at the given market. Global prices are
+    /// fetched once and reused.
+    pub async fn price_models(
+        &self,
+        market: &Market,
+        type_ids: &[i64],
+    ) -> Result<Vec<PriceModel>, EsiError> {
         let adjusted = self.adjusted_prices().await?;
         let mut out = Vec::with_capacity(type_ids.len());
         for &type_id in type_ids {
-            let orders = self.orders_for(type_id).await?;
-            let history = self.history_for(type_id).await?;
+            let orders = self.orders_for(market.region_id, type_id).await?;
+            let history = self.history_for(market.region_id, type_id).await?;
             out.push(assemble_price_model(
                 type_id,
                 &orders,
                 &history,
                 adjusted.get(&type_id),
                 self.ma_days,
-                self.station_id,
+                market.station_id,
             ));
         }
         Ok(out)
     }
 
     /// Cheap price models for many types using only the global adjusted/average
-    /// prices (one ESI call total). Spot sell/buy and volume are left empty —
-    /// this is for ranking the whole catalogue, where per-item fetches don't
-    /// scale.
+    /// prices (one ESI call total, market-independent). Spot sell/buy and volume
+    /// are left empty — for ranking the whole catalogue, where per-item fetches
+    /// don't scale.
     pub async fn average_price_models(
         &self,
         type_ids: &[i64],

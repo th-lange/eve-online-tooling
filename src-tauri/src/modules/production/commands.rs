@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, State};
 
-use crate::market::{MarketService, PriceModel};
+use crate::market::{default_market, market_by_id, MarketService, PriceModel};
 use crate::sde::{BlueprintProduct, Sde, SdePaths};
 
 use super::engine::{evaluate, manufacturing_step, PriceBasis, ProfitBreakdown, ProfitConfig};
@@ -48,6 +48,10 @@ pub struct ProfitParams {
     pub material_basis: Option<PriceBasis>,
     #[serde(default)]
     pub product_basis: Option<PriceBasis>,
+    /// Market to price against in `Selected` mode (default Jita). `All` mode
+    /// uses global average prices and ignores this.
+    #[serde(default)]
+    pub market_id: Option<String>,
 }
 
 /// Evaluate and rank blueprints by profit (descending).
@@ -102,11 +106,17 @@ pub async fn production_profit(
         steps.push(manufacturing_step(*bp, product, &materials));
     }
 
-    // Price the needed types — precisely (Selected) or in bulk (All).
+    // Price the needed types — precisely at the chosen market (Selected) or in
+    // bulk with global average prices (All).
     let ids: Vec<i64> = needed.into_iter().collect();
+    let chosen_market = params
+        .market_id
+        .as_deref()
+        .and_then(market_by_id)
+        .unwrap_or_else(default_market);
     let price_list = match params.mode {
         ProfitMode::All => market.average_price_models(&ids).await,
-        ProfitMode::Selected => market.price_models(&ids).await,
+        ProfitMode::Selected => market.price_models(&chosen_market, &ids).await,
     }
     .map_err(|e| e.to_string())?;
     let prices: HashMap<i64, PriceModel> = price_list.into_iter().map(|m| (m.type_id, m)).collect();

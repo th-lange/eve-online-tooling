@@ -11,8 +11,10 @@ pub mod commands;
 
 mod aggregate;
 mod cache;
+mod markets;
 mod service;
 mod types;
 
+pub use markets::{default_market, market_by_id};
 pub use service::MarketService;
 pub use types::PriceModel;

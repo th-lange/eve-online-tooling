@@ -117,9 +117,25 @@ export function marketPrice(typeId: number): Promise<PriceModel> {
   return invoke<PriceModel>("market_price", { typeId });
 }
 
-/** Price models for many types in one call. */
-export function marketPrices(typeIds: number[]): Promise<PriceModel[]> {
-  return invoke<PriceModel[]>("market_prices", { typeIds });
+/** A selectable market (trade hub or whole region) to price against. */
+export interface Market {
+  id: string;
+  label: string;
+  regionId: number;
+  stationId: number | null;
+}
+
+/** The selectable markets (trade hubs + a few whole-region options). */
+export function marketHubs(): Promise<Market[]> {
+  return invoke<Market[]>("market_hubs");
+}
+
+/** Price models for many types in one call, at the given market (default Jita). */
+export function marketPrices(
+  typeIds: number[],
+  marketId?: string,
+): Promise<PriceModel[]> {
+  return invoke<PriceModel[]>("market_prices", { typeIds, marketId });
 }
 
 // --- Production profit ---
@@ -177,6 +193,8 @@ export interface ProfitParams {
   facilityTax?: number;
   materialBasis?: PriceBasis;
   productBasis?: PriceBasis;
+  /** Market to price against in "selected" mode (default Jita). */
+  marketId?: string;
 }
 
 /** Evaluate and rank the given blueprints by build-vs-buy profit (desc). */

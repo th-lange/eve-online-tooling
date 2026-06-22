@@ -70,8 +70,9 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
 - **Production profit engine** — ME-adjusted material cost + EIV job fee + revenue → profit, margin,
   and per-unit, with a per-material breakdown.
 - **Production UI** — rank **All** manufacturable items (global average prices, one call) or a
-  hand-picked **Selected** set (precise spot/volume pricing), with controls for runs / ME / cost index
-  / facility tax / price basis. Ranked, sortable table (profit · **ROI** · margin · per-unit · daily
+  hand-picked **Selected** set (precise spot/volume pricing) priced against a chosen **market** (Jita,
+  Amarr, Dodixie, Rens, Hek, or a whole region), with controls for runs / ME / cost index / facility
+  tax / price basis. Ranked, sortable table (profit · **ROI** · margin · per-unit · daily
   volume) with text, min-volume, and **meta-group** (Tech I/II, Faction, Officer, …) filters and a
   per-material cost drill-down. Public data — no login yet.
 - **Smart SDE caching** — the static data only re-downloads when Fuzzwork's published md5 changes

@@ -5,20 +5,25 @@
 
 use super::types::{AdjustedPrice, HistoryDay, Order, PriceModel};
 
-/// Lowest sell price among sell orders at `station_id`.
-pub fn sell_min(orders: &[Order], station_id: i64) -> Option<f64> {
+/// Whether an order is at the requested station (or anywhere, when `None`).
+fn at_station(order: &Order, station_id: Option<i64>) -> bool {
+    station_id.is_none_or(|s| order.location_id == s)
+}
+
+/// Lowest sell price among sell orders at `station_id` (whole region if `None`).
+pub fn sell_min(orders: &[Order], station_id: Option<i64>) -> Option<f64> {
     orders
         .iter()
-        .filter(|o| !o.is_buy_order && o.location_id == station_id)
+        .filter(|o| !o.is_buy_order && at_station(o, station_id))
         .map(|o| o.price)
         .fold(None, |acc, p| Some(acc.map_or(p, |a: f64| a.min(p))))
 }
 
-/// Highest buy price among buy orders at `station_id`.
-pub fn buy_max(orders: &[Order], station_id: i64) -> Option<f64> {
+/// Highest buy price among buy orders at `station_id` (whole region if `None`).
+pub fn buy_max(orders: &[Order], station_id: Option<i64>) -> Option<f64> {
     orders
         .iter()
-        .filter(|o| o.is_buy_order && o.location_id == station_id)
+        .filter(|o| o.is_buy_order && at_station(o, station_id))
         .map(|o| o.price)
         .fold(None, |acc, p| Some(acc.map_or(p, |a: f64| a.max(p))))
 }
@@ -50,7 +55,7 @@ pub fn assemble_price_model(
     history: &[HistoryDay],
     adjusted: Option<&AdjustedPrice>,
     ma_days: usize,
-    station_id: i64,
+    station_id: Option<i64>,
 ) -> PriceModel {
     let latest = latest_day(history);
     PriceModel {
@@ -98,7 +103,7 @@ mod tests {
             order(80.0, false, OTHER), // different station, ignored
             order(50.0, true, HUB),    // buy order, ignored
         ];
-        assert_eq!(sell_min(&orders, HUB), Some(90.0));
+        assert_eq!(sell_min(&orders, Some(HUB)), Some(90.0));
     }
 
     #[test]
@@ -109,13 +114,13 @@ mod tests {
             order(99.0, true, OTHER), // different station, ignored
             order(200.0, false, HUB), // sell order, ignored
         ];
-        assert_eq!(buy_max(&orders, HUB), Some(55.0));
+        assert_eq!(buy_max(&orders, Some(HUB)), Some(55.0));
     }
 
     #[test]
     fn missing_orders_yield_none() {
-        assert_eq!(sell_min(&[], HUB), None);
-        assert_eq!(buy_max(&[], HUB), None);
+        assert_eq!(sell_min(&[], Some(HUB)), None);
+        assert_eq!(buy_max(&[], Some(HUB)), None);
     }
 
     #[test]
@@ -145,7 +150,7 @@ mod tests {
             adjusted_price: Some(85.0),
             average_price: Some(86.0),
         };
-        let m = assemble_price_model(34, &orders, &history, Some(&adjusted), 2, HUB);
+        let m = assemble_price_model(34, &orders, &history, Some(&adjusted), 2, Some(HUB));
         assert_eq!(m.type_id, 34);
         assert_eq!(m.sell_min, Some(100.0));
         assert_eq!(m.buy_max, Some(70.0));
@@ -159,7 +164,7 @@ mod tests {
 
     #[test]
     fn assemble_with_no_data_is_all_none() {
-        let m = assemble_price_model(34, &[], &[], None, 7, HUB);
+        let m = assemble_price_model(34, &[], &[], None, 7, Some(HUB));
         assert_eq!(
             m,
             PriceModel {

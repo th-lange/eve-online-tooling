@@ -1,9 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-/// The Forge region (contains Jita) and Jita 4-4, EVE's main trade hub.
-pub const THE_FORGE_REGION_ID: i64 = 10000002;
-pub const JITA_STATION_ID: i64 = 60003760;
-
 /// A market order as returned by `/markets/{region}/orders/`. We only model the
 /// fields we use; serde ignores the rest of the response.
 #[derive(Debug, Clone, Deserialize)]

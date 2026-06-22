@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  marketHubs,
   productionProfit,
   sdeManufacturableBlueprints,
   sdeStatus,
@@ -50,11 +51,14 @@ function Workbench() {
   const [facilityTaxPct, setFacilityTaxPct] = useState(0);
   const [materialBasis, setMaterialBasis] = useState<PriceBasis>("sellMin");
   const [productBasis, setProductBasis] = useState<PriceBasis>("sellMin");
+  const [marketId, setMarketId] = useState("jita");
 
   const blueprints = useQuery({
     queryKey: ["sde", "manufacturable"],
     queryFn: sdeManufacturableBlueprints,
   });
+
+  const hubs = useQuery({ queryKey: ["market", "hubs"], queryFn: marketHubs });
 
   const update = useMutation({ mutationFn: () => sdeUpdate(false) });
 
@@ -78,6 +82,7 @@ function Workbench() {
               facilityTax: facilityTaxPct / 100,
               materialBasis,
               productBasis,
+              marketId,
             },
       ),
   });
@@ -179,6 +184,20 @@ function Workbench() {
             />
             {mode === "selected" && (
               <>
+                <label className="col-span-2 flex flex-col gap-1 text-xs text-zinc-400">
+                  Market
+                  <select
+                    value={marketId}
+                    onChange={(e) => setMarketId(e.currentTarget.value)}
+                    className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+                  >
+                    {hubs.data?.map((h) => (
+                      <option key={h.id} value={h.id}>
+                        {h.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <BasisField
                   label="Materials priced at"
                   value={materialBasis}
