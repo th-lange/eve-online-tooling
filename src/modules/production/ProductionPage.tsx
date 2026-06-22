@@ -51,7 +51,8 @@ function Workbench() {
   const [facilityTaxPct, setFacilityTaxPct] = useState(0);
   const [materialBasis, setMaterialBasis] = useState<PriceBasis>("sellMin");
   const [productBasis, setProductBasis] = useState<PriceBasis>("sellMin");
-  const [marketId, setMarketId] = useState("jita");
+  const [markets, setMarkets] = useState<Set<string>>(new Set(["jita"]));
+  const [blueprintCostPerRun, setBlueprintCostPerRun] = useState(0);
 
   const blueprints = useQuery({
     queryKey: ["sde", "manufacturable"],
@@ -82,7 +83,8 @@ function Workbench() {
               facilityTax: facilityTaxPct / 100,
               materialBasis,
               productBasis,
-              marketId,
+              marketIds: [...markets],
+              blueprintCostPerRun,
             },
       ),
   });
@@ -91,6 +93,15 @@ function Workbench() {
     setSelected((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleMarket(id: string) {
+    setMarkets((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.size === 0) next.add("jita"); // always price against at least one
       return next;
     });
   }
@@ -182,22 +193,43 @@ function Workbench() {
               min={0}
               step={0.1}
             />
+            <label className="col-span-2 flex flex-col gap-1 text-xs text-zinc-400">
+              Blueprint cost / run (ISK)
+              <input
+                type="number"
+                value={blueprintCostPerRun}
+                min={0}
+                step={1000000}
+                onChange={(e) =>
+                  setBlueprintCostPerRun(Number(e.currentTarget.value))
+                }
+                className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+              />
+            </label>
             {mode === "selected" && (
               <>
-                <label className="col-span-2 flex flex-col gap-1 text-xs text-zinc-400">
-                  Market
-                  <select
-                    value={marketId}
-                    onChange={(e) => setMarketId(e.currentTarget.value)}
-                    className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
-                  >
+                <div className="col-span-2 flex flex-col gap-1 text-xs text-zinc-400">
+                  Markets (best wins)
+                  <div className="flex flex-wrap gap-1.5">
                     {hubs.data?.map((h) => (
-                      <option key={h.id} value={h.id}>
+                      <label
+                        key={h.id}
+                        className={`flex cursor-pointer items-center gap-1 rounded px-2 py-1 ${
+                          markets.has(h.id)
+                            ? "bg-zinc-700 text-zinc-100"
+                            : "bg-zinc-800 text-zinc-400"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={markets.has(h.id)}
+                          onChange={() => toggleMarket(h.id)}
+                        />
                         {h.label}
-                      </option>
+                      </label>
                     ))}
-                  </select>
-                </label>
+                  </div>
+                </div>
                 <BasisField
                   label="Materials priced at"
                   value={materialBasis}

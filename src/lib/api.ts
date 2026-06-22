@@ -157,6 +157,8 @@ export interface ProfitBreakdown {
   unitsProduced: number;
   materialCost: number;
   jobFee: number;
+  /** Amortized blueprint acquisition cost for this job (per-run cost × runs). */
+  blueprintCost: number;
   revenue: number;
   profit: number;
   /** profit / revenue, or null when revenue is zero. Capped at 100%. */
@@ -166,6 +168,8 @@ export interface ProfitBreakdown {
   profitPerUnit: number;
   /** Meta group of the product (Tech I/II, Faction, Officer, …). */
   metaGroup: string | null;
+  /** Which market this result was priced at (best of the selected markets). */
+  market: string | null;
   /** Product daily volume (liquidity), or null. */
   productVolume: number | null;
   materials: MaterialLine[];
@@ -193,8 +197,10 @@ export interface ProfitParams {
   facilityTax?: number;
   materialBasis?: PriceBasis;
   productBasis?: PriceBasis;
-  /** Market to price against in "selected" mode (default Jita). */
-  marketId?: string;
+  /** Markets to price against in "selected" mode; best per item wins. */
+  marketIds?: string[];
+  /** Amortized blueprint acquisition cost per run (e.g. faction BPC). */
+  blueprintCostPerRun?: number;
 }
 
 /** Evaluate and rank the given blueprints by build-vs-buy profit (desc). */

@@ -25,7 +25,7 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [filter, setFilter] = useState("");
   const [minVolume, setMinVolume] = useState("");
-  const [metaGroup, setMetaGroup] = useState("");
+  const [selectedMeta, setSelectedMeta] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<number | null>(null);
 
   const metaGroups = useMemo(() => {
@@ -34,17 +34,27 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
     return [...set].sort();
   }, [rows]);
 
+  function toggleMeta(m: string) {
+    setSelectedMeta((prev) => {
+      const next = new Set(prev);
+      next.has(m) ? next.delete(m) : next.add(m);
+      return next;
+    });
+  }
+
   const view = useMemo(() => {
     const needle = filter.trim().toLowerCase();
     const min = minVolume.trim() === "" ? null : Number(minVolume);
     const filtered = rows.filter((r) => {
       if (needle && !r.productName.toLowerCase().includes(needle)) return false;
       if (min !== null && (r.productVolume ?? 0) < min) return false;
-      if (metaGroup && r.metaGroup !== metaGroup) return false;
+      // No meta selected = show all; otherwise the row's group must be ticked.
+      if (selectedMeta.size > 0 && !(r.metaGroup && selectedMeta.has(r.metaGroup)))
+        return false;
       return true;
     });
     return sortBreakdowns(filtered, sortKey, sortDir);
-  }, [rows, filter, minVolume, metaGroup, sortKey, sortDir]);
+  }, [rows, filter, minVolume, selectedMeta, sortKey, sortDir]);
 
   const shown = view.slice(0, MAX_ROWS);
 
@@ -76,21 +86,24 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
             className="w-24 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
           />
         </label>
-        {metaGroups.length > 1 && (
-          <select
-            value={metaGroup}
-            onChange={(e) => setMetaGroup(e.currentTarget.value)}
-            className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
-            title="Filter by meta group"
-          >
-            <option value="">All meta groups</option>
-            {metaGroups.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-        )}
+        {metaGroups.length > 1 &&
+          metaGroups.map((m) => (
+            <label
+              key={m}
+              className={`flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs ${
+                selectedMeta.has(m)
+                  ? "bg-zinc-700 text-zinc-100"
+                  : "bg-zinc-800 text-zinc-400"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={selectedMeta.has(m)}
+                onChange={() => toggleMeta(m)}
+              />
+              {m}
+            </label>
+          ))}
         <span className="ml-auto text-xs text-zinc-500">
           {view.length > MAX_ROWS
             ? `top ${MAX_ROWS} of ${view.length}`
@@ -115,6 +128,7 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
                   {sortKey === c.key ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
                 </th>
               ))}
+              <th className="px-3 py-2 text-left font-medium">Market</th>
             </tr>
           </thead>
           <tbody>
@@ -166,6 +180,9 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
                     <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                       {formatInt(r.productVolume)}
                     </td>
+                    <td className="px-3 py-1.5 text-zinc-400">
+                      {r.market ?? "—"}
+                    </td>
                   </tr>
                   {open && <BreakdownRow row={r} />}
                 </Fragment>
@@ -173,7 +190,7 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
             })}
             {view.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-3 py-6 text-center text-zinc-500">
+                <td colSpan={8} className="px-3 py-6 text-center text-zinc-500">
                   No rows.
                 </td>
               </tr>
@@ -189,10 +206,14 @@ function BreakdownRow({ row }: { row: ProfitBreakdown }) {
   return (
     <tr className="border-t border-zinc-800 bg-zinc-900/40">
       <td />
-      <td colSpan={6} className="px-3 py-3">
+      <td colSpan={7} className="px-3 py-3">
         <div className="mb-2 text-xs text-zinc-400">
           {row.runs} run(s) · ME {row.me} · {formatInt(row.unitsProduced)} unit(s)
-          · job fee {formatIsk(row.jobFee)} · revenue {formatIsk(row.revenue)}
+          · job fee {formatIsk(row.jobFee)}
+          {row.blueprintCost > 0
+            ? ` · blueprint ${formatIsk(row.blueprintCost)}`
+            : ""}{" "}
+          · revenue {formatIsk(row.revenue)}
         </div>
         <table className="w-full text-xs">
           <thead className="text-zinc-500">

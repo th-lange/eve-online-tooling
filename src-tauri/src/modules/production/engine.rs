@@ -87,6 +87,9 @@ pub struct ProfitConfig {
     pub broker_fee: f64,
     /// Whether to subtract sales tax + broker fee from revenue.
     pub include_sales_cost: bool,
+    /// Cost to acquire the blueprint copy, amortized **per run** (e.g. a faction
+    /// or officer BPC from an LP store). Multiplied by `runs`.
+    pub blueprint_cost_per_run: f64,
 }
 
 impl Default for ProfitConfig {
@@ -99,6 +102,7 @@ impl Default for ProfitConfig {
             sales_tax: 0.0,
             broker_fee: 0.0,
             include_sales_cost: false,
+            blueprint_cost_per_run: 0.0,
         }
     }
 }
@@ -126,6 +130,8 @@ pub struct ProfitBreakdown {
     pub units_produced: i64,
     pub material_cost: f64,
     pub job_fee: f64,
+    /// Amortized blueprint acquisition cost for this job (per-run cost × runs).
+    pub blueprint_cost: f64,
     pub revenue: f64,
     pub profit: f64,
     /// Profit / revenue, or `None` when revenue is zero. Capped at 100%.
@@ -137,6 +143,9 @@ pub struct ProfitBreakdown {
     /// Meta group of the product (Tech I/II, Faction, Officer, …). Filled by the
     /// command layer from the SDE; the pure engine leaves it `None`.
     pub meta_group: Option<String>,
+    /// Which market this result was priced at. Filled by the command layer; the
+    /// pure engine leaves it `None`.
+    pub market: Option<String>,
     /// Product daily volume (liquidity), for downstream filtering.
     pub product_volume: Option<i64>,
     pub materials: Vec<MaterialLine>,
@@ -266,8 +275,9 @@ pub fn evaluate(
         }
     };
 
-    let cost = material_cost + job_fee;
-    let profit = revenue - material_cost - job_fee;
+    let blueprint_cost = config.blueprint_cost_per_run * runs as f64;
+    let cost = material_cost + job_fee + blueprint_cost;
+    let profit = revenue - cost;
     let margin = if revenue > 0.0 {
         Some(profit / revenue)
     } else {
@@ -293,12 +303,14 @@ pub fn evaluate(
         units_produced,
         material_cost,
         job_fee,
+        blueprint_cost,
         revenue,
         profit,
         margin,
         roi,
         profit_per_unit,
         meta_group: None,
+        market: None,
         product_volume,
         materials,
         missing_prices,
@@ -394,6 +406,18 @@ mod tests {
         assert!(b.missing_prices.is_empty());
         assert_eq!(b.materials.len(), 2);
         approx(b.materials[0].line_cost, 180.0);
+    }
+
+    #[test]
+    fn blueprint_cost_per_run_reduces_profit() {
+        let config = ProfitConfig {
+            blueprint_cost_per_run: 100.0,
+            ..Default::default()
+        };
+        let b = evaluate(&widget_step(), 1, 10, &widget_prices(), &config);
+        approx(b.blueprint_cost, 100.0);
+        // materials 270, no job fee (index 0), blueprint 100 -> profit 630
+        approx(b.profit, 1000.0 - 270.0 - 100.0);
     }
 
     #[test]

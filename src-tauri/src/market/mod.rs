@@ -15,6 +15,6 @@ mod markets;
 mod service;
 mod types;
 
-pub use markets::{default_market, market_by_id};
+pub use markets::{default_market, market_by_id, Market};
 pub use service::MarketService;
 pub use types::PriceModel;

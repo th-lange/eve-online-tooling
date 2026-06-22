@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, State};
 
-use crate::market::{default_market, market_by_id, MarketService, PriceModel};
+use crate::market::{default_market, market_by_id, Market, MarketService, PriceModel};
 use crate::sde::{BlueprintProduct, Sde, SdePaths};
 
 use super::engine::{evaluate, manufacturing_step, PriceBasis, ProfitBreakdown, ProfitConfig};
@@ -19,11 +19,11 @@ fn default_runs() -> i64 {
 #[serde(rename_all = "camelCase")]
 pub enum ProfitMode {
     /// Only the blueprints in `blueprint_type_ids`, priced precisely (spot
-    /// orders + history + volume).
+    /// orders + history + volume) at the chosen markets.
     #[default]
     Selected,
     /// Every manufacturable blueprint, priced cheaply with global average
-    /// prices (one ESI call; no spot/volume).
+    /// prices (one ESI call; no spot/volume, market-independent).
     All,
 }
 
@@ -48,16 +48,24 @@ pub struct ProfitParams {
     pub material_basis: Option<PriceBasis>,
     #[serde(default)]
     pub product_basis: Option<PriceBasis>,
-    /// Market to price against in `Selected` mode (default Jita). `All` mode
-    /// uses global average prices and ignores this.
+    /// Markets to price against in `Selected` mode; the best (most profitable)
+    /// per item wins. Empty -> Jita. `All` mode ignores this.
     #[serde(default)]
-    pub market_id: Option<String>,
+    pub market_ids: Vec<String>,
+    /// Amortized blueprint acquisition cost per run (e.g. a faction BPC).
+    #[serde(default)]
+    pub blueprint_cost_per_run: f64,
+}
+
+fn price_map(models: Vec<PriceModel>) -> HashMap<i64, PriceModel> {
+    models.into_iter().map(|m| (m.type_id, m)).collect()
 }
 
 /// Evaluate and rank blueprints by profit (descending).
 ///
-/// In `Selected` mode it prices each blueprint precisely; in `All` mode it
-/// ranks the whole catalogue using global average prices (one ESI call).
+/// `Selected` mode prices each blueprint at every chosen market and keeps the
+/// most profitable; `All` mode ranks the whole catalogue with global average
+/// prices (one ESI call).
 #[tauri::command]
 pub async fn production_profit(
     app: AppHandle,
@@ -105,23 +113,8 @@ pub async fn production_profit(
         needed.extend(materials.iter().map(|m| m.material_type_id));
         steps.push(manufacturing_step(*bp, product, &materials));
     }
-
-    // Price the needed types — precisely at the chosen market (Selected) or in
-    // bulk with global average prices (All).
     let ids: Vec<i64> = needed.into_iter().collect();
-    let chosen_market = params
-        .market_id
-        .as_deref()
-        .and_then(market_by_id)
-        .unwrap_or_else(default_market);
-    let price_list = match params.mode {
-        ProfitMode::All => market.average_price_models(&ids).await,
-        ProfitMode::Selected => market.price_models(&chosen_market, &ids).await,
-    }
-    .map_err(|e| e.to_string())?;
-    let prices: HashMap<i64, PriceModel> = price_list.into_iter().map(|m| (m.type_id, m)).collect();
 
-    // In All mode only average prices are available, so force that basis.
     let defaults = ProfitConfig::default();
     let (material_basis, product_basis) = match params.mode {
         ProfitMode::All => (PriceBasis::AveragePrice, PriceBasis::AveragePrice),
@@ -135,24 +128,77 @@ pub async fn production_profit(
         facility_tax: params.facility_tax,
         material_basis,
         product_basis,
+        blueprint_cost_per_run: params.blueprint_cost_per_run,
         ..defaults
     };
 
-    // Tag each row with its product's meta group (Tech I/II, Faction, …) so the
-    // UI can filter. Absent from the map == Tech I.
     let meta = sde.meta_group_names().map_err(|e| e.to_string())?;
-    let mut out: Vec<ProfitBreakdown> = steps
-        .iter()
-        .map(|step| {
-            let mut bd = evaluate(step, params.runs, params.me, &prices, &config);
-            bd.meta_group = Some(
-                meta.get(&bd.product_type_id)
-                    .cloned()
-                    .unwrap_or_else(|| "Tech I".to_string()),
+    let tag_meta = |bd: &mut ProfitBreakdown| {
+        bd.meta_group = Some(
+            meta.get(&bd.product_type_id)
+                .cloned()
+                .unwrap_or_else(|| "Tech I".to_string()),
+        );
+    };
+
+    let mut out: Vec<ProfitBreakdown> = match params.mode {
+        ProfitMode::All => {
+            let prices = price_map(
+                market
+                    .average_price_models(&ids)
+                    .await
+                    .map_err(|e| e.to_string())?,
             );
-            bd
-        })
-        .collect();
+            steps
+                .iter()
+                .map(|step| {
+                    let mut bd = evaluate(step, params.runs, params.me, &prices, &config);
+                    bd.market = Some("Global average".to_string());
+                    tag_meta(&mut bd);
+                    bd
+                })
+                .collect()
+        }
+        ProfitMode::Selected => {
+            // Resolve the chosen markets (default Jita), and fetch a price map
+            // for each.
+            let mut markets: Vec<Market> = params
+                .market_ids
+                .iter()
+                .filter_map(|id| market_by_id(id))
+                .collect();
+            if markets.is_empty() {
+                markets.push(default_market());
+            }
+            let mut market_prices: Vec<(String, HashMap<i64, PriceModel>)> = Vec::new();
+            for m in &markets {
+                let models = market
+                    .price_models(m, &ids)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                market_prices.push((m.label.clone(), price_map(models)));
+            }
+
+            steps
+                .iter()
+                .map(|step| {
+                    // Pick the market that maximises profit for this item.
+                    let mut best: Option<ProfitBreakdown> = None;
+                    for (label, prices) in &market_prices {
+                        let mut bd = evaluate(step, params.runs, params.me, prices, &config);
+                        bd.market = Some(label.clone());
+                        if best.as_ref().is_none_or(|b| bd.profit > b.profit) {
+                            best = Some(bd);
+                        }
+                    }
+                    let mut bd = best.expect("at least one market");
+                    tag_meta(&mut bd);
+                    bd
+                })
+                .collect()
+        }
+    };
+
     out.sort_by(|a, b| {
         b.profit
             .partial_cmp(&a.profit)
