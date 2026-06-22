@@ -14,3 +14,11 @@ pub use error::EsiError;
 
 /// ESI base URL. Endpoint paths include the version segment (e.g. `/latest`).
 pub const ESI_BASE: &str = "https://esi.evetech.net";
+
+/// Descriptive User-Agent sent with all outbound HTTP. ESI asks third-party
+/// apps to send one, and some hosts (e.g. Fuzzwork) reject requests without it.
+pub const USER_AGENT: &str = concat!(
+    "eve-online-tooling/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/th-lange/eve-online-tooling)"
+);

@@ -37,11 +37,11 @@ where
     tokio::fs::create_dir_all(&paths.dir).await?;
 
     // 1. Stream the gzip to a temp file so we never hold the whole archive in RAM.
-    let resp = reqwest::Client::new()
-        .get(SDE_URL)
-        .send()
-        .await?
-        .error_for_status()?;
+    // A User-Agent is required — Fuzzwork returns 403 for requests without one.
+    let client = reqwest::Client::builder()
+        .user_agent(crate::esi::USER_AGENT)
+        .build()?;
+    let resp = client.get(SDE_URL).send().await?.error_for_status()?;
     let total = resp.content_length();
     let mut stream = resp.bytes_stream();
     let mut file = tokio::fs::File::create(&paths.tmp_archive).await?;

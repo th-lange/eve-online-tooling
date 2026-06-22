@@ -6,14 +6,7 @@
 use serde::de::DeserializeOwned;
 
 use super::error::EsiError;
-use super::ESI_BASE;
-
-/// Descriptive User-Agent, as ESI asks third-party apps to send.
-const USER_AGENT: &str = concat!(
-    "eve-online-tooling/",
-    env!("CARGO_PKG_VERSION"),
-    " (+https://github.com/th-lange/eve-online-tooling)"
-);
+use super::{ESI_BASE, USER_AGENT};
 
 pub struct EsiClient {
     http: reqwest::Client,
