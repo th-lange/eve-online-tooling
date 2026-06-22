@@ -25,7 +25,7 @@ serde_json = "1"
 thiserror = "1"
 # SDE service: SQLite (statically bundled), streaming download, bz2 decompress.
 rusqlite = { version = "0.32", features = ["bundled"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 bzip2 = "0.4"
 futures-util = "0.3"
 tokio = { version = "1", features = ["fs", "io-util", "rt"] }

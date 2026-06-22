@@ -26,6 +26,7 @@ mod storage;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .manage(market::MarketService::new())
         .invoke_handler(tauri::generate_handler![
             commands::ping,
             sde::commands::sde_status,
@@ -34,6 +35,8 @@ pub fn run() {
             sde::commands::sde_blueprint_product,
             sde::commands::sde_type_info,
             sde::commands::sde_manufacturable_blueprints,
+            market::commands::market_price,
+            market::commands::market_prices,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

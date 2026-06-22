@@ -94,3 +94,28 @@ export function onSdeProgress(
     handler(event.payload),
   );
 }
+
+// --- Market prices ---
+
+/** All price vectors for a type. Each is null when no data is available. */
+export interface PriceModel {
+  typeId: number;
+  sellMin: number | null;
+  buyMax: number | null;
+  adjustedPrice: number | null;
+  averagePrice: number | null;
+  dailyAverage: number | null;
+  dailyVolume: number | null;
+  orderCount: number | null;
+  movingAverage: number | null;
+}
+
+/** Price model (all vectors) for one type. */
+export function marketPrice(typeId: number): Promise<PriceModel> {
+  return invoke<PriceModel>("market_price", { typeId });
+}
+
+/** Price models for many types in one call. */
+export function marketPrices(typeIds: number[]): Promise<PriceModel[]> {
+  return invoke<PriceModel[]>("market_prices", { typeIds });
+}
