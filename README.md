@@ -71,8 +71,9 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
   and per-unit, with a per-material breakdown.
 - **Production UI** — rank **All** manufacturable items (global average prices, one call) or a
   hand-picked **Selected** set (precise spot/volume pricing), with controls for runs / ME / cost index
-  / facility tax / price basis. Ranked, sortable table (profit · margin · per-unit · daily volume) with
-  text + min-volume filters and a per-material cost drill-down. Public data — no login yet.
+  / facility tax / price basis. Ranked, sortable table (profit · **ROI** · margin · per-unit · daily
+  volume) with text, min-volume, and **meta-group** (Tech I/II, Faction, Officer, …) filters and a
+  per-material cost drill-down. Public data — no login yet.
 - **Smart SDE caching** — the static data only re-downloads when Fuzzwork's published md5 changes
   ("Update data" button reports updated vs already-current).
 

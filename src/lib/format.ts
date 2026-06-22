@@ -23,6 +23,7 @@ export function formatPercent(frac: number | null | undefined): string {
 export type SortKey =
   | "productName"
   | "profit"
+  | "roi"
   | "margin"
   | "profitPerUnit"
   | "productVolume";
@@ -34,6 +35,8 @@ function value(row: ProfitBreakdown, key: SortKey): number | string | null {
       return row.productName;
     case "profit":
       return row.profit;
+    case "roi":
+      return row.roi;
     case "margin":
       return row.margin;
     case "profitPerUnit":

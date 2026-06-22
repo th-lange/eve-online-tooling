@@ -14,6 +14,7 @@ const MAX_ROWS = 500;
 const COLUMNS: { key: SortKey; label: string; numeric: boolean }[] = [
   { key: "productName", label: "Item", numeric: false },
   { key: "profit", label: "Profit", numeric: true },
+  { key: "roi", label: "ROI", numeric: true },
   { key: "margin", label: "Margin", numeric: true },
   { key: "profitPerUnit", label: "Profit/unit", numeric: true },
   { key: "productVolume", label: "Daily vol.", numeric: true },
@@ -24,7 +25,14 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [filter, setFilter] = useState("");
   const [minVolume, setMinVolume] = useState("");
+  const [metaGroup, setMetaGroup] = useState("");
   const [expanded, setExpanded] = useState<number | null>(null);
+
+  const metaGroups = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of rows) if (r.metaGroup) set.add(r.metaGroup);
+    return [...set].sort();
+  }, [rows]);
 
   const view = useMemo(() => {
     const needle = filter.trim().toLowerCase();
@@ -32,10 +40,11 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
     const filtered = rows.filter((r) => {
       if (needle && !r.productName.toLowerCase().includes(needle)) return false;
       if (min !== null && (r.productVolume ?? 0) < min) return false;
+      if (metaGroup && r.metaGroup !== metaGroup) return false;
       return true;
     });
     return sortBreakdowns(filtered, sortKey, sortDir);
-  }, [rows, filter, minVolume, sortKey, sortDir]);
+  }, [rows, filter, minVolume, metaGroup, sortKey, sortDir]);
 
   const shown = view.slice(0, MAX_ROWS);
 
@@ -67,6 +76,21 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
             className="w-24 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
           />
         </label>
+        {metaGroups.length > 1 && (
+          <select
+            value={metaGroup}
+            onChange={(e) => setMetaGroup(e.currentTarget.value)}
+            className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+            title="Filter by meta group"
+          >
+            <option value="">All meta groups</option>
+            {metaGroups.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+        )}
         <span className="ml-auto text-xs text-zinc-500">
           {view.length > MAX_ROWS
             ? `top ${MAX_ROWS} of ${view.length}`
@@ -126,6 +150,13 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
                     >
                       {formatIsk(r.profit)}
                     </td>
+                    <td
+                      className={`px-3 py-1.5 text-right tabular-nums ${
+                        (r.roi ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"
+                      }`}
+                    >
+                      {formatPercent(r.roi)}
+                    </td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
                       {formatPercent(r.margin)}
                     </td>
@@ -142,7 +173,7 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
             })}
             {view.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-zinc-500">
+                <td colSpan={7} className="px-3 py-6 text-center text-zinc-500">
                   No rows.
                 </td>
               </tr>
@@ -158,7 +189,7 @@ function BreakdownRow({ row }: { row: ProfitBreakdown }) {
   return (
     <tr className="border-t border-zinc-800 bg-zinc-900/40">
       <td />
-      <td colSpan={5} className="px-3 py-3">
+      <td colSpan={6} className="px-3 py-3">
         <div className="mb-2 text-xs text-zinc-400">
           {row.runs} run(s) · ME {row.me} · {formatInt(row.unitsProduced)} unit(s)
           · job fee {formatIsk(row.jobFee)} · revenue {formatIsk(row.revenue)}

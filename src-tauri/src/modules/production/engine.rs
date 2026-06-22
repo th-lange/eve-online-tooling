@@ -128,9 +128,15 @@ pub struct ProfitBreakdown {
     pub job_fee: f64,
     pub revenue: f64,
     pub profit: f64,
-    /// Profit / revenue, or `None` when revenue is zero.
+    /// Profit / revenue, or `None` when revenue is zero. Capped at 100%.
     pub margin: Option<f64>,
+    /// Return on investment: profit / cost. Can exceed 100% (e.g. build for
+    /// 100, sell for 600 -> 500%). `None` when cost is zero.
+    pub roi: Option<f64>,
     pub profit_per_unit: f64,
+    /// Meta group of the product (Tech I/II, Faction, Officer, …). Filled by the
+    /// command layer from the SDE; the pure engine leaves it `None`.
+    pub meta_group: Option<String>,
     /// Product daily volume (liquidity), for downstream filtering.
     pub product_volume: Option<i64>,
     pub materials: Vec<MaterialLine>,
@@ -260,9 +266,15 @@ pub fn evaluate(
         }
     };
 
+    let cost = material_cost + job_fee;
     let profit = revenue - material_cost - job_fee;
     let margin = if revenue > 0.0 {
         Some(profit / revenue)
+    } else {
+        None
+    };
+    let roi = if cost > 0.0 {
+        Some(profit / cost)
     } else {
         None
     };
@@ -284,7 +296,9 @@ pub fn evaluate(
         revenue,
         profit,
         margin,
+        roi,
         profit_per_unit,
+        meta_group: None,
         product_volume,
         materials,
         missing_prices,
@@ -372,6 +386,8 @@ mod tests {
         approx(b.revenue, 1000.0);
         approx(b.profit, 716.8);
         approx(b.margin.unwrap(), 0.7168);
+        // ROI = profit / cost = 716.8 / (270 + 13.2) -> ~253%, well over 100%.
+        approx(b.roi.unwrap(), 716.8 / 283.2);
         approx(b.profit_per_unit, 716.8);
         assert_eq!(b.units_produced, 1);
         assert_eq!(b.product_volume, Some(1200));

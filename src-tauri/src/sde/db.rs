@@ -1,6 +1,7 @@
 //! Read-only query layer over the SDE SQLite database.
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
+use std::collections::HashMap;
 use std::path::Path;
 
 use super::types::{
@@ -117,6 +118,25 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Map of typeID -> meta group name (Tech II, Faction, Officer, …) for every
+    /// type that has a meta entry. Types absent from the map are Tech I.
+    pub fn meta_group_names(&self) -> Result<HashMap<i64, String>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT mt.typeID, mg.metaGroupName
+             FROM invMetaTypes mt
+             JOIN invMetaGroups mg ON mg.metaGroupID = mt.metaGroupID",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut map = HashMap::new();
+        for row in rows {
+            let (type_id, name) = row?;
+            map.insert(type_id, name);
+        }
+        Ok(map)
+    }
+
     #[cfg(test)]
     fn from_connection(conn: Connection) -> Self {
         Self { conn }
@@ -136,7 +156,11 @@ mod tests {
              CREATE TABLE invTypes(typeID INT, groupID INT, typeName TEXT, volume REAL);
              CREATE TABLE industryActivityProducts(typeID INT, activityID INT, productTypeID INT, quantity INT);
              CREATE TABLE industryActivityMaterials(typeID INT, activityID INT, materialTypeID INT, quantity INT);
+             CREATE TABLE invMetaGroups(metaGroupID INT, metaGroupName TEXT);
+             CREATE TABLE invMetaTypes(typeID INT, parentTypeID INT, metaGroupID INT);
 
+             INSERT INTO invMetaGroups VALUES (2, 'Tech II'), (4, 'Faction');
+             INSERT INTO invMetaTypes VALUES (100, NULL, 2);
              INSERT INTO invGroups VALUES (10, 4, 'Widgets'), (18, 4, 'Minerals');
              INSERT INTO invTypes VALUES
                (100, 10, 'Widget', 5.0),
@@ -207,6 +231,14 @@ mod tests {
     fn type_info_is_none_when_missing() {
         let sde = fixture();
         assert!(sde.type_info(424242).unwrap().is_none());
+    }
+
+    #[test]
+    fn maps_meta_group_names() {
+        let sde = fixture();
+        let meta = sde.meta_group_names().unwrap();
+        assert_eq!(meta.get(&100).map(String::as_str), Some("Tech II"));
+        assert_eq!(meta.get(&200), None); // no meta entry -> Tech I (absent)
     }
 
     #[test]

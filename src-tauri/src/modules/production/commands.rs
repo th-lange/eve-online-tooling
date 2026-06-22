@@ -128,9 +128,20 @@ pub async fn production_profit(
         ..defaults
     };
 
+    // Tag each row with its product's meta group (Tech I/II, Faction, …) so the
+    // UI can filter. Absent from the map == Tech I.
+    let meta = sde.meta_group_names().map_err(|e| e.to_string())?;
     let mut out: Vec<ProfitBreakdown> = steps
         .iter()
-        .map(|step| evaluate(step, params.runs, params.me, &prices, &config))
+        .map(|step| {
+            let mut bd = evaluate(step, params.runs, params.me, &prices, &config);
+            bd.meta_group = Some(
+                meta.get(&bd.product_type_id)
+                    .cloned()
+                    .unwrap_or_else(|| "Tech I".to_string()),
+            );
+            bd
+        })
         .collect();
     out.sort_by(|a, b| {
         b.profit

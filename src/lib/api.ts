@@ -143,9 +143,13 @@ export interface ProfitBreakdown {
   jobFee: number;
   revenue: number;
   profit: number;
-  /** profit / revenue, or null when revenue is zero. */
+  /** profit / revenue, or null when revenue is zero. Capped at 100%. */
   margin: number | null;
+  /** return on investment: profit / cost. Can exceed 100%. Null if cost is 0. */
+  roi: number | null;
   profitPerUnit: number;
+  /** Meta group of the product (Tech I/II, Faction, Officer, …). */
+  metaGroup: string | null;
   /** Product daily volume (liquidity), or null. */
   productVolume: number | null;
   materials: MaterialLine[];
