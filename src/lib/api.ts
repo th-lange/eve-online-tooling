@@ -151,12 +151,22 @@ export interface ProfitBreakdown {
   missingPrices: number[];
 }
 
+export type PriceBasis =
+  | "sellMin"
+  | "buyMax"
+  | "dailyAverage"
+  | "movingAverage"
+  | "adjustedPrice"
+  | "averagePrice";
+
 export interface ProfitParams {
   blueprintTypeIds: number[];
   runs?: number;
   me?: number;
   systemCostIndex?: number;
   facilityTax?: number;
+  materialBasis?: PriceBasis;
+  productBasis?: PriceBasis;
 }
 
 /** Evaluate and rank the given blueprints by build-vs-buy profit (desc). */

@@ -69,9 +69,12 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
   daily average, N-day moving average, volume), cached.
 - **Production profit engine** — ME-adjusted material cost + EIV job fee + revenue → profit, margin,
   and per-unit, with a per-material breakdown.
+- **Production UI** — pick blueprints from the SDE, set runs / ME / cost index / facility tax and the
+  price basis, then see a ranked, sortable profit table (profit · margin · per-unit · daily volume)
+  with text + min-volume filters and a per-material cost drill-down. Uses public data — no login yet.
 
-Still to come: SSO login + reading character blueprints (#3/#4), the ranked profit **UI** (#7), and
-invention/T2 and reactions/T3 (#9/#10).
+Still to come: SSO login + reading character blueprints (#3/#4) — which adds the "show only owned"
+view — and invention/T2 and reactions/T3 (#9/#10).
 
 ## Status & tracking
 

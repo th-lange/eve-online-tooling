@@ -8,7 +8,7 @@ use tauri::{AppHandle, Manager, State};
 use crate::market::{MarketService, PriceModel};
 use crate::sde::{Sde, SdePaths};
 
-use super::engine::{evaluate, manufacturing_step, ProfitBreakdown, ProfitConfig};
+use super::engine::{evaluate, manufacturing_step, PriceBasis, ProfitBreakdown, ProfitConfig};
 
 fn default_runs() -> i64 {
     1
@@ -28,6 +28,10 @@ pub struct ProfitParams {
     pub system_cost_index: f64,
     #[serde(default)]
     pub facility_tax: f64,
+    #[serde(default)]
+    pub material_basis: Option<PriceBasis>,
+    #[serde(default)]
+    pub product_basis: Option<PriceBasis>,
 }
 
 /// Evaluate and rank the given blueprints by profit (descending).
@@ -68,10 +72,13 @@ pub async fn production_profit(
         .map(|m| (m.type_id, m))
         .collect();
 
+    let defaults = ProfitConfig::default();
     let config = ProfitConfig {
         system_cost_index: params.system_cost_index,
         facility_tax: params.facility_tax,
-        ..Default::default()
+        material_basis: params.material_basis.unwrap_or(defaults.material_basis),
+        product_basis: params.product_basis.unwrap_or(defaults.product_basis),
+        ..defaults
     };
 
     let mut out: Vec<ProfitBreakdown> = steps

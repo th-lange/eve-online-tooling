@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::market::PriceModel;
 use crate::sde::{BlueprintMaterial, BlueprintProduct};
@@ -29,9 +29,9 @@ pub enum Activity {
 }
 
 /// Which price vector to value a role (materials or product) with. Defaults use
-/// `SellMin`; the rest become user-selectable in the UI (#7).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
+/// `SellMin`; the rest are user-selectable in the UI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum PriceBasis {
     SellMin,
     BuyMax,
