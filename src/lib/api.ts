@@ -15,6 +15,8 @@ export interface SdeStatus {
   installed: boolean;
   path: string;
   sizeBytes: number | null;
+  /** Whether the call actually (re)downloaded the database. */
+  updated: boolean;
 }
 
 export interface BlueprintMaterial {
@@ -159,8 +161,12 @@ export type PriceBasis =
   | "adjustedPrice"
   | "averagePrice";
 
+export type ProfitMode = "selected" | "all";
+
 export interface ProfitParams {
-  blueprintTypeIds: number[];
+  mode?: ProfitMode;
+  /** Used in "selected" mode. */
+  blueprintTypeIds?: number[];
   runs?: number;
   me?: number;
   systemCostIndex?: number;

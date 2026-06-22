@@ -9,6 +9,8 @@ import {
   type SortKey,
 } from "../../lib/format";
 
+const MAX_ROWS = 500;
+
 const COLUMNS: { key: SortKey; label: string; numeric: boolean }[] = [
   { key: "productName", label: "Item", numeric: false },
   { key: "profit", label: "Profit", numeric: true },
@@ -34,6 +36,8 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
     });
     return sortBreakdowns(filtered, sortKey, sortDir);
   }, [rows, filter, minVolume, sortKey, sortDir]);
+
+  const shown = view.slice(0, MAX_ROWS);
 
   function toggleSort(key: SortKey) {
     if (key === sortKey) {
@@ -64,7 +68,9 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
           />
         </label>
         <span className="ml-auto text-xs text-zinc-500">
-          {view.length} of {rows.length}
+          {view.length > MAX_ROWS
+            ? `top ${MAX_ROWS} of ${view.length}`
+            : `${view.length} of ${rows.length}`}
         </span>
       </div>
 
@@ -88,7 +94,7 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
             </tr>
           </thead>
           <tbody>
-            {view.map((r) => {
+            {shown.map((r) => {
               const open = expanded === r.blueprintTypeId;
               const incomplete = r.missingPrices.length > 0;
               return (

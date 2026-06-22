@@ -16,6 +16,12 @@ use super::types::{
 /// Default window for the moving-average vector.
 const MA_DAYS: usize = 7;
 
+/// ESI returns 404 for `history`/`orders` of a type that isn't traded on the
+/// market (some blueprint inputs aren't). That's "no data", not a hard error.
+fn is_not_found(err: &EsiError) -> bool {
+    matches!(err, EsiError::Http(e) if e.status() == Some(reqwest::StatusCode::NOT_FOUND))
+}
+
 pub struct MarketService {
     esi: EsiClient,
     region_id: i64,
@@ -52,7 +58,7 @@ impl MarketService {
             return Ok(cached);
         }
         let path = format!("/latest/markets/{}/orders/", self.region_id);
-        let orders: Vec<Order> = self
+        let orders: Vec<Order> = match self
             .esi
             .get_paged(
                 &path,
@@ -61,7 +67,12 @@ impl MarketService {
                     ("order_type", "all".to_string()),
                 ],
             )
-            .await?;
+            .await
+        {
+            Ok(orders) => orders,
+            Err(e) if is_not_found(&e) => Vec::new(),
+            Err(e) => return Err(e),
+        };
         self.orders.put(type_id, orders.clone());
         Ok(orders)
     }
@@ -72,10 +83,15 @@ impl MarketService {
             return Ok(cached);
         }
         let path = format!("/latest/markets/{}/history/", self.region_id);
-        let history: Vec<HistoryDay> = self
+        let history: Vec<HistoryDay> = match self
             .esi
             .get_json(&path, &[("type_id", type_id.to_string())])
-            .await?;
+            .await
+        {
+            Ok(history) => history,
+            Err(e) if is_not_found(&e) => Vec::new(),
+            Err(e) => return Err(e),
+        };
         self.history.put(type_id, history.clone());
         Ok(history)
     }
@@ -124,5 +140,28 @@ impl MarketService {
             ));
         }
         Ok(out)
+    }
+
+    /// Cheap price models for many types using only the global adjusted/average
+    /// prices (one ESI call total). Spot sell/buy and volume are left empty —
+    /// this is for ranking the whole catalogue, where per-item fetches don't
+    /// scale.
+    pub async fn average_price_models(
+        &self,
+        type_ids: &[i64],
+    ) -> Result<Vec<PriceModel>, EsiError> {
+        let adjusted = self.adjusted_prices().await?;
+        Ok(type_ids
+            .iter()
+            .map(|&type_id| {
+                let a = adjusted.get(&type_id);
+                PriceModel {
+                    type_id,
+                    adjusted_price: a.and_then(|x| x.adjusted_price),
+                    average_price: a.and_then(|x| x.average_price),
+                    ..Default::default()
+                }
+            })
+            .collect())
     }
 }
