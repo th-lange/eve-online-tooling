@@ -27,8 +27,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(market::MarketService::new())
+        .manage(esi::AuthState::new())
         .invoke_handler(tauri::generate_handler![
             commands::ping,
+            esi::commands::auth_login,
+            esi::commands::auth_characters,
+            esi::commands::auth_logout,
             sde::commands::sde_status,
             sde::commands::sde_update,
             sde::commands::sde_blueprint_materials,

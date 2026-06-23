@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { modules } from "../modules/registry";
 import { BridgeStatus } from "./BridgeStatus";
+import { Characters } from "./Characters";
 
 // App shell: a sidebar whose entries are driven by the module registry, plus
 // the routed module page in the main area.
@@ -32,6 +33,7 @@ export function Layout() {
             </NavLink>
           ))}
         </nav>
+        <Characters />
         <div className="border-t border-zinc-800 px-4 py-3">
           <BridgeStatus />
         </div>

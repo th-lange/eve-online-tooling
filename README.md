@@ -82,9 +82,12 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
   - Owned-only filter is stubbed pending SSO. Public data — no login yet.
 - **Smart SDE caching** — the static data only re-downloads when Fuzzwork's published md5 changes
   ("Update data" button reports updated vs already-current).
+- **EVE SSO login (multi-character)** — add one or more characters via OAuth2 PKCE (sidebar →
+  "Add character"); each refresh token is stored in the OS keychain, the roster persists across
+  restarts, and removing a character clears its credential.
 
-Still to come: SSO login + reading character blueprints (#3/#4) — which lights up the **Owned** view —
-and invention/T2 and reactions/T3 (#9/#10).
+Still to come: reading character blueprints/assets (#4) — which lights up the **Owned** view — and
+invention/T2 and reactions/T3 (#9/#10).
 
 ## Status & tracking
 

@@ -6,9 +6,12 @@
 //!
 //! Tracking: issues #3 (SSO), #4 (assets/blueprints), #5 (market).
 
+mod auth;
 mod client;
+pub mod commands;
 mod error;
 
+pub use auth::AuthState;
 pub use client::EsiClient;
 pub use error::EsiError;
 

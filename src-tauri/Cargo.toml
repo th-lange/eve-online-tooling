@@ -28,5 +28,11 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 flate2 = "1"
 futures-util = "0.3"
-tokio = { version = "1", features = ["fs", "io-util", "rt"] }
+tokio = { version = "1", features = ["fs", "io-util", "rt", "time"] }
+# EVE SSO (OAuth2 PKCE): keychain, hashing/encoding, loopback redirect server.
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.8"
+tiny_http = "0.12"
 

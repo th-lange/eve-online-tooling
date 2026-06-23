@@ -9,6 +9,29 @@ export function ping(): Promise<string> {
   return invoke<string>("ping");
 }
 
+// --- Auth (EVE SSO, multi-character) ---
+
+export interface Character {
+  characterId: number;
+  name: string;
+  scopes: string[];
+}
+
+/** Log in (or re-authorize) a character via EVE SSO. Opens the browser. */
+export function authLogin(): Promise<Character> {
+  return invoke<Character>("auth_login");
+}
+
+/** The current character roster. */
+export function authCharacters(): Promise<Character[]> {
+  return invoke<Character[]>("auth_characters");
+}
+
+/** Remove a character; returns the updated roster. */
+export function authLogout(characterId: number): Promise<Character[]> {
+  return invoke<Character[]>("auth_logout", { characterId });
+}
+
 // --- SDE (Static Data Export) ---
 
 export interface SdeStatus {
