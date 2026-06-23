@@ -212,11 +212,35 @@ impl Sde {
             )?
             .collect::<Result<Vec<_>, _>>()?;
 
+        // T3 (strategic cruiser / subsystem) invention consumes an Ancient Relic
+        // bought at market, rather than copying a T1 blueprint. Detect that by the
+        // inventing type's category so its market cost can be priced in (#12).
+        let relic: Option<(String, String)> = self
+            .conn
+            .query_row(
+                "SELECT t.typeName, c.categoryName
+                 FROM invTypes t
+                 JOIN invGroups g ON g.groupID = t.groupID
+                 JOIN invCategories c ON c.categoryID = g.categoryID
+                 WHERE t.typeID = ?1",
+                params![inventing_blueprint_type_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let relic = relic
+            .filter(|(_, category)| category == "Ancient Relics")
+            .map(|(name, _)| BlueprintMaterial {
+                material_type_id: inventing_blueprint_type_id,
+                name,
+                quantity: 1,
+            });
+
         Ok(Some(InventionData {
             inventing_blueprint_type_id,
             runs_per_success,
             probability,
             datacores,
+            relic,
         }))
     }
 
@@ -488,6 +512,43 @@ mod tests {
         assert_eq!(inv.datacores.len(), 1);
         assert_eq!(inv.datacores[0].material_type_id, 500);
         assert_eq!(inv.datacores[0].quantity, 2);
+        // T2 is invented from a T1 blueprint (copied), not a consumed relic.
+        assert!(inv.relic.is_none());
+    }
+
+    #[test]
+    fn finds_relic_for_t3_invention() {
+        // Self-contained: needs an inventing type in the 'Ancient Relics' category.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE invCategories(categoryID INT, categoryName TEXT);
+             CREATE TABLE invGroups(groupID INT, categoryID INT, groupName TEXT);
+             CREATE TABLE invTypes(typeID INT, groupID INT, typeName TEXT, volume REAL);
+             CREATE TABLE industryActivityProducts(typeID INT, activityID INT, productTypeID INT, quantity INT);
+             CREATE TABLE industryActivityProbabilities(typeID INT, activityID INT, productTypeID INT, probability REAL);
+             CREATE TABLE industryActivityMaterials(typeID INT, activityID INT, materialTypeID INT, quantity INT);
+
+             INSERT INTO invCategories VALUES (34, 'Ancient Relics'), (6, 'Ship');
+             INSERT INTO invGroups VALUES (970, 34, 'Sleeper Hull Relics'), (963, 6, 'Strategic Cruiser');
+             INSERT INTO invTypes VALUES
+               (30752, 970, 'Intact Hull Section', 1.0),
+               (29984, 963, 'Tengu Blueprint', 0.01),
+               (20412, 970, 'Datacore - Plasma Physics', 0.1);
+             -- Relic 30752 invents the Tengu BP (29984): 20 runs, 26%, 3 datacores.
+             INSERT INTO industryActivityProducts VALUES (30752, 8, 29984, 20);
+             INSERT INTO industryActivityProbabilities VALUES (30752, 8, 29984, 0.26);
+             INSERT INTO industryActivityMaterials VALUES (30752, 8, 20412, 3);",
+        )
+        .unwrap();
+        let sde = Sde::from_connection(conn);
+
+        let inv = sde.invention_for(29984).unwrap().unwrap();
+        assert_eq!(inv.inventing_blueprint_type_id, 30752);
+        assert_eq!(inv.runs_per_success, 20);
+        let relic = inv.relic.expect("T3 invention should carry a relic");
+        assert_eq!(relic.material_type_id, 30752);
+        assert_eq!(relic.name, "Intact Hull Section");
+        assert_eq!(relic.quantity, 1);
     }
 
     #[test]

@@ -61,17 +61,21 @@ pub struct Decryptor {
     pub run_modifier: i64,
 }
 
-/// Invention (SDE activity 8) that produces a T2 blueprint.
+/// Invention (SDE activity 8) that produces a T2 or T3 blueprint.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InventionData {
-    /// The T1 blueprint that invents the T2 blueprint.
+    /// The thing that does the inventing: a T1 blueprint (copied, for T2) or an
+    /// Ancient Relic (consumed/bought, for T3 strategic cruisers & subsystems).
     pub inventing_blueprint_type_id: i64,
-    /// Runs on the resulting T2 BPC per successful attempt.
+    /// Runs on the resulting T2/T3 BPC per successful attempt.
     pub runs_per_success: i64,
     /// Base success probability (0..1), no decryptor.
     pub probability: f64,
     /// Datacores (and any other inputs) consumed per attempt.
     pub datacores: Vec<BlueprintMaterial>,
+    /// For T3 (relic) invention: the Ancient Relic consumed per attempt, which
+    /// is bought at market (not copied). `None` for T2 (T1-BPC) invention.
+    pub relic: Option<BlueprintMaterial>,
 }
 
 /// A tradeable market item (published, has a market group).
