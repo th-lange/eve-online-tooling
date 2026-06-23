@@ -17,6 +17,7 @@ function row(
     materialCost: 0,
     jobFee: 0,
     blueprintCost: 0,
+    inventionCost: 0,
     revenue: 0,
     profit,
     margin: null,

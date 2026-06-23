@@ -10,7 +10,10 @@ use crate::market::{
 };
 use crate::sde::{Sde, SdePaths};
 
-use super::engine::{evaluate, manufacturing_step, PriceBasis, ProfitBreakdown, ProfitConfig};
+use super::engine::{
+    evaluate, manufacturing_step, InputLine, Invention, PriceBasis, ProfitBreakdown, ProfitConfig,
+    Sourcing,
+};
 
 fn default_runs() -> i64 {
     1
@@ -70,11 +73,30 @@ pub async fn production_profit(
             .map_err(|e| e.to_string())?;
         needed.insert(product.product_type_id);
         needed.extend(materials.iter().map(|m| m.material_type_id));
-        steps.push(manufacturing_step(
-            bp.blueprint_type_id,
-            &product,
-            &materials,
-        ));
+
+        let mut step = manufacturing_step(bp.blueprint_type_id, &product, &materials);
+        // T2 items: attach the invention so its expected cost is amortized in.
+        if let Some(inv) = sde
+            .invention_for(bp.blueprint_type_id)
+            .map_err(|e| e.to_string())?
+        {
+            needed.extend(inv.datacores.iter().map(|d| d.material_type_id));
+            step.invention = Some(Invention {
+                datacores: inv
+                    .datacores
+                    .iter()
+                    .map(|d| InputLine {
+                        type_id: d.material_type_id,
+                        name: d.name.clone(),
+                        base_quantity: d.quantity,
+                        sourcing: Sourcing::Buy,
+                    })
+                    .collect(),
+                runs_per_success: inv.runs_per_success,
+                probability: inv.probability,
+            });
+        }
+        steps.push(step);
     }
     let ids: Vec<i64> = needed.into_iter().collect();
 

@@ -60,6 +60,18 @@ pub struct InputLine {
     pub sourcing: Sourcing,
 }
 
+/// Invention prerequisite for a T2 build (SDE activity 8). Its expected cost is
+/// amortized into the manufacturing cost.
+#[derive(Debug, Clone)]
+pub struct Invention {
+    /// Datacores (+ any other inputs) consumed per attempt.
+    pub datacores: Vec<InputLine>,
+    /// Runs on the resulting T2 BPC per successful attempt.
+    pub runs_per_success: i64,
+    /// Success probability (0..1).
+    pub probability: f64,
+}
+
 /// A generic build step: some activity turning inputs into a product.
 #[derive(Debug, Clone)]
 pub struct BuildStep {
@@ -69,6 +81,8 @@ pub struct BuildStep {
     pub product_name: String,
     pub product_per_run: i64,
     pub inputs: Vec<InputLine>,
+    /// Set for T2 items: invention must succeed before manufacturing.
+    pub invention: Option<Invention>,
 }
 
 /// Tunables for a profit calculation. Defaults value everything at Jita sell-min
@@ -132,6 +146,8 @@ pub struct ProfitBreakdown {
     pub job_fee: f64,
     /// Amortized blueprint acquisition cost for this job (per-run cost × runs).
     pub blueprint_cost: f64,
+    /// Amortized invention cost for this job (T2 items; 0 otherwise).
+    pub invention_cost: f64,
     pub revenue: f64,
     pub profit: f64,
     /// Profit / revenue, or `None` when revenue is zero. Capped at 100%.
@@ -186,6 +202,7 @@ pub fn manufacturing_step(
                 sourcing: Sourcing::Buy,
             })
             .collect(),
+        invention: None,
     }
 }
 
@@ -279,7 +296,34 @@ pub fn evaluate(
     };
 
     let blueprint_cost = config.blueprint_cost_per_run * runs as f64;
-    let cost = material_cost + job_fee + blueprint_cost;
+
+    // Invention (T2): amortize the expected attempt cost over the runs it yields.
+    let invention_cost = match &step.invention {
+        Some(inv) => {
+            let mut datacore_cost = 0.0;
+            let mut invention_eiv = 0.0;
+            for dc in &inv.datacores {
+                let model = prices.get(&dc.type_id);
+                match price_for(model, config.material_basis) {
+                    Some(p) => datacore_cost += p * dc.base_quantity as f64,
+                    None => missing_prices.push(dc.type_id),
+                }
+                invention_eiv += eiv_unit_value(model) * dc.base_quantity as f64;
+            }
+            let invention_job_fee =
+                invention_eiv * config.system_cost_index * (1.0 + config.facility_tax);
+            let attempt_cost = datacore_cost + invention_job_fee;
+            let yielded = inv.probability * inv.runs_per_success as f64;
+            if yielded > 0.0 {
+                (attempt_cost / yielded) * runs as f64
+            } else {
+                0.0
+            }
+        }
+        None => 0.0,
+    };
+
+    let cost = material_cost + job_fee + blueprint_cost + invention_cost;
     let profit = revenue - cost;
     let margin = if revenue > 0.0 {
         Some(profit / revenue)
@@ -307,6 +351,7 @@ pub fn evaluate(
         material_cost,
         job_fee,
         blueprint_cost,
+        invention_cost,
         revenue,
         profit,
         margin,
@@ -366,6 +411,7 @@ mod tests {
                     sourcing: Sourcing::Buy,
                 },
             ],
+            invention: None,
         }
     }
 
@@ -410,6 +456,29 @@ mod tests {
         assert!(b.missing_prices.is_empty());
         assert_eq!(b.materials.len(), 2);
         approx(b.materials[0].line_cost, 180.0);
+    }
+
+    #[test]
+    fn invention_cost_is_amortized() {
+        let mut step = widget_step();
+        step.invention = Some(Invention {
+            datacores: vec![InputLine {
+                type_id: 500,
+                name: "Datacore".into(),
+                base_quantity: 2,
+                sourcing: Sourcing::Buy,
+            }],
+            runs_per_success: 10,
+            probability: 0.5,
+        });
+        let mut prices = widget_prices();
+        prices.insert(500, price(500, Some(100.0), Some(100.0), None));
+        // Default config: SellMin basis, cost index 0 (no invention job fee).
+        let b = evaluate(&step, 1, 10, &prices, &ProfitConfig::default());
+        // attempt = 2 datacores × 100 = 200; per mfg-run = 200 / (0.5 × 10) = 40.
+        approx(b.invention_cost, 40.0);
+        // profit = 1000 − materials 270 − invention 40
+        approx(b.profit, 1000.0 - 270.0 - 40.0);
     }
 
     #[test]

@@ -153,6 +153,9 @@ function BreakdownRow({ row }: { row: ProfitBreakdown }) {
         <div className="mb-2 text-xs text-zinc-400">
           {row.runs} run(s) · ME {row.me} · {formatInt(row.unitsProduced)} unit(s)
           · job fee {formatIsk(row.jobFee)}
+          {row.inventionCost > 0
+            ? ` · invention ${formatIsk(row.inventionCost)}`
+            : ""}
           {row.blueprintCost > 0
             ? ` · blueprint ${formatIsk(row.blueprintCost)}`
             : ""}{" "}

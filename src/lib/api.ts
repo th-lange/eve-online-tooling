@@ -188,6 +188,8 @@ export interface ProfitBreakdown {
   jobFee: number;
   /** Amortized blueprint acquisition cost for this job (per-run cost × runs). */
   blueprintCost: number;
+  /** Amortized invention cost for this job (T2 items; 0 otherwise). */
+  inventionCost: number;
   revenue: number;
   profit: number;
   /** profit / revenue, or null when revenue is zero. Capped at 100%. */

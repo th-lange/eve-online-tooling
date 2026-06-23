@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use super::types::{
-    activity, BlueprintMaterial, BlueprintProduct, ManufacturableBlueprint, TypeInfo,
+    activity, BlueprintMaterial, BlueprintProduct, InventionData, ManufacturableBlueprint, TypeInfo,
 };
 use super::SdeError;
 
@@ -118,6 +118,69 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// The invention (activity 8) that produces this blueprint, if it's a T2
+    /// blueprint invented from a T1 one. `None` for T1 (uninvented) blueprints.
+    pub fn invention_for(&self, blueprint_type_id: i64) -> Result<Option<InventionData>, SdeError> {
+        let inv: Option<(i64, i64)> = self
+            .conn
+            .query_row(
+                "SELECT typeID, quantity
+                 FROM industryActivityProducts
+                 WHERE activityID = ?1 AND productTypeID = ?2
+                 LIMIT 1",
+                params![activity::INVENTION, blueprint_type_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((inventing_blueprint_type_id, runs_per_success)) = inv else {
+            return Ok(None);
+        };
+
+        let probability: f64 = self
+            .conn
+            .query_row(
+                "SELECT probability
+                 FROM industryActivityProbabilities
+                 WHERE activityID = ?1 AND typeID = ?2 AND productTypeID = ?3
+                 LIMIT 1",
+                params![
+                    activity::INVENTION,
+                    inventing_blueprint_type_id,
+                    blueprint_type_id
+                ],
+                |row| row.get(0),
+            )
+            .optional()?
+            .unwrap_or(0.0);
+
+        let mut stmt = self.conn.prepare(
+            "SELECT iam.materialTypeID, t.typeName, iam.quantity
+             FROM industryActivityMaterials iam
+             JOIN invTypes t ON t.typeID = iam.materialTypeID
+             WHERE iam.typeID = ?1 AND iam.activityID = ?2
+             ORDER BY iam.materialTypeID",
+        )?;
+        let datacores = stmt
+            .query_map(
+                params![inventing_blueprint_type_id, activity::INVENTION],
+                |row| {
+                    Ok(BlueprintMaterial {
+                        material_type_id: row.get(0)?,
+                        name: row.get(1)?,
+                        quantity: row.get(2)?,
+                    })
+                },
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Some(InventionData {
+            inventing_blueprint_type_id,
+            runs_per_success,
+            probability,
+            datacores,
+        }))
+    }
+
     /// Map of typeID -> meta group name (Tech II, Faction, Officer, …) for every
     /// type that has a meta entry. Types absent from the map are Tech I.
     pub fn meta_group_names(&self) -> Result<HashMap<i64, String>, SdeError> {
@@ -178,6 +241,7 @@ mod tests {
              CREATE TABLE invMetaGroups(metaGroupID INT, metaGroupName TEXT);
              CREATE TABLE invMetaTypes(typeID INT, parentTypeID INT, metaGroupID INT);
              CREATE TABLE invCategories(categoryID INT, categoryName TEXT);
+             CREATE TABLE industryActivityProbabilities(typeID INT, activityID INT, productTypeID INT, probability REAL);
 
              INSERT INTO invCategories VALUES (4, 'Gadgets');
              INSERT INTO invMetaGroups VALUES (2, 'Tech II'), (4, 'Faction');
@@ -187,11 +251,17 @@ mod tests {
                (100, 10, 'Widget', 5.0),
                (200, 18, 'Tritanium', 0.01),
                (300, 18, 'Pyerite', 0.01),
+               (500, 18, 'Datacore - Test', 0.1),
+               (998, 10, 'Widget I Blueprint', 0.01),
                (999, 10, 'Widget Blueprint', 0.01);
              INSERT INTO industryActivityProducts VALUES (999, 1, 100, 1);
              INSERT INTO industryActivityMaterials VALUES (999, 1, 200, 40), (999, 1, 300, 10);
              -- An invention row that must NOT leak into manufacturing queries.
-             INSERT INTO industryActivityMaterials VALUES (999, 8, 5000, 2);",
+             INSERT INTO industryActivityMaterials VALUES (999, 8, 5000, 2);
+             -- Invention: T1 BP 998 invents T2 BP 999 (10 runs, 30%, 2 datacores).
+             INSERT INTO industryActivityProducts VALUES (998, 8, 999, 10);
+             INSERT INTO industryActivityProbabilities VALUES (998, 8, 999, 0.3);
+             INSERT INTO industryActivityMaterials VALUES (998, 8, 500, 2);",
         )
         .unwrap();
         Sde::from_connection(conn)
@@ -252,6 +322,25 @@ mod tests {
     fn type_info_is_none_when_missing() {
         let sde = fixture();
         assert!(sde.type_info(424242).unwrap().is_none());
+    }
+
+    #[test]
+    fn finds_invention_for_t2_blueprint() {
+        let sde = fixture();
+        let inv = sde.invention_for(999).unwrap().unwrap();
+        assert_eq!(inv.inventing_blueprint_type_id, 998);
+        assert_eq!(inv.runs_per_success, 10);
+        assert_eq!(inv.probability, 0.3);
+        assert_eq!(inv.datacores.len(), 1);
+        assert_eq!(inv.datacores[0].material_type_id, 500);
+        assert_eq!(inv.datacores[0].quantity, 2);
+    }
+
+    #[test]
+    fn no_invention_for_t1_blueprint() {
+        let sde = fixture();
+        // 998 is the T1 inventing BP — nothing invents it.
+        assert!(sde.invention_for(998).unwrap().is_none());
     }
 
     #[test]

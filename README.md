@@ -78,7 +78,8 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
     Faction, Officer…), price basis (sell/buy percentile, min/max, average), runs / ME / cost index /
     facility tax / **per-run blueprint cost**, **min ROI**, and **min volume** (when a hub is picked).
   - Sortable table — profit · **ROI** · margin · per-unit · volume · market — with a per-material cost
-    drill-down.
+    drill-down. **T2 items include the amortized invention cost** (datacores + job fee, divided by
+    success probability × runs per success).
   - **Owned-only** filter: with characters logged in, restrict to items whose blueprint you own
     (across all characters in the roster).
 - **Smart SDE caching** — the static data only re-downloads when Fuzzwork's published md5 changes
@@ -87,7 +88,8 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
   "Add character"); each refresh token is stored in the OS keychain, the roster persists across
   restarts, and removing a character clears its credential.
 
-Still to come: invention/T2 and reactions/T3 (#9/#10).
+Still to come: T3 + reactions with a recursive build-vs-buy bill of materials (#10), and decryptor
+choices for invention.
 
 ## Status & tracking
 

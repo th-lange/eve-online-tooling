@@ -39,6 +39,19 @@ pub struct BlueprintProduct {
     pub quantity: i64,
 }
 
+/// Invention (SDE activity 8) that produces a T2 blueprint.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InventionData {
+    /// The T1 blueprint that invents the T2 blueprint.
+    pub inventing_blueprint_type_id: i64,
+    /// Runs on the resulting T2 BPC per successful attempt.
+    pub runs_per_success: i64,
+    /// Base success probability (0..1), no decryptor.
+    pub probability: f64,
+    /// Datacores (and any other inputs) consumed per attempt.
+    pub datacores: Vec<BlueprintMaterial>,
+}
+
 /// A manufacturable blueprint, keyed for ranking/lookup.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
