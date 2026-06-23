@@ -181,6 +181,19 @@ export interface MaterialLine {
   built: boolean;
 }
 
+export interface InventionBreakdown {
+  datacores: MaterialLine[];
+  datacoreCost: number;
+  inventionJobFee: number;
+  copyFee: number;
+  attemptCost: number;
+  /** Skill-adjusted success probability (0..1). */
+  probability: number;
+  runsPerSuccess: number;
+  /** Invention cost per produced unit. */
+  perUnit: number;
+}
+
 export interface ProfitBreakdown {
   blueprintTypeId: number;
   productTypeId: number;
@@ -194,6 +207,8 @@ export interface ProfitBreakdown {
   blueprintCost: number;
   /** Amortized invention cost for this job (T2 items; 0 otherwise). */
   inventionCost: number;
+  /** Invention cost detail (T2 items only). */
+  invention: InventionBreakdown | null;
   revenue: number;
   profit: number;
   /** profit / revenue, or null when revenue is zero. Capped at 100%. */

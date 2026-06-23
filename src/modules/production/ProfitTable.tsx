@@ -210,6 +210,73 @@ function BreakdownRow({ row }: { row: ProfitBreakdown }) {
             </tr>
           </tbody>
         </table>
+
+        {row.invention && (
+          <div className="mt-3">
+            <div className="mb-1 text-xs font-medium text-zinc-400">
+              Invention — {(row.invention.probability * 100).toFixed(1)}% chance ×{" "}
+              {row.invention.runsPerSuccess} runs/success ={" "}
+              {formatIsk(row.invention.perUnit)}/unit
+            </div>
+            <table className="w-full text-xs">
+              <thead className="text-zinc-500">
+                <tr>
+                  <th className="text-left font-medium">Per attempt</th>
+                  <th className="text-right font-medium">Qty</th>
+                  <th className="text-right font-medium">Unit</th>
+                  <th className="text-right font-medium">Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {row.invention.datacores.map((d) => (
+                  <tr key={d.typeId} className="text-zinc-300">
+                    <td className="py-0.5">
+                      {d.name}
+                      {d.unitPrice === null && (
+                        <span className="ml-1 text-amber-400" title="No price">
+                          ⚠
+                        </span>
+                      )}
+                    </td>
+                    <td className="text-right tabular-nums">
+                      {formatInt(d.requiredQuantity)}
+                    </td>
+                    <td className="text-right tabular-nums">
+                      {formatIsk(d.unitPrice)}
+                    </td>
+                    <td className="text-right tabular-nums">
+                      {formatIsk(d.lineCost)}
+                    </td>
+                  </tr>
+                ))}
+                <tr className="text-zinc-400">
+                  <td className="py-0.5">Invention job fee</td>
+                  <td />
+                  <td />
+                  <td className="text-right tabular-nums">
+                    {formatIsk(row.invention.inventionJobFee)}
+                  </td>
+                </tr>
+                <tr className="text-zinc-400">
+                  <td className="py-0.5">T1 BPC copy fee</td>
+                  <td />
+                  <td />
+                  <td className="text-right tabular-nums">
+                    {formatIsk(row.invention.copyFee)}
+                  </td>
+                </tr>
+                <tr className="border-t border-zinc-800 font-medium text-zinc-200">
+                  <td className="py-0.5">Per attempt</td>
+                  <td />
+                  <td />
+                  <td className="text-right tabular-nums">
+                    {formatIsk(row.invention.attemptCost)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
       </td>
     </tr>
   );

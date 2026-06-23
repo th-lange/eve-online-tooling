@@ -142,6 +142,24 @@ pub struct MaterialLine {
     pub built: bool,
 }
 
+/// Invention cost detail for the drill-down (T2 items).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct InventionBreakdown {
+    /// Datacores consumed per attempt (quantity, unit price, cost).
+    pub datacores: Vec<MaterialLine>,
+    pub datacore_cost: f64,
+    pub invention_job_fee: f64,
+    /// Copy job fee for the T1 BPC consumed each attempt.
+    pub copy_fee: f64,
+    pub attempt_cost: f64,
+    /// Skill-adjusted success probability (0..1).
+    pub probability: f64,
+    pub runs_per_success: i64,
+    /// Invention cost per produced unit-run = attempt_cost / (probability × runs).
+    pub per_unit: f64,
+}
+
 /// How deep the recursive build-vs-buy resolver descends.
 const MAX_BUILD_DEPTH: u32 = 8;
 
@@ -197,6 +215,8 @@ pub struct ProfitBreakdown {
     pub blueprint_cost: f64,
     /// Amortized invention cost for this job (T2 items; 0 otherwise).
     pub invention_cost: f64,
+    /// Invention cost detail (T2 items only).
+    pub invention: Option<InventionBreakdown>,
     pub revenue: f64,
     pub profit: f64,
     /// Profit / revenue, or `None` when revenue is zero. Capped at 100%.
@@ -358,17 +378,31 @@ pub fn evaluate(
     let blueprint_cost = config.blueprint_cost_per_run * runs as f64;
 
     // Invention (T2): amortize the expected attempt cost over the runs it yields.
-    let invention_cost = match &step.invention {
+    let (invention_cost, invention) = match &step.invention {
         Some(inv) => {
+            let mut datacore_lines = Vec::with_capacity(inv.datacores.len());
             let mut datacore_cost = 0.0;
             let mut invention_eiv = 0.0;
             for dc in &inv.datacores {
                 let model = prices.get(&dc.type_id);
-                match price_for(model, config.material_basis) {
-                    Some(p) => datacore_cost += p * dc.base_quantity as f64,
-                    None => missing_prices.push(dc.type_id),
-                }
+                let unit = price_for(model, config.material_basis);
+                let line = match unit {
+                    Some(p) => p * dc.base_quantity as f64,
+                    None => {
+                        missing_prices.push(dc.type_id);
+                        0.0
+                    }
+                };
+                datacore_cost += line;
                 invention_eiv += eiv_unit_value(model) * dc.base_quantity as f64;
+                datacore_lines.push(MaterialLine {
+                    type_id: dc.type_id,
+                    name: dc.name.clone(),
+                    required_quantity: dc.base_quantity,
+                    unit_price: unit,
+                    line_cost: line,
+                    built: false,
+                });
             }
             let invention_job_fee =
                 invention_eiv * config.system_cost_index * (1.0 + config.facility_tax);
@@ -379,17 +413,28 @@ pub fn evaluate(
                 .iter()
                 .map(|m| eiv_unit_value(prices.get(&m.type_id)) * m.base_quantity as f64)
                 .sum();
-            let copy_job_fee = copy_eiv * config.system_cost_index * (1.0 + config.facility_tax);
-            let attempt_cost = datacore_cost + invention_job_fee + copy_job_fee;
+            let copy_fee = copy_eiv * config.system_cost_index * (1.0 + config.facility_tax);
+            let attempt_cost = datacore_cost + invention_job_fee + copy_fee;
             let probability = (inv.probability * config.invention_skill_multiplier).min(1.0);
             let yielded = probability * inv.runs_per_success as f64;
-            if yielded > 0.0 {
-                (attempt_cost / yielded) * runs as f64
+            let per_unit = if yielded > 0.0 {
+                attempt_cost / yielded
             } else {
                 0.0
-            }
+            };
+            let breakdown = InventionBreakdown {
+                datacores: datacore_lines,
+                datacore_cost,
+                invention_job_fee,
+                copy_fee,
+                attempt_cost,
+                probability,
+                runs_per_success: inv.runs_per_success,
+                per_unit,
+            };
+            (per_unit * runs as f64, Some(breakdown))
         }
-        None => 0.0,
+        None => (0.0, None),
     };
 
     let cost = material_cost + job_fee + blueprint_cost + invention_cost;
@@ -421,6 +466,7 @@ pub fn evaluate(
         job_fee,
         blueprint_cost,
         invention_cost,
+        invention,
         revenue,
         profit,
         margin,
@@ -607,6 +653,10 @@ mod tests {
         approx(b.invention_cost, 40.0);
         // profit = 1000 − materials 270 − invention 40
         approx(b.profit, 1000.0 - 270.0 - 40.0);
+        let inv = b.invention.unwrap();
+        approx(inv.datacore_cost, 200.0);
+        approx(inv.per_unit, 40.0);
+        assert_eq!(inv.datacores.len(), 1);
     }
 
     #[test]
