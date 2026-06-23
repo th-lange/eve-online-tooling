@@ -1,0 +1,38 @@
+[package]
+name = "eve-online-tooling"
+version = "0.1.0"
+description = "EVE Online tooling — production, trading and more"
+authors = ["Thomas Lange"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "eve_tooling_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+# SDE service: SQLite (statically bundled), streaming download, bz2 decompress.
+rusqlite = { version = "0.32", features = ["bundled"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
+flate2 = "1"
+futures-util = "0.3"
+tokio = { version = "1", features = ["fs", "io-util", "rt", "time"] }
+# EVE SSO (OAuth2 PKCE): keychain, hashing/encoding, loopback redirect server.
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.8"
+tiny_http = "0.12"
+
