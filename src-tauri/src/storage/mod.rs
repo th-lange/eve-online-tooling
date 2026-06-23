@@ -57,9 +57,34 @@ pub fn save_roster(app_data_dir: &Path, roster: &[Character]) -> Result<(), Stri
     std::fs::write(roster_path(app_data_dir), data).map_err(|e| e.to_string())
 }
 
+/// Load a persisted list of type ids (e.g. `blacklist`, `favorites`).
+pub fn load_id_list(app_data_dir: &Path, name: &str) -> Vec<i64> {
+    std::fs::read(app_data_dir.join(format!("{name}.json")))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+/// Persist a list of type ids.
+pub fn save_id_list(app_data_dir: &Path, name: &str, ids: &[i64]) -> Result<(), String> {
+    std::fs::create_dir_all(app_data_dir).map_err(|e| e.to_string())?;
+    let data = serde_json::to_vec_pretty(ids).map_err(|e| e.to_string())?;
+    std::fs::write(app_data_dir.join(format!("{name}.json")), data).map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn id_list_round_trips() {
+        let dir = std::env::temp_dir().join(format!("eve-list-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(load_id_list(&dir, "blacklist").is_empty());
+        save_id_list(&dir, "blacklist", &[34, 35, 36]).unwrap();
+        assert_eq!(load_id_list(&dir, "blacklist"), vec![34, 35, 36]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn roster_round_trips() {

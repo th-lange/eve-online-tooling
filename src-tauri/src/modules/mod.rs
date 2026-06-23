@@ -2,3 +2,4 @@
 //! services (`esi`, `sde`, `market`, `model`, `storage`).
 
 pub mod production;
+pub mod trading;

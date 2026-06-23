@@ -91,6 +91,9 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
 - **EVE SSO login (multi-character)** — add one or more characters via OAuth2 PKCE (sidebar →
   "Add character"); each refresh token is stored in the OS keychain, the roster persists across
   restarts, and removing a character clears its credential.
+- **Station-trading module** — scan a hub's ~19k market items for buy→sell flips: profit/unit and
+  margin after broker fee + sales tax, with a min-volume filter, plus persisted **blacklist** and
+  **favorites** tabs (★/✕ on each row).
 
 Still to come: T3 strategic cruisers (relic invention cost) and decryptor choices for invention.
 

@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use super::types::{
-    activity, BlueprintMaterial, BlueprintProduct, InventionData, ManufacturableBlueprint, Recipe,
-    TypeInfo,
+    activity, BlueprintMaterial, BlueprintProduct, InventionData, ManufacturableBlueprint,
+    MarketItem, Recipe, TypeInfo,
 };
 use super::SdeError;
 
@@ -237,6 +237,22 @@ impl Sde {
             map.insert(type_id, name);
         }
         Ok(map)
+    }
+
+    /// All published items that appear on the market (for station trading).
+    pub fn market_items(&self) -> Result<Vec<MarketItem>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT typeID, typeName FROM invTypes
+             WHERE published = 1 AND marketGroupID IS NOT NULL
+             ORDER BY typeID",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(MarketItem {
+                type_id: row.get(0)?,
+                name: row.get(1)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
     /// Map of typeID -> category name (Ship, Module, Charge, Drone, …).

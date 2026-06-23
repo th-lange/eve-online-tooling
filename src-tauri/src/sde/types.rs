@@ -60,6 +60,13 @@ pub struct InventionData {
     pub datacores: Vec<BlueprintMaterial>,
 }
 
+/// A tradeable market item (published, has a market group).
+#[derive(Debug, Clone)]
+pub struct MarketItem {
+    pub type_id: i64,
+    pub name: String,
+}
+
 /// A manufacturable blueprint, keyed for ranking/lookup.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]

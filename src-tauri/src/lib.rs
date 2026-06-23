@@ -45,6 +45,9 @@ pub fn run() {
             market::commands::market_price,
             market::commands::market_prices,
             modules::production::commands::production_profit,
+            modules::trading::commands::station_trading,
+            modules::trading::commands::trading_get_list,
+            modules::trading::commands::trading_set_list,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

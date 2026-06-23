@@ -61,6 +61,53 @@ export function characterAssets(characterId: number): Promise<Asset[]> {
   return invoke<Asset[]>("character_assets", { characterId });
 }
 
+// --- Station trading ---
+
+export interface TradeRow {
+  typeId: number;
+  name: string;
+  buy: number;
+  sell: number;
+  profitPerUnit: number;
+  margin: number;
+  volume: number;
+  favorite: boolean;
+}
+
+export interface TradeParams {
+  regionId?: number;
+  stationId?: number | null;
+  brokerFee?: number;
+  salesTax?: number;
+  minVolume?: number;
+}
+
+/** Rank tradeable items by buy→sell margin at a market. */
+export function stationTrading(params: TradeParams): Promise<TradeRow[]> {
+  return invoke<TradeRow[]>("station_trading", { params });
+}
+
+export type ListName = "blacklist" | "favorites";
+
+export interface ListItem {
+  typeId: number;
+  name: string;
+}
+
+/** Contents of a saved list (blacklist/favorites), with names. */
+export function tradingGetList(list: ListName): Promise<ListItem[]> {
+  return invoke<ListItem[]>("trading_get_list", { list });
+}
+
+/** Add/remove a type from a saved list. */
+export function tradingSetList(
+  list: ListName,
+  typeId: number,
+  add: boolean,
+): Promise<void> {
+  return invoke<void>("trading_set_list", { list, typeId, add });
+}
+
 // --- SDE (Static Data Export) ---
 
 export interface SdeStatus {

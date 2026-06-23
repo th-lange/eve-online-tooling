@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 
+use futures_util::stream::{self, StreamExt};
 use serde::Deserialize;
 
 use crate::esi::{EsiError, USER_AGENT};
@@ -14,6 +15,8 @@ use super::markets::Location;
 const BASE: &str = "https://market.fuzzwork.co.uk/aggregates/";
 /// Fuzzwork handles a few hundred type ids per request comfortably.
 const BATCH: usize = 250;
+/// How many batches to fetch concurrently (the trading universe is ~19k items).
+const CONCURRENCY: usize = 6;
 
 /// One side (buy or sell) of the aggregated order book.
 #[derive(Debug, Clone)]
@@ -114,30 +117,51 @@ impl FuzzworkClient {
         Self { http }
     }
 
-    /// Aggregates for the given type ids at a location, fetched in batches.
+    /// Aggregates for the given type ids at a location, fetched in concurrent
+    /// batches.
     pub async fn aggregates(
         &self,
         location: Location,
         type_ids: &[i64],
     ) -> Result<HashMap<i64, Aggregate>, EsiError> {
         let (param, id) = location.query_param();
+        let id = id.to_string();
+        // Precompute owned batch strings so the concurrent futures borrow nothing.
+        let type_lists: Vec<String> = type_ids
+            .chunks(BATCH)
+            .map(|chunk| {
+                chunk
+                    .iter()
+                    .map(|t| t.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .collect();
+        let http = self.http.clone();
+
+        let results: Vec<Result<HashMap<String, RawAggregate>, reqwest::Error>> =
+            stream::iter(type_lists)
+                .map(|types| {
+                    let client = http.clone();
+                    let id = id.clone();
+                    async move {
+                        client
+                            .get(BASE)
+                            .query(&[(param, id), ("types", types)])
+                            .send()
+                            .await?
+                            .error_for_status()?
+                            .json::<HashMap<String, RawAggregate>>()
+                            .await
+                    }
+                })
+                .buffer_unordered(CONCURRENCY)
+                .collect()
+                .await;
+
         let mut out = HashMap::with_capacity(type_ids.len());
-        for chunk in type_ids.chunks(BATCH) {
-            let types = chunk
-                .iter()
-                .map(|t| t.to_string())
-                .collect::<Vec<_>>()
-                .join(",");
-            let raw: HashMap<String, RawAggregate> = self
-                .http
-                .get(BASE)
-                .query(&[(param, id.to_string()), ("types", types)])
-                .send()
-                .await?
-                .error_for_status()?
-                .json()
-                .await?;
-            for (key, value) in raw {
+        for batch in results {
+            for (key, value) in batch? {
                 if let Ok(type_id) = key.parse::<i64>() {
                     out.insert(
                         type_id,
