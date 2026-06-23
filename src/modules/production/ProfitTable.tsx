@@ -8,16 +8,52 @@ import {
   type SortKey,
 } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
+import {
+  SortHeaderCell,
+  type SortColumn,
+} from "../../components/SortHeaderCell";
 
 const MAX_ROWS = 500;
 
-const COLUMNS: { key: SortKey; label: string; numeric: boolean }[] = [
-  { key: "productName", label: "Item", numeric: false },
-  { key: "productPrice", label: "Price", numeric: true },
-  { key: "roi", label: "ROI", numeric: true },
-  { key: "margin", label: "Margin", numeric: true },
-  { key: "profitPerUnit", label: "Profit/item", numeric: true },
-  { key: "productVolume", label: "Volume", numeric: true },
+const COLUMNS: SortColumn<SortKey>[] = [
+  {
+    key: "productName",
+    label: "Item",
+    numeric: false,
+    description: "The item produced by this blueprint.",
+  },
+  {
+    key: "productPrice",
+    label: "Price",
+    numeric: true,
+    description: "Product sell price at the chosen market and price basis.",
+  },
+  {
+    key: "roi",
+    label: "ROI",
+    numeric: true,
+    description:
+      "Profit ÷ total cost — the uncapped build-and-sell return on investment.",
+  },
+  {
+    key: "margin",
+    label: "Margin",
+    numeric: true,
+    description: "Profit ÷ revenue (capped at 100%).",
+  },
+  {
+    key: "profitPerUnit",
+    label: "Profit/item",
+    numeric: true,
+    description:
+      "Net ISK per unit after materials, industry fees and taxes (can be negative).",
+  },
+  {
+    key: "productVolume",
+    label: "Volume",
+    numeric: true,
+    description: "Daily volume at the chosen market — a liquidity proxy.",
+  },
 ];
 
 const SORT_KEYS = COLUMNS.map((c) => c.key);
@@ -61,18 +97,20 @@ export function ProfitTable({
               <th className="w-6" />
               <th className="w-16" />
               {COLUMNS.map((c) => (
-                <th
+                <SortHeaderCell
                   key={c.key}
-                  onClick={() => toggleSort(c.key)}
-                  className={`cursor-pointer select-none px-3 py-2 font-medium ${
-                    c.numeric ? "text-right" : "text-left"
-                  } hover:text-zinc-200`}
-                >
-                  {c.label}
-                  {sortKey === c.key ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
-                </th>
+                  column={c}
+                  active={sortKey === c.key}
+                  dir={sortDir}
+                  onClick={toggleSort}
+                />
               ))}
-              <th className="px-3 py-2 text-left font-medium">Market</th>
+              <th
+                className="px-3 py-2 text-left font-medium"
+                title="The market this row was priced at."
+              >
+                Market
+              </th>
             </tr>
           </thead>
           <tbody>

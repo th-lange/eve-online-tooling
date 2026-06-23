@@ -13,6 +13,10 @@ import {
 import { SdeSetup } from "../production/SdeSetup";
 import { formatInt, formatIsk, formatPercent } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
+import {
+  SortHeaderCell,
+  type SortColumn,
+} from "../../components/SortHeaderCell";
 
 const FORGE = 10000002;
 type Tab = "opportunities" | "favorites" | "blacklist";
@@ -236,18 +240,44 @@ type TradeSortKey =
   | "volume"
   | "dailyTraded";
 
-const TRADE_COLUMNS: {
-  key: TradeSortKey;
-  label: string;
-  numeric: boolean;
-}[] = [
-  { key: "name", label: "Item", numeric: false },
-  { key: "buy", label: "Buy", numeric: true },
-  { key: "sell", label: "Sell", numeric: true },
-  { key: "profitPerUnit", label: "Profit/unit", numeric: true },
-  { key: "margin", label: "Margin", numeric: true },
-  { key: "volume", label: "Listed", numeric: true },
-  { key: "dailyTraded", label: "Traded/day", numeric: true },
+const TRADE_COLUMNS: SortColumn<TradeSortKey>[] = [
+  { key: "name", label: "Item", numeric: false, description: "The item's name." },
+  {
+    key: "buy",
+    label: "Buy",
+    numeric: true,
+    description: "Buy-order price at the chosen basis — what you acquire at.",
+  },
+  {
+    key: "sell",
+    label: "Sell",
+    numeric: true,
+    description: "Sell-order price at the chosen basis — what you sell at.",
+  },
+  {
+    key: "profitPerUnit",
+    label: "Profit/unit",
+    numeric: true,
+    description: "Net ISK per unit after broker fee and sales tax.",
+  },
+  {
+    key: "margin",
+    label: "Margin",
+    numeric: true,
+    description: "Profit ÷ cost.",
+  },
+  {
+    key: "volume",
+    label: "Listed",
+    numeric: true,
+    description: "Units currently listed in orders — order-book liquidity.",
+  },
+  {
+    key: "dailyTraded",
+    label: "Traded/day",
+    numeric: true,
+    description: "Average units actually traded per day, from market history.",
+  },
 ];
 
 const TRADE_SORT_KEYS = TRADE_COLUMNS.map((c) => c.key);
@@ -284,16 +314,13 @@ function TradeTable({
           <tr>
             <th className="w-16" />
             {TRADE_COLUMNS.map((c) => (
-              <th
+              <SortHeaderCell
                 key={c.key}
-                onClick={() => toggleSort(c.key)}
-                className={`cursor-pointer select-none px-3 py-2 font-medium ${
-                  c.numeric ? "text-right" : "text-left"
-                } hover:text-zinc-200`}
-              >
-                {c.label}
-                {sortKey === c.key ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
-              </th>
+                column={c}
+                active={sortKey === c.key}
+                dir={sortDir}
+                onClick={toggleSort}
+              />
             ))}
           </tr>
         </thead>

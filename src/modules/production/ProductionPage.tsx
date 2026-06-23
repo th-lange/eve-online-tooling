@@ -76,6 +76,7 @@ function Workbench() {
   const [categories, setCategories] = useState<Set<string>>(new Set());
   const [metas, setMetas] = useState<Set<string>>(new Set());
   const [ownedOnly, setOwnedOnly] = useState(false);
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [minRoiPct, setMinRoiPct] = useState("");
   const [minVolume, setMinVolume] = useState("");
 
@@ -184,11 +185,12 @@ function Workbench() {
       if (metas.size > 0 && !(r.metaGroup && metas.has(r.metaGroup)))
         return false;
       if (ownedOnly && !ownedSet.has(r.blueprintTypeId)) return false;
+      if (favoritesOnly && !r.favorite) return false;
       if (minRoi !== null && (r.roi ?? -Infinity) < minRoi) return false;
       if (minVol !== null && (r.productVolume ?? 0) < minVol) return false;
       return true;
     });
-  }, [rows, name, categories, metas, ownedOnly, ownedSet, minRoiPct, minVolume, stationId]);
+  }, [rows, name, categories, metas, ownedOnly, favoritesOnly, ownedSet, minRoiPct, minVolume, stationId]);
 
   const stations = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
   const rowsByType = useMemo(
@@ -260,6 +262,17 @@ function Workbench() {
                   onChange={(e) => setOwnedOnly(e.currentTarget.checked)}
                 />
                 Owned only{ownedCount > 0 ? ` (${ownedCount})` : ""}
+              </label>
+              <label
+                className="mt-1 flex items-center gap-1 text-xs text-zinc-300"
+                title="Show only items you've favorited (★)"
+              >
+                <input
+                  type="checkbox"
+                  checked={favoritesOnly}
+                  onChange={(e) => setFavoritesOnly(e.currentTarget.checked)}
+                />
+                Favorites only
               </label>
             </Field>
             <Field label="Category / Type">
