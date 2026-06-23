@@ -79,7 +79,8 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
     facility tax / **per-run blueprint cost**, **min ROI**, and **min volume** (when a hub is picked).
   - Sortable table — profit · **ROI** · margin · per-unit · volume · market — with a per-material cost
     drill-down. **T2 items include the amortized invention cost** (datacores + job fee, divided by
-    success probability × runs per success).
+    success probability × runs per success), with a configurable **invention skill level** (0–5,
+    default all-V) scaling the probability.
   - **Owned-only** filter: with characters logged in, restrict to items whose blueprint you own
     (across all characters in the roster).
 - **Smart SDE caching** — the static data only re-downloads when Fuzzwork's published md5 changes

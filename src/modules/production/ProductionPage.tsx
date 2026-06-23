@@ -59,6 +59,7 @@ function Workbench() {
     useState<PriceBasis>("sellPercentile");
   const [productBasis, setProductBasis] = useState<PriceBasis>("sellPercentile");
   const [blueprintCostPerRun, setBlueprintCostPerRun] = useState(0);
+  const [inventionSkill, setInventionSkill] = useState(5);
 
   // Client-side filters — applied instantly to the results.
   const [name, setName] = useState("");
@@ -97,6 +98,7 @@ function Workbench() {
       materialBasis,
       productBasis,
       blueprintCostPerRun,
+      inventionSkillLevel: inventionSkill,
     });
   }
 
@@ -279,6 +281,13 @@ function Workbench() {
               onChange={setBlueprintCostPerRun}
               min={0}
               step={1000000}
+            />
+            <Num
+              label="Invention skills (0-5)"
+              value={inventionSkill}
+              onChange={setInventionSkill}
+              min={0}
+              max={5}
             />
             <div className="col-span-2 self-end text-xs text-zinc-500 md:col-span-4">
               Changing market settings? Hit <strong>Calculate</strong> to

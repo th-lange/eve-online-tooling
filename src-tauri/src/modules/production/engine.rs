@@ -104,6 +104,9 @@ pub struct ProfitConfig {
     /// Cost to acquire the blueprint copy, amortized **per run** (e.g. a faction
     /// or officer BPC from an LP store). Multiplied by `runs`.
     pub blueprint_cost_per_run: f64,
+    /// Multiplier on the SDE base invention probability from the inventor's
+    /// skills/decryptor (1.0 = base/skill-0; ~1.458 = all science skills at V).
+    pub invention_skill_multiplier: f64,
 }
 
 impl Default for ProfitConfig {
@@ -117,6 +120,7 @@ impl Default for ProfitConfig {
             broker_fee: 0.0,
             include_sales_cost: false,
             blueprint_cost_per_run: 0.0,
+            invention_skill_multiplier: 1.0,
         }
     }
 }
@@ -313,7 +317,8 @@ pub fn evaluate(
             let invention_job_fee =
                 invention_eiv * config.system_cost_index * (1.0 + config.facility_tax);
             let attempt_cost = datacore_cost + invention_job_fee;
-            let yielded = inv.probability * inv.runs_per_success as f64;
+            let probability = (inv.probability * config.invention_skill_multiplier).min(1.0);
+            let yielded = probability * inv.runs_per_success as f64;
             if yielded > 0.0 {
                 (attempt_cost / yielded) * runs as f64
             } else {

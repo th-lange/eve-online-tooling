@@ -45,6 +45,10 @@ pub struct ProfitParams {
     /// Amortized blueprint acquisition cost per run (e.g. a faction BPC).
     #[serde(default)]
     pub blueprint_cost_per_run: f64,
+    /// Inventor science/encryption skill level (0..5) scaling invention
+    /// probability. Default 5 (all V).
+    #[serde(default)]
+    pub invention_skill_level: Option<i64>,
 }
 
 /// Rank **every** manufacturable item by build-vs-buy profit at the chosen
@@ -111,6 +115,9 @@ pub async fn production_profit(
         .map(|m| (m.type_id, m))
         .collect();
 
+    // Invention probability multiplier from skills (1 + L/40 + 2L/30); all-V ≈ 1.458.
+    let skill = params.invention_skill_level.unwrap_or(5).clamp(0, 5) as f64;
+    let invention_skill_multiplier = 1.0 + skill / 40.0 + 2.0 * skill / 30.0;
     let defaults = ProfitConfig::default();
     let config = ProfitConfig {
         system_cost_index: params.system_cost_index,
@@ -118,6 +125,7 @@ pub async fn production_profit(
         material_basis: params.material_basis.unwrap_or(PriceBasis::SellPercentile),
         product_basis: params.product_basis.unwrap_or(PriceBasis::SellPercentile),
         blueprint_cost_per_run: params.blueprint_cost_per_run,
+        invention_skill_multiplier,
         ..defaults
     };
 

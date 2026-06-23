@@ -233,6 +233,8 @@ export interface ProfitParams {
   productBasis?: PriceBasis;
   /** Amortized blueprint acquisition cost per run (e.g. faction BPC). */
   blueprintCostPerRun?: number;
+  /** Inventor skill level 0..5 scaling invention probability (default 5). */
+  inventionSkillLevel?: number;
 }
 
 /** Rank every manufacturable item by build-vs-buy profit at the chosen market. */
