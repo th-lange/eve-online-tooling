@@ -12,6 +12,7 @@ import {
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
 import { formatInt, formatIsk, formatPercent } from "../../lib/format";
+import { usePersistentSort } from "../../lib/usePersistentSort";
 
 const FORGE = 10000002;
 type Tab = "opportunities" | "favorites" | "blacklist";
@@ -234,7 +235,6 @@ type TradeSortKey =
   | "margin"
   | "volume"
   | "dailyTraded";
-type SortDir = "asc" | "desc";
 
 const TRADE_COLUMNS: {
   key: TradeSortKey;
@@ -250,6 +250,8 @@ const TRADE_COLUMNS: {
   { key: "dailyTraded", label: "Traded/day", numeric: true },
 ];
 
+const TRADE_SORT_KEYS = TRADE_COLUMNS.map((c) => c.key);
+
 function TradeTable({
   rows,
   onFavorite,
@@ -259,17 +261,13 @@ function TradeTable({
   onFavorite: (r: TradeRow) => void;
   onBlacklist: (r: TradeRow) => void;
 }) {
-  const [sortKey, setSortKey] = useState<TradeSortKey>("profitPerUnit");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
-
-  function toggleSort(key: TradeSortKey) {
-    if (key === sortKey) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir(key === "name" ? "asc" : "desc");
-    }
-  }
+  const { sortKey, sortDir, toggleSort } = usePersistentSort<TradeSortKey>(
+    "sort.trading",
+    TRADE_SORT_KEYS,
+    "profitPerUnit",
+    "desc",
+    ["name"],
+  );
 
   const sorted = useMemo(() => {
     const dir = sortDir === "asc" ? 1 : -1;
