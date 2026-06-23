@@ -34,18 +34,46 @@ pub struct Aggregate {
     pub sell: Side,
 }
 
-// Fuzzwork encodes every number as a JSON string, so deserialize as strings and
-// parse.
+// Fuzzwork encodes numbers as JSON strings for priced items but as bare numbers
+// (e.g. `0`) for empty sides, so accept either.
+fn de_num<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f64, D::Error> {
+    use serde::de::{self, Visitor};
+    struct NumOrStr;
+    impl Visitor<'_> for NumOrStr {
+        type Value = f64;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a number or numeric string")
+        }
+        fn visit_f64<E>(self, v: f64) -> Result<f64, E> {
+            Ok(v)
+        }
+        fn visit_i64<E>(self, v: i64) -> Result<f64, E> {
+            Ok(v as f64)
+        }
+        fn visit_u64<E>(self, v: u64) -> Result<f64, E> {
+            Ok(v as f64)
+        }
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<f64, E> {
+            v.parse().map_err(de::Error::custom)
+        }
+    }
+    d.deserialize_any(NumOrStr)
+}
+
 #[derive(Deserialize)]
 struct RawSide {
-    #[serde(rename = "weightedAverage")]
-    weighted_average: String,
-    max: String,
-    min: String,
-    volume: String,
-    #[serde(rename = "orderCount")]
-    order_count: String,
-    percentile: String,
+    #[serde(rename = "weightedAverage", deserialize_with = "de_num")]
+    weighted_average: f64,
+    #[serde(deserialize_with = "de_num")]
+    max: f64,
+    #[serde(deserialize_with = "de_num")]
+    min: f64,
+    #[serde(deserialize_with = "de_num")]
+    volume: f64,
+    #[serde(rename = "orderCount", deserialize_with = "de_num")]
+    order_count: f64,
+    #[serde(deserialize_with = "de_num")]
+    percentile: f64,
 }
 
 #[derive(Deserialize)]
@@ -54,19 +82,15 @@ struct RawAggregate {
     sell: RawSide,
 }
 
-fn parse(s: &str) -> f64 {
-    s.parse().unwrap_or(0.0)
-}
-
 impl From<RawSide> for Side {
     fn from(r: RawSide) -> Self {
         Side {
-            min: parse(&r.min),
-            max: parse(&r.max),
-            weighted_average: parse(&r.weighted_average),
-            percentile: parse(&r.percentile),
-            volume: parse(&r.volume),
-            order_count: parse(&r.order_count) as i64,
+            min: r.min,
+            max: r.max,
+            weighted_average: r.weighted_average,
+            percentile: r.percentile,
+            volume: r.volume,
+            order_count: r.order_count as i64,
         }
     }
 }
@@ -133,6 +157,15 @@ impl FuzzworkClient {
 mod tests {
     use super::*;
 
+    fn first(json: &str) -> Aggregate {
+        let raw: HashMap<String, RawAggregate> = serde_json::from_str(json).unwrap();
+        let v = raw.into_iter().next().unwrap().1;
+        Aggregate {
+            buy: v.buy.into(),
+            sell: v.sell.into(),
+        }
+    }
+
     #[test]
     fn parses_fuzzwork_string_numbers() {
         let json = r#"{
@@ -141,18 +174,25 @@ mod tests {
                 "sell": {"weightedAverage":"3.99","max":"55000.0","min":"3.68","stddev":"6436.9","median":"4.14","volume":"18785145164.0","orderCount":"73","percentile":"3.69"}
             }
         }"#;
-        let raw: HashMap<String, RawAggregate> = serde_json::from_str(json).unwrap();
-        let agg: Aggregate = {
-            let v = raw.into_iter().next().unwrap().1;
-            Aggregate {
-                buy: v.buy.into(),
-                sell: v.sell.into(),
-            }
-        };
+        let agg = first(json);
         assert_eq!(agg.sell.min, 3.68);
         assert_eq!(agg.buy.max, 3.62);
         assert_eq!(agg.sell.percentile, 3.69);
         assert_eq!(agg.sell.order_count, 73);
         assert_eq!(agg.sell.volume, 18785145164.0);
+    }
+
+    #[test]
+    fn parses_empty_side_with_numeric_zeros() {
+        // Untraded items come back as bare `0` numbers, not strings.
+        let json = r#"{
+            "60": {
+                "buy": {"weightedAverage":0,"max":0,"min":0,"stddev":0,"median":0,"volume":0,"orderCount":0,"percentile":0},
+                "sell": {"weightedAverage":0,"max":0,"min":0,"stddev":0,"median":0,"volume":0,"orderCount":0,"percentile":0}
+            }
+        }"#;
+        let agg = first(json);
+        assert_eq!(agg.sell.order_count, 0);
+        assert_eq!(agg.sell.min, 0.0);
     }
 }
