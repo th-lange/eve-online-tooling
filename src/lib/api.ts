@@ -70,7 +70,10 @@ export interface TradeRow {
   sell: number;
   profitPerUnit: number;
   margin: number;
+  /** Order-book volume — units currently listed. */
   volume: number;
+  /** Average units traded per day, from market history. */
+  dailyTraded: number;
   favorite: boolean;
   category: string | null;
   group: string | null;

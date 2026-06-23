@@ -226,6 +226,30 @@ function Workbench() {
   );
 }
 
+type TradeSortKey =
+  | "name"
+  | "buy"
+  | "sell"
+  | "profitPerUnit"
+  | "margin"
+  | "volume"
+  | "dailyTraded";
+type SortDir = "asc" | "desc";
+
+const TRADE_COLUMNS: {
+  key: TradeSortKey;
+  label: string;
+  numeric: boolean;
+}[] = [
+  { key: "name", label: "Item", numeric: false },
+  { key: "buy", label: "Buy", numeric: true },
+  { key: "sell", label: "Sell", numeric: true },
+  { key: "profitPerUnit", label: "Profit/unit", numeric: true },
+  { key: "margin", label: "Margin", numeric: true },
+  { key: "volume", label: "Listed", numeric: true },
+  { key: "dailyTraded", label: "Traded/day", numeric: true },
+];
+
 function TradeTable({
   rows,
   onFavorite,
@@ -235,22 +259,48 @@ function TradeTable({
   onFavorite: (r: TradeRow) => void;
   onBlacklist: (r: TradeRow) => void;
 }) {
+  const [sortKey, setSortKey] = useState<TradeSortKey>("profitPerUnit");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  function toggleSort(key: TradeSortKey) {
+    if (key === sortKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir(key === "name" ? "asc" : "desc");
+    }
+  }
+
+  const sorted = useMemo(() => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...rows].sort((a, b) => {
+      if (sortKey === "name") return dir * a.name.localeCompare(b.name);
+      return dir * (a[sortKey] - b[sortKey]);
+    });
+  }, [rows, sortKey, sortDir]);
+
   return (
     <div className="overflow-auto rounded border border-zinc-800">
       <table className="w-full border-collapse text-sm">
         <thead className="bg-zinc-900 text-zinc-400">
           <tr>
             <th className="w-16" />
-            <th className="px-3 py-2 text-left font-medium">Item</th>
-            <th className="px-3 py-2 text-right font-medium">Buy</th>
-            <th className="px-3 py-2 text-right font-medium">Sell</th>
-            <th className="px-3 py-2 text-right font-medium">Profit/unit</th>
-            <th className="px-3 py-2 text-right font-medium">Margin</th>
-            <th className="px-3 py-2 text-right font-medium">Volume</th>
+            {TRADE_COLUMNS.map((c) => (
+              <th
+                key={c.key}
+                onClick={() => toggleSort(c.key)}
+                className={`cursor-pointer select-none px-3 py-2 font-medium ${
+                  c.numeric ? "text-right" : "text-left"
+                } hover:text-zinc-200`}
+              >
+                {c.label}
+                {sortKey === c.key ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
+          {sorted.map((r) => (
             <tr key={r.typeId} className="border-t border-zinc-800 hover:bg-zinc-800/40">
               <td className="px-2">
                 <button
@@ -291,11 +341,14 @@ function TradeTable({
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                 {formatInt(r.volume)}
               </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+                {formatInt(r.dailyTraded)}
+              </td>
             </tr>
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={7} className="px-3 py-6 text-center text-zinc-500">
+              <td colSpan={8} className="px-3 py-6 text-center text-zinc-500">
                 Hit Calculate to scan the market.
               </td>
             </tr>

@@ -181,6 +181,32 @@ impl MarketService {
         Ok(out)
     }
 
+    /// Average daily-**traded** volume (units moved/day) over the last `days` of
+    /// market history, for many types in a region, fetched concurrently. This is
+    /// the real liquidity measure (vs. Fuzzwork's order-book *listed* units).
+    /// Types with no history map to 0. Errors are swallowed per-type as 0 so one
+    /// missing type can't fail the batch.
+    pub async fn daily_traded_volumes(
+        &self,
+        region_id: i64,
+        type_ids: &[i64],
+        days: usize,
+    ) -> HashMap<i64, i64> {
+        use futures_util::stream::{self, StreamExt};
+        const CONCURRENCY: usize = 16;
+        stream::iter(type_ids.iter().copied())
+            .map(|type_id| async move {
+                let volume = match self.history_for(region_id, type_id).await {
+                    Ok(history) => average_recent_volume(&history, days),
+                    Err(_) => 0,
+                };
+                (type_id, volume)
+            })
+            .buffer_unordered(CONCURRENCY)
+            .collect::<HashMap<i64, i64>>()
+            .await
+    }
+
     /// Price models for many types at a [`Location`] (region average or a hub),
     /// using Fuzzwork aggregates for sell/buy/volume plus the global adjusted
     /// price for the EIV (job-fee) basis. This is the bulk pricing path used to
@@ -199,6 +225,17 @@ impl MarketService {
             })
             .collect())
     }
+}
+
+/// Mean of the `days` most recent days' traded volume. ESI history is ascending
+/// by date, so the tail is the newest. Empty history → 0.
+fn average_recent_volume(history: &[HistoryDay], days: usize) -> i64 {
+    if history.is_empty() || days == 0 {
+        return 0;
+    }
+    let recent = &history[history.len().saturating_sub(days)..];
+    let total: i64 = recent.iter().map(|h| h.volume).sum();
+    total / recent.len() as i64
 }
 
 /// Only treat a side as priced if it actually has orders.
@@ -225,5 +262,30 @@ fn model_from_aggregate(
         order_count: sell.map(|s| s.order_count),
         daily_average: None,
         moving_average: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn day(volume: i64) -> HistoryDay {
+        HistoryDay {
+            date: "2026-01-01".into(),
+            average: 1.0,
+            order_count: 1,
+            volume,
+        }
+    }
+
+    #[test]
+    fn averages_only_the_recent_window() {
+        // Oldest → newest; last 3 of [10,20,30,40,50] = (30+40+50)/3 = 40.
+        let history: Vec<HistoryDay> = [10, 20, 30, 40, 50].into_iter().map(day).collect();
+        assert_eq!(average_recent_volume(&history, 3), 40);
+        // Window longer than history → average of everything.
+        assert_eq!(average_recent_volume(&history, 99), 30);
+        // No history → 0, never a panic.
+        assert_eq!(average_recent_volume(&[], 7), 0);
     }
 }

@@ -29,8 +29,11 @@ pub struct TradeRow {
     pub profit_per_unit: f64,
     /// Profit / cost.
     pub margin: f64,
-    /// Market volume (units listed) — liquidity.
+    /// Order-book volume (units currently *listed*) — order-book liquidity.
     pub volume: i64,
+    /// Average units actually *traded* per day, from market history (#14). Filled
+    /// in by the command for the displayed set; 0 until then.
+    pub daily_traded: i64,
     pub favorite: bool,
     /// Category/group of the item (Ship/Module…, Frigate/Cruiser…), for search.
     pub category: Option<String>,
@@ -64,6 +67,7 @@ pub fn evaluate(
         profit_per_unit,
         margin,
         volume: model.daily_volume.unwrap_or(0),
+        daily_traded: 0,
         favorite,
         category: None,
         group: None,
