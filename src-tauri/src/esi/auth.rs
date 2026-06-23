@@ -44,6 +44,10 @@ pub enum AuthError {
     Jwt(String),
     #[error("loopback server error: {0}")]
     Server(String),
+    #[error("character is not logged in")]
+    NotLoggedIn,
+    #[error("credential storage error: {0}")]
+    Storage(String),
 }
 
 /// In-memory auth state: an HTTP client and a per-character access-token cache.
@@ -53,8 +57,6 @@ pub struct AuthState {
     tokens: Mutex<HashMap<i64, CachedToken>>,
 }
 
-// Read by `access_token`, which the ESI data feed (#4) consumes.
-#[allow(dead_code)]
 struct CachedToken {
     access_token: String,
     expires_at: Instant,
@@ -90,20 +92,18 @@ impl AuthState {
         );
     }
 
-    /// A valid (cached or refreshed) access token for a character. Used by the
-    /// ESI data feed (#4).
-    #[allow(dead_code)]
-    pub async fn access_token(
-        &self,
-        character_id: i64,
-        refresh_token: &str,
-    ) -> Result<String, AuthError> {
+    /// A valid (cached or refreshed) access token for a character, loading its
+    /// refresh token from the keychain.
+    pub async fn access_token_for(&self, character_id: i64) -> Result<String, AuthError> {
         if let Some(t) = self.tokens.lock().unwrap().get(&character_id) {
             if t.expires_at > Instant::now() {
                 return Ok(t.access_token.clone());
             }
         }
-        let tokens = refresh(&self.http, refresh_token).await?;
+        let refresh_token = crate::storage::load_refresh_token(character_id)
+            .map_err(AuthError::Storage)?
+            .ok_or(AuthError::NotLoggedIn)?;
+        let tokens = refresh(&self.http, &refresh_token).await?;
         self.cache_token(character_id, tokens.access_token.clone(), tokens.expires_in);
         Ok(tokens.access_token)
     }
@@ -185,9 +185,7 @@ pub async fn exchange_code(
     Ok(resp.json().await?)
 }
 
-/// Exchange a refresh token for a fresh access token (consumed via
-/// `AuthState::access_token` by the ESI data feed, #4).
-#[allow(dead_code)]
+/// Exchange a refresh token for a fresh access token.
 pub async fn refresh(
     http: &reqwest::Client,
     refresh_token: &str,

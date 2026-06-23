@@ -32,6 +32,33 @@ export function authLogout(characterId: number): Promise<Character[]> {
   return invoke<Character[]>("auth_logout", { characterId });
 }
 
+export interface OwnedBlueprint {
+  characterId: number;
+  characterName: string;
+  /** The blueprint's type id (matches a production row's blueprintTypeId). */
+  typeId: number;
+  materialEfficiency: number;
+  timeEfficiency: number;
+  runs: number;
+  quantity: number;
+}
+
+/** Blueprints owned across the whole roster (their real ME/TE). */
+export function ownedBlueprints(): Promise<OwnedBlueprint[]> {
+  return invoke<OwnedBlueprint[]>("owned_blueprints");
+}
+
+export interface Asset {
+  typeId: number;
+  quantity: number;
+  locationId: number;
+}
+
+/** A character's assets. */
+export function characterAssets(characterId: number): Promise<Asset[]> {
+  return invoke<Asset[]>("character_assets", { characterId });
+}
+
 // --- SDE (Static Data Export) ---
 
 export interface SdeStatus {

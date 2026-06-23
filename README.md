@@ -79,15 +79,15 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
     facility tax / **per-run blueprint cost**, **min ROI**, and **min volume** (when a hub is picked).
   - Sortable table — profit · **ROI** · margin · per-unit · volume · market — with a per-material cost
     drill-down.
-  - Owned-only filter is stubbed pending SSO. Public data — no login yet.
+  - **Owned-only** filter: with characters logged in, restrict to items whose blueprint you own
+    (across all characters in the roster).
 - **Smart SDE caching** — the static data only re-downloads when Fuzzwork's published md5 changes
   ("Update data" button reports updated vs already-current).
 - **EVE SSO login (multi-character)** — add one or more characters via OAuth2 PKCE (sidebar →
   "Add character"); each refresh token is stored in the OS keychain, the roster persists across
   restarts, and removing a character clears its credential.
 
-Still to come: reading character blueprints/assets (#4) — which lights up the **Owned** view — and
-invention/T2 and reactions/T3 (#9/#10).
+Still to come: invention/T2 and reactions/T3 (#9/#10).
 
 ## Status & tracking
 

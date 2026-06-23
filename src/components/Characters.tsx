@@ -5,8 +5,10 @@ import { authCharacters, authLogin, authLogout } from "../lib/api";
 // character can be removed (which clears its keychain entry).
 export function Characters() {
   const qc = useQueryClient();
-  const invalidate = () =>
+  const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["auth", "characters"] });
+    qc.invalidateQueries({ queryKey: ["owned"] }); // refresh the Owned filter
+  };
 
   const chars = useQuery({
     queryKey: ["auth", "characters"],

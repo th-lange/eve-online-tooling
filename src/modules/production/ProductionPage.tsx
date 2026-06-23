@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   marketRegions,
+  ownedBlueprints,
   productionProfit,
   sdeStatus,
   sdeUpdate,
@@ -63,6 +64,7 @@ function Workbench() {
   const [name, setName] = useState("");
   const [categories, setCategories] = useState<Set<string>>(new Set());
   const [metas, setMetas] = useState<Set<string>>(new Set());
+  const [ownedOnly, setOwnedOnly] = useState(false);
   const [minRoiPct, setMinRoiPct] = useState("");
   const [minVolume, setMinVolume] = useState("");
 
@@ -70,6 +72,15 @@ function Workbench() {
     queryKey: ["market", "regions"],
     queryFn: marketRegions,
   });
+  const owned = useQuery({
+    queryKey: ["owned", "blueprints"],
+    queryFn: ownedBlueprints,
+  });
+  const ownedSet = useMemo(
+    () => new Set(owned.data?.map((b) => b.typeId)),
+    [owned.data],
+  );
+  const ownedCount = ownedSet.size;
   const update = useMutation({ mutationFn: () => sdeUpdate(false) });
   const profit = useMutation({
     mutationFn: (p: ProfitParams) => productionProfit(p),
@@ -110,11 +121,12 @@ function Workbench() {
         return false;
       if (metas.size > 0 && !(r.metaGroup && metas.has(r.metaGroup)))
         return false;
+      if (ownedOnly && !ownedSet.has(r.blueprintTypeId)) return false;
       if (minRoi !== null && (r.roi ?? -Infinity) < minRoi) return false;
       if (minVol !== null && (r.productVolume ?? 0) < minVol) return false;
       return true;
     });
-  }, [rows, name, categories, metas, minRoiPct, minVolume, stationId]);
+  }, [rows, name, categories, metas, ownedOnly, ownedSet, minRoiPct, minVolume, stationId]);
 
   const stations = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
 
@@ -165,7 +177,24 @@ function Workbench() {
                 placeholder="Search items…"
                 className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
               />
-              <OwnedNote />
+              <label
+                className={`mt-1 flex items-center gap-1 text-xs ${
+                  ownedCount > 0 ? "text-zinc-300" : "text-zinc-600"
+                }`}
+                title={
+                  ownedCount > 0
+                    ? "Show only items whose blueprint a logged-in character owns"
+                    : "Log in a character with blueprints to enable"
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={ownedOnly}
+                  disabled={ownedCount === 0}
+                  onChange={(e) => setOwnedOnly(e.currentTarget.checked)}
+                />
+                Owned only{ownedCount > 0 ? ` (${ownedCount})` : ""}
+              </label>
             </Field>
             <Field label="Category / Type">
               <CheckboxGroup
@@ -352,15 +381,6 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
     <label className="flex flex-col gap-1 text-xs text-zinc-400">
       {label}
       {children}
-    </label>
-  );
-}
-
-function OwnedNote() {
-  return (
-    <label className="mt-1 flex items-center gap-1 text-xs text-zinc-600">
-      <input type="checkbox" disabled />
-      Owned only (needs EVE login)
     </label>
   );
 }

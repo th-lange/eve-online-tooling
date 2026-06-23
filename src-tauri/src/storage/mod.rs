@@ -21,8 +21,7 @@ pub fn store_refresh_token(character_id: i64, token: &str) -> Result<(), String>
         .map_err(|e| e.to_string())
 }
 
-/// Load a character's refresh token, if present (used by the ESI data feed, #4).
-#[allow(dead_code)]
+/// Load a character's refresh token, if present.
 pub fn load_refresh_token(character_id: i64) -> Result<Option<String>, String> {
     match entry(character_id)?.get_password() {
         Ok(token) => Ok(Some(token)),

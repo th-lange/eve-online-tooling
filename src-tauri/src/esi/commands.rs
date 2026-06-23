@@ -1,9 +1,11 @@
 //! Tauri command surface for EVE SSO (multi-character).
 
+use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use super::auth::{self, AuthState};
+use super::character;
 use crate::model::Character;
 use crate::storage;
 
@@ -59,6 +61,74 @@ pub async fn auth_login(
 pub fn auth_characters(app: AppHandle) -> Result<Vec<Character>, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     Ok(storage::load_roster(&dir))
+}
+
+/// A blueprint owned by a character (its real ME/TE/runs).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnedBlueprint {
+    pub character_id: i64,
+    pub character_name: String,
+    pub type_id: i64,
+    pub material_efficiency: i64,
+    pub time_efficiency: i64,
+    pub runs: i64,
+    pub quantity: i64,
+}
+
+/// All blueprints owned across the whole roster (one entry per blueprint stack).
+/// A character whose token can't be refreshed is skipped rather than failing the
+/// whole call.
+#[tauri::command]
+pub async fn owned_blueprints(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+) -> Result<Vec<OwnedBlueprint>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let roster = storage::load_roster(&dir);
+    let mut out = Vec::new();
+    for c in roster {
+        if let Ok(blueprints) = character::fetch_blueprints(&auth_state, c.character_id).await {
+            out.extend(blueprints.into_iter().map(|b| OwnedBlueprint {
+                character_id: c.character_id,
+                character_name: c.name.clone(),
+                type_id: b.type_id,
+                material_efficiency: b.material_efficiency,
+                time_efficiency: b.time_efficiency,
+                runs: b.runs,
+                quantity: b.quantity,
+            }));
+        }
+    }
+    Ok(out)
+}
+
+/// A character's assets (type id, quantity, location).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Asset {
+    pub type_id: i64,
+    pub quantity: i64,
+    pub location_id: i64,
+}
+
+/// Assets for one character.
+#[tauri::command]
+pub async fn character_assets(
+    auth_state: State<'_, AuthState>,
+    character_id: i64,
+) -> Result<Vec<Asset>, String> {
+    let assets = character::fetch_assets(&auth_state, character_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(assets
+        .into_iter()
+        .map(|a| Asset {
+            type_id: a.type_id,
+            quantity: a.quantity,
+            location_id: a.location_id,
+        })
+        .collect())
 }
 
 /// Remove a character: drop it from the roster, delete its keychain entry, and

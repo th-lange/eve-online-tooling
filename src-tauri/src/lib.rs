@@ -33,6 +33,8 @@ pub fn run() {
             esi::commands::auth_login,
             esi::commands::auth_characters,
             esi::commands::auth_logout,
+            esi::commands::owned_blueprints,
+            esi::commands::character_assets,
             sde::commands::sde_status,
             sde::commands::sde_update,
             sde::commands::sde_blueprint_materials,
