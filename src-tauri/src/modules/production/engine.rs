@@ -66,6 +66,9 @@ pub struct InputLine {
 pub struct Invention {
     /// Datacores (+ any other inputs) consumed per attempt.
     pub datacores: Vec<InputLine>,
+    /// The T1 product's manufacturing materials, used to estimate the copy job
+    /// fee for the consumed T1 BPC (EIV × cost index).
+    pub copy_materials: Vec<InputLine>,
     /// Runs on the resulting T2 BPC per successful attempt.
     pub runs_per_success: i64,
     /// Success probability (0..1).
@@ -316,7 +319,15 @@ pub fn evaluate(
             }
             let invention_job_fee =
                 invention_eiv * config.system_cost_index * (1.0 + config.facility_tax);
-            let attempt_cost = datacore_cost + invention_job_fee;
+            // Copy job fee for the T1 BPC consumed each attempt: EIV of the T1
+            // product × the (manufacturing) cost index, as an approximation.
+            let copy_eiv: f64 = inv
+                .copy_materials
+                .iter()
+                .map(|m| eiv_unit_value(prices.get(&m.type_id)) * m.base_quantity as f64)
+                .sum();
+            let copy_job_fee = copy_eiv * config.system_cost_index * (1.0 + config.facility_tax);
+            let attempt_cost = datacore_cost + invention_job_fee + copy_job_fee;
             let probability = (inv.probability * config.invention_skill_multiplier).min(1.0);
             let yielded = probability * inv.runs_per_success as f64;
             if yielded > 0.0 {
@@ -473,6 +484,7 @@ mod tests {
                 base_quantity: 2,
                 sourcing: Sourcing::Buy,
             }],
+            copy_materials: vec![],
             runs_per_success: 10,
             probability: 0.5,
         });

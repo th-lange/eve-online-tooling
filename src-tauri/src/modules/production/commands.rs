@@ -84,18 +84,21 @@ pub async fn production_profit(
             .invention_for(bp.blueprint_type_id)
             .map_err(|e| e.to_string())?
         {
+            // T1 product's manufacturing materials estimate the copy job fee.
+            let copy_materials = sde
+                .blueprint_materials(inv.inventing_blueprint_type_id)
+                .map_err(|e| e.to_string())?;
             needed.extend(inv.datacores.iter().map(|d| d.material_type_id));
+            needed.extend(copy_materials.iter().map(|m| m.material_type_id));
+            let to_input = |m: &crate::sde::BlueprintMaterial| InputLine {
+                type_id: m.material_type_id,
+                name: m.name.clone(),
+                base_quantity: m.quantity,
+                sourcing: Sourcing::Buy,
+            };
             step.invention = Some(Invention {
-                datacores: inv
-                    .datacores
-                    .iter()
-                    .map(|d| InputLine {
-                        type_id: d.material_type_id,
-                        name: d.name.clone(),
-                        base_quantity: d.quantity,
-                        sourcing: Sourcing::Buy,
-                    })
-                    .collect(),
+                datacores: inv.datacores.iter().map(to_input).collect(),
+                copy_materials: copy_materials.iter().map(to_input).collect(),
                 runs_per_success: inv.runs_per_success,
                 probability: inv.probability,
             });
