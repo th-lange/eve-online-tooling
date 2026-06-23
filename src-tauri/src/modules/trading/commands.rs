@@ -2,9 +2,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tauri::{AppHandle, Manager, State};
 
+use crate::lists::{self, ListItem};
 use crate::market::{default_region_id, resolve_location, MarketService, PriceModel};
 use crate::sde::{Sde, SdePaths};
 use crate::storage;
@@ -117,34 +118,13 @@ pub async fn station_trading(
     Ok(out)
 }
 
-/// An item on a saved list (with its name).
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ListItem {
-    pub type_id: i64,
-    pub name: String,
-}
-
 /// The contents of a saved list (`blacklist` or `favorites`), with names.
 #[tauri::command]
 pub fn trading_get_list(app: AppHandle, list: String) -> Result<Vec<ListItem>, String> {
     let key = list_key(&list)?;
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
-    let ids = storage::load_id_list(&dir, key);
-    let out = ids
-        .into_iter()
-        .map(|type_id| {
-            let name = sde
-                .type_info(type_id)
-                .ok()
-                .flatten()
-                .map(|t| t.name)
-                .unwrap_or_else(|| format!("Type {type_id}"));
-            ListItem { type_id, name }
-        })
-        .collect();
-    Ok(out)
+    Ok(lists::get(&sde, &dir, key))
 }
 
 /// Add or remove a type from a saved list.
@@ -157,10 +137,5 @@ pub fn trading_set_list(
 ) -> Result<(), String> {
     let key = list_key(&list)?;
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let mut ids = storage::load_id_list(&dir, key);
-    ids.retain(|&x| x != type_id);
-    if add {
-        ids.push(type_id);
-    }
-    storage::save_id_list(&dir, key, &ids)
+    lists::set(&dir, key, type_id, add)
 }

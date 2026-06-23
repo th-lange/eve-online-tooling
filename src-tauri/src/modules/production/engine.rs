@@ -239,6 +239,8 @@ pub struct ProfitBreakdown {
     /// Which market this result was priced at. Filled by the command layer; the
     /// pure engine leaves it `None`.
     pub market: Option<String>,
+    /// Whether the user has favorited this item. Filled by the command layer.
+    pub favorite: bool,
     /// Product daily volume (liquidity), for downstream filtering.
     pub product_volume: Option<i64>,
     /// Per-unit sell price of the product at the chosen basis (the target price).
@@ -491,6 +493,7 @@ pub fn evaluate(
         category: None,
         group: None,
         market: None,
+        favorite: false,
         product_volume,
         product_price,
         materials,

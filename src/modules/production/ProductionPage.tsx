@@ -1,18 +1,24 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   marketRegions,
   ownedBlueprints,
   productionDecryptors,
+  productionGetList,
   productionProfit,
+  productionSetList,
   sdeStatus,
   sdeUpdate,
+  type ListName,
   type PriceBasis,
   type ProfitBreakdown,
   type ProfitParams,
 } from "../../lib/api";
+import { formatIsk, formatPercent } from "../../lib/format";
 import { SdeSetup } from "./SdeSetup";
 import { ProfitTable } from "./ProfitTable";
+
+type ResultsView = "opportunities" | "favorites" | "blacklist";
 
 const FORGE = 10000002;
 
@@ -47,7 +53,9 @@ export function ProductionPage() {
 }
 
 function Workbench() {
+  const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("market");
+  const [view, setView] = useState<ResultsView>("opportunities");
 
   // Pricing/cost params — changing these re-runs the calculation.
   const [regionId, setRegionId] = useState(FORGE);
@@ -89,9 +97,47 @@ function Workbench() {
   );
   const ownedCount = ownedSet.size;
   const update = useMutation({ mutationFn: () => sdeUpdate(false) });
+  const [rows, setRows] = useState<ProfitBreakdown[]>([]);
   const profit = useMutation({
     mutationFn: (p: ProfitParams) => productionProfit(p),
+    onSuccess: setRows,
   });
+
+  const favorites = useQuery({
+    queryKey: ["production", "favorites"],
+    queryFn: () => productionGetList("favorites"),
+  });
+  const blacklist = useQuery({
+    queryKey: ["production", "blacklist"],
+    queryFn: () => productionGetList("blacklist"),
+  });
+  const setList = useMutation({
+    mutationFn: (v: { list: ListName; typeId: number; add: boolean }) =>
+      productionSetList(v.list, v.typeId, v.add),
+    onSuccess: (_d, v) =>
+      qc.invalidateQueries({ queryKey: ["production", v.list] }),
+  });
+
+  function toggleFavorite(r: ProfitBreakdown) {
+    setList.mutate({
+      list: "favorites",
+      typeId: r.blueprintTypeId,
+      add: !r.favorite,
+    });
+    setRows((prev) =>
+      prev.map((x) =>
+        x.blueprintTypeId === r.blueprintTypeId
+          ? { ...x, favorite: !x.favorite }
+          : x,
+      ),
+    );
+  }
+  function blacklistRow(r: ProfitBreakdown) {
+    setList.mutate({ list: "blacklist", typeId: r.blueprintTypeId, add: true });
+    setRows((prev) =>
+      prev.filter((x) => x.blueprintTypeId !== r.blueprintTypeId),
+    );
+  }
 
   function calculate() {
     profit.mutate({
@@ -115,7 +161,6 @@ function Workbench() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const rows = profit.data ?? [];
   const categoryOptions = useMemo(() => uniqueSorted(rows, (r) => r.category), [rows]);
   const metaOptions = useMemo(() => uniqueSorted(rows, (r) => r.metaGroup), [rows]);
 
@@ -146,6 +191,10 @@ function Workbench() {
   }, [rows, name, categories, metas, ownedOnly, ownedSet, minRoiPct, minVolume, stationId]);
 
   const stations = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
+  const rowsByType = useMemo(
+    () => new Map(rows.map((r) => [r.blueprintTypeId, r])),
+    [rows],
+  );
 
   return (
     <div className="p-6">
@@ -361,19 +410,136 @@ function Workbench() {
         )}
       </div>
 
-      <div className="mt-4">
-        {profit.isError ? (
-          <div className="text-sm text-rose-400">
-            Calculation failed: {String(profit.error)}
-          </div>
-        ) : profit.isPending && rows.length === 0 ? (
-          <div className="p-10 text-center text-sm text-zinc-500">
-            Pricing the whole catalogue at the chosen market…
-          </div>
-        ) : (
-          <ProfitTable rows={filtered} />
+      <ViewTabs
+        view={view}
+        onChange={setView}
+        counts={{
+          favorites: favorites.data?.length ?? 0,
+          blacklist: blacklist.data?.length ?? 0,
+        }}
+      />
+
+      <div className="mt-3">
+        {view === "opportunities" &&
+          (profit.isError ? (
+            <div className="text-sm text-rose-400">
+              Calculation failed: {String(profit.error)}
+            </div>
+          ) : profit.isPending && rows.length === 0 ? (
+            <div className="p-10 text-center text-sm text-zinc-500">
+              Pricing the whole catalogue at the chosen market…
+            </div>
+          ) : (
+            <ProfitTable
+              rows={filtered}
+              onFavorite={toggleFavorite}
+              onBlacklist={blacklistRow}
+            />
+          ))}
+
+        {view === "favorites" && (
+          <ListView
+            items={favorites.data ?? []}
+            rowsByType={rowsByType}
+            removeLabel="Unfavorite"
+            onRemove={(id) =>
+              setList.mutate({ list: "favorites", typeId: id, add: false })
+            }
+          />
+        )}
+        {view === "blacklist" && (
+          <ListView
+            items={blacklist.data ?? []}
+            rowsByType={rowsByType}
+            removeLabel="Remove"
+            onRemove={(id) =>
+              setList.mutate({ list: "blacklist", typeId: id, add: false })
+            }
+          />
         )}
       </div>
+    </div>
+  );
+}
+
+function ViewTabs({
+  view,
+  onChange,
+  counts,
+}: {
+  view: ResultsView;
+  onChange: (v: ResultsView) => void;
+  counts: { favorites: number; blacklist: number };
+}) {
+  const tabs: { value: ResultsView; label: string }[] = [
+    { value: "opportunities", label: "Opportunities" },
+    { value: "favorites", label: `Favorites (${counts.favorites})` },
+    { value: "blacklist", label: `Blacklist (${counts.blacklist})` },
+  ];
+  return (
+    <div className="mt-4 inline-flex rounded border border-zinc-800 bg-zinc-900 p-0.5">
+      {tabs.map((t) => (
+        <button
+          key={t.value}
+          onClick={() => onChange(t.value)}
+          className={`rounded px-3 py-1.5 text-sm ${
+            view === t.value
+              ? "bg-zinc-700 text-zinc-100"
+              : "text-zinc-400 hover:text-zinc-200"
+          }`}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ListView({
+  items,
+  rowsByType,
+  removeLabel,
+  onRemove,
+}: {
+  items: { typeId: number; name: string }[];
+  rowsByType: Map<number, ProfitBreakdown>;
+  removeLabel: string;
+  onRemove: (typeId: number) => void;
+}) {
+  if (items.length === 0) {
+    return (
+      <div className="p-10 text-center text-sm text-zinc-500">
+        Nothing here yet.
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-auto rounded border border-zinc-800">
+      <table className="w-full border-collapse text-sm">
+        <tbody>
+          {items.map((it) => {
+            const r = rowsByType.get(it.typeId);
+            return (
+              <tr key={it.typeId} className="border-t border-zinc-800">
+                <td className="px-3 py-1.5 text-zinc-200">{it.name}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                  {r
+                    ? `${formatIsk(r.profitPerUnit)}/item · ${formatPercent(r.roi)} ROI`
+                    : ""}
+                </td>
+                <td className="px-3 py-1.5 text-right">
+                  <button
+                    onClick={() => onRemove(it.typeId)}
+                    className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
+                  >
+                    {removeLabel}
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
