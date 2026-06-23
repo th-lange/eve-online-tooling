@@ -83,6 +83,61 @@ pub async fn fetch_assets(auth: &AuthState, character_id: i64) -> Result<Vec<Raw
     .await
 }
 
+#[derive(Deserialize)]
+struct CharacterPublic {
+    corporation_id: i64,
+}
+
+/// The character's corporation id (public endpoint).
+pub async fn corporation_id(auth: &AuthState, character_id: i64) -> Result<i64, AuthError> {
+    let url = format!("{ESI_BASE}/latest/characters/{character_id}/");
+    let info: CharacterPublic = auth
+        .http()
+        .get(&url)
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    Ok(info.corporation_id)
+}
+
+/// Corporation blueprints, using the character's token. Requires the
+/// `esi-corporations.read_blueprints.v1` scope and the Director role; if the
+/// character lacks either, ESI returns 403 and we treat it as "none".
+pub async fn fetch_corp_blueprints(
+    auth: &AuthState,
+    character_id: i64,
+    corporation_id: i64,
+) -> Result<Vec<RawBlueprint>, AuthError> {
+    let token = auth.access_token_for(character_id).await?;
+    let url = format!("{ESI_BASE}/latest/corporations/{corporation_id}/blueprints/");
+    let resp = auth.http().get(&url).bearer_auth(&token).send().await?;
+    if resp.status() == reqwest::StatusCode::FORBIDDEN {
+        return Ok(Vec::new());
+    }
+    let resp = resp.error_for_status()?;
+    let pages: u32 = resp
+        .headers()
+        .get("x-pages")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+    let mut out: Vec<RawBlueprint> = resp.json().await?;
+    for page in 2..=pages {
+        let resp = auth
+            .http()
+            .get(&url)
+            .query(&[("page", page.to_string())])
+            .bearer_auth(&token)
+            .send()
+            .await?
+            .error_for_status()?;
+        out.extend(resp.json::<Vec<RawBlueprint>>().await?);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

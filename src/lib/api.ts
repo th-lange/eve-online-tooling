@@ -35,6 +35,8 @@ export function authLogout(characterId: number): Promise<Character[]> {
 export interface OwnedBlueprint {
   characterId: number;
   characterName: string;
+  /** True for a corporation blueprint, false for a personal one. */
+  corporation: boolean;
   /** The blueprint's type id (matches a production row's blueprintTypeId). */
   typeId: number;
   materialEfficiency: number;

@@ -63,12 +63,15 @@ pub fn auth_characters(app: AppHandle) -> Result<Vec<Character>, String> {
     Ok(storage::load_roster(&dir))
 }
 
-/// A blueprint owned by a character (its real ME/TE/runs).
+/// A blueprint owned by a character (or their corporation), with its real
+/// ME/TE/runs.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OwnedBlueprint {
     pub character_id: i64,
     pub character_name: String,
+    /// True for a corporation blueprint, false for a personal one.
+    pub corporation: bool,
     pub type_id: i64,
     pub material_efficiency: i64,
     pub time_efficiency: i64,
@@ -76,9 +79,9 @@ pub struct OwnedBlueprint {
     pub quantity: i64,
 }
 
-/// All blueprints owned across the whole roster (one entry per blueprint stack).
-/// A character whose token can't be refreshed is skipped rather than failing the
-/// whole call.
+/// All blueprints owned across the whole roster — personal **and** corporation
+/// (where the character has the Director role + corp scope). A character whose
+/// token can't be refreshed is skipped rather than failing the whole call.
 #[tauri::command]
 pub async fn owned_blueprints(
     app: AppHandle,
@@ -88,16 +91,27 @@ pub async fn owned_blueprints(
     let roster = storage::load_roster(&dir);
     let mut out = Vec::new();
     for c in roster {
+        let to_owned = |b: character::RawBlueprint, corporation: bool| OwnedBlueprint {
+            character_id: c.character_id,
+            character_name: c.name.clone(),
+            corporation,
+            type_id: b.type_id,
+            material_efficiency: b.material_efficiency,
+            time_efficiency: b.time_efficiency,
+            runs: b.runs,
+            quantity: b.quantity,
+        };
+
         if let Ok(blueprints) = character::fetch_blueprints(&auth_state, c.character_id).await {
-            out.extend(blueprints.into_iter().map(|b| OwnedBlueprint {
-                character_id: c.character_id,
-                character_name: c.name.clone(),
-                type_id: b.type_id,
-                material_efficiency: b.material_efficiency,
-                time_efficiency: b.time_efficiency,
-                runs: b.runs,
-                quantity: b.quantity,
-            }));
+            out.extend(blueprints.into_iter().map(|b| to_owned(b, false)));
+        }
+        // Corp blueprints (empty if the character lacks the role/scope).
+        if let Ok(corp_id) = character::corporation_id(&auth_state, c.character_id).await {
+            if let Ok(blueprints) =
+                character::fetch_corp_blueprints(&auth_state, c.character_id, corp_id).await
+            {
+                out.extend(blueprints.into_iter().map(|b| to_owned(b, true)));
+            }
         }
     }
     Ok(out)

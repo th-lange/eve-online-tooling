@@ -28,6 +28,7 @@ const SCOPES: &[&str] = &[
     "publicData",
     "esi-assets.read_assets.v1",
     "esi-characters.read_blueprints.v1",
+    "esi-corporations.read_blueprints.v1",
 ];
 /// How long to wait for the user to complete the browser login.
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(180);
