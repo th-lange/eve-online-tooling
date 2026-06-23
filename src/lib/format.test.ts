@@ -28,6 +28,7 @@ function row(
     category: null,
     group: null,
     market: null,
+    favorite: false,
     productVolume,
     productPrice: null,
     materials: [],

@@ -21,7 +21,15 @@ const COLUMNS: { key: SortKey; label: string; numeric: boolean }[] = [
 ];
 
 // Pure display: the page does the filtering, this sorts + renders.
-export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
+export function ProfitTable({
+  rows,
+  onFavorite,
+  onBlacklist,
+}: {
+  rows: ProfitBreakdown[];
+  onFavorite: (r: ProfitBreakdown) => void;
+  onBlacklist: (r: ProfitBreakdown) => void;
+}) {
   const [sortKey, setSortKey] = useState<SortKey>("profitPerUnit");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -53,6 +61,7 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
           <thead className="bg-zinc-900 text-zinc-400">
             <tr>
               <th className="w-6" />
+              <th className="w-16" />
               {COLUMNS.map((c) => (
                 <th
                   key={c.key}
@@ -83,6 +92,32 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
                   >
                     <td className="px-2 text-center text-zinc-500">
                       {open ? "▾" : "▸"}
+                    </td>
+                    <td className="px-2 whitespace-nowrap">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onFavorite(r);
+                        }}
+                        title="Favorite"
+                        className={
+                          r.favorite
+                            ? "text-amber-400"
+                            : "text-zinc-600 hover:text-amber-400"
+                        }
+                      >
+                        ★
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onBlacklist(r);
+                        }}
+                        title="Blacklist (hide from ranking)"
+                        className="ml-2 text-zinc-600 hover:text-rose-400"
+                      >
+                        ✕
+                      </button>
                     </td>
                     <td className="px-3 py-1.5">
                       <div className="text-zinc-200">
@@ -133,7 +168,7 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-3 py-6 text-center text-zinc-500">
+                <td colSpan={9} className="px-3 py-6 text-center text-zinc-500">
                   No rows.
                 </td>
               </tr>
@@ -149,7 +184,7 @@ function BreakdownRow({ row }: { row: ProfitBreakdown }) {
   return (
     <tr className="border-t border-zinc-800 bg-zinc-900/40">
       <td />
-      <td colSpan={7} className="px-3 py-3">
+      <td colSpan={8} className="px-3 py-3">
         <div className="mb-2 text-xs text-zinc-400">
           {row.runs} run(s) · ME {row.me} · {formatInt(row.unitsProduced)} unit(s)
           · job fee {formatIsk(row.jobFee)}

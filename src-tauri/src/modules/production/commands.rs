@@ -5,10 +5,12 @@ use std::collections::HashMap;
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, State};
 
+use crate::lists::{self, ListItem};
 use crate::market::{
     default_region_id, location_label, resolve_location, MarketService, PriceModel,
 };
 use crate::sde::{Sde, SdePaths};
+use crate::storage;
 
 use super::engine::{
     evaluate, manufacturing_step, Activity, BuildStep, InputLine, Invention, PriceBasis,
@@ -139,7 +141,18 @@ pub async fn production_profit(
     params: ProfitParams,
 ) -> Result<Vec<ProfitBreakdown>, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+
+    // Saved lists are keyed by blueprint type id (the ranking row's identity):
+    // blacklisted blueprints are dropped, favorites are flagged for the UI.
+    let blacklist: std::collections::HashSet<i64> =
+        storage::load_id_list(&dir, PRODUCTION_BLACKLIST_KEY)
+            .into_iter()
+            .collect();
+    let favorites: std::collections::HashSet<i64> =
+        storage::load_id_list(&dir, PRODUCTION_FAVORITES_KEY)
+            .into_iter()
+            .collect();
 
     // Resolve the chosen decryptor (if any) once up front.
     let decryptor = match params.decryptor_type_id {
@@ -157,6 +170,9 @@ pub async fn production_profit(
     let mut needed = std::collections::HashSet::new();
     let mut recipe_cache: HashMap<i64, Option<Recipe>> = HashMap::new();
     for bp in sde.manufacturable_blueprints().map_err(|e| e.to_string())? {
+        if blacklist.contains(&bp.blueprint_type_id) {
+            continue;
+        }
         let product = crate::sde::BlueprintProduct {
             product_type_id: bp.product_type_id,
             name: bp.product_name,
@@ -279,6 +295,7 @@ pub async fn production_profit(
             bd.category = categories.get(&bd.product_type_id).cloned();
             bd.group = groups.get(&bd.product_type_id).cloned();
             bd.market = Some(market_name.clone());
+            bd.favorite = favorites.contains(&bd.blueprint_type_id);
             bd
         })
         .collect();
@@ -297,4 +314,41 @@ pub async fn production_decryptors(app: AppHandle) -> Result<Vec<crate::sde::Dec
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
     sde.decryptors().map_err(|e| e.to_string())
+}
+
+/// Storage keys for production's saved lists — distinct from trading's so the
+/// two modules' blacklists/favorites never collide.
+const PRODUCTION_BLACKLIST_KEY: &str = "production_blacklist";
+const PRODUCTION_FAVORITES_KEY: &str = "production_favorites";
+
+/// Map the UI's logical list name to its (module-scoped) storage key.
+fn list_key(list: &str) -> Result<&'static str, String> {
+    match list {
+        "blacklist" => Ok(PRODUCTION_BLACKLIST_KEY),
+        "favorites" => Ok(PRODUCTION_FAVORITES_KEY),
+        _ => Err(format!("unknown list: {list}")),
+    }
+}
+
+/// The contents of a production saved list (`blacklist` or `favorites`), with
+/// names. Ids are blueprint type ids.
+#[tauri::command]
+pub fn production_get_list(app: AppHandle, list: String) -> Result<Vec<ListItem>, String> {
+    let key = list_key(&list)?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    Ok(lists::get(&sde, &dir, key))
+}
+
+/// Add or remove a blueprint type from a production saved list.
+#[tauri::command]
+pub fn production_set_list(
+    app: AppHandle,
+    list: String,
+    type_id: i64,
+    add: bool,
+) -> Result<(), String> {
+    let key = list_key(&list)?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    lists::set(&dir, key, type_id, add)
 }

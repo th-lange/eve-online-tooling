@@ -16,6 +16,7 @@
 
 mod commands;
 mod esi;
+mod lists;
 mod market;
 mod model;
 mod modules;
@@ -46,6 +47,8 @@ pub fn run() {
             market::commands::market_prices,
             modules::production::commands::production_profit,
             modules::production::commands::production_decryptors,
+            modules::production::commands::production_get_list,
+            modules::production::commands::production_set_list,
             modules::trading::commands::station_trading,
             modules::trading::commands::trading_get_list,
             modules::trading::commands::trading_set_list,
