@@ -93,14 +93,18 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
     Faction, Officer…), price basis (sell/buy percentile, min/max, average), runs / ME / cost index /
     facility tax / **per-run blueprint cost**, **min ROI**, and **min volume** (when a hub is picked).
   - Sortable table — price · **ROI** · margin · **profit/item** (net, can be negative) · volume · market — with a per-material cost
-    drill-down. **T2 items include the amortized invention cost** (datacores + invention job fee + the
-    T1 BPC copy fee, divided by success probability × runs per success), with a configurable
-    **invention skill level** (0–5, default all-V) scaling the probability.
+    drill-down. Column headers carry hover/`ⓘ` descriptions, and the chosen **sort sticks** across
+    recalcs and restarts. **T2 items include the amortized invention cost** (datacores + invention job
+    fee + the T1 BPC copy fee, divided by success probability × runs per success), with a configurable
+    **invention skill level** (0–5, default all-V) scaling the probability and an optional
+    **decryptor** (shifts the invented ME / runs / probability and is priced per attempt).
+  - **T3 strategic cruisers & subsystems** — invented from **Ancient Relics**, whose market cost is
+    consumed and priced into the invention attempt.
   - **Recursive build-vs-buy**: intermediate components are resolved down the tree (manufacturing +
     reactions) and each takes the cheaper of building or buying; the drill-down tags inputs that are
     cheaper to **build**.
-  - **Owned-only** filter: with characters logged in, restrict to items whose blueprint you own
-    (across all characters in the roster).
+  - **Owned-only** / **Favorites-only** filters, plus persisted **blacklist** and **favorites**
+    (★/✕ on each row, with Opportunities / Favorites / Blacklist tabs).
 - **Smart SDE caching** — the static data only re-downloads when Fuzzwork's published md5 changes
   ("Update data" button reports updated vs already-current).
 - **EVE SSO login (multi-character)** — add one or more characters via OAuth2 PKCE (sidebar →
@@ -108,9 +112,8 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
   restarts, and removing a character clears its credential.
 - **Station-trading module** — scan a hub's ~19k market items for buy→sell flips: profit/unit and
   margin after broker fee + sales tax, with a min-volume filter, plus persisted **blacklist** and
-  **favorites** tabs (★/✕ on each row).
-
-Still to come: T3 strategic cruisers (relic invention cost) and decryptor choices for invention.
+  **favorites** tabs (★/✕ on each row). The table is **sortable** on every column and shows both
+  order-book **Listed** volume and **Traded/day** (real units moved, from market history).
 
 ## Releasing
 
@@ -118,7 +121,7 @@ Installers are produced by the **Release** GitHub Actions workflow (`.github/wor
 To cut a release:
 
 1. Bump the version in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`.
-2. Commit, then tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
+2. Commit, then tag and push: `git tag v0.3.0 && git push origin v0.3.0`.
 
 The workflow builds Linux / macOS / Windows installers on their respective runners and attaches them
 to the GitHub Release for that tag (it can also be run manually from the **Actions** tab against an
