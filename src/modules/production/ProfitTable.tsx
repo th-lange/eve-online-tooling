@@ -175,6 +175,14 @@ function BreakdownRow({ row }: { row: ProfitBreakdown }) {
               <tr key={m.typeId} className="text-zinc-300">
                 <td className="py-0.5">
                   {m.name}
+                  {m.built && (
+                    <span
+                      className="ml-1 rounded bg-sky-900/60 px-1 text-[10px] text-sky-300"
+                      title="Cheaper to build than buy"
+                    >
+                      build
+                    </span>
+                  )}
                   {m.unitPrice === null && (
                     <span className="ml-1 text-amber-400" title="No price">
                       ⚠

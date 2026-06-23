@@ -3,9 +3,17 @@ use serde::Serialize;
 /// Activity ids as used by the SDE `industryActivity*` tables.
 pub mod activity {
     pub const MANUFACTURING: i64 = 1;
-    /// Reserved for the invention/T2 work (issue #9).
-    #[allow(dead_code)]
     pub const INVENTION: i64 = 8;
+    pub const REACTION: i64 = 11;
+}
+
+/// How to build a product: a manufacturing blueprint or a reaction formula.
+#[derive(Debug, Clone)]
+pub struct Recipe {
+    pub blueprint_type_id: i64,
+    pub activity_id: i64,
+    pub product_quantity: i64,
+    pub materials: Vec<BlueprintMaterial>,
 }
 
 /// An item type from `invTypes` (+ its group).

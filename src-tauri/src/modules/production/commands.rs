@@ -11,9 +11,82 @@ use crate::market::{
 use crate::sde::{Sde, SdePaths};
 
 use super::engine::{
-    evaluate, manufacturing_step, InputLine, Invention, PriceBasis, ProfitBreakdown, ProfitConfig,
-    Sourcing,
+    evaluate, manufacturing_step, Activity, BuildStep, InputLine, Invention, PriceBasis,
+    ProfitBreakdown, ProfitConfig, Sourcing,
 };
+use crate::sde::Recipe;
+
+/// How deep the recursive build-vs-buy tree is resolved.
+const MAX_TREE_DEPTH: u32 = 5;
+
+/// Resolve a material into an [`InputLine`], recursively attaching a `Build`
+/// sub-step when the material has a recipe (manufacturing or reaction). Recipes
+/// are memoized; `path` guards against cycles.
+#[allow(clippy::too_many_arguments)]
+fn resolve_input(
+    sde: &Sde,
+    cache: &mut HashMap<i64, Option<Recipe>>,
+    needed: &mut std::collections::HashSet<i64>,
+    type_id: i64,
+    name: String,
+    base_quantity: i64,
+    depth: u32,
+    path: &mut Vec<i64>,
+) -> Result<InputLine, String> {
+    needed.insert(type_id);
+    let sourcing = if depth == 0 || path.contains(&type_id) {
+        Sourcing::Buy
+    } else {
+        let recipe = match cache.get(&type_id) {
+            Some(r) => r.clone(),
+            None => {
+                let r = sde.recipe_for(type_id).map_err(|e| e.to_string())?;
+                cache.insert(type_id, r.clone());
+                r
+            }
+        };
+        match recipe {
+            Some(recipe) => {
+                path.push(type_id);
+                let mut inputs = Vec::with_capacity(recipe.materials.len());
+                for m in &recipe.materials {
+                    inputs.push(resolve_input(
+                        sde,
+                        cache,
+                        needed,
+                        m.material_type_id,
+                        m.name.clone(),
+                        m.quantity,
+                        depth - 1,
+                        path,
+                    )?);
+                }
+                path.pop();
+                let activity = if recipe.activity_id == 11 {
+                    Activity::Reaction
+                } else {
+                    Activity::Manufacturing
+                };
+                Sourcing::Build(Box::new(BuildStep {
+                    activity,
+                    blueprint_type_id: recipe.blueprint_type_id,
+                    product_type_id: type_id,
+                    product_name: name.clone(),
+                    product_per_run: recipe.product_quantity,
+                    inputs,
+                    invention: None,
+                }))
+            }
+            None => Sourcing::Buy,
+        }
+    };
+    Ok(InputLine {
+        type_id,
+        name,
+        base_quantity,
+        sourcing,
+    })
+}
 
 fn default_runs() -> i64 {
     1
@@ -66,6 +139,7 @@ pub async fn production_profit(
     // the type ids we need prices for.
     let mut steps = Vec::new();
     let mut needed = std::collections::HashSet::new();
+    let mut recipe_cache: HashMap<i64, Option<Recipe>> = HashMap::new();
     for bp in sde.manufacturable_blueprints().map_err(|e| e.to_string())? {
         let product = crate::sde::BlueprintProduct {
             product_type_id: bp.product_type_id,
@@ -76,9 +150,24 @@ pub async fn production_profit(
             .blueprint_materials(bp.blueprint_type_id)
             .map_err(|e| e.to_string())?;
         needed.insert(product.product_type_id);
-        needed.extend(materials.iter().map(|m| m.material_type_id));
 
         let mut step = manufacturing_step(bp.blueprint_type_id, &product, &materials);
+        // Recursively resolve each material into a build-or-buy sub-tree.
+        let mut path = vec![product.product_type_id];
+        let mut inputs = Vec::with_capacity(materials.len());
+        for m in &materials {
+            inputs.push(resolve_input(
+                &sde,
+                &mut recipe_cache,
+                &mut needed,
+                m.material_type_id,
+                m.name.clone(),
+                m.quantity,
+                MAX_TREE_DEPTH,
+                &mut path,
+            )?);
+        }
+        step.inputs = inputs;
         // T2 items: attach the invention so its expected cost is amortized in.
         if let Some(inv) = sde
             .invention_for(bp.blueprint_type_id)

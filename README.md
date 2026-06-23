@@ -81,6 +81,9 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
     drill-down. **T2 items include the amortized invention cost** (datacores + invention job fee + the
     T1 BPC copy fee, divided by success probability × runs per success), with a configurable
     **invention skill level** (0–5, default all-V) scaling the probability.
+  - **Recursive build-vs-buy**: intermediate components are resolved down the tree (manufacturing +
+    reactions) and each takes the cheaper of building or buying; the drill-down tags inputs that are
+    cheaper to **build**.
   - **Owned-only** filter: with characters logged in, restrict to items whose blueprint you own
     (across all characters in the roster).
 - **Smart SDE caching** — the static data only re-downloads when Fuzzwork's published md5 changes
@@ -89,8 +92,7 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
   "Add character"); each refresh token is stored in the OS keychain, the roster persists across
   restarts, and removing a character clears its credential.
 
-Still to come: T3 + reactions with a recursive build-vs-buy bill of materials (#10), and decryptor
-choices for invention.
+Still to come: T3 strategic cruisers (relic invention cost) and decryptor choices for invention.
 
 ## Status & tracking
 

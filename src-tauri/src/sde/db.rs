@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use super::types::{
-    activity, BlueprintMaterial, BlueprintProduct, InventionData, ManufacturableBlueprint, TypeInfo,
+    activity, BlueprintMaterial, BlueprintProduct, InventionData, ManufacturableBlueprint, Recipe,
+    TypeInfo,
 };
 use super::SdeError;
 
@@ -26,10 +27,11 @@ impl Sde {
         Ok(Self { conn })
     }
 
-    /// Manufacturing inputs (activity 1) for a blueprint, with material names.
-    pub fn blueprint_materials(
+    /// Materials for a blueprint/formula at a given activity, with names.
+    fn materials_for(
         &self,
-        blueprint_type_id: i64,
+        type_id: i64,
+        activity_id: i64,
     ) -> Result<Vec<BlueprintMaterial>, SdeError> {
         let mut stmt = self.conn.prepare(
             "SELECT iam.materialTypeID, t.typeName, iam.quantity
@@ -38,7 +40,7 @@ impl Sde {
              WHERE iam.typeID = ?1 AND iam.activityID = ?2
              ORDER BY iam.materialTypeID",
         )?;
-        let rows = stmt.query_map(params![blueprint_type_id, activity::MANUFACTURING], |row| {
+        let rows = stmt.query_map(params![type_id, activity_id], |row| {
             Ok(BlueprintMaterial {
                 material_type_id: row.get(0)?,
                 name: row.get(1)?,
@@ -46,6 +48,43 @@ impl Sde {
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Manufacturing inputs (activity 1) for a blueprint, with material names.
+    pub fn blueprint_materials(
+        &self,
+        blueprint_type_id: i64,
+    ) -> Result<Vec<BlueprintMaterial>, SdeError> {
+        self.materials_for(blueprint_type_id, activity::MANUFACTURING)
+    }
+
+    /// How to build a product directly: its manufacturing blueprint (preferred)
+    /// or reaction formula. `None` if it isn't produced by either (e.g. a raw
+    /// mineral — buy it).
+    pub fn recipe_for(&self, product_type_id: i64) -> Result<Option<Recipe>, SdeError> {
+        for activity_id in [activity::MANUFACTURING, activity::REACTION] {
+            let row: Option<(i64, i64)> = self
+                .conn
+                .query_row(
+                    "SELECT typeID, quantity
+                     FROM industryActivityProducts
+                     WHERE activityID = ?1 AND productTypeID = ?2
+                     LIMIT 1",
+                    params![activity_id, product_type_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional()?;
+            if let Some((blueprint_type_id, product_quantity)) = row {
+                let materials = self.materials_for(blueprint_type_id, activity_id)?;
+                return Ok(Some(Recipe {
+                    blueprint_type_id,
+                    activity_id,
+                    product_quantity,
+                    materials,
+                }));
+            }
+        }
+        Ok(None)
     }
 
     /// What a blueprint manufactures (activity 1), if anything.
@@ -252,10 +291,15 @@ mod tests {
                (200, 18, 'Tritanium', 0.01),
                (300, 18, 'Pyerite', 0.01),
                (500, 18, 'Datacore - Test', 0.1),
+               (600, 18, 'Composite', 1.0),
                (998, 10, 'Widget I Blueprint', 0.01),
-               (999, 10, 'Widget Blueprint', 0.01);
+               (999, 10, 'Widget Blueprint', 0.01),
+               (9000, 10, 'Composite Reaction Formula', 0.01);
              INSERT INTO industryActivityProducts VALUES (999, 1, 100, 1);
              INSERT INTO industryActivityMaterials VALUES (999, 1, 200, 40), (999, 1, 300, 10);
+             -- Reaction: formula 9000 makes 100 Composite (600) from 50 Tritanium (200).
+             INSERT INTO industryActivityProducts VALUES (9000, 11, 600, 100);
+             INSERT INTO industryActivityMaterials VALUES (9000, 11, 200, 50);
              -- An invention row that must NOT leak into manufacturing queries.
              INSERT INTO industryActivityMaterials VALUES (999, 8, 5000, 2);
              -- Invention: T1 BP 998 invents T2 BP 999 (10 runs, 30%, 2 datacores).
@@ -322,6 +366,25 @@ mod tests {
     fn type_info_is_none_when_missing() {
         let sde = fixture();
         assert!(sde.type_info(424242).unwrap().is_none());
+    }
+
+    #[test]
+    fn recipe_for_manufacturing_and_reaction() {
+        let sde = fixture();
+        let mfg = sde.recipe_for(100).unwrap().unwrap();
+        assert_eq!(mfg.blueprint_type_id, 999);
+        assert_eq!(mfg.activity_id, 1);
+        assert_eq!(mfg.product_quantity, 1);
+        assert_eq!(mfg.materials.len(), 2);
+
+        let rxn = sde.recipe_for(600).unwrap().unwrap();
+        assert_eq!(rxn.blueprint_type_id, 9000);
+        assert_eq!(rxn.activity_id, 11);
+        assert_eq!(rxn.product_quantity, 100);
+        assert_eq!(rxn.materials[0].material_type_id, 200);
+
+        // A raw mineral has no recipe.
+        assert!(sde.recipe_for(200).unwrap().is_none());
     }
 
     #[test]

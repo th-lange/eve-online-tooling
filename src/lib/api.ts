@@ -177,6 +177,8 @@ export interface MaterialLine {
   requiredQuantity: number;
   unitPrice: number | null;
   lineCost: number;
+  /** True when building this input is cheaper than buying it. */
+  built: boolean;
 }
 
 export interface ProfitBreakdown {

@@ -2,13 +2,13 @@
 //!
 //! Pure, network-free calculation: given a blueprint's SDE rows and a price map
 //! it computes the profit of **building and selling** an item versus selling the
-//! inputs. v1 implements single-level **manufacturing**, but the model is
-//! activity-aware and tree-shaped so invention/T2 (#9) and reactions/T3 (#10)
-//! slot in without a rewrite:
+//! inputs. The model is activity-aware and tree-shaped:
 //!
 //! - a build step is a generic `(activity, inputs, output)` node ([`BuildStep`])
-//! - each input carries its [`Sourcing`] — `Buy` (value at market, the v1
-//!   default) or `Build` (a recursive sub-step, reserved for #10).
+//! - each input carries its [`Sourcing`] — `Buy` (value at market) or `Build`
+//!   (a recursive sub-step). Buildable inputs take the cheaper of build vs buy,
+//!   recursively (manufacturing + reactions).
+//! - T2 items carry an [`Invention`] whose expected cost is amortized in.
 
 use std::collections::HashMap;
 
@@ -135,8 +135,50 @@ pub struct MaterialLine {
     pub type_id: i64,
     pub name: String,
     pub required_quantity: i64,
+    /// Unit cost used (the cheaper of build vs buy when buildable).
     pub unit_price: Option<f64>,
     pub line_cost: f64,
+    /// True when building this input is cheaper than buying it.
+    pub built: bool,
+}
+
+/// How deep the recursive build-vs-buy resolver descends.
+const MAX_BUILD_DEPTH: u32 = 8;
+
+/// Per-unit cost to **build** this step's product, recursively choosing the
+/// cheaper of build vs buy for each input. `None` if the subtree can't be fully
+/// priced (so the caller falls back to buying).
+fn build_unit_cost(
+    step: &BuildStep,
+    prices: &HashMap<i64, PriceModel>,
+    config: &ProfitConfig,
+    depth: u32,
+) -> Option<f64> {
+    if depth == 0 || step.product_per_run <= 0 {
+        return None;
+    }
+    let mut materials_total = 0.0;
+    let mut eiv = 0.0;
+    for input in &step.inputs {
+        let model = prices.get(&input.type_id);
+        let buy_unit = price_for(model, config.material_basis);
+        let unit = match &input.sourcing {
+            Sourcing::Build(sub) => {
+                match (build_unit_cost(sub, prices, config, depth - 1), buy_unit) {
+                    (Some(b), Some(y)) => b.min(y),
+                    (Some(b), None) => b,
+                    (None, Some(y)) => y,
+                    (None, None) => return None,
+                }
+            }
+            Sourcing::Buy => buy_unit?,
+        };
+        // Sub-builds use base (ME 0) quantities — we don't know per-component ME.
+        materials_total += input.base_quantity as f64 * unit;
+        eiv += eiv_unit_value(model) * input.base_quantity as f64;
+    }
+    let job_fee = eiv * config.system_cost_index * (1.0 + config.facility_tax);
+    Some((materials_total + job_fee) / step.product_per_run as f64)
 }
 
 /// The result of evaluating a build step.
@@ -256,11 +298,21 @@ pub fn evaluate(
     for input in &step.inputs {
         let model = prices.get(&input.type_id);
         let required = required_quantity(input.base_quantity, runs, me);
-        // v1 values every input at market; the recursive `Build` resolver lands
-        // in #10, at which point a sub-step's own build cost is compared here.
-        let unit_price = match &input.sourcing {
-            Sourcing::Buy => price_for(model, config.material_basis),
-            Sourcing::Build(_) => price_for(model, config.material_basis),
+        let buy_unit = price_for(model, config.material_basis);
+        // Buildable inputs (a sub-recipe) take the cheaper of build vs buy.
+        let (unit_price, built) = match &input.sourcing {
+            Sourcing::Build(sub) => {
+                match (
+                    build_unit_cost(sub, prices, config, MAX_BUILD_DEPTH),
+                    buy_unit,
+                ) {
+                    (Some(b), Some(y)) if b < y => (Some(b), true),
+                    (Some(_), Some(y)) => (Some(y), false),
+                    (Some(b), None) => (Some(b), true),
+                    (None, y) => (y, false),
+                }
+            }
+            Sourcing::Buy => (buy_unit, false),
         };
         let line_cost = match unit_price {
             Some(p) => p * required as f64,
@@ -278,6 +330,7 @@ pub fn evaluate(
             required_quantity: required,
             unit_price,
             line_cost,
+            built,
         });
     }
 
@@ -472,6 +525,64 @@ mod tests {
         assert!(b.missing_prices.is_empty());
         assert_eq!(b.materials.len(), 2);
         approx(b.materials[0].line_cost, 180.0);
+    }
+
+    fn buildable_step() -> (BuildStep, HashMap<i64, PriceModel>) {
+        // Product 100 needs 1× A(10); A is buildable from 2× B(20).
+        let sub = BuildStep {
+            activity: Activity::Manufacturing,
+            blueprint_type_id: 11,
+            product_type_id: 10,
+            product_name: "A".into(),
+            product_per_run: 1,
+            inputs: vec![InputLine {
+                type_id: 20,
+                name: "B".into(),
+                base_quantity: 2,
+                sourcing: Sourcing::Buy,
+            }],
+            invention: None,
+        };
+        let step = BuildStep {
+            activity: Activity::Manufacturing,
+            blueprint_type_id: 1,
+            product_type_id: 100,
+            product_name: "P".into(),
+            product_per_run: 1,
+            inputs: vec![InputLine {
+                type_id: 10,
+                name: "A".into(),
+                base_quantity: 1,
+                sourcing: Sourcing::Build(Box::new(sub)),
+            }],
+            invention: None,
+        };
+        let prices = HashMap::from([
+            (10, price(10, Some(100.0), Some(100.0), None)),
+            (20, price(20, Some(10.0), Some(10.0), None)),
+            (100, price(100, Some(1000.0), Some(900.0), None)),
+        ]);
+        (step, prices)
+    }
+
+    #[test]
+    fn recursive_build_wins_when_cheaper() {
+        let (step, prices) = buildable_step();
+        // Build A = 2×B(10) = 20 < buy A (100).
+        let b = evaluate(&step, 1, 0, &prices, &ProfitConfig::default());
+        assert!(b.materials[0].built);
+        approx(b.materials[0].line_cost, 20.0);
+        approx(b.material_cost, 20.0);
+    }
+
+    #[test]
+    fn recursive_buy_wins_when_cheaper() {
+        let (step, mut prices) = buildable_step();
+        // Make B expensive so building A (2×200=400) costs more than buying (100).
+        prices.insert(20, price(20, Some(200.0), Some(200.0), None));
+        let b = evaluate(&step, 1, 0, &prices, &ProfitConfig::default());
+        assert!(!b.materials[0].built);
+        approx(b.materials[0].line_cost, 100.0);
     }
 
     #[test]
