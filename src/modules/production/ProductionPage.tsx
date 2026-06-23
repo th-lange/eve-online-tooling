@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   marketRegions,
   ownedBlueprints,
+  productionDecryptors,
   productionProfit,
   sdeStatus,
   sdeUpdate,
@@ -60,6 +61,7 @@ function Workbench() {
   const [productBasis, setProductBasis] = useState<PriceBasis>("sellPercentile");
   const [blueprintCostPerRun, setBlueprintCostPerRun] = useState(0);
   const [inventionSkill, setInventionSkill] = useState(5);
+  const [decryptorTypeId, setDecryptorTypeId] = useState<number | null>(null);
 
   // Client-side filters — applied instantly to the results.
   const [name, setName] = useState("");
@@ -76,6 +78,10 @@ function Workbench() {
   const owned = useQuery({
     queryKey: ["owned", "blueprints"],
     queryFn: ownedBlueprints,
+  });
+  const decryptors = useQuery({
+    queryKey: ["production", "decryptors"],
+    queryFn: productionDecryptors,
   });
   const ownedSet = useMemo(
     () => new Set(owned.data?.map((b) => b.typeId)),
@@ -99,6 +105,7 @@ function Workbench() {
       productBasis,
       blueprintCostPerRun,
       inventionSkillLevel: inventionSkill,
+      decryptorTypeId,
     });
   }
 
@@ -297,6 +304,29 @@ function Workbench() {
               min={0}
               max={5}
             />
+            <Field label="Decryptor (T2 invention)">
+              <select
+                value={decryptorTypeId ?? ""}
+                onChange={(e) =>
+                  setDecryptorTypeId(
+                    e.currentTarget.value === ""
+                      ? null
+                      : Number(e.currentTarget.value),
+                  )
+                }
+                className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+              >
+                <option value="">None</option>
+                {decryptors.data?.map((d) => (
+                  <option key={d.typeId} value={d.typeId}>
+                    {d.name.replace(/ Decryptor$/, "")} (ME{" "}
+                    {d.meModifier >= 0 ? "+" : ""}
+                    {d.meModifier}, runs {d.runModifier >= 0 ? "+" : ""}
+                    {d.runModifier}, ×{d.probabilityMultiplier} prob)
+                  </option>
+                ))}
+              </select>
+            </Field>
             <div className="col-span-2 self-end text-xs text-zinc-500 md:col-span-4">
               Changing market settings? Hit <strong>Calculate</strong> to
               re-price.

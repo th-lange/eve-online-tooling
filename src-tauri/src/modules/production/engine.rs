@@ -73,6 +73,9 @@ pub struct Invention {
     pub runs_per_success: i64,
     /// Success probability (0..1).
     pub probability: f64,
+    /// Material efficiency of the invented T2 BPC (base 2 + decryptor). Used for
+    /// the T2 manufacturing material quantities instead of the user ME.
+    pub result_me: i64,
 }
 
 /// A generic build step: some activity turning inputs into a product.
@@ -315,13 +318,20 @@ pub fn evaluate(
     );
     let mut missing_prices = Vec::new();
 
+    // T2 items use the invented BPC's ME (base 2 + decryptor), not the user ME.
+    let effective_me = step
+        .invention
+        .as_ref()
+        .map(|inv| inv.result_me)
+        .unwrap_or(me);
+
     // Materials: ME-adjusted quantity valued at the material price basis.
     let mut material_cost = 0.0;
     let mut eiv = 0.0;
     let mut materials = Vec::with_capacity(step.inputs.len());
     for input in &step.inputs {
         let model = prices.get(&input.type_id);
-        let required = required_quantity(input.base_quantity, runs, me);
+        let required = required_quantity(input.base_quantity, runs, effective_me);
         let buy_unit = price_for(model, config.material_basis);
         // Buildable inputs (a sub-recipe) take the cheaper of build vs buy.
         let (unit_price, built) = match &input.sourcing {
@@ -651,6 +661,7 @@ mod tests {
             copy_materials: vec![],
             runs_per_success: 10,
             probability: 0.5,
+            result_me: 10,
         });
         let mut prices = widget_prices();
         prices.insert(500, price(500, Some(100.0), Some(100.0), None));

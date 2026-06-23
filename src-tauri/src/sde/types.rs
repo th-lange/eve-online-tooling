@@ -47,6 +47,20 @@ pub struct BlueprintProduct {
     pub quantity: i64,
 }
 
+/// An invention decryptor and its outcome modifiers (read from the SDE).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Decryptor {
+    pub type_id: i64,
+    pub name: String,
+    /// Multiplier on invention success probability.
+    pub probability_multiplier: f64,
+    /// Added to the invented T2 BPC's material efficiency.
+    pub me_modifier: i64,
+    /// Added to runs per successful invention.
+    pub run_modifier: i64,
+}
+
 /// Invention (SDE activity 8) that produces a T2 blueprint.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InventionData {
