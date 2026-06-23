@@ -137,6 +137,25 @@ impl Sde {
         Ok(map)
     }
 
+    /// Map of typeID -> category name (Ship, Module, Charge, Drone, …).
+    pub fn category_names(&self) -> Result<HashMap<i64, String>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.typeID, c.categoryName
+             FROM invTypes t
+             JOIN invGroups g ON g.groupID = t.groupID
+             JOIN invCategories c ON c.categoryID = g.categoryID",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut map = HashMap::new();
+        for row in rows {
+            let (type_id, name) = row?;
+            map.insert(type_id, name);
+        }
+        Ok(map)
+    }
+
     #[cfg(test)]
     fn from_connection(conn: Connection) -> Self {
         Self { conn }
@@ -158,7 +177,9 @@ mod tests {
              CREATE TABLE industryActivityMaterials(typeID INT, activityID INT, materialTypeID INT, quantity INT);
              CREATE TABLE invMetaGroups(metaGroupID INT, metaGroupName TEXT);
              CREATE TABLE invMetaTypes(typeID INT, parentTypeID INT, metaGroupID INT);
+             CREATE TABLE invCategories(categoryID INT, categoryName TEXT);
 
+             INSERT INTO invCategories VALUES (4, 'Gadgets');
              INSERT INTO invMetaGroups VALUES (2, 'Tech II'), (4, 'Faction');
              INSERT INTO invMetaTypes VALUES (100, NULL, 2);
              INSERT INTO invGroups VALUES (10, 4, 'Widgets'), (18, 4, 'Minerals');
@@ -231,6 +252,14 @@ mod tests {
     fn type_info_is_none_when_missing() {
         let sde = fixture();
         assert!(sde.type_info(424242).unwrap().is_none());
+    }
+
+    #[test]
+    fn maps_category_names() {
+        let sde = fixture();
+        let cats = sde.category_names().unwrap();
+        assert_eq!(cats.get(&100).map(String::as_str), Some("Gadgets"));
+        assert_eq!(cats.get(&200).map(String::as_str), Some("Gadgets"));
     }
 
     #[test]

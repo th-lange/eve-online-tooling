@@ -9,7 +9,8 @@ use crate::esi::{EsiClient, EsiError};
 
 use super::aggregate::assemble_price_model;
 use super::cache::TtlCache;
-use super::markets::Market;
+use super::fuzzwork::{Aggregate, FuzzworkClient};
+use super::markets::Location;
 use super::types::{AdjustedPrice, HistoryDay, Order, PriceModel};
 
 /// Default window for the moving-average vector.
@@ -23,11 +24,14 @@ fn is_not_found(err: &EsiError) -> bool {
 
 pub struct MarketService {
     esi: EsiClient,
+    fuzzwork: FuzzworkClient,
     ma_days: usize,
     // Orders/history are region-scoped, so cache them by (region_id, type_id).
     orders: TtlCache<(i64, i64), Vec<Order>>,
     history: TtlCache<(i64, i64), Vec<HistoryDay>>,
-    // Global adjusted/average prices (one document for all types).
+    // Fuzzwork aggregates, cached by (location key, type_id).
+    aggregates: TtlCache<((i64, i64), i64), Aggregate>,
+    // Global adjusted prices (one document for all types; the EIV basis).
     prices: TtlCache<(), Arc<HashMap<i64, AdjustedPrice>>>,
 }
 
@@ -41,10 +45,12 @@ impl MarketService {
     pub fn new() -> Self {
         Self {
             esi: EsiClient::new(),
+            fuzzwork: FuzzworkClient::new(),
             ma_days: MA_DAYS,
             // TTLs roughly track ESI cache timers.
             orders: TtlCache::new(Duration::from_secs(300)),
             history: TtlCache::new(Duration::from_secs(1200)),
+            aggregates: TtlCache::new(Duration::from_secs(900)),
             prices: TtlCache::new(Duration::from_secs(3600)),
         }
     }
@@ -105,65 +111,119 @@ impl MarketService {
         Ok(arc)
     }
 
-    /// Full price model for one type at the given market.
-    pub async fn price_model(&self, market: &Market, type_id: i64) -> Result<PriceModel, EsiError> {
+    /// Full price model for one type at a location, using live ESI orders +
+    /// history (precise, with real daily-traded volume).
+    pub async fn price_model(
+        &self,
+        location: Location,
+        type_id: i64,
+    ) -> Result<PriceModel, EsiError> {
         let adjusted = self.adjusted_prices().await?;
-        let orders = self.orders_for(market.region_id, type_id).await?;
-        let history = self.history_for(market.region_id, type_id).await?;
+        let orders = self.orders_for(location.region_id(), type_id).await?;
+        let history = self.history_for(location.region_id(), type_id).await?;
         Ok(assemble_price_model(
             type_id,
             &orders,
             &history,
             adjusted.get(&type_id),
             self.ma_days,
-            market.station_id,
+            location.station_id(),
         ))
     }
 
-    /// Price models for many types at the given market. Global prices are
-    /// fetched once and reused.
+    /// Price models for many types at a location via live ESI orders + history.
     pub async fn price_models(
         &self,
-        market: &Market,
+        location: Location,
         type_ids: &[i64],
     ) -> Result<Vec<PriceModel>, EsiError> {
         let adjusted = self.adjusted_prices().await?;
         let mut out = Vec::with_capacity(type_ids.len());
         for &type_id in type_ids {
-            let orders = self.orders_for(market.region_id, type_id).await?;
-            let history = self.history_for(market.region_id, type_id).await?;
+            let orders = self.orders_for(location.region_id(), type_id).await?;
+            let history = self.history_for(location.region_id(), type_id).await?;
             out.push(assemble_price_model(
                 type_id,
                 &orders,
                 &history,
                 adjusted.get(&type_id),
                 self.ma_days,
-                market.station_id,
+                location.station_id(),
             ));
         }
         Ok(out)
     }
 
-    /// Cheap price models for many types using only the global adjusted/average
-    /// prices (one ESI call total, market-independent). Spot sell/buy and volume
-    /// are left empty — for ranking the whole catalogue, where per-item fetches
-    /// don't scale.
-    pub async fn average_price_models(
+    /// Fuzzwork aggregates for the given types at a location, cached per type.
+    async fn aggregates_for(
         &self,
+        location: Location,
+        type_ids: &[i64],
+    ) -> Result<HashMap<i64, Aggregate>, EsiError> {
+        let key = location.key();
+        let mut out = HashMap::with_capacity(type_ids.len());
+        let mut misses = Vec::new();
+        for &type_id in type_ids {
+            match self.aggregates.get(&(key, type_id)) {
+                Some(agg) => {
+                    out.insert(type_id, agg);
+                }
+                None => misses.push(type_id),
+            }
+        }
+        if !misses.is_empty() {
+            let fetched = self.fuzzwork.aggregates(location, &misses).await?;
+            for (type_id, agg) in fetched {
+                self.aggregates.put((key, type_id), agg.clone());
+                out.insert(type_id, agg);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Price models for many types at a [`Location`] (region average or a hub),
+    /// using Fuzzwork aggregates for sell/buy/volume plus the global adjusted
+    /// price for the EIV (job-fee) basis. This is the bulk pricing path used to
+    /// rank the whole catalogue.
+    pub async fn price_models_at(
+        &self,
+        location: Location,
         type_ids: &[i64],
     ) -> Result<Vec<PriceModel>, EsiError> {
         let adjusted = self.adjusted_prices().await?;
+        let aggregates = self.aggregates_for(location, type_ids).await?;
         Ok(type_ids
             .iter()
             .map(|&type_id| {
-                let a = adjusted.get(&type_id);
-                PriceModel {
-                    type_id,
-                    adjusted_price: a.and_then(|x| x.adjusted_price),
-                    average_price: a.and_then(|x| x.average_price),
-                    ..Default::default()
-                }
+                model_from_aggregate(type_id, aggregates.get(&type_id), adjusted.get(&type_id))
             })
             .collect())
+    }
+}
+
+/// Only treat a side as priced if it actually has orders.
+fn priced(value: f64, order_count: i64) -> Option<f64> {
+    (order_count > 0 && value > 0.0).then_some(value)
+}
+
+fn model_from_aggregate(
+    type_id: i64,
+    aggregate: Option<&Aggregate>,
+    adjusted: Option<&AdjustedPrice>,
+) -> PriceModel {
+    let sell = aggregate.map(|a| &a.sell);
+    let buy = aggregate.map(|a| &a.buy);
+    PriceModel {
+        type_id,
+        sell_min: sell.and_then(|s| priced(s.min, s.order_count)),
+        buy_max: buy.and_then(|b| priced(b.max, b.order_count)),
+        sell_percentile: sell.and_then(|s| priced(s.percentile, s.order_count)),
+        buy_percentile: buy.and_then(|b| priced(b.percentile, b.order_count)),
+        average_price: sell.and_then(|s| priced(s.weighted_average, s.order_count)),
+        adjusted_price: adjusted.and_then(|a| a.adjusted_price),
+        daily_volume: sell.map(|s| s.volume as i64),
+        order_count: sell.map(|s| s.order_count),
+        daily_average: None,
+        moving_average: None,
     }
 }

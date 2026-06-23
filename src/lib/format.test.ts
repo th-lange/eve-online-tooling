@@ -23,6 +23,7 @@ function row(
     roi: null,
     profitPerUnit: profit,
     metaGroup: null,
+    category: null,
     market: null,
     productVolume,
     materials: [],

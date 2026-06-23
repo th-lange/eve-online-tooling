@@ -62,6 +62,8 @@ pub fn assemble_price_model(
         type_id,
         sell_min: sell_min(orders, station_id),
         buy_max: buy_max(orders, station_id),
+        sell_percentile: None,
+        buy_percentile: None,
         adjusted_price: adjusted.and_then(|a| a.adjusted_price),
         average_price: adjusted.and_then(|a| a.average_price),
         daily_average: latest.map(|h| h.average),

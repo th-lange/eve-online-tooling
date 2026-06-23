@@ -61,7 +61,9 @@ so the UI wires itself up.
 - Shared services (stubs today, each filled by its tracking issue):
   - `esi/` — EVE SSO auth + rate-limit-aware ESI HTTP client + endpoint wrappers (#3/#4/#5)
   - `sde/` — Static Data Export: bootstrap + query the Fuzzwork SQLite (#2)
-  - `market/` — multi-vector price service + cache (#5)
+  - `market/` — pricing: Fuzzwork market **aggregates** (`fuzzwork.rs`) for bulk per region/station
+    prices + volume, ESI `/markets/prices` for the adjusted/EIV basis, plus a per-item ESI
+    orders/history path; regions/hubs + `Location` in `markets.rs`; TTL cache (#5)
   - `model/` — shared domain types
   - `storage/` — OS keychain (refresh tokens) + on-disk cache (#2/#3/#5)
 - `modules/production/` — the profit engine (#6); future modules sit beside it.

@@ -11,10 +11,11 @@ pub mod commands;
 
 mod aggregate;
 mod cache;
+mod fuzzwork;
 mod markets;
 mod service;
 mod types;
 
-pub use markets::{default_market, market_by_id, Market};
+pub use markets::{default_region_id, location_label, resolve_location};
 pub use service::MarketService;
 pub use types::PriceModel;

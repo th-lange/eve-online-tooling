@@ -97,45 +97,24 @@ export function onSdeProgress(
   );
 }
 
-// --- Market prices ---
+// --- Markets ---
 
-/** All price vectors for a type. Each is null when no data is available. */
-export interface PriceModel {
-  typeId: number;
-  sellMin: number | null;
-  buyMax: number | null;
-  adjustedPrice: number | null;
-  averagePrice: number | null;
-  dailyAverage: number | null;
-  dailyVolume: number | null;
-  orderCount: number | null;
-  movingAverage: number | null;
+/** A station within a region. */
+export interface Station {
+  id: number;
+  name: string;
 }
 
-/** Price model (all vectors) for one type. */
-export function marketPrice(typeId: number): Promise<PriceModel> {
-  return invoke<PriceModel>("market_price", { typeId });
+/** A selectable region with its hub station(s). */
+export interface Region {
+  id: number;
+  name: string;
+  stations: Station[];
 }
 
-/** A selectable market (trade hub or whole region) to price against. */
-export interface Market {
-  id: string;
-  label: string;
-  regionId: number;
-  stationId: number | null;
-}
-
-/** The selectable markets (trade hubs + a few whole-region options). */
-export function marketHubs(): Promise<Market[]> {
-  return invoke<Market[]>("market_hubs");
-}
-
-/** Price models for many types in one call, at the given market (default Jita). */
-export function marketPrices(
-  typeIds: number[],
-  marketId?: string,
-): Promise<PriceModel[]> {
-  return invoke<PriceModel[]>("market_prices", { typeIds, marketId });
+/** The selectable regions, each with its hub station. */
+export function marketRegions(): Promise<Region[]> {
+  return invoke<Region[]>("market_regions");
 }
 
 // --- Production profit ---
@@ -168,9 +147,11 @@ export interface ProfitBreakdown {
   profitPerUnit: number;
   /** Meta group of the product (Tech I/II, Faction, Officer, …). */
   metaGroup: string | null;
-  /** Which market this result was priced at (best of the selected markets). */
+  /** Category of the product (Ship, Module, Charge, …). */
+  category: string | null;
+  /** Which market this result was priced at. */
   market: string | null;
-  /** Product daily volume (liquidity), or null. */
+  /** Product market volume (units listed), or null. */
   productVolume: number | null;
   materials: MaterialLine[];
   /** type ids that couldn't be priced; numbers are incomplete when non-empty. */
@@ -180,30 +161,27 @@ export interface ProfitBreakdown {
 export type PriceBasis =
   | "sellMin"
   | "buyMax"
-  | "dailyAverage"
-  | "movingAverage"
+  | "sellPercentile"
+  | "buyPercentile"
   | "adjustedPrice"
   | "averagePrice";
 
-export type ProfitMode = "selected" | "all";
-
 export interface ProfitParams {
-  mode?: ProfitMode;
-  /** Used in "selected" mode. */
-  blueprintTypeIds?: number[];
+  /** Region to price against (default The Forge). */
+  regionId?: number;
+  /** Station within the region; null/undefined = region average. */
+  stationId?: number | null;
   runs?: number;
   me?: number;
   systemCostIndex?: number;
   facilityTax?: number;
   materialBasis?: PriceBasis;
   productBasis?: PriceBasis;
-  /** Markets to price against in "selected" mode; best per item wins. */
-  marketIds?: string[];
   /** Amortized blueprint acquisition cost per run (e.g. faction BPC). */
   blueprintCostPerRun?: number;
 }
 
-/** Evaluate and rank the given blueprints by build-vs-buy profit (desc). */
+/** Rank every manufacturable item by build-vs-buy profit at the chosen market. */
 export function productionProfit(
   params: ProfitParams,
 ): Promise<ProfitBreakdown[]> {

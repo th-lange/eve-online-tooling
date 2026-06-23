@@ -35,8 +35,8 @@ pub enum Activity {
 pub enum PriceBasis {
     SellMin,
     BuyMax,
-    DailyAverage,
-    MovingAverage,
+    SellPercentile,
+    BuyPercentile,
     AdjustedPrice,
     AveragePrice,
 }
@@ -143,6 +143,9 @@ pub struct ProfitBreakdown {
     /// Meta group of the product (Tech I/II, Faction, Officer, …). Filled by the
     /// command layer from the SDE; the pure engine leaves it `None`.
     pub meta_group: Option<String>,
+    /// Category of the product (Ship, Module, Charge, …). Filled by the command
+    /// layer from the SDE; the pure engine leaves it `None`.
+    pub category: Option<String>,
     /// Which market this result was priced at. Filled by the command layer; the
     /// pure engine leaves it `None`.
     pub market: Option<String>,
@@ -191,8 +194,8 @@ fn price_for(model: Option<&PriceModel>, basis: PriceBasis) -> Option<f64> {
     match basis {
         PriceBasis::SellMin => m.sell_min,
         PriceBasis::BuyMax => m.buy_max,
-        PriceBasis::DailyAverage => m.daily_average,
-        PriceBasis::MovingAverage => m.moving_average,
+        PriceBasis::SellPercentile => m.sell_percentile,
+        PriceBasis::BuyPercentile => m.buy_percentile,
         PriceBasis::AdjustedPrice => m.adjusted_price,
         PriceBasis::AveragePrice => m.average_price,
     }
@@ -310,6 +313,7 @@ pub fn evaluate(
         roi,
         profit_per_unit,
         meta_group: None,
+        category: None,
         market: None,
         product_volume,
         materials,

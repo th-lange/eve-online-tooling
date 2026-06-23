@@ -1,27 +1,29 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-  marketHubs,
+  marketRegions,
   productionProfit,
-  sdeManufacturableBlueprints,
   sdeStatus,
   sdeUpdate,
   type PriceBasis,
+  type ProfitBreakdown,
+  type ProfitParams,
 } from "../../lib/api";
 import { SdeSetup } from "./SdeSetup";
-import { BlueprintPicker } from "./BlueprintPicker";
 import { ProfitTable } from "./ProfitTable";
 
-type Mode = "all" | "owned" | "selected";
+const FORGE = 10000002;
 
 const BASES: { value: PriceBasis; label: string }[] = [
+  { value: "sellPercentile", label: "Sell (percentile)" },
+  { value: "buyPercentile", label: "Buy (percentile)" },
   { value: "sellMin", label: "Sell (min)" },
   { value: "buyMax", label: "Buy (max)" },
-  { value: "dailyAverage", label: "Daily average" },
-  { value: "movingAverage", label: "Moving average" },
-  { value: "adjustedPrice", label: "Adjusted" },
-  { value: "averagePrice", label: "Average" },
+  { value: "averagePrice", label: "Weighted average" },
+  { value: "adjustedPrice", label: "Adjusted (CCP)" },
 ];
+
+type Tab = "item" | "market" | "thresholds";
 
 export function ProductionPage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
@@ -43,71 +45,78 @@ export function ProductionPage() {
 }
 
 function Workbench() {
-  const [mode, setMode] = useState<Mode>("all");
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [tab, setTab] = useState<Tab>("market");
+
+  // Pricing/cost params — changing these re-runs the calculation.
+  const [regionId, setRegionId] = useState(FORGE);
+  const [stationId, setStationId] = useState<number | null>(null);
   const [runs, setRuns] = useState(1);
   const [me, setMe] = useState(0);
   const [costIndexPct, setCostIndexPct] = useState(5);
   const [facilityTaxPct, setFacilityTaxPct] = useState(0);
-  const [materialBasis, setMaterialBasis] = useState<PriceBasis>("sellMin");
-  const [productBasis, setProductBasis] = useState<PriceBasis>("sellMin");
-  const [markets, setMarkets] = useState<Set<string>>(new Set(["jita"]));
+  const [materialBasis, setMaterialBasis] =
+    useState<PriceBasis>("sellPercentile");
+  const [productBasis, setProductBasis] = useState<PriceBasis>("sellPercentile");
   const [blueprintCostPerRun, setBlueprintCostPerRun] = useState(0);
 
-  const blueprints = useQuery({
-    queryKey: ["sde", "manufacturable"],
-    queryFn: sdeManufacturableBlueprints,
+  // Client-side filters — applied instantly to the results.
+  const [name, setName] = useState("");
+  const [categories, setCategories] = useState<Set<string>>(new Set());
+  const [metas, setMetas] = useState<Set<string>>(new Set());
+  const [minRoiPct, setMinRoiPct] = useState("");
+  const [minVolume, setMinVolume] = useState("");
+
+  const regions = useQuery({
+    queryKey: ["market", "regions"],
+    queryFn: marketRegions,
   });
-
-  const hubs = useQuery({ queryKey: ["market", "hubs"], queryFn: marketHubs });
-
   const update = useMutation({ mutationFn: () => sdeUpdate(false) });
-
   const profit = useMutation({
-    mutationFn: () =>
-      productionProfit(
-        mode === "all"
-          ? {
-              mode: "all",
-              runs,
-              me,
-              systemCostIndex: costIndexPct / 100,
-              facilityTax: facilityTaxPct / 100,
-            }
-          : {
-              mode: "selected",
-              blueprintTypeIds: [...selected],
-              runs,
-              me,
-              systemCostIndex: costIndexPct / 100,
-              facilityTax: facilityTaxPct / 100,
-              materialBasis,
-              productBasis,
-              marketIds: [...markets],
-              blueprintCostPerRun,
-            },
-      ),
+    mutationFn: (p: ProfitParams) => productionProfit(p),
   });
 
-  function toggle(id: number) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
+  function calculate() {
+    profit.mutate({
+      regionId,
+      stationId,
+      runs,
+      me,
+      systemCostIndex: costIndexPct / 100,
+      facilityTax: facilityTaxPct / 100,
+      materialBasis,
+      productBasis,
+      blueprintCostPerRun,
     });
   }
 
-  function toggleMarket(id: string) {
-    setMarkets((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      if (next.size === 0) next.add("jita"); // always price against at least one
-      return next;
-    });
-  }
+  // Rank once on first load.
+  useEffect(() => {
+    calculate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const canCalculate =
-    mode === "all" || (mode === "selected" && selected.size > 0);
+  const rows = profit.data ?? [];
+  const categoryOptions = useMemo(() => uniqueSorted(rows, (r) => r.category), [rows]);
+  const metaOptions = useMemo(() => uniqueSorted(rows, (r) => r.metaGroup), [rows]);
+
+  const filtered = useMemo(() => {
+    const needle = name.trim().toLowerCase();
+    const minRoi = minRoiPct.trim() === "" ? null : Number(minRoiPct) / 100;
+    const minVol =
+      stationId === null || minVolume.trim() === "" ? null : Number(minVolume);
+    return rows.filter((r) => {
+      if (needle && !r.productName.toLowerCase().includes(needle)) return false;
+      if (categories.size > 0 && !(r.category && categories.has(r.category)))
+        return false;
+      if (metas.size > 0 && !(r.metaGroup && metas.has(r.metaGroup)))
+        return false;
+      if (minRoi !== null && (r.roi ?? -Infinity) < minRoi) return false;
+      if (minVol !== null && (r.productVolume ?? 0) < minVol) return false;
+      return true;
+    });
+  }, [rows, name, categories, metas, minRoiPct, minVolume, stationId]);
+
+  const stations = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
 
   return (
     <div className="p-6">
@@ -115,182 +124,209 @@ function Workbench() {
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100">Production</h1>
           <p className="mt-1 text-sm text-zinc-400">
-            Rank what you can build by build-vs-buy profit at Jita.
+            Every manufacturable item, ranked by build-vs-buy profit. Search,
+            then filter.
           </p>
         </div>
-        <button
-          onClick={() => update.mutate()}
-          disabled={update.isPending}
-          className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-          title="Re-download the SDE only if Fuzzwork's data changed"
-        >
-          {update.isPending
-            ? "Checking…"
-            : update.data
-              ? update.data.updated
-                ? "Updated ✓"
-                : "Up to date ✓"
-              : "Update data"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => update.mutate()}
+            disabled={update.isPending}
+            className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+            title="Re-download the SDE only if it changed"
+          >
+            {update.isPending
+              ? "Checking…"
+              : update.data
+                ? update.data.updated
+                  ? "Updated ✓"
+                  : "Up to date ✓"
+                : "Update data"}
+          </button>
+          <button
+            onClick={calculate}
+            disabled={profit.isPending}
+            className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            {profit.isPending ? "Calculating…" : "Calculate"}
+          </button>
+        </div>
       </div>
 
-      <ModeTabs mode={mode} onChange={setMode} />
+      <Tabs tab={tab} onChange={setTab} />
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[20rem_1fr]">
-        <div className="space-y-3">
-          {mode === "owned" && (
-            <div className="rounded border border-zinc-800 bg-zinc-900 p-4 text-sm text-zinc-400">
-              Showing your owned blueprints needs EVE SSO login, which isn't
-              wired up yet. Use <strong>All</strong> or <strong>Selected</strong>{" "}
-              for now.
-            </div>
-          )}
+      <div className="mt-3 rounded border border-zinc-800 bg-zinc-900 p-3">
+        {tab === "item" && (
+          <div className="grid gap-4 md:grid-cols-3">
+            <Field label="Name">
+              <input
+                value={name}
+                onChange={(e) => setName(e.currentTarget.value)}
+                placeholder="Search items…"
+                className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+              />
+              <OwnedNote />
+            </Field>
+            <Field label="Category / Type">
+              <CheckboxGroup
+                options={categoryOptions}
+                selected={categories}
+                onToggle={(v) => setCategories(toggle(categories, v))}
+              />
+            </Field>
+            <Field label="Meta (tech level / faction)">
+              <CheckboxGroup
+                options={metaOptions}
+                selected={metas}
+                onToggle={(v) => setMetas(toggle(metas, v))}
+              />
+            </Field>
+          </div>
+        )}
 
-          {mode === "all" && (
-            <div className="rounded border border-zinc-800 bg-zinc-900 p-4 text-sm text-zinc-400">
-              Ranks every manufacturable blueprint
-              {blueprints.data ? ` (${blueprints.data.length})` : ""} using
-              global <strong>average</strong> prices — fast, but no live
-              spot/volume. Use <strong>Selected</strong> for precise pricing.
-            </div>
-          )}
-
-          {mode === "selected" && (
-            <>
-              {blueprints.isLoading && (
-                <div className="text-sm text-zinc-500">Loading blueprints…</div>
-              )}
-              {blueprints.isError && (
-                <div className="text-sm text-rose-400">
-                  Failed to load blueprints: {String(blueprints.error)}
-                </div>
-              )}
-              {blueprints.data && (
-                <BlueprintPicker
-                  items={blueprints.data}
-                  selected={selected}
-                  onToggle={toggle}
-                  onClear={() => setSelected(new Set())}
-                />
-              )}
-            </>
-          )}
-
-          <div className="grid grid-cols-2 gap-2 rounded border border-zinc-800 bg-zinc-900 p-3 text-sm">
-            <NumberField label="Runs" value={runs} onChange={setRuns} min={1} />
-            <NumberField label="ME" value={me} onChange={setMe} min={0} max={10} />
-            <NumberField
+        {tab === "market" && (
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <Field label="Region">
+              <select
+                value={regionId}
+                onChange={(e) => {
+                  setRegionId(Number(e.currentTarget.value));
+                  setStationId(null);
+                }}
+                className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+              >
+                {regions.data?.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Market">
+              <select
+                value={stationId ?? ""}
+                onChange={(e) =>
+                  setStationId(
+                    e.currentTarget.value === ""
+                      ? null
+                      : Number(e.currentTarget.value),
+                  )
+                }
+                className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+              >
+                <option value="">Region average</option>
+                {stations.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Materials priced at">
+              <BasisSelect value={materialBasis} onChange={setMaterialBasis} />
+            </Field>
+            <Field label="Product priced at">
+              <BasisSelect value={productBasis} onChange={setProductBasis} />
+            </Field>
+            <Num label="Runs" value={runs} onChange={setRuns} min={1} />
+            <Num label="ME" value={me} onChange={setMe} min={0} max={10} />
+            <Num
               label="Cost index %"
               value={costIndexPct}
               onChange={setCostIndexPct}
               min={0}
               step={0.1}
             />
-            <NumberField
+            <Num
               label="Facility tax %"
               value={facilityTaxPct}
               onChange={setFacilityTaxPct}
               min={0}
               step={0.1}
             />
-            <label className="col-span-2 flex flex-col gap-1 text-xs text-zinc-400">
-              Blueprint cost / run (ISK)
+            <Num
+              label="Blueprint cost / run"
+              value={blueprintCostPerRun}
+              onChange={setBlueprintCostPerRun}
+              min={0}
+              step={1000000}
+            />
+            <div className="col-span-2 self-end text-xs text-zinc-500 md:col-span-4">
+              Changing market settings? Hit <strong>Calculate</strong> to
+              re-price.
+            </div>
+          </div>
+        )}
+
+        {tab === "thresholds" && (
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <Field label="Min ROI %">
               <input
                 type="number"
-                value={blueprintCostPerRun}
+                value={minRoiPct}
                 min={0}
-                step={1000000}
-                onChange={(e) =>
-                  setBlueprintCostPerRun(Number(e.currentTarget.value))
-                }
-                className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+                onChange={(e) => setMinRoiPct(e.currentTarget.value)}
+                placeholder="0"
+                className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
               />
-            </label>
-            {mode === "selected" && (
-              <>
-                <div className="col-span-2 flex flex-col gap-1 text-xs text-zinc-400">
-                  Markets (best wins)
-                  <div className="flex flex-wrap gap-1.5">
-                    {hubs.data?.map((h) => (
-                      <label
-                        key={h.id}
-                        className={`flex cursor-pointer items-center gap-1 rounded px-2 py-1 ${
-                          markets.has(h.id)
-                            ? "bg-zinc-700 text-zinc-100"
-                            : "bg-zinc-800 text-zinc-400"
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={markets.has(h.id)}
-                          onChange={() => toggleMarket(h.id)}
-                        />
-                        {h.label}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-                <BasisField
-                  label="Materials priced at"
-                  value={materialBasis}
-                  onChange={setMaterialBasis}
-                />
-                <BasisField
-                  label="Product priced at"
-                  value={productBasis}
-                  onChange={setProductBasis}
-                />
-              </>
-            )}
+            </Field>
+            <Field label="Min volume">
+              <input
+                type="number"
+                value={minVolume}
+                min={0}
+                disabled={stationId === null}
+                onChange={(e) => setMinVolume(e.currentTarget.value)}
+                placeholder={stationId === null ? "pick a market hub" : "0"}
+                className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500 disabled:opacity-50"
+              />
+            </Field>
           </div>
+        )}
+      </div>
 
-          <button
-            onClick={() => profit.mutate()}
-            disabled={!canCalculate || profit.isPending}
-            className="w-full rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-          >
-            {profit.isPending
-              ? "Calculating…"
-              : mode === "selected"
-                ? `Calculate profit (${selected.size})`
-                : "Calculate profit"}
-          </button>
-        </div>
-
-        <div>
-          {profit.isError && (
-            <div className="text-sm text-rose-400">
-              Calculation failed: {String(profit.error)}
-            </div>
-          )}
-          {profit.data ? (
-            <ProfitTable rows={profit.data} />
-          ) : (
-            !profit.isError && (
-              <div className="rounded border border-dashed border-zinc-800 p-10 text-center text-sm text-zinc-500">
-                {mode === "owned"
-                  ? "Owned-blueprint view needs login (coming soon)."
-                  : "Set your options and hit Calculate to see ranked profit."}
-              </div>
-            )
-          )}
-        </div>
+      <div className="mt-4">
+        {profit.isError ? (
+          <div className="text-sm text-rose-400">
+            Calculation failed: {String(profit.error)}
+          </div>
+        ) : profit.isPending && rows.length === 0 ? (
+          <div className="p-10 text-center text-sm text-zinc-500">
+            Pricing the whole catalogue at the chosen market…
+          </div>
+        ) : (
+          <ProfitTable rows={filtered} />
+        )}
       </div>
     </div>
   );
 }
 
-function ModeTabs({
-  mode,
-  onChange,
-}: {
-  mode: Mode;
-  onChange: (m: Mode) => void;
-}) {
-  const tabs: { value: Mode; label: string; disabled?: boolean }[] = [
-    { value: "all", label: "All" },
-    { value: "owned", label: "Owned (login)" },
-    { value: "selected", label: "Selected" },
+// --- small helpers / components ---
+
+function uniqueSorted(
+  rows: ProfitBreakdown[],
+  pick: (r: ProfitBreakdown) => string | null,
+): string[] {
+  const set = new Set<string>();
+  for (const r of rows) {
+    const v = pick(r);
+    if (v) set.add(v);
+  }
+  return [...set].sort();
+}
+
+function toggle(set: Set<string>, v: string): Set<string> {
+  const next = new Set(set);
+  next.has(v) ? next.delete(v) : next.add(v);
+  return next;
+}
+
+function Tabs({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
+  const tabs: { value: Tab; label: string }[] = [
+    { value: "item", label: "Item" },
+    { value: "market", label: "Market" },
+    { value: "thresholds", label: "Thresholds" },
   ];
   return (
     <div className="mt-4 inline-flex rounded border border-zinc-800 bg-zinc-900 p-0.5">
@@ -299,7 +335,7 @@ function ModeTabs({
           key={t.value}
           onClick={() => onChange(t.value)}
           className={`rounded px-3 py-1.5 text-sm ${
-            mode === t.value
+            tab === t.value
               ? "bg-zinc-700 text-zinc-100"
               : "text-zinc-400 hover:text-zinc-200"
           }`}
@@ -311,7 +347,82 @@ function ModeTabs({
   );
 }
 
-function NumberField({
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="flex flex-col gap-1 text-xs text-zinc-400">
+      {label}
+      {children}
+    </label>
+  );
+}
+
+function OwnedNote() {
+  return (
+    <label className="mt-1 flex items-center gap-1 text-xs text-zinc-600">
+      <input type="checkbox" disabled />
+      Owned only (needs EVE login)
+    </label>
+  );
+}
+
+function CheckboxGroup({
+  options,
+  selected,
+  onToggle,
+}: {
+  options: string[];
+  selected: Set<string>;
+  onToggle: (v: string) => void;
+}) {
+  if (options.length === 0) {
+    return <div className="text-xs text-zinc-600">—</div>;
+  }
+  return (
+    <div className="flex max-h-40 flex-wrap gap-1 overflow-auto">
+      {options.map((o) => (
+        <label
+          key={o}
+          className={`flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 text-xs ${
+            selected.has(o)
+              ? "bg-zinc-700 text-zinc-100"
+              : "bg-zinc-800 text-zinc-400"
+          }`}
+        >
+          <input
+            type="checkbox"
+            checked={selected.has(o)}
+            onChange={() => onToggle(o)}
+          />
+          {o}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function BasisSelect({
+  value,
+  onChange,
+}: {
+  value: PriceBasis;
+  onChange: (b: PriceBasis) => void;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.currentTarget.value as PriceBasis)}
+      className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+    >
+      {BASES.map((b) => (
+        <option key={b.value} value={b.value}>
+          {b.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function Num({
   label,
   value,
   onChange,
@@ -327,8 +438,7 @@ function NumberField({
   step?: number;
 }) {
   return (
-    <label className="flex flex-col gap-1 text-xs text-zinc-400">
-      {label}
+    <Field label={label}>
       <input
         type="number"
         value={value}
@@ -336,36 +446,9 @@ function NumberField({
         max={max}
         step={step}
         onChange={(e) => onChange(Number(e.currentTarget.value))}
-        className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+        className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
       />
-    </label>
-  );
-}
-
-function BasisField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: PriceBasis;
-  onChange: (b: PriceBasis) => void;
-}) {
-  return (
-    <label className="flex flex-col gap-1 text-xs text-zinc-400">
-      {label}
-      <select
-        value={value}
-        onChange={(e) => onChange(e.currentTarget.value as PriceBasis)}
-        className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
-      >
-        {BASES.map((b) => (
-          <option key={b.value} value={b.value}>
-            {b.label}
-          </option>
-        ))}
-      </select>
-    </label>
+    </Field>
   );
 }
 

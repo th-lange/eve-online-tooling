@@ -69,13 +69,17 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
   daily average, N-day moving average, volume), cached.
 - **Production profit engine** — ME-adjusted material cost + EIV job fee + revenue → profit, margin,
   and per-unit, with a per-material breakdown.
-- **Production UI** — rank **All** manufacturable items (global average prices, one call) or a
-  hand-picked **Selected** set (precise spot/volume pricing) priced against **one or more markets**
-  (Jita, Amarr, Dodixie, Rens, Hek, or whole regions — the most profitable market wins per item), with
-  controls for runs / ME / cost index / facility tax / **per-run blueprint cost** / price basis.
-  Ranked, sortable table (profit · **ROI** · margin · per-unit · daily volume · market) with text,
-  min-volume, and **meta-group** (Tech I/II, Faction, Officer, …) multi-select filters and a
-  per-material cost drill-down. Public data — no login yet.
+- **Production workbench** — a single window that ranks **every** manufacturable item by build-vs-buy
+  profit at a chosen market, then filters (EVE-Guru-style):
+  - **Pricing** via [Fuzzwork market aggregates](https://market.fuzzwork.co.uk/) — pick a **region**
+    and optionally a **hub** (Jita, Amarr, Dodixie, Rens, Hek); region = region average, hub = station
+    prices. Prices/ROI follow the selection.
+  - **Filters** in tabs (Item / Market / Thresholds): name, Category/Type, Meta (Tech I/II/III,
+    Faction, Officer…), price basis (sell/buy percentile, min/max, average), runs / ME / cost index /
+    facility tax / **per-run blueprint cost**, **min ROI**, and **min volume** (when a hub is picked).
+  - Sortable table — profit · **ROI** · margin · per-unit · volume · market — with a per-material cost
+    drill-down.
+  - Owned-only filter is stubbed pending SSO. Public data — no login yet.
 - **Smart SDE caching** — the static data only re-downloads when Fuzzwork's published md5 changes
   ("Update data" button reports updated vs already-current).
 

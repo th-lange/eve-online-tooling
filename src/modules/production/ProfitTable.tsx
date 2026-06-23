@@ -17,46 +17,20 @@ const COLUMNS: { key: SortKey; label: string; numeric: boolean }[] = [
   { key: "roi", label: "ROI", numeric: true },
   { key: "margin", label: "Margin", numeric: true },
   { key: "profitPerUnit", label: "Profit/unit", numeric: true },
-  { key: "productVolume", label: "Daily vol.", numeric: true },
+  { key: "productVolume", label: "Volume", numeric: true },
 ];
 
+// Pure display: the page does the filtering, this sorts + renders.
 export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
   const [sortKey, setSortKey] = useState<SortKey>("profit");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const [filter, setFilter] = useState("");
-  const [minVolume, setMinVolume] = useState("");
-  const [selectedMeta, setSelectedMeta] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<number | null>(null);
 
-  const metaGroups = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of rows) if (r.metaGroup) set.add(r.metaGroup);
-    return [...set].sort();
-  }, [rows]);
-
-  function toggleMeta(m: string) {
-    setSelectedMeta((prev) => {
-      const next = new Set(prev);
-      next.has(m) ? next.delete(m) : next.add(m);
-      return next;
-    });
-  }
-
-  const view = useMemo(() => {
-    const needle = filter.trim().toLowerCase();
-    const min = minVolume.trim() === "" ? null : Number(minVolume);
-    const filtered = rows.filter((r) => {
-      if (needle && !r.productName.toLowerCase().includes(needle)) return false;
-      if (min !== null && (r.productVolume ?? 0) < min) return false;
-      // No meta selected = show all; otherwise the row's group must be ticked.
-      if (selectedMeta.size > 0 && !(r.metaGroup && selectedMeta.has(r.metaGroup)))
-        return false;
-      return true;
-    });
-    return sortBreakdowns(filtered, sortKey, sortDir);
-  }, [rows, filter, minVolume, selectedMeta, sortKey, sortDir]);
-
-  const shown = view.slice(0, MAX_ROWS);
+  const sorted = useMemo(
+    () => sortBreakdowns(rows, sortKey, sortDir),
+    [rows, sortKey, sortDir],
+  );
+  const shown = sorted.slice(0, MAX_ROWS);
 
   function toggleSort(key: SortKey) {
     if (key === sortKey) {
@@ -69,48 +43,11 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
 
   return (
     <div>
-      <div className="mb-2 flex flex-wrap items-center gap-2">
-        <input
-          value={filter}
-          onChange={(e) => setFilter(e.currentTarget.value)}
-          placeholder="Filter items…"
-          className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
-        />
-        <label className="flex items-center gap-1 text-xs text-zinc-400">
-          Min daily volume
-          <input
-            value={minVolume}
-            onChange={(e) => setMinVolume(e.currentTarget.value)}
-            inputMode="numeric"
-            placeholder="0"
-            className="w-24 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
-          />
-        </label>
-        {metaGroups.length > 1 &&
-          metaGroups.map((m) => (
-            <label
-              key={m}
-              className={`flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-xs ${
-                selectedMeta.has(m)
-                  ? "bg-zinc-700 text-zinc-100"
-                  : "bg-zinc-800 text-zinc-400"
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={selectedMeta.has(m)}
-                onChange={() => toggleMeta(m)}
-              />
-              {m}
-            </label>
-          ))}
-        <span className="ml-auto text-xs text-zinc-500">
-          {view.length > MAX_ROWS
-            ? `top ${MAX_ROWS} of ${view.length}`
-            : `${view.length} of ${rows.length}`}
-        </span>
+      <div className="mb-1 text-xs text-zinc-500">
+        {rows.length > MAX_ROWS
+          ? `Showing top ${MAX_ROWS} of ${rows.length}`
+          : `${rows.length} item(s)`}
       </div>
-
       <div className="overflow-auto rounded border border-zinc-800">
         <table className="w-full border-collapse text-sm">
           <thead className="bg-zinc-900 text-zinc-400">
@@ -135,26 +72,32 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
             {shown.map((r) => {
               const open = expanded === r.blueprintTypeId;
               const incomplete = r.missingPrices.length > 0;
+              const subtitle = [r.category, r.metaGroup]
+                .filter(Boolean)
+                .join(" · ");
               return (
                 <Fragment key={r.blueprintTypeId}>
                   <tr
-                    onClick={() =>
-                      setExpanded(open ? null : r.blueprintTypeId)
-                    }
+                    onClick={() => setExpanded(open ? null : r.blueprintTypeId)}
                     className="cursor-pointer border-t border-zinc-800 hover:bg-zinc-800/40"
                   >
                     <td className="px-2 text-center text-zinc-500">
                       {open ? "▾" : "▸"}
                     </td>
-                    <td className="px-3 py-1.5 text-zinc-200">
-                      {r.productName}
-                      {incomplete && (
-                        <span
-                          title={`Missing prices for ${r.missingPrices.length} item(s) — numbers are incomplete`}
-                          className="ml-1 text-amber-400"
-                        >
-                          ⚠
-                        </span>
+                    <td className="px-3 py-1.5">
+                      <div className="text-zinc-200">
+                        {r.productName}
+                        {incomplete && (
+                          <span
+                            title={`Missing prices for ${r.missingPrices.length} item(s) — numbers are incomplete`}
+                            className="ml-1 text-amber-400"
+                          >
+                            ⚠
+                          </span>
+                        )}
+                      </div>
+                      {subtitle && (
+                        <div className="text-xs text-zinc-500">{subtitle}</div>
                       )}
                     </td>
                     <td
@@ -188,7 +131,7 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
                 </Fragment>
               );
             })}
-            {view.length === 0 && (
+            {rows.length === 0 && (
               <tr>
                 <td colSpan={8} className="px-3 py-6 text-center text-zinc-500">
                   No rows.

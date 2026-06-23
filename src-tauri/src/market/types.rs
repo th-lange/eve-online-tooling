@@ -34,10 +34,14 @@ pub struct AdjustedPrice {
 #[serde(rename_all = "camelCase")]
 pub struct PriceModel {
     pub type_id: i64,
-    /// Lowest sell order at the hub (what you pay to buy now).
+    /// Lowest sell order (what you pay to buy now).
     pub sell_min: Option<f64>,
-    /// Highest buy order at the hub (what you get selling now).
+    /// Highest buy order (what you get selling now).
     pub buy_max: Option<f64>,
+    /// "Realistic" sell price (percentile) — ignores outlier orders.
+    pub sell_percentile: Option<f64>,
+    /// "Realistic" buy price (percentile).
+    pub buy_percentile: Option<f64>,
     /// Global adjusted price (industry job-fee / EIV basis).
     pub adjusted_price: Option<f64>,
     /// Global average price.
