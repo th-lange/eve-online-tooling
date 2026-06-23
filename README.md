@@ -3,13 +3,28 @@
 A standalone cross-platform desktop app (Linux / macOS / Windows) for [EVE Online](https://www.eveonline.com/),
 built as a set of feature **modules** over a shared service layer.
 
-- **Production** *(in progress)* — read a character's assets & blueprints, fetch live market prices,
-  and rank what you can manufacture by build-vs-buy **profit** (what you'd make building and selling
-  an item versus selling its inputs).
-- **Daytrading**, **station-trading**, **mission-running** — planned.
+- **Production** — read your characters' (and corp) blueprints, fetch live market prices, and rank what
+  you can manufacture by build-vs-buy **profit**, including recursive build-vs-buy and T2 invention.
+- **Station Trading** — scan a hub for profitable buy→sell flips, with a blacklist and favorites.
+- **Mission-running** and more — planned.
 
 Built with **Tauri 2** (Rust core) + **React / TypeScript** (Vite). Market and character data come
 from EVE's **ESI** API; blueprint/material data from the **SDE**.
+
+## Install
+
+Grab the installer for your OS from the
+[latest release](https://github.com/th-lange/eve-online-tooling/releases/latest):
+
+- **Linux** — `.AppImage` (`chmod +x` it, then run) or `.deb`
+  (`sudo apt install ./eve-online-tooling_*.deb`).
+- **macOS** — open the `.dmg` and drag the app to Applications. The build is **unsigned**, so on first
+  launch right-click the app → **Open** (or run
+  `xattr -dr com.apple.quarantine "/Applications/EVE Online Tooling.app"`).
+- **Windows** — run the `.msi` (or the NSIS `-setup.exe`). SmartScreen may warn (unsigned):
+  **More info → Run anyway**.
+
+Prefer to run from source? See *Getting started* below.
 
 ## Getting started
 
@@ -96,6 +111,19 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
   **favorites** tabs (★/✕ on each row).
 
 Still to come: T3 strategic cruisers (relic invention cost) and decryptor choices for invention.
+
+## Releasing
+
+Installers are produced by the **Release** GitHub Actions workflow (`.github/workflows/release.yml`).
+To cut a release:
+
+1. Bump the version in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`.
+2. Commit, then tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
+
+The workflow builds Linux / macOS / Windows installers on their respective runners and attaches them
+to the GitHub Release for that tag (it can also be run manually from the **Actions** tab against an
+existing tag). Builds are currently **unsigned** — code signing (Apple notarization, Windows
+Authenticode) and in-app auto-update can be layered into the same workflow later.
 
 ## Status & tracking
 
