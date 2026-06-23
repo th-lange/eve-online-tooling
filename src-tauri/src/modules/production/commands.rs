@@ -203,6 +203,12 @@ pub async fn production_profit(
             };
             // A decryptor shifts ME/runs/probability and is consumed per attempt.
             let mut datacores: Vec<InputLine> = inv.datacores.iter().map(to_input).collect();
+            // T3 invention consumes an Ancient Relic bought at market; price it in
+            // as a per-attempt input (it has no copy fee — relics aren't copied).
+            if let Some(relic) = &inv.relic {
+                needed.insert(relic.material_type_id);
+                datacores.push(to_input(relic));
+            }
             let (result_me, runs_per_success, probability) = match &decryptor {
                 Some(d) => {
                     needed.insert(d.type_id);
