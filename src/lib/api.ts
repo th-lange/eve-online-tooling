@@ -72,6 +72,8 @@ export interface TradeRow {
   margin: number;
   volume: number;
   favorite: boolean;
+  category: string | null;
+  group: string | null;
 }
 
 export interface TradeParams {
@@ -267,6 +269,8 @@ export interface ProfitBreakdown {
   metaGroup: string | null;
   /** Category of the product (Ship, Module, Charge, …). */
   category: string | null;
+  /** Group of the product (Frigate, Cruiser, …). */
+  group: string | null;
   /** Which market this result was priced at. */
   market: string | null;
   /** Product market volume (units listed), or null. */

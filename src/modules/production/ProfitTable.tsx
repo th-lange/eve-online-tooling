@@ -72,7 +72,7 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
             {shown.map((r) => {
               const open = expanded === r.blueprintTypeId;
               const incomplete = r.missingPrices.length > 0;
-              const subtitle = [r.category, r.metaGroup]
+              const subtitle = [r.category, r.group, r.metaGroup]
                 .filter(Boolean)
                 .join(" · ");
               return (

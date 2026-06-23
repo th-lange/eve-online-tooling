@@ -223,6 +223,7 @@ pub async fn production_profit(
 
     let meta = sde.meta_group_names().map_err(|e| e.to_string())?;
     let categories = sde.category_names().map_err(|e| e.to_string())?;
+    let groups = sde.group_names().map_err(|e| e.to_string())?;
 
     let mut out: Vec<ProfitBreakdown> = steps
         .iter()
@@ -234,6 +235,7 @@ pub async fn production_profit(
                     .unwrap_or_else(|| "Tech I".to_string()),
             );
             bd.category = categories.get(&bd.product_type_id).cloned();
+            bd.group = groups.get(&bd.product_type_id).cloned();
             bd.market = Some(market_name.clone());
             bd
         })
