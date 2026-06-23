@@ -305,6 +305,8 @@ export interface ProfitParams {
   blueprintCostPerRun?: number;
   /** Inventor skill level 0..5 scaling invention probability (default 5). */
   inventionSkillLevel?: number;
+  /** Decryptor applied to every T2 invention; null/undefined = none. */
+  decryptorTypeId?: number | null;
 }
 
 /** Rank every manufacturable item by build-vs-buy profit at the chosen market. */
@@ -312,4 +314,21 @@ export function productionProfit(
   params: ProfitParams,
 ): Promise<ProfitBreakdown[]> {
   return invoke<ProfitBreakdown[]>("production_profit", { params });
+}
+
+/** An invention decryptor and its outcome modifiers (from the SDE). */
+export interface Decryptor {
+  typeId: number;
+  name: string;
+  /** Multiplier on invention success probability. */
+  probabilityMultiplier: number;
+  /** Added to the invented T2 BPC's material efficiency. */
+  meModifier: number;
+  /** Added to runs per successful invention. */
+  runModifier: number;
+}
+
+/** The invention decryptors, for the production decryptor dropdown. */
+export function productionDecryptors(): Promise<Decryptor[]> {
+  return invoke<Decryptor[]>("production_decryptors");
 }

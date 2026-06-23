@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use super::types::{
-    activity, BlueprintMaterial, BlueprintProduct, InventionData, ManufacturableBlueprint,
-    MarketItem, Recipe, TypeInfo,
+    activity, BlueprintMaterial, BlueprintProduct, Decryptor, InventionData,
+    ManufacturableBlueprint, MarketItem, Recipe, TypeInfo,
 };
 use super::SdeError;
 
@@ -239,6 +239,30 @@ impl Sde {
         Ok(map)
     }
 
+    /// The invention decryptors and their modifiers (probability / ME / runs),
+    /// read from `dgmTypeAttributes` (1112 / 1113 / 1124).
+    pub fn decryptors(&self) -> Result<Vec<Decryptor>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.typeID, t.typeName,
+               (SELECT valueFloat FROM dgmTypeAttributes WHERE typeID = t.typeID AND attributeID = 1112),
+               (SELECT valueFloat FROM dgmTypeAttributes WHERE typeID = t.typeID AND attributeID = 1113),
+               (SELECT valueFloat FROM dgmTypeAttributes WHERE typeID = t.typeID AND attributeID = 1124)
+             FROM invTypes t
+             WHERE t.typeName LIKE '%Decryptor%' AND t.published = 1
+             ORDER BY t.typeName",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Decryptor {
+                type_id: row.get(0)?,
+                name: row.get(1)?,
+                probability_multiplier: row.get::<_, Option<f64>>(2)?.unwrap_or(1.0),
+                me_modifier: row.get::<_, Option<f64>>(3)?.unwrap_or(0.0) as i64,
+                run_modifier: row.get::<_, Option<f64>>(4)?.unwrap_or(0.0) as i64,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// All published items that appear on the market (for station trading).
     pub fn market_items(&self) -> Result<Vec<MarketItem>, SdeError> {
         let mut stmt = self.conn.prepare(
@@ -364,6 +388,39 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn decryptors_read_modifiers_from_attributes() {
+        // Self-contained: invTypes needs `published`, which the shared fixture omits.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE invTypes(typeID INT, groupID INT, typeName TEXT, volume REAL, published INT);
+             CREATE TABLE dgmTypeAttributes(typeID INT, attributeID INT, valueFloat REAL);
+             INSERT INTO invTypes VALUES
+               (34201, 1, 'Accelerant Decryptor', 0.1, 1),
+               (34203, 1, 'Augmentation Decryptor', 0.1, 1),
+               (99999, 1, 'Unpublished Decryptor', 0.1, 0),
+               (100, 1, 'Tritanium', 0.1, 1);
+             -- 1112 = probability mult, 1113 = ME modifier, 1124 = run modifier.
+             INSERT INTO dgmTypeAttributes VALUES
+               (34201, 1112, 1.2), (34201, 1113, 2.0), (34201, 1124, 1.0),
+               (34203, 1112, 0.6), (34203, 1113, -2.0), (34203, 1124, 9.0);",
+        )
+        .unwrap();
+        let sde = Sde::from_connection(conn);
+
+        let decs = sde.decryptors().unwrap();
+        // Only published items whose name contains "Decryptor", ordered by name.
+        assert_eq!(decs.len(), 2);
+        assert_eq!(decs[0].name, "Accelerant Decryptor");
+        assert_eq!(decs[0].type_id, 34201);
+        assert!((decs[0].probability_multiplier - 1.2).abs() < 1e-9);
+        assert_eq!(decs[0].me_modifier, 2);
+        assert_eq!(decs[0].run_modifier, 1);
+        assert_eq!(decs[1].name, "Augmentation Decryptor");
+        assert_eq!(decs[1].me_modifier, -2);
+        assert_eq!(decs[1].run_modifier, 9);
     }
 
     #[test]

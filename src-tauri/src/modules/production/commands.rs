@@ -122,7 +122,13 @@ pub struct ProfitParams {
     /// probability. Default 5 (all V).
     #[serde(default)]
     pub invention_skill_level: Option<i64>,
+    /// Decryptor type to apply to every T2 invention; `None` = no decryptor.
+    #[serde(default)]
+    pub decryptor_type_id: Option<i64>,
 }
+
+/// Base material efficiency of a freshly invented T2 blueprint copy (no decryptor).
+const BASE_T2_ME: i64 = 2;
 
 /// Rank **every** manufacturable item by build-vs-buy profit at the chosen
 /// market. The whole catalogue is returned; the UI filters it client-side.
@@ -134,6 +140,16 @@ pub async fn production_profit(
 ) -> Result<Vec<ProfitBreakdown>, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+
+    // Resolve the chosen decryptor (if any) once up front.
+    let decryptor = match params.decryptor_type_id {
+        Some(id) => sde
+            .decryptors()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .find(|d| d.type_id == id),
+        None => None,
+    };
 
     // Build a manufacturing step for every manufacturable blueprint, collecting
     // the type ids we need prices for.
@@ -185,11 +201,31 @@ pub async fn production_profit(
                 base_quantity: m.quantity,
                 sourcing: Sourcing::Buy,
             };
+            // A decryptor shifts ME/runs/probability and is consumed per attempt.
+            let mut datacores: Vec<InputLine> = inv.datacores.iter().map(to_input).collect();
+            let (result_me, runs_per_success, probability) = match &decryptor {
+                Some(d) => {
+                    needed.insert(d.type_id);
+                    datacores.push(InputLine {
+                        type_id: d.type_id,
+                        name: d.name.clone(),
+                        base_quantity: 1,
+                        sourcing: Sourcing::Buy,
+                    });
+                    (
+                        BASE_T2_ME + d.me_modifier,
+                        inv.runs_per_success + d.run_modifier,
+                        inv.probability * d.probability_multiplier,
+                    )
+                }
+                None => (BASE_T2_ME, inv.runs_per_success, inv.probability),
+            };
             step.invention = Some(Invention {
-                datacores: inv.datacores.iter().map(to_input).collect(),
+                datacores,
                 copy_materials: copy_materials.iter().map(to_input).collect(),
-                runs_per_success: inv.runs_per_success,
-                probability: inv.probability,
+                runs_per_success,
+                probability,
+                result_me,
             });
         }
         steps.push(step);
@@ -247,4 +283,12 @@ pub async fn production_profit(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     Ok(out)
+}
+
+/// The invention decryptors (for the UI dropdown).
+#[tauri::command]
+pub async fn production_decryptors(app: AppHandle) -> Result<Vec<crate::sde::Decryptor>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+    sde.decryptors().map_err(|e| e.to_string())
 }
