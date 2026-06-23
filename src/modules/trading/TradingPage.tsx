@@ -33,6 +33,7 @@ function Workbench() {
   const [brokerPct, setBrokerPct] = useState(3);
   const [taxPct, setTaxPct] = useState(4.5);
   const [minVolume, setMinVolume] = useState("1000");
+  const [search, setSearch] = useState("");
   const [rows, setRows] = useState<TradeRow[]>([]);
 
   const regions = useQuery({ queryKey: ["market", "regions"], queryFn: marketRegions });
@@ -85,6 +86,17 @@ function Workbench() {
     () => new Map(rows.map((r) => [r.typeId, r])),
     [rows],
   );
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) =>
+      [r.name, r.category, r.group]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [rows, search]);
 
   return (
     <div className="p-6">
@@ -172,11 +184,21 @@ function Workbench() {
           ) : run.isPending ? (
             <Centered>Scanning ~19k items at the chosen market…</Centered>
           ) : (
-            <TradeTable
-              rows={rows}
-              onFavorite={toggleFavorite}
-              onBlacklist={blacklistRow}
-            />
+            <div>
+              {rows.length > 0 && (
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.currentTarget.value)}
+                  placeholder="Search name / category / group…"
+                  className="mb-2 w-72 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+                />
+              )}
+              <TradeTable
+                rows={filteredRows}
+                onFavorite={toggleFavorite}
+                onBlacklist={blacklistRow}
+              />
+            </div>
           ))}
 
         {tab === "favorites" && (
@@ -246,7 +268,14 @@ function TradeTable({
                   ✕
                 </button>
               </td>
-              <td className="px-3 py-1.5 text-zinc-200">{r.name}</td>
+              <td className="px-3 py-1.5">
+                <div className="text-zinc-200">{r.name}</div>
+                {(r.category || r.group) && (
+                  <div className="text-xs text-zinc-500">
+                    {[r.category, r.group].filter(Boolean).join(" · ")}
+                  </div>
+                )}
+              </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                 {formatIsk(r.buy)}
               </td>

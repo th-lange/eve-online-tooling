@@ -65,6 +65,8 @@ pub async fn station_trading(
     let favorites: HashSet<i64> = storage::load_id_list(&dir, "favorites")
         .into_iter()
         .collect();
+    let categories = sde.category_names().map_err(|e| e.to_string())?;
+    let groups = sde.group_names().map_err(|e| e.to_string())?;
     let config = TradeConfig {
         broker_fee: params.broker_fee,
         sales_tax: params.sales_tax,
@@ -75,14 +77,19 @@ pub async fn station_trading(
         .filter(|item| !blacklist.contains(&item.type_id))
         .filter_map(|item| {
             let model = prices.get(&item.type_id)?;
-            let row = evaluate(
+            let mut row = evaluate(
                 item.type_id,
                 &item.name,
                 model,
                 &config,
                 favorites.contains(&item.type_id),
             )?;
-            (row.profit_per_unit > 0.0 && row.volume >= params.min_volume).then_some(row)
+            if row.profit_per_unit <= 0.0 || row.volume < params.min_volume {
+                return None;
+            }
+            row.category = categories.get(&item.type_id).cloned();
+            row.group = groups.get(&item.type_id).cloned();
+            Some(row)
         })
         .collect();
 

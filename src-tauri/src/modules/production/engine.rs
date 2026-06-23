@@ -231,6 +231,8 @@ pub struct ProfitBreakdown {
     /// Category of the product (Ship, Module, Charge, …). Filled by the command
     /// layer from the SDE; the pure engine leaves it `None`.
     pub category: Option<String>,
+    /// Group of the product (Frigate, Cruiser, …). Filled by the command layer.
+    pub group: Option<String>,
     /// Which market this result was priced at. Filled by the command layer; the
     /// pure engine leaves it `None`.
     pub market: Option<String>,
@@ -477,6 +479,7 @@ pub fn evaluate(
         profit_per_unit,
         meta_group: None,
         category: None,
+        group: None,
         market: None,
         product_volume,
         product_price,

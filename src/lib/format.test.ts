@@ -26,6 +26,7 @@ function row(
     profitPerUnit: profit,
     metaGroup: null,
     category: null,
+    group: null,
     market: null,
     productVolume,
     productPrice: null,

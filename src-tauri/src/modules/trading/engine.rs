@@ -32,6 +32,9 @@ pub struct TradeRow {
     /// Market volume (units listed) — liquidity.
     pub volume: i64,
     pub favorite: bool,
+    /// Category/group of the item (Ship/Module…, Frigate/Cruiser…), for search.
+    pub category: Option<String>,
+    pub group: Option<String>,
 }
 
 /// Evaluate one item. `None` if it has no usable buy/sell price.
@@ -62,6 +65,8 @@ pub fn evaluate(
         margin,
         volume: model.daily_volume.unwrap_or(0),
         favorite,
+        category: None,
+        group: None,
     })
 }
 

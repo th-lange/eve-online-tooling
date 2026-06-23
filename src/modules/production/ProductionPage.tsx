@@ -118,7 +118,15 @@ function Workbench() {
     const minVol =
       stationId === null || minVolume.trim() === "" ? null : Number(minVolume);
     return rows.filter((r) => {
-      if (needle && !r.productName.toLowerCase().includes(needle)) return false;
+      if (
+        needle &&
+        ![r.productName, r.category, r.group, r.metaGroup]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(needle)
+      )
+        return false;
       if (categories.size > 0 && !(r.category && categories.has(r.category)))
         return false;
       if (metas.size > 0 && !(r.metaGroup && metas.has(r.metaGroup)))
@@ -172,11 +180,11 @@ function Workbench() {
       <div className="mt-3 rounded border border-zinc-800 bg-zinc-900 p-3">
         {tab === "item" && (
           <div className="grid gap-4 md:grid-cols-3">
-            <Field label="Name">
+            <Field label="Search">
               <input
                 value={name}
                 onChange={(e) => setName(e.currentTarget.value)}
-                placeholder="Search items…"
+                placeholder="name, category, group…"
                 className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
               />
               <label

@@ -255,6 +255,24 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Map of typeID -> group name (Frigate, Cruiser, Hybrid Weapon, …).
+    pub fn group_names(&self) -> Result<HashMap<i64, String>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.typeID, g.groupName
+             FROM invTypes t
+             JOIN invGroups g ON g.groupID = t.groupID",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut map = HashMap::new();
+        for row in rows {
+            let (type_id, name) = row?;
+            map.insert(type_id, name);
+        }
+        Ok(map)
+    }
+
     /// Map of typeID -> category name (Ship, Module, Charge, Drone, …).
     pub fn category_names(&self) -> Result<HashMap<i64, String>, SdeError> {
         let mut stmt = self.conn.prepare(
@@ -428,6 +446,14 @@ mod tests {
         let cats = sde.category_names().unwrap();
         assert_eq!(cats.get(&100).map(String::as_str), Some("Gadgets"));
         assert_eq!(cats.get(&200).map(String::as_str), Some("Gadgets"));
+    }
+
+    #[test]
+    fn maps_group_names() {
+        let sde = fixture();
+        let groups = sde.group_names().unwrap();
+        assert_eq!(groups.get(&100).map(String::as_str), Some("Widgets"));
+        assert_eq!(groups.get(&200).map(String::as_str), Some("Minerals"));
     }
 
     #[test]
