@@ -13,6 +13,9 @@ use super::engine::{evaluate, TradeConfig, TradeRow};
 
 const RESULT_CAP: usize = 500;
 
+/// History window (days) averaged for the daily-traded volume column.
+const TRADED_VOLUME_DAYS: usize = 7;
+
 /// Only these named lists are persisted (guards the filename).
 fn list_key(list: &str) -> Result<&'static str, String> {
     match list {
@@ -99,6 +102,18 @@ pub async fn station_trading(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     out.truncate(RESULT_CAP);
+
+    // Enrich the displayed set with real daily-traded volume from market history
+    // (units moved/day). Only the truncated rows are fetched, so we don't pull
+    // history for the whole ~19k catalogue. Region-scoped + cached.
+    let displayed_ids: Vec<i64> = out.iter().map(|r| r.type_id).collect();
+    let traded = market
+        .daily_traded_volumes(params.region_id, &displayed_ids, TRADED_VOLUME_DAYS)
+        .await;
+    for row in &mut out {
+        row.daily_traded = traded.get(&row.type_id).copied().unwrap_or(0);
+    }
+
     Ok(out)
 }
 
