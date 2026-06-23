@@ -224,6 +224,8 @@ export interface ProfitBreakdown {
   market: string | null;
   /** Product market volume (units listed), or null. */
   productVolume: number | null;
+  /** Per-unit sell price of the product (the target price), or null. */
+  productPrice: number | null;
   materials: MaterialLine[];
   /** type ids that couldn't be priced; numbers are incomplete when non-empty. */
   missingPrices: number[];

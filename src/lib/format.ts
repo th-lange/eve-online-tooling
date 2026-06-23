@@ -26,6 +26,7 @@ export type SortKey =
   | "roi"
   | "margin"
   | "profitPerUnit"
+  | "productPrice"
   | "productVolume";
 export type SortDir = "asc" | "desc";
 
@@ -41,6 +42,8 @@ function value(row: ProfitBreakdown, key: SortKey): number | string | null {
       return row.margin;
     case "profitPerUnit":
       return row.profitPerUnit;
+    case "productPrice":
+      return row.productPrice;
     case "productVolume":
       return row.productVolume;
   }

@@ -17,6 +17,7 @@ const COLUMNS: { key: SortKey; label: string; numeric: boolean }[] = [
   { key: "roi", label: "ROI", numeric: true },
   { key: "margin", label: "Margin", numeric: true },
   { key: "profitPerUnit", label: "Profit/unit", numeric: true },
+  { key: "productPrice", label: "Target", numeric: true },
   { key: "productVolume", label: "Volume", numeric: true },
 ];
 
@@ -120,6 +121,9 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
                     <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
                       {formatIsk(r.profitPerUnit)}
                     </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+                      {formatIsk(r.productPrice)}
+                    </td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                       {formatInt(r.productVolume)}
                     </td>
@@ -133,7 +137,7 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-3 py-6 text-center text-zinc-500">
+                <td colSpan={9} className="px-3 py-6 text-center text-zinc-500">
                   No rows.
                 </td>
               </tr>
@@ -149,7 +153,7 @@ function BreakdownRow({ row }: { row: ProfitBreakdown }) {
   return (
     <tr className="border-t border-zinc-800 bg-zinc-900/40">
       <td />
-      <td colSpan={7} className="px-3 py-3">
+      <td colSpan={8} className="px-3 py-3">
         <div className="mb-2 text-xs text-zinc-400">
           {row.runs} run(s) · ME {row.me} · {formatInt(row.unitsProduced)} unit(s)
           · job fee {formatIsk(row.jobFee)}

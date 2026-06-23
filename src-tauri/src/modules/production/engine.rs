@@ -236,6 +236,8 @@ pub struct ProfitBreakdown {
     pub market: Option<String>,
     /// Product daily volume (liquidity), for downstream filtering.
     pub product_volume: Option<i64>,
+    /// Per-unit sell price of the product at the chosen basis (the target price).
+    pub product_price: Option<f64>,
     pub materials: Vec<MaterialLine>,
     /// Type ids we could not price; the row's numbers are incomplete when set.
     pub missing_prices: Vec<i64>,
@@ -360,7 +362,8 @@ pub fn evaluate(
     let units_produced = step.product_per_run * runs;
     let product_model = prices.get(&step.product_type_id);
     let product_volume = product_model.and_then(|m| m.daily_volume);
-    let revenue = match price_for(product_model, config.product_basis) {
+    let product_price = price_for(product_model, config.product_basis);
+    let revenue = match product_price {
         Some(price) => {
             let gross = price * units_produced as f64;
             if config.include_sales_cost {
@@ -476,6 +479,7 @@ pub fn evaluate(
         category: None,
         market: None,
         product_volume,
+        product_price,
         materials,
         missing_prices,
     }

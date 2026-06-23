@@ -28,6 +28,7 @@ function row(
     category: null,
     market: null,
     productVolume,
+    productPrice: null,
     materials: [],
     missingPrices: [],
   };
