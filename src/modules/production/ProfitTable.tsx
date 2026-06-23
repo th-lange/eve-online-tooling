@@ -13,17 +13,16 @@ const MAX_ROWS = 500;
 
 const COLUMNS: { key: SortKey; label: string; numeric: boolean }[] = [
   { key: "productName", label: "Item", numeric: false },
-  { key: "profit", label: "Profit", numeric: true },
+  { key: "productPrice", label: "Price", numeric: true },
   { key: "roi", label: "ROI", numeric: true },
   { key: "margin", label: "Margin", numeric: true },
-  { key: "profitPerUnit", label: "Profit/unit", numeric: true },
-  { key: "productPrice", label: "Target", numeric: true },
+  { key: "profitPerUnit", label: "Profit/item", numeric: true },
   { key: "productVolume", label: "Volume", numeric: true },
 ];
 
 // Pure display: the page does the filtering, this sorts + renders.
 export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
-  const [sortKey, setSortKey] = useState<SortKey>("profit");
+  const [sortKey, setSortKey] = useState<SortKey>("profitPerUnit");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [expanded, setExpanded] = useState<number | null>(null);
 
@@ -101,12 +100,8 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
                         <div className="text-xs text-zinc-500">{subtitle}</div>
                       )}
                     </td>
-                    <td
-                      className={`px-3 py-1.5 text-right tabular-nums ${
-                        r.profit >= 0 ? "text-emerald-400" : "text-rose-400"
-                      }`}
-                    >
-                      {formatIsk(r.profit)}
+                    <td className="px-3 py-1.5 text-right tabular-nums text-zinc-200">
+                      {formatIsk(r.productPrice)}
                     </td>
                     <td
                       className={`px-3 py-1.5 text-right tabular-nums ${
@@ -118,11 +113,12 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
                     <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
                       {formatPercent(r.margin)}
                     </td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+                    <td
+                      className={`px-3 py-1.5 text-right tabular-nums ${
+                        r.profitPerUnit >= 0 ? "text-emerald-400" : "text-rose-400"
+                      }`}
+                    >
                       {formatIsk(r.profitPerUnit)}
-                    </td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
-                      {formatIsk(r.productPrice)}
                     </td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                       {formatInt(r.productVolume)}
@@ -137,7 +133,7 @@ export function ProfitTable({ rows }: { rows: ProfitBreakdown[] }) {
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-3 py-6 text-center text-zinc-500">
+                <td colSpan={8} className="px-3 py-6 text-center text-zinc-500">
                   No rows.
                 </td>
               </tr>
@@ -153,7 +149,7 @@ function BreakdownRow({ row }: { row: ProfitBreakdown }) {
   return (
     <tr className="border-t border-zinc-800 bg-zinc-900/40">
       <td />
-      <td colSpan={8} className="px-3 py-3">
+      <td colSpan={7} className="px-3 py-3">
         <div className="mb-2 text-xs text-zinc-400">
           {row.runs} run(s) · ME {row.me} · {formatInt(row.unitsProduced)} unit(s)
           · job fee {formatIsk(row.jobFee)}

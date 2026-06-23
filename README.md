@@ -77,7 +77,7 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
   - **Filters** in tabs (Item / Market / Thresholds): name, Category/Type, Meta (Tech I/II/III,
     Faction, Officer…), price basis (sell/buy percentile, min/max, average), runs / ME / cost index /
     facility tax / **per-run blueprint cost**, **min ROI**, and **min volume** (when a hub is picked).
-  - Sortable table — profit · **ROI** · margin · per-unit · volume · market — with a per-material cost
+  - Sortable table — price · **ROI** · margin · **profit/item** (net, can be negative) · volume · market — with a per-material cost
     drill-down. **T2 items include the amortized invention cost** (datacores + invention job fee + the
     T1 BPC copy fee, divided by success probability × runs per success), with a configurable
     **invention skill level** (0–5, default all-V) scaling the probability.
