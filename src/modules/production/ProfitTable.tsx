@@ -5,9 +5,9 @@ import {
   formatIsk,
   formatPercent,
   sortBreakdowns,
-  type SortDir,
   type SortKey,
 } from "../../lib/format";
+import { usePersistentSort } from "../../lib/usePersistentSort";
 
 const MAX_ROWS = 500;
 
@@ -20,6 +20,8 @@ const COLUMNS: { key: SortKey; label: string; numeric: boolean }[] = [
   { key: "productVolume", label: "Volume", numeric: true },
 ];
 
+const SORT_KEYS = COLUMNS.map((c) => c.key);
+
 // Pure display: the page does the filtering, this sorts + renders.
 export function ProfitTable({
   rows,
@@ -30,8 +32,13 @@ export function ProfitTable({
   onFavorite: (r: ProfitBreakdown) => void;
   onBlacklist: (r: ProfitBreakdown) => void;
 }) {
-  const [sortKey, setSortKey] = useState<SortKey>("profitPerUnit");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const { sortKey, sortDir, toggleSort } = usePersistentSort<SortKey>(
+    "sort.production",
+    SORT_KEYS,
+    "profitPerUnit",
+    "desc",
+    ["productName"],
+  );
   const [expanded, setExpanded] = useState<number | null>(null);
 
   const sorted = useMemo(
@@ -39,15 +46,6 @@ export function ProfitTable({
     [rows, sortKey, sortDir],
   );
   const shown = sorted.slice(0, MAX_ROWS);
-
-  function toggleSort(key: SortKey) {
-    if (key === sortKey) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir(key === "productName" ? "asc" : "desc");
-    }
-  }
 
   return (
     <div>
