@@ -305,8 +305,6 @@ pub struct BestSell {
 pub struct TradedStats {
     /// Mean daily traded volume.
     pub volume: i64,
-    /// Mean daily average price.
-    pub avg: f64,
     /// Lowest daily low in the window.
     pub low: f64,
     /// Highest daily high in the window.
@@ -319,9 +317,7 @@ fn recent_stats(history: &[HistoryDay], days: usize) -> TradedStats {
         return TradedStats::default();
     }
     let recent = &history[history.len().saturating_sub(days)..];
-    let n = recent.len() as f64;
     let volume = recent.iter().map(|h| h.volume).sum::<i64>() / recent.len() as i64;
-    let avg = recent.iter().map(|h| h.average).sum::<f64>() / n;
     let low = recent
         .iter()
         .map(|h| if h.lowest > 0.0 { h.lowest } else { h.average })
@@ -332,7 +328,6 @@ fn recent_stats(history: &[HistoryDay], days: usize) -> TradedStats {
         .fold(0.0_f64, f64::max);
     TradedStats {
         volume,
-        avg,
         low: if low.is_finite() { low } else { 0.0 },
         high,
     }

@@ -1,6 +1,7 @@
 import { Fragment, useMemo, useState } from "react";
 import type { ProfitBreakdown } from "../../lib/api";
 import {
+  formatDuration,
   formatInt,
   formatIsk,
   formatPercent,
@@ -229,6 +230,9 @@ function BreakdownRow({ row }: { row: ProfitBreakdown }) {
       <td colSpan={8} className="px-3 py-3">
         <div className="mb-2 text-xs text-zinc-400">
           {row.runs} run(s) · ME {row.me} · {formatInt(row.unitsProduced)} unit(s)
+          {row.jobTimeSeconds > 0
+            ? ` · build ${formatDuration(row.jobTimeSeconds)}`
+            : ""}
           · job fee {formatIsk(row.jobFee)}
           {row.inventionCost > 0
             ? ` · invention ${formatIsk(row.inventionCost)}`

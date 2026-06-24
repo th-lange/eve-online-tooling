@@ -63,6 +63,9 @@ function Workbench() {
   const [runs, setRuns] = useState(1);
   const [me, setMe] = useState(0);
   const [useOwnedMe, setUseOwnedMe] = useState(true);
+  const [te, setTe] = useState(0);
+  const [timeSkill, setTimeSkill] = useState(5);
+  const [structureTePct, setStructureTePct] = useState(0);
   const [costIndexPct, setCostIndexPct] = useState(5);
   const [facilityTaxPct, setFacilityTaxPct] = useState(0);
   const [materialBasis, setMaterialBasis] =
@@ -99,11 +102,18 @@ function Workbench() {
     [owned.data],
   );
   const ownedCount = ownedSet.size;
-  // Best researched ME per owned blueprint type (highest ME across all copies).
+  // Best researched ME/TE per owned blueprint type (highest across all copies).
   const ownedMe = useMemo(() => {
     const map: Record<number, number> = {};
     for (const b of owned.data ?? []) {
       map[b.typeId] = Math.max(map[b.typeId] ?? 0, b.materialEfficiency);
+    }
+    return map;
+  }, [owned.data]);
+  const ownedTe = useMemo(() => {
+    const map: Record<number, number> = {};
+    for (const b of owned.data ?? []) {
+      map[b.typeId] = Math.max(map[b.typeId] ?? 0, b.timeEfficiency);
     }
     return map;
   }, [owned.data]);
@@ -157,6 +167,10 @@ function Workbench() {
       runs,
       me,
       ownedMe: useOwnedMe ? ownedMe : {},
+      te,
+      ownedTe: useOwnedMe ? ownedTe : {},
+      timeSkill,
+      structureTePct,
       systemCostIndex: costIndexPct / 100,
       facilityTax: facilityTaxPct / 100,
       materialBasis,
@@ -388,6 +402,15 @@ function Workbench() {
                 Use owned blueprint ME{ownedCount > 0 ? ` (${ownedCount})` : ""}
               </label>
             </Field>
+            <Num label="TE (default for un-owned)" value={te} onChange={setTe} min={0} max={20} />
+            <Num label="Time skills (0-5)" value={timeSkill} onChange={setTimeSkill} min={0} max={5} />
+            <Num
+              label="Structure TE %"
+              value={structureTePct}
+              onChange={setStructureTePct}
+              min={0}
+              step={1}
+            />
             <Num
               label="Cost index %"
               value={costIndexPct}
