@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   marketHistory,
   marketRegions,
+  openMarketWindow,
   sdeSearch,
   sdeStatus,
   type HistoryPoint,
@@ -108,6 +109,19 @@ function Workbench() {
             <option value={400}>All</option>
           </select>
         </label>
+        {picked && (
+          <button
+            onClick={() =>
+              openMarketWindow(picked.id).catch((e) =>
+                alert(`Couldn't open market window: ${e}`),
+              )
+            }
+            title="Open this item's market in the EVE client (needs a logged-in character + the open-window scope)"
+            className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+          >
+            Open in EVE
+          </button>
+        )}
       </div>
 
       <div className="mt-4">

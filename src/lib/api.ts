@@ -63,6 +63,12 @@ export function characterAssets(characterId: number): Promise<Asset[]> {
   return invoke<Asset[]>("character_assets", { characterId });
 }
 
+/** Open the in-game market window for a type (needs a logged-in character + the
+ * esi-ui.open_window scope). */
+export function openMarketWindow(typeId: number): Promise<void> {
+  return invoke<void>("open_market_window", { typeId });
+}
+
 /**
  * Total owned quantity per type across the whole roster (durably cached ~10min).
  * Keys are type ids (as strings, per JSON object keys).

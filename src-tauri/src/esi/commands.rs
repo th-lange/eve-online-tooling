@@ -187,6 +187,24 @@ pub async fn roster_stock(
     Ok(stock)
 }
 
+/// Open the in-game market window for a type, using the first logged-in
+/// character. Requires the `esi-ui.open_window.v1` scope (re-login if added).
+#[tauri::command]
+pub async fn open_market_window(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+    type_id: i64,
+) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let character = storage::load_roster(&dir)
+        .into_iter()
+        .next()
+        .ok_or("Log in a character first")?;
+    character::open_market_window(&auth_state, character.character_id, type_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Remove a character: drop it from the roster, delete its keychain entry, and
 /// forget any cached token. Returns the updated roster.
 #[tauri::command]
