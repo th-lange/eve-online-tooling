@@ -418,6 +418,26 @@ export function sdeTypeDetail(typeId: number): Promise<TypeDetail | null> {
 export function sdeTypeAttributes(typeId: number): Promise<AttrPair[]> {
   return invoke<AttrPair[]>("sde_type_attributes", { typeId });
 }
+/** Search marketable types by name (for pickers). */
+export function sdeSearch(query: string): Promise<IdName[]> {
+  return invoke<IdName[]>("sde_search", { query });
+}
+
+// --- Market history ---
+
+export interface HistoryPoint {
+  date: string;
+  average: number;
+  highest: number;
+  lowest: number;
+  volume: number;
+  orderCount: number;
+}
+
+/** Daily market history for a type in a region (ascending by date). */
+export function marketHistory(regionId: number, typeId: number): Promise<HistoryPoint[]> {
+  return invoke<HistoryPoint[]>("market_history", { regionId, typeId });
+}
 
 /** Subscribe to SDE download/decompress progress. */
 export function onSdeProgress(
