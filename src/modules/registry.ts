@@ -10,6 +10,7 @@ import { AssetsPage } from "./assets/AssetsPage";
 import { CharacterPage } from "./character/CharacterPage";
 import { AccountingPage } from "./accounting/AccountingPage";
 import { ContractsPage } from "./contracts/ContractsPage";
+import { LpStorePage } from "./lpstore/LpStorePage";
 
 // A feature module = a nav entry + the page rendered at `/{id}`. Adding a new
 // module (daytrading, station-trading, …) is a one-line entry here plus its
@@ -91,5 +92,11 @@ export const modules: ModuleDef[] = [
     title: "Public Contracts",
     description: "Find item-exchange contracts worth more than their price.",
     Component: ContractsPage,
+  },
+  {
+    id: "lpstore",
+    title: "LP Store",
+    description: "Rank loyalty-store offers by ISK per LP.",
+    Component: LpStorePage,
   },
 ];
