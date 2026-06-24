@@ -195,7 +195,13 @@ export function ProfitTable({
                       {formatInt(r.productVolume)}
                     </td>
                     <td className="px-3 py-1.5 text-zinc-400">
-                      {r.market ?? "—"}
+                      {r.sellHub ? (
+                        <span title="Best hub to sell at">
+                          <span className="text-emerald-400">↗ {r.sellHub}</span>
+                        </span>
+                      ) : (
+                        (r.market ?? "—")
+                      )}
                     </td>
                   </tr>
                   {open && <BreakdownRow row={r} />}

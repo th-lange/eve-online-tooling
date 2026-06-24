@@ -336,6 +336,8 @@ export interface ProfitBreakdown {
   group: string | null;
   /** Which market this result was priced at. */
   market: string | null;
+  /** Best hub to sell the product at (when "sell at best hub" is on), else null. */
+  sellHub: string | null;
   /** Whether the user has favorited this item. */
   favorite: boolean;
   /** Product market volume (units listed), or null. */
@@ -374,6 +376,8 @@ export interface ProfitParams {
   inventionSkillLevel?: number;
   /** Decryptor applied to every T2 invention; null/undefined = none. */
   decryptorTypeId?: number | null;
+  /** Price the product at whichever hub pays the most (materials stay local). */
+  productBestHub?: boolean;
 }
 
 /** Rank every manufacturable item by build-vs-buy profit at the chosen market. */
