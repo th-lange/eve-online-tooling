@@ -83,6 +83,8 @@ pub struct InventionData {
 pub struct MarketItem {
     pub type_id: i64,
     pub name: String,
+    /// Packaged volume in m³ (for ISK/m³ in daytrading); `None` if unset.
+    pub volume: Option<f64>,
 }
 
 /// A manufacturable blueprint, keyed for ranking/lookup.

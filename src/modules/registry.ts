@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import { ProductionPage } from "./production/ProductionPage";
 import { TradingPage } from "./trading/TradingPage";
+import { DaytradingPage } from "./daytrading/DaytradingPage";
 
 // A feature module = a nav entry + the page rendered at `/{id}`. Adding a new
 // module (daytrading, station-trading, …) is a one-line entry here plus its
@@ -28,5 +29,11 @@ export const modules: ModuleDef[] = [
     title: "Station Trading",
     description: "Rank items by buy→sell margin at a market hub.",
     Component: TradingPage,
+  },
+  {
+    id: "daytrading",
+    title: "Daytrading",
+    description: "Cross-region price gaps on the same item, ranked by ISK/m³.",
+    Component: DaytradingPage,
   },
 ];

@@ -115,6 +115,60 @@ export function tradingSetList(
   return invoke<void>("trading_set_list", { list, typeId, add });
 }
 
+// --- Daytrading (inter-station arbitrage) ---
+
+export interface DayTradeRow {
+  typeId: number;
+  name: string;
+  /** Hub to buy at (cheapest). */
+  buyRegionId: number;
+  buyHub: string;
+  buyPrice: number;
+  /** Hub to sell at (dearest). */
+  sellRegionId: number;
+  sellHub: string;
+  sellPrice: number;
+  /** Net profit per unit after sales tax + broker fee. */
+  profitPerUnit: number;
+  margin: number;
+  /** Packaged volume per unit, m³. */
+  volumeM3: number;
+  /** Profit per m³ of cargo (the hauler's metric). */
+  iskPerM3: number;
+  /** Daily-traded volume at the sell hub (how much you can offload). */
+  destVolume: number;
+  favorite: boolean;
+  category: string | null;
+  group: string | null;
+}
+
+export interface DayTradeParams {
+  /** Region (hub) ids to scan; empty/omitted = all hubs. */
+  regionIds?: number[];
+  salesTax?: number;
+  brokerFee?: number;
+  minProfit?: number;
+}
+
+/** Rank items by inter-station arbitrage (buy source → sell destination). */
+export function daytradingScan(params: DayTradeParams): Promise<DayTradeRow[]> {
+  return invoke<DayTradeRow[]>("daytrading_scan", { params });
+}
+
+/** Contents of a daytrading saved list (blacklist/favorites), with names. */
+export function daytradingGetList(list: ListName): Promise<ListItem[]> {
+  return invoke<ListItem[]>("daytrading_get_list", { list });
+}
+
+/** Add/remove a type from a daytrading saved list. */
+export function daytradingSetList(
+  list: ListName,
+  typeId: number,
+  add: boolean,
+): Promise<void> {
+  return invoke<void>("daytrading_set_list", { list, typeId, add });
+}
+
 // --- SDE (Static Data Export) ---
 
 export interface SdeStatus {

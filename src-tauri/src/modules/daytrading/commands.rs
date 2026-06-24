@@ -1,0 +1,201 @@
+//! Tauri command surface for the daytrading (cross-region arbitrage) module.
+
+use std::collections::{HashMap, HashSet};
+
+use serde::Deserialize;
+use tauri::{AppHandle, Manager, State};
+
+use crate::lists::{self, ListItem};
+use crate::market::{regions, resolve_location, MarketService, PriceModel};
+use crate::sde::{Sde, SdePaths};
+use crate::storage;
+
+use super::engine::{evaluate, DayTradeConfig, DayTradeRow, Quote};
+
+const RESULT_CAP: usize = 500;
+
+/// History window (days) averaged for the sell-hub daily-traded volume.
+const TRADED_VOLUME_DAYS: usize = 7;
+
+/// Storage keys — distinct from the other modules' lists.
+const DAYTRADING_BLACKLIST_KEY: &str = "daytrading_blacklist";
+const DAYTRADING_FAVORITES_KEY: &str = "daytrading_favorites";
+
+/// Map the UI's logical list name to its (module-scoped) storage key.
+fn list_key(list: &str) -> Result<&'static str, String> {
+    match list {
+        "blacklist" => Ok(DAYTRADING_BLACKLIST_KEY),
+        "favorites" => Ok(DAYTRADING_FAVORITES_KEY),
+        _ => Err(format!("unknown list: {list}")),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DayTradeParams {
+    /// Region (hub) ids to scan. Empty = all known hubs.
+    #[serde(default)]
+    pub region_ids: Vec<i64>,
+    #[serde(default)]
+    pub sales_tax: f64,
+    #[serde(default)]
+    pub broker_fee: f64,
+    /// Minimum profit per unit (ISK) to keep a row.
+    #[serde(default)]
+    pub min_profit: f64,
+}
+
+/// One hub being scanned: its region, station, short label, and per-type prices.
+struct HubPrices {
+    region_id: i64,
+    label: String,
+    prices: HashMap<i64, PriceModel>,
+}
+
+/// Scan several market hubs for the best cross-region flip per item: buy where
+/// it's cheapest, sell where it's dearest, after taxes and fees. Excludes
+/// blacklisted items; marks favorites.
+#[tauri::command]
+pub async fn daytrading_scan(
+    app: AppHandle,
+    market: State<'_, MarketService>,
+    params: DayTradeParams,
+) -> Result<Vec<DayTradeRow>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    let items = sde.market_items().map_err(|e| e.to_string())?;
+    let ids: Vec<i64> = items.iter().map(|i| i.type_id).collect();
+
+    // Resolve which hubs to scan (default: all). Each hub prices at its station.
+    let all_hubs = regions();
+    let selected: Vec<_> = all_hubs
+        .iter()
+        .filter(|h| params.region_ids.is_empty() || params.region_ids.contains(&h.id))
+        .collect();
+    if selected.len() < 2 {
+        return Err("pick at least two hubs to compare".into());
+    }
+
+    // Price the whole catalogue at each selected hub (Fuzzwork aggregates, cached).
+    let mut hubs: Vec<HubPrices> = Vec::with_capacity(selected.len());
+    for hub in &selected {
+        let station_id = hub.stations.first().map(|s| s.id);
+        let label = hub
+            .stations
+            .first()
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| hub.name.clone());
+        let location = resolve_location(hub.id, station_id);
+        let prices: HashMap<i64, PriceModel> = market
+            .price_models_at(location, &ids)
+            .await
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|m| (m.type_id, m))
+            .collect();
+        hubs.push(HubPrices {
+            region_id: hub.id,
+            label,
+            prices,
+        });
+    }
+
+    let blacklist: HashSet<i64> = storage::load_id_list(&dir, DAYTRADING_BLACKLIST_KEY)
+        .into_iter()
+        .collect();
+    let favorites: HashSet<i64> = storage::load_id_list(&dir, DAYTRADING_FAVORITES_KEY)
+        .into_iter()
+        .collect();
+    let categories = sde.category_names().map_err(|e| e.to_string())?;
+    let groups = sde.group_names().map_err(|e| e.to_string())?;
+    let config = DayTradeConfig {
+        sales_tax: params.sales_tax,
+        broker_fee: params.broker_fee,
+    };
+
+    let mut out: Vec<DayTradeRow> = items
+        .iter()
+        .filter(|item| !blacklist.contains(&item.type_id))
+        .filter_map(|item| {
+            // Collect this item's realistic sell-side price at each hub.
+            let quotes: Vec<Quote> = hubs
+                .iter()
+                .filter_map(|h| {
+                    let price = h.prices.get(&item.type_id)?.sell_percentile?;
+                    Some(Quote {
+                        region_id: h.region_id,
+                        hub: h.label.clone(),
+                        price,
+                    })
+                })
+                .collect();
+            let mut row = evaluate(
+                item.type_id,
+                &item.name,
+                item.volume,
+                &quotes,
+                &config,
+                favorites.contains(&item.type_id),
+            )?;
+            if row.profit_per_unit < params.min_profit || row.profit_per_unit <= 0.0 {
+                return None;
+            }
+            row.category = categories.get(&item.type_id).cloned();
+            row.group = groups.get(&item.type_id).cloned();
+            Some(row)
+        })
+        .collect();
+
+    // Rank by ISK/m³ — the metric a hauler optimizes (cargo-bound).
+    out.sort_by(|a, b| {
+        b.isk_per_m3
+            .partial_cmp(&a.isk_per_m3)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    out.truncate(RESULT_CAP);
+
+    // Enrich the displayed set with daily-traded volume at each row's sell hub
+    // (how much you can realistically offload). Group by sell region so each
+    // region's history is fetched once.
+    let mut by_region: HashMap<i64, Vec<i64>> = HashMap::new();
+    for row in &out {
+        by_region
+            .entry(row.sell_region_id)
+            .or_default()
+            .push(row.type_id);
+    }
+    let mut traded: HashMap<i64, i64> = HashMap::new();
+    for (region_id, type_ids) in &by_region {
+        let vols = market
+            .daily_traded_volumes(*region_id, type_ids, TRADED_VOLUME_DAYS)
+            .await;
+        traded.extend(vols);
+    }
+    for row in &mut out {
+        row.dest_volume = traded.get(&row.type_id).copied().unwrap_or(0);
+    }
+
+    Ok(out)
+}
+
+/// The contents of a daytrading saved list (`blacklist` or `favorites`).
+#[tauri::command]
+pub fn daytrading_get_list(app: AppHandle, list: String) -> Result<Vec<ListItem>, String> {
+    let key = list_key(&list)?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    Ok(lists::get(&sde, &dir, key))
+}
+
+/// Add or remove a type from a daytrading saved list.
+#[tauri::command]
+pub fn daytrading_set_list(
+    app: AppHandle,
+    list: String,
+    type_id: i64,
+    add: bool,
+) -> Result<(), String> {
+    let key = list_key(&list)?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    lists::set(&dir, key, type_id, add)
+}

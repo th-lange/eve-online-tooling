@@ -287,10 +287,10 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
-    /// All published items that appear on the market (for station trading).
+    /// All published items that appear on the market (for trading modules).
     pub fn market_items(&self) -> Result<Vec<MarketItem>, SdeError> {
         let mut stmt = self.conn.prepare(
-            "SELECT typeID, typeName FROM invTypes
+            "SELECT typeID, typeName, volume FROM invTypes
              WHERE published = 1 AND marketGroupID IS NOT NULL
              ORDER BY typeID",
         )?;
@@ -298,6 +298,7 @@ impl Sde {
             Ok(MarketItem {
                 type_id: row.get(0)?,
                 name: row.get(1)?,
+                volume: row.get(2)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
