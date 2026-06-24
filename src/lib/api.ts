@@ -265,6 +265,40 @@ export function reprocessingSetList(
   return invoke<void>("reprocessing_set_list", { list, typeId, add });
 }
 
+// --- Appraisal ---
+
+export interface AppraisalLine {
+  name: string;
+  typeId: number | null;
+  quantity: number;
+  buyPrice: number | null;
+  sellPrice: number | null;
+  buyValue: number;
+  sellValue: number;
+  sellHub: string | null;
+  volume: number;
+  resolved: boolean;
+}
+
+export interface AppraisalResult {
+  lines: AppraisalLine[];
+  buyTotal: number;
+  sellTotal: number;
+  volumeTotal: number;
+}
+
+export interface AppraisalParams {
+  items: { name: string; quantity: number }[];
+  regionId?: number;
+  stationId?: number | null;
+  bestHub?: boolean;
+}
+
+/** Value a pasted inventory (buy & sell) at a market, with total cargo volume. */
+export function appraisal(params: AppraisalParams): Promise<AppraisalResult> {
+  return invoke<AppraisalResult>("appraisal", { params });
+}
+
 // --- SDE (Static Data Export) ---
 
 export interface SdeStatus {
