@@ -207,6 +207,31 @@ impl MarketService {
             .await
     }
 
+    /// Like [`daily_traded_volumes`](Self::daily_traded_volumes) but also returns
+    /// the recent **price band** (avg / low / high over the window) per type, so
+    /// callers can flag a current price sitting at a historical extreme. One
+    /// concurrent history fetch per type; missing history → zeroed stats.
+    pub async fn daily_traded_stats(
+        &self,
+        region_id: i64,
+        type_ids: &[i64],
+        days: usize,
+    ) -> HashMap<i64, TradedStats> {
+        use futures_util::stream::{self, StreamExt};
+        const CONCURRENCY: usize = 16;
+        stream::iter(type_ids.iter().copied())
+            .map(|type_id| async move {
+                let stats = match self.history_for(region_id, type_id).await {
+                    Ok(history) => recent_stats(&history, days),
+                    Err(_) => TradedStats::default(),
+                };
+                (type_id, stats)
+            })
+            .buffer_unordered(CONCURRENCY)
+            .collect::<HashMap<i64, TradedStats>>()
+            .await
+    }
+
     /// Price models for many types at a [`Location`] (region average or a hub),
     /// using Fuzzwork aggregates for sell/buy/volume plus the global adjusted
     /// price for the EIV (job-fee) basis. This is the bulk pricing path used to
@@ -275,6 +300,44 @@ pub struct BestSell {
     pub price: f64,
 }
 
+/// Recent traded volume + price band over the last `days` of history.
+#[derive(Debug, Clone, Default)]
+pub struct TradedStats {
+    /// Mean daily traded volume.
+    pub volume: i64,
+    /// Mean daily average price.
+    pub avg: f64,
+    /// Lowest daily low in the window.
+    pub low: f64,
+    /// Highest daily high in the window.
+    pub high: f64,
+}
+
+/// Volume + price band (avg/low/high) over the `days` most recent history days.
+fn recent_stats(history: &[HistoryDay], days: usize) -> TradedStats {
+    if history.is_empty() || days == 0 {
+        return TradedStats::default();
+    }
+    let recent = &history[history.len().saturating_sub(days)..];
+    let n = recent.len() as f64;
+    let volume = recent.iter().map(|h| h.volume).sum::<i64>() / recent.len() as i64;
+    let avg = recent.iter().map(|h| h.average).sum::<f64>() / n;
+    let low = recent
+        .iter()
+        .map(|h| if h.lowest > 0.0 { h.lowest } else { h.average })
+        .fold(f64::INFINITY, f64::min);
+    let high = recent
+        .iter()
+        .map(|h| h.highest.max(h.average))
+        .fold(0.0_f64, f64::max);
+    TradedStats {
+        volume,
+        avg,
+        low: if low.is_finite() { low } else { 0.0 },
+        high,
+    }
+}
+
 /// Mean of the `days` most recent days' traded volume. ESI history is ascending
 /// by date, so the tail is the newest. Empty history → 0.
 fn average_recent_volume(history: &[HistoryDay], days: usize) -> i64 {
@@ -322,6 +385,8 @@ mod tests {
         HistoryDay {
             date: "2026-01-01".into(),
             average: 1.0,
+            highest: 1.0,
+            lowest: 1.0,
             order_count: 1,
             volume,
         }

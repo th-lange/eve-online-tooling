@@ -95,6 +95,8 @@ mod tests {
         HistoryDay {
             date: date.to_string(),
             average,
+            highest: average,
+            lowest: average,
             order_count,
             volume,
         }
