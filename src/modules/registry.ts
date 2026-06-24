@@ -4,6 +4,7 @@ import { TradingPage } from "./trading/TradingPage";
 import { DaytradingPage } from "./daytrading/DaytradingPage";
 import { ReprocessingPage } from "./reprocessing/ReprocessingPage";
 import { AppraisalPage } from "./appraisal/AppraisalPage";
+import { UniversePage } from "./universe/UniversePage";
 
 // A feature module = a nav entry + the page rendered at `/{id}`. Adding a new
 // module (daytrading, station-trading, …) is a one-line entry here plus its
@@ -49,5 +50,11 @@ export const modules: ModuleDef[] = [
     title: "Appraisal",
     description: "Paste items → buy/sell ISK value and cargo volume.",
     Component: AppraisalPage,
+  },
+  {
+    id: "universe",
+    title: "Universe",
+    description: "Browse every item type with stats and dogma attributes.",
+    Component: UniversePage,
   },
 ];

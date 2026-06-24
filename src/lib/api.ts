@@ -378,6 +378,47 @@ export function sdeManufacturableBlueprints(): Promise<
   return invoke<ManufacturableBlueprint[]>("sde_manufacturable_blueprints");
 }
 
+// --- Universe / item browser ---
+
+export interface IdName {
+  id: number;
+  name: string;
+}
+
+export interface TypeDetail {
+  typeId: number;
+  name: string;
+  description: string | null;
+  mass: number | null;
+  volume: number | null;
+  capacity: number | null;
+  portionSize: number | null;
+  marketGroupId: number | null;
+  published: boolean;
+  basePrice: number | null;
+}
+
+export interface AttrPair {
+  name: string;
+  value: number;
+}
+
+export function sdeCategories(): Promise<IdName[]> {
+  return invoke<IdName[]>("sde_categories");
+}
+export function sdeGroups(categoryId: number, publishedOnly: boolean): Promise<IdName[]> {
+  return invoke<IdName[]>("sde_groups", { categoryId, publishedOnly });
+}
+export function sdeTypes(groupId: number, publishedOnly: boolean): Promise<IdName[]> {
+  return invoke<IdName[]>("sde_types", { groupId, publishedOnly });
+}
+export function sdeTypeDetail(typeId: number): Promise<TypeDetail | null> {
+  return invoke<TypeDetail | null>("sde_type_detail", { typeId });
+}
+export function sdeTypeAttributes(typeId: number): Promise<AttrPair[]> {
+  return invoke<AttrPair[]>("sde_type_attributes", { typeId });
+}
+
 /** Subscribe to SDE download/decompress progress. */
 export function onSdeProgress(
   handler: (progress: SdeProgress) => void,
