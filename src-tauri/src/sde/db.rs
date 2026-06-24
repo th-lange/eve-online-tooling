@@ -483,6 +483,15 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Map of solar system id -> name (for mining ledger / fleet).
+    pub fn system_names(&self) -> Result<HashMap<i64, String>, SdeError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT solarSystemID, solarSystemName FROM mapSolarSystems")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
+        rows.collect::<Result<HashMap<_, _>, _>>().map_err(Into::into)
+    }
+
     /// Map of typeID -> group name (Frigate, Cruiser, Hybrid Weapon, …).
     pub fn group_names(&self) -> Result<HashMap<i64, String>, SdeError> {
         let mut stmt = self.conn.prepare(

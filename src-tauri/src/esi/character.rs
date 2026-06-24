@@ -80,6 +80,15 @@ pub async fn authed_get<T: DeserializeOwned>(
     Ok(resp.json().await?)
 }
 
+/// Public wrapper over the paginated authed GET (for the mining ledger).
+pub async fn authed_get_paged_pub<T: DeserializeOwned>(
+    auth: &AuthState,
+    character_id: i64,
+    path: &str,
+) -> Result<Vec<T>, AuthError> {
+    authed_get_paged(auth, character_id, path).await
+}
+
 /// Public `/universe/names/` resolver: ids → names (characters, corps, factions,
 /// systems, types). Unauthenticated POST; unknown ids are simply absent.
 pub async fn resolve_names(

@@ -1,9 +1,12 @@
 //! Character module — skills, standings, and R&D research viewers.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
-use crate::esi::{authed_get, resolve_names, AuthState};
+use crate::esi::{authed_get, authed_get_paged_pub, resolve_names, AuthState};
+use crate::market::{resolve_location, MarketService};
 use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
@@ -264,6 +267,227 @@ pub async fn character_research(
         rows,
         total_points,
         points_per_day,
+    })
+}
+
+// --- Mining ledger (#58) ---
+
+#[derive(Deserialize)]
+struct EsiMining {
+    date: String,
+    solar_system_id: i64,
+    type_id: i64,
+    quantity: i64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MiningRow {
+    pub name: String,
+    pub quantity: i64,
+    pub value: f64,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MiningView {
+    pub units24h: i64,
+    pub units7d: i64,
+    pub units30d: i64,
+    pub value24h: f64,
+    pub value7d: f64,
+    pub value30d: f64,
+    /// Per-ore 30-day totals, valued at Jita buy.
+    pub rows: Vec<MiningRow>,
+    /// Most recent systems mined in (names).
+    pub systems: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn character_mining(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+    market: State<'_, MarketService>,
+) -> Result<MiningView, String> {
+    let character_id = first_character(&app)?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+
+    let ledger: Vec<EsiMining> = authed_get_paged_pub(
+        &auth_state,
+        character_id,
+        &format!("/latest/characters/{character_id}/mining/"),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // Price the distinct ore types at Jita buy.
+    let type_ids: Vec<i64> = {
+        let mut s: std::collections::HashSet<i64> = std::collections::HashSet::new();
+        for e in &ledger {
+            s.insert(e.type_id);
+        }
+        s.into_iter().collect()
+    };
+    let prices: HashMap<i64, f64> = market
+        .price_models_at(resolve_location(10_000_002, None), &type_ids)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter_map(|m| m.buy_percentile.map(|p| (m.type_id, p)))
+        .collect();
+    let systems = sde.system_names().map_err(|e| e.to_string())?;
+
+    let now = chrono_now_secs();
+    let (d1, d7, d30) = (now - 86_400.0, now - 7.0 * 86_400.0, now - 30.0 * 86_400.0);
+    let (mut u24, mut u7, mut u30) = (0i64, 0i64, 0i64);
+    let (mut v24, mut v7, mut v30) = (0.0, 0.0, 0.0);
+    let mut by_type: HashMap<i64, i64> = HashMap::new();
+    let mut recent_systems: Vec<String> = Vec::new();
+    let mut seen_sys: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    for e in &ledger {
+        let t = parse_epoch(&format!("{}T00:00:00Z", e.date));
+        if t < d30 {
+            continue;
+        }
+        let value = e.quantity as f64 * prices.get(&e.type_id).copied().unwrap_or(0.0);
+        u30 += e.quantity;
+        v30 += value;
+        if t >= d7 {
+            u7 += e.quantity;
+            v7 += value;
+        }
+        if t >= d1 {
+            u24 += e.quantity;
+            v24 += value;
+        }
+        *by_type.entry(e.type_id).or_default() += e.quantity;
+        if seen_sys.insert(e.solar_system_id) && recent_systems.len() < 8 {
+            recent_systems.push(
+                systems
+                    .get(&e.solar_system_id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("#{}", e.solar_system_id)),
+            );
+        }
+    }
+    let mut rows: Vec<MiningRow> = by_type
+        .into_iter()
+        .map(|(type_id, quantity)| MiningRow {
+            name: sde
+                .type_info(type_id)
+                .ok()
+                .flatten()
+                .map(|t| t.name)
+                .unwrap_or_else(|| format!("Type {type_id}")),
+            quantity,
+            value: quantity as f64 * prices.get(&type_id).copied().unwrap_or(0.0),
+        })
+        .collect();
+    rows.sort_by(|a, b| b.value.partial_cmp(&a.value).unwrap_or(std::cmp::Ordering::Equal));
+
+    Ok(MiningView {
+        units24h: u24,
+        units7d: u7,
+        units30d: u30,
+        value24h: v24,
+        value7d: v7,
+        value30d: v30,
+        rows,
+        systems: recent_systems,
+    })
+}
+
+// --- Fleet (#59) ---
+
+#[derive(Deserialize)]
+struct EsiFleet {
+    fleet_id: i64,
+}
+#[derive(Deserialize)]
+struct EsiFleetMember {
+    character_id: i64,
+    ship_type_id: i64,
+    solar_system_id: i64,
+    #[serde(default)]
+    role_name: String,
+    #[serde(default)]
+    join_time: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FleetMemberRow {
+    pub name: String,
+    pub ship: String,
+    pub system: String,
+    pub role: String,
+    pub joined: String,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FleetView {
+    pub in_fleet: bool,
+    pub members: Vec<FleetMemberRow>,
+}
+
+#[tauri::command]
+pub async fn character_fleet(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+) -> Result<FleetView, String> {
+    let character_id = first_character(&app)?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+
+    // Not in a fleet → ESI 404; treat as "no fleet" rather than an error.
+    let fleet: EsiFleet = match authed_get(
+        &auth_state,
+        character_id,
+        &format!("/latest/characters/{character_id}/fleet/"),
+    )
+    .await
+    {
+        Ok(f) => f,
+        Err(_) => {
+            return Ok(FleetView {
+                in_fleet: false,
+                members: Vec::new(),
+            })
+        }
+    };
+    let members: Vec<EsiFleetMember> = authed_get(
+        &auth_state,
+        character_id,
+        &format!("/latest/fleets/{}/members/", fleet.fleet_id),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let char_ids: Vec<i64> = members.iter().map(|m| m.character_id).collect();
+    let names = resolve_names(&auth_state, &char_ids).await;
+    let systems = sde.system_names().map_err(|e| e.to_string())?;
+
+    let rows = members
+        .into_iter()
+        .map(|m| FleetMemberRow {
+            name: names.get(&m.character_id).cloned().unwrap_or_else(|| format!("#{}", m.character_id)),
+            ship: sde
+                .type_info(m.ship_type_id)
+                .ok()
+                .flatten()
+                .map(|t| t.name)
+                .unwrap_or_else(|| format!("Ship {}", m.ship_type_id)),
+            system: systems
+                .get(&m.solar_system_id)
+                .cloned()
+                .unwrap_or_else(|| format!("#{}", m.solar_system_id)),
+            role: m.role_name,
+            joined: m.join_time,
+        })
+        .collect();
+    Ok(FleetView {
+        in_fleet: true,
+        members: rows,
     })
 }
 
