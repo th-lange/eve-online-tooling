@@ -21,10 +21,6 @@ import {
 const FORGE = 10000002;
 type Tab = "opportunities" | "favorites" | "blacklist";
 
-// Sensible default filters: tradeable goods, no junk. Exact SDE category/meta names.
-const DEFAULT_CATEGORIES = ["Ship", "Module", "Charge"];
-const DEFAULT_METAS = ["Tech I", "Tech II", "Tech III"];
-
 export function TradingPage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
   if (status.isLoading) return <Centered>Checking static data…</Centered>;
@@ -43,12 +39,10 @@ function Workbench() {
   const [taxPct, setTaxPct] = useState(4.5);
   const [minVolume, setMinVolume] = useState("1000");
   const [search, setSearch] = useState("");
-  // Default: usable trade goods only — Ships/Modules/Charges, Tech I–III. Hides
-  // blueprints, SKINs, apparel, faction/officer/etc. The user can broaden these.
-  const [categories, setCategories] = useState<Set<string>>(
-    () => new Set(DEFAULT_CATEGORIES),
-  );
-  const [metas, setMetas] = useState<Set<string>>(() => new Set(DEFAULT_METAS));
+  // Exclusion filters: nothing checked = show everything; check a category or
+  // tech level to *hide* it (e.g. blueprints, SKINs, apparel, faction).
+  const [hideCategories, setHideCategories] = useState<Set<string>>(new Set());
+  const [hideMetas, setHideMetas] = useState<Set<string>>(new Set());
   const [rows, setRows] = useState<TradeRow[]>([]);
 
   const regions = useQuery({ queryKey: ["market", "regions"], queryFn: marketRegions });
@@ -112,10 +106,8 @@ function Workbench() {
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((r) => {
-      if (categories.size > 0 && !(r.category && categories.has(r.category)))
-        return false;
-      if (metas.size > 0 && !(r.metaGroup && metas.has(r.metaGroup)))
-        return false;
+      if (r.category && hideCategories.has(r.category)) return false;
+      if (r.metaGroup && hideMetas.has(r.metaGroup)) return false;
       if (
         q &&
         ![r.name, r.category, r.group, r.metaGroup]
@@ -127,7 +119,7 @@ function Workbench() {
         return false;
       return true;
     });
-  }, [rows, search, categories, metas]);
+  }, [rows, search, hideCategories, hideMetas]);
 
   return (
     <div className="p-6">
@@ -218,18 +210,18 @@ function Workbench() {
             <div>
               {rows.length > 0 && (
                 <div className="mb-2 grid gap-3 md:grid-cols-2">
-                  <Field label="Category">
+                  <Field label="Hide categories (check to exclude)">
                     <CheckboxGroup
                       options={categoryOptions}
-                      selected={categories}
-                      onToggle={(v) => setCategories(toggle(categories, v))}
+                      selected={hideCategories}
+                      onToggle={(v) => setHideCategories(toggle(hideCategories, v))}
                     />
                   </Field>
-                  <Field label="Tech level / meta">
+                  <Field label="Hide tech levels (check to exclude)">
                     <CheckboxGroup
                       options={metaOptions}
-                      selected={metas}
-                      onToggle={(v) => setMetas(toggle(metas, v))}
+                      selected={hideMetas}
+                      onToggle={(v) => setHideMetas(toggle(hideMetas, v))}
                     />
                   </Field>
                 </div>
