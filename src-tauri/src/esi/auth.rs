@@ -105,6 +105,11 @@ impl AuthState {
             .map_err(AuthError::Storage)?
             .ok_or(AuthError::NotLoggedIn)?;
         let tokens = refresh(&self.http, &refresh_token).await?;
+        // ESI rotates refresh tokens: persist the new one so the old (now
+        // invalidated) token isn't reused on the next refresh.
+        if tokens.refresh_token != refresh_token {
+            let _ = crate::storage::store_refresh_token(character_id, &tokens.refresh_token);
+        }
         self.cache_token(character_id, tokens.access_token.clone(), tokens.expires_in);
         Ok(tokens.access_token)
     }

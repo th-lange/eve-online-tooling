@@ -163,6 +163,30 @@ pub async fn character_assets(
         .collect())
 }
 
+/// Total owned quantity per type across the **whole roster** (personal assets),
+/// for stock-aware production. Durably cached for 10 minutes so repeated builds
+/// don't re-hit ESI; characters whose token can't refresh are skipped.
+#[tauri::command]
+pub async fn roster_stock(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+) -> Result<std::collections::HashMap<i64, i64>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    if let Some(cached) = storage::cache_get::<std::collections::HashMap<i64, i64>>(&dir, "roster_stock") {
+        return Ok(cached);
+    }
+    let mut stock: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    for c in storage::load_roster(&dir) {
+        if let Ok(assets) = character::fetch_assets(&auth_state, c.character_id).await {
+            for a in assets {
+                *stock.entry(a.type_id).or_default() += a.quantity;
+            }
+        }
+    }
+    let _ = storage::cache_put(&dir, "roster_stock", &stock, 600);
+    Ok(stock)
+}
+
 /// Remove a character: drop it from the roster, delete its keychain entry, and
 /// forget any cached token. Returns the updated roster.
 #[tauri::command]

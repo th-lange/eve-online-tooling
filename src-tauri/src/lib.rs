@@ -36,6 +36,7 @@ pub fn run() {
             esi::commands::auth_logout,
             esi::commands::owned_blueprints,
             esi::commands::character_assets,
+            esi::commands::roster_stock,
             sde::commands::sde_status,
             sde::commands::sde_update,
             sde::commands::sde_blueprint_materials,
