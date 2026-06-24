@@ -33,7 +33,10 @@ function Workbench() {
   const [regionIds, setRegionIds] = useState<Set<number>>(new Set());
   const [brokerPct, setBrokerPct] = useState(3);
   const [taxPct, setTaxPct] = useState(4.5);
+  const [shippingRate, setShippingRate] = useState(1000);
+  const [purchaseDays, setPurchaseDays] = useState(1);
   const [minProfit, setMinProfit] = useState("100000");
+  const [minDailyDemand, setMinDailyDemand] = useState("0");
   const [search, setSearch] = useState("");
   // Exclusion filters: nothing checked = show everything; check a category or
   // tech level to *hide* it (e.g. blueprints, SKINs, apparel, faction).
@@ -61,7 +64,10 @@ function Workbench() {
       regionIds: [...regionIds],
       salesTax: taxPct / 100,
       brokerFee: brokerPct / 100,
+      shippingRate,
+      purchaseDays,
       minProfit: minProfit.trim() === "" ? 0 : Number(minProfit),
+      minDailyDemand: minDailyDemand.trim() === "" ? 0 : Number(minDailyDemand),
     });
   }
 
@@ -174,12 +180,23 @@ function Workbench() {
         <div className="grid grid-cols-3 gap-3">
           <NumField label="Broker fee %" value={brokerPct} onChange={setBrokerPct} />
           <NumField label="Sales tax %" value={taxPct} onChange={setTaxPct} />
+          <NumField label="Shipping ISK/m³" value={shippingRate} onChange={setShippingRate} />
+          <NumField label="Stock days" value={purchaseDays} onChange={setPurchaseDays} />
           <Field label="Min profit/unit">
             <input
               type="number"
               value={minProfit}
               min={0}
               onChange={(e) => setMinProfit(e.currentTarget.value)}
+              className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+            />
+          </Field>
+          <Field label="Min sell-hub vol/day">
+            <input
+              type="number"
+              value={minDailyDemand}
+              min={0}
+              onChange={(e) => setMinDailyDemand(e.currentTarget.value)}
               className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
             />
           </Field>
@@ -274,8 +291,11 @@ type DaySortKey =
   | "profitPerUnit"
   | "margin"
   | "iskPerM3"
+  | "totalProfit"
+  | "suggestedQty"
   | "volumeM3"
-  | "destVolume";
+  | "destVolume"
+  | "daysOfSupply";
 
 const DAY_COLUMNS: SortColumn<DaySortKey>[] = [
   { key: "name", label: "Item", numeric: false, description: "The item, with its best buy→sell route below." },
@@ -310,6 +330,18 @@ const DAY_COLUMNS: SortColumn<DaySortKey>[] = [
     description: "Profit per m³ of cargo — the metric a hauler optimizes (cargo-bound).",
   },
   {
+    key: "totalProfit",
+    label: "Total",
+    numeric: true,
+    description: "Profit at the suggested quantity (profit/unit × suggested qty).",
+  },
+  {
+    key: "suggestedQty",
+    label: "Qty",
+    numeric: true,
+    description: "Units worth buying = sell-hub daily volume × stock days.",
+  },
+  {
     key: "volumeM3",
     label: "m³",
     numeric: true,
@@ -320,6 +352,12 @@ const DAY_COLUMNS: SortColumn<DaySortKey>[] = [
     label: "Sell vol",
     numeric: true,
     description: "Average units traded per day at the sell hub — how much you can offload.",
+  },
+  {
+    key: "daysOfSupply",
+    label: "Supply",
+    numeric: true,
+    description: "Sell-hub order-book supply ÷ daily-traded — lower clears faster.",
   },
 ];
 
@@ -411,17 +449,26 @@ function DayTradeTable({
               <td className="px-3 py-1.5 text-right tabular-nums text-emerald-300">
                 {formatIsk(r.iskPerM3)}
               </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
+                {formatIsk(r.totalProfit)}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                {formatInt(r.suggestedQty)}
+              </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                 {r.volumeM3.toLocaleString(undefined, { maximumFractionDigits: 2 })}
               </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                 {formatInt(r.destVolume)}
               </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                {r.daysOfSupply.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+              </td>
             </tr>
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={9} className="px-3 py-6 text-center text-zinc-500">
+              <td colSpan={12} className="px-3 py-6 text-center text-zinc-500">
                 Hit Calculate to scan for cross-region flips.
               </td>
             </tr>

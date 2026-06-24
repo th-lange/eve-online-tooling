@@ -130,8 +130,10 @@ export interface DayTradeRow {
   sellRegionId: number;
   sellHub: string;
   sellPrice: number;
-  /** Net profit per unit after sales tax + broker fee. */
+  /** Net profit per unit after sales tax + broker fee + shipping. */
   profitPerUnit: number;
+  /** Hauling cost per unit (volume × shipping rate). */
+  shippingPerUnit: number;
   margin: number;
   /** Packaged volume per unit, m³. */
   volumeM3: number;
@@ -139,6 +141,12 @@ export interface DayTradeRow {
   iskPerM3: number;
   /** Daily-traded volume at the sell hub (how much you can offload). */
   destVolume: number;
+  /** Suggested quantity over the purchase window (dest volume × days). */
+  suggestedQty: number;
+  /** Total profit at the suggested quantity. */
+  totalProfit: number;
+  /** Sell-hub order-book supply ÷ daily-traded (how contested the sell side is). */
+  daysOfSupply: number;
   favorite: boolean;
   category: string | null;
   group: string | null;
@@ -151,7 +159,13 @@ export interface DayTradeParams {
   regionIds?: number[];
   salesTax?: number;
   brokerFee?: number;
+  /** Hauling cost in ISK per m³. */
+  shippingRate?: number;
   minProfit?: number;
+  /** Days of demand to stock (suggested qty = sell-hub volume × this). */
+  purchaseDays?: number;
+  /** Drop rows whose sell-hub daily-traded volume is below this. */
+  minDailyDemand?: number;
 }
 
 /** Rank items by inter-station arbitrage (buy source → sell destination). */
