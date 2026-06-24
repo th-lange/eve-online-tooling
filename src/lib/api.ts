@@ -63,6 +63,14 @@ export function characterAssets(characterId: number): Promise<Asset[]> {
   return invoke<Asset[]>("character_assets", { characterId });
 }
 
+/**
+ * Total owned quantity per type across the whole roster (durably cached ~10min).
+ * Keys are type ids (as strings, per JSON object keys).
+ */
+export function rosterStock(): Promise<Record<string, number>> {
+  return invoke<Record<string, number>>("roster_stock");
+}
+
 // --- Station trading ---
 
 export interface TradeRow {
