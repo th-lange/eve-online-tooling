@@ -130,7 +130,7 @@ Installers are produced by the **Release** GitHub Actions workflow (`.github/wor
 To cut a release:
 
 1. Bump the version in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`.
-2. Commit, then tag and push: `git tag v0.3.0 && git push origin v0.3.0`.
+2. Commit, then tag and push: `git tag v0.4.0 && git push origin v0.4.0`.
 
 The workflow builds Linux / macOS / Windows installers on their respective runners and attaches them
 to the GitHub Release for that tag (it can also be run manually from the **Actions** tab against an
