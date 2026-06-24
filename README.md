@@ -6,6 +6,8 @@ built as a set of feature **modules** over a shared service layer.
 - **Production** — read your characters' (and corp) blueprints, fetch live market prices, and rank what
   you can manufacture by build-vs-buy **profit**, including recursive build-vs-buy and T2 invention.
 - **Station Trading** — scan a hub for profitable buy→sell flips, with a blacklist and favorites.
+- **Daytrading** — scans multiple regional hubs for price gaps on the same item, finds the best
+  cross-region flip (buy cheapest → sell dearest) after taxes/fees, ranked by ISK/m³.
 - **Mission-running** and more — planned.
 
 Built with **Tauri 2** (Rust core) + **React / TypeScript** (Vite). Market and character data come
@@ -116,6 +118,11 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
   depth on each side — **Sell vol** / **Buy vol** (units listed in sell vs buy orders) — alongside
   **Traded/day** (real units moved, from market history; buys and sells are the same quantity, so that
   column isn't split).
+- **Daytrading module** — pick a set of regional hubs (or all of them) and scan ~19k items for the
+  best **cross-region** flip on each: buy at the cheapest hub, sell at the dearest, after sales tax +
+  broker fee. Ranked by **ISK/m³** (cargo is the constraint), with the buy→sell route, per-unit
+  profit, margin, item volume, and sell-hub daily-traded volume — sortable, searchable, with the same
+  blacklist/favorites.
 
 ## Releasing
 
