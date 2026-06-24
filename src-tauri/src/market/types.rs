@@ -14,6 +14,10 @@ pub struct Order {
 pub struct HistoryDay {
     pub date: String,
     pub average: f64,
+    #[serde(default)]
+    pub highest: f64,
+    #[serde(default)]
+    pub lowest: f64,
     pub order_count: i64,
     pub volume: i64,
 }

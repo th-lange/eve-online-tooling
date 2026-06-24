@@ -74,8 +74,14 @@ export interface TradeRow {
   volume: number;
   /** Buy-side order-book depth — units listed in buy orders. */
   buyVolume: number;
+  /** Buy depth ÷ sell depth — demand vs supply pressure (>1 = more buyers). */
+  buySellRatio: number;
   /** Average units traded per day, from market history (buys == sells). */
   dailyTraded: number;
+  /** Sell depth ÷ daily-traded — days of supply on the book. */
+  daysOfSupply: number;
+  /** Set when the current sell sits at a recent price extreme, else null. */
+  priceFlag: string | null;
   favorite: boolean;
   category: string | null;
   group: string | null;

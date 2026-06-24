@@ -280,7 +280,9 @@ type TradeSortKey =
   | "margin"
   | "volume"
   | "buyVolume"
-  | "dailyTraded";
+  | "buySellRatio"
+  | "dailyTraded"
+  | "daysOfSupply";
 
 const TRADE_COLUMNS: SortColumn<TradeSortKey>[] = [
   { key: "name", label: "Item", numeric: false, description: "The item's name." },
@@ -321,11 +323,23 @@ const TRADE_COLUMNS: SortColumn<TradeSortKey>[] = [
     description: "Units currently listed in buy orders — buy-side depth.",
   },
   {
+    key: "buySellRatio",
+    label: "B/S",
+    numeric: true,
+    description: "Buy depth ÷ sell depth — demand vs supply pressure (>1 = more buyers listed).",
+  },
+  {
     key: "dailyTraded",
     label: "Traded/day",
     numeric: true,
     description:
       "Average units traded per day, from market history. Buys and sells are the same quantity (every trade is both), so it isn't split.",
+  },
+  {
+    key: "daysOfSupply",
+    label: "Supply",
+    numeric: true,
+    description: "Sell-side depth ÷ daily-traded — days of supply on the book (lower clears faster).",
   },
 ];
 
@@ -393,7 +407,17 @@ function TradeTable({
                 </button>
               </td>
               <td className="px-3 py-1.5">
-                <div className="text-zinc-200">{r.name}</div>
+                <div className="text-zinc-200">
+                  {r.name}
+                  {r.priceFlag && (
+                    <span
+                      className="ml-1 text-amber-400"
+                      title={`Current sell price is ${r.priceFlag} — possible mean-reversion`}
+                    >
+                      ⚠
+                    </span>
+                  )}
+                </div>
                 {(r.category || r.group) && (
                   <div className="text-xs text-zinc-500">
                     {[r.category, r.group].filter(Boolean).join(" · ")}
@@ -401,10 +425,10 @@ function TradeTable({
                 )}
               </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {formatIsk(r.buy)}
+                <UndercutPrice value={r.buy} tick={0.01} label="buy (overcut +0.01)" />
               </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {formatIsk(r.sell)}
+                <UndercutPrice value={r.sell} tick={-0.01} label="sell (undercut −0.01)" />
               </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
                 {formatIsk(r.profitPerUnit)}
@@ -418,14 +442,32 @@ function TradeTable({
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                 {formatInt(r.buyVolume)}
               </td>
+              <td
+                className={`px-3 py-1.5 text-right tabular-nums ${
+                  r.buySellRatio >= 1 ? "text-emerald-400" : "text-zinc-400"
+                }`}
+              >
+                {r.buySellRatio > 0
+                  ? r.buySellRatio.toLocaleString(undefined, {
+                      maximumFractionDigits: 2,
+                    })
+                  : "—"}
+              </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
                 {formatInt(r.dailyTraded)}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                {r.daysOfSupply > 0
+                  ? r.daysOfSupply.toLocaleString(undefined, {
+                      maximumFractionDigits: 1,
+                    })
+                  : "—"}
               </td>
             </tr>
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={9} className="px-3 py-6 text-center text-zinc-500">
+              <td colSpan={11} className="px-3 py-6 text-center text-zinc-500">
                 Hit Calculate to scan the market.
               </td>
             </tr>
@@ -433,6 +475,28 @@ function TradeTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** A price that copies an undercut/overcut value (one tick) to the clipboard. */
+function UndercutPrice({
+  value,
+  tick,
+  label,
+}: {
+  value: number;
+  tick: number;
+  label: string;
+}) {
+  const adjusted = Math.max(value + tick, 0);
+  return (
+    <button
+      onClick={() => navigator.clipboard?.writeText(adjusted.toFixed(2))}
+      title={`Copy ${label}: ${adjusted.toFixed(2)}`}
+      className="hover:text-zinc-100"
+    >
+      {formatIsk(value)}
+    </button>
   );
 }
 

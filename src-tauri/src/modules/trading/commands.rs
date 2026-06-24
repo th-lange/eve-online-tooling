@@ -114,11 +114,23 @@ pub async fn station_trading(
     // (units moved/day). Only the truncated rows are fetched, so we don't pull
     // history for the whole ~19k catalogue. Region-scoped + cached.
     let displayed_ids: Vec<i64> = out.iter().map(|r| r.type_id).collect();
-    let traded = market
-        .daily_traded_volumes(params.region_id, &displayed_ids, TRADED_VOLUME_DAYS)
+    let stats = market
+        .daily_traded_stats(params.region_id, &displayed_ids, TRADED_VOLUME_DAYS)
         .await;
     for row in &mut out {
-        row.daily_traded = traded.get(&row.type_id).copied().unwrap_or(0);
+        let s = stats.get(&row.type_id).cloned().unwrap_or_default();
+        row.daily_traded = s.volume;
+        row.days_of_supply = if s.volume > 0 {
+            row.volume as f64 / s.volume as f64
+        } else {
+            0.0
+        };
+        // Flag a current sell price sitting at a recent extreme (mean-reversion risk).
+        if s.high > 0.0 && row.sell > s.high {
+            row.price_flag = Some(format!("above {TRADED_VOLUME_DAYS}d high"));
+        } else if s.low > 0.0 && row.sell < s.low {
+            row.price_flag = Some(format!("below {TRADED_VOLUME_DAYS}d low"));
+        }
     }
 
     Ok(out)

@@ -33,10 +33,19 @@ pub struct TradeRow {
     pub volume: i64,
     /// Buy-side order-book depth — units currently listed in buy orders.
     pub buy_volume: i64,
+    /// Buy-side depth ÷ sell-side depth — demand vs supply pressure on the book
+    /// (>1 = more buyers listed than sellers).
+    pub buy_sell_ratio: f64,
     /// Average units actually *traded* per day, from market history (#14). Filled
     /// in by the command for the displayed set; 0 until then. (Buys and sells are
     /// the same quantity — every trade is both — so this isn't split.)
     pub daily_traded: i64,
+    /// Sell-side depth ÷ daily-traded — days of supply on the book (how long your
+    /// stock takes to clear / how contested). Filled by the command.
+    pub days_of_supply: f64,
+    /// Set when the current sell price sits at a recent extreme ("above 30d high"
+    /// / "below 30d low") — risk of mean reversion. Filled by the command.
+    pub price_flag: Option<String>,
     pub favorite: bool,
     /// Category/group of the item (Ship/Module…, Frigate/Cruiser…), for search + filters.
     pub category: Option<String>,
@@ -73,7 +82,17 @@ pub fn evaluate(
         margin,
         volume: model.daily_volume.unwrap_or(0),
         buy_volume: model.buy_volume.unwrap_or(0),
+        buy_sell_ratio: {
+            let sell_listed = model.daily_volume.unwrap_or(0);
+            if sell_listed > 0 {
+                model.buy_volume.unwrap_or(0) as f64 / sell_listed as f64
+            } else {
+                0.0
+            }
+        },
         daily_traded: 0,
+        days_of_supply: 0.0,
+        price_flag: None,
         favorite,
         category: None,
         group: None,
