@@ -269,6 +269,14 @@ function BreakdownRow({ row }: { row: ProfitBreakdown }) {
                       ⚠
                     </span>
                   )}
+                  {m.have > 0 && (
+                    <span
+                      className="ml-1 rounded bg-emerald-900/60 px-1 text-[10px] text-emerald-300"
+                      title={`You own ${m.have} — only the shortfall is bought`}
+                    >
+                      have {formatInt(m.have)}
+                    </span>
+                  )}
                 </td>
                 <td className="text-right tabular-nums">
                   {formatInt(m.requiredQuantity)}

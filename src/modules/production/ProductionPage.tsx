@@ -7,6 +7,7 @@ import {
   productionGetList,
   productionProfit,
   productionSetList,
+  rosterStock,
   sdeStatus,
   sdeUpdate,
   type ListName,
@@ -95,6 +96,7 @@ function Workbench() {
   const [runs, setRuns] = useState(1);
   const [me, setMe] = useState(0);
   const [useOwnedMe, setUseOwnedMe] = useState(true);
+  const [useStock, setUseStock] = useState(false);
   const [te, setTe] = useState(0);
   const [timeSkill, setTimeSkill] = useState(5);
   const [structure, setStructure] = useState<StructureKey>("npc");
@@ -128,6 +130,11 @@ function Workbench() {
   const decryptors = useQuery({
     queryKey: ["production", "decryptors"],
     queryFn: productionDecryptors,
+  });
+  const stock = useQuery({
+    queryKey: ["roster", "stock"],
+    queryFn: rosterStock,
+    enabled: useStock,
   });
   const ownedSet = useMemo(
     () => new Set(owned.data?.map((b) => b.typeId)),
@@ -218,6 +225,7 @@ function Workbench() {
       structureTePct: STRUCTURES[structure].tePct,
       meBonus: STRUCTURES[structure].meBonus,
       costBonus: STRUCTURES[structure].costBonus,
+      stock: useStock ? (stock.data ?? {}) : {},
       systemCostIndex: costIndexPct / 100,
       facilityTax: facilityTaxPct / 100,
       materialBasis,
@@ -405,6 +413,17 @@ function Workbench() {
             </Field>
             <Field label="Materials priced at">
               <BasisSelect value={materialBasis} onChange={setMaterialBasis} />
+              <label
+                className="mt-1 flex items-center gap-1 text-xs text-zinc-300"
+                title="Net your owned assets (across the roster) against each bill of materials — you only pay for the shortfall."
+              >
+                <input
+                  type="checkbox"
+                  checked={useStock}
+                  onChange={(e) => setUseStock(e.currentTarget.checked)}
+                />
+                Use my stock{stock.isFetching ? " (loading…)" : ""}
+              </label>
             </Field>
             <Field label="Product priced at">
               <BasisSelect value={productBasis} onChange={setProductBasis} />

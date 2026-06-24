@@ -379,6 +379,8 @@ export interface MaterialLine {
   typeId: number;
   name: string;
   requiredQuantity: number;
+  /** Units covered from owned stock; lineCost only pays the shortfall. */
+  have: number;
   unitPrice: number | null;
   lineCost: number;
   /** True when building this input is cheaper than buying it. */
@@ -486,6 +488,8 @@ export interface ProfitParams {
   costBonus?: number;
   /** SCC surcharge fraction of EIV (default 0.04). */
   sccSurcharge?: number;
+  /** Owned stock per type id; netted against the top-level bill of materials. */
+  stock?: Record<number, number>;
 }
 
 /** Rank every manufacturable item by build-vs-buy profit at the chosen market. */
