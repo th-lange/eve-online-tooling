@@ -8,6 +8,7 @@ use serde::de::DeserializeOwned;
 use super::error::EsiError;
 use super::{ESI_BASE, USER_AGENT};
 
+#[derive(Clone)]
 pub struct EsiClient {
     http: reqwest::Client,
     base: String,
