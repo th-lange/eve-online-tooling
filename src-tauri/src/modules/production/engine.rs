@@ -158,6 +158,8 @@ pub struct MaterialLine {
     pub type_id: i64,
     pub name: String,
     pub required_quantity: i64,
+    /// Units covered from owned stock (#41); `line_cost` only pays the shortfall.
+    pub have: i64,
     /// Unit cost used (the cheaper of build vs buy when buildable).
     pub unit_price: Option<f64>,
     pub line_cost: f64,
@@ -331,15 +333,27 @@ fn eiv_unit_value(model: Option<&PriceModel>) -> f64 {
 }
 
 /// Evaluate a (manufacturing) build step into a profit breakdown.
-///
-/// v1 values every input at market (`Sourcing::Buy`); `Build` sub-steps are
-/// treated as buy until the recursive resolver lands in #10.
 pub fn evaluate(
     step: &BuildStep,
     runs: i64,
     me: i64,
     prices: &HashMap<i64, PriceModel>,
     config: &ProfitConfig,
+) -> ProfitBreakdown {
+    evaluate_with_stock(step, runs, me, prices, config, &HashMap::new())
+}
+
+/// Like [`evaluate`] but nets `stock` (type id → owned quantity) against the
+/// top-level bill of materials: you only pay for the shortfall of each input you
+/// already own ("Have"). Job fee (EIV) is unaffected — it doesn't depend on what
+/// you hold. Stock is applied at the top level only, not deep in sub-builds.
+pub fn evaluate_with_stock(
+    step: &BuildStep,
+    runs: i64,
+    me: i64,
+    prices: &HashMap<i64, PriceModel>,
+    config: &ProfitConfig,
+    stock: &HashMap<i64, i64>,
 ) -> ProfitBreakdown {
     debug_assert!(
         matches!(step.activity, Activity::Manufacturing),
@@ -377,10 +391,15 @@ pub fn evaluate(
             }
             Sourcing::Buy => (buy_unit, false),
         };
+        // Net owned stock: only pay for the shortfall you don't already hold.
+        let have = required.min(stock.get(&input.type_id).copied().unwrap_or(0));
+        let to_source = required - have;
         let line_cost = match unit_price {
-            Some(p) => p * required as f64,
+            Some(p) => p * to_source as f64,
             None => {
-                missing_prices.push(input.type_id);
+                if to_source > 0 {
+                    missing_prices.push(input.type_id);
+                }
                 0.0
             }
         };
@@ -391,6 +410,7 @@ pub fn evaluate(
             type_id: input.type_id,
             name: input.name.clone(),
             required_quantity: required,
+            have,
             unit_price,
             line_cost,
             built,
@@ -443,6 +463,7 @@ pub fn evaluate(
                     type_id: dc.type_id,
                     name: dc.name.clone(),
                     required_quantity: dc.base_quantity,
+                    have: 0,
                     unit_price: unit,
                     line_cost: line,
                     built: false,
@@ -641,6 +662,25 @@ mod tests {
         assert!(b.missing_prices.is_empty());
         assert_eq!(b.materials.len(), 2);
         approx(b.materials[0].line_cost, 180.0);
+    }
+
+    #[test]
+    fn stock_covers_the_shortfall_only() {
+        // Own all 36 Tritanium (type 200) needed at ME10; pay only for Pyerite.
+        let stock = HashMap::from([(200_i64, 100_i64)]);
+        let b = evaluate_with_stock(
+            &widget_step(),
+            1,
+            10,
+            &widget_prices(),
+            &ProfitConfig::default(),
+            &stock,
+        );
+        // Trit line: have 36, cost 0; Pyerite: 9 × 10 = 90.
+        approx(b.materials[0].line_cost, 0.0);
+        assert_eq!(b.materials[0].have, 36);
+        approx(b.materials[1].line_cost, 90.0);
+        approx(b.material_cost, 90.0);
     }
 
     fn buildable_step() -> (BuildStep, HashMap<i64, PriceModel>) {

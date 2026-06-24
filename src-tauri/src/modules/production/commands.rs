@@ -13,7 +13,7 @@ use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
 use super::engine::{
-    evaluate, manufacturing_step, Activity, BuildStep, InputLine, Invention, PriceBasis,
+    evaluate_with_stock, manufacturing_step, Activity, BuildStep, InputLine, Invention, PriceBasis,
     ProfitBreakdown, ProfitConfig, Sourcing,
 };
 use crate::sde::Recipe;
@@ -158,6 +158,10 @@ pub struct ProfitParams {
     /// SCC surcharge fraction of EIV (CCP's 4% manufacturing default).
     #[serde(default = "default_scc")]
     pub scc_surcharge: f64,
+    /// Owned stock per type id (from `roster_stock`); netted against the
+    /// top-level bill of materials so you only buy the shortfall. Empty = none.
+    #[serde(default)]
+    pub stock: HashMap<i64, i64>,
 }
 
 fn default_me_bonus() -> f64 {
@@ -342,7 +346,8 @@ pub async fn production_profit(
                 .get(&step.blueprint_type_id)
                 .copied()
                 .unwrap_or(params.me);
-            let mut bd = evaluate(step, params.runs, step_me, &prices, &config);
+            let mut bd =
+                evaluate_with_stock(step, params.runs, step_me, &prices, &config, &params.stock);
             // Job time = base × runs × (1 − TE/100) × skill × structure.
             let te = params
                 .owned_te
