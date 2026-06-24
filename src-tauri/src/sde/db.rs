@@ -6,7 +6,7 @@ use std::path::Path;
 
 use super::types::{
     activity, BlueprintMaterial, BlueprintProduct, Decryptor, InventionData,
-    ManufacturableBlueprint, MarketItem, Recipe, TypeInfo,
+    ManufacturableBlueprint, MarketItem, Recipe, ReprocessRecipe, TypeInfo,
 };
 use super::SdeError;
 
@@ -302,6 +302,49 @@ impl Sde {
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Published, reprocessable items in a category (e.g. 25 = Asteroid/ore),
+    /// each with its `portionSize` and per-portion refine outputs from
+    /// `invTypeMaterials`. One query, grouped in Rust.
+    pub fn reprocess_recipes(&self, category_id: i64) -> Result<Vec<ReprocessRecipe>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.typeID, t.typeName, t.portionSize, m.materialTypeID, mt.typeName, m.quantity
+             FROM invTypes t
+             JOIN invGroups g ON g.groupID = t.groupID
+             JOIN invTypeMaterials m ON m.typeID = t.typeID
+             JOIN invTypes mt ON mt.typeID = m.materialTypeID
+             WHERE g.categoryID = ?1 AND t.published = 1 AND t.portionSize > 0
+             ORDER BY t.typeID, m.materialTypeID",
+        )?;
+        let rows = stmt.query_map(params![category_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,    // type id
+                row.get::<_, String>(1)?, // type name
+                row.get::<_, i64>(2)?,    // portion size
+                BlueprintMaterial {
+                    material_type_id: row.get(3)?,
+                    name: row.get(4)?,
+                    quantity: row.get(5)?,
+                },
+            ))
+        })?;
+
+        // Group consecutive rows (ordered by type id) into one recipe per item.
+        let mut out: Vec<ReprocessRecipe> = Vec::new();
+        for row in rows {
+            let (type_id, name, portion_size, material) = row?;
+            match out.last_mut() {
+                Some(r) if r.type_id == type_id => r.outputs.push(material),
+                _ => out.push(ReprocessRecipe {
+                    type_id,
+                    name,
+                    portion_size,
+                    outputs: vec![material],
+                }),
+            }
+        }
+        Ok(out)
     }
 
     /// Map of typeID -> group name (Frigate, Cruiser, Hybrid Weapon, …).
