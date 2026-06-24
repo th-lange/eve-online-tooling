@@ -49,9 +49,11 @@ pub struct DayTradeRow {
     /// by the command for the displayed set; 0 until then.
     pub dest_volume: i64,
     pub favorite: bool,
-    /// Category/group for search (Ship/Module…, Frigate/Cruiser…).
+    /// Category/group for search + filters (Ship/Module…, Frigate/Cruiser…).
     pub category: Option<String>,
     pub group: Option<String>,
+    /// Meta group (Tech I/II/III, Faction, …), for the tech-level filter.
+    pub meta_group: Option<String>,
 }
 
 /// Find the best cross-region flip for one item from its per-hub `quotes`. Buys
@@ -105,6 +107,7 @@ pub fn evaluate(
         favorite,
         category: None,
         group: None,
+        meta_group: None,
     })
 }
 

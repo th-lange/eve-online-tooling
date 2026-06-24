@@ -108,6 +108,7 @@ pub async fn daytrading_scan(
         .collect();
     let categories = sde.category_names().map_err(|e| e.to_string())?;
     let groups = sde.group_names().map_err(|e| e.to_string())?;
+    let meta = sde.meta_group_names().map_err(|e| e.to_string())?;
     let config = DayTradeConfig {
         sales_tax: params.sales_tax,
         broker_fee: params.broker_fee,
@@ -142,6 +143,11 @@ pub async fn daytrading_scan(
             }
             row.category = categories.get(&item.type_id).cloned();
             row.group = groups.get(&item.type_id).cloned();
+            row.meta_group = Some(
+                meta.get(&item.type_id)
+                    .cloned()
+                    .unwrap_or_else(|| "Tech I".to_string()),
+            );
             Some(row)
         })
         .collect();

@@ -142,6 +142,8 @@ export interface DayTradeRow {
   favorite: boolean;
   category: string | null;
   group: string | null;
+  /** Meta group (Tech I/II/III, Faction, …). */
+  metaGroup: string | null;
 }
 
 export interface DayTradeParams {

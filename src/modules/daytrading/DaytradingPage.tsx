@@ -17,6 +17,10 @@ import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell
 
 type Tab = "opportunities" | "favorites" | "blacklist";
 
+// Sensible default filters: tradeable goods, no junk. Exact SDE category/meta names.
+const DEFAULT_CATEGORIES = ["Ship", "Module", "Charge"];
+const DEFAULT_METAS = ["Tech I", "Tech II", "Tech III"];
+
 export function DaytradingPage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
   if (status.isLoading) return <Centered>Checking static data…</Centered>;
@@ -35,6 +39,12 @@ function Workbench() {
   const [taxPct, setTaxPct] = useState(4.5);
   const [minProfit, setMinProfit] = useState("100000");
   const [search, setSearch] = useState("");
+  // Default: usable trade goods only — Ships/Modules/Charges, Tech I–III. Hides
+  // blueprints, SKINs, apparel, faction/officer/etc. The user can broaden these.
+  const [categories, setCategories] = useState<Set<string>>(
+    () => new Set(DEFAULT_CATEGORIES),
+  );
+  const [metas, setMetas] = useState<Set<string>>(() => new Set(DEFAULT_METAS));
   const [rows, setRows] = useState<DayTradeRow[]>([]);
 
   const regions = useQuery({ queryKey: ["market", "regions"], queryFn: marketRegions });
@@ -87,17 +97,33 @@ function Workbench() {
     () => new Map(rows.map((r) => [r.typeId, r])),
     [rows],
   );
+  const categoryOptions = useMemo(
+    () => uniqueSorted(rows, (r) => r.category),
+    [rows],
+  );
+  const metaOptions = useMemo(
+    () => uniqueSorted(rows, (r) => r.metaGroup),
+    [rows],
+  );
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
-      [r.name, r.category, r.group, r.buyHub, r.sellHub]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(q),
-    );
-  }, [rows, search]);
+    return rows.filter((r) => {
+      if (categories.size > 0 && !(r.category && categories.has(r.category)))
+        return false;
+      if (metas.size > 0 && !(r.metaGroup && metas.has(r.metaGroup)))
+        return false;
+      if (
+        q &&
+        ![r.name, r.category, r.group, r.buyHub, r.sellHub]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(q)
+      )
+        return false;
+      return true;
+    });
+  }, [rows, search, categories, metas]);
 
   function toggleRegion(id: number) {
     setRegionIds((prev) => {
@@ -186,12 +212,35 @@ function Workbench() {
           ) : (
             <div>
               {rows.length > 0 && (
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.currentTarget.value)}
-                  placeholder="Search name / category / hub…"
-                  className="mb-2 w-72 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
-                />
+                <div className="mb-2 grid gap-3 md:grid-cols-2">
+                  <Field label="Category">
+                    <CheckboxGroup
+                      options={categoryOptions}
+                      selected={categories}
+                      onToggle={(v) => setCategories(toggle(categories, v))}
+                    />
+                  </Field>
+                  <Field label="Tech level / meta">
+                    <CheckboxGroup
+                      options={metaOptions}
+                      selected={metas}
+                      onToggle={(v) => setMetas(toggle(metas, v))}
+                    />
+                  </Field>
+                </div>
+              )}
+              {rows.length > 0 && (
+                <div className="mb-2 flex items-center gap-3">
+                  <input
+                    value={search}
+                    onChange={(e) => setSearch(e.currentTarget.value)}
+                    placeholder="Search name / category / hub…"
+                    className="w-72 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+                  />
+                  <span className="text-xs text-zinc-500">
+                    {filteredRows.length} of {rows.length} shown
+                  </span>
+                </div>
               )}
               <DayTradeTable
                 rows={filteredRows}
@@ -387,6 +436,59 @@ function DayTradeTable({
           )}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function uniqueSorted(
+  rows: DayTradeRow[],
+  pick: (r: DayTradeRow) => string | null,
+): string[] {
+  const set = new Set<string>();
+  for (const r of rows) {
+    const v = pick(r);
+    if (v) set.add(v);
+  }
+  return [...set].sort();
+}
+
+function toggle(set: Set<string>, v: string): Set<string> {
+  const next = new Set(set);
+  next.has(v) ? next.delete(v) : next.add(v);
+  return next;
+}
+
+function CheckboxGroup({
+  options,
+  selected,
+  onToggle,
+}: {
+  options: string[];
+  selected: Set<string>;
+  onToggle: (v: string) => void;
+}) {
+  if (options.length === 0) {
+    return <div className="text-xs text-zinc-600">—</div>;
+  }
+  return (
+    <div className="flex max-h-28 flex-wrap gap-1 overflow-auto">
+      {options.map((o) => (
+        <label
+          key={o}
+          className={`flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 text-xs ${
+            selected.has(o)
+              ? "bg-zinc-700 text-zinc-100"
+              : "bg-zinc-800 text-zinc-400"
+          }`}
+        >
+          <input
+            type="checkbox"
+            checked={selected.has(o)}
+            onChange={() => onToggle(o)}
+          />
+          {o}
+        </label>
+      ))}
     </div>
   );
 }
