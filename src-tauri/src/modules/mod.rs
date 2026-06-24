@@ -5,6 +5,7 @@ pub mod accounting;
 pub mod appraisal;
 pub mod assets;
 pub mod character;
+pub mod contracts;
 pub mod daytrading;
 pub mod production;
 pub mod reprocessing;

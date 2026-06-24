@@ -9,6 +9,7 @@ import { MarketHistoryPage } from "./markethistory/MarketHistoryPage";
 import { AssetsPage } from "./assets/AssetsPage";
 import { CharacterPage } from "./character/CharacterPage";
 import { AccountingPage } from "./accounting/AccountingPage";
+import { ContractsPage } from "./contracts/ContractsPage";
 
 // A feature module = a nav entry + the page rendered at `/{id}`. Adding a new
 // module (daytrading, station-trading, …) is a one-line entry here plus its
@@ -84,5 +85,11 @@ export const modules: ModuleDef[] = [
     title: "Accounting",
     description: "Wallet history and FIFO realized profit.",
     Component: AccountingPage,
+  },
+  {
+    id: "contracts",
+    title: "Public Contracts",
+    description: "Find item-exchange contracts worth more than their price.",
+    Component: ContractsPage,
   },
 ];

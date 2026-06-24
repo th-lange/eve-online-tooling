@@ -68,6 +68,7 @@ pub fn run() {
             modules::assets::commands::assets_value,
             modules::accounting::commands::wallet_sync,
             modules::accounting::commands::profit_fifo,
+            modules::contracts::commands::contracts_scan,
             modules::character::commands::character_skills,
             modules::character::commands::character_standings,
             modules::character::commands::character_research,
