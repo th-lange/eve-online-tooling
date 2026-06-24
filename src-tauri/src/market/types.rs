@@ -48,8 +48,11 @@ pub struct PriceModel {
     pub average_price: Option<f64>,
     /// Most recent daily average from market history.
     pub daily_average: Option<f64>,
-    /// Most recent daily traded volume (liquidity).
+    /// Sell-side order-book volume — units currently listed in sell orders. (In
+    /// the per-item ESI path this instead holds the latest daily traded volume.)
     pub daily_volume: Option<i64>,
+    /// Buy-side order-book volume — units currently listed in buy orders.
+    pub buy_volume: Option<i64>,
     /// Most recent daily distinct-order count.
     pub order_count: Option<i64>,
     /// N-day moving average of the daily average.

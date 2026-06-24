@@ -29,10 +29,13 @@ pub struct TradeRow {
     pub profit_per_unit: f64,
     /// Profit / cost.
     pub margin: f64,
-    /// Order-book volume (units currently *listed*) — order-book liquidity.
+    /// Sell-side order-book depth — units currently listed in sell orders.
     pub volume: i64,
+    /// Buy-side order-book depth — units currently listed in buy orders.
+    pub buy_volume: i64,
     /// Average units actually *traded* per day, from market history (#14). Filled
-    /// in by the command for the displayed set; 0 until then.
+    /// in by the command for the displayed set; 0 until then. (Buys and sells are
+    /// the same quantity — every trade is both — so this isn't split.)
     pub daily_traded: i64,
     pub favorite: bool,
     /// Category/group of the item (Ship/Module…, Frigate/Cruiser…), for search.
@@ -67,6 +70,7 @@ pub fn evaluate(
         profit_per_unit,
         margin,
         volume: model.daily_volume.unwrap_or(0),
+        buy_volume: model.buy_volume.unwrap_or(0),
         daily_traded: 0,
         favorite,
         category: None,
@@ -84,6 +88,7 @@ mod tests {
             buy_percentile: Some(buy),
             sell_percentile: Some(sell),
             daily_volume: Some(vol),
+            buy_volume: Some(vol / 2),
             ..Default::default()
         }
     }
@@ -100,6 +105,7 @@ mod tests {
         assert!((r.profit_per_unit - 17.9).abs() < 1e-6);
         assert!((r.margin - 17.9 / 103.0).abs() < 1e-6);
         assert_eq!(r.volume, 500);
+        assert_eq!(r.buy_volume, 250);
     }
 
     #[test]

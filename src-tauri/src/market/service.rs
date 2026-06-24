@@ -259,6 +259,7 @@ fn model_from_aggregate(
         average_price: sell.and_then(|s| priced(s.weighted_average, s.order_count)),
         adjusted_price: adjusted.and_then(|a| a.adjusted_price),
         daily_volume: sell.map(|s| s.volume as i64),
+        buy_volume: buy.map(|b| b.volume as i64),
         order_count: sell.map(|s| s.order_count),
         daily_average: None,
         moving_average: None,

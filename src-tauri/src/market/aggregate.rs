@@ -68,6 +68,9 @@ pub fn assemble_price_model(
         average_price: adjusted.and_then(|a| a.average_price),
         daily_average: latest.map(|h| h.average),
         daily_volume: latest.map(|h| h.volume),
+        // Buy-side order-book depth isn't modelled in the per-item ESI path
+        // (the order rows we parse don't carry remaining quantity).
+        buy_volume: None,
         order_count: latest.map(|h| h.order_count),
         moving_average: moving_average(history, ma_days),
     }
