@@ -39,6 +39,8 @@ export interface OwnedBlueprint {
   corporation: boolean;
   /** The blueprint's type id (matches a production row's blueprintTypeId). */
   typeId: number;
+  /** Blueprint name from the SDE, e.g. "Hobgoblin II Blueprint". */
+  name: string;
   materialEfficiency: number;
   timeEfficiency: number;
   runs: number;

@@ -73,6 +73,8 @@ pub struct OwnedBlueprint {
     /// True for a corporation blueprint, false for a personal one.
     pub corporation: bool,
     pub type_id: i64,
+    /// Blueprint name (resolved from the SDE), e.g. "Hobgoblin II Blueprint".
+    pub name: String,
     pub material_efficiency: i64,
     pub time_efficiency: i64,
     pub runs: i64,
@@ -96,6 +98,7 @@ pub async fn owned_blueprints(
             character_name: c.name.clone(),
             corporation,
             type_id: b.type_id,
+            name: String::new(),
             material_efficiency: b.material_efficiency,
             time_efficiency: b.time_efficiency,
             runs: b.runs,
@@ -112,6 +115,21 @@ pub async fn owned_blueprints(
             {
                 out.extend(blueprints.into_iter().map(|b| to_owned(b, true)));
             }
+        }
+    }
+
+    // Resolve blueprint names from the SDE (cached per type id).
+    if let Ok(sde) = crate::sde::Sde::open(&crate::sde::SdePaths::new(dir).db) {
+        let mut names: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
+        for bp in &mut out {
+            let name = names.entry(bp.type_id).or_insert_with(|| {
+                sde.type_info(bp.type_id)
+                    .ok()
+                    .flatten()
+                    .map(|t| t.name)
+                    .unwrap_or_else(|| format!("Type {}", bp.type_id))
+            });
+            bp.name = name.clone();
         }
     }
     Ok(out)
