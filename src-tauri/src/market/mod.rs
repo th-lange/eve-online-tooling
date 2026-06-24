@@ -16,6 +16,6 @@ mod markets;
 mod service;
 mod types;
 
-pub use markets::{default_region_id, location_label, regions, resolve_location, Region};
+pub use markets::{default_region_id, location_label, regions, resolve_location};
 pub use service::MarketService;
 pub use types::PriceModel;

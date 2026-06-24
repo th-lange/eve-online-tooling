@@ -38,9 +38,11 @@ pub struct TradeRow {
     /// the same quantity — every trade is both — so this isn't split.)
     pub daily_traded: i64,
     pub favorite: bool,
-    /// Category/group of the item (Ship/Module…, Frigate/Cruiser…), for search.
+    /// Category/group of the item (Ship/Module…, Frigate/Cruiser…), for search + filters.
     pub category: Option<String>,
     pub group: Option<String>,
+    /// Meta group (Tech I/II/III, Faction, …), for the tech-level filter.
+    pub meta_group: Option<String>,
 }
 
 /// Evaluate one item. `None` if it has no usable buy/sell price.
@@ -75,6 +77,7 @@ pub fn evaluate(
         favorite,
         category: None,
         group: None,
+        meta_group: None,
     })
 }
 
