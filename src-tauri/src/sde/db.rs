@@ -6,7 +6,7 @@ use std::path::Path;
 
 use super::types::{
     activity, BlueprintMaterial, BlueprintProduct, Decryptor, InventionData,
-    ManufacturableBlueprint, MarketItem, Recipe, ReprocessRecipe, TypeInfo,
+    ManufacturableBlueprint, MarketItem, Recipe, ReprocessRecipe, TypeDetail, TypeInfo,
 };
 use super::SdeError;
 
@@ -381,6 +381,93 @@ impl Sde {
             Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
         })?;
         rows.collect::<Result<HashMap<_, _>, _>>().map_err(Into::into)
+    }
+
+    /// All item categories (id, name) — the root of the universe browser tree.
+    pub fn universe_categories(&self) -> Result<Vec<(i64, String)>, SdeError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT categoryID, categoryName FROM invCategories ORDER BY categoryName")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Groups in a category (id, name), optionally published-only.
+    pub fn universe_groups(
+        &self,
+        category_id: i64,
+        published_only: bool,
+    ) -> Result<Vec<(i64, String)>, SdeError> {
+        let sql = if published_only {
+            "SELECT g.groupID, g.groupName FROM invGroups g
+             WHERE g.categoryID = ?1 AND EXISTS
+               (SELECT 1 FROM invTypes t WHERE t.groupID = g.groupID AND t.published = 1)
+             ORDER BY g.groupName"
+        } else {
+            "SELECT groupID, groupName FROM invGroups WHERE categoryID = ?1 ORDER BY groupName"
+        };
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = stmt.query_map(params![category_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Types in a group (id, name), optionally published-only.
+    pub fn universe_types(
+        &self,
+        group_id: i64,
+        published_only: bool,
+    ) -> Result<Vec<(i64, String)>, SdeError> {
+        let sql = if published_only {
+            "SELECT typeID, typeName FROM invTypes WHERE groupID = ?1 AND published = 1 ORDER BY typeName"
+        } else {
+            "SELECT typeID, typeName FROM invTypes WHERE groupID = ?1 ORDER BY typeName"
+        };
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = stmt.query_map(params![group_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Full SDE metadata for a type (for the detail pane).
+    pub fn type_detail(&self, type_id: i64) -> Result<Option<TypeDetail>, SdeError> {
+        self.conn
+            .query_row(
+                "SELECT typeName, description, mass, volume, capacity, portionSize,
+                        marketGroupID, published, basePrice
+                 FROM invTypes WHERE typeID = ?1",
+                params![type_id],
+                |r| {
+                    Ok(TypeDetail {
+                        type_id,
+                        name: r.get(0)?,
+                        description: r.get(1)?,
+                        mass: r.get(2)?,
+                        volume: r.get(3)?,
+                        capacity: r.get(4)?,
+                        portion_size: r.get(5)?,
+                        market_group_id: r.get(6)?,
+                        published: r.get::<_, i64>(7).unwrap_or(0) != 0,
+                        base_price: r.get(8)?,
+                    })
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    /// Dogma attributes for a type: (display name, value), published attrs only.
+    pub fn type_attributes(&self, type_id: i64) -> Result<Vec<(String, f64)>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT COALESCE(NULLIF(a.displayName, ''), a.attributeName),
+                    COALESCE(ta.valueFloat, ta.valueInt)
+             FROM dgmTypeAttributes ta
+             JOIN dgmAttributeTypes a ON a.attributeID = ta.attributeID
+             WHERE ta.typeID = ?1 AND a.published = 1
+             ORDER BY a.attributeName",
+        )?;
+        let rows = stmt.query_map(params![type_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Option<f64>>(1)?.unwrap_or(0.0)))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
     /// Map of typeID -> group name (Frigate, Cruiser, Hybrid Weapon, …).

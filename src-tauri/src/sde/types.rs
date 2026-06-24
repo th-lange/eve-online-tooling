@@ -78,6 +78,22 @@ pub struct InventionData {
     pub relic: Option<BlueprintMaterial>,
 }
 
+/// Full SDE metadata for one type (universe browser detail pane).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TypeDetail {
+    pub type_id: i64,
+    pub name: String,
+    pub description: Option<String>,
+    pub mass: Option<f64>,
+    pub volume: Option<f64>,
+    pub capacity: Option<f64>,
+    pub portion_size: Option<i64>,
+    pub market_group_id: Option<i64>,
+    pub published: bool,
+    pub base_price: Option<f64>,
+}
+
 /// What reprocessing/refining one item yields, per `portion_size` units.
 #[derive(Debug, Clone)]
 pub struct ReprocessRecipe {

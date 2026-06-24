@@ -7,8 +7,30 @@
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use super::types::{BlueprintMaterial, BlueprintProduct, ManufacturableBlueprint, TypeInfo};
+use super::types::{
+    BlueprintMaterial, BlueprintProduct, ManufacturableBlueprint, TypeDetail, TypeInfo,
+};
 use super::{download_sde, Sde, SdeError, SdePaths};
+
+/// An (id, name) pair for the universe browser tree.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdName {
+    pub id: i64,
+    pub name: String,
+}
+
+fn id_names(pairs: Vec<(i64, String)>) -> Vec<IdName> {
+    pairs.into_iter().map(|(id, name)| IdName { id, name }).collect()
+}
+
+/// A named dogma attribute value.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttrPair {
+    pub name: String,
+    pub value: f64,
+}
 
 /// Installation state of the local SDE.
 #[derive(Debug, Clone, Serialize)]
@@ -155,4 +177,46 @@ pub fn sde_manufacturable_blueprints(
     open(&app)?
         .manufacturable_blueprints()
         .map_err(|e| e.to_string())
+}
+
+// --- Universe browser ---
+
+#[tauri::command]
+pub fn sde_categories(app: AppHandle) -> Result<Vec<IdName>, String> {
+    open(&app)?
+        .universe_categories()
+        .map(id_names)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn sde_groups(app: AppHandle, category_id: i64, published_only: bool) -> Result<Vec<IdName>, String> {
+    open(&app)?
+        .universe_groups(category_id, published_only)
+        .map(id_names)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn sde_types(app: AppHandle, group_id: i64, published_only: bool) -> Result<Vec<IdName>, String> {
+    open(&app)?
+        .universe_types(group_id, published_only)
+        .map(id_names)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn sde_type_detail(app: AppHandle, type_id: i64) -> Result<Option<TypeDetail>, String> {
+    open(&app)?.type_detail(type_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn sde_type_attributes(app: AppHandle, type_id: i64) -> Result<Vec<AttrPair>, String> {
+    let attrs = open(&app)?
+        .type_attributes(type_id)
+        .map_err(|e| e.to_string())?;
+    Ok(attrs
+        .into_iter()
+        .map(|(name, value)| AttrPair { name, value })
+        .collect())
 }
