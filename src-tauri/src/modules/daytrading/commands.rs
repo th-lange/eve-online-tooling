@@ -40,9 +40,22 @@ pub struct DayTradeParams {
     pub sales_tax: f64,
     #[serde(default)]
     pub broker_fee: f64,
+    /// Hauling cost in ISK per m³ (0 = ignore shipping).
+    #[serde(default)]
+    pub shipping_rate: f64,
     /// Minimum profit per unit (ISK) to keep a row.
     #[serde(default)]
     pub min_profit: f64,
+    /// Days of demand to stock — suggested quantity = sell-hub daily volume × this.
+    #[serde(default = "default_purchase_days")]
+    pub purchase_days: f64,
+    /// Drop rows whose sell-hub daily-traded volume is below this (illiquid).
+    #[serde(default)]
+    pub min_daily_demand: i64,
+}
+
+fn default_purchase_days() -> f64 {
+    1.0
 }
 
 /// One hub being scanned: its region, station, short label, and per-type prices.
@@ -112,6 +125,7 @@ pub async fn daytrading_scan(
     let config = DayTradeConfig {
         sales_tax: params.sales_tax,
         broker_fee: params.broker_fee,
+        shipping_rate: params.shipping_rate,
     };
 
     let mut out: Vec<DayTradeRow> = items
@@ -179,6 +193,28 @@ pub async fn daytrading_scan(
     }
     for row in &mut out {
         row.dest_volume = traded.get(&row.type_id).copied().unwrap_or(0);
+        // Suggested quantity = how much the sell hub moves over the window.
+        row.suggested_qty = (row.dest_volume as f64 * params.purchase_days).round() as i64;
+        row.total_profit = row.profit_per_unit * row.suggested_qty as f64;
+        // Days-of-supply = sell-hub order-book sell listing ÷ daily-traded. High =
+        // a contested book (slow to clear); low = clears fast.
+        let listed = hubs
+            .iter()
+            .find(|h| h.region_id == row.sell_region_id)
+            .and_then(|h| h.prices.get(&row.type_id))
+            .and_then(|m| m.daily_volume)
+            .unwrap_or(0);
+        row.days_of_supply = if row.dest_volume > 0 {
+            listed as f64 / row.dest_volume as f64
+        } else {
+            0.0
+        };
+    }
+
+    // Liquidity floor: drop rows the sell hub can't absorb (after enrichment,
+    // since dest_volume comes from history).
+    if params.min_daily_demand > 0 {
+        out.retain(|r| r.dest_volume >= params.min_daily_demand);
     }
 
     Ok(out)
