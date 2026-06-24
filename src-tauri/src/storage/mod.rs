@@ -111,6 +111,31 @@ pub fn cache_get<T: DeserializeOwned>(app_data_dir: &Path, key: &str) -> Option<
     (env.expires >= now_epoch()).then_some(env.value)
 }
 
+/// Load a durable (non-expiring) JSON document by name, or `None` if absent.
+/// For accumulated history (wallet journal, transactions) that must survive
+/// restarts and grow beyond ESI's window.
+pub fn load_data<T: DeserializeOwned>(app_data_dir: &Path, name: &str) -> Option<T> {
+    let safe = sanitize(name);
+    let bytes = std::fs::read(app_data_dir.join("data").join(format!("{safe}.json"))).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+/// Persist a durable JSON document by name.
+pub fn save_data<T: Serialize>(app_data_dir: &Path, name: &str, value: &T) -> Result<(), String> {
+    let path = app_data_dir.join("data").join(format!("{}.json", sanitize(name)));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let data = serde_json::to_vec(value).map_err(|e| e.to_string())?;
+    std::fs::write(path, data).map_err(|e| e.to_string())
+}
+
+fn sanitize(key: &str) -> String {
+    key.chars()
+        .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .collect()
+}
+
 /// Write a cached value that stays fresh for `ttl_secs`.
 pub fn cache_put<T: Serialize>(
     app_data_dir: &Path,

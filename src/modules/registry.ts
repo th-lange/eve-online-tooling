@@ -8,6 +8,7 @@ import { UniversePage } from "./universe/UniversePage";
 import { MarketHistoryPage } from "./markethistory/MarketHistoryPage";
 import { AssetsPage } from "./assets/AssetsPage";
 import { CharacterPage } from "./character/CharacterPage";
+import { AccountingPage } from "./accounting/AccountingPage";
 
 // A feature module = a nav entry + the page rendered at `/{id}`. Adding a new
 // module (daytrading, station-trading, …) is a one-line entry here plus its
@@ -77,5 +78,11 @@ export const modules: ModuleDef[] = [
     title: "Character",
     description: "Skills, standings and R&D research.",
     Component: CharacterPage,
+  },
+  {
+    id: "accounting",
+    title: "Accounting",
+    description: "Wallet history and FIFO realized profit.",
+    Component: AccountingPage,
   },
 ];
