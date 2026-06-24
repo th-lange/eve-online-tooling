@@ -339,6 +339,43 @@ export function assetsValue(params: AssetsParams): Promise<AssetsResult> {
   return invoke<AssetsResult>("assets_value", { params });
 }
 
+// --- Character (skills / standings / research) ---
+
+export interface SkillsView {
+  totalSp: number;
+  unallocatedSp: number;
+  trainedCount: number;
+  queue: { skillName: string; level: number; finishDate: string | null }[];
+}
+export function characterSkills(): Promise<SkillsView> {
+  return invoke<SkillsView>("character_skills");
+}
+
+export interface StandingRow {
+  name: string;
+  fromType: string;
+  base: number;
+  effective: number;
+  skill: string;
+}
+export function characterStandings(): Promise<StandingRow[]> {
+  return invoke<StandingRow[]>("character_standings");
+}
+
+export interface ResearchView {
+  rows: {
+    agent: string;
+    skill: string;
+    pointsPerDay: number;
+    currentPoints: number;
+  }[];
+  totalPoints: number;
+  pointsPerDay: number;
+}
+export function characterResearch(): Promise<ResearchView> {
+  return invoke<ResearchView>("character_research");
+}
+
 // --- SDE (Static Data Export) ---
 
 export interface SdeStatus {

@@ -62,6 +62,62 @@ async fn authed_get_paged<T: DeserializeOwned>(
     Ok(out)
 }
 
+/// Authenticated single-page ESI GET (deserialized). Shared by the character
+/// data viewers (skills, standings, research, mining, fleet).
+pub async fn authed_get<T: DeserializeOwned>(
+    auth: &AuthState,
+    character_id: i64,
+    path: &str,
+) -> Result<T, AuthError> {
+    let token = auth.access_token_for(character_id).await?;
+    let resp = auth
+        .http()
+        .get(format!("{ESI_BASE}{path}"))
+        .bearer_auth(&token)
+        .send()
+        .await?
+        .error_for_status()?;
+    Ok(resp.json().await?)
+}
+
+/// Public `/universe/names/` resolver: ids → names (characters, corps, factions,
+/// systems, types). Unauthenticated POST; unknown ids are simply absent.
+pub async fn resolve_names(
+    auth: &AuthState,
+    ids: &[i64],
+) -> std::collections::HashMap<i64, String> {
+    #[derive(Deserialize)]
+    struct NameRow {
+        id: i64,
+        name: String,
+    }
+    let mut out = std::collections::HashMap::new();
+    if ids.is_empty() {
+        return out;
+    }
+    // ESI caps the batch at 1000 ids per call. Failures are skipped, not fatal.
+    for chunk in ids.chunks(1000) {
+        let Ok(resp) = auth
+            .http()
+            .post(format!("{ESI_BASE}/latest/universe/names/"))
+            .json(&chunk)
+            .send()
+            .await
+        else {
+            continue;
+        };
+        let Ok(resp) = resp.error_for_status() else {
+            continue;
+        };
+        if let Ok(rows) = resp.json::<Vec<NameRow>>().await {
+            for r in rows {
+                out.insert(r.id, r.name);
+            }
+        }
+    }
+    out
+}
+
 /// Open the in-game market details window for a type (ESI UI write).
 pub async fn open_market_window(
     auth: &AuthState,

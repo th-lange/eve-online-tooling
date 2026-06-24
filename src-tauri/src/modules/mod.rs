@@ -3,6 +3,7 @@
 
 pub mod appraisal;
 pub mod assets;
+pub mod character;
 pub mod daytrading;
 pub mod production;
 pub mod reprocessing;
