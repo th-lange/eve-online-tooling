@@ -3,4 +3,5 @@
 
 pub mod daytrading;
 pub mod production;
+pub mod reprocessing;
 pub mod trading;

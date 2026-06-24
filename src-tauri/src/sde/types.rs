@@ -78,6 +78,17 @@ pub struct InventionData {
     pub relic: Option<BlueprintMaterial>,
 }
 
+/// What reprocessing/refining one item yields, per `portion_size` units.
+#[derive(Debug, Clone)]
+pub struct ReprocessRecipe {
+    pub type_id: i64,
+    pub name: String,
+    /// Units consumed per refine cycle (`portionSize`); yields are per portion.
+    pub portion_size: i64,
+    /// Output materials and their per-portion base quantity (before efficiency).
+    pub outputs: Vec<BlueprintMaterial>,
+}
+
 /// A tradeable market item (published, has a market group).
 #[derive(Debug, Clone)]
 pub struct MarketItem {

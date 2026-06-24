@@ -55,6 +55,10 @@ pub fn run() {
             modules::daytrading::commands::daytrading_scan,
             modules::daytrading::commands::daytrading_get_list,
             modules::daytrading::commands::daytrading_set_list,
+            modules::reprocessing::commands::reprocessing_scan,
+            modules::reprocessing::commands::reprocessing_efficiency,
+            modules::reprocessing::commands::reprocessing_get_list,
+            modules::reprocessing::commands::reprocessing_set_list,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
