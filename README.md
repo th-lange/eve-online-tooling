@@ -112,8 +112,10 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
   restarts, and removing a character clears its credential.
 - **Station-trading module** — scan a hub's ~19k market items for buy→sell flips: profit/unit and
   margin after broker fee + sales tax, with a min-volume filter, plus persisted **blacklist** and
-  **favorites** tabs (★/✕ on each row). The table is **sortable** on every column and shows both
-  order-book **Listed** volume and **Traded/day** (real units moved, from market history).
+  **favorites** tabs (★/✕ on each row). The table is **sortable** on every column and shows order-book
+  depth on each side — **Sell vol** / **Buy vol** (units listed in sell vs buy orders) — alongside
+  **Traded/day** (real units moved, from market history; buys and sells are the same quantity, so that
+  column isn't split).
 
 ## Releasing
 

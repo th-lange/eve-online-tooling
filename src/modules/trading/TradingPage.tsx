@@ -238,6 +238,7 @@ type TradeSortKey =
   | "profitPerUnit"
   | "margin"
   | "volume"
+  | "buyVolume"
   | "dailyTraded";
 
 const TRADE_COLUMNS: SortColumn<TradeSortKey>[] = [
@@ -268,15 +269,22 @@ const TRADE_COLUMNS: SortColumn<TradeSortKey>[] = [
   },
   {
     key: "volume",
-    label: "Listed",
+    label: "Sell vol",
     numeric: true,
-    description: "Units currently listed in orders — order-book liquidity.",
+    description: "Units currently listed in sell orders — sell-side depth.",
+  },
+  {
+    key: "buyVolume",
+    label: "Buy vol",
+    numeric: true,
+    description: "Units currently listed in buy orders — buy-side depth.",
   },
   {
     key: "dailyTraded",
     label: "Traded/day",
     numeric: true,
-    description: "Average units actually traded per day, from market history.",
+    description:
+      "Average units traded per day, from market history. Buys and sells are the same quantity (every trade is both), so it isn't split.",
   },
 ];
 
@@ -366,6 +374,9 @@ function TradeTable({
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                 {formatInt(r.volume)}
               </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                {formatInt(r.buyVolume)}
+              </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
                 {formatInt(r.dailyTraded)}
               </td>
@@ -373,7 +384,7 @@ function TradeTable({
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={8} className="px-3 py-6 text-center text-zinc-500">
+              <td colSpan={9} className="px-3 py-6 text-center text-zinc-500">
                 Hit Calculate to scan the market.
               </td>
             </tr>
