@@ -309,6 +309,19 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Search marketable types by name substring (case-insensitive), capped.
+    /// For pickers (market history, etc.).
+    pub fn search_types(&self, query: &str, limit: i64) -> Result<Vec<(i64, String)>, SdeError> {
+        let pattern = format!("%{}%", query.trim());
+        let mut stmt = self.conn.prepare(
+            "SELECT typeID, typeName FROM invTypes
+             WHERE published = 1 AND marketGroupID IS NOT NULL AND typeName LIKE ?1
+             ORDER BY LENGTH(typeName), typeName LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![pattern, limit], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// Resolve an item by (case-insensitive) name → `(type_id, packaged_volume)`.
     /// For the appraisal tool's clipboard parsing.
     pub fn type_by_name(&self, name: &str) -> Result<Option<(i64, Option<f64>)>, SdeError> {

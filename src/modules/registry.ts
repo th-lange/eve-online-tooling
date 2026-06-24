@@ -5,6 +5,7 @@ import { DaytradingPage } from "./daytrading/DaytradingPage";
 import { ReprocessingPage } from "./reprocessing/ReprocessingPage";
 import { AppraisalPage } from "./appraisal/AppraisalPage";
 import { UniversePage } from "./universe/UniversePage";
+import { MarketHistoryPage } from "./markethistory/MarketHistoryPage";
 
 // A feature module = a nav entry + the page rendered at `/{id}`. Adding a new
 // module (daytrading, station-trading, …) is a one-line entry here plus its
@@ -56,5 +57,11 @@ export const modules: ModuleDef[] = [
     title: "Universe",
     description: "Browse every item type with stats and dogma attributes.",
     Component: UniversePage,
+  },
+  {
+    id: "market-history",
+    title: "Market History",
+    description: "Daily price & volume trend for an item in a region.",
+    Component: MarketHistoryPage,
   },
 ];

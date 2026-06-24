@@ -210,6 +210,18 @@ pub fn sde_type_detail(app: AppHandle, type_id: i64) -> Result<Option<TypeDetail
     open(&app)?.type_detail(type_id).map_err(|e| e.to_string())
 }
 
+/// Search marketable types by name (for pickers).
+#[tauri::command]
+pub fn sde_search(app: AppHandle, query: String) -> Result<Vec<IdName>, String> {
+    if query.trim().len() < 2 {
+        return Ok(Vec::new());
+    }
+    open(&app)?
+        .search_types(&query, 25)
+        .map(id_names)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn sde_type_attributes(app: AppHandle, type_id: i64) -> Result<Vec<AttrPair>, String> {
     let attrs = open(&app)?
