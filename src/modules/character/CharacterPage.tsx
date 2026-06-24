@@ -1,13 +1,15 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  characterFleet,
+  characterMining,
   characterResearch,
   characterSkills,
   characterStandings,
 } from "../../lib/api";
-import { formatInt } from "../../lib/format";
+import { formatInt, formatIsk } from "../../lib/format";
 
-type Tab = "skills" | "standings" | "research";
+type Tab = "skills" | "standings" | "research" | "mining" | "fleet";
 
 export function CharacterPage() {
   const [tab, setTab] = useState<Tab>("skills");
@@ -25,6 +27,8 @@ export function CharacterPage() {
         {tab === "skills" && <Skills />}
         {tab === "standings" && <Standings />}
         {tab === "research" && <Research />}
+        {tab === "mining" && <Mining />}
+        {tab === "fleet" && <Fleet />}
       </div>
     </div>
   );
@@ -167,6 +171,97 @@ function Research() {
   );
 }
 
+function Mining() {
+  const q = useQuery({ queryKey: ["char", "mining"], queryFn: characterMining });
+  if (q.isError) return <Err e={q.error} />;
+  if (!q.data) return <Loading />;
+  const d = q.data;
+  return (
+    <div>
+      <div className="mb-3 grid grid-cols-3 gap-4 text-sm">
+        <Window label="24h" units={d.units24h} value={d.value24h} />
+        <Window label="7d" units={d.units7d} value={d.value7d} />
+        <Window label="30d" units={d.units30d} value={d.value30d} />
+      </div>
+      {d.systems.length > 0 && (
+        <div className="mb-2 text-xs text-zinc-500">Recent systems: {d.systems.join(", ")}</div>
+      )}
+      <div className="overflow-auto rounded border border-zinc-800">
+        <table className="w-full text-sm">
+          <thead className="bg-zinc-900 text-zinc-400">
+            <tr>
+              <th className="px-3 py-2 text-left font-medium">Ore (30d)</th>
+              <th className="px-3 py-2 text-right font-medium">Units</th>
+              <th className="px-3 py-2 text-right font-medium">Value (Jita buy)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {d.rows.map((r, i) => (
+              <tr key={i} className="border-t border-zinc-800 text-zinc-300">
+                <td className="px-3 py-1.5">{r.name}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">{formatInt(r.quantity)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
+                  {formatIsk(r.value)}
+                </td>
+              </tr>
+            ))}
+            {d.rows.length === 0 && (
+              <tr>
+                <td colSpan={3} className="px-3 py-4 text-center text-zinc-500">
+                  No mining in the last 30 days.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function Fleet() {
+  const q = useQuery({ queryKey: ["char", "fleet"], queryFn: characterFleet });
+  if (q.isError) return <Err e={q.error} />;
+  if (!q.data) return <Loading />;
+  if (!q.data.inFleet) {
+    return <div className="p-8 text-center text-sm text-zinc-500">Not in a fleet.</div>;
+  }
+  return (
+    <div className="overflow-auto rounded border border-zinc-800">
+      <table className="w-full text-sm">
+        <thead className="bg-zinc-900 text-zinc-400">
+          <tr>
+            <th className="px-3 py-2 text-left font-medium">Member</th>
+            <th className="px-3 py-2 text-left font-medium">Ship</th>
+            <th className="px-3 py-2 text-left font-medium">System</th>
+            <th className="px-3 py-2 text-left font-medium">Role</th>
+          </tr>
+        </thead>
+        <tbody>
+          {q.data.members.map((m, i) => (
+            <tr key={i} className="border-t border-zinc-800 text-zinc-300">
+              <td className="px-3 py-1.5 text-zinc-200">{m.name}</td>
+              <td className="px-3 py-1.5">{m.ship}</td>
+              <td className="px-3 py-1.5 text-zinc-400">{m.system}</td>
+              <td className="px-3 py-1.5 text-zinc-500">{m.role}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Window({ label, units, value }: { label: string; units: number; value: number }) {
+  return (
+    <div className="rounded border border-zinc-800 bg-zinc-900 p-3">
+      <div className="text-xs text-zinc-500">{label}</div>
+      <div className="tabular-nums text-zinc-200">{formatInt(units)} units</div>
+      <div className="tabular-nums text-emerald-400">{formatIsk(value)}</div>
+    </div>
+  );
+}
+
 function until(iso: string): string {
   const ms = new Date(iso).getTime() - Date.now();
   if (ms <= 0) return "done";
@@ -180,6 +275,8 @@ function Tabs({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
     { value: "skills", label: "Skills" },
     { value: "standings", label: "Standings" },
     { value: "research", label: "Research" },
+    { value: "mining", label: "Mining" },
+    { value: "fleet", label: "Fleet" },
   ];
   return (
     <div className="mt-4 inline-flex rounded border border-zinc-800 bg-zinc-900 p-0.5">

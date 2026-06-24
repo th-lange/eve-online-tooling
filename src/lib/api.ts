@@ -376,6 +376,34 @@ export function characterResearch(): Promise<ResearchView> {
   return invoke<ResearchView>("character_research");
 }
 
+export interface MiningView {
+  units24h: number;
+  units7d: number;
+  units30d: number;
+  value24h: number;
+  value7d: number;
+  value30d: number;
+  rows: { name: string; quantity: number; value: number }[];
+  systems: string[];
+}
+export function characterMining(): Promise<MiningView> {
+  return invoke<MiningView>("character_mining");
+}
+
+export interface FleetView {
+  inFleet: boolean;
+  members: {
+    name: string;
+    ship: string;
+    system: string;
+    role: string;
+    joined: string;
+  }[];
+}
+export function characterFleet(): Promise<FleetView> {
+  return invoke<FleetView>("character_fleet");
+}
+
 // --- SDE (Static Data Export) ---
 
 export interface SdeStatus {

@@ -69,6 +69,8 @@ pub fn run() {
             modules::character::commands::character_skills,
             modules::character::commands::character_standings,
             modules::character::commands::character_research,
+            modules::character::commands::character_mining,
+            modules::character::commands::character_fleet,
             modules::reprocessing::commands::reprocessing_scan,
             modules::reprocessing::commands::reprocessing_efficiency,
             modules::reprocessing::commands::reprocessing_get_list,
