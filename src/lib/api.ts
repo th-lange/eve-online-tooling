@@ -305,6 +305,40 @@ export function appraisal(params: AppraisalParams): Promise<AppraisalResult> {
   return invoke<AppraisalResult>("appraisal", { params });
 }
 
+// --- Assets ---
+
+export interface AssetRow {
+  typeId: number;
+  name: string;
+  quantity: number;
+  sellPrice: number | null;
+  buyPrice: number | null;
+  sellValue: number;
+  buyValue: number;
+  sellHub: string | null;
+  volume: number;
+  category: string | null;
+  group: string | null;
+}
+
+export interface AssetsResult {
+  rows: AssetRow[];
+  sellTotal: number;
+  buyTotal: number;
+  volumeTotal: number;
+}
+
+export interface AssetsParams {
+  regionId?: number;
+  stationId?: number | null;
+  bestHub?: boolean;
+}
+
+/** Value the roster's holdings at a market (or best hub). */
+export function assetsValue(params: AssetsParams): Promise<AssetsResult> {
+  return invoke<AssetsResult>("assets_value", { params });
+}
+
 // --- SDE (Static Data Export) ---
 
 export interface SdeStatus {
