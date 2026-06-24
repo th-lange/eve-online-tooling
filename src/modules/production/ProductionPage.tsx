@@ -10,6 +10,7 @@ import {
   sdeStatus,
   sdeUpdate,
   type ListName,
+  type OwnedBlueprint,
   type PriceBasis,
   type ProfitBreakdown,
   type ProfitParams,
@@ -18,7 +19,26 @@ import { formatIsk, formatPercent } from "../../lib/format";
 import { SdeSetup } from "./SdeSetup";
 import { ProfitTable } from "./ProfitTable";
 
-type ResultsView = "opportunities" | "favorites" | "blacklist";
+type ResultsView = "opportunities" | "favorites" | "blacklist" | "library";
+
+/** A blueprint the user imported to model (not necessarily owned via ESI). */
+interface ImportedBlueprint {
+  typeId: number;
+  name: string;
+  me: number;
+  te: number;
+}
+
+const IMPORTED_BP_KEY = "production.importedBlueprints";
+
+function loadImported(): ImportedBlueprint[] {
+  try {
+    const raw = localStorage.getItem(IMPORTED_BP_KEY);
+    return raw ? (JSON.parse(raw) as ImportedBlueprint[]) : [];
+  } catch {
+    return [];
+  }
+}
 
 const FORGE = 10000002;
 
@@ -102,21 +122,34 @@ function Workbench() {
     [owned.data],
   );
   const ownedCount = ownedSet.size;
-  // Best researched ME/TE per owned blueprint type (highest across all copies).
+  const [imported, setImported] = useState<ImportedBlueprint[]>(loadImported);
+  function saveImported(next: ImportedBlueprint[]) {
+    setImported(next);
+    try {
+      localStorage.setItem(IMPORTED_BP_KEY, JSON.stringify(next));
+    } catch {
+      // storage may be unavailable; the overlay still works in-memory
+    }
+  }
+
+  // Best researched ME/TE per blueprint type (highest across owned copies, then
+  // imported entries layered on so you can model BPs you don't own yet).
   const ownedMe = useMemo(() => {
     const map: Record<number, number> = {};
     for (const b of owned.data ?? []) {
       map[b.typeId] = Math.max(map[b.typeId] ?? 0, b.materialEfficiency);
     }
+    for (const b of imported) map[b.typeId] = Math.max(map[b.typeId] ?? 0, b.me);
     return map;
-  }, [owned.data]);
+  }, [owned.data, imported]);
   const ownedTe = useMemo(() => {
     const map: Record<number, number> = {};
     for (const b of owned.data ?? []) {
       map[b.typeId] = Math.max(map[b.typeId] ?? 0, b.timeEfficiency);
     }
+    for (const b of imported) map[b.typeId] = Math.max(map[b.typeId] ?? 0, b.te);
     return map;
-  }, [owned.data]);
+  }, [owned.data, imported]);
   const update = useMutation({ mutationFn: () => sdeUpdate(false) });
   const [rows, setRows] = useState<ProfitBreakdown[]>([]);
   const profit = useMutation({
@@ -502,6 +535,7 @@ function Workbench() {
         counts={{
           favorites: favorites.data?.length ?? 0,
           blacklist: blacklist.data?.length ?? 0,
+          library: (owned.data?.length ?? 0) + imported.length,
         }}
       />
 
@@ -543,6 +577,13 @@ function Workbench() {
             }
           />
         )}
+        {view === "library" && (
+          <BlueprintLibrary
+            owned={owned.data ?? []}
+            imported={imported}
+            onImport={saveImported}
+          />
+        )}
       </div>
     </div>
   );
@@ -555,12 +596,13 @@ function ViewTabs({
 }: {
   view: ResultsView;
   onChange: (v: ResultsView) => void;
-  counts: { favorites: number; blacklist: number };
+  counts: { favorites: number; blacklist: number; library: number };
 }) {
   const tabs: { value: ResultsView; label: string }[] = [
     { value: "opportunities", label: "Opportunities" },
     { value: "favorites", label: `Favorites (${counts.favorites})` },
     { value: "blacklist", label: `Blacklist (${counts.blacklist})` },
+    { value: "library", label: `Library (${counts.library})` },
   ];
   return (
     <div className="mt-4 inline-flex rounded border border-zinc-800 bg-zinc-900 p-0.5">
@@ -577,6 +619,173 @@ function ViewTabs({
           {t.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+function BlueprintLibrary({
+  owned,
+  imported,
+  onImport,
+}: {
+  owned: OwnedBlueprint[];
+  imported: ImportedBlueprint[];
+  onImport: (next: ImportedBlueprint[]) => void;
+}) {
+  function exportJson() {
+    const payload = {
+      owned: owned.map((b) => ({
+        typeId: b.typeId,
+        name: b.name,
+        me: b.materialEfficiency,
+        te: b.timeEfficiency,
+        runs: b.runs,
+      })),
+      imported,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "blueprint-library.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function importJson(file: File) {
+    file.text().then((text) => {
+      try {
+        const parsed = JSON.parse(text);
+        const list: unknown[] = Array.isArray(parsed)
+          ? parsed
+          : (parsed.imported ?? parsed.owned ?? []);
+        const next: ImportedBlueprint[] = [];
+        for (const item of list) {
+          const o = item as Record<string, unknown>;
+          const typeId = Number(o.typeId);
+          if (!typeId) continue;
+          next.push({
+            typeId,
+            name: String(o.name ?? `Type ${typeId}`),
+            me: Number(o.me ?? o.materialEfficiency ?? 0),
+            te: Number(o.te ?? o.timeEfficiency ?? 0),
+          });
+        }
+        // Merge with existing imports (new entries override by typeId).
+        const merged = new Map(imported.map((b) => [b.typeId, b]));
+        for (const b of next) merged.set(b.typeId, b);
+        onImport([...merged.values()]);
+      } catch {
+        alert("Couldn't parse that file as a blueprint library JSON.");
+      }
+    });
+  }
+
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-2">
+        <button
+          onClick={exportJson}
+          className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+        >
+          Export JSON
+        </button>
+        <label className="cursor-pointer rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800">
+          Import JSON
+          <input
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.currentTarget.files?.[0];
+              if (f) importJson(f);
+              e.currentTarget.value = "";
+            }}
+          />
+        </label>
+        <span className="text-xs text-zinc-500">
+          Imported blueprints model BPs you don't own — their ME/TE feed the
+          ranking.
+        </span>
+      </div>
+      <div className="overflow-auto rounded border border-zinc-800">
+        <table className="w-full border-collapse text-sm">
+          <thead className="bg-zinc-900 text-zinc-400">
+            <tr>
+              <th className="px-3 py-2 text-left font-medium">Blueprint</th>
+              <th className="px-3 py-2 text-left font-medium">Owner</th>
+              <th className="px-3 py-2 text-right font-medium">Runs</th>
+              <th className="px-3 py-2 text-right font-medium">ME</th>
+              <th className="px-3 py-2 text-right font-medium">TE</th>
+              <th className="px-3 py-2 text-right font-medium">Qty</th>
+              <th className="w-8" />
+            </tr>
+          </thead>
+          <tbody>
+            {owned.map((b, i) => (
+              <tr key={`o${i}`} className="border-t border-zinc-800">
+                <td className="px-3 py-1.5 text-zinc-200">{b.name}</td>
+                <td className="px-3 py-1.5 text-zinc-400">
+                  {b.characterName}
+                  {b.corporation ? " (corp)" : ""}
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                  {b.runs === -1 ? "∞ (BPO)" : b.runs}
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+                  {b.materialEfficiency}
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+                  {b.timeEfficiency}
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                  {b.quantity}
+                </td>
+                <td />
+              </tr>
+            ))}
+            {imported.map((b) => (
+              <tr key={`i${b.typeId}`} className="border-t border-zinc-800 bg-sky-950/20">
+                <td className="px-3 py-1.5 text-zinc-200">
+                  {b.name}
+                  <span className="ml-1 rounded bg-sky-900/60 px-1 text-[10px] text-sky-300">
+                    imported
+                  </span>
+                </td>
+                <td className="px-3 py-1.5 text-zinc-500">—</td>
+                <td className="px-3 py-1.5 text-right text-zinc-500">—</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+                  {b.me}
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+                  {b.te}
+                </td>
+                <td className="px-3 py-1.5 text-right text-zinc-500">—</td>
+                <td className="px-2 text-center">
+                  <button
+                    onClick={() =>
+                      onImport(imported.filter((x) => x.typeId !== b.typeId))
+                    }
+                    title="Remove imported blueprint"
+                    className="text-zinc-600 hover:text-rose-400"
+                  >
+                    ✕
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {owned.length === 0 && imported.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-3 py-6 text-center text-zinc-500">
+                  No blueprints. Log in a character, or import a library JSON.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
