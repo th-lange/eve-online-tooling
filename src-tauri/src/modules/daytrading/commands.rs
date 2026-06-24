@@ -13,6 +13,9 @@ use crate::storage;
 use super::engine::{evaluate, DayTradeConfig, DayTradeRow, Quote};
 
 const RESULT_CAP: usize = 500;
+/// On top of the ISK/m³ top list, also keep this many by absolute per-unit
+/// profit, so high-value bulky flips (ships) aren't hidden by the cargo metric.
+const PROFIT_CAP: usize = 200;
 
 /// History window (days) averaged for the sell-hub daily-traded volume.
 const TRADED_VOLUME_DAYS: usize = 7;
@@ -166,13 +169,23 @@ pub async fn daytrading_scan(
         })
         .collect();
 
-    // Rank by ISK/m³ — the metric a hauler optimizes (cargo-bound).
+    // Two views matter for hauling: ISK/m³ (cargo-bound) and absolute profit — a
+    // bulky ship can have low ISK/m³ but a big per-unit margin. Keep the top of
+    // each so high-value flips aren't silently dropped by the cap.
+    out.sort_by(|a, b| {
+        b.profit_per_unit
+            .partial_cmp(&a.profit_per_unit)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let by_profit: Vec<DayTradeRow> = out.iter().take(PROFIT_CAP).cloned().collect();
     out.sort_by(|a, b| {
         b.isk_per_m3
             .partial_cmp(&a.isk_per_m3)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     out.truncate(RESULT_CAP);
+    let present: HashSet<i64> = out.iter().map(|r| r.type_id).collect();
+    out.extend(by_profit.into_iter().filter(|r| !present.contains(&r.type_id)));
 
     // Enrich the displayed set with daily-traded volume at each row's sell hub
     // (how much you can realistically offload). Group by sell region so each

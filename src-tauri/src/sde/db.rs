@@ -287,18 +287,23 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
-    /// All published items that appear on the market (for trading modules).
+    /// All published items that appear on the market (for trading modules). The
+    /// `volume` is the **packaged** (hauling) volume: for ships `invTypes.volume`
+    /// is the *assembled* volume, so it's overridden by the per-group packaged
+    /// constant (e.g. an Assault Frigate is 2,500 m³, not its ~16k assembled).
     pub fn market_items(&self) -> Result<Vec<MarketItem>, SdeError> {
         let mut stmt = self.conn.prepare(
-            "SELECT typeID, typeName, volume FROM invTypes
+            "SELECT typeID, typeName, groupID, volume FROM invTypes
              WHERE published = 1 AND marketGroupID IS NOT NULL
              ORDER BY typeID",
         )?;
         let rows = stmt.query_map([], |row| {
+            let group_id: i64 = row.get(2)?;
+            let assembled: Option<f64> = row.get(3)?;
             Ok(MarketItem {
                 type_id: row.get(0)?,
                 name: row.get(1)?,
-                volume: row.get(2)?,
+                volume: packaged_volume(group_id, assembled),
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -402,9 +407,42 @@ impl Sde {
     }
 }
 
+/// Packaged (hauling) volume for a type, given its group and assembled volume.
+/// Ships repackage to a fixed per-group size; `invTypes.volume` is the assembled
+/// figure, so combat-ship groups are overridden with their packaged constant.
+/// Groups not listed (industrials, mining barges, capitals) and all non-ship
+/// items fall back to the assembled/own volume.
+fn packaged_volume(group_id: i64, assembled: Option<f64>) -> Option<f64> {
+    let packaged = match group_id {
+        // Frigate-class → 2,500 m³
+        25 | 237 | 324 | 830 | 831 | 834 | 893 | 1022 | 1283 | 1527 => Some(2_500.0),
+        31 => Some(500.0), // Shuttle
+        // Destroyer-class → 5,000
+        420 | 541 | 1305 | 1534 => Some(5_000.0),
+        // Cruiser-class → 10,000
+        26 | 358 | 832 | 833 | 894 | 906 | 963 | 1972 => Some(10_000.0),
+        // Battlecruiser-class → 15,000
+        419 | 540 | 1201 => Some(15_000.0),
+        // Battleship-class → 50,000
+        27 | 898 | 900 => Some(50_000.0),
+        _ => None,
+    };
+    packaged.or(assembled)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn packaged_volume_overrides_ships_only() {
+        // Assault Frigate (324) packages to 2,500 regardless of assembled volume.
+        assert_eq!(packaged_volume(324, Some(16_500.0)), Some(2_500.0));
+        assert_eq!(packaged_volume(27, Some(486_000.0)), Some(50_000.0)); // Battleship
+        // Non-ship / unmapped groups keep their own volume.
+        assert_eq!(packaged_volume(18, Some(0.01)), Some(0.01)); // Mineral
+        assert_eq!(packaged_volume(513, Some(16_250_000.0)), Some(16_250_000.0)); // Freighter (fallback)
+    }
 
     /// A tiny in-memory SDE: blueprint 999 builds 1x Widget (100) from
     /// 40x Tritanium (200) + 10x Pyerite (300).
