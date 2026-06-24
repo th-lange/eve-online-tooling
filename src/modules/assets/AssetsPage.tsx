@@ -1,0 +1,201 @@
+import { useMemo, useState, type ReactNode } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+  assetsValue,
+  marketRegions,
+  sdeStatus,
+  type AssetRow,
+  type AssetsParams,
+  type AssetsResult,
+} from "../../lib/api";
+import { SdeSetup } from "../production/SdeSetup";
+import { formatInt, formatIsk } from "../../lib/format";
+
+const FORGE = 10000002;
+const JITA = 60003760;
+
+export function AssetsPage() {
+  const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
+  if (status.isLoading) return <Centered>Checking static data…</Centered>;
+  if (!status.data?.installed) {
+    return <SdeSetup onInstalled={() => status.refetch()} />;
+  }
+  return <Workbench />;
+}
+
+function Workbench() {
+  const [regionId, setRegionId] = useState(FORGE);
+  const [stationId, setStationId] = useState<number | null>(JITA);
+  const [bestHub, setBestHub] = useState(false);
+  const [search, setSearch] = useState("");
+  const [result, setResult] = useState<AssetsResult | null>(null);
+
+  const regions = useQuery({ queryKey: ["market", "regions"], queryFn: marketRegions });
+  const run = useMutation({
+    mutationFn: (p: AssetsParams) => assetsValue(p),
+    onSuccess: setResult,
+  });
+
+  const stations = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
+  const rows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const all = result?.rows ?? [];
+    if (!q) return all;
+    return all.filter((r) =>
+      [r.name, r.category, r.group].filter(Boolean).join(" ").toLowerCase().includes(q),
+    );
+  }, [result, search]);
+
+  return (
+    <div className="p-6">
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-zinc-100">Assets</h1>
+          <p className="mt-1 text-sm text-zinc-400">
+            Your roster's holdings, valued at a market — and where each stack is
+            worth the most.
+          </p>
+        </div>
+        <button
+          onClick={() => run.mutate({ regionId, stationId, bestHub })}
+          disabled={run.isPending}
+          className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+        >
+          {run.isPending ? "Valuing…" : "Value assets"}
+        </button>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3 rounded border border-zinc-800 bg-zinc-900 p-3 md:grid-cols-4">
+        <Field label="Region">
+          <select
+            value={regionId}
+            onChange={(e) => {
+              setRegionId(Number(e.currentTarget.value));
+              setStationId(null);
+            }}
+            className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+          >
+            {regions.data?.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Market">
+          <select
+            value={stationId ?? ""}
+            onChange={(e) =>
+              setStationId(e.currentTarget.value === "" ? null : Number(e.currentTarget.value))
+            }
+            className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+          >
+            <option value="">Region average</option>
+            {stations.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <label className="col-span-2 flex items-end gap-1 text-xs text-zinc-300">
+          <input
+            type="checkbox"
+            checked={bestHub}
+            onChange={(e) => setBestHub(e.currentTarget.checked)}
+          />
+          Value at the best-paying hub (slower)
+        </label>
+      </div>
+
+      {run.isError && (
+        <div className="mt-3 text-sm text-rose-400">
+          Failed: {String(run.error)} — log in a character with the assets scope.
+        </div>
+      )}
+
+      {result && (
+        <>
+          <div className="mt-4 flex flex-wrap gap-6 text-sm">
+            <Stat label="Sell value (net worth)" value={formatIsk(result.sellTotal)} accent />
+            <Stat label="Buy value" value={formatIsk(result.buyTotal)} />
+            <Stat label="Volume" value={`${formatInt(Math.round(result.volumeTotal))} m³`} />
+            <Stat label="Item types" value={formatInt(result.rows.length)} />
+          </div>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.currentTarget.value)}
+            placeholder="Search name / category / group…"
+            className="mt-3 w-72 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+          />
+          <div className="mt-2 overflow-auto rounded border border-zinc-800">
+            <table className="w-full border-collapse text-sm">
+              <thead className="bg-zinc-900 text-zinc-400">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">Item</th>
+                  <th className="px-3 py-2 text-right font-medium">Qty</th>
+                  <th className="px-3 py-2 text-right font-medium">Unit sell</th>
+                  <th className="px-3 py-2 text-right font-medium">Sell value</th>
+                  <th className="px-3 py-2 text-right font-medium">m³</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.slice(0, 500).map((r) => (
+                  <Row key={r.typeId} r={r} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Row({ r }: { r: AssetRow }) {
+  return (
+    <tr className="border-t border-zinc-800">
+      <td className="px-3 py-1.5">
+        <div className="text-zinc-200">
+          {r.name}
+          {r.sellHub && <span className="ml-1 text-[10px] text-emerald-400">↗ {r.sellHub}</span>}
+        </div>
+        {(r.category || r.group) && (
+          <div className="text-xs text-zinc-500">
+            {[r.category, r.group].filter(Boolean).join(" · ")}
+          </div>
+        )}
+      </td>
+      <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">{formatInt(r.quantity)}</td>
+      <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">{formatIsk(r.sellPrice)}</td>
+      <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
+        {formatIsk(r.sellValue)}
+      </td>
+      <td className="px-3 py-1.5 text-right tabular-nums text-zinc-500">
+        {formatInt(Math.round(r.volume))}
+      </td>
+    </tr>
+  );
+}
+
+function Stat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div>
+      <div className="text-xs text-zinc-500">{label}</div>
+      <div className={`tabular-nums ${accent ? "text-emerald-400" : "text-zinc-200"}`}>{value}</div>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="flex flex-col gap-1 text-xs text-zinc-400">
+      {label}
+      {children}
+    </label>
+  );
+}
+
+function Centered({ children }: { children: ReactNode }) {
+  return <div className="p-10 text-center text-sm text-zinc-500">{children}</div>;
+}

@@ -65,6 +65,7 @@ pub fn run() {
             modules::daytrading::commands::daytrading_get_list,
             modules::daytrading::commands::daytrading_set_list,
             modules::appraisal::commands::appraisal,
+            modules::assets::commands::assets_value,
             modules::reprocessing::commands::reprocessing_scan,
             modules::reprocessing::commands::reprocessing_efficiency,
             modules::reprocessing::commands::reprocessing_get_list,

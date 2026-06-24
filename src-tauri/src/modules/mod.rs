@@ -2,6 +2,7 @@
 //! services (`esi`, `sde`, `market`, `model`, `storage`).
 
 pub mod appraisal;
+pub mod assets;
 pub mod daytrading;
 pub mod production;
 pub mod reprocessing;

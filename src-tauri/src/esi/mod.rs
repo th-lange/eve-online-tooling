@@ -13,6 +13,7 @@ pub mod commands;
 mod error;
 
 pub use auth::AuthState;
+pub use character::fetch_assets;
 pub use client::EsiClient;
 pub use error::EsiError;
 

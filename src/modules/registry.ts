@@ -6,6 +6,7 @@ import { ReprocessingPage } from "./reprocessing/ReprocessingPage";
 import { AppraisalPage } from "./appraisal/AppraisalPage";
 import { UniversePage } from "./universe/UniversePage";
 import { MarketHistoryPage } from "./markethistory/MarketHistoryPage";
+import { AssetsPage } from "./assets/AssetsPage";
 
 // A feature module = a nav entry + the page rendered at `/{id}`. Adding a new
 // module (daytrading, station-trading, …) is a one-line entry here plus its
@@ -63,5 +64,11 @@ export const modules: ModuleDef[] = [
     title: "Market History",
     description: "Daily price & volume trend for an item in a region.",
     Component: MarketHistoryPage,
+  },
+  {
+    id: "assets",
+    title: "Assets",
+    description: "Value your holdings and find where each stack sells best.",
+    Component: AssetsPage,
   },
 ];
