@@ -347,6 +347,18 @@ impl Sde {
         Ok(out)
     }
 
+    /// Map of blueprint type id -> base activity time (seconds) for `activity_id`
+    /// (1 = manufacturing), from `industryActivity`. Used for job-time estimates.
+    pub fn base_times(&self, activity_id: i64) -> Result<HashMap<i64, i64>, SdeError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT typeID, time FROM industryActivity WHERE activityID = ?1")?;
+        let rows = stmt.query_map(params![activity_id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        rows.collect::<Result<HashMap<_, _>, _>>().map_err(Into::into)
+    }
+
     /// Map of typeID -> group name (Frigate, Cruiser, Hybrid Weapon, …).
     pub fn group_names(&self) -> Result<HashMap<i64, String>, SdeError> {
         let mut stmt = self.conn.prepare(

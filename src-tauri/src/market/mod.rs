@@ -17,5 +17,7 @@ mod service;
 mod types;
 
 pub use markets::{default_region_id, location_label, regions, resolve_location};
-pub use service::{BestSell, MarketService, TradedStats};
+pub use service::MarketService;
+// `BestSell` / `TradedStats` are returned by MarketService methods and reached
+// through those return types; they don't need a named re-export.
 pub use types::PriceModel;

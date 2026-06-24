@@ -394,6 +394,8 @@ export interface ProfitBreakdown {
   productName: string;
   runs: number;
   me: number;
+  /** Total manufacturing time for the job (all runs), in seconds; 0 if unknown. */
+  jobTimeSeconds: number;
   unitsProduced: number;
   materialCost: number;
   jobFee: number;
@@ -460,6 +462,14 @@ export interface ProfitParams {
   decryptorTypeId?: number | null;
   /** Price the product at whichever hub pays the most (materials stay local). */
   productBestHub?: boolean;
+  /** Time efficiency (default for un-owned blueprints), 0..20. */
+  te?: number;
+  /** Per-blueprint researched TE (blueprintTypeId → TE); overrides te for owned. */
+  ownedTe?: Record<number, number>;
+  /** Industry time-skill level 0..5 (Industry + Advanced Industry). */
+  timeSkill?: number;
+  /** Structure time-efficiency bonus %, e.g. Raitaru 15 / Sotiyo 30. */
+  structureTePct?: number;
 }
 
 /** Rank every manufacturable item by build-vs-buy profit at the chosen market. */

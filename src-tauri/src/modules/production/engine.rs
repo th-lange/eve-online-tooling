@@ -211,6 +211,9 @@ pub struct ProfitBreakdown {
     pub product_name: String,
     pub runs: i64,
     pub me: i64,
+    /// Total manufacturing time for the job (all runs), in seconds. Filled by the
+    /// command layer (needs SDE base time + TE/skill/structure); 0 otherwise.
+    pub job_time_seconds: f64,
     pub units_produced: i64,
     pub material_cost: f64,
     pub job_fee: f64,
@@ -481,6 +484,7 @@ pub fn evaluate(
         product_name: step.product_name.clone(),
         runs,
         me: effective_me,
+        job_time_seconds: 0.0,
         units_produced,
         material_cost,
         job_fee,

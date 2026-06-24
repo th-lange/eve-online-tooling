@@ -13,6 +13,7 @@ function row(
     productName,
     runs: 1,
     me: 0,
+    jobTimeSeconds: 0,
     unitsProduced: 1,
     materialCost: 0,
     jobFee: 0,

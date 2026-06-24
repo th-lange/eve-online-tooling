@@ -137,6 +137,18 @@ pub struct ProfitParams {
     /// Materials are still priced at the chosen market.
     #[serde(default)]
     pub product_best_hub: bool,
+    /// Time efficiency (default for un-owned blueprints), 0..20.
+    #[serde(default)]
+    pub te: i64,
+    /// Per-blueprint researched TE (blueprintTypeId → TE) from the owned library.
+    #[serde(default)]
+    pub owned_te: HashMap<i64, i64>,
+    /// Industry time-skill level (0..5): Industry −4%/lvl × Advanced Industry −3%/lvl.
+    #[serde(default)]
+    pub time_skill: i64,
+    /// Structure time-efficiency bonus, percent (e.g. Raitaru 15, Sotiyo 30).
+    #[serde(default)]
+    pub structure_te_pct: f64,
 }
 
 /// Base material efficiency of a freshly invented T2 blueprint copy (no decryptor).
@@ -292,6 +304,13 @@ pub async fn production_profit(
     let meta = sde.meta_group_names().map_err(|e| e.to_string())?;
     let categories = sde.category_names().map_err(|e| e.to_string())?;
     let groups = sde.group_names().map_err(|e| e.to_string())?;
+    let base_times = sde.base_times(1).map_err(|e| e.to_string())?; // 1 = manufacturing
+
+    // Job-time multipliers shared by every row: Industry (−4%/lvl) × Advanced
+    // Industry (−3%/lvl) × structure TE bonus.
+    let l = params.time_skill.clamp(0, 5) as f64;
+    let time_skill_mult = (1.0 - 0.04 * l) * (1.0 - 0.03 * l);
+    let structure_te_mult = 1.0 - params.structure_te_pct / 100.0;
 
     let mut out: Vec<ProfitBreakdown> = steps
         .iter()
@@ -305,6 +324,19 @@ pub async fn production_profit(
                 .copied()
                 .unwrap_or(params.me);
             let mut bd = evaluate(step, params.runs, step_me, &prices, &config);
+            // Job time = base × runs × (1 − TE/100) × skill × structure.
+            let te = params
+                .owned_te
+                .get(&step.blueprint_type_id)
+                .copied()
+                .unwrap_or(params.te);
+            if let Some(&base) = base_times.get(&step.blueprint_type_id) {
+                bd.job_time_seconds = base as f64
+                    * params.runs as f64
+                    * (1.0 - te as f64 / 100.0)
+                    * time_skill_mult
+                    * structure_te_mult;
+            }
             bd.meta_group = Some(
                 meta.get(&bd.product_type_id)
                     .cloned()

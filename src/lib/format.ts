@@ -20,6 +20,29 @@ export function formatPercent(frac: number | null | undefined): string {
   return `${(frac * 100).toFixed(1)}%`;
 }
 
+/** A duration in seconds as a compact `1d 2h 3m` (largest two units). */
+export function formatDuration(seconds: number | null | undefined): string {
+  if (!seconds || seconds <= 0) return "—";
+  const s = Math.round(seconds);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const parts: [number, string][] = [
+    [d, "d"],
+    [h, "h"],
+    [m, "m"],
+    [sec, "s"],
+  ];
+  return (
+    parts
+      .filter(([v]) => v > 0)
+      .slice(0, 2)
+      .map(([v, u]) => `${v}${u}`)
+      .join(" ") || "0s"
+  );
+}
+
 export type SortKey =
   | "productName"
   | "profit"
