@@ -456,6 +456,35 @@ export function contractsScan(params: ContractParams): Promise<ContractRow[]> {
   return invoke<ContractRow[]>("contracts_scan", { params });
 }
 
+// --- LP store ---
+
+export interface LpBalance {
+  corporationId: number;
+  corporation: string;
+  points: number;
+}
+export function lpBalances(): Promise<LpBalance[]> {
+  return invoke<LpBalance[]>("lp_balances");
+}
+
+export interface OfferRow {
+  name: string;
+  quantity: number;
+  lpCost: number;
+  iskCost: number;
+  sellValue: number;
+  cost: number;
+  profit: number;
+  iskPerLp: number;
+}
+export interface LpParams {
+  corporationId: number;
+  iskPerLp?: number;
+}
+export function lpOffers(params: LpParams): Promise<OfferRow[]> {
+  return invoke<OfferRow[]>("lp_offers", { params });
+}
+
 // --- SDE (Static Data Export) ---
 
 export interface SdeStatus {
