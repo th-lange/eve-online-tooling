@@ -109,6 +109,12 @@ pub struct ProfitParams {
     pub runs: i64,
     #[serde(default)]
     pub me: i64,
+    /// Per-blueprint researched ME, keyed by blueprint type id, from the owned
+    /// blueprint library. When a blueprint is owned, its real ME overrides the
+    /// global `me` above (T2/T3 rows still use the invented BPC's ME). Empty by
+    /// default; the UI populates it from the logged-in characters' blueprints.
+    #[serde(default)]
+    pub owned_me: HashMap<i64, i64>,
     #[serde(default)]
     pub system_cost_index: f64,
     #[serde(default)]
@@ -286,7 +292,15 @@ pub async fn production_profit(
     let mut out: Vec<ProfitBreakdown> = steps
         .iter()
         .map(|step| {
-            let mut bd = evaluate(step, params.runs, params.me, &prices, &config);
+            // Owned blueprints use their researched ME; everything else the
+            // global ME slider. (T2/T3 rows override with the invented BPC's ME
+            // inside evaluate regardless.)
+            let step_me = params
+                .owned_me
+                .get(&step.blueprint_type_id)
+                .copied()
+                .unwrap_or(params.me);
+            let mut bd = evaluate(step, params.runs, step_me, &prices, &config);
             bd.meta_group = Some(
                 meta.get(&bd.product_type_id)
                     .cloned()
