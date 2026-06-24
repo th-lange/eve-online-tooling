@@ -62,6 +62,23 @@ async fn authed_get_paged<T: DeserializeOwned>(
     Ok(out)
 }
 
+/// Open the in-game market details window for a type (ESI UI write).
+pub async fn open_market_window(
+    auth: &AuthState,
+    character_id: i64,
+    type_id: i64,
+) -> Result<(), AuthError> {
+    let token = auth.access_token_for(character_id).await?;
+    auth.http()
+        .post(format!("{ESI_BASE}/latest/ui/openwindow/marketdetails/"))
+        .query(&[("type_id", type_id.to_string())])
+        .bearer_auth(&token)
+        .send()
+        .await?
+        .error_for_status()?;
+    Ok(())
+}
+
 pub async fn fetch_blueprints(
     auth: &AuthState,
     character_id: i64,

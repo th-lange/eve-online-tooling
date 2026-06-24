@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  openMarketWindow,
   sdeCategories,
   sdeGroups,
   sdeStatus,
@@ -169,7 +170,20 @@ function Detail({ typeId }: { typeId: number }) {
   if (!d) return <div className="p-4 text-sm text-zinc-500">Loading…</div>;
   return (
     <div>
-      <h2 className="text-lg font-semibold text-zinc-100">{d.name}</h2>
+      <div className="flex items-start justify-between">
+        <h2 className="text-lg font-semibold text-zinc-100">{d.name}</h2>
+        <button
+          onClick={() =>
+            openMarketWindow(d.typeId).catch((e) =>
+              alert(`Couldn't open market window: ${e}`),
+            )
+          }
+          title="Open this item's market in the EVE client"
+          className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
+        >
+          Open in EVE
+        </button>
+      </div>
       <div className="mt-1 text-xs text-zinc-500">
         type #{d.typeId}
         {!d.published && " · unpublished"}
