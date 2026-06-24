@@ -362,6 +362,8 @@ export interface ProfitParams {
   stationId?: number | null;
   runs?: number;
   me?: number;
+  /** Per-blueprint researched ME (blueprintTypeId → ME); overrides `me` for owned BPs. */
+  ownedMe?: Record<number, number>;
   systemCostIndex?: number;
   facilityTax?: number;
   materialBasis?: PriceBasis;

@@ -477,7 +477,7 @@ pub fn evaluate(
         product_type_id: step.product_type_id,
         product_name: step.product_name.clone(),
         runs,
-        me,
+        me: effective_me,
         units_produced,
         material_cost,
         job_fee,

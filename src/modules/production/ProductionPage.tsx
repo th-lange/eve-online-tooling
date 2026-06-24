@@ -62,6 +62,7 @@ function Workbench() {
   const [stationId, setStationId] = useState<number | null>(null);
   const [runs, setRuns] = useState(1);
   const [me, setMe] = useState(0);
+  const [useOwnedMe, setUseOwnedMe] = useState(true);
   const [costIndexPct, setCostIndexPct] = useState(5);
   const [facilityTaxPct, setFacilityTaxPct] = useState(0);
   const [materialBasis, setMaterialBasis] =
@@ -97,6 +98,14 @@ function Workbench() {
     [owned.data],
   );
   const ownedCount = ownedSet.size;
+  // Best researched ME per owned blueprint type (highest ME across all copies).
+  const ownedMe = useMemo(() => {
+    const map: Record<number, number> = {};
+    for (const b of owned.data ?? []) {
+      map[b.typeId] = Math.max(map[b.typeId] ?? 0, b.materialEfficiency);
+    }
+    return map;
+  }, [owned.data]);
   const update = useMutation({ mutationFn: () => sdeUpdate(false) });
   const [rows, setRows] = useState<ProfitBreakdown[]>([]);
   const profit = useMutation({
@@ -146,6 +155,7 @@ function Workbench() {
       stationId,
       runs,
       me,
+      ownedMe: useOwnedMe ? ownedMe : {},
       systemCostIndex: costIndexPct / 100,
       facilityTax: facilityTaxPct / 100,
       materialBasis,
@@ -337,7 +347,34 @@ function Workbench() {
               <BasisSelect value={productBasis} onChange={setProductBasis} />
             </Field>
             <Num label="Runs" value={runs} onChange={setRuns} min={1} />
-            <Num label="ME" value={me} onChange={setMe} min={0} max={10} />
+            <Field label={`ME (default for un-owned)`}>
+              <input
+                type="number"
+                value={me}
+                min={0}
+                max={10}
+                onChange={(e) => setMe(Number(e.currentTarget.value))}
+                className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+              />
+              <label
+                className={`mt-1 flex items-center gap-1 text-xs ${
+                  ownedCount > 0 ? "text-zinc-300" : "text-zinc-600"
+                }`}
+                title={
+                  ownedCount > 0
+                    ? "Use each owned blueprint's researched ME instead of the value above"
+                    : "Log in a character with blueprints to enable"
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={useOwnedMe}
+                  disabled={ownedCount === 0}
+                  onChange={(e) => setUseOwnedMe(e.currentTarget.checked)}
+                />
+                Use owned blueprint ME{ownedCount > 0 ? ` (${ownedCount})` : ""}
+              </label>
+            </Field>
             <Num
               label="Cost index %"
               value={costIndexPct}
