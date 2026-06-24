@@ -309,6 +309,25 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Resolve an item by (case-insensitive) name → `(type_id, packaged_volume)`.
+    /// For the appraisal tool's clipboard parsing.
+    pub fn type_by_name(&self, name: &str) -> Result<Option<(i64, Option<f64>)>, SdeError> {
+        self.conn
+            .query_row(
+                "SELECT typeID, groupID, volume FROM invTypes
+                 WHERE LOWER(typeName) = LOWER(?1) LIMIT 1",
+                params![name],
+                |row| {
+                    let type_id: i64 = row.get(0)?;
+                    let group_id: i64 = row.get(1)?;
+                    let assembled: Option<f64> = row.get(2)?;
+                    Ok((type_id, packaged_volume(group_id, assembled)))
+                },
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
     /// Published, reprocessable items in a category (e.g. 25 = Asteroid/ore),
     /// each with its `portionSize` and per-portion refine outputs from
     /// `invTypeMaterials`. One query, grouped in Rust.

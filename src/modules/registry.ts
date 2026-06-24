@@ -3,6 +3,7 @@ import { ProductionPage } from "./production/ProductionPage";
 import { TradingPage } from "./trading/TradingPage";
 import { DaytradingPage } from "./daytrading/DaytradingPage";
 import { ReprocessingPage } from "./reprocessing/ReprocessingPage";
+import { AppraisalPage } from "./appraisal/AppraisalPage";
 
 // A feature module = a nav entry + the page rendered at `/{id}`. Adding a new
 // module (daytrading, station-trading, …) is a one-line entry here plus its
@@ -42,5 +43,11 @@ export const modules: ModuleDef[] = [
     title: "Reprocessing",
     description: "Rank ores by reprocess-vs-sell at your refining efficiency.",
     Component: ReprocessingPage,
+  },
+  {
+    id: "appraisal",
+    title: "Appraisal",
+    description: "Paste items → buy/sell ISK value and cargo volume.",
+    Component: AppraisalPage,
   },
 ];
