@@ -1,6 +1,7 @@
 //! Feature modules. Each exposes its own Tauri commands and reuses the shared
 //! services (`esi`, `sde`, `market`, `model`, `storage`).
 
+pub mod accounting;
 pub mod appraisal;
 pub mod assets;
 pub mod character;
