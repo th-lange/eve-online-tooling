@@ -332,7 +332,9 @@ fn eiv_unit_value(model: Option<&PriceModel>) -> f64 {
         .unwrap_or(0.0)
 }
 
-/// Evaluate a (manufacturing) build step into a profit breakdown.
+/// Evaluate a (manufacturing) build step into a profit breakdown. The no-stock
+/// convenience over [`evaluate_with_stock`]; used by the engine's unit tests.
+#[allow(dead_code)]
 pub fn evaluate(
     step: &BuildStep,
     runs: i64,
