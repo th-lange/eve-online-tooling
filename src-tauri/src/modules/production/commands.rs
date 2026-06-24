@@ -149,6 +149,22 @@ pub struct ProfitParams {
     /// Structure time-efficiency bonus, percent (e.g. Raitaru 15, Sotiyo 30).
     #[serde(default)]
     pub structure_te_pct: f64,
+    /// Combined structure+rig material multiplier (1.0 = none, 0.99 = −1%).
+    #[serde(default = "default_me_bonus")]
+    pub me_bonus: f64,
+    /// Combined structure+rig cost saving on the cost-index portion (0..1).
+    #[serde(default)]
+    pub cost_bonus: f64,
+    /// SCC surcharge fraction of EIV (CCP's 4% manufacturing default).
+    #[serde(default = "default_scc")]
+    pub scc_surcharge: f64,
+}
+
+fn default_me_bonus() -> f64 {
+    1.0
+}
+fn default_scc() -> f64 {
+    0.04
 }
 
 /// Base material efficiency of a freshly invented T2 blueprint copy (no decryptor).
@@ -298,6 +314,9 @@ pub async fn production_profit(
         product_basis: params.product_basis.unwrap_or(PriceBasis::SellPercentile),
         blueprint_cost_per_run: params.blueprint_cost_per_run,
         invention_skill_multiplier,
+        me_bonus: params.me_bonus,
+        cost_bonus: params.cost_bonus,
+        scc_surcharge: params.scc_surcharge,
         ..defaults
     };
 

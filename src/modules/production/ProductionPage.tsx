@@ -21,6 +21,18 @@ import { ProfitTable } from "./ProfitTable";
 
 type ResultsView = "opportunities" | "favorites" | "blacklist" | "library";
 
+// Manufacturing structure presets → material/cost/time bonuses (role bonuses).
+type StructureKey = "npc" | "raitaru" | "azbel" | "sotiyo";
+const STRUCTURES: Record<
+  StructureKey,
+  { label: string; meBonus: number; costBonus: number; tePct: number }
+> = {
+  npc: { label: "NPC station", meBonus: 1.0, costBonus: 0, tePct: 0 },
+  raitaru: { label: "Raitaru", meBonus: 0.99, costBonus: 0.03, tePct: 15 },
+  azbel: { label: "Azbel", meBonus: 0.99, costBonus: 0.04, tePct: 20 },
+  sotiyo: { label: "Sotiyo", meBonus: 0.99, costBonus: 0.05, tePct: 30 },
+};
+
 /** A blueprint the user imported to model (not necessarily owned via ESI). */
 interface ImportedBlueprint {
   typeId: number;
@@ -85,7 +97,7 @@ function Workbench() {
   const [useOwnedMe, setUseOwnedMe] = useState(true);
   const [te, setTe] = useState(0);
   const [timeSkill, setTimeSkill] = useState(5);
-  const [structureTePct, setStructureTePct] = useState(0);
+  const [structure, setStructure] = useState<StructureKey>("npc");
   const [costIndexPct, setCostIndexPct] = useState(5);
   const [facilityTaxPct, setFacilityTaxPct] = useState(0);
   const [materialBasis, setMaterialBasis] =
@@ -203,7 +215,9 @@ function Workbench() {
       te,
       ownedTe: useOwnedMe ? ownedTe : {},
       timeSkill,
-      structureTePct,
+      structureTePct: STRUCTURES[structure].tePct,
+      meBonus: STRUCTURES[structure].meBonus,
+      costBonus: STRUCTURES[structure].costBonus,
       systemCostIndex: costIndexPct / 100,
       facilityTax: facilityTaxPct / 100,
       materialBasis,
@@ -437,13 +451,20 @@ function Workbench() {
             </Field>
             <Num label="TE (default for un-owned)" value={te} onChange={setTe} min={0} max={20} />
             <Num label="Time skills (0-5)" value={timeSkill} onChange={setTimeSkill} min={0} max={5} />
-            <Num
-              label="Structure TE %"
-              value={structureTePct}
-              onChange={setStructureTePct}
-              min={0}
-              step={1}
-            />
+            <Field label="Structure">
+              <select
+                value={structure}
+                onChange={(e) => setStructure(e.currentTarget.value as StructureKey)}
+                className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+                title="Engineering complex role bonuses: material, cost, and time. SCC 4% surcharge is applied automatically."
+              >
+                {Object.entries(STRUCTURES).map(([k, s]) => (
+                  <option key={k} value={k}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
             <Num
               label="Cost index %"
               value={costIndexPct}

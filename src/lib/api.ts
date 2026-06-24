@@ -472,6 +472,12 @@ export interface ProfitParams {
   timeSkill?: number;
   /** Structure time-efficiency bonus %, e.g. Raitaru 15 / Sotiyo 30. */
   structureTePct?: number;
+  /** Combined structure+rig material multiplier (1.0 = none, 0.99 = −1%). */
+  meBonus?: number;
+  /** Combined structure+rig cost saving on the cost-index portion (0..1). */
+  costBonus?: number;
+  /** SCC surcharge fraction of EIV (default 0.04). */
+  sccSurcharge?: number;
 }
 
 /** Rank every manufacturable item by build-vs-buy profit at the chosen market. */

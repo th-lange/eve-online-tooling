@@ -113,6 +113,15 @@ pub struct ProfitConfig {
     /// Multiplier on the SDE base invention probability from the inventor's
     /// skills/decryptor (1.0 = base/skill-0; ~1.458 = all science skills at V).
     pub invention_skill_multiplier: f64,
+    /// Combined structure+rig **material** multiplier (e.g. 0.99 = −1% materials);
+    /// applied on top of blueprint ME. 1.0 = no structure bonus.
+    pub me_bonus: f64,
+    /// Combined structure+rig **cost** saving on the system-cost-index portion of
+    /// the job fee (e.g. 0.03 = −3%). 0.0 = none.
+    pub cost_bonus: f64,
+    /// SCC surcharge fraction of EIV added to the job fee (CCP's 4% for
+    /// manufacturing). 0.0 in the engine default; the command sets the real value.
+    pub scc_surcharge: f64,
 }
 
 impl Default for ProfitConfig {
@@ -127,8 +136,19 @@ impl Default for ProfitConfig {
             include_sales_cost: false,
             blueprint_cost_per_run: 0.0,
             invention_skill_multiplier: 1.0,
+            me_bonus: 1.0,
+            cost_bonus: 0.0,
+            scc_surcharge: 0.0,
         }
     }
+}
+
+/// EVE job install cost from EIV: system-cost-index (less structure/rig cost
+/// bonus) + facility tax + SCC surcharge, all on the estimated item value.
+fn job_fee(eiv: f64, config: &ProfitConfig) -> f64 {
+    eiv * config.system_cost_index * (1.0 - config.cost_bonus)
+        + eiv * config.facility_tax
+        + eiv * config.scc_surcharge
 }
 
 /// Per-material cost line for the UI drill-down.
@@ -198,7 +218,7 @@ fn build_unit_cost(
         materials_total += input.base_quantity as f64 * unit;
         eiv += eiv_unit_value(model) * input.base_quantity as f64;
     }
-    let job_fee = eiv * config.system_cost_index * (1.0 + config.facility_tax);
+    let job_fee = job_fee(eiv, config);
     Some((materials_total + job_fee) / step.product_per_run as f64)
 }
 
@@ -256,11 +276,12 @@ pub struct ProfitBreakdown {
     pub missing_prices: Vec<i64>,
 }
 
-/// ME-adjusted required quantity of a material for `runs` runs.
+/// ME-adjusted required quantity of a material for `runs` runs. `me_bonus` is the
+/// combined structure/rig material multiplier (1.0 = none, 0.99 = −1%).
 ///
-/// `max(runs, ceil(base * runs * (1 - me/100)))` — at least one unit per run.
-pub fn required_quantity(base_quantity: i64, runs: i64, me: i64) -> i64 {
-    let factor = 1.0 - (me as f64) / 100.0;
+/// `max(runs, ceil(base * runs * (1 - me/100) * me_bonus))` — at least one per run.
+pub fn required_quantity(base_quantity: i64, runs: i64, me: i64, me_bonus: f64) -> i64 {
+    let factor = (1.0 - (me as f64) / 100.0) * me_bonus;
     let raw = (base_quantity as f64) * (runs as f64) * factor;
     (raw.ceil() as i64).max(runs)
 }
@@ -339,7 +360,7 @@ pub fn evaluate(
     let mut materials = Vec::with_capacity(step.inputs.len());
     for input in &step.inputs {
         let model = prices.get(&input.type_id);
-        let required = required_quantity(input.base_quantity, runs, effective_me);
+        let required = required_quantity(input.base_quantity, runs, effective_me, config.me_bonus);
         let buy_unit = price_for(model, config.material_basis);
         // Buildable inputs (a sub-recipe) take the cheaper of build vs buy.
         let (unit_price, built) = match &input.sourcing {
@@ -376,7 +397,7 @@ pub fn evaluate(
         });
     }
 
-    let job_fee = eiv * config.system_cost_index * (1.0 + config.facility_tax);
+    let job_fee = job_fee(eiv, config);
 
     // Revenue from selling the product.
     let units_produced = step.product_per_run * runs;
@@ -568,11 +589,32 @@ mod tests {
 
     #[test]
     fn required_quantity_applies_me_and_min_per_run() {
-        assert_eq!(required_quantity(40, 1, 10), 36); // ceil(36)
-        assert_eq!(required_quantity(10, 1, 10), 9); // ceil(9)
-        assert_eq!(required_quantity(40, 1, 0), 40); // no ME
-        assert_eq!(required_quantity(1, 3, 10), 3); // 2.7 -> ceil 3, also min runs
-        assert_eq!(required_quantity(1, 5, 90), 5); // 0.5 -> clamps up to runs
+        assert_eq!(required_quantity(40, 1, 10, 1.0), 36); // ceil(36)
+        assert_eq!(required_quantity(10, 1, 10, 1.0), 9); // ceil(9)
+        assert_eq!(required_quantity(40, 1, 0, 1.0), 40); // no ME
+        assert_eq!(required_quantity(1, 3, 10, 1.0), 3); // 2.7 -> ceil 3, also min runs
+        assert_eq!(required_quantity(1, 5, 90, 1.0), 5); // 0.5 -> clamps up to runs
+    }
+
+    #[test]
+    fn required_quantity_applies_structure_me_bonus() {
+        // 1000 base at ME10 = 900; ×0.99 structure bonus = 891.
+        assert_eq!(required_quantity(1000, 1, 10, 0.99), 891);
+        // Bonus stacks on top of ME but never below runs.
+        assert_eq!(required_quantity(1, 4, 0, 0.95), 4);
+    }
+
+    #[test]
+    fn job_fee_adds_scc_and_cost_bonus() {
+        let cfg = ProfitConfig {
+            system_cost_index: 0.05,
+            facility_tax: 0.01,
+            cost_bonus: 0.03,
+            scc_surcharge: 0.04,
+            ..Default::default()
+        };
+        // 1000 EIV: 1000×0.05×0.97 + 1000×0.01 + 1000×0.04 = 48.5 + 10 + 40 = 98.5.
+        assert!((job_fee(1000.0, &cfg) - 98.5).abs() < 1e-9);
     }
 
     #[test]
@@ -586,14 +628,14 @@ mod tests {
 
         // materials: 36*5 + 9*10 = 270
         approx(b.material_cost, 270.0);
-        // EIV = 40*4 + 10*8 = 240; fee = 240 * 0.05 * 1.1 = 13.2
-        approx(b.job_fee, 13.2);
+        // EIV = 40*4 + 10*8 = 240; fee = 240*0.05 (sci) + 240*0.1 (tax) = 12 + 24 = 36.
+        approx(b.job_fee, 36.0);
         approx(b.revenue, 1000.0);
-        approx(b.profit, 716.8);
-        approx(b.margin.unwrap(), 0.7168);
-        // ROI = profit / cost = 716.8 / (270 + 13.2) -> ~253%, well over 100%.
-        approx(b.roi.unwrap(), 716.8 / 283.2);
-        approx(b.profit_per_unit, 716.8);
+        approx(b.profit, 694.0);
+        approx(b.margin.unwrap(), 0.694);
+        // ROI = profit / cost = 694 / (270 + 36).
+        approx(b.roi.unwrap(), 694.0 / 306.0);
+        approx(b.profit_per_unit, 694.0);
         assert_eq!(b.units_produced, 1);
         assert_eq!(b.product_volume, Some(1200));
         assert!(b.missing_prices.is_empty());
