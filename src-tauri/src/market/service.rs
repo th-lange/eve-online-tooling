@@ -225,6 +225,54 @@ impl MarketService {
             })
             .collect())
     }
+
+    /// For each type, the hub with the **highest realistic sell price** — "where
+    /// is this worth the most to sell". Prices every known hub (Fuzzwork
+    /// aggregates per hub station) and keeps the max `sell_percentile`. Types
+    /// with no priced hub are absent from the map. Shared by production
+    /// ("sell at best hub"), appraisal, and assets.
+    pub async fn best_sell_hubs(
+        &self,
+        type_ids: &[i64],
+    ) -> Result<HashMap<i64, BestSell>, EsiError> {
+        let mut best: HashMap<i64, BestSell> = HashMap::new();
+        for hub in super::markets::regions() {
+            let station_id = hub.stations.first().map(|s| s.id);
+            let label = hub
+                .stations
+                .first()
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| hub.name.clone());
+            let location = super::markets::resolve_location(hub.id, station_id);
+            for model in self.price_models_at(location, type_ids).await? {
+                let Some(price) = model.sell_percentile else {
+                    continue;
+                };
+                let entry = best.entry(model.type_id).or_insert(BestSell {
+                    region_id: hub.id,
+                    hub: label.clone(),
+                    price,
+                });
+                if price > entry.price {
+                    *entry = BestSell {
+                        region_id: hub.id,
+                        hub: label.clone(),
+                        price,
+                    };
+                }
+            }
+        }
+        Ok(best)
+    }
+}
+
+/// The best hub to sell a type at, and that hub's realistic sell price.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BestSell {
+    pub region_id: i64,
+    pub hub: String,
+    pub price: f64,
 }
 
 /// Mean of the `days` most recent days' traded volume. ESI history is ascending

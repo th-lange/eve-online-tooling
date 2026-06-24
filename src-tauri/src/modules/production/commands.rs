@@ -133,6 +133,10 @@ pub struct ProfitParams {
     /// Decryptor type to apply to every T2 invention; `None` = no decryptor.
     #[serde(default)]
     pub decryptor_type_id: Option<i64>,
+    /// Price the product at whichever hub pays the most (vs the chosen market).
+    /// Materials are still priced at the chosen market.
+    #[serde(default)]
+    pub product_best_hub: bool,
 }
 
 /// Base material efficiency of a freshly invented T2 blueprint copy (no decryptor).
@@ -314,12 +318,53 @@ pub async fn production_profit(
         })
         .collect();
 
+    // "Sell at best hub": re-price each product at whichever hub pays the most
+    // and recompute the profit fields. Materials stay at the chosen market.
+    if params.product_best_hub {
+        let product_ids: Vec<i64> = out.iter().map(|r| r.product_type_id).collect();
+        let best = market
+            .best_sell_hubs(&product_ids)
+            .await
+            .map_err(|e| e.to_string())?;
+        for bd in &mut out {
+            if let Some(b) = best.get(&bd.product_type_id) {
+                if b.price > bd.product_price.unwrap_or(0.0) {
+                    reprice_product(bd, b.price, &b.hub);
+                }
+            }
+        }
+        out.sort_by(|a, b| {
+            b.profit
+                .partial_cmp(&a.profit)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        return Ok(out);
+    }
+
     out.sort_by(|a, b| {
         b.profit
             .partial_cmp(&a.profit)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     Ok(out)
+}
+
+/// Re-price a breakdown's product at `unit_price` (the best hub's sell price)
+/// and recompute the dependent profit fields. Production values revenue gross
+/// (no sales cost), so revenue = units × price; cost is unchanged.
+fn reprice_product(bd: &mut ProfitBreakdown, unit_price: f64, hub: &str) {
+    let cost = bd.material_cost + bd.job_fee + bd.blueprint_cost + bd.invention_cost;
+    bd.product_price = Some(unit_price);
+    bd.revenue = bd.units_produced as f64 * unit_price;
+    bd.profit = bd.revenue - cost;
+    bd.margin = (bd.revenue > 0.0).then(|| bd.profit / bd.revenue);
+    bd.roi = (cost > 0.0).then(|| bd.profit / cost);
+    bd.profit_per_unit = if bd.units_produced > 0 {
+        bd.profit / bd.units_produced as f64
+    } else {
+        0.0
+    };
+    bd.sell_hub = Some(hub.to_string());
 }
 
 /// The invention decryptors (for the UI dropdown).

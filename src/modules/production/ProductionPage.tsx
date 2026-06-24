@@ -68,6 +68,7 @@ function Workbench() {
   const [materialBasis, setMaterialBasis] =
     useState<PriceBasis>("sellPercentile");
   const [productBasis, setProductBasis] = useState<PriceBasis>("sellPercentile");
+  const [productBestHub, setProductBestHub] = useState(false);
   const [blueprintCostPerRun, setBlueprintCostPerRun] = useState(0);
   const [inventionSkill, setInventionSkill] = useState(5);
   const [decryptorTypeId, setDecryptorTypeId] = useState<number | null>(null);
@@ -163,6 +164,7 @@ function Workbench() {
       blueprintCostPerRun,
       inventionSkillLevel: inventionSkill,
       decryptorTypeId,
+      productBestHub,
     });
   }
 
@@ -345,6 +347,17 @@ function Workbench() {
             </Field>
             <Field label="Product priced at">
               <BasisSelect value={productBasis} onChange={setProductBasis} />
+              <label
+                className="mt-1 flex items-center gap-1 text-xs text-zinc-300"
+                title="Price each product at whichever hub pays the most (materials still priced at the chosen market). Slower — prices all hubs."
+              >
+                <input
+                  type="checkbox"
+                  checked={productBestHub}
+                  onChange={(e) => setProductBestHub(e.currentTarget.checked)}
+                />
+                Sell at best hub
+              </label>
             </Field>
             <Num label="Runs" value={runs} onChange={setRuns} min={1} />
             <Field label={`ME (default for un-owned)`}>
