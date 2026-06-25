@@ -9,7 +9,6 @@ import {
   systemNeighbourhood,
   systemSearch,
   type BreadcrumbEntry,
-  type NeighbourNode,
   type SystemActivity,
   type SystemMatch,
 } from "../../lib/api";
@@ -27,21 +26,40 @@ export function RoutePage() {
   return <Workbench />;
 }
 
+type Mode = "all" | "neighbouring";
+
 function Workbench() {
   const [search, setSearch] = useState("");
+  const [mode, setMode] = useState<Mode>("all");
+  const [picked, setPicked] = useState<SystemMatch | null>(null);
+  const [depth, setDepth] = useState(2);
+
   const activity = useQuery({
     queryKey: ["route", "systemActivity"],
     queryFn: () => systemActivity(false),
   });
+  const hood = useMutation({
+    mutationFn: (v: { id: number; depth: number }) => systemNeighbourhood(v.id, v.depth),
+  });
 
-  const rows = activity.data ?? [];
+  function pickSystem(m: SystemMatch) {
+    setPicked(m);
+    setMode("neighbouring");
+    hood.mutate({ id: m.id, depth });
+  }
+  function changeDepth(d: number) {
+    setDepth(d);
+    if (picked) hood.mutate({ id: picked.id, depth: d });
+  }
+
+  // The table shows either every active system or the picked neighbourhood.
+  const source: SystemActivity[] =
+    mode === "neighbouring" ? hood.data?.nodes ?? [] : activity.data ?? [];
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
-      `${r.name} ${r.region}`.toLowerCase().includes(q),
-    );
-  }, [rows, search]);
+    if (!q) return source;
+    return source.filter((r) => `${r.name} ${r.region}`.toLowerCase().includes(q));
+  }, [source, search]);
 
   return (
     <div className="p-6">
@@ -62,18 +80,6 @@ function Workbench() {
         </button>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.currentTarget.value)}
-          placeholder="Search system / region…"
-          className="w-72 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
-        />
-        <span className="text-xs text-zinc-500">
-          {formatInt(filtered.length)} active system(s) · refreshed hourly by CCP
-        </span>
-      </div>
-
       {activity.isError && (
         <div className="mt-3 text-sm text-rose-400">
           Failed: {String(activity.error)}
@@ -82,10 +88,55 @@ function Workbench() {
 
       <Breadcrumb />
 
-      <Neighbourhood />
+      <Neighbourhood
+        picked={picked}
+        depth={depth}
+        onPick={pickSystem}
+        onDepth={changeDepth}
+        loading={hood.isPending}
+        error={hood.isError ? String(hood.error) : null}
+      />
 
-      <h2 className="mt-6 text-sm font-semibold text-zinc-300">All active systems</h2>
-      <ActivityTable rows={filtered} />
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex rounded border border-zinc-800 bg-zinc-900 p-0.5 text-sm">
+          <button
+            onClick={() => setMode("all")}
+            className={`rounded px-3 py-1 ${
+              mode === "all" ? "bg-zinc-700 text-zinc-100" : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            All systems
+          </button>
+          <button
+            onClick={() => setMode("neighbouring")}
+            disabled={!picked}
+            title={picked ? undefined : "Pick a system in Neighbourhood first"}
+            className={`rounded px-3 py-1 disabled:opacity-40 ${
+              mode === "neighbouring" ? "bg-zinc-700 text-zinc-100" : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            Neighbouring{picked ? ` · ${picked.name}` : ""}
+          </button>
+        </div>
+        <div className="flex items-center gap-3">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.currentTarget.value)}
+            placeholder="Search system / region…"
+            className="w-64 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+          />
+          <span className="text-xs text-zinc-500">
+            {formatInt(filtered.length)} system(s)
+            {mode === "all" ? " · refreshed hourly by CCP" : ""}
+          </span>
+        </div>
+      </div>
+
+      {mode === "neighbouring" && !picked ? (
+        <Centered>Pick a system in Neighbourhood above to see its neighbours.</Centered>
+      ) : (
+        <ActivityTable rows={filtered} />
+      )}
     </div>
   );
 }
@@ -195,36 +246,33 @@ function SystemHop({ entry, current }: { entry: BreadcrumbEntry; current: boolea
   );
 }
 
-/** Pick a system → see its stargate neighbourhood out to N jumps, with heat.
- * The "fog-of-war" view; until the location scope (#99) lands, the centre is
- * chosen by search rather than auto-centred on your ship. */
-function Neighbourhood() {
+/** Neighbourhood selectors only: pick a centre system + jump depth. The results
+ * render in the "All active systems" table when its switch is set to
+ * Neighbouring. Centre is chosen by search (auto-centre on your ship is a #99
+ * follow-up). */
+function Neighbourhood({
+  picked,
+  depth,
+  onPick,
+  onDepth,
+  loading,
+  error,
+}: {
+  picked: SystemMatch | null;
+  depth: number;
+  onPick: (m: SystemMatch) => void;
+  onDepth: (d: number) => void;
+  loading: boolean;
+  error: string | null;
+}) {
   const [query, setQuery] = useState("");
-  const [depth, setDepth] = useState(2);
-  const [picked, setPicked] = useState<SystemMatch | null>(null);
-
   const matches = useQuery({
     queryKey: ["route", "systemSearch", query],
     queryFn: () => systemSearch(query),
     enabled: query.trim().length >= 2,
   });
-  const hood = useMutation({
-    mutationFn: (v: { id: number; depth: number }) => systemNeighbourhood(v.id, v.depth),
-  });
-
-  function pick(m: SystemMatch) {
-    setPicked(m);
-    setQuery(m.name);
-    hood.mutate({ id: m.id, depth });
-  }
-  function changeDepth(d: number) {
-    setDepth(d);
-    if (picked) hood.mutate({ id: picked.id, depth: d });
-  }
-
   const showResults =
-    query.trim().length >= 2 && (!picked || picked.name !== query);
-  const byDistance = useMemo(() => groupByDistance(hood.data?.nodes ?? []), [hood.data]);
+    query.trim().length >= 2 && (!picked || picked.name !== query.trim());
 
   return (
     <div className="mt-5 rounded border border-zinc-800 bg-zinc-900/40 p-3">
@@ -233,11 +281,8 @@ function Neighbourhood() {
         <div className="relative">
           <input
             value={query}
-            onChange={(e) => {
-              setQuery(e.currentTarget.value);
-              setPicked(null);
-            }}
-            placeholder="Find a system…"
+            onChange={(e) => setQuery(e.currentTarget.value)}
+            placeholder={picked ? picked.name : "Find a system…"}
             className="w-56 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
           />
           {showResults && (matches.data?.length ?? 0) > 0 && (
@@ -245,7 +290,10 @@ function Neighbourhood() {
               {matches.data!.map((m) => (
                 <button
                   key={m.id}
-                  onClick={() => pick(m)}
+                  onClick={() => {
+                    onPick(m);
+                    setQuery("");
+                  }}
                   className="block w-full px-2 py-1 text-left text-sm text-zinc-200 hover:bg-zinc-800"
                 >
                   {m.name}
@@ -259,7 +307,7 @@ function Neighbourhood() {
           {[1, 2, 3].map((d) => (
             <button
               key={d}
-              onClick={() => changeDepth(d)}
+              onClick={() => onDepth(d)}
               className={`rounded px-2 py-0.5 ${
                 depth === d ? "bg-zinc-700 text-zinc-100" : "bg-zinc-800 text-zinc-400"
               }`}
@@ -268,67 +316,16 @@ function Neighbourhood() {
             </button>
           ))}
         </div>
-        {hood.isPending && <span className="text-xs text-zinc-500">Loading…</span>}
+        {loading && <span className="text-xs text-zinc-500">Loading…</span>}
+        {picked && !loading && (
+          <span className="text-xs text-zinc-500">
+            Centre: <span className="text-zinc-300">{picked.name}</span> — shown in the table below.
+          </span>
+        )}
       </div>
-
-      {hood.isError && (
-        <div className="mt-2 text-sm text-rose-400">Failed: {String(hood.error)}</div>
-      )}
-
-      {hood.data && (
-        <div className="mt-3 space-y-3">
-          {byDistance.map(([dist, nodes]) => (
-            <div key={dist}>
-              <div className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">
-                {dist === 0 ? "Centre" : `${dist} jump${dist > 1 ? "s" : ""}`} · {nodes.length}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {nodes.map((n) => (
-                  <SystemChip key={n.systemId} node={n} center={dist === 0} />
-                ))}
-              </div>
-            </div>
-          ))}
-          {hood.data.nodes.length <= 1 && (
-            <div className="text-xs text-zinc-500">
-              No stargate neighbours (wormhole systems have none).
-            </div>
-          )}
-        </div>
-      )}
+      {error && <div className="mt-2 text-sm text-rose-400">Failed: {error}</div>}
     </div>
   );
-}
-
-function SystemChip({ node, center }: { node: NeighbourNode; center: boolean }) {
-  const danger = node.shipKills + node.podKills;
-  const border = center
-    ? "border-emerald-500"
-    : danger > 0
-      ? "border-rose-600"
-      : "border-zinc-700";
-  return (
-    <div
-      className={`rounded border ${border} bg-zinc-900 px-2 py-1 text-xs`}
-      title={`${node.region} · ${node.jumps} jumps · ${node.shipKills} ship / ${node.podKills} pod / ${node.npcKills} NPC kills (last hour)`}
-    >
-      <span className={secColor(node.security)}>{node.security.toFixed(1)}</span>{" "}
-      <span className="text-zinc-200">{node.name || `#${node.systemId}`}</span>
-      <span className="ml-2 text-zinc-500">↻{formatInt(node.jumps)}</span>
-      {danger > 0 && <span className="ml-1 text-rose-400">☠{formatInt(danger)}</span>}
-    </div>
-  );
-}
-
-/** Group nodes into [distance, nodes] pairs, ascending by distance. */
-function groupByDistance(nodes: NeighbourNode[]): [number, NeighbourNode[]][] {
-  const map = new Map<number, NeighbourNode[]>();
-  for (const n of nodes) {
-    const arr = map.get(n.distance) ?? [];
-    arr.push(n);
-    map.set(n.distance, arr);
-  }
-  return [...map.entries()].sort((a, b) => a[0] - b[0]);
 }
 
 type ActSortKey =
