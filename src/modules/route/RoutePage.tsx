@@ -29,30 +29,80 @@ export function RoutePage() {
 type Mode = "all" | "neighbouring";
 
 function Workbench() {
+  const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [mode, setMode] = useState<Mode>("all");
-  const [picked, setPicked] = useState<SystemMatch | null>(null);
   const [depth, setDepth] = useState(2);
+  // Neighbourhood centre: a typed system, or the live "my location".
+  const [centre, setCentre] = useState<SystemMatch | null>(null);
+  const [fromMe, setFromMe] = useState(false);
+  const [auto, setAuto] = useState(false);
+  const [query, setQuery] = useState("");
+  const [locError, setLocError] = useState<string | null>(null);
 
   const activity = useQuery({
     queryKey: ["route", "systemActivity"],
     queryFn: () => systemActivity(false),
   });
+  const trail = useQuery({ queryKey: ["route", "breadcrumb"], queryFn: routeBreadcrumb });
+  const matches = useQuery({
+    queryKey: ["route", "systemSearch", query],
+    queryFn: () => systemSearch(query),
+    enabled: query.trim().length >= 2,
+  });
   const hood = useMutation({
     mutationFn: (v: { id: number; depth: number }) => systemNeighbourhood(v.id, v.depth),
   });
 
-  function pickSystem(m: SystemMatch) {
-    setPicked(m);
+  // Focus the neighbourhood on a typed system.
+  function focusSystem(m: SystemMatch) {
+    setFromMe(false);
+    setCentre(m);
     setMode("neighbouring");
+    setQuery("");
     hood.mutate({ id: m.id, depth });
+  }
+  // Focus on the live current location (also records the travel breadcrumb).
+  async function focusMyLocation(d = depth) {
+    try {
+      const t = await routeLocation();
+      setLocError(null);
+      qc.setQueryData(["route", "breadcrumb"], t);
+      const last = t[t.length - 1];
+      if (last) {
+        setFromMe(true);
+        setCentre({ id: last.systemId, name: last.name });
+        setMode("neighbouring");
+        hood.mutate({ id: last.systemId, depth: d });
+      }
+    } catch (e) {
+      setLocError(String(e));
+    }
   }
   function changeDepth(d: number) {
     setDepth(d);
-    if (picked) hood.mutate({ id: picked.id, depth: d });
+    if (fromMe) void focusMyLocation(d);
+    else if (centre) hood.mutate({ id: centre.id, depth: d });
+  }
+  // Manual refresh: re-pull activity + re-centre (live location if "from me").
+  function update() {
+    void activity.refetch();
+    if (fromMe) void focusMyLocation();
+    else if (centre) hood.mutate({ id: centre.id, depth });
   }
 
-  // The table shows either every active system or the picked neighbourhood.
+  // Auto-update every 30s while enabled (re-centres a live "my location" focus).
+  useEffect(() => {
+    if (!auto) return;
+    const id = setInterval(() => {
+      void activity.refetch();
+      if (fromMe) void focusMyLocation();
+      else if (centre) hood.mutate({ id: centre.id, depth });
+    }, 30_000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auto, fromMe, centre, depth]);
+
   const source: SystemActivity[] =
     mode === "neighbouring" ? hood.data?.nodes ?? [] : activity.data ?? [];
   const filtered = useMemo(() => {
@@ -60,6 +110,9 @@ function Workbench() {
     if (!q) return source;
     return source.filter((r) => `${r.name} ${r.region}`.toLowerCase().includes(q));
   }, [source, search]);
+
+  const showResults = query.trim().length >= 2 && (matches.data?.length ?? 0) > 0;
+  const entries = trail.data ?? [];
 
   return (
     <div className="p-6">
@@ -81,21 +134,111 @@ function Workbench() {
       </div>
 
       {activity.isError && (
-        <div className="mt-3 text-sm text-rose-400">
-          Failed: {String(activity.error)}
-        </div>
+        <div className="mt-3 text-sm text-rose-400">Failed: {String(activity.error)}</div>
       )}
 
-      <Breadcrumb />
+      {/* Merged focus: type a system OR use your live location; depth + update. */}
+      <div className="mt-5 rounded border border-zinc-800 bg-zinc-900/40 p-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-sm font-semibold text-zinc-300">Focus</span>
+          <div className="relative">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.currentTarget.value)}
+              placeholder={centre && !fromMe ? centre.name : "Find a system…"}
+              className="w-52 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+            />
+            {showResults && (
+              <div className="absolute z-10 mt-1 max-h-56 w-52 overflow-auto rounded border border-zinc-700 bg-zinc-900 shadow-lg">
+                {matches.data!.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => focusSystem(m)}
+                    className="block w-full px-2 py-1 text-left text-sm text-zinc-200 hover:bg-zinc-800"
+                  >
+                    {m.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={() => void focusMyLocation()}
+            className={`rounded border px-2 py-1 text-xs ${
+              fromMe ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+            }`}
+            title="Centre on your current system (records the travel trail)"
+          >
+            📍 My location
+          </button>
+          <div className="flex items-center gap-1 text-xs text-zinc-400">
+            jumps:
+            {[1, 2, 3, 4, 5].map((d) => (
+              <button
+                key={d}
+                onClick={() => changeDepth(d)}
+                className={`rounded px-2 py-0.5 ${
+                  depth === d ? "bg-zinc-700 text-zinc-100" : "bg-zinc-800 text-zinc-400"
+                }`}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={update}
+            className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+          >
+            Update
+          </button>
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
+            <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.currentTarget.checked)} />
+            Auto 30s
+          </label>
+          {centre && (
+            <span className="text-xs text-zinc-500">
+              Centre: <span className="text-zinc-300">{centre.name}</span>
+              {fromMe ? " (you)" : ""} · {hood.isPending ? "loading…" : "shown below"}
+            </span>
+          )}
+          {entries.length > 0 && (
+            <button
+              onClick={async () => {
+                await routeClearBreadcrumb();
+                qc.setQueryData(["route", "breadcrumb"], []);
+              }}
+              className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            >
+              Clear trail
+            </button>
+          )}
+        </div>
 
-      <Neighbourhood
-        picked={picked}
-        depth={depth}
-        onPick={pickSystem}
-        onDepth={changeDepth}
-        loading={hood.isPending}
-        error={hood.isError ? String(hood.error) : null}
-      />
+        {(locError || hood.isError) && (
+          <div className="mt-2 text-xs text-rose-400">
+            {locError ?? String(hood.error)}
+            {locError && (
+              <span className="ml-1 text-zinc-500">
+                (needs <code>esi-location.read_location.v1</code> — re-login if just enabled)
+              </span>
+            )}
+          </div>
+        )}
+
+        {entries.length > 0 && (
+          <div className="mt-3">
+            <div className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">Travel trail</div>
+            <div className="flex flex-wrap items-center gap-1">
+              {entries.map((e, i) => (
+                <span key={`${e.systemId}-${e.enteredAt}`} className="flex items-center gap-1">
+                  {i > 0 && <span className="text-zinc-600">→</span>}
+                  <SystemHop entry={e} current={i === entries.length - 1} />
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
         <div className="inline-flex rounded border border-zinc-800 bg-zinc-900 p-0.5 text-sm">
@@ -109,13 +252,13 @@ function Workbench() {
           </button>
           <button
             onClick={() => setMode("neighbouring")}
-            disabled={!picked}
-            title={picked ? undefined : "Pick a system in Neighbourhood first"}
+            disabled={!centre}
+            title={centre ? undefined : "Set a Focus above first"}
             className={`rounded px-3 py-1 disabled:opacity-40 ${
               mode === "neighbouring" ? "bg-zinc-700 text-zinc-100" : "text-zinc-400 hover:text-zinc-200"
             }`}
           >
-            Neighbouring{picked ? ` · ${picked.name}` : ""}
+            Around{centre ? ` · ${centre.name}` : ""}
           </button>
         </div>
         <div className="flex items-center gap-3">
@@ -132,95 +275,10 @@ function Workbench() {
         </div>
       </div>
 
-      {mode === "neighbouring" && !picked ? (
-        <Centered>Pick a system in Neighbourhood above to see its neighbours.</Centered>
+      {mode === "neighbouring" && !centre ? (
+        <Centered>Set a Focus above (type a system or “My location”).</Centered>
       ) : (
         <ActivityTable rows={filtered} />
-      )}
-    </div>
-  );
-}
-
-/** Travel breadcrumb: poll the character's location while tracking is on and
- * render the recorded path (k-space ↔ wormhole). There's no travel-history API,
- * so the trail is built by polling /location while the view is open. */
-function Breadcrumb() {
-  const qc = useQueryClient();
-  const [tracking, setTracking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const trail = useQuery({ queryKey: ["route", "breadcrumb"], queryFn: routeBreadcrumb });
-
-  // While tracking, poll the live location every 30s and refresh the trail.
-  useEffect(() => {
-    if (!tracking) return;
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const t = await routeLocation();
-        if (!cancelled) {
-          setError(null);
-          qc.setQueryData(["route", "breadcrumb"], t);
-        }
-      } catch (e) {
-        if (!cancelled) setError(String(e));
-      }
-    };
-    void poll();
-    const id = setInterval(poll, 30_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [tracking, qc]);
-
-  const entries = trail.data ?? [];
-
-  return (
-    <div className="mt-5 rounded border border-zinc-800 bg-zinc-900/40 p-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="text-sm font-semibold text-zinc-300">Travel</span>
-        <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-400">
-          <input
-            type="checkbox"
-            checked={tracking}
-            onChange={(e) => setTracking(e.currentTarget.checked)}
-          />
-          Track my location {tracking ? "(polling every 30s)" : ""}
-        </label>
-        <button
-          onClick={async () => {
-            await routeClearBreadcrumb();
-            qc.setQueryData(["route", "breadcrumb"], []);
-          }}
-          className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
-        >
-          Clear
-        </button>
-      </div>
-
-      {error && (
-        <div className="mt-2 text-xs text-rose-400">
-          {error}
-          <span className="ml-1 text-zinc-500">
-            (needs <code>esi-location.read_location.v1</code> — re-login if just enabled)
-          </span>
-        </div>
-      )}
-
-      {entries.length > 0 ? (
-        <div className="mt-3 flex flex-wrap items-center gap-1">
-          {entries.map((e, i) => (
-            <span key={`${e.systemId}-${e.enteredAt}`} className="flex items-center gap-1">
-              {i > 0 && <span className="text-zinc-600">→</span>}
-              <SystemHop entry={e} current={i === entries.length - 1} />
-            </span>
-          ))}
-        </div>
-      ) : (
-        <div className="mt-2 text-xs text-zinc-500">
-          No trail yet — enable tracking and fly between systems.
-        </div>
       )}
     </div>
   );
@@ -243,88 +301,6 @@ function SystemHop({ entry, current }: { entry: BreadcrumbEntry; current: boolea
         </>
       )}
     </span>
-  );
-}
-
-/** Neighbourhood selectors only: pick a centre system + jump depth. The results
- * render in the "All active systems" table when its switch is set to
- * Neighbouring. Centre is chosen by search (auto-centre on your ship is a #99
- * follow-up). */
-function Neighbourhood({
-  picked,
-  depth,
-  onPick,
-  onDepth,
-  loading,
-  error,
-}: {
-  picked: SystemMatch | null;
-  depth: number;
-  onPick: (m: SystemMatch) => void;
-  onDepth: (d: number) => void;
-  loading: boolean;
-  error: string | null;
-}) {
-  const [query, setQuery] = useState("");
-  const matches = useQuery({
-    queryKey: ["route", "systemSearch", query],
-    queryFn: () => systemSearch(query),
-    enabled: query.trim().length >= 2,
-  });
-  const showResults =
-    query.trim().length >= 2 && (!picked || picked.name !== query.trim());
-
-  return (
-    <div className="mt-5 rounded border border-zinc-800 bg-zinc-900/40 p-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="text-sm font-semibold text-zinc-300">Neighbourhood</span>
-        <div className="relative">
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.currentTarget.value)}
-            placeholder={picked ? picked.name : "Find a system…"}
-            className="w-56 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
-          />
-          {showResults && (matches.data?.length ?? 0) > 0 && (
-            <div className="absolute z-10 mt-1 max-h-56 w-56 overflow-auto rounded border border-zinc-700 bg-zinc-900 shadow-lg">
-              {matches.data!.map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => {
-                    onPick(m);
-                    setQuery("");
-                  }}
-                  className="block w-full px-2 py-1 text-left text-sm text-zinc-200 hover:bg-zinc-800"
-                >
-                  {m.name}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-1 text-xs text-zinc-400">
-          jumps:
-          {[1, 2, 3].map((d) => (
-            <button
-              key={d}
-              onClick={() => onDepth(d)}
-              className={`rounded px-2 py-0.5 ${
-                depth === d ? "bg-zinc-700 text-zinc-100" : "bg-zinc-800 text-zinc-400"
-              }`}
-            >
-              {d}
-            </button>
-          ))}
-        </div>
-        {loading && <span className="text-xs text-zinc-500">Loading…</span>}
-        {picked && !loading && (
-          <span className="text-xs text-zinc-500">
-            Centre: <span className="text-zinc-300">{picked.name}</span> — shown in the table below.
-          </span>
-        )}
-      </div>
-      {error && <div className="mt-2 text-sm text-rose-400">Failed: {error}</div>}
-    </div>
   );
 }
 

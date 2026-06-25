@@ -22,7 +22,7 @@ const WSPACE_MIN_SYSTEM_ID: i64 = 31_000_000;
 const BREADCRUMB_CAP: usize = 300;
 
 /// Max neighbourhood BFS depth (jumps out from the centre).
-const MAX_DEPTH: i64 = 3;
+const MAX_DEPTH: i64 = 5;
 
 /// Cache TTL for the merged activity — CCP refreshes these hourly, so half an
 /// hour keeps it fresh without hammering ESI on every view switch.
