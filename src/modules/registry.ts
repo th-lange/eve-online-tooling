@@ -11,6 +11,7 @@ import { CharacterPage } from "./character/CharacterPage";
 import { AccountingPage } from "./accounting/AccountingPage";
 import { ContractsPage } from "./contracts/ContractsPage";
 import { LpStorePage } from "./lpstore/LpStorePage";
+import { RoutePage } from "./route/RoutePage";
 
 // A feature module = a nav entry + the page rendered at `/{id}`. Adding a new
 // module (daytrading, station-trading, …) is a one-line entry here plus its
@@ -98,5 +99,11 @@ export const modules: ModuleDef[] = [
     title: "LP Store",
     description: "Rank loyalty-store offers by ISK per LP.",
     Component: LpStorePage,
+  },
+  {
+    id: "route",
+    title: "Route",
+    description: "Per-system jumps & kills (last hour) across known space.",
+    Component: RoutePage,
   },
 ];
