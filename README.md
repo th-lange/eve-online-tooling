@@ -17,7 +17,8 @@ built as a set of feature **modules** over a shared service layer.
 - **Local Intel** — paste the in-game Local member list to classify pilots blue/neutral/red by standing,
   corp and alliance, with a corp/alliance watchlist + alerts and zKillboard danger enrichment.
 - **Market Orders** — your open buy/sell orders with undercut detection and a one-tick re-list helper.
-- **Industry Jobs** — running and recently-delivered jobs ("what's cooking") with finish countdowns.
+- **Industry Jobs** — personal + corp jobs ("what's cooking") with finish countdowns, status/location
+  filters, and production/science/reaction slot usage.
 - **Wormholes** — map your chain by hand with mass/EOL tracking, cross-chain routing (stargates ∪ your
   scanned holes), and probe-scanner signature paste.
 - **Mission-running** and more — planned.
