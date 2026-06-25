@@ -194,6 +194,11 @@ export interface DayTradeParams {
    * `[]` = the whole catalogue.
    */
   categoryIds?: number[];
+  /**
+   * Owned stock per type id (from `rosterStock`), netted off the suggested
+   * quantity. Omitted/empty = don't subtract (the "subtract owned stock" toggle off).
+   */
+  stock?: Record<number, number>;
 }
 
 /** Rank items by inter-station arbitrage (buy source → sell destination). */

@@ -55,6 +55,11 @@ pub struct DayTradeParams {
     /// Drop rows whose sell-hub daily-traded volume is below this (illiquid).
     #[serde(default)]
     pub min_daily_demand: i64,
+    /// Owned stock per type id (from `roster_stock`), netted off the suggested
+    /// quantity so it doesn't tell you to buy what's already in your hangar.
+    /// Empty = don't subtract (the UI's "subtract owned stock" toggle off).
+    #[serde(default)]
+    pub stock: HashMap<i64, i64>,
     /// Item categories (a whitelist) to scan/price — the scan starts from this
     /// reduced id set instead of the whole catalogue. Empty = the default
     /// day-trade set (Ships + Modules + Charges); pass explicit ids to override
@@ -221,8 +226,12 @@ pub async fn daytrading_scan(
     }
     for row in &mut out {
         row.dest_volume = traded.get(&row.type_id).copied().unwrap_or(0);
-        // Suggested quantity = how much the sell hub moves over the window.
-        row.suggested_qty = (row.dest_volume as f64 * params.purchase_days).round() as i64;
+        // Suggested quantity = how much the sell hub moves over the window, less
+        // what you already own (so you don't restock your own hangar). `stock` is
+        // empty when the UI's "subtract owned stock" toggle is off.
+        let demand = (row.dest_volume as f64 * params.purchase_days).round() as i64;
+        let owned = params.stock.get(&row.type_id).copied().unwrap_or(0);
+        row.suggested_qty = super::engine::net_suggested_qty(demand, owned);
         row.total_profit = row.profit_per_unit * row.suggested_qty as f64;
         // Days-of-supply = sell-hub order-book sell listing ÷ daily-traded. High =
         // a contested book (slow to clear); low = clears fast.
