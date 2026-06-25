@@ -71,6 +71,16 @@ pub struct PivotRow {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RecentEntry {
+    pub date: String,
+    pub ref_type: String,
+    pub amount: f64,
+    pub balance: f64,
+    pub description: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WalletView {
     pub balance: f64,
     pub income_total: f64,
@@ -78,6 +88,8 @@ pub struct WalletView {
     pub entry_count: i64,
     pub transaction_count: i64,
     pub pivots: Vec<PivotRow>,
+    /// The 200 most recent journal entries (with date/time).
+    pub recent: Vec<RecentEntry>,
 }
 
 /// Sync the wallet journal + transactions for the first character, incrementally
@@ -153,6 +165,21 @@ pub async fn wallet_sync(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
+    // Most recent entries (newest first), with date/time.
+    let mut sorted = journal.clone();
+    sorted.sort_by(|a, b| b.date.cmp(&a.date));
+    let recent = sorted
+        .into_iter()
+        .take(200)
+        .map(|e| RecentEntry {
+            date: e.date,
+            ref_type: e.ref_type,
+            amount: e.amount,
+            balance: e.balance,
+            description: e.description,
+        })
+        .collect();
+
     Ok(WalletView {
         balance,
         income_total,
@@ -160,6 +187,7 @@ pub async fn wallet_sync(
         entry_count: journal.len() as i64,
         transaction_count: transactions.len() as i64,
         pivots,
+        recent,
     })
 }
 
@@ -175,6 +203,8 @@ pub struct ProfitRow {
     pub profit: f64,
     /// Units sold without a matching buy in the data (cost basis 0).
     pub unmatched_units: i64,
+    /// Date of the most recent sale of this type.
+    pub last_sold: String,
 }
 
 #[derive(Serialize)]
@@ -214,10 +244,13 @@ pub fn profit_fifo(app: AppHandle) -> Result<ProfitView, String> {
                 cost: 0.0,
                 profit: 0.0,
                 unmatched_units: 0,
+                last_sold: String::new(),
             });
             let revenue = t.unit_price * t.quantity as f64;
             row.units_sold += t.quantity;
             row.revenue += revenue;
+            // Transactions are sorted ascending, so the last seen is the newest.
+            row.last_sold = t.date.clone();
             // Consume buy lots FIFO.
             let queue = lots.entry(t.type_id).or_default();
             let mut need = t.quantity;
