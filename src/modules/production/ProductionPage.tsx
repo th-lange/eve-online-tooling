@@ -64,7 +64,7 @@ const BASES: { value: PriceBasis; label: string }[] = [
   { value: "adjustedPrice", label: "Adjusted (CCP)" },
 ];
 
-type Tab = "item" | "market" | "thresholds";
+type Tab = "item" | "market" | "industry" | "thresholds";
 
 export function ProductionPage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
@@ -97,6 +97,7 @@ function Workbench() {
   const [me, setMe] = useState(0);
   const [useOwnedMe, setUseOwnedMe] = useState(true);
   const [useStock, setUseStock] = useState(false);
+  const [buildComponents, setBuildComponents] = useState(true);
   const [te, setTe] = useState(0);
   const [timeSkill, setTimeSkill] = useState(5);
   const [structure, setStructure] = useState<StructureKey>("npc");
@@ -233,6 +234,7 @@ function Workbench() {
       meBonus: STRUCTURES[structure].meBonus * (1 - rigMePct / 100),
       costBonus: 1 - (1 - STRUCTURES[structure].costBonus) * (1 - rigCostPct / 100),
       stock: useStock ? (stock.data ?? {}) : {},
+      buildComponents,
       systemCostIndex: costIndexPct / 100,
       facilityTax: facilityTaxPct / 100,
       materialBasis,
@@ -446,6 +448,28 @@ function Workbench() {
                 Sell at best hub
               </label>
             </Field>
+            <Field label="Components">
+              <label
+                className="flex items-center gap-1 py-1 text-xs text-zinc-300"
+                title="On: build intermediate components when cheaper than buying (recursive build-vs-buy). Off: buy every material at market."
+              >
+                <input
+                  type="checkbox"
+                  checked={buildComponents}
+                  onChange={(e) => setBuildComponents(e.currentTarget.checked)}
+                />
+                Build sub-components
+              </label>
+            </Field>
+            <div className="col-span-2 self-end text-xs text-zinc-500 md:col-span-4">
+              Changing market settings? Hit <strong>Calculate</strong> to
+              re-price.
+            </div>
+          </div>
+        )}
+
+        {tab === "industry" && (
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <Num label="Runs" value={runs} onChange={setRuns} min={1} />
             <Field label={`ME (default for un-owned)`}>
               <input
@@ -494,12 +518,6 @@ function Workbench() {
             <Num label="Rig ME %" value={rigMePct} onChange={setRigMePct} min={0} max={10} />
             <Num label="Rig TE %" value={rigTePct} onChange={setRigTePct} min={0} max={50} />
             <Num label="Rig cost %" value={rigCostPct} onChange={setRigCostPct} min={0} max={10} />
-            <Field label="Structure">
-              <span className="text-[11px] text-zinc-500">
-                Rig % compose with the structure preset (you supply the
-                security-adjusted rig bonus).
-              </span>
-            </Field>
             <Num
               label="Cost index %"
               value={costIndexPct}
@@ -551,9 +569,10 @@ function Workbench() {
                 ))}
               </select>
             </Field>
-            <div className="col-span-2 self-end text-xs text-zinc-500 md:col-span-4">
-              Changing market settings? Hit <strong>Calculate</strong> to
-              re-price.
+            <div className="col-span-2 self-end text-[11px] text-zinc-500 md:col-span-4">
+              Rig % compose with the structure preset (you supply the
+              security-adjusted bonus). Changing these? Hit{" "}
+              <strong>Calculate</strong> to re-price.
             </div>
           </div>
         )}
@@ -919,6 +938,7 @@ function Tabs({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
   const tabs: { value: Tab; label: string }[] = [
     { value: "item", label: "Item" },
     { value: "market", label: "Market" },
+    { value: "industry", label: "Industry" },
     { value: "thresholds", label: "Thresholds" },
   ];
   return (
