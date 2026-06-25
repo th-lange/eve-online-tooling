@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { industryJobs, type JobRow, type Slot } from "../../lib/api";
+import { authCharacters, industryJobs, type JobRow, type Slot } from "../../lib/api";
 import { formatInt, formatIsk } from "../../lib/format";
 
 type StatusFilter = "active" | "delivered" | "all";
@@ -13,11 +13,17 @@ function matchesStatus(status: string, filter: StatusFilter): boolean {
 }
 
 export function IndustryJobsPage() {
-  const jobs = useQuery({ queryKey: ["industry", "jobs"], queryFn: industryJobs });
+  const [characterId, setCharacterId] = useState<number | undefined>(undefined);
+  const characters = useQuery({ queryKey: ["auth", "characters"], queryFn: authCharacters });
+  const jobs = useQuery({
+    queryKey: ["industry", "jobs", characterId ?? "first"],
+    queryFn: () => industryJobs(characterId),
+  });
   const allRows = jobs.data?.jobs ?? [];
   const slots = jobs.data?.slots;
   const [status, setStatus] = useState<StatusFilter>("active");
   const [facility, setFacility] = useState("all");
+  const roster = characters.data ?? [];
 
   // Facilities present in the data, for the location selector.
   const facilities = useMemo(
@@ -68,6 +74,22 @@ export function IndustryJobsPage() {
       )}
 
       <div className="mt-4 flex flex-wrap items-end gap-3">
+        {roster.length > 1 && (
+          <label className="flex flex-col gap-1 text-xs text-zinc-400">
+            Character
+            <select
+              value={characterId ?? roster[0]?.characterId ?? ""}
+              onChange={(e) => setCharacterId(Number(e.currentTarget.value))}
+              className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+            >
+              {roster.map((c) => (
+                <option key={c.characterId} value={c.characterId}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <label className="flex flex-col gap-1 text-xs text-zinc-400">
           Status
           <select

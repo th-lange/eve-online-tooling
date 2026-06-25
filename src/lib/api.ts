@@ -604,11 +604,12 @@ export interface JobsResult {
 }
 
 /**
- * The character's industry jobs (running + recently delivered) plus slot usage,
- * durably accumulated. Requires `esi-industry.read_character_jobs.v1` (re-login if added).
+ * A character's industry jobs (running + recently delivered) plus slot usage,
+ * durably accumulated. `characterId` selects the roster character (default: first).
+ * Requires `esi-industry.read_character_jobs.v1` (re-login if added).
  */
-export function industryJobs(): Promise<JobsResult> {
-  return invoke<JobsResult>("industry_jobs");
+export function industryJobs(characterId?: number): Promise<JobsResult> {
+  return invoke<JobsResult>("industry_jobs", { characterId });
 }
 
 // --- Market Orders ---
