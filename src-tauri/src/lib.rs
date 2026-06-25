@@ -85,6 +85,8 @@ pub fn run() {
             modules::wormholes::commands::wh_update_connection,
             modules::wormholes::commands::wh_delete_connection,
             modules::wormholes::commands::wh_route,
+            modules::wormholes::commands::wh_paste_signatures,
+            modules::wormholes::commands::wh_signatures,
             modules::localintel::commands::local_scan,
             modules::localintel::commands::localintel_zkill,
             modules::localintel::commands::localintel_get_watchlist,

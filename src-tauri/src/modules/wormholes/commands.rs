@@ -213,6 +213,100 @@ pub fn wh_delete_connection(app: AppHandle, id: i64) -> Result<Vec<ConnectionVie
     save_and_view(&dir, &conns)
 }
 
+// --- Signature paste (#104) ---
+
+/// One scanned signature.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Signature {
+    pub id: String,
+    pub group: String,
+    pub sig_type: String,
+    pub name: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignatureScan {
+    pub signatures: Vec<Signature>,
+    /// Sig ids new since the last paste.
+    pub added: Vec<String>,
+    /// Sig ids that disappeared since the last paste.
+    pub removed: Vec<String>,
+}
+
+/// EVE signature id format: `ABC-123`.
+fn is_sig_id(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 7
+        && b[0..3].iter().all(|c| c.is_ascii_alphabetic())
+        && b[3] == b'-'
+        && b[4..7].iter().all(|c| c.is_ascii_digit())
+}
+
+/// Parse the in-game probe-scanner clipboard (tab-separated:
+/// `id  group  type  name  signal  distance`). Keeps only real signature rows,
+/// deduped by id. Pure (testable).
+fn parse_signatures(text: &str) -> Vec<Signature> {
+    let mut seen = HashSet::new();
+    text.lines()
+        .filter_map(|line| {
+            let cols: Vec<&str> = line.split('\t').collect();
+            let id = cols.first()?.trim();
+            if !is_sig_id(id) || !seen.insert(id.to_string()) {
+                return None;
+            }
+            Some(Signature {
+                id: id.to_string(),
+                group: cols.get(1).unwrap_or(&"").trim().to_string(),
+                sig_type: cols.get(2).unwrap_or(&"").trim().to_string(),
+                name: cols.get(3).unwrap_or(&"").trim().to_string(),
+            })
+        })
+        .collect()
+}
+
+fn sig_key(system_id: i64) -> String {
+    format!("wh_sigs_{system_id}")
+}
+
+/// Paste a scanner result for a system: store it, return the new set plus the
+/// added/removed diff vs the previous paste (what changed in the hole).
+#[tauri::command]
+pub fn wh_paste_signatures(
+    app: AppHandle,
+    system_id: i64,
+    text: String,
+) -> Result<SignatureScan, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let key = sig_key(system_id);
+    let previous: Vec<Signature> = storage::load_data(&dir, &key).unwrap_or_default();
+    let incoming = parse_signatures(&text);
+
+    let prev_ids: HashSet<&str> = previous.iter().map(|s| s.id.as_str()).collect();
+    let new_ids: HashSet<&str> = incoming.iter().map(|s| s.id.as_str()).collect();
+    let added: Vec<String> = incoming
+        .iter()
+        .filter(|s| !prev_ids.contains(s.id.as_str()))
+        .map(|s| s.id.clone())
+        .collect();
+    let removed: Vec<String> = previous
+        .iter()
+        .filter(|s| !new_ids.contains(s.id.as_str()))
+        .map(|s| s.id.clone())
+        .collect();
+
+    storage::save_data(&dir, &key, &incoming)?;
+    Ok(SignatureScan { signatures: incoming, added, removed })
+}
+
+/// Stored signatures for a system.
+#[tauri::command]
+pub fn wh_signatures(app: AppHandle, system_id: i64) -> Result<Vec<Signature>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(storage::load_data(&dir, &sig_key(system_id)).unwrap_or_default())
+}
+
 // --- Cross-chain routing (#103) ---
 
 /// How a hop is reached.
@@ -334,6 +428,21 @@ pub fn wh_route(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_scanner_paste_and_filters_noise() {
+        let text = "ABC-123\tCosmic Signature\tWormhole\tUnstable Wormhole\t100.0%\t1.2 AU\n\
+                    header line that is not a sig\n\
+                    XYZ-789\tCosmic Signature\tData\tRuined Site\t12.0%\t3 AU\n\
+                    ABC-123\tdup\t\t\t\t"; // dup id ignored
+        let sigs = parse_signatures(text);
+        assert_eq!(sigs.len(), 2);
+        assert_eq!(sigs[0].id, "ABC-123");
+        assert_eq!(sigs[0].sig_type, "Wormhole");
+        assert_eq!(sigs[1].id, "XYZ-789");
+        assert!(!is_sig_id("nope"));
+        assert!(is_sig_id("ABC-123"));
+    }
 
     #[test]
     fn routes_over_stargates_and_wormholes() {
