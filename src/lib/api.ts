@@ -406,6 +406,13 @@ export function characterFleet(): Promise<FleetView> {
 
 // --- Accounting (wallet + FIFO profit) ---
 
+export interface RecentEntry {
+  date: string;
+  refType: string;
+  amount: number;
+  balance: number;
+  description: string;
+}
 export interface WalletView {
   balance: number;
   incomeTotal: number;
@@ -413,6 +420,7 @@ export interface WalletView {
   entryCount: number;
   transactionCount: number;
   pivots: { refType: string; income: number; expense: number }[];
+  recent: RecentEntry[];
 }
 export function walletSync(): Promise<WalletView> {
   return invoke<WalletView>("wallet_sync");
@@ -426,6 +434,7 @@ export interface ProfitView {
     cost: number;
     profit: number;
     unmatchedUnits: number;
+    lastSold: string;
   }[];
   totalProfit: number;
 }
