@@ -73,6 +73,8 @@ pub fn run() {
             modules::accounting::commands::profit_fifo,
             modules::contracts::commands::contracts_scan,
             modules::route::commands::system_activity,
+            modules::route::commands::system_search,
+            modules::route::commands::system_neighbourhood,
             modules::localintel::commands::local_scan,
             modules::localintel::commands::localintel_zkill,
             modules::localintel::commands::localintel_get_watchlist,

@@ -642,6 +642,37 @@ export function systemActivity(refresh = false): Promise<SystemActivity[]> {
   return invoke<SystemActivity[]>("system_activity", { refresh });
 }
 
+export interface SystemMatch {
+  id: number;
+  name: string;
+}
+
+/** A neighbourhood node — a system's activity plus its distance (jumps) from the centre. */
+export interface NeighbourNode extends SystemActivity {
+  /** Jumps from the centre (0 = the centre itself). */
+  distance: number;
+}
+
+export interface Neighbourhood {
+  center: number;
+  nodes: NeighbourNode[];
+  /** Stargate edges between systems in the neighbourhood. */
+  edges: [number, number][];
+}
+
+/** Search solar systems by name (for the neighbourhood picker). */
+export function systemSearch(query: string): Promise<SystemMatch[]> {
+  return invoke<SystemMatch[]>("system_search", { query });
+}
+
+/** Stargate neighbourhood around a system out to `depth` jumps, with jumps/kills heat. */
+export function systemNeighbourhood(
+  systemId: number,
+  depth: number,
+): Promise<Neighbourhood> {
+  return invoke<Neighbourhood>("system_neighbourhood", { systemId, depth });
+}
+
 // --- SDE (Static Data Export) ---
 
 export interface SdeStatus {

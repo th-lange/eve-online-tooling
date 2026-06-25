@@ -576,6 +576,38 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Search solar systems by name substring (case-insensitive), capped. For
+    /// the route neighbourhood picker.
+    pub fn search_systems(&self, query: &str, limit: i64) -> Result<Vec<(i64, String)>, SdeError> {
+        let pattern = format!("%{}%", query.trim());
+        let mut stmt = self.conn.prepare(
+            "SELECT solarSystemID, solarSystemName FROM mapSolarSystems
+             WHERE solarSystemName LIKE ?1
+             ORDER BY LENGTH(solarSystemName), solarSystemName LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![pattern, limit], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Stargate edges `(from, to)` whose source is one of `ids` — for building a
+    /// system neighbourhood by BFS. K-space only (wormhole systems have no
+    /// stargates). One query; the caller walks levels.
+    pub fn stargate_edges_from(&self, ids: &[i64]) -> Result<Vec<(i64, i64)>, SdeError> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = vec!["?"; ids.len()].join(", ");
+        let sql = format!(
+            "SELECT fromSolarSystemID, toSolarSystemID FROM mapSolarSystemJumps
+             WHERE fromSolarSystemID IN ({placeholders})",
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(ids.iter()), |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// Map of solar system id -> (name, security, region name). For the route /
     /// system-activity view. `security` is the raw SDE float (−1.0 … 1.0).
     pub fn solar_system_info(&self) -> Result<HashMap<i64, (String, f64, String)>, SdeError> {
