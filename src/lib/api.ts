@@ -520,12 +520,18 @@ export interface OfferRow {
   profit: number;
   iskPerLp: number;
 }
+export interface OffersResult {
+  /** Unix seconds the offers were pulled from ESI (cached locally). */
+  fetchedAt: number;
+  rows: OfferRow[];
+}
 export interface LpParams {
   corporationId: number;
   iskPerLp?: number;
+  refresh?: boolean;
 }
-export function lpOffers(params: LpParams): Promise<OfferRow[]> {
-  return invoke<OfferRow[]>("lp_offers", { params });
+export function lpOffers(params: LpParams): Promise<OffersResult> {
+  return invoke<OffersResult>("lp_offers", { params });
 }
 
 // --- SDE (Static Data Export) ---

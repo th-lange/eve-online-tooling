@@ -36,11 +36,15 @@ function Workbench() {
   const [corpId, setCorpId] = useState<number | null>(null);
   const [iskPerLp, setIskPerLp] = useState(1000);
   const [rows, setRows] = useState<OfferRow[]>([]);
+  const [fetchedAt, setFetchedAt] = useState<number | null>(null);
 
   const balances = useQuery({ queryKey: ["lp", "balances"], queryFn: lpBalances });
   const run = useMutation({
     mutationFn: (p: LpParams) => lpOffers(p),
-    onSuccess: setRows,
+    onSuccess: (r) => {
+      setRows(r.rows);
+      setFetchedAt(r.fetchedAt);
+    },
   });
 
   useEffect(() => {
@@ -58,13 +62,28 @@ function Workbench() {
             Loyalty-store offers ranked by ISK per LP, valued at Jita.
           </p>
         </div>
-        <button
-          onClick={() => corpId != null && run.mutate({ corporationId: corpId, iskPerLp })}
-          disabled={run.isPending || corpId == null}
-          className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-        >
-          {run.isPending ? "Pricing…" : "Calculate"}
-        </button>
+        <div className="flex items-center gap-2">
+          {fetchedAt != null && (
+            <span className="text-xs text-zinc-500">Offers pulled {ago(fetchedAt)}</span>
+          )}
+          <button
+            onClick={() => corpId != null && run.mutate({ corporationId: corpId, iskPerLp })}
+            disabled={run.isPending || corpId == null}
+            className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            {run.isPending ? "Pricing…" : "Calculate"}
+          </button>
+          <button
+            onClick={() =>
+              corpId != null && run.mutate({ corporationId: corpId, iskPerLp, refresh: true })
+            }
+            disabled={run.isPending || corpId == null}
+            title="Re-pull the offers from ESI (ignore the local cache)"
+            className="rounded border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+          >
+            Refresh
+          </button>
+        </div>
       </div>
 
       {balances.isError && (
@@ -180,6 +199,15 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       {children}
     </label>
   );
+}
+
+/** Compact "X min/h/d ago" from a Unix-seconds timestamp. */
+function ago(epochSecs: number): string {
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - epochSecs));
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
 }
 
 function Centered({ children }: { children: ReactNode }) {

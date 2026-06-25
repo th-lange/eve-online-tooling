@@ -69,7 +69,7 @@ pub async fn lp_balances(
 
 // --- Offers (valued + ranked) ---
 
-#[derive(Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct EsiOffer {
     type_id: i64,
     quantity: i64,
@@ -78,10 +78,25 @@ struct EsiOffer {
     #[serde(default)]
     required_items: Vec<EsiRequired>,
 }
-#[derive(Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 struct EsiRequired {
     type_id: i64,
     quantity: i64,
+}
+
+/// Locally-cached raw offers with the pull time, so the (rarely-changing) LP
+/// store isn't re-fetched on every calculation.
+#[derive(Serialize, Deserialize)]
+struct CachedOffers {
+    fetched_at: u64,
+    offers: Vec<EsiOffer>,
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Deserialize)]
@@ -91,6 +106,17 @@ pub struct LpParams {
     /// ISK value assigned to one loyalty point (default 1000).
     #[serde(default = "default_isk_per_lp")]
     pub isk_per_lp: f64,
+    /// Force a re-pull of the offers (ignore the local cache).
+    #[serde(default)]
+    pub refresh: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OffersResult {
+    /// Unix seconds the offers were pulled from ESI (cached locally).
+    pub fetched_at: u64,
+    pub rows: Vec<OfferRow>,
 }
 fn default_isk_per_lp() -> f64 {
     1000.0
@@ -119,18 +145,39 @@ pub async fn lp_offers(
     app: AppHandle,
     market: State<'_, MarketService>,
     params: LpParams,
-) -> Result<Vec<OfferRow>, String> {
+) -> Result<OffersResult, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
     let esi = EsiClient::new();
 
-    let offers: Vec<EsiOffer> = esi
-        .get_paged(
-            &format!("/latest/loyalty/stores/{}/offers/", params.corporation_id),
-            &[],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
+    // Offers change rarely — serve them from the local cache unless refreshing.
+    let key = format!("lp_offers_{}", params.corporation_id);
+    let (offers, fetched_at) = match if params.refresh {
+        None
+    } else {
+        storage::load_data::<CachedOffers>(&dir, &key)
+    } {
+        Some(c) => (c.offers, c.fetched_at),
+        None => {
+            let offers: Vec<EsiOffer> = esi
+                .get_paged(
+                    &format!("/latest/loyalty/stores/{}/offers/", params.corporation_id),
+                    &[],
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            let fetched_at = now_secs();
+            let _ = storage::save_data(
+                &dir,
+                &key,
+                &CachedOffers {
+                    fetched_at,
+                    offers: offers.clone(),
+                },
+            );
+            (offers, fetched_at)
+        }
+    };
 
     // Price every product + required item at Jita.
     let mut ids: HashSet<i64> = HashSet::new();
@@ -184,5 +231,5 @@ pub async fn lp_offers(
             .partial_cmp(&a.isk_per_lp)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    Ok(rows)
+    Ok(OffersResult { fetched_at, rows })
 }
