@@ -45,6 +45,7 @@ pub fn run() {
             sde::commands::sde_type_info,
             sde::commands::sde_manufacturable_blueprints,
             sde::commands::sde_categories,
+            sde::commands::sde_market_categories,
             sde::commands::sde_groups,
             sde::commands::sde_types,
             sde::commands::sde_type_detail,

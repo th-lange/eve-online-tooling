@@ -189,6 +189,16 @@ pub fn sde_categories(app: AppHandle) -> Result<Vec<IdName>, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Categories that contain at least one marketable item — for the daytrading
+/// category whitelist selector (a strict subset of `sde_categories`).
+#[tauri::command]
+pub fn sde_market_categories(app: AppHandle) -> Result<Vec<IdName>, String> {
+    open(&app)?
+        .market_categories()
+        .map(id_names)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn sde_groups(app: AppHandle, category_id: i64, published_only: bool) -> Result<Vec<IdName>, String> {
     open(&app)?

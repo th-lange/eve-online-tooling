@@ -5,6 +5,7 @@ import {
   daytradingScan,
   daytradingSetList,
   marketRegions,
+  sdeMarketCategories,
   sdeStatus,
   type DayTradeParams,
   type DayTradeRow,
@@ -16,6 +17,9 @@ import { usePersistentSort } from "../../lib/usePersistentSort";
 import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
 
 type Tab = "opportunities" | "favorites" | "blacklist";
+
+/** EVE category ids for the default day-trade set: Ship / Module / Charge. */
+const DEFAULT_CATEGORY_IDS = [6, 7, 8];
 
 export function DaytradingPage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
@@ -38,13 +42,20 @@ function Workbench() {
   const [minProfit, setMinProfit] = useState("100000");
   const [minDailyDemand, setMinDailyDemand] = useState("0");
   const [search, setSearch] = useState("");
-  // Exclusion filters: nothing checked = show everything; check a category or
-  // tech level to *hide* it (e.g. blueprints, SKINs, apparel, faction).
-  const [hideCategories, setHideCategories] = useState<Set<string>>(new Set());
+  // Category whitelist (pre-scan): only these categories are pulled/priced at
+  // each hub. Defaults to the common day-trade set (Ships/Modules/Charges).
+  const [categoryIds, setCategoryIds] = useState<Set<number>>(
+    new Set(DEFAULT_CATEGORY_IDS),
+  );
+  // Post-scan tech-level exclusion: check a tech level to *hide* it from results.
   const [hideMetas, setHideMetas] = useState<Set<string>>(new Set());
   const [rows, setRows] = useState<DayTradeRow[]>([]);
 
   const regions = useQuery({ queryKey: ["market", "regions"], queryFn: marketRegions });
+  const categories = useQuery({
+    queryKey: ["sde", "marketCategories"],
+    queryFn: sdeMarketCategories,
+  });
   const favorites = useQuery({
     queryKey: ["daytrading", "favorites"],
     queryFn: () => daytradingGetList("favorites"),
@@ -68,6 +79,7 @@ function Workbench() {
       purchaseDays,
       minProfit: minProfit.trim() === "" ? 0 : Number(minProfit),
       minDailyDemand: minDailyDemand.trim() === "" ? 0 : Number(minDailyDemand),
+      categoryIds: [...categoryIds],
     });
   }
 
@@ -93,12 +105,9 @@ function Workbench() {
 
   const allRegions = regions.data ?? [];
   const selectedCount = regionIds.size === 0 ? allRegions.length : regionIds.size;
+  const allCategories = categories.data ?? [];
   const rowsByType = useMemo(
     () => new Map(rows.map((r) => [r.typeId, r])),
-    [rows],
-  );
-  const categoryOptions = useMemo(
-    () => uniqueSorted(rows, (r) => r.category),
     [rows],
   );
   const metaOptions = useMemo(
@@ -108,7 +117,6 @@ function Workbench() {
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((r) => {
-      if (r.category && hideCategories.has(r.category)) return false;
       if (r.metaGroup && hideMetas.has(r.metaGroup)) return false;
       if (
         q &&
@@ -121,10 +129,18 @@ function Workbench() {
         return false;
       return true;
     });
-  }, [rows, search, hideCategories, hideMetas]);
+  }, [rows, search, hideMetas]);
 
   function toggleRegion(id: number) {
     setRegionIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function toggleCategory(id: number) {
+    setCategoryIds((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
@@ -143,9 +159,15 @@ function Workbench() {
         </div>
         <button
           onClick={calculate}
-          disabled={run.isPending || selectedCount < 2}
+          disabled={run.isPending || selectedCount < 2 || categoryIds.size === 0}
           className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-          title={selectedCount < 2 ? "Select at least two hubs" : undefined}
+          title={
+            selectedCount < 2
+              ? "Select at least two hubs"
+              : categoryIds.size === 0
+                ? "Select at least one category"
+                : undefined
+          }
         >
           {run.isPending ? "Scanning…" : "Calculate"}
         </button>
@@ -176,6 +198,54 @@ function Workbench() {
           <span className="mt-1 text-[11px] text-zinc-500">
             None checked = all hubs.
           </span>
+        </Field>
+        <Field label={`Categories to scan (${categoryIds.size})`}>
+          <div className="flex max-h-28 flex-wrap gap-1 overflow-auto">
+            {allCategories.map((c) => {
+              const on = categoryIds.has(c.id);
+              return (
+                <label
+                  key={c.id}
+                  className={`flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 text-xs ${
+                    on ? "bg-zinc-700 text-zinc-100" : "bg-zinc-800 text-zinc-400"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    onChange={() => toggleCategory(c.id)}
+                  />
+                  {c.name}
+                </label>
+              );
+            })}
+          </div>
+          <div className="mt-1 flex items-center gap-2 text-[11px]">
+            <button
+              type="button"
+              onClick={() => setCategoryIds(new Set(DEFAULT_CATEGORY_IDS))}
+              className="rounded border border-zinc-700 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800"
+            >
+              Ships + Modules + Charges
+            </button>
+            <button
+              type="button"
+              onClick={() => setCategoryIds(new Set(allCategories.map((c) => c.id)))}
+              className="rounded border border-zinc-700 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800"
+            >
+              Select all
+            </button>
+            <button
+              type="button"
+              onClick={() => setCategoryIds(new Set())}
+              className="rounded border border-zinc-700 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800"
+            >
+              Clear
+            </button>
+            <span className="text-zinc-500">
+              Only the chosen categories are pulled — fewer = faster.
+            </span>
+          </div>
         </Field>
         <div className="grid grid-cols-3 gap-3">
           <NumField label="Broker fee %" value={brokerPct} onChange={setBrokerPct} />
@@ -217,18 +287,14 @@ function Workbench() {
           (run.isError ? (
             <div className="text-sm text-rose-400">Failed: {String(run.error)}</div>
           ) : run.isPending ? (
-            <Centered>Pricing ~19k items across {selectedCount} hubs…</Centered>
+            <Centered>
+              Pricing {categoryIds.size} categor
+              {categoryIds.size === 1 ? "y" : "ies"} across {selectedCount} hubs…
+            </Centered>
           ) : (
             <div>
-              {rows.length > 0 && (
-                <div className="mb-2 grid gap-3 md:grid-cols-2">
-                  <Field label="Hide categories (check to exclude)">
-                    <CheckboxGroup
-                      options={categoryOptions}
-                      selected={hideCategories}
-                      onToggle={(v) => setHideCategories(toggle(hideCategories, v))}
-                    />
-                  </Field>
+              {rows.length > 0 && metaOptions.length > 0 && (
+                <div className="mb-2">
                   <Field label="Hide tech levels (check to exclude)">
                     <CheckboxGroup
                       options={metaOptions}
