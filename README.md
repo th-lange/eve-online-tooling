@@ -12,6 +12,9 @@ built as a set of feature **modules** over a shared service layer.
 - **Appraisal** — paste items for a buy/sell valuation across hubs, or a reprocessing mineral yield.
 - **Universe**, **Market History**, **Assets**, **Character** (skills/standings/research/mining/fleet),
   **Accounting** (wallet + FIFO profit), **Public Contracts**, and **LP Store** tools.
+- **Route** — per-system jumps & ship/pod/NPC kills (last hour) across known space, sortable by activity.
+- **Local Intel** — paste the in-game Local member list to classify pilots blue/neutral/red by standing,
+  corp and alliance, with a corp/alliance watchlist + alerts and zKillboard danger enrichment.
 - **Mission-running** and more — planned.
 
 Built with **Tauri 2** (Rust core) + **React / TypeScript** (Vite). Market and character data come
