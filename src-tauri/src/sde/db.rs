@@ -608,6 +608,17 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Every stargate edge `(from, to)` in known space — the full adjacency for
+    /// in-memory route BFS (~13k rows). Cross-chain routing unions wormhole
+    /// connections onto this.
+    pub fn all_stargate_edges(&self) -> Result<Vec<(i64, i64)>, SdeError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT fromSolarSystemID, toSolarSystemID FROM mapSolarSystemJumps")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// Map of solar system id -> (name, security, region name). For the route /
     /// system-activity view. `security` is the raw SDE float (−1.0 … 1.0).
     pub fn solar_system_info(&self) -> Result<HashMap<i64, (String, f64, String)>, SdeError> {

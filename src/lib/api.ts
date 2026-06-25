@@ -769,6 +769,29 @@ export function whDeleteConnection(id: number): Promise<ConnectionView[]> {
   return invoke<ConnectionView[]>("wh_delete_connection", { id });
 }
 
+export interface RouteHop {
+  systemId: number;
+  name: string;
+  security: number;
+  wspace: boolean;
+  /** "origin" | "stargate" | "wormhole" — edge used to reach this hop. */
+  via: string;
+}
+export interface RouteResult {
+  hops: RouteHop[];
+  reachable: boolean;
+  jumps: number;
+}
+
+/** Route origin→destination over stargates ∪ mapped wormhole connections. */
+export function whRoute(
+  originSystemId: number,
+  destinationSystemId: number,
+  avoidEol: boolean,
+): Promise<RouteResult> {
+  return invoke<RouteResult>("wh_route", { originSystemId, destinationSystemId, avoidEol });
+}
+
 export interface BreadcrumbEntry {
   systemId: number;
   name: string;
