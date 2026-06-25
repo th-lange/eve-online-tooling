@@ -10,9 +10,38 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
-use crate::esi::{authed_get, resolve_names, AuthState};
+use crate::esi::{authed_get, resolve_names, AuthError, AuthState};
 use crate::sde::{Sde, SdePaths};
 use crate::storage;
+
+/// Fetch the character's jobs, retrying transient ESI failures (5xx / timeouts —
+/// the `include_completed` payload is heavy and ESI returns 504s under load).
+/// Real errors (e.g. 403 missing scope) fail fast — they aren't retried.
+async fn fetch_jobs_retrying(
+    auth: &AuthState,
+    character_id: i64,
+    url: &str,
+) -> Result<Vec<StoredJob>, String> {
+    let mut attempt = 0u32;
+    loop {
+        match authed_get::<Vec<StoredJob>>(auth, character_id, url).await {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                // Retry on 5xx or a status-less error (timeout/connection); a
+                // 4xx (403/401) is a real problem and returned immediately.
+                let retryable = match &e {
+                    AuthError::Http(he) => he.status().map(|s| s.is_server_error()).unwrap_or(true),
+                    _ => false,
+                };
+                attempt += 1;
+                if attempt >= 3 || !retryable {
+                    return Err(e.to_string());
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(700 * attempt as u64)).await;
+            }
+        }
+    }
+}
 
 /// Raw ESI industry job (the fields we keep). Stored durably, merged by job id.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,13 +158,13 @@ pub async fn industry_jobs(
         .ok_or_else(|| "Log in a character first".to_string())?;
 
     // include_completed so delivered jobs (the cost-basis source) come through.
-    let incoming: Vec<StoredJob> = authed_get(
+    // Retried on transient ESI 5xx/timeouts (this endpoint 504s under load).
+    let incoming: Vec<StoredJob> = fetch_jobs_retrying(
         &auth_state,
         character_id,
         &format!("/latest/characters/{character_id}/industry/jobs/?include_completed=true"),
     )
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
     // Merge into the durable store, keyed by job id (delivered jobs persist).
     let key = format!("industry_jobs_{character_id}");
