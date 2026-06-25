@@ -27,6 +27,7 @@ mod storage;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         .manage(market::MarketService::new())
         .manage(esi::AuthState::new())
         .invoke_handler(tauri::generate_handler![
@@ -73,6 +74,8 @@ pub fn run() {
             modules::contracts::commands::contracts_scan,
             modules::route::commands::system_activity,
             modules::localintel::commands::local_scan,
+            modules::localintel::commands::localintel_get_watchlist,
+            modules::localintel::commands::localintel_set_watchlist,
             modules::lpstore::commands::lp_balances,
             modules::lpstore::commands::lp_offers,
             modules::character::commands::character_skills,
