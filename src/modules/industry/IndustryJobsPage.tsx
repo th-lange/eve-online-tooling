@@ -1,12 +1,36 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { industryJobs, type JobRow } from "../../lib/api";
 import { formatInt, formatIsk } from "../../lib/format";
 
+type StatusFilter = "active" | "delivered" | "all";
+
+/** "active" = running + ready-to-deliver. */
+function matchesStatus(status: string, filter: StatusFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "active") return status === "active" || status === "ready";
+  return status === filter; // "delivered"
+}
+
 export function IndustryJobsPage() {
   const jobs = useQuery({ queryKey: ["industry", "jobs"], queryFn: industryJobs });
-  const rows = jobs.data ?? [];
-  const active = rows.filter((r) => r.status === "active" || r.status === "ready").length;
+  const allRows = jobs.data ?? [];
+  const [status, setStatus] = useState<StatusFilter>("active");
+  const [facility, setFacility] = useState("all");
+
+  // Facilities present in the data, for the location selector.
+  const facilities = useMemo(
+    () => [...new Set(allRows.map((r) => r.facility).filter(Boolean))].sort(),
+    [allRows],
+  );
+  const rows = useMemo(
+    () =>
+      allRows.filter(
+        (r) => matchesStatus(r.status, status) && (facility === "all" || r.facility === facility),
+      ),
+    [allRows, status, facility],
+  );
+  const active = allRows.filter((r) => r.status === "active" || r.status === "ready").length;
 
   return (
     <div className="p-6">
@@ -37,11 +61,40 @@ export function IndustryJobsPage() {
         </div>
       )}
 
-      {rows.length > 0 && (
-        <div className="mt-3 text-sm text-zinc-400">
-          {formatInt(rows.length)} job(s) · {formatInt(active)} running
-        </div>
-      )}
+      <div className="mt-4 flex flex-wrap items-end gap-3">
+        <label className="flex flex-col gap-1 text-xs text-zinc-400">
+          Status
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.currentTarget.value as StatusFilter)}
+            className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+          >
+            <option value="active">Active (running + to deliver)</option>
+            <option value="delivered">Delivered</option>
+            <option value="all">All</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-zinc-400">
+          Location
+          <select
+            value={facility}
+            onChange={(e) => setFacility(e.currentTarget.value)}
+            className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+          >
+            <option value="all">All locations</option>
+            {facilities.map((f) => (
+              <option key={f} value={f}>
+                {f}
+              </option>
+            ))}
+          </select>
+        </label>
+        {allRows.length > 0 && (
+          <span className="pb-1 text-xs text-zinc-500">
+            {formatInt(rows.length)} shown · {formatInt(active)} running total
+          </span>
+        )}
+      </div>
 
       <JobsTable rows={rows} />
     </div>
