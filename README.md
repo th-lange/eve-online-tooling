@@ -122,11 +122,13 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
   depth on each side — **Sell vol** / **Buy vol** (units listed in sell vs buy orders) — alongside
   **Traded/day** (real units moved, from market history; buys and sells are the same quantity, so that
   column isn't split).
-- **Daytrading module** — pick a set of regional hubs (or all of them) and scan ~19k items for the
-  best **cross-region** flip on each: buy at the cheapest hub, sell at the dearest, after sales tax +
-  broker fee. Ranked by **ISK/m³** (cargo is the constraint), with the buy→sell route, per-unit
-  profit, margin, item volume, and sell-hub daily-traded volume — sortable, searchable, with the same
-  blacklist/favorites.
+- **Daytrading module** — pick a set of regional hubs (or all of them) and a **category whitelist**
+  (defaults to Ships + Modules + Charges; "Select all" for the full catalogue), then scan only those
+  categories for the best **cross-region** flip on each: buy at the cheapest hub, sell at the dearest,
+  after sales tax + broker fee. Scanning a few categories instead of the whole ~19k catalogue means far
+  less market data pulled per hub — faster scans, lighter API load. Ranked by **ISK/m³** (cargo is the
+  constraint), with the buy→sell route, per-unit profit, margin, item volume, and sell-hub daily-traded
+  volume — sortable, searchable, with the same blacklist/favorites.
 
 ## Releasing
 
