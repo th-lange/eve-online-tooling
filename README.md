@@ -9,6 +9,9 @@ built as a set of feature **modules** over a shared service layer.
 - **Daytrading** — scans multiple regional hubs for price gaps on the same item, finds the best
   cross-region flip (buy cheapest → sell dearest) after taxes/fees, ranked by ISK/m³.
 - **Reprocessing** — ranks ores by reprocess-vs-sell at your refining efficiency.
+- **Appraisal** — paste items for a buy/sell valuation across hubs, or a reprocessing mineral yield.
+- **Universe**, **Market History**, **Assets**, **Character** (skills/standings/research/mining/fleet),
+  **Accounting** (wallet + FIFO profit), **Public Contracts**, and **LP Store** tools.
 - **Mission-running** and more — planned.
 
 Built with **Tauri 2** (Rust core) + **React / TypeScript** (Vite). Market and character data come
@@ -131,7 +134,7 @@ Installers are produced by the **Release** GitHub Actions workflow (`.github/wor
 To cut a release:
 
 1. Bump the version in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`.
-2. Commit, then tag and push: `git tag v0.5.0 && git push origin v0.5.0`.
+2. Commit, then tag and push: `git tag v0.6.0 && git push origin v0.6.0`.
 
 The workflow builds Linux / macOS / Windows installers on their respective runners and attaches them
 to the GitHub Release for that tag (it can also be run manually from the **Actions** tab against an
