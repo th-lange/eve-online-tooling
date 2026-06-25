@@ -10,7 +10,7 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
-use crate::esi::{authed_get, resolve_names, AuthError, AuthState};
+use crate::esi::{authed_get, corporation_id, resolve_names, AuthError, AuthState, ESI_BASE};
 use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
@@ -81,6 +81,30 @@ pub struct JobRow {
     pub start_date: String,
     pub end_date: String,
     pub facility: String,
+    /// "You" for personal jobs, "Corp" for corporation jobs.
+    pub owner: String,
+}
+
+/// Fetch corporation industry jobs (403/error → none: needs the scope + a corp
+/// role). Not durably stored; display-only.
+async fn fetch_corp_jobs(
+    auth: &AuthState,
+    character_id: i64,
+    corporation_id: i64,
+) -> Vec<StoredJob> {
+    let Ok(token) = auth.access_token_for(character_id).await else {
+        return Vec::new();
+    };
+    let url = format!(
+        "{ESI_BASE}/latest/corporations/{corporation_id}/industry/jobs/?include_completed=true"
+    );
+    let Ok(resp) = auth.http().get(&url).bearer_auth(&token).send().await else {
+        return Vec::new();
+    };
+    match resp.error_for_status() {
+        Ok(r) => r.json::<Vec<StoredJob>>().await.unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
 }
 
 /// Industry job slots of one kind: how many are in use vs available.
@@ -223,11 +247,25 @@ pub async fn industry_jobs(
         reactions: Slot { used: used_r, total: total_r },
     };
 
+    // Corp jobs (display-only; needs the corp scope + a corp role — else none).
+    // Tag personal jobs "You" and corp jobs "Corp"; a job_id seen in both keeps
+    // the personal one. Slots above stay character-only.
+    let mut combined: Vec<(StoredJob, &'static str)> =
+        jobs.into_iter().map(|j| (j, "You")).collect();
+    if let Ok(corp_id) = corporation_id(&auth_state, character_id).await {
+        let seen: HashSet<i64> = combined.iter().map(|(j, _)| j.job_id).collect();
+        for j in fetch_corp_jobs(&auth_state, character_id, corp_id).await {
+            if !seen.contains(&j.job_id) {
+                combined.push((j, "Corp"));
+            }
+        }
+    }
+
     // Resolve names: product/blueprint via SDE, facility via /universe/names.
     let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
-    let facility_ids: Vec<i64> = jobs
+    let facility_ids: Vec<i64> = combined
         .iter()
-        .filter_map(|j| j.facility_id.or(j.station_id))
+        .filter_map(|(j, _)| j.facility_id.or(j.station_id))
         .collect();
     let facilities = resolve_names(&auth_state, &facility_ids).await;
     let type_name = |id: i64| {
@@ -238,9 +276,9 @@ pub async fn industry_jobs(
             .unwrap_or_else(|| format!("Type {id}"))
     };
 
-    let mut rows: Vec<JobRow> = jobs
+    let mut rows: Vec<JobRow> = combined
         .into_iter()
-        .map(|j| {
+        .map(|(j, owner)| {
             let product = type_name(j.product_type_id.unwrap_or(j.blueprint_type_id));
             let facility = j
                 .facility_id
@@ -257,6 +295,7 @@ pub async fn industry_jobs(
                 start_date: j.start_date,
                 end_date: j.end_date,
                 facility,
+                owner: owner.to_string(),
             }
         })
         .collect();

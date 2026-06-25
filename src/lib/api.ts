@@ -584,6 +584,8 @@ export interface JobRow {
   startDate: string;
   endDate: string;
   facility: string;
+  /** "You" for personal jobs, "Corp" for corporation jobs. */
+  owner: string;
 }
 
 export interface Slot {

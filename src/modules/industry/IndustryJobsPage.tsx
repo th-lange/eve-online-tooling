@@ -115,6 +115,7 @@ function JobsTable({ rows }: { rows: JobRow[] }) {
         <thead className="bg-zinc-900 text-zinc-400">
           <tr>
             <th className="px-3 py-1.5 text-left font-medium">Product</th>
+            <th className="px-3 py-1.5 text-left font-medium">Owner</th>
             <th className="px-3 py-1.5 text-left font-medium">Activity</th>
             <th className="px-3 py-1.5 text-right font-medium">Runs</th>
             <th className="px-3 py-1.5 text-left font-medium">Status</th>
@@ -127,6 +128,11 @@ function JobsTable({ rows }: { rows: JobRow[] }) {
           {rows.map((r) => (
             <tr key={r.jobId} className="border-t border-zinc-800 text-zinc-300 hover:bg-zinc-800/40">
               <td className="px-3 py-1.5 text-zinc-200">{r.product}</td>
+              <td className="px-3 py-1.5">
+                <span className={r.owner === "Corp" ? "text-sky-400" : "text-zinc-500"}>
+                  {r.owner}
+                </span>
+              </td>
               <td className="px-3 py-1.5 text-zinc-400">{r.activity}</td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">{formatInt(r.runs)}</td>
               <td className="px-3 py-1.5">
@@ -141,7 +147,7 @@ function JobsTable({ rows }: { rows: JobRow[] }) {
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={7} className="px-3 py-6 text-center text-zinc-500">
+              <td colSpan={8} className="px-3 py-6 text-center text-zinc-500">
                 No industry jobs.
               </td>
             </tr>
