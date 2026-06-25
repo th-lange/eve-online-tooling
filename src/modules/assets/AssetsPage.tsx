@@ -1,12 +1,15 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  assetsTree,
   assetsValue,
   marketRegions,
   sdeStatus,
+  type AssetNode,
   type AssetRow,
   type AssetsParams,
   type AssetsResult,
+  type AssetsTreeResult,
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
 import { formatInt, formatIsk, sortRows } from "../../lib/format";
@@ -32,10 +35,22 @@ function Workbench() {
   const [search, setSearch] = useState("");
   const [result, setResult] = useState<AssetsResult | null>(null);
 
+  const [tree, setTree] = useState<AssetsTreeResult | null>(null);
+
   const regions = useQuery({ queryKey: ["market", "regions"], queryFn: marketRegions });
   const run = useMutation({
     mutationFn: (p: AssetsParams) => assetsValue(p),
-    onSuccess: setResult,
+    onSuccess: (r) => {
+      setResult(r);
+      setTree(null);
+    },
+  });
+  const treeRun = useMutation({
+    mutationFn: () => assetsTree(),
+    onSuccess: (t) => {
+      setTree(t);
+      setResult(null);
+    },
   });
 
   const stations = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
@@ -58,14 +73,45 @@ function Workbench() {
             worth the most.
           </p>
         </div>
-        <button
-          onClick={() => run.mutate({ regionId, stationId, bestHub })}
-          disabled={run.isPending}
-          className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-        >
-          {run.isPending ? "Valuing…" : "Value assets"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => treeRun.mutate()}
+            disabled={treeRun.isPending}
+            className="rounded border border-zinc-700 px-4 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+            title="Nested location tree, valued at the best hub"
+          >
+            {treeRun.isPending ? "Loading…" : "Location tree"}
+          </button>
+          <button
+            onClick={() => run.mutate({ regionId, stationId, bestHub })}
+            disabled={run.isPending}
+            className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            {run.isPending ? "Valuing…" : "Value assets"}
+          </button>
+        </div>
       </div>
+
+      {treeRun.isError && (
+        <div className="mt-3 text-sm text-rose-400">Failed: {String(treeRun.error)}</div>
+      )}
+      {tree && (
+        <>
+          <div className="mt-4 flex flex-wrap gap-6 text-sm">
+            <Stat label="Sell value (best hub)" value={formatIsk(tree.sellTotal)} accent />
+            <Stat label="Volume" value={`${formatInt(Math.round(tree.volumeTotal))} m³`} />
+            <Stat label="Locations" value={formatInt(tree.roots.length)} />
+          </div>
+          <div className="mt-3 rounded border border-zinc-800">
+            {tree.roots.map((n) => (
+              <TreeRow key={n.id} node={n} depth={0} />
+            ))}
+            {tree.roots.length === 0 && (
+              <div className="px-3 py-6 text-center text-sm text-zinc-500">No assets.</div>
+            )}
+          </div>
+        </>
+      )}
 
       <div className="mt-4 grid grid-cols-2 gap-3 rounded border border-zinc-800 bg-zinc-900 p-3 md:grid-cols-4">
         <Field label="Region">
@@ -205,6 +251,39 @@ function Row({ r }: { r: AssetRow }) {
         {formatInt(Math.round(r.volume))}
       </td>
     </tr>
+  );
+}
+
+/** A collapsible row in the asset location tree (locations expanded by default). */
+function TreeRow({ node, depth }: { node: AssetNode; depth: number }) {
+  const [open, setOpen] = useState(depth === 0);
+  const hasChildren = node.children.length > 0;
+  return (
+    <>
+      <div
+        className="flex items-center justify-between border-t border-zinc-800/60 px-3 py-1 text-sm hover:bg-zinc-800/30"
+        style={{ paddingLeft: `${12 + depth * 16}px` }}
+      >
+        <span className="flex items-center gap-1">
+          {hasChildren ? (
+            <button onClick={() => setOpen(!open)} className="w-4 text-zinc-500">
+              {open ? "▾" : "▸"}
+            </button>
+          ) : (
+            <span className="w-4" />
+          )}
+          <span className={node.isLocation ? "font-medium text-zinc-100" : "text-zinc-300"}>
+            {node.name}
+          </span>
+          {node.quantity > 1 && !node.isLocation && (
+            <span className="text-xs text-zinc-500">×{formatInt(node.quantity)}</span>
+          )}
+          {node.bestHub && <span className="ml-1 text-[10px] text-sky-400/70">{node.bestHub}</span>}
+        </span>
+        <span className="tabular-nums text-zinc-400">{formatIsk(node.sellValue)}</span>
+      </div>
+      {open && node.children.map((c) => <TreeRow key={c.id} node={c} depth={depth + 1} />)}
+    </>
   );
 }
 

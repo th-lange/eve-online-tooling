@@ -24,6 +24,10 @@ pub struct RawAsset {
     pub type_id: i64,
     pub quantity: i64,
     pub location_id: i64,
+    /// Unique in-game id of this asset stack (a container's id can be another
+    /// asset's `location_id` — that's how the location tree nests). 0 if absent.
+    #[serde(default)]
+    pub item_id: i64,
 }
 
 /// Authenticated, paginated ESI GET for the given character.

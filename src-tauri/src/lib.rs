@@ -69,6 +69,7 @@ pub fn run() {
             modules::appraisal::commands::appraisal,
             modules::appraisal::commands::appraisal_reprocess,
             modules::assets::commands::assets_value,
+            modules::assets::commands::assets_tree,
             modules::accounting::commands::wallet_sync,
             modules::accounting::commands::profit_fifo,
             modules::contracts::commands::contracts_scan,
