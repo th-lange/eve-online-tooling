@@ -54,6 +54,53 @@ pub struct JobRow {
     pub facility: String,
 }
 
+/// Industry job slots of one kind: how many are in use vs available.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Slot {
+    pub used: i64,
+    pub total: i64,
+}
+
+/// The character's three job-slot pools.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Slots {
+    pub manufacturing: Slot,
+    pub science: Slot,
+    pub reactions: Slot,
+}
+
+/// Jobs + slot usage — the Industry Jobs command's response.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobsResult {
+    pub jobs: Vec<JobRow>,
+    pub slots: Slots,
+}
+
+#[derive(Deserialize, Default)]
+struct EsiSkills {
+    #[serde(default)]
+    skills: Vec<EsiSkill>,
+}
+#[derive(Deserialize)]
+struct EsiSkill {
+    skill_id: i64,
+    #[serde(default)]
+    active_skill_level: i64,
+}
+
+/// Which slot pool an activity draws from: manufacturing / science / reactions.
+fn slot_pool(activity_id: i64) -> Option<&'static str> {
+    match activity_id {
+        1 => Some("m"),              // manufacturing
+        3 | 4 | 5 | 8 => Some("s"),  // TE/ME research, copy, invention
+        9 => Some("r"),              // reactions
+        _ => None,
+    }
+}
+
 /// ESI industry activity id → label.
 fn activity_name(id: i64) -> &'static str {
     match id {
@@ -73,7 +120,7 @@ fn activity_name(id: i64) -> &'static str {
 pub async fn industry_jobs(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
-) -> Result<Vec<JobRow>, String> {
+) -> Result<JobsResult, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let character_id = storage::load_roster(&dir)
         .into_iter()
@@ -104,6 +151,48 @@ pub async fn industry_jobs(
         }
     }
     let _ = storage::save_data(&dir, &key, &jobs);
+
+    // Slot usage: max slots come from skills (1 base + each rank), used = jobs
+    // occupying a slot now (active or finished-but-undelivered).
+    let skills: EsiSkills = authed_get(
+        &auth_state,
+        character_id,
+        &format!("/latest/characters/{character_id}/skills/"),
+    )
+    .await
+    .unwrap_or_default();
+    let level = |skill_id: i64| {
+        skills
+            .skills
+            .iter()
+            .find(|s| s.skill_id == skill_id)
+            .map(|s| s.active_skill_level)
+            .unwrap_or(0)
+    };
+    // Mass Production / Adv (3387/24625), Laboratory Operation / Adv (3406/24624),
+    // Mass Reactions / Adv (45748/45749) — 1 base slot + 1 per level.
+    let (total_m, total_s, total_r) = (
+        1 + level(3387) + level(24625),
+        1 + level(3406) + level(24624),
+        1 + level(45748) + level(45749),
+    );
+    let (mut used_m, mut used_s, mut used_r) = (0, 0, 0);
+    for j in &jobs {
+        if j.status != "active" && j.status != "ready" {
+            continue;
+        }
+        match slot_pool(j.activity_id) {
+            Some("m") => used_m += 1,
+            Some("s") => used_s += 1,
+            Some("r") => used_r += 1,
+            _ => {}
+        }
+    }
+    let slots = Slots {
+        manufacturing: Slot { used: used_m, total: total_m },
+        science: Slot { used: used_s, total: total_s },
+        reactions: Slot { used: used_r, total: total_r },
+    };
 
     // Resolve names: product/blueprint via SDE, facility via /universe/names.
     let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
@@ -149,5 +238,5 @@ pub async fn industry_jobs(
             .cmp(&rank(&b.status))
             .then_with(|| b.end_date.cmp(&a.end_date))
     });
-    Ok(rows)
+    Ok(JobsResult { jobs: rows, slots })
 }

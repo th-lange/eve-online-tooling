@@ -586,12 +586,27 @@ export interface JobRow {
   facility: string;
 }
 
+export interface Slot {
+  used: number;
+  total: number;
+}
+export interface Slots {
+  manufacturing: Slot;
+  science: Slot;
+  reactions: Slot;
+}
+export interface JobsResult {
+  jobs: JobRow[];
+  /** Job-slot usage (used vs available), from the character's skills. */
+  slots: Slots;
+}
+
 /**
- * The character's industry jobs (running + recently delivered), durably
- * accumulated. Requires `esi-industry.read_character_jobs.v1` (re-login if added).
+ * The character's industry jobs (running + recently delivered) plus slot usage,
+ * durably accumulated. Requires `esi-industry.read_character_jobs.v1` (re-login if added).
  */
-export function industryJobs(): Promise<JobRow[]> {
-  return invoke<JobRow[]>("industry_jobs");
+export function industryJobs(): Promise<JobsResult> {
+  return invoke<JobsResult>("industry_jobs");
 }
 
 // --- Market Orders ---

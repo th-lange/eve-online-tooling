@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { industryJobs, type JobRow } from "../../lib/api";
+import { industryJobs, type JobRow, type Slot } from "../../lib/api";
 import { formatInt, formatIsk } from "../../lib/format";
 
 type StatusFilter = "active" | "delivered" | "all";
@@ -14,7 +14,8 @@ function matchesStatus(status: string, filter: StatusFilter): boolean {
 
 export function IndustryJobsPage() {
   const jobs = useQuery({ queryKey: ["industry", "jobs"], queryFn: industryJobs });
-  const allRows = jobs.data ?? [];
+  const allRows = jobs.data?.jobs ?? [];
+  const slots = jobs.data?.slots;
   const [status, setStatus] = useState<StatusFilter>("active");
   const [facility, setFacility] = useState("all");
 
@@ -58,6 +59,14 @@ export function IndustryJobsPage() {
             Needs the <code>esi-industry.read_character_jobs.v1</code> scope —
             re-login after it's enabled on the EVE app.
           </div>
+        </div>
+      )}
+
+      {slots && (
+        <div className="mt-4 flex flex-wrap gap-3">
+          <SlotPill label="Manufacturing" slot={slots.manufacturing} />
+          <SlotPill label="Science" slot={slots.science} />
+          <SlotPill label="Reactions" slot={slots.reactions} />
         </div>
       )}
 
@@ -142,6 +151,19 @@ function JobsTable({ rows }: { rows: JobRow[] }) {
           )}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/** A used/total slot pill, amber when full. */
+function SlotPill({ label, slot }: { label: string; slot: Slot }) {
+  const full = slot.used >= slot.total;
+  return (
+    <div className="rounded border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm">
+      <span className="text-zinc-400">{label}</span>{" "}
+      <span className={`tabular-nums font-medium ${full ? "text-amber-400" : "text-zinc-100"}`}>
+        {slot.used}/{slot.total}
+      </span>
     </div>
   );
 }
