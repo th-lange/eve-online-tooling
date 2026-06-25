@@ -549,6 +549,28 @@ export function lpOffers(params: LpParams): Promise<OffersResult> {
   return invoke<OffersResult>("lp_offers", { params });
 }
 
+// --- Route / system activity ---
+
+export interface SystemActivity {
+  systemId: number;
+  name: string;
+  region: string;
+  /** Raw SDE security status (−1.0 … 1.0). */
+  security: number;
+  jumps: number;
+  shipKills: number;
+  podKills: number;
+  npcKills: number;
+}
+
+/**
+ * Per-system jumps + ship/pod/npc kills over the last hour (CCP hourly
+ * aggregates, k-space only). Cached ~30 min; `refresh` bypasses the cache.
+ */
+export function systemActivity(refresh = false): Promise<SystemActivity[]> {
+  return invoke<SystemActivity[]>("system_activity", { refresh });
+}
+
 // --- SDE (Static Data Export) ---
 
 export interface SdeStatus {

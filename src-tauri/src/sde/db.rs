@@ -576,6 +576,32 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Map of solar system id -> (name, security, region name). For the route /
+    /// system-activity view. `security` is the raw SDE float (−1.0 … 1.0).
+    pub fn solar_system_info(&self) -> Result<HashMap<i64, (String, f64, String)>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT s.solarSystemID, s.solarSystemName, s.security, r.regionName
+             FROM mapSolarSystems s
+             LEFT JOIN mapRegions r ON r.regionID = s.regionID",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                (
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<f64>>(2)?.unwrap_or(0.0),
+                    row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                ),
+            ))
+        })?;
+        let mut map = HashMap::new();
+        for row in rows {
+            let (id, info) = row?;
+            map.insert(id, info);
+        }
+        Ok(map)
+    }
+
     /// Map of solar system id -> name (for mining ledger / fleet).
     pub fn system_names(&self) -> Result<HashMap<i64, String>, SdeError> {
         let mut stmt = self

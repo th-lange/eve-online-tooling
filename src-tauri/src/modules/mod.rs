@@ -10,4 +10,5 @@ pub mod daytrading;
 pub mod lpstore;
 pub mod production;
 pub mod reprocessing;
+pub mod route;
 pub mod trading;
