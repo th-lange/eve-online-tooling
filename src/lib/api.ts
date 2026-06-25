@@ -188,6 +188,12 @@ export interface DayTradeParams {
   purchaseDays?: number;
   /** Drop rows whose sell-hub daily-traded volume is below this. */
   minDailyDemand?: number;
+  /**
+   * Item category ids (a whitelist) to scan/price — only these are pulled at
+   * each hub. Omitted = the default day-trade set (Ships + Modules + Charges);
+   * `[]` = the whole catalogue.
+   */
+  categoryIds?: number[];
 }
 
 /** Rank items by inter-station arbitrage (buy source → sell destination). */
@@ -640,6 +646,10 @@ export interface AttrPair {
 
 export function sdeCategories(): Promise<IdName[]> {
   return invoke<IdName[]>("sde_categories");
+}
+/** Categories that contain marketable items (for the daytrading whitelist). */
+export function sdeMarketCategories(): Promise<IdName[]> {
+  return invoke<IdName[]>("sde_market_categories");
 }
 export function sdeGroups(categoryId: number, publishedOnly: boolean): Promise<IdName[]> {
   return invoke<IdName[]>("sde_groups", { categoryId, publishedOnly });

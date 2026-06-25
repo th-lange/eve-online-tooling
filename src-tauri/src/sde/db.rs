@@ -309,6 +309,56 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Marketable items restricted to the given category ids (e.g. 6 = Ship,
+    /// 7 = Module, 8 = Charge). An empty list means "no restriction" and falls
+    /// back to the full [`market_items`](Self::market_items) catalogue. Narrowing
+    /// to a few categories is the whole point of the daytrading whitelist (#87):
+    /// far fewer type ids → far less market data pulled per hub.
+    pub fn market_items_in_categories(
+        &self,
+        category_ids: &[i64],
+    ) -> Result<Vec<MarketItem>, SdeError> {
+        if category_ids.is_empty() {
+            return self.market_items();
+        }
+        // Build a `(?, ?, …)` placeholder list — rusqlite has no native array bind.
+        let placeholders = vec!["?"; category_ids.len()].join(", ");
+        let sql = format!(
+            "SELECT t.typeID, t.typeName, t.groupID, t.volume FROM invTypes t
+             JOIN invGroups g ON g.groupID = t.groupID
+             WHERE t.published = 1 AND t.marketGroupID IS NOT NULL
+               AND g.categoryID IN ({placeholders})
+             ORDER BY t.typeID",
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let params = rusqlite::params_from_iter(category_ids.iter());
+        let rows = stmt.query_map(params, |row| {
+            let group_id: i64 = row.get(2)?;
+            let assembled: Option<f64> = row.get(3)?;
+            Ok(MarketItem {
+                type_id: row.get(0)?,
+                name: row.get(1)?,
+                volume: packaged_volume(group_id, assembled),
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Categories that contain at least one marketable item, for the daytrading
+    /// category selector. Sorted by name.
+    pub fn market_categories(&self) -> Result<Vec<(i64, String)>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT c.categoryID, c.categoryName
+             FROM invCategories c
+             JOIN invGroups g ON g.categoryID = c.categoryID
+             JOIN invTypes t ON t.groupID = g.groupID
+             WHERE t.published = 1 AND t.marketGroupID IS NOT NULL
+             ORDER BY c.categoryName",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// Search marketable types by name substring (case-insensitive), capped.
     /// For pickers (market history, etc.).
     pub fn search_types(&self, query: &str, limit: i64) -> Result<Vec<(i64, String)>, SdeError> {
@@ -845,6 +895,73 @@ mod tests {
         let meta = sde.meta_group_names().unwrap();
         assert_eq!(meta.get(&100).map(String::as_str), Some("Tech II"));
         assert_eq!(meta.get(&200), None); // no meta entry -> Tech I (absent)
+    }
+
+    /// A tiny market fixture: Ship (cat 6), Module (cat 7), Charge (cat 8), plus
+    /// an unpublished and a non-market type that must never appear.
+    fn market_fixture() -> Sde {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE invCategories(categoryID INT, categoryName TEXT);
+             CREATE TABLE invGroups(groupID INT, categoryID INT, groupName TEXT);
+             CREATE TABLE invTypes(typeID INT, groupID INT, typeName TEXT, volume REAL, published INT, marketGroupID INT);
+
+             INSERT INTO invCategories VALUES (6, 'Ship'), (7, 'Module'), (8, 'Charge'), (9, 'Blueprint');
+             INSERT INTO invGroups VALUES (25, 6, 'Frigate'), (60, 7, 'Cap Booster'), (85, 8, 'Charge'), (105, 9, 'Blueprint');
+             INSERT INTO invTypes VALUES
+               (587, 25, 'Rifter', 27.0, 1, 100),       -- ship, on market
+               (400, 60, 'Cap Recharger', 5.0, 1, 200), -- module, on market
+               (200, 85, 'EMP S', 0.01, 1, 300),        -- charge, on market
+               (999, 105, 'Rifter Blueprint', 0.01, 1, 400), -- blueprint, on market
+               (998, 25, 'Unpublished Hull', 27.0, 0, 100),  -- unpublished
+               (997, 25, 'No-Market Hull', 27.0, 1, NULL);   -- not on market",
+        )
+        .unwrap();
+        Sde::from_connection(conn)
+    }
+
+    #[test]
+    fn market_items_in_categories_filters_by_category() {
+        let sde = market_fixture();
+        // Ships + Modules + Charges (the daytrading default) — no blueprint.
+        let items = sde.market_items_in_categories(&[6, 7, 8]).unwrap();
+        let ids: Vec<i64> = items.iter().map(|i| i.type_id).collect();
+        assert_eq!(ids, vec![200, 400, 587]); // ordered by type id
+        // Ship volume override (Frigate group 25 → 2,500 packaged).
+        let rifter = items.iter().find(|i| i.type_id == 587).unwrap();
+        assert_eq!(rifter.volume, Some(2_500.0));
+
+        // Just one category.
+        let charges = sde.market_items_in_categories(&[8]).unwrap();
+        assert_eq!(charges.iter().map(|i| i.type_id).collect::<Vec<_>>(), vec![200]);
+    }
+
+    #[test]
+    fn market_items_empty_categories_returns_all() {
+        let sde = market_fixture();
+        // Empty filter = whole catalogue (published + on market), incl. blueprint.
+        let all = sde.market_items_in_categories(&[]).unwrap();
+        assert_eq!(
+            all.iter().map(|i| i.type_id).collect::<Vec<_>>(),
+            vec![200, 400, 587, 999],
+        );
+    }
+
+    #[test]
+    fn market_categories_lists_only_marketable() {
+        let sde = market_fixture();
+        let cats = sde.market_categories().unwrap();
+        // Sorted by name; only categories with a published, marketable type
+        // (Blueprint qualifies — the Rifter Blueprint is on the market).
+        assert_eq!(
+            cats,
+            vec![
+                (9, "Blueprint".to_string()),
+                (8, "Charge".to_string()),
+                (7, "Module".to_string()),
+                (6, "Ship".to_string()),
+            ],
+        );
     }
 
     #[test]

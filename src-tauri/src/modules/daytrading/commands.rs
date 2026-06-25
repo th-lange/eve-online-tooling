@@ -55,10 +55,21 @@ pub struct DayTradeParams {
     /// Drop rows whose sell-hub daily-traded volume is below this (illiquid).
     #[serde(default)]
     pub min_daily_demand: i64,
+    /// Item categories (a whitelist) to scan/price — the scan starts from this
+    /// reduced id set instead of the whole catalogue. Empty = the default
+    /// day-trade set (Ships + Modules + Charges); pass explicit ids to override
+    /// (e.g. add Drones, or `[]`-but-non-default via a full-catalogue selection).
+    #[serde(default = "default_category_ids")]
+    pub category_ids: Vec<i64>,
 }
 
 fn default_purchase_days() -> f64 {
     1.0
+}
+
+/// EVE category ids for the default day-trade set: Ship / Module / Charge.
+fn default_category_ids() -> Vec<i64> {
+    vec![6, 7, 8]
 }
 
 /// One hub being scanned: its region, station, short label, and per-type prices.
@@ -79,7 +90,11 @@ pub async fn daytrading_scan(
 ) -> Result<Vec<DayTradeRow>, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
-    let items = sde.market_items().map_err(|e| e.to_string())?;
+    // Whitelist scan: only price the chosen categories (default Ships/Modules/
+    // Charges) instead of the whole ~19k catalogue — the headline win of #87.
+    let items = sde
+        .market_items_in_categories(&params.category_ids)
+        .map_err(|e| e.to_string())?;
     let ids: Vec<i64> = items.iter().map(|i| i.type_id).collect();
 
     // Resolve which hubs to scan (default: all). Each hub prices at its station.
