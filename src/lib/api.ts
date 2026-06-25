@@ -769,6 +769,27 @@ export function whDeleteConnection(id: number): Promise<ConnectionView[]> {
   return invoke<ConnectionView[]>("wh_delete_connection", { id });
 }
 
+export interface Signature {
+  id: string;
+  group: string;
+  sigType: string;
+  name: string;
+}
+export interface SignatureScan {
+  signatures: Signature[];
+  added: string[];
+  removed: string[];
+}
+
+/** Paste a probe-scanner result for a system; returns the set + added/removed diff. */
+export function whPasteSignatures(systemId: number, text: string): Promise<SignatureScan> {
+  return invoke<SignatureScan>("wh_paste_signatures", { systemId, text });
+}
+/** Stored signatures for a system. */
+export function whSignatures(systemId: number): Promise<Signature[]> {
+  return invoke<Signature[]>("wh_signatures", { systemId });
+}
+
 export interface RouteHop {
   systemId: number;
   name: string;
