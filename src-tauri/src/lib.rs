@@ -76,6 +76,7 @@ pub fn run() {
             modules::route::commands::system_search,
             modules::route::commands::system_neighbourhood,
             modules::orders::commands::market_orders,
+            modules::industry::commands::industry_jobs,
             modules::localintel::commands::local_scan,
             modules::localintel::commands::localintel_zkill,
             modules::localintel::commands::localintel_get_watchlist,
