@@ -5,6 +5,7 @@ import {
   daytradingScan,
   daytradingSetList,
   marketRegions,
+  rosterStock,
   sdeMarketCategories,
   sdeStatus,
   type DayTradeParams,
@@ -41,6 +42,9 @@ function Workbench() {
   const [purchaseDays, setPurchaseDays] = useState(1);
   const [minProfit, setMinProfit] = useState("100000");
   const [minDailyDemand, setMinDailyDemand] = useState("0");
+  // Net owned stock off the suggested quantity (default on) — don't restock the
+  // hangar. Fetched lazily; only when the toggle is on.
+  const [subtractStock, setSubtractStock] = useState(true);
   const [search, setSearch] = useState("");
   // Category whitelist (pre-scan): only these categories are pulled/priced at
   // each hub. Defaults to the common day-trade set (Ships/Modules/Charges).
@@ -55,6 +59,11 @@ function Workbench() {
   const categories = useQuery({
     queryKey: ["sde", "marketCategories"],
     queryFn: sdeMarketCategories,
+  });
+  const stock = useQuery({
+    queryKey: ["roster", "stock"],
+    queryFn: rosterStock,
+    enabled: subtractStock,
   });
   const favorites = useQuery({
     queryKey: ["daytrading", "favorites"],
@@ -80,6 +89,7 @@ function Workbench() {
       minProfit: minProfit.trim() === "" ? 0 : Number(minProfit),
       minDailyDemand: minDailyDemand.trim() === "" ? 0 : Number(minDailyDemand),
       categoryIds: [...categoryIds],
+      stock: subtractStock ? (stock.data ?? {}) : {},
     });
   }
 
@@ -269,6 +279,16 @@ function Workbench() {
               onChange={(e) => setMinDailyDemand(e.currentTarget.value)}
               className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
             />
+          </Field>
+          <Field label="Owned stock">
+            <label className="flex cursor-pointer items-center gap-2 py-1 text-xs text-zinc-300">
+              <input
+                type="checkbox"
+                checked={subtractStock}
+                onChange={(e) => setSubtractStock(e.currentTarget.checked)}
+              />
+              Subtract from qty{stock.isFetching ? " (loading…)" : ""}
+            </label>
           </Field>
         </div>
       </div>

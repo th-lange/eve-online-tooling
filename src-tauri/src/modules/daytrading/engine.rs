@@ -128,6 +128,13 @@ pub fn evaluate(
     })
 }
 
+/// Units worth buying = the sell hub's demand over the window, less what you
+/// already own (so a flip doesn't tell you to restock your own hangar). Never
+/// negative. `owned` is 0 when stock-netting is off.
+pub fn net_suggested_qty(demand: i64, owned: i64) -> i64 {
+    (demand - owned).max(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,6 +175,14 @@ mod tests {
         assert!((r.shipping_per_unit - 10.0).abs() < 1e-6);
         assert!((r.profit_per_unit - 30.2).abs() < 1e-6);
         assert!((r.isk_per_m3 - 15.1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn nets_owned_stock_off_suggested_qty() {
+        // Demand 1000, own 300 → suggest 700; own more than demand → 0, never negative.
+        assert_eq!(net_suggested_qty(1000, 300), 700);
+        assert_eq!(net_suggested_qty(1000, 0), 1000); // toggle off
+        assert_eq!(net_suggested_qty(500, 800), 0); // already overstocked
     }
 
     #[test]
