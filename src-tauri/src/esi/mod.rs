@@ -13,7 +13,9 @@ pub mod commands;
 mod error;
 
 pub use auth::AuthState;
-pub use character::{authed_get, authed_get_paged_pub, fetch_assets, resolve_names};
+pub use character::{
+    authed_get, authed_get_paged_pub, corporation_id, fetch_assets, resolve_names,
+};
 pub use client::EsiClient;
 pub use error::EsiError;
 
