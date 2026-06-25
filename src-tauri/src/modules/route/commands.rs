@@ -7,13 +7,19 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 
-use crate::esi::EsiClient;
+use crate::esi::{authed_get, AuthState, EsiClient};
 use crate::sde::{Sde, SdePaths};
 use crate::storage;
+
+/// J-space (wormhole) solar systems start at this id.
+const WSPACE_MIN_SYSTEM_ID: i64 = 31_000_000;
+/// Keep at most this many breadcrumb hops.
+const BREADCRUMB_CAP: usize = 300;
 
 /// Max neighbourhood BFS depth (jumps out from the centre).
 const MAX_DEPTH: i64 = 3;
@@ -227,6 +233,104 @@ pub async fn system_neighbourhood(
         nodes,
         edges: edges.into_iter().map(|(a, b)| [a, b]).collect(),
     })
+}
+
+// --- Travel breadcrumb (#99) ---
+
+#[derive(Deserialize)]
+struct EsiLocation {
+    solar_system_id: i64,
+}
+
+/// One hop on the travel trail (k-space or wormhole).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BreadcrumbEntry {
+    pub system_id: i64,
+    pub name: String,
+    pub security: f64,
+    pub region: String,
+    /// True for a wormhole (J-space) system.
+    pub wspace: bool,
+    /// Unix seconds this system was first recorded on this leg.
+    pub entered_at: u64,
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn breadcrumb_key(app: &AppHandle) -> Result<(std::path::PathBuf, i64, String), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let character_id = storage::load_roster(&dir)
+        .into_iter()
+        .next()
+        .map(|c| c.character_id)
+        .ok_or_else(|| "Log in a character first".to_string())?;
+    let key = format!("route_breadcrumb_{character_id}");
+    Ok((dir, character_id, key))
+}
+
+/// Poll the character's current system and append it to the travel trail (dedup
+/// consecutive same-system hits). The frontend calls this on an interval while
+/// the Route view is open — there's no travel-history API, so the trail is the
+/// recorded sequence. Works in w-space (the J-system id is returned). Requires
+/// `esi-location.read_location.v1`.
+#[tauri::command]
+pub async fn route_location(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+) -> Result<Vec<BreadcrumbEntry>, String> {
+    let (dir, character_id, key) = breadcrumb_key(&app)?;
+    let loc: EsiLocation = authed_get(
+        &auth_state,
+        character_id,
+        &format!("/latest/characters/{character_id}/location/"),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let mut trail: Vec<BreadcrumbEntry> = storage::load_data(&dir, &key).unwrap_or_default();
+    // Only append when the system actually changed (dedupe rest-in-system polls).
+    if trail.last().map(|e| e.system_id) != Some(loc.solar_system_id) {
+        let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+        let info = sde.solar_system_info().map_err(|e| e.to_string())?;
+        let (name, security, region) = info
+            .get(&loc.solar_system_id)
+            .cloned()
+            .unwrap_or_else(|| (format!("J{}", loc.solar_system_id), 0.0, String::new()));
+        trail.push(BreadcrumbEntry {
+            system_id: loc.solar_system_id,
+            name,
+            security,
+            region,
+            wspace: loc.solar_system_id >= WSPACE_MIN_SYSTEM_ID,
+            entered_at: now_secs(),
+        });
+        if trail.len() > BREADCRUMB_CAP {
+            let excess = trail.len() - BREADCRUMB_CAP;
+            trail.drain(0..excess);
+        }
+        let _ = storage::save_data(&dir, &key, &trail);
+    }
+    Ok(trail)
+}
+
+/// The stored travel trail without polling ESI.
+#[tauri::command]
+pub fn route_breadcrumb(app: AppHandle) -> Result<Vec<BreadcrumbEntry>, String> {
+    let (dir, _id, key) = breadcrumb_key(&app)?;
+    Ok(storage::load_data(&dir, &key).unwrap_or_default())
+}
+
+/// Clear the travel trail.
+#[tauri::command]
+pub fn route_clear_breadcrumb(app: AppHandle) -> Result<(), String> {
+    let (dir, _id, key) = breadcrumb_key(&app)?;
+    storage::save_data(&dir, &key, &Vec::<BreadcrumbEntry>::new())
 }
 
 #[cfg(test)]

@@ -41,6 +41,7 @@ const SCOPES: &[&str] = &[
     "esi-industry.read_character_mining.v1",
     "esi-industry.read_character_jobs.v1",
     "esi-markets.read_character_orders.v1",
+    "esi-location.read_location.v1",
     "esi-fleets.read_fleet.v1",
 ];
 /// How long to wait for the user to complete the browser login.
