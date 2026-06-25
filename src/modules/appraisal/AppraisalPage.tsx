@@ -4,9 +4,12 @@ import {
   appraisal,
   marketRegions,
   sdeStatus,
+  appraisalReprocess,
   type AppraisalLine,
   type AppraisalParams,
   type AppraisalResult,
+  type ReprocessAppraisalParams,
+  type ReprocessAppraisalResult,
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
 import { formatInt, formatIsk, sortRows } from "../../lib/format";
@@ -30,19 +33,30 @@ function Workbench() {
   const [regionId, setRegionId] = useState(FORGE);
   const [stationId, setStationId] = useState<number | null>(JITA);
   const [bestHub, setBestHub] = useState(false);
+  const [reprocess, setReprocess] = useState(false);
+  const [effPct, setEffPct] = useState(70);
   const [result, setResult] = useState<AppraisalResult | null>(null);
+  const [repro, setRepro] = useState<ReprocessAppraisalResult | null>(null);
 
   const regions = useQuery({ queryKey: ["market", "regions"], queryFn: marketRegions });
   const run = useMutation({
     mutationFn: (p: AppraisalParams) => appraisal(p),
     onSuccess: setResult,
   });
+  const runRepro = useMutation({
+    mutationFn: (p: ReprocessAppraisalParams) => appraisalReprocess(p),
+    onSuccess: setRepro,
+  });
 
   // Parse the EVE clipboard format: tab- or multi-space-separated Name + Qty.
   const items = useMemo(() => parseItems(text), [text]);
 
   function calculate() {
-    run.mutate({ items, regionId, stationId, bestHub });
+    if (reprocess) {
+      runRepro.mutate({ items, regionId, stationId, efficiency: effPct / 100 });
+    } else {
+      run.mutate({ items, regionId, stationId, bestHub });
+    }
   }
 
   const stations = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
@@ -59,10 +73,12 @@ function Workbench() {
         </div>
         <button
           onClick={calculate}
-          disabled={run.isPending || items.length === 0}
+          disabled={run.isPending || runRepro.isPending || items.length === 0}
           className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
         >
-          {run.isPending ? "Pricing…" : `Appraise (${items.length})`}
+          {run.isPending || runRepro.isPending
+            ? "Pricing…"
+            : `${reprocess ? "Reprocess" : "Appraise"} (${items.length})`}
         </button>
       </div>
 
@@ -110,11 +126,32 @@ function Workbench() {
             <input
               type="checkbox"
               checked={bestHub}
+              disabled={reprocess}
               onChange={(e) => setBestHub(e.currentTarget.checked)}
             />
             Sell side uses the best-paying hub (slower)
           </label>
-          {result && (
+          <label className="col-span-2 flex items-center gap-1 text-xs text-zinc-300">
+            <input
+              type="checkbox"
+              checked={reprocess}
+              onChange={(e) => setReprocess(e.currentTarget.checked)}
+            />
+            Reprocess — show mineral yield instead of item value
+          </label>
+          {reprocess && (
+            <Field label="Refining efficiency %">
+              <input
+                type="number"
+                value={effPct}
+                min={0}
+                max={100}
+                onChange={(e) => setEffPct(Number(e.currentTarget.value))}
+                className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+              />
+            </Field>
+          )}
+          {!reprocess && result && (
             <div className="col-span-2 rounded border border-zinc-800 bg-zinc-900 p-3 text-sm">
               <div className="flex justify-between">
                 <span className="text-zinc-400">Buy value</span>
@@ -135,13 +172,14 @@ function Workbench() {
         </div>
       </div>
 
-      {run.isError && (
-        <div className="mt-3 text-sm text-rose-400">Failed: {String(run.error)}</div>
+      {(run.isError || runRepro.isError) && (
+        <div className="mt-3 text-sm text-rose-400">
+          Failed: {String(run.error ?? runRepro.error)}
+        </div>
       )}
 
-      {result && (
-        <LineTable lines={result.lines} />
-      )}
+      {!reprocess && result && <LineTable lines={result.lines} />}
+      {reprocess && repro && <ReproResult d={repro} />}
     </div>
   );
 }
@@ -227,6 +265,109 @@ function LineTable({ lines }: { lines: AppraisalLine[] }) {
             </tbody>
           </table>
         </div>
+  );
+}
+
+function ReproResult({ d }: { d: ReprocessAppraisalResult }) {
+  const better = d.mineralTotal >= d.inputSellTotal;
+  return (
+    <div className="mt-4">
+      <div className="mb-3 flex flex-wrap gap-6 text-sm">
+        <div>
+          <div className="text-xs text-zinc-500">Mineral yield value</div>
+          <div className="tabular-nums text-emerald-400">{formatIsk(d.mineralTotal)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-zinc-500">Sell inputs as-is</div>
+          <div className="tabular-nums text-zinc-200">{formatIsk(d.inputSellTotal)}</div>
+        </div>
+        <div>
+          <div className="text-xs text-zinc-500">Efficiency</div>
+          <div className="tabular-nums text-zinc-300">{(d.efficiency * 100).toFixed(0)}%</div>
+        </div>
+        <div>
+          <div className="text-xs text-zinc-500">Better to</div>
+          <div className={better ? "text-emerald-400" : "text-zinc-200"}>
+            {better ? "reprocess" : "sell as-is"}
+          </div>
+        </div>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <div>
+          <h3 className="mb-1 text-sm font-medium text-zinc-300">Mineral yield</h3>
+          <div className="overflow-auto rounded border border-zinc-800">
+            <table className="w-full text-sm">
+              <thead className="bg-zinc-900 text-zinc-400">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">Mineral</th>
+                  <th className="px-3 py-2 text-right font-medium">Units</th>
+                  <th className="px-3 py-2 text-right font-medium">Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.minerals.map((m) => (
+                  <tr key={m.typeId} className="border-t border-zinc-800 text-zinc-300">
+                    <td className="px-3 py-1.5">{m.name}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                      {formatInt(m.quantity)}
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
+                      {formatIsk(m.value)}
+                    </td>
+                  </tr>
+                ))}
+                {d.minerals.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="px-3 py-4 text-center text-zinc-500">
+                      Nothing reprocessable in the paste.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <h3 className="mb-1 text-sm font-medium text-zinc-300">Inputs</h3>
+          <div className="overflow-auto rounded border border-zinc-800">
+            <table className="w-full text-sm">
+              <thead className="bg-zinc-900 text-zinc-400">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">Item</th>
+                  <th className="px-3 py-2 text-right font-medium">Qty</th>
+                  <th className="px-3 py-2 text-right font-medium">Yield value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {d.inputs.map((l, i) => (
+                  <tr key={i} className="border-t border-zinc-800 text-zinc-300">
+                    <td className="px-3 py-1.5">
+                      {l.name}
+                      {!l.resolved && (
+                        <span className="ml-1 text-amber-400" title="Not reprocessable / unknown">
+                          ⚠
+                        </span>
+                      )}
+                      {l.resolved && l.reprocessed < l.quantity && (
+                        <span className="ml-1 text-[10px] text-zinc-500">
+                          ({formatInt(l.reprocessed)} refined)
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                      {formatInt(l.quantity)}
+                    </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+                      {formatIsk(l.yieldValue)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
