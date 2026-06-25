@@ -168,18 +168,25 @@ fn activity_name(id: i64) -> &'static str {
 }
 
 /// The character's industry jobs (running + recently delivered), names resolved.
-/// Durably accumulates delivered jobs across syncs.
+/// Durably accumulates delivered jobs across syncs. `character_id` selects which
+/// roster character; `None` = the first.
 #[tauri::command]
 pub async fn industry_jobs(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
+    character_id: Option<i64>,
 ) -> Result<JobsResult, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let character_id = storage::load_roster(&dir)
-        .into_iter()
-        .next()
-        .map(|c| c.character_id)
-        .ok_or_else(|| "Log in a character first".to_string())?;
+    let roster = storage::load_roster(&dir);
+    let character_id = match character_id {
+        // Only honour an id that's actually in the roster (else fall through).
+        Some(id) if roster.iter().any(|c| c.character_id == id) => id,
+        _ => roster
+            .into_iter()
+            .next()
+            .map(|c| c.character_id)
+            .ok_or_else(|| "Log in a character first".to_string())?,
+    };
 
     // include_completed so delivered jobs (the cost-basis source) come through.
     // Retried on transient ESI 5xx/timeouts (this endpoint 504s under load).
