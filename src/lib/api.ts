@@ -631,6 +631,17 @@ export function localScan(text: string): Promise<LocalScanResult> {
   return invoke<LocalScanResult>("local_scan", { text });
 }
 
+export interface LocalLogResult {
+  /** Pilots who spoke in the newest Local log (logs don't carry the member list). */
+  senders: string[];
+  file: string;
+}
+
+/** Speaker names from the newest `Local_*` chatlog in a user-configured folder. */
+export function localLogNames(logsDir: string): Promise<LocalLogResult> {
+  return invoke<LocalLogResult>("local_log_names", { logsDir });
+}
+
 export interface ZkillStats {
   characterId: number;
   /** 0–100: share of recent engagements that were kills. */

@@ -88,6 +88,7 @@ pub fn run() {
             modules::wormholes::commands::wh_paste_signatures,
             modules::wormholes::commands::wh_signatures,
             modules::localintel::commands::local_scan,
+            modules::localintel::commands::local_log_names,
             modules::localintel::commands::localintel_zkill,
             modules::localintel::commands::localintel_get_watchlist,
             modules::localintel::commands::localintel_set_watchlist,
