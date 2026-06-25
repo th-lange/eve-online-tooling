@@ -33,10 +33,11 @@ fn resolve_input(
     name: String,
     base_quantity: i64,
     depth: u32,
+    build: bool,
     path: &mut Vec<i64>,
 ) -> Result<InputLine, String> {
     needed.insert(type_id);
-    let sourcing = if depth == 0 || path.contains(&type_id) {
+    let sourcing = if !build || depth == 0 || path.contains(&type_id) {
         Sourcing::Buy
     } else {
         let recipe = match cache.get(&type_id) {
@@ -60,6 +61,7 @@ fn resolve_input(
                         m.name.clone(),
                         m.quantity,
                         depth - 1,
+                        build,
                         path,
                     )?);
                 }
@@ -162,6 +164,14 @@ pub struct ProfitParams {
     /// top-level bill of materials so you only buy the shortfall. Empty = none.
     #[serde(default)]
     pub stock: HashMap<i64, i64>,
+    /// Build sub-components (recursive build-vs-buy). When false, every material
+    /// is simply bought at market — no intermediate manufacturing. Default true.
+    #[serde(default = "default_build_components")]
+    pub build_components: bool,
+}
+
+fn default_build_components() -> bool {
+    true
 }
 
 fn default_me_bonus() -> f64 {
@@ -238,6 +248,7 @@ pub async fn production_profit(
                 m.name.clone(),
                 m.quantity,
                 MAX_TREE_DEPTH,
+                params.build_components,
                 &mut path,
             )?);
         }
