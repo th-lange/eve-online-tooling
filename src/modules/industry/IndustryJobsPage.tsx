@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { authCharacters, industryJobs, type JobRow, type Slot } from "../../lib/api";
+import { activeCharacter, authCharacters, industryJobs, type JobRow, type Slot } from "../../lib/api";
 import { formatInt, formatIsk } from "../../lib/format";
 
 type StatusFilter = "active" | "delivered" | "all";
@@ -32,6 +32,7 @@ function withinPeriod(endDate: string, period: Period, now: number): boolean {
 export function IndustryJobsPage() {
   const [characterId, setCharacterId] = useState<number | undefined>(undefined);
   const characters = useQuery({ queryKey: ["auth", "characters"], queryFn: authCharacters });
+  const activeChar = useQuery({ queryKey: ["auth", "active"], queryFn: activeCharacter });
   const jobs = useQuery({
     queryKey: ["industry", "jobs", characterId ?? "first"],
     queryFn: () => industryJobs(characterId),
@@ -98,7 +99,7 @@ export function IndustryJobsPage() {
           <label className="flex flex-col gap-1 text-xs text-zinc-400">
             Character
             <select
-              value={characterId ?? roster[0]?.characterId ?? ""}
+              value={characterId ?? activeChar.data ?? roster[0]?.characterId ?? ""}
               onChange={(e) => setCharacterId(Number(e.currentTarget.value))}
               className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
             >

@@ -63,6 +63,21 @@ pub fn auth_characters(app: AppHandle) -> Result<Vec<Character>, String> {
     Ok(storage::load_roster(&dir))
 }
 
+/// Bookmark the "active" character used by per-character features (industry
+/// jobs, route, etc.).
+#[tauri::command]
+pub fn set_active_character(app: AppHandle, character_id: i64) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    storage::save_active_character(&dir, character_id)
+}
+
+/// The active character id (bookmarked if set + in roster, else the first).
+#[tauri::command]
+pub fn active_character(app: AppHandle) -> Result<Option<i64>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(storage::active_character(&dir))
+}
+
 /// A blueprint owned by a character (or their corporation), with its real
 /// ME/TE/runs.
 #[derive(Debug, Clone, Serialize)]

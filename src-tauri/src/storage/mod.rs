@@ -57,6 +57,26 @@ pub fn save_roster(app_data_dir: &Path, roster: &[Character]) -> Result<(), Stri
     std::fs::write(roster_path(app_data_dir), data).map_err(|e| e.to_string())
 }
 
+const ACTIVE_CHARACTER_KEY: &str = "active_character";
+
+/// Set the bookmarked "active" character used by character-based features.
+pub fn save_active_character(app_data_dir: &Path, character_id: i64) -> Result<(), String> {
+    save_data(app_data_dir, ACTIVE_CHARACTER_KEY, &character_id)
+}
+
+/// The active character id if one is bookmarked and still in the roster, else
+/// the first roster character. The single source of truth for "which character"
+/// every per-character command defaults to.
+pub fn active_character(app_data_dir: &Path) -> Option<i64> {
+    let roster = load_roster(app_data_dir);
+    if let Some(id) = load_data::<i64>(app_data_dir, ACTIVE_CHARACTER_KEY) {
+        if roster.iter().any(|c| c.character_id == id) {
+            return Some(id);
+        }
+    }
+    roster.into_iter().next().map(|c| c.character_id)
+}
+
 /// Load a persisted list of type ids (e.g. `blacklist`, `favorites`).
 pub fn load_id_list(app_data_dir: &Path, name: &str) -> Vec<i64> {
     std::fs::read(app_data_dir.join(format!("{name}.json")))

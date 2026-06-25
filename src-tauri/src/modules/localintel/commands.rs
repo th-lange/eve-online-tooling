@@ -235,7 +235,7 @@ async fn load_standings(app: &AppHandle, auth_state: &AuthState) -> HashMap<i64,
     let Ok(dir) = app.path().app_data_dir() else {
         return HashMap::new();
     };
-    let Some(character_id) = storage::load_roster(&dir).into_iter().next().map(|c| c.character_id)
+    let Some(character_id) = storage::active_character(&dir)
     else {
         return HashMap::new();
     };

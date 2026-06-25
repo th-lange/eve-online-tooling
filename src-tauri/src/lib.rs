@@ -35,6 +35,8 @@ pub fn run() {
             esi::commands::auth_login,
             esi::commands::auth_characters,
             esi::commands::auth_logout,
+            esi::commands::set_active_character,
+            esi::commands::active_character,
             esi::commands::owned_blueprints,
             esi::commands::character_assets,
             esi::commands::roster_stock,

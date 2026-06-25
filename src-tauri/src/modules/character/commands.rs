@@ -13,11 +13,7 @@ use crate::storage;
 /// The first logged-in character id, or an error message if the roster is empty.
 fn first_character(app: &AppHandle) -> Result<i64, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    storage::load_roster(&dir)
-        .into_iter()
-        .next()
-        .map(|c| c.character_id)
-        .ok_or_else(|| "Log in a character first".to_string())
+    storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())
 }
 
 // --- Skills (#55) ---

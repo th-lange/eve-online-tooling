@@ -181,11 +181,8 @@ pub async fn industry_jobs(
     let character_id = match character_id {
         // Only honour an id that's actually in the roster (else fall through).
         Some(id) if roster.iter().any(|c| c.character_id == id) => id,
-        _ => roster
-            .into_iter()
-            .next()
-            .map(|c| c.character_id)
-            .ok_or_else(|| "Log in a character first".to_string())?,
+        // Default to the bookmarked active character (else the first).
+        _ => storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?,
     };
 
     // include_completed so delivered jobs (the cost-basis source) come through.

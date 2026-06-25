@@ -58,11 +58,8 @@ pub async fn market_orders(
     market: State<'_, MarketService>,
 ) -> Result<Vec<OrderRow>, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let character_id = storage::load_roster(&dir)
-        .into_iter()
-        .next()
-        .map(|c| c.character_id)
-        .ok_or_else(|| "Log in a character first".to_string())?;
+    let character_id =
+        storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?;
 
     let orders: Vec<EsiOrder> = authed_get(
         &auth_state,
