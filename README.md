@@ -12,9 +12,14 @@ built as a set of feature **modules** over a shared service layer.
 - **Appraisal** — paste items for a buy/sell valuation across hubs, or a reprocessing mineral yield.
 - **Universe**, **Market History**, **Assets**, **Character** (skills/standings/research/mining/fleet),
   **Accounting** (wallet + FIFO profit), **Public Contracts**, and **LP Store** tools.
-- **Route** — per-system jumps & ship/pod/NPC kills (last hour) across known space, sortable by activity.
+- **Route** — per-system jumps & ship/pod/NPC kills (last hour) across known space, a stargate
+  neighbourhood "fog-of-war" map, and a live travel breadcrumb spanning known space and wormholes.
 - **Local Intel** — paste the in-game Local member list to classify pilots blue/neutral/red by standing,
   corp and alliance, with a corp/alliance watchlist + alerts and zKillboard danger enrichment.
+- **Market Orders** — your open buy/sell orders with undercut detection and a one-tick re-list helper.
+- **Industry Jobs** — running and recently-delivered jobs ("what's cooking") with finish countdowns.
+- **Wormholes** — map your chain by hand with mass/EOL tracking, cross-chain routing (stargates ∪ your
+  scanned holes), and probe-scanner signature paste.
 - **Mission-running** and more — planned.
 
 Built with **Tauri 2** (Rust core) + **React / TypeScript** (Vite). Market and character data come
