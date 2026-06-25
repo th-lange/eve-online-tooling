@@ -6,7 +6,7 @@
 //! list (a manual, EULA-safe action). We resolve names → ids → corp/alliance
 //! via public ESI, then classify against the logged-in character's standings.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -341,6 +341,83 @@ pub async fn localintel_zkill(
     Ok(out)
 }
 
+/// Read an EVE chatlog file, decoding UTF-16LE (the format EVE writes) or UTF-8.
+fn read_chatlog(path: &std::path::Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
+        // UTF-16LE with BOM.
+        let u16s: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        Some(String::from_utf16_lossy(&u16s))
+    } else {
+        Some(String::from_utf8_lossy(&bytes).into_owned())
+    }
+}
+
+/// Distinct sender names from chatlog content. Message lines look like
+/// `[ 2026.06.25 12:00:00 ] Sender Name > text`. The member list isn't logged,
+/// so this only yields pilots who actually spoke. Pure (testable).
+fn parse_chat_senders(content: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for line in content.lines() {
+        let Some((_, after)) = line.split_once("] ") else { continue };
+        let Some((sender, _msg)) = after.split_once(" > ") else { continue };
+        let s = sender.trim();
+        if s.is_empty() || s == "EVE System" {
+            continue;
+        }
+        if seen.insert(s.to_string()) {
+            out.push(s.to_string());
+        }
+    }
+    out
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalLogResult {
+    /// Pilots who spoke in the newest Local log (the only names logs contain).
+    pub senders: Vec<String>,
+    /// The log file used, or empty if none found.
+    pub file: String,
+}
+
+/// Pull speaker names from the most recent `Local_*` chatlog in `logs_dir`
+/// (e.g. `…/EVE/logs/Chatlogs`). A convenience source for the scan — EVE never
+/// logs the Local member list, so this only sees pilots who chatted. The path
+/// is user-configured (it lives inside the Proton/Wine prefix on Linux).
+#[tauri::command]
+pub fn local_log_names(logs_dir: String) -> Result<LocalLogResult, String> {
+    let dir = std::path::Path::new(&logs_dir);
+    if !dir.is_dir() {
+        return Err(format!("not a folder: {logs_dir}"));
+    }
+    // Newest Local_*.txt by modified time.
+    let newest = std::fs::read_dir(dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .starts_with("local_")
+        })
+        .filter_map(|e| Some((e.path(), e.metadata().ok()?.modified().ok()?)))
+        .max_by_key(|(_, m)| *m);
+
+    let Some((path, _)) = newest else {
+        return Ok(LocalLogResult { senders: Vec::new(), file: String::new() });
+    };
+    let content = read_chatlog(&path).unwrap_or_default();
+    Ok(LocalLogResult {
+        senders: parse_chat_senders(&content),
+        file: path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default(),
+    })
+}
+
 const WATCHLIST_KEY: &str = "localintel_watchlist";
 
 /// A watched corporation or alliance — a scan flags any pilot in it.
@@ -385,6 +462,17 @@ mod tests {
     fn parses_dedupes_and_trims_names() {
         let text = "  Alice \nBob\n\nAlice\n  \nCharlie\n";
         assert_eq!(parse_names(text), vec!["Alice", "Bob", "Charlie"]);
+    }
+
+    #[test]
+    fn parses_chat_senders_from_log() {
+        let log = "---------------------------------------------------------------\n\
+                   [ 2026.06.25 12:00:00 ] EVE System > Channel changed to Local : Jita\n\
+                   [ 2026.06.25 12:01:02 ] Alice Pilot > hi\n\
+                   [ 2026.06.25 12:01:30 ] Bob Pilot > o7\n\
+                   [ 2026.06.25 12:02:00 ] Alice Pilot > again\n";
+        // Distinct real speakers, EVE System filtered out, deduped, ordered.
+        assert_eq!(parse_chat_senders(log), vec!["Alice Pilot", "Bob Pilot"]);
     }
 
     #[test]

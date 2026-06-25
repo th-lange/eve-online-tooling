@@ -6,6 +6,7 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import {
+  localLogNames,
   localScan,
   localintelGetWatchlist,
   localintelSetWatchlist,
@@ -31,6 +32,16 @@ export function LocalIntelPage() {
   const qc = useQueryClient();
   const [text, setText] = useState("");
   const [alertAnyRed, setAlertAnyRed] = useState(true);
+  // EVE logs folder (Chatlogs); persisted. Used to prefill names from the
+  // newest Local log — only pilots who chatted (logs lack the member list).
+  const [logsDir, setLogsDir] = useState(() => localStorage.getItem("eveLogsDir") ?? "");
+  const loadLog = useMutation({
+    mutationFn: () => localLogNames(logsDir),
+    onSuccess: (r) => {
+      localStorage.setItem("eveLogsDir", logsDir);
+      if (r.senders.length > 0) setText(r.senders.join("\n"));
+    },
+  });
 
   const watchlist = useQuery({
     queryKey: ["localintel", "watchlist"],
@@ -104,6 +115,31 @@ export function LocalIntelPage() {
         rows={5}
         className="mt-4 w-full rounded border border-zinc-800 bg-zinc-900 px-3 py-2 font-mono text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
       />
+
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-400">
+        <input
+          value={logsDir}
+          onChange={(e) => setLogsDir(e.currentTarget.value)}
+          placeholder="EVE Chatlogs folder…"
+          className="w-72 rounded bg-zinc-800 px-2 py-1 text-zinc-100 outline-none placeholder:text-zinc-600"
+          title="e.g. …/ProtonPrefix/drive_c/users/steamuser/Documents/EVE/logs/Chatlogs"
+        />
+        <button
+          onClick={() => loadLog.mutate()}
+          disabled={logsDir.trim() === "" || loadLog.isPending}
+          className="rounded border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+        >
+          Load from latest Local log
+        </button>
+        {loadLog.isError && <span className="text-rose-400">{String(loadLog.error)}</span>}
+        {loadLog.data && (
+          <span className="text-zinc-500">
+            {loadLog.data.senders.length > 0
+              ? `${loadLog.data.senders.length} speaker(s) from ${loadLog.data.file}`
+              : "no chat found (only pilots who spoke are logged)"}
+          </span>
+        )}
+      </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-zinc-400">
         <label className="flex cursor-pointer items-center gap-2">
