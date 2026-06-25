@@ -714,6 +714,61 @@ export function systemSearch(query: string): Promise<SystemMatch[]> {
   return invoke<SystemMatch[]>("system_search", { query });
 }
 
+// --- Wormhole mapping ---
+
+export interface ConnectionView {
+  id: number;
+  sourceSystemId: number;
+  sourceName: string;
+  sourceWspace: boolean;
+  targetSystemId: number;
+  targetName: string;
+  targetWspace: boolean;
+  scope: string;
+  massStatus: string;
+  jumpMass: string;
+  eol: boolean;
+  sourceSig: string | null;
+  targetSig: string | null;
+  createdAt: number;
+}
+
+export interface NewConnection {
+  sourceSystemId: number;
+  targetSystemId: number;
+  scope?: string;
+  sourceSig?: string | null;
+  targetSig?: string | null;
+}
+
+/** Current wormhole/stargate connections (dead wormholes auto-pruned). */
+export function whConnections(): Promise<ConnectionView[]> {
+  return invoke<ConnectionView[]>("wh_connections");
+}
+export function whAddConnection(connection: NewConnection): Promise<ConnectionView[]> {
+  return invoke<ConnectionView[]>("wh_add_connection", { connection });
+}
+export function whUpdateConnection(
+  id: number,
+  massStatus: string,
+  jumpMass: string,
+  eol: boolean,
+  sourceSig: string | null,
+  targetSig: string | null,
+): Promise<ConnectionView[]> {
+  return invoke<ConnectionView[]>("wh_update_connection", {
+    id,
+    massStatus,
+    jumpMass,
+    eol,
+    sourceSig,
+    targetSig,
+  });
+}
+export function whDeleteConnection(id: number): Promise<ConnectionView[]> {
+  return invoke<ConnectionView[]>("wh_delete_connection", { id });
+}
+
 export interface BreadcrumbEntry {
   systemId: number;
   name: string;

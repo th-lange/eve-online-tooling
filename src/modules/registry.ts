@@ -15,6 +15,7 @@ import { RoutePage } from "./route/RoutePage";
 import { LocalIntelPage } from "./localintel/LocalIntelPage";
 import { OrdersPage } from "./orders/OrdersPage";
 import { IndustryJobsPage } from "./industry/IndustryJobsPage";
+import { WormholesPage } from "./wormholes/WormholesPage";
 
 // A feature module = a nav entry + the page rendered at `/{id}`. Adding a new
 // module (daytrading, station-trading, …) is a one-line entry here plus its
@@ -126,5 +127,11 @@ export const modules: ModuleDef[] = [
     title: "Industry Jobs",
     description: "Running and delivered industry jobs — what's cooking.",
     Component: IndustryJobsPage,
+  },
+  {
+    id: "wormholes",
+    title: "Wormholes",
+    description: "Map your wormhole chain with mass/EOL tracking.",
+    Component: WormholesPage,
   },
 ];
