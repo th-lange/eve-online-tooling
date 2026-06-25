@@ -55,10 +55,7 @@ export function IndustryJobsPage() {
       {jobs.isError && (
         <div className="mt-3 text-sm text-rose-400">
           Failed: {String(jobs.error)}
-          <div className="mt-1 text-xs text-zinc-500">
-            Needs the <code>esi-industry.read_character_jobs.v1</code> scope —
-            re-login after it's enabled on the EVE app.
-          </div>
+          <div className="mt-1 text-xs text-zinc-500">{errorHint(String(jobs.error))}</div>
         </div>
       )}
 
@@ -159,6 +156,17 @@ function JobsTable({ rows }: { rows: JobRow[] }) {
       </table>
     </div>
   );
+}
+
+/** Tailor the hint to the failure: scope/auth vs a transient ESI timeout. */
+function errorHint(error: string): string {
+  if (/403|forbidden/i.test(error)) {
+    return "Looks like a permissions issue — enable esi-industry.read_character_jobs.v1 on the EVE app and re-login.";
+  }
+  if (/50\d|timeout|gateway/i.test(error)) {
+    return "ESI is busy/timed out (the completed-jobs list is heavy) — it retries automatically; hit Refresh to try again.";
+  }
+  return "If this persists, check you're logged in with the esi-industry.read_character_jobs.v1 scope.";
 }
 
 /** A used/total slot pill, amber when full. */
