@@ -53,6 +53,24 @@ export type SortKey =
   | "productVolume";
 export type SortDir = "asc" | "desc";
 
+/**
+ * Generic row sort by a field name. Strings compare lexically; numbers
+ * numerically with `null`/`undefined` sorted last. Returns a new array.
+ */
+export function sortRows<T>(rows: T[], key: keyof T, dir: SortDir): T[] {
+  const d = dir === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const av = a[key];
+    const bv = b[key];
+    if (typeof av === "string" || typeof bv === "string") {
+      return d * String(av ?? "").localeCompare(String(bv ?? ""));
+    }
+    const an = av == null ? Number.NEGATIVE_INFINITY : Number(av);
+    const bn = bv == null ? Number.NEGATIVE_INFINITY : Number(bv);
+    return d * (an - bn);
+  });
+}
+
 function value(row: ProfitBreakdown, key: SortKey): number | string | null {
   switch (key) {
     case "productName":

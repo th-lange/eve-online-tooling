@@ -8,7 +8,20 @@ import {
   type OfferRow,
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
-import { formatInt, formatIsk } from "../../lib/format";
+import { formatInt, formatIsk, sortRows } from "../../lib/format";
+import { usePersistentSort } from "../../lib/usePersistentSort";
+import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
+
+type OfferSortKey = "name" | "lpCost" | "iskCost" | "sellValue" | "profit" | "iskPerLp";
+const OFFER_COLUMNS: SortColumn<OfferSortKey>[] = [
+  { key: "name", label: "Offer", numeric: false, description: "The item you receive." },
+  { key: "lpCost", label: "LP", numeric: true, description: "Loyalty points required." },
+  { key: "iskCost", label: "ISK cost", numeric: true, description: "ISK the offer also costs." },
+  { key: "sellValue", label: "Sell value", numeric: true, description: "Jita sell value of the item(s), less ~5%." },
+  { key: "profit", label: "Profit", numeric: true, description: "Sell value − cost (LP×rate + ISK + handed-in items)." },
+  { key: "iskPerLp", label: "ISK/LP", numeric: true, description: "Net ISK per loyalty point." },
+];
+const OFFER_KEYS = OFFER_COLUMNS.map((c) => c.key);
 
 export function LpStorePage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
@@ -86,20 +99,39 @@ function Workbench() {
 
       {run.isError && <div className="mt-3 text-sm text-rose-400">Failed: {String(run.error)}</div>}
 
+      <OfferTable rows={rows} />
+    </div>
+  );
+}
+
+function OfferTable({ rows }: { rows: OfferRow[] }) {
+  const { sortKey, sortDir, toggleSort } = usePersistentSort<OfferSortKey>(
+    "sort.lpstore",
+    OFFER_KEYS,
+    "iskPerLp",
+    "desc",
+    ["name"],
+  );
+  const sorted = sortRows(rows, sortKey, sortDir);
+  return (
+    <>
       <div className="mt-4 overflow-auto rounded border border-zinc-800">
         <table className="w-full border-collapse text-sm">
           <thead className="bg-zinc-900 text-zinc-400">
             <tr>
-              <th className="px-3 py-2 text-left font-medium">Offer</th>
-              <th className="px-3 py-2 text-right font-medium">LP</th>
-              <th className="px-3 py-2 text-right font-medium">ISK cost</th>
-              <th className="px-3 py-2 text-right font-medium">Sell value</th>
-              <th className="px-3 py-2 text-right font-medium">Profit</th>
-              <th className="px-3 py-2 text-right font-medium">ISK/LP</th>
+              {OFFER_COLUMNS.map((c) => (
+                <SortHeaderCell
+                  key={c.key}
+                  column={c}
+                  active={sortKey === c.key}
+                  dir={sortDir}
+                  onClick={toggleSort}
+                />
+              ))}
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
+            {sorted.map((r, i) => (
               <tr key={i} className="border-t border-zinc-800 text-zinc-300">
                 <td className="px-3 py-1.5">
                   {r.quantity > 1 ? `${formatInt(r.quantity)}× ` : ""}
@@ -137,7 +169,7 @@ function Workbench() {
       <div className="mt-1 text-xs text-zinc-500">
         Blueprint offers value the BPC item itself (not the built product) — a known under-valuation.
       </div>
-    </div>
+    </>
   );
 }
 
