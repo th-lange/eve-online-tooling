@@ -9,6 +9,7 @@ pub mod contracts;
 pub mod daytrading;
 pub mod localintel;
 pub mod lpstore;
+pub mod orders;
 pub mod production;
 pub mod reprocessing;
 pub mod route;
