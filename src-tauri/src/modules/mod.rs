@@ -15,3 +15,4 @@ pub mod production;
 pub mod reprocessing;
 pub mod route;
 pub mod trading;
+pub mod wormholes;
