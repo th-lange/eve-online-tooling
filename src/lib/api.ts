@@ -503,6 +503,10 @@ export interface ContractRow {
 export interface ContractParams {
   regionId: number;
   minRoi?: number;
+  /** Sales tax fraction applied to the resale (default 0.045). */
+  salesTax?: number;
+  /** Broker fee fraction applied to the resale (default 0.03). */
+  brokerFee?: number;
 }
 
 /** Rank a region's public item-exchange contracts by flip ROI vs Jita. */

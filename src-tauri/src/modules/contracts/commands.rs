@@ -20,6 +20,19 @@ pub struct ContractParams {
     pub region_id: i64,
     #[serde(default)]
     pub min_roi: f64,
+    /// Sales tax fraction applied to the resale (e.g. 0.045). Default 4.5%.
+    #[serde(default = "default_sales_tax")]
+    pub sales_tax: f64,
+    /// Broker fee fraction applied to the resale (e.g. 0.03). Default 3%.
+    #[serde(default = "default_broker_fee")]
+    pub broker_fee: f64,
+}
+
+fn default_sales_tax() -> f64 {
+    0.045
+}
+fn default_broker_fee() -> f64 {
+    0.03
 }
 
 #[derive(Deserialize)]
@@ -47,8 +60,9 @@ pub struct ContractRow {
     pub contract_id: i64,
     pub title: String,
     pub price: f64,
-    /// Jita sell value of the items you'd receive.
+    /// Jita sell value of the items you'd receive (gross, before resale fees).
     pub contents_value: f64,
+    /// Profit after sales tax + broker fee on the resale: `contents·(1−fees) − cost`.
     pub profit: f64,
     pub roi: f64,
     pub item_count: i64,
@@ -132,8 +146,12 @@ pub async fn contracts_scan(
                     requested += v;
                 }
             }
+            // Net the resale: you pay sales tax + broker fee to sell the items
+            // you receive, so the realistic proceeds are below raw Jita sell.
+            let fee_factor = (1.0 - params.sales_tax - params.broker_fee).max(0.0);
+            let proceeds = contents_value * fee_factor;
             let cost = c.price + requested;
-            let profit = contents_value - cost;
+            let profit = proceeds - cost;
             let roi = if cost > 0.0 { profit / cost } else { 0.0 };
             if roi < params.min_roi {
                 return None;
