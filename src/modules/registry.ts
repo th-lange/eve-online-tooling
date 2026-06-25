@@ -14,6 +14,7 @@ import { LpStorePage } from "./lpstore/LpStorePage";
 import { RoutePage } from "./route/RoutePage";
 import { LocalIntelPage } from "./localintel/LocalIntelPage";
 import { OrdersPage } from "./orders/OrdersPage";
+import { IndustryJobsPage } from "./industry/IndustryJobsPage";
 
 // A feature module = a nav entry + the page rendered at `/{id}`. Adding a new
 // module (daytrading, station-trading, …) is a one-line entry here plus its
@@ -119,5 +120,11 @@ export const modules: ModuleDef[] = [
     title: "Market Orders",
     description: "Your open buy/sell orders with undercut detection.",
     Component: OrdersPage,
+  },
+  {
+    id: "industry-jobs",
+    title: "Industry Jobs",
+    description: "Running and delivered industry jobs — what's cooking.",
+    Component: IndustryJobsPage,
   },
 ];

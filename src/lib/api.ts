@@ -549,6 +549,28 @@ export function lpOffers(params: LpParams): Promise<OffersResult> {
   return invoke<OffersResult>("lp_offers", { params });
 }
 
+// --- Industry Jobs ---
+
+export interface JobRow {
+  jobId: number;
+  activity: string;
+  product: string;
+  runs: number;
+  status: string;
+  cost: number | null;
+  startDate: string;
+  endDate: string;
+  facility: string;
+}
+
+/**
+ * The character's industry jobs (running + recently delivered), durably
+ * accumulated. Requires `esi-industry.read_character_jobs.v1` (re-login if added).
+ */
+export function industryJobs(): Promise<JobRow[]> {
+  return invoke<JobRow[]>("industry_jobs");
+}
+
 // --- Market Orders ---
 
 export interface OrderRow {
