@@ -100,6 +100,12 @@ function Workbench() {
   const [te, setTe] = useState(0);
   const [timeSkill, setTimeSkill] = useState(5);
   const [structure, setStructure] = useState<StructureKey>("npc");
+  // Rig role bonuses (%), composed onto the structure preset. Auto rig×security
+  // math varies by patch/security and isn't reliably knowable here, so the user
+  // supplies the effective rig bonus (e.g. a T2 ME rig in null ≈ 2.4%).
+  const [rigMePct, setRigMePct] = useState(0);
+  const [rigTePct, setRigTePct] = useState(0);
+  const [rigCostPct, setRigCostPct] = useState(0);
   const [costIndexPct, setCostIndexPct] = useState(5);
   const [facilityTaxPct, setFacilityTaxPct] = useState(0);
   const [materialBasis, setMaterialBasis] =
@@ -222,9 +228,10 @@ function Workbench() {
       te,
       ownedTe: useOwnedMe ? ownedTe : {},
       timeSkill,
-      structureTePct: STRUCTURES[structure].tePct,
-      meBonus: STRUCTURES[structure].meBonus,
-      costBonus: STRUCTURES[structure].costBonus,
+      // Compose structure preset with rig bonuses (material/cost multiplicative).
+      structureTePct: STRUCTURES[structure].tePct + rigTePct,
+      meBonus: STRUCTURES[structure].meBonus * (1 - rigMePct / 100),
+      costBonus: 1 - (1 - STRUCTURES[structure].costBonus) * (1 - rigCostPct / 100),
       stock: useStock ? (stock.data ?? {}) : {},
       systemCostIndex: costIndexPct / 100,
       facilityTax: facilityTaxPct / 100,
@@ -483,6 +490,15 @@ function Workbench() {
                   </option>
                 ))}
               </select>
+            </Field>
+            <Num label="Rig ME %" value={rigMePct} onChange={setRigMePct} min={0} max={10} />
+            <Num label="Rig TE %" value={rigTePct} onChange={setRigTePct} min={0} max={50} />
+            <Num label="Rig cost %" value={rigCostPct} onChange={setRigCostPct} min={0} max={10} />
+            <Field label="Structure">
+              <span className="text-[11px] text-zinc-500">
+                Rig % compose with the structure preset (you supply the
+                security-adjusted rig bonus).
+              </span>
             </Field>
             <Num
               label="Cost index %"
