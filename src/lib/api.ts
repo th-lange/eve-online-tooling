@@ -554,7 +554,9 @@ export function lpOffers(params: LpParams): Promise<OffersResult> {
 export interface LocalPilot {
   characterId: number;
   name: string;
+  corporationId: number;
   corporation: string;
+  allianceId: number | null;
   alliance: string | null;
   /** Your standing toward corp/alliance/faction (most specific), or null. */
   standing: number | null;
@@ -578,6 +580,25 @@ export interface LocalScanResult {
  */
 export function localScan(text: string): Promise<LocalScanResult> {
   return invoke<LocalScanResult>("local_scan", { text });
+}
+
+export interface WatchEntry {
+  id: number;
+  name: string;
+}
+
+/** Watched corps/alliances (a scan flags any pilot in them). */
+export function localintelGetWatchlist(): Promise<WatchEntry[]> {
+  return invoke<WatchEntry[]>("localintel_get_watchlist");
+}
+
+/** Add/remove a corp or alliance from the watchlist; returns the updated list. */
+export function localintelSetWatchlist(
+  id: number,
+  name: string,
+  add: boolean,
+): Promise<WatchEntry[]> {
+  return invoke<WatchEntry[]>("localintel_set_watchlist", { id, name, add });
 }
 
 // --- Route / system activity ---

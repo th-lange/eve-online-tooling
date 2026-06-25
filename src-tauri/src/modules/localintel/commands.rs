@@ -23,7 +23,9 @@ const NAME_CAP: usize = 256;
 pub struct LocalPilot {
     pub character_id: i64,
     pub name: String,
+    pub corporation_id: i64,
     pub corporation: String,
+    pub alliance_id: Option<i64>,
     pub alliance: Option<String>,
     /// Your standing toward the most-specific entity that has one (corp →
     /// alliance → faction), or null if you have none.
@@ -193,7 +195,9 @@ pub async fn local_scan(
         pilots.push(LocalPilot {
             character_id: c.id,
             name: org_names.get(&c.id).cloned().unwrap_or_else(|| c.name.clone()),
+            corporation_id: aff.map(|a| a.corporation_id).unwrap_or(0),
             corporation,
+            alliance_id: aff.and_then(|a| a.alliance_id),
             alliance,
             standing,
             threat: threat.to_string(),
@@ -242,6 +246,42 @@ async fn load_standings(app: &AppHandle, auth_state: &AuthState) -> HashMap<i64,
     standings
         .map(|rows| rows.into_iter().map(|s| (s.from_id, s.standing)).collect())
         .unwrap_or_default()
+}
+
+const WATCHLIST_KEY: &str = "localintel_watchlist";
+
+/// A watched corporation or alliance — a scan flags any pilot in it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WatchEntry {
+    pub id: i64,
+    pub name: String,
+}
+
+/// The current watchlist (corps/alliances to flag in a scan).
+#[tauri::command]
+pub fn localintel_get_watchlist(app: AppHandle) -> Result<Vec<WatchEntry>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(storage::load_data(&dir, WATCHLIST_KEY).unwrap_or_default())
+}
+
+/// Add or remove a corp/alliance from the watchlist; returns the updated list.
+#[tauri::command]
+pub fn localintel_set_watchlist(
+    app: AppHandle,
+    id: i64,
+    name: String,
+    add: bool,
+) -> Result<Vec<WatchEntry>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let mut list: Vec<WatchEntry> = storage::load_data(&dir, WATCHLIST_KEY).unwrap_or_default();
+    list.retain(|e| e.id != id);
+    if add {
+        list.push(WatchEntry { id, name });
+    }
+    list.sort_by(|a, b| a.name.cmp(&b.name));
+    storage::save_data(&dir, WATCHLIST_KEY, &list)?;
+    Ok(list)
 }
 
 #[cfg(test)]
