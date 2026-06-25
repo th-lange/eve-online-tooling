@@ -26,7 +26,11 @@ export function ContractsPage() {
 function Workbench() {
   const [regionId, setRegionId] = useState(FORGE);
   const [minRoiPct, setMinRoiPct] = useState("10");
+  const [brokerPct, setBrokerPct] = useState("3");
+  const [taxPct, setTaxPct] = useState("4.5");
   const [rows, setRows] = useState<ContractRow[]>([]);
+
+  const num = (s: string) => (s.trim() === "" ? 0 : Number(s));
 
   const regions = useQuery({ queryKey: ["market", "regions"], queryFn: marketRegions });
   const run = useMutation({
@@ -46,7 +50,12 @@ function Workbench() {
         </div>
         <button
           onClick={() =>
-            run.mutate({ regionId, minRoi: minRoiPct.trim() === "" ? 0 : Number(minRoiPct) / 100 })
+            run.mutate({
+              regionId,
+              minRoi: num(minRoiPct) / 100,
+              brokerFee: num(brokerPct) / 100,
+              salesTax: num(taxPct) / 100,
+            })
           }
           disabled={run.isPending}
           className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
@@ -77,8 +86,25 @@ function Workbench() {
             className="w-24 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
           />
         </Field>
+        <Field label="Broker fee %">
+          <input
+            type="number"
+            value={brokerPct}
+            onChange={(e) => setBrokerPct(e.currentTarget.value)}
+            className="w-24 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+          />
+        </Field>
+        <Field label="Sales tax %">
+          <input
+            type="number"
+            value={taxPct}
+            onChange={(e) => setTaxPct(e.currentTarget.value)}
+            className="w-24 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+          />
+        </Field>
         <span className="text-xs text-zinc-500">
-          Values up to 150 item-exchange contracts at Jita sell (BPCs unpriceable).
+          Values up to 150 item-exchange contracts at Jita sell, net of resale
+          fees (BPCs unpriceable).
         </span>
       </div>
 
@@ -99,7 +125,7 @@ const CONTRACT_COLUMNS: SortColumn<ContractSortKey>[] = [
   { key: "title", label: "Contract", numeric: false, description: "Contract title + item count." },
   { key: "price", label: "Price", numeric: true, description: "The asking price." },
   { key: "contentsValue", label: "Contents (Jita sell)", numeric: true, description: "Jita sell value of the included items." },
-  { key: "profit", label: "Profit", numeric: true, description: "Contents value − price (and any items you must provide)." },
+  { key: "profit", label: "Profit", numeric: true, description: "Contents value net of sales tax + broker fee, − price (and any items you must provide)." },
   { key: "roi", label: "ROI", numeric: true, description: "Profit ÷ cost." },
 ];
 const CONTRACT_KEYS = CONTRACT_COLUMNS.map((c) => c.key);
