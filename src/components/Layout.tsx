@@ -101,7 +101,7 @@ function NavRow({
         className={`shrink-0 rounded px-1.5 py-1 text-xs transition-opacity ${
           pinned
             ? "text-amber-400 hover:text-amber-300"
-            : "text-zinc-600 opacity-0 hover:text-amber-400 group-hover:opacity-100"
+            : "text-zinc-500 opacity-0 hover:text-zinc-200 group-hover:opacity-100"
         }`}
       >
         {pinned ? "★" : "☆"}
