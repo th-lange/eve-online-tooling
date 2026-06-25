@@ -9,8 +9,10 @@ import {
   localScan,
   localintelGetWatchlist,
   localintelSetWatchlist,
+  localintelZkill,
   type LocalPilot,
   type LocalScanResult,
+  type ZkillStats,
 } from "../../lib/api";
 import { formatInt } from "../../lib/format";
 
@@ -39,9 +41,19 @@ export function LocalIntelPage() {
     [watchlist.data],
   );
 
+  const [zkill, setZkill] = useState<Map<number, ZkillStats>>(new Map());
+
+  const zkillRun = useMutation({
+    mutationFn: (ids: number[]) => localintelZkill(ids),
+    onSuccess: (stats) => setZkill(new Map(stats.map((s) => [s.characterId, s]))),
+  });
+
   const scan = useMutation({
     mutationFn: (t: string) => localScan(t),
     onSuccess: (res) => {
+      setZkill(new Map());
+      const ids = res.pilots.map((p) => p.characterId);
+      if (ids.length > 0) zkillRun.mutate(ids);
       const watched = res.pilots.filter(
         (p) => watchIds.has(p.corporationId) || (p.allianceId != null && watchIds.has(p.allianceId)),
       );
@@ -127,6 +139,8 @@ export function LocalIntelPage() {
       {result && (
         <PilotTable
           pilots={result.pilots}
+          zkill={zkill}
+          zkillLoading={zkillRun.isPending}
           isWatched={isWatched}
           onWatch={(id, name) => setWatch.mutate({ id, name, add: true })}
         />
@@ -153,10 +167,14 @@ function Summary({ result }: { result: LocalScanResult }) {
 
 function PilotTable({
   pilots,
+  zkill,
+  zkillLoading,
   isWatched,
   onWatch,
 }: {
   pilots: LocalPilot[];
+  zkill: Map<number, ZkillStats>;
+  zkillLoading: boolean;
   isWatched: (p: LocalPilot) => boolean;
   onWatch: (id: number, name: string) => void;
 }) {
@@ -169,11 +187,16 @@ function PilotTable({
             <th className="px-3 py-1.5 text-left font-medium">Corporation</th>
             <th className="px-3 py-1.5 text-left font-medium">Alliance</th>
             <th className="px-3 py-1.5 text-right font-medium">Standing</th>
+            <th className="px-3 py-1.5 text-right font-medium">
+              Danger{zkillLoading ? " …" : ""}
+            </th>
             <th className="px-3 py-1.5 text-right font-medium">Watch</th>
           </tr>
         </thead>
         <tbody>
-          {pilots.map((p) => (
+          {pilots.map((p) => {
+            const z = zkill.get(p.characterId);
+            return (
             <tr
               key={p.characterId}
               className={`border-t border-zinc-800 hover:bg-zinc-800/40 ${
@@ -188,6 +211,15 @@ function PilotTable({
               <td className="px-3 py-1.5 text-zinc-400">{p.alliance ?? "—"}</td>
               <td className={`px-3 py-1.5 text-right tabular-nums ${standingColor(p.threat)}`}>
                 {p.standing == null ? "—" : p.standing.toFixed(1)}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums">
+                {z ? (
+                  <span className={dangerColor(z.dangerRatio)} title={`${z.shipsDestroyed} kills / ${z.shipsLost} losses${z.active ? " · recently active" : ""}`}>
+                    {z.dangerRatio}%{z.active ? " ⚡" : ""}
+                  </span>
+                ) : (
+                  <span className="text-zinc-600">—</span>
+                )}
               </td>
               <td className="px-3 py-1.5 text-right text-xs">
                 {p.allianceId != null && (
@@ -210,10 +242,11 @@ function PilotTable({
                 )}
               </td>
             </tr>
-          ))}
+            );
+          })}
           {pilots.length === 0 && (
             <tr>
-              <td colSpan={5} className="px-3 py-6 text-center text-zinc-500">
+              <td colSpan={6} className="px-3 py-6 text-center text-zinc-500">
                 No pilots resolved.
               </td>
             </tr>
@@ -232,5 +265,11 @@ function dot(threat: string): string {
 function standingColor(threat: string): string {
   if (threat === "red") return "text-rose-400";
   if (threat === "blue") return "text-sky-400";
+  return "text-zinc-400";
+}
+/** zKill danger ratio → color: high = dangerous (red), low = soft target. */
+function dangerColor(danger: number): string {
+  if (danger >= 75) return "text-rose-400";
+  if (danger >= 40) return "text-amber-400";
   return "text-zinc-400";
 }

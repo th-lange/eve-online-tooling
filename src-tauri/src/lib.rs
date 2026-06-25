@@ -74,6 +74,7 @@ pub fn run() {
             modules::contracts::commands::contracts_scan,
             modules::route::commands::system_activity,
             modules::localintel::commands::local_scan,
+            modules::localintel::commands::localintel_zkill,
             modules::localintel::commands::localintel_get_watchlist,
             modules::localintel::commands::localintel_set_watchlist,
             modules::lpstore::commands::lp_balances,

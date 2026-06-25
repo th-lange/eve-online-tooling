@@ -582,6 +582,25 @@ export function localScan(text: string): Promise<LocalScanResult> {
   return invoke<LocalScanResult>("local_scan", { text });
 }
 
+export interface ZkillStats {
+  characterId: number;
+  /** 0–100: share of recent engagements that were kills. */
+  dangerRatio: number;
+  /** 0–100: share of kills made in a gang. */
+  gangRatio: number;
+  shipsDestroyed: number;
+  shipsLost: number;
+  active: boolean;
+}
+
+/**
+ * zKillboard danger stats for the given characters (per-character cached ~6h).
+ * Best-effort: characters that fail to fetch are simply absent.
+ */
+export function localintelZkill(characterIds: number[]): Promise<ZkillStats[]> {
+  return invoke<ZkillStats[]>("localintel_zkill", { characterIds });
+}
+
 export interface WatchEntry {
   id: number;
   name: string;
