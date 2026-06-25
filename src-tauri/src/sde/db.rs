@@ -608,6 +608,29 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// NPC station names for the given station ids (from `staStations`). Player
+    /// structures (citadels) aren't in the SDE, so they're simply absent and the
+    /// caller falls back to a generic label.
+    pub fn station_names(&self, ids: &[i64]) -> Result<HashMap<i64, String>, SdeError> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let placeholders = vec!["?"; ids.len()].join(", ");
+        let sql = format!(
+            "SELECT stationID, stationName FROM staStations WHERE stationID IN ({placeholders})",
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(ids.iter()), |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+        })?;
+        let mut map = HashMap::new();
+        for row in rows {
+            let (id, name) = row?;
+            map.insert(id, name);
+        }
+        Ok(map)
+    }
+
     /// Every stargate edge `(from, to)` in known space — the full adjacency for
     /// in-memory route BFS (~13k rows). Cross-chain routing unions wormhole
     /// connections onto this.
