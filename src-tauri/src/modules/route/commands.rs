@@ -265,11 +265,8 @@ fn now_secs() -> u64 {
 
 fn breadcrumb_key(app: &AppHandle) -> Result<(std::path::PathBuf, i64, String), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let character_id = storage::load_roster(&dir)
-        .into_iter()
-        .next()
-        .map(|c| c.character_id)
-        .ok_or_else(|| "Log in a character first".to_string())?;
+    let character_id =
+        storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?;
     let key = format!("route_breadcrumb_{character_id}");
     Ok((dir, character_id, key))
 }

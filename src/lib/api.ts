@@ -32,6 +32,16 @@ export function authLogout(characterId: number): Promise<Character[]> {
   return invoke<Character[]>("auth_logout", { characterId });
 }
 
+/** Bookmark the "active" character used by per-character features. */
+export function setActiveCharacter(characterId: number): Promise<void> {
+  return invoke<void>("set_active_character", { characterId });
+}
+
+/** The active character id (bookmarked if set + in roster, else the first). */
+export function activeCharacter(): Promise<number | null> {
+  return invoke<number | null>("active_character");
+}
+
 export interface OwnedBlueprint {
   characterId: number;
   characterName: string;

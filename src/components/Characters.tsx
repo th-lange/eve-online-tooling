@@ -1,12 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { authCharacters, authLogin, authLogout } from "../lib/api";
+import {
+  activeCharacter,
+  authCharacters,
+  authLogin,
+  authLogout,
+  setActiveCharacter,
+} from "../lib/api";
 
 // Roster of logged-in EVE characters. Add opens the browser SSO flow; each
-// character can be removed (which clears its keychain entry).
+// character can be removed (which clears its keychain entry). One character is
+// the "active" one (★) — the default used by per-character features.
 export function Characters() {
   const qc = useQueryClient();
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["auth", "characters"] });
+    qc.invalidateQueries({ queryKey: ["auth", "active"] });
     qc.invalidateQueries({ queryKey: ["owned"] }); // refresh the Owned filter
   };
 
@@ -14,11 +22,18 @@ export function Characters() {
     queryKey: ["auth", "characters"],
     queryFn: authCharacters,
   });
+  const active = useQuery({ queryKey: ["auth", "active"], queryFn: activeCharacter });
   const login = useMutation({ mutationFn: authLogin, onSuccess: invalidate });
   const logout = useMutation({
     mutationFn: (id: number) => authLogout(id),
     onSuccess: invalidate,
   });
+  const setActive = useMutation({
+    mutationFn: (id: number) => setActiveCharacter(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["auth", "active"] }),
+  });
+
+  const activeId = active.data ?? chars.data?.[0]?.characterId ?? null;
 
   return (
     <div className="border-t border-zinc-800 px-3 py-3">
@@ -29,27 +44,40 @@ export function Characters() {
       </div>
 
       <ul className="space-y-1">
-        {chars.data?.map((c) => (
-          <li
-            key={c.characterId}
-            className="group flex items-center justify-between rounded px-2 py-1 text-sm text-zinc-300 hover:bg-zinc-800/60"
-          >
-            <span className="truncate" title={c.name}>
-              {c.name}
-            </span>
-            <button
-              onClick={() => logout.mutate(c.characterId)}
-              className="ml-2 text-zinc-600 opacity-0 hover:text-rose-400 group-hover:opacity-100"
-              title="Remove character"
+        {chars.data?.map((c) => {
+          const isActive = c.characterId === activeId;
+          return (
+            <li
+              key={c.characterId}
+              className="group flex items-center gap-1 rounded px-2 py-1 text-sm text-zinc-300 hover:bg-zinc-800/60"
             >
-              ✕
-            </button>
-          </li>
-        ))}
+              <button
+                onClick={() => setActive.mutate(c.characterId)}
+                title={isActive ? "Active character" : "Set as active character"}
+                aria-label={isActive ? `${c.name} is active` : `Set ${c.name} active`}
+                className={`shrink-0 text-xs ${
+                  isActive
+                    ? "text-amber-400"
+                    : "text-zinc-600 opacity-0 hover:text-amber-400 group-hover:opacity-100"
+                }`}
+              >
+                {isActive ? "★" : "☆"}
+              </button>
+              <span className={`flex-1 truncate ${isActive ? "text-zinc-100" : ""}`} title={c.name}>
+                {c.name}
+              </span>
+              <button
+                onClick={() => logout.mutate(c.characterId)}
+                className="ml-2 text-zinc-600 opacity-0 hover:text-rose-400 group-hover:opacity-100"
+                title="Remove character"
+              >
+                ✕
+              </button>
+            </li>
+          );
+        })}
         {chars.data && chars.data.length === 0 && (
-          <li className="px-2 py-1 text-xs text-zinc-600">
-            No characters yet.
-          </li>
+          <li className="px-2 py-1 text-xs text-zinc-600">No characters yet.</li>
         )}
       </ul>
 
@@ -62,9 +90,7 @@ export function Characters() {
       </button>
 
       {login.isError && (
-        <p className="mt-1 text-xs text-rose-400">
-          Login failed: {String(login.error)}
-        </p>
+        <p className="mt-1 text-xs text-rose-400">Login failed: {String(login.error)}</p>
       )}
     </div>
   );
