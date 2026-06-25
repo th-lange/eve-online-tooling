@@ -549,6 +549,37 @@ export function lpOffers(params: LpParams): Promise<OffersResult> {
   return invoke<OffersResult>("lp_offers", { params });
 }
 
+// --- Local Intel ---
+
+export interface LocalPilot {
+  characterId: number;
+  name: string;
+  corporation: string;
+  alliance: string | null;
+  /** Your standing toward corp/alliance/faction (most specific), or null. */
+  standing: number | null;
+  /** "blue" | "neutral" | "red". */
+  threat: string;
+}
+
+export interface LocalScanResult {
+  pilots: LocalPilot[];
+  reds: number;
+  neutrals: number;
+  blues: number;
+  /** Pasted names that didn't resolve to a character. */
+  unresolved: string[];
+}
+
+/**
+ * Classify a pasted in-game Local member list (one name per line) by
+ * corp/alliance and your standing. Resolves via public ESI; standings use the
+ * logged-in character.
+ */
+export function localScan(text: string): Promise<LocalScanResult> {
+  return invoke<LocalScanResult>("local_scan", { text });
+}
+
 // --- Route / system activity ---
 
 export interface SystemActivity {

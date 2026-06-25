@@ -72,6 +72,7 @@ pub fn run() {
             modules::accounting::commands::profit_fifo,
             modules::contracts::commands::contracts_scan,
             modules::route::commands::system_activity,
+            modules::localintel::commands::local_scan,
             modules::lpstore::commands::lp_balances,
             modules::lpstore::commands::lp_offers,
             modules::character::commands::character_skills,
