@@ -1,10 +1,14 @@
-import { useMemo, useState, type ReactNode } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  routeBreadcrumb,
+  routeClearBreadcrumb,
+  routeLocation,
   sdeStatus,
   systemActivity,
   systemNeighbourhood,
   systemSearch,
+  type BreadcrumbEntry,
   type NeighbourNode,
   type SystemActivity,
   type SystemMatch,
@@ -76,11 +80,118 @@ function Workbench() {
         </div>
       )}
 
+      <Breadcrumb />
+
       <Neighbourhood />
 
       <h2 className="mt-6 text-sm font-semibold text-zinc-300">All active systems</h2>
       <ActivityTable rows={filtered} />
     </div>
+  );
+}
+
+/** Travel breadcrumb: poll the character's location while tracking is on and
+ * render the recorded path (k-space ↔ wormhole). There's no travel-history API,
+ * so the trail is built by polling /location while the view is open. */
+function Breadcrumb() {
+  const qc = useQueryClient();
+  const [tracking, setTracking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const trail = useQuery({ queryKey: ["route", "breadcrumb"], queryFn: routeBreadcrumb });
+
+  // While tracking, poll the live location every 30s and refresh the trail.
+  useEffect(() => {
+    if (!tracking) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const t = await routeLocation();
+        if (!cancelled) {
+          setError(null);
+          qc.setQueryData(["route", "breadcrumb"], t);
+        }
+      } catch (e) {
+        if (!cancelled) setError(String(e));
+      }
+    };
+    void poll();
+    const id = setInterval(poll, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [tracking, qc]);
+
+  const entries = trail.data ?? [];
+
+  return (
+    <div className="mt-5 rounded border border-zinc-800 bg-zinc-900/40 p-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-sm font-semibold text-zinc-300">Travel</span>
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-400">
+          <input
+            type="checkbox"
+            checked={tracking}
+            onChange={(e) => setTracking(e.currentTarget.checked)}
+          />
+          Track my location {tracking ? "(polling every 30s)" : ""}
+        </label>
+        <button
+          onClick={async () => {
+            await routeClearBreadcrumb();
+            qc.setQueryData(["route", "breadcrumb"], []);
+          }}
+          className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
+        >
+          Clear
+        </button>
+      </div>
+
+      {error && (
+        <div className="mt-2 text-xs text-rose-400">
+          {error}
+          <span className="ml-1 text-zinc-500">
+            (needs <code>esi-location.read_location.v1</code> — re-login if just enabled)
+          </span>
+        </div>
+      )}
+
+      {entries.length > 0 ? (
+        <div className="mt-3 flex flex-wrap items-center gap-1">
+          {entries.map((e, i) => (
+            <span key={`${e.systemId}-${e.enteredAt}`} className="flex items-center gap-1">
+              {i > 0 && <span className="text-zinc-600">→</span>}
+              <SystemHop entry={e} current={i === entries.length - 1} />
+            </span>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-2 text-xs text-zinc-500">
+          No trail yet — enable tracking and fly between systems.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SystemHop({ entry, current }: { entry: BreadcrumbEntry; current: boolean }) {
+  return (
+    <span
+      className={`rounded border px-2 py-0.5 text-xs ${
+        current ? "border-emerald-500" : "border-zinc-700"
+      } ${entry.wspace ? "bg-purple-950/40" : "bg-zinc-900"}`}
+      title={`${entry.region}${entry.wspace ? " · wormhole" : ""}`}
+    >
+      {entry.wspace ? (
+        <span className="text-purple-300">{entry.name}</span>
+      ) : (
+        <>
+          <span className={secColor(entry.security)}>{entry.security.toFixed(1)}</span>{" "}
+          <span className="text-zinc-200">{entry.name}</span>
+        </>
+      )}
+    </span>
   );
 }
 

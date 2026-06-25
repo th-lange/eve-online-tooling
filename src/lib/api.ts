@@ -714,6 +714,33 @@ export function systemSearch(query: string): Promise<SystemMatch[]> {
   return invoke<SystemMatch[]>("system_search", { query });
 }
 
+export interface BreadcrumbEntry {
+  systemId: number;
+  name: string;
+  security: number;
+  region: string;
+  /** True for a wormhole (J-space) system. */
+  wspace: boolean;
+  enteredAt: number;
+}
+
+/**
+ * Poll the character's current system and append it to the travel trail.
+ * Requires `esi-location.read_location.v1` (re-login if added). Call on an
+ * interval while the Route view is open — there's no travel-history API.
+ */
+export function routeLocation(): Promise<BreadcrumbEntry[]> {
+  return invoke<BreadcrumbEntry[]>("route_location");
+}
+/** The stored travel trail without polling ESI. */
+export function routeBreadcrumb(): Promise<BreadcrumbEntry[]> {
+  return invoke<BreadcrumbEntry[]>("route_breadcrumb");
+}
+/** Clear the travel trail. */
+export function routeClearBreadcrumb(): Promise<void> {
+  return invoke<void>("route_clear_breadcrumb");
+}
+
 /** Stargate neighbourhood around a system out to `depth` jumps, with jumps/kills heat. */
 export function systemNeighbourhood(
   systemId: number,
