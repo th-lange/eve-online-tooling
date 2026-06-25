@@ -4,12 +4,29 @@ import { authCharacters, industryJobs, type JobRow, type Slot } from "../../lib/
 import { formatInt, formatIsk } from "../../lib/format";
 
 type StatusFilter = "active" | "delivered" | "all";
+type Period = "1w" | "1m" | "3m" | "all";
+const PERIOD_DAYS: Record<Exclude<Period, "all">, number> = { "1w": 7, "1m": 30, "3m": 90 };
+const PERIOD_LABEL: Record<Period, string> = {
+  "1w": "1 week",
+  "1m": "1 month",
+  "3m": "3 months",
+  all: "All time",
+};
 
 /** "active" = running + ready-to-deliver. */
 function matchesStatus(status: string, filter: StatusFilter): boolean {
   if (filter === "all") return true;
   if (filter === "active") return status === "active" || status === "ready";
   return status === filter; // "delivered"
+}
+
+/** Keep a job if it's still running (future end) or finished within the period. */
+function withinPeriod(endDate: string, period: Period, now: number): boolean {
+  if (period === "all") return true;
+  const end = Date.parse(endDate);
+  if (Number.isNaN(end)) return true;
+  if (end >= now) return true; // active/future jobs always show
+  return end >= now - PERIOD_DAYS[period] * 86_400_000;
 }
 
 export function IndustryJobsPage() {
@@ -23,6 +40,7 @@ export function IndustryJobsPage() {
   const slots = jobs.data?.slots;
   const [status, setStatus] = useState<StatusFilter>("active");
   const [facility, setFacility] = useState("all");
+  const [period, setPeriod] = useState<Period>("1w");
   const roster = characters.data ?? [];
 
   // Facilities present in the data, for the location selector.
@@ -30,13 +48,15 @@ export function IndustryJobsPage() {
     () => [...new Set(allRows.map((r) => r.facility).filter(Boolean))].sort(),
     [allRows],
   );
-  const rows = useMemo(
-    () =>
-      allRows.filter(
-        (r) => matchesStatus(r.status, status) && (facility === "all" || r.facility === facility),
-      ),
-    [allRows, status, facility],
-  );
+  const rows = useMemo(() => {
+    const now = Date.now();
+    return allRows.filter(
+      (r) =>
+        matchesStatus(r.status, status) &&
+        (facility === "all" || r.facility === facility) &&
+        withinPeriod(r.endDate, period, now),
+    );
+  }, [allRows, status, facility, period]);
   const active = allRows.filter((r) => r.status === "active" || r.status === "ready").length;
 
   return (
@@ -113,6 +133,20 @@ export function IndustryJobsPage() {
             {facilities.map((f) => (
               <option key={f} value={f}>
                 {f}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs text-zinc-400">
+          Period
+          <select
+            value={period}
+            onChange={(e) => setPeriod(e.currentTarget.value as Period)}
+            className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+          >
+            {(["1w", "1m", "3m", "all"] as Period[]).map((p) => (
+              <option key={p} value={p}>
+                {PERIOD_LABEL[p]}
               </option>
             ))}
           </select>
