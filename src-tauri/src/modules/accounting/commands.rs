@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
 use crate::esi::{authed_get_paged_pub, AuthState};
+use crate::market::{resolve_location, MarketService, PriceModel};
 use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
@@ -193,7 +194,7 @@ pub async fn wallet_sync(
 
 // --- FIFO profit tracker (#54) ---
 
-#[derive(Serialize)]
+#[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfitRow {
     pub name: String,
@@ -214,70 +215,165 @@ pub struct ProfitView {
     pub total_profit: f64,
 }
 
-/// FIFO realized profit from the stored market transactions: each sale consumes
-/// the oldest unconsumed buy lots of that type. Unmatched sales (bought before
-/// tracking, or looted) get a zero cost basis and are flagged.
-#[tauri::command]
-pub fn profit_fifo(app: AppHandle) -> Result<ProfitView, String> {
-    let character_id = first_character(&app)?;
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
-    let mut transactions: Vec<Transaction> =
-        storage::load_data(&dir, &format!("transactions_{character_id}")).unwrap_or_default();
-    transactions.sort_by(|a, b| a.date.cmp(&b.date));
+/// One acquisition (buy or built) or disposal (sell), unified for the FIFO pass.
+#[derive(Debug, Clone)]
+struct FifoEvent {
+    date: String,
+    type_id: i64,
+    qty: i64,
+    /// Acquisitions carry a unit cost; disposals carry a unit sale price.
+    unit_value: f64,
+    acquire: bool,
+}
 
-    // Per type: a FIFO queue of buy lots (qty, unit cost).
+/// Pure FIFO over date-sorted events: acquisitions push lots, disposals consume
+/// the oldest lots and realize profit (unmatched = zero cost, flagged).
+fn run_fifo(mut events: Vec<FifoEvent>) -> (HashMap<i64, ProfitRow>, f64) {
+    // Date order; on a tie, acquisitions before disposals (build-then-sell same day).
+    events.sort_by(|a, b| a.date.cmp(&b.date).then(b.acquire.cmp(&a.acquire)));
+
     let mut lots: HashMap<i64, std::collections::VecDeque<(i64, f64)>> = HashMap::new();
     let mut agg: HashMap<i64, ProfitRow> = HashMap::new();
     let mut total_profit = 0.0;
 
-    for t in &transactions {
-        if t.is_buy {
-            lots.entry(t.type_id)
-                .or_default()
-                .push_back((t.quantity, t.unit_price));
-        } else {
-            let row = agg.entry(t.type_id).or_insert_with(|| ProfitRow {
-                name: String::new(),
-                units_sold: 0,
-                revenue: 0.0,
-                cost: 0.0,
-                profit: 0.0,
-                unmatched_units: 0,
-                last_sold: String::new(),
-            });
-            let revenue = t.unit_price * t.quantity as f64;
-            row.units_sold += t.quantity;
-            row.revenue += revenue;
-            // Transactions are sorted ascending, so the last seen is the newest.
-            row.last_sold = t.date.clone();
-            // Consume buy lots FIFO.
-            let queue = lots.entry(t.type_id).or_default();
-            let mut need = t.quantity;
-            let mut cost = 0.0;
-            while need > 0 {
-                match queue.front_mut() {
-                    Some((lot_qty, lot_cost)) => {
-                        let take = need.min(*lot_qty);
-                        cost += take as f64 * *lot_cost;
-                        *lot_qty -= take;
-                        need -= take;
-                        if *lot_qty == 0 {
-                            queue.pop_front();
-                        }
-                    }
-                    None => {
-                        row.unmatched_units += need;
-                        need = 0;
+    for e in &events {
+        if e.acquire {
+            lots.entry(e.type_id).or_default().push_back((e.qty, e.unit_value));
+            continue;
+        }
+        let row = agg.entry(e.type_id).or_insert_with(ProfitRow::default);
+        let revenue = e.unit_value * e.qty as f64;
+        row.units_sold += e.qty;
+        row.revenue += revenue;
+        row.last_sold = e.date.clone();
+        let queue = lots.entry(e.type_id).or_default();
+        let mut need = e.qty;
+        let mut cost = 0.0;
+        while need > 0 {
+            match queue.front_mut() {
+                Some((lot_qty, lot_cost)) => {
+                    let take = need.min(*lot_qty);
+                    cost += take as f64 * *lot_cost;
+                    *lot_qty -= take;
+                    need -= take;
+                    if *lot_qty == 0 {
+                        queue.pop_front();
                     }
                 }
+                None => {
+                    row.unmatched_units += need;
+                    need = 0;
+                }
             }
-            row.cost += cost;
-            let realized = revenue - cost;
-            row.profit += realized;
-            total_profit += realized;
+        }
+        row.cost += cost;
+        let realized = revenue - cost;
+        row.profit += realized;
+        total_profit += realized;
+    }
+    (agg, total_profit)
+}
+
+/// A delivered manufacturing job, valued as an acquisition lot.
+#[derive(Debug, Clone, Deserialize)]
+struct StoredJobLite {
+    activity_id: i64,
+    blueprint_type_id: i64,
+    #[serde(default)]
+    product_type_id: Option<i64>,
+    runs: i64,
+    #[serde(default)]
+    cost: Option<f64>,
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    end_date: String,
+}
+
+/// FIFO realized profit across **buys and builds**: market buys and delivered
+/// manufacturing jobs both supply cost basis; sells realize profit. Built units
+/// are valued at current Jita material price + the job's install fee (an
+/// estimate — current prices, ME not applied, so cost is a slight overestimate /
+/// profit a slight underestimate). Unmatched sells get zero cost and are flagged.
+#[tauri::command]
+pub async fn profit_fifo(
+    app: AppHandle,
+    market: State<'_, MarketService>,
+) -> Result<ProfitView, String> {
+    let character_id = first_character(&app)?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+
+    let transactions: Vec<Transaction> =
+        storage::load_data(&dir, &format!("transactions_{character_id}")).unwrap_or_default();
+
+    // Delivered manufacturing jobs become acquisition lots (build cost basis).
+    let jobs: Vec<StoredJobLite> =
+        storage::load_data(&dir, &format!("industry_jobs_{character_id}")).unwrap_or_default();
+    let delivered: Vec<&StoredJobLite> = jobs
+        .iter()
+        .filter(|j| j.activity_id == 1 && j.status == "delivered")
+        .collect();
+
+    // Price every material referenced by a delivered job at Jita (one pull).
+    let mut mat_ids: HashSet<i64> = HashSet::new();
+    for j in &delivered {
+        if let Ok(mats) = sde.blueprint_materials(j.blueprint_type_id) {
+            for m in mats {
+                mat_ids.insert(m.material_type_id);
+            }
         }
     }
+    let prices: HashMap<i64, PriceModel> = if mat_ids.is_empty() {
+        HashMap::new()
+    } else {
+        let ids: Vec<i64> = mat_ids.into_iter().collect();
+        market
+            .price_models_at(resolve_location(10_000_002, None), &ids)
+            .await
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|m| (m.type_id, m))
+            .collect()
+    };
+    let mat_price = |id: i64| prices.get(&id).and_then(|m| m.sell_percentile).unwrap_or(0.0);
+
+    // Build the unified event stream.
+    let mut events: Vec<FifoEvent> = Vec::new();
+    for t in &transactions {
+        events.push(FifoEvent {
+            date: t.date.clone(),
+            type_id: t.type_id,
+            qty: t.quantity,
+            unit_value: t.unit_price,
+            acquire: t.is_buy,
+        });
+    }
+    for j in &delivered {
+        let Some(product) = sde.blueprint_product(j.blueprint_type_id).ok().flatten() else {
+            continue;
+        };
+        let output_units = product.quantity * j.runs;
+        if output_units <= 0 {
+            continue;
+        }
+        let materials = sde.blueprint_materials(j.blueprint_type_id).unwrap_or_default();
+        // Materials at base quantity × runs (ME not applied — documented estimate).
+        let material_cost: f64 = materials
+            .iter()
+            .map(|m| (m.quantity * j.runs) as f64 * mat_price(m.material_type_id))
+            .sum();
+        let total_cost = material_cost + j.cost.unwrap_or(0.0);
+        events.push(FifoEvent {
+            date: j.end_date.clone(),
+            type_id: j.product_type_id.unwrap_or(product.product_type_id),
+            qty: output_units,
+            unit_value: total_cost / output_units as f64,
+            acquire: true,
+        });
+    }
+
+    let (agg, total_profit) = run_fifo(events);
 
     let mut rows: Vec<ProfitRow> = agg
         .into_iter()
@@ -293,8 +389,47 @@ pub fn profit_fifo(app: AppHandle) -> Result<ProfitView, String> {
         .collect();
     rows.sort_by(|a, b| b.profit.partial_cmp(&a.profit).unwrap_or(std::cmp::Ordering::Equal));
 
-    Ok(ProfitView {
-        rows,
-        total_profit,
-    })
+    Ok(ProfitView { rows, total_profit })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ev(date: &str, type_id: i64, qty: i64, value: f64, acquire: bool) -> FifoEvent {
+        FifoEvent { date: date.into(), type_id, qty, unit_value: value, acquire }
+    }
+
+    #[test]
+    fn builds_supply_cost_basis_alongside_buys() {
+        // Build 10 of type 1 @ cost 50 (acquire), then sell 10 @ 100 → profit 500.
+        let (agg, total) = run_fifo(vec![
+            ev("2026-01-01", 1, 10, 50.0, true),
+            ev("2026-01-02", 1, 10, 100.0, false),
+        ]);
+        assert_eq!(total, 500.0);
+        let row = &agg[&1];
+        assert_eq!(row.units_sold, 10);
+        assert_eq!(row.cost, 500.0);
+        assert_eq!(row.unmatched_units, 0);
+    }
+
+    #[test]
+    fn same_day_build_then_sell_is_matched() {
+        // Acquisition sorts before disposal on the same date.
+        let (agg, _) = run_fifo(vec![
+            ev("2026-01-01", 1, 5, 20.0, false), // sell listed first…
+            ev("2026-01-01", 1, 5, 8.0, true),   // …but built same day
+        ]);
+        assert_eq!(agg[&1].unmatched_units, 0);
+        assert_eq!(agg[&1].cost, 40.0);
+    }
+
+    #[test]
+    fn unmatched_sell_flagged_zero_cost() {
+        let (agg, total) = run_fifo(vec![ev("2026-01-01", 1, 3, 100.0, false)]);
+        assert_eq!(agg[&1].unmatched_units, 3);
+        assert_eq!(agg[&1].cost, 0.0);
+        assert_eq!(total, 300.0);
+    }
 }
