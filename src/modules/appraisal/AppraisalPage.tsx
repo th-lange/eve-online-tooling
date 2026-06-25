@@ -4,11 +4,14 @@ import {
   appraisal,
   marketRegions,
   sdeStatus,
+  type AppraisalLine,
   type AppraisalParams,
   type AppraisalResult,
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
-import { formatInt, formatIsk } from "../../lib/format";
+import { formatInt, formatIsk, sortRows } from "../../lib/format";
+import { usePersistentSort } from "../../lib/usePersistentSort";
+import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
 
 const FORGE = 10000002;
 const JITA = 60003760;
@@ -137,21 +140,58 @@ function Workbench() {
       )}
 
       {result && (
-        <div className="mt-4 overflow-auto rounded border border-zinc-800">
+        <LineTable lines={result.lines} />
+      )}
+    </div>
+  );
+}
+
+type LineSortKey =
+  | "name"
+  | "quantity"
+  | "buyPrice"
+  | "sellPrice"
+  | "buyValue"
+  | "sellValue"
+  | "volume";
+const LINE_COLUMNS: SortColumn<LineSortKey>[] = [
+  { key: "name", label: "Item", numeric: false, description: "Pasted item name." },
+  { key: "quantity", label: "Qty", numeric: true, description: "Quantity." },
+  { key: "buyPrice", label: "Buy", numeric: true, description: "Per-unit buy price." },
+  { key: "sellPrice", label: "Sell", numeric: true, description: "Per-unit sell price." },
+  { key: "buyValue", label: "Buy value", numeric: true, description: "Qty × buy." },
+  { key: "sellValue", label: "Sell value", numeric: true, description: "Qty × sell." },
+  { key: "volume", label: "m³", numeric: true, description: "Total volume." },
+];
+const LINE_KEYS = LINE_COLUMNS.map((c) => c.key);
+
+function LineTable({ lines }: { lines: AppraisalLine[] }) {
+  const { sortKey, sortDir, toggleSort } = usePersistentSort<LineSortKey>(
+    "sort.appraisal",
+    LINE_KEYS,
+    "sellValue",
+    "desc",
+    ["name"],
+  );
+  const sorted = sortRows(lines, sortKey, sortDir);
+  return (
+    <div className="mt-4 overflow-auto rounded border border-zinc-800">
           <table className="w-full border-collapse text-sm">
             <thead className="bg-zinc-900 text-zinc-400">
               <tr>
-                <th className="px-3 py-2 text-left font-medium">Item</th>
-                <th className="px-3 py-2 text-right font-medium">Qty</th>
-                <th className="px-3 py-2 text-right font-medium">Buy</th>
-                <th className="px-3 py-2 text-right font-medium">Sell</th>
-                <th className="px-3 py-2 text-right font-medium">Buy value</th>
-                <th className="px-3 py-2 text-right font-medium">Sell value</th>
-                <th className="px-3 py-2 text-right font-medium">m³</th>
+                {LINE_COLUMNS.map((c) => (
+                  <SortHeaderCell
+                    key={c.key}
+                    column={c}
+                    active={sortKey === c.key}
+                    dir={sortDir}
+                    onClick={toggleSort}
+                  />
+                ))}
               </tr>
             </thead>
             <tbody>
-              {result.lines.map((l, i) => (
+              {sorted.map((l, i) => (
                 <tr key={i} className="border-t border-zinc-800">
                   <td className="px-3 py-1.5 text-zinc-200">
                     {l.name}
@@ -187,8 +227,6 @@ function Workbench() {
             </tbody>
           </table>
         </div>
-      )}
-    </div>
   );
 }
 

@@ -8,7 +8,9 @@ import {
   type ContractRow,
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
-import { formatInt, formatIsk, formatPercent } from "../../lib/format";
+import { formatInt, formatIsk, formatPercent, sortRows } from "../../lib/format";
+import { usePersistentSort } from "../../lib/usePersistentSort";
+import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
 
 const FORGE = 10000002;
 
@@ -84,19 +86,51 @@ function Workbench() {
         <div className="mt-3 text-sm text-rose-400">Failed: {String(run.error)}</div>
       )}
 
-      <div className="mt-4 overflow-auto rounded border border-zinc-800">
+      <ContractTable rows={rows} />
+      {rows.length > 0 && (
+        <div className="mt-1 text-xs text-zinc-500">{formatInt(rows.length)} profitable contract(s)</div>
+      )}
+    </div>
+  );
+}
+
+type ContractSortKey = "title" | "price" | "contentsValue" | "profit" | "roi";
+const CONTRACT_COLUMNS: SortColumn<ContractSortKey>[] = [
+  { key: "title", label: "Contract", numeric: false, description: "Contract title + item count." },
+  { key: "price", label: "Price", numeric: true, description: "The asking price." },
+  { key: "contentsValue", label: "Contents (Jita sell)", numeric: true, description: "Jita sell value of the included items." },
+  { key: "profit", label: "Profit", numeric: true, description: "Contents value − price (and any items you must provide)." },
+  { key: "roi", label: "ROI", numeric: true, description: "Profit ÷ cost." },
+];
+const CONTRACT_KEYS = CONTRACT_COLUMNS.map((c) => c.key);
+
+function ContractTable({ rows }: { rows: ContractRow[] }) {
+  const { sortKey, sortDir, toggleSort } = usePersistentSort<ContractSortKey>(
+    "sort.contracts",
+    CONTRACT_KEYS,
+    "roi",
+    "desc",
+    ["title"],
+  );
+  const sorted = sortRows(rows, sortKey, sortDir);
+  return (
+    <div className="mt-4 overflow-auto rounded border border-zinc-800">
         <table className="w-full border-collapse text-sm">
           <thead className="bg-zinc-900 text-zinc-400">
             <tr>
-              <th className="px-3 py-2 text-left font-medium">Contract</th>
-              <th className="px-3 py-2 text-right font-medium">Price</th>
-              <th className="px-3 py-2 text-right font-medium">Contents (Jita sell)</th>
-              <th className="px-3 py-2 text-right font-medium">Profit</th>
-              <th className="px-3 py-2 text-right font-medium">ROI</th>
+              {CONTRACT_COLUMNS.map((c) => (
+                <SortHeaderCell
+                  key={c.key}
+                  column={c}
+                  active={sortKey === c.key}
+                  dir={sortDir}
+                  onClick={toggleSort}
+                />
+              ))}
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {sorted.map((r) => (
               <tr key={r.contractId} className="border-t border-zinc-800 text-zinc-300">
                 <td className="px-3 py-1.5">
                   {r.title}
@@ -138,10 +172,6 @@ function Workbench() {
             )}
           </tbody>
         </table>
-      </div>
-      {rows.length > 0 && (
-        <div className="mt-1 text-xs text-zinc-500">{formatInt(rows.length)} profitable contract(s)</div>
-      )}
     </div>
   );
 }

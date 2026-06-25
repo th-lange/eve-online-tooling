@@ -9,7 +9,9 @@ import {
   type AssetsResult,
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
-import { formatInt, formatIsk } from "../../lib/format";
+import { formatInt, formatIsk, sortRows } from "../../lib/format";
+import { usePersistentSort } from "../../lib/usePersistentSort";
+import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
 
 const FORGE = 10000002;
 const JITA = 60003760;
@@ -128,26 +130,54 @@ function Workbench() {
             placeholder="Search name / category / group…"
             className="mt-3 w-72 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
           />
-          <div className="mt-2 overflow-auto rounded border border-zinc-800">
-            <table className="w-full border-collapse text-sm">
-              <thead className="bg-zinc-900 text-zinc-400">
-                <tr>
-                  <th className="px-3 py-2 text-left font-medium">Item</th>
-                  <th className="px-3 py-2 text-right font-medium">Qty</th>
-                  <th className="px-3 py-2 text-right font-medium">Unit sell</th>
-                  <th className="px-3 py-2 text-right font-medium">Sell value</th>
-                  <th className="px-3 py-2 text-right font-medium">m³</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.slice(0, 500).map((r) => (
-                  <Row key={r.typeId} r={r} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <AssetTable rows={rows} />
         </>
       )}
+    </div>
+  );
+}
+
+type AssetSortKey = "name" | "quantity" | "sellPrice" | "sellValue" | "volume";
+const ASSET_COLUMNS: SortColumn<AssetSortKey>[] = [
+  { key: "name", label: "Item", numeric: false, description: "The item (+ best sell hub)." },
+  { key: "quantity", label: "Qty", numeric: true, description: "Units owned across the roster." },
+  { key: "sellPrice", label: "Unit sell", numeric: true, description: "Per-unit sell price at the chosen market." },
+  { key: "sellValue", label: "Sell value", numeric: true, description: "Quantity × unit sell." },
+  { key: "volume", label: "m³", numeric: true, description: "Total packaged volume." },
+];
+const ASSET_KEYS = ASSET_COLUMNS.map((c) => c.key);
+
+function AssetTable({ rows }: { rows: AssetRow[] }) {
+  const { sortKey, sortDir, toggleSort } = usePersistentSort<AssetSortKey>(
+    "sort.assets",
+    ASSET_KEYS,
+    "sellValue",
+    "desc",
+    ["name"],
+  );
+  const sorted = sortRows(rows, sortKey, sortDir).slice(0, 500);
+  return (
+    <div className="mt-2 overflow-auto rounded border border-zinc-800">
+      <table className="w-full border-collapse text-sm">
+        <thead className="bg-zinc-900 text-zinc-400">
+          <tr>
+            {ASSET_COLUMNS.map((c) => (
+              <SortHeaderCell
+                key={c.key}
+                column={c}
+                active={sortKey === c.key}
+                dir={sortDir}
+                onClick={toggleSort}
+              />
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((r) => (
+            <Row key={r.typeId} r={r} />
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
