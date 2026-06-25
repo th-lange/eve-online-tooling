@@ -7,6 +7,7 @@ pub mod assets;
 pub mod character;
 pub mod contracts;
 pub mod daytrading;
+pub mod localintel;
 pub mod lpstore;
 pub mod production;
 pub mod reprocessing;

@@ -12,6 +12,7 @@ import { AccountingPage } from "./accounting/AccountingPage";
 import { ContractsPage } from "./contracts/ContractsPage";
 import { LpStorePage } from "./lpstore/LpStorePage";
 import { RoutePage } from "./route/RoutePage";
+import { LocalIntelPage } from "./localintel/LocalIntelPage";
 
 // A feature module = a nav entry + the page rendered at `/{id}`. Adding a new
 // module (daytrading, station-trading, …) is a one-line entry here plus its
@@ -105,5 +106,11 @@ export const modules: ModuleDef[] = [
     title: "Route",
     description: "Per-system jumps & kills (last hour) across known space.",
     Component: RoutePage,
+  },
+  {
+    id: "local-intel",
+    title: "Local Intel",
+    description: "Paste Local → classify pilots by standing, corp and alliance.",
+    Component: LocalIntelPage,
   },
 ];
