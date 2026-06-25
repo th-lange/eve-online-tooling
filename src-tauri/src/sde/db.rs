@@ -322,6 +322,49 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// The reprocessing recipe for a single type (any item with refine outputs),
+    /// or `None`. For the reprocess-appraisal tool.
+    pub fn reprocess_recipe(&self, type_id: i64) -> Result<Option<ReprocessRecipe>, SdeError> {
+        let portion: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT portionSize FROM invTypes WHERE typeID = ?1 AND portionSize > 0",
+                params![type_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(portion_size) = portion else {
+            return Ok(None);
+        };
+        let name = self
+            .type_info(type_id)?
+            .map(|t| t.name)
+            .unwrap_or_else(|| format!("Type {type_id}"));
+        let mut stmt = self.conn.prepare(
+            "SELECT m.materialTypeID, t.typeName, m.quantity
+             FROM invTypeMaterials m JOIN invTypes t ON t.typeID = m.materialTypeID
+             WHERE m.typeID = ?1 ORDER BY m.materialTypeID",
+        )?;
+        let outputs = stmt
+            .query_map(params![type_id], |r| {
+                Ok(BlueprintMaterial {
+                    material_type_id: r.get(0)?,
+                    name: r.get(1)?,
+                    quantity: r.get(2)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        if outputs.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(ReprocessRecipe {
+            type_id,
+            name,
+            portion_size,
+            outputs,
+        }))
+    }
+
     /// Resolve an item by (case-insensitive) name → `(type_id, packaged_volume)`.
     /// For the appraisal tool's clipboard parsing.
     pub fn type_by_name(&self, name: &str) -> Result<Option<(i64, Option<f64>)>, SdeError> {
