@@ -13,7 +13,10 @@ use tauri::{AppHandle, Manager, State};
 
 use futures_util::stream::{self, StreamExt};
 
-use crate::esi::{authed_get, authed_get_paged_pub, resolve_names, AuthState, ESI_BASE, USER_AGENT};
+use crate::esi::{
+    authed_get, authed_get_paged_pub, corporation_id, resolve_names, AuthState, ESI_BASE,
+    USER_AGENT,
+};
 use crate::storage;
 
 /// Cap on pasted names per scan (Local tops out well below this).
@@ -93,12 +96,19 @@ struct EsiStanding {
     from_id: i64,
     standing: f64,
 }
-/// One personal contact (`/characters/{id}/contacts/`): the blue/red marks you
-/// set on a character, corp, alliance or faction. `contact_id` is the entity id.
+/// One contact (`/{characters|corporations|alliances}/{id}/contacts/`): a
+/// blue/red mark on a character, corp, alliance or faction. `contact_id` is the
+/// entity id. Same shape across the personal/corp/alliance endpoints.
 #[derive(Deserialize)]
 struct Contact {
     contact_id: i64,
     standing: f64,
+}
+/// Corporation public info — we only need its alliance membership.
+#[derive(Deserialize)]
+struct CorpInfo {
+    #[serde(default)]
+    alliance_id: Option<i64>,
 }
 
 /// Resolve a pasted Local member list to classified pilots. Name→id and
@@ -240,13 +250,14 @@ fn threat_rank(threat: &str) -> u8 {
 }
 
 /// The active character's standings as an entity-id → standing map, used to
-/// classify Local. Combines two sources, most-personal winning:
+/// classify Local. Layered, **most-specific winning** (matching EVE):
 ///   1. NPC **standings** (`/standings/`) — factions/agents earned from missions.
-///   2. Personal **contacts** (`/contacts/`) — the blue/red you set on players,
-///      corps and alliances (this is what actually "watches Local").
-/// Contacts overlay standings. Returns empty (everyone neutral) if no character
-/// is active or both fetches fail; a missing `read_contacts` scope just means
-/// contacts are skipped until the character re-logs in with it granted.
+///   2. **Alliance** contacts — set by your alliance leadership.
+///   3. **Corp** contacts — set by your corp leadership.
+///   4. Your **personal** contacts — the blue/red you set yourself (highest).
+/// Each layer overwrites the previous for the same entity. Returns empty
+/// (everyone neutral) if no character is active or every fetch fails; any layer
+/// whose scope/role isn't granted (403) is simply skipped.
 async fn load_standings(app: &AppHandle, auth_state: &AuthState) -> HashMap<i64, f64> {
     let Ok(dir) = app.path().app_data_dir() else {
         return HashMap::new();
@@ -256,7 +267,13 @@ async fn load_standings(app: &AppHandle, auth_state: &AuthState) -> HashMap<i64,
     };
 
     let mut map: HashMap<i64, f64> = HashMap::new();
-    // NPC standings (already-granted scope).
+    let merge = |map: &mut HashMap<i64, f64>, rows: Vec<Contact>| {
+        for c in rows {
+            map.insert(c.contact_id, c.standing);
+        }
+    };
+
+    // 1. NPC standings (already-granted scope).
     if let Ok(rows) = authed_get::<Vec<EsiStanding>>(
         auth_state,
         character_id,
@@ -268,9 +285,43 @@ async fn load_standings(app: &AppHandle, auth_state: &AuthState) -> HashMap<i64,
             map.insert(s.from_id, s.standing);
         }
     }
-    // Personal contacts (needs esi-characters.read_contacts.v1). These are the
-    // player's explicit marks, so they overwrite any NPC standing for the same
-    // entity. Paginated; a 403 (scope not yet granted) is treated as "none".
+
+    // 2/3. Alliance then corp contacts (needs esi-alliances.read_contacts.v1 /
+    // esi-corporations.read_contacts.v1 + membership/role). The character's corp
+    // gives both ids; a 403 (no scope/role, or not in an alliance) is skipped.
+    if let Ok(corp_id) = corporation_id(auth_state, character_id).await {
+        let alliance_id = authed_get::<CorpInfo>(
+            auth_state,
+            character_id,
+            &format!("/latest/corporations/{corp_id}/"),
+        )
+        .await
+        .ok()
+        .and_then(|c| c.alliance_id);
+        if let Some(alliance_id) = alliance_id {
+            if let Ok(rows) = authed_get_paged_pub::<Contact>(
+                auth_state,
+                character_id,
+                &format!("/latest/alliances/{alliance_id}/contacts/"),
+            )
+            .await
+            {
+                merge(&mut map, rows);
+            }
+        }
+        if let Ok(rows) = authed_get_paged_pub::<Contact>(
+            auth_state,
+            character_id,
+            &format!("/latest/corporations/{corp_id}/contacts/"),
+        )
+        .await
+        {
+            merge(&mut map, rows);
+        }
+    }
+
+    // 4. Personal contacts (needs esi-characters.read_contacts.v1) — your own
+    // explicit marks win over corp/alliance and NPC standings.
     if let Ok(rows) = authed_get_paged_pub::<Contact>(
         auth_state,
         character_id,
@@ -278,10 +329,9 @@ async fn load_standings(app: &AppHandle, auth_state: &AuthState) -> HashMap<i64,
     )
     .await
     {
-        for c in rows {
-            map.insert(c.contact_id, c.standing);
-        }
+        merge(&mut map, rows);
     }
+
     map
 }
 
