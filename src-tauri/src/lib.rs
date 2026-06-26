@@ -39,6 +39,15 @@ pub fn run() {
                 .expect("could not resolve the app data directory");
             app.manage(market::MarketService::with_cache(dir.clone()));
             app.manage(esi::AuthState::with_cache(dir));
+
+            // Fetch key data early, in the background — never block launch. Keeps
+            // the SDE current (daily, md5-gated) and primes the active
+            // character's assets into the conditional cache.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                sde::commands::auto_refresh(&handle).await;
+                esi::commands::warm_active_character(&handle).await;
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

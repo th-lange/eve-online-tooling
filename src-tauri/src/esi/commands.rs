@@ -220,6 +220,20 @@ pub async fn open_market_window(
         .map_err(|e| e.to_string())
 }
 
+/// Best-effort startup warm-up: pull the active character's assets so the
+/// ESI conditional cache is primed and Production/Assets open without waiting on
+/// a cold network fetch. Silent on any failure (offline, no character, etc.).
+pub async fn warm_active_character(app: &AppHandle) {
+    let Ok(dir) = app.path().app_data_dir() else {
+        return;
+    };
+    let Some(character_id) = storage::active_character(&dir) else {
+        return;
+    };
+    let auth = app.state::<AuthState>();
+    let _ = character::fetch_assets(&auth, character_id).await;
+}
+
 /// Remove a character: drop it from the roster, delete its keychain entry, and
 /// forget any cached token. Returns the updated roster.
 #[tauri::command]
