@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   routeBreadcrumb,
   routeClearBreadcrumb,
@@ -15,6 +15,7 @@ import {
 import { SdeSetup } from "../production/SdeSetup";
 import { formatInt } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
+import { usePersistentState } from "../../lib/usePersistentState";
 import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
 import { DataAge } from "../../components/DataAge";
 
@@ -31,13 +32,16 @@ type Mode = "all" | "neighbouring";
 
 function Workbench() {
   const qc = useQueryClient();
-  const [search, setSearch] = useState("");
-  const [mode, setMode] = useState<Mode>("all");
-  const [depth, setDepth] = useState(2);
+  // UI selection persists across tab switches / restarts, so leaving Route and
+  // coming back shows exactly what you left — the data revalidates in the
+  // background rather than resetting the view.
+  const [search, setSearch] = usePersistentState("route.search", "");
+  const [mode, setMode] = usePersistentState<Mode>("route.mode", "all");
+  const [depth, setDepth] = usePersistentState("route.depth", 2);
   // Neighbourhood centre: a typed system, or the live "my location".
-  const [centre, setCentre] = useState<SystemMatch | null>(null);
-  const [fromMe, setFromMe] = useState(false);
-  const [auto, setAuto] = useState(false);
+  const [centre, setCentre] = usePersistentState<SystemMatch | null>("route.centre", null);
+  const [fromMe, setFromMe] = usePersistentState("route.fromMe", false);
+  const [auto, setAuto] = usePersistentState("route.auto", false);
   const [query, setQuery] = useState("");
   const [locError, setLocError] = useState<string | null>(null);
 
@@ -51,17 +55,21 @@ function Workbench() {
     queryFn: () => systemSearch(query),
     enabled: query.trim().length >= 2,
   });
-  const hood = useMutation({
-    mutationFn: (v: { id: number; depth: number }) => systemNeighbourhood(v.id, v.depth),
+  // Neighbourhood graph as a cached query keyed on (centre, depth): it survives
+  // unmount and restores instantly on return, refetching only when stale or on
+  // an explicit Update.
+  const hood = useQuery({
+    queryKey: ["route", "neighbourhood", centre?.id ?? null, depth],
+    queryFn: () => systemNeighbourhood(centre!.id, depth),
+    enabled: mode === "neighbouring" && !!centre,
   });
 
-  // Focus the neighbourhood on a typed system.
+  // Focus the neighbourhood on a typed system (the query reacts to centre/mode).
   function focusSystem(m: SystemMatch) {
     setFromMe(false);
     setCentre(m);
     setMode("neighbouring");
     setQuery("");
-    hood.mutate({ id: m.id, depth });
   }
   // Focus on the live current location (also records the travel breadcrumb).
   async function focusMyLocation(d = depth) {
@@ -74,7 +82,7 @@ function Workbench() {
         setFromMe(true);
         setCentre({ id: last.systemId, name: last.name });
         setMode("neighbouring");
-        hood.mutate({ id: last.systemId, depth: d });
+        setDepth(d);
       }
     } catch (e) {
       setLocError(String(e));
@@ -82,14 +90,15 @@ function Workbench() {
   }
   function changeDepth(d: number) {
     setDepth(d);
+    // A live "my location" focus re-pulls the position; a typed centre just
+    // re-keys the neighbourhood query above.
     if (fromMe) void focusMyLocation(d);
-    else if (centre) hood.mutate({ id: centre.id, depth: d });
   }
   // Manual refresh: re-pull activity + re-centre (live location if "from me").
   function update() {
     void activity.refetch();
     if (fromMe) void focusMyLocation();
-    else if (centre) hood.mutate({ id: centre.id, depth });
+    else if (centre) void hood.refetch();
   }
 
   // Auto-update every 30s while enabled (re-centres a live "my location" focus).
@@ -98,7 +107,7 @@ function Workbench() {
     const id = setInterval(() => {
       void activity.refetch();
       if (fromMe) void focusMyLocation();
-      else if (centre) hood.mutate({ id: centre.id, depth });
+      else if (centre) void hood.refetch();
     }, 30_000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -202,7 +211,7 @@ function Workbench() {
           {centre && (
             <span className="text-xs text-zinc-500">
               Centre: <span className="text-zinc-300">{centre.name}</span>
-              {fromMe ? " (you)" : ""} · {hood.isPending ? "loading…" : "shown below"}
+              {fromMe ? " (you)" : ""} · {hood.isFetching ? "loading…" : "shown below"}
             </span>
           )}
           {entries.length > 0 && (
