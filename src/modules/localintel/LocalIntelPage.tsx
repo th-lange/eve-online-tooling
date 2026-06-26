@@ -96,7 +96,8 @@ export function LocalIntelPage() {
           <h1 className="text-2xl font-semibold text-zinc-100">Local Intel</h1>
           <p className="mt-1 text-sm text-zinc-400">
             Select-all in the in-game Local member list, copy, and paste it here
-            to classify every pilot by corp/alliance and your standing.
+            to classify every pilot by corp/alliance against your character's
+            contacts (blue/red) and standings.
           </p>
         </div>
         <button
