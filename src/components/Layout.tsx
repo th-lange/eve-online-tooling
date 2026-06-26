@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { NavLink, useLocation } from "react-router-dom";
 import { modules, type ModuleDef } from "../modules/registry";
 import { BridgeStatus } from "./BridgeStatus";
 import { Characters } from "./Characters";
@@ -62,10 +62,44 @@ export function Layout() {
           <BridgeStatus />
         </div>
       </aside>
-      <main className="flex-1 overflow-auto">
-        <Outlet />
+      <main className="flex-1 overflow-hidden">
+        <ModuleHost />
       </main>
     </div>
+  );
+}
+
+/**
+ * Keep-alive host for the module pages. Each page is mounted on its first visit
+ * and then **kept mounted** (just hidden) when you navigate elsewhere, so
+ * switching tabs no longer unmounts/resets a page — its inputs, results and
+ * scroll position are all preserved, and its data revalidates in the background.
+ * Pages are mounted lazily (only once visited), so nothing fetches up front.
+ */
+function ModuleHost() {
+  const location = useLocation();
+  const seg = location.pathname.split("/").filter(Boolean)[0];
+  const activeId = modules.some((m) => m.id === seg) ? seg : modules[0].id;
+
+  const [visited, setVisited] = useState<Set<string>>(() => new Set([activeId]));
+  useEffect(() => {
+    setVisited((prev) => (prev.has(activeId) ? prev : new Set(prev).add(activeId)));
+  }, [activeId]);
+
+  return (
+    <>
+      {modules
+        .filter((m) => visited.has(m.id))
+        .map((m) => (
+          <div
+            key={m.id}
+            className="h-full overflow-auto"
+            style={{ display: m.id === activeId ? "block" : "none" }}
+          >
+            <m.Component />
+          </div>
+        ))}
+    </>
   );
 }
 

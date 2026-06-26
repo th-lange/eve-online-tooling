@@ -12,14 +12,16 @@ import { modules } from "./modules/registry";
 import "./index.css";
 
 // Routes are generated from the module registry: "/" redirects to the first
-// module, and each module mounts at "/{id}".
+// module. The module pages themselves are rendered by Layout's keep-alive host
+// (see ModuleHost), so these child routes exist only for path matching — the
+// active page is chosen from the URL and kept mounted across navigation.
 const router = createBrowserRouter([
   {
     path: "/",
     element: <Layout />,
     children: [
       { index: true, element: <Navigate to={`/${modules[0].id}`} replace /> },
-      ...modules.map((m) => ({ path: m.id, element: <m.Component /> })),
+      ...modules.map((m) => ({ path: m.id })),
     ],
   },
 ]);
