@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::error::EsiError;
+use super::net::send_retrying;
 
 /// Fallback freshness window when a response carries no cache headers. Kept
 /// short: with an ETag, revalidation is cheap (a 304), so erring small is safe.
@@ -172,7 +173,11 @@ impl ConditionalCache {
         F: Fn() -> RequestBuilder,
     {
         if self.dir.is_none() {
-            let bytes = build().send().await?.error_for_status()?.bytes().await?;
+            let bytes = send_retrying(build)
+                .await?
+                .error_for_status()?
+                .bytes()
+                .await?;
             return Ok(serde_json::from_slice(&bytes)?);
         }
 
@@ -183,11 +188,12 @@ impl ConditionalCache {
             }
         }
 
-        let mut req = build();
-        if let Some(tag) = entry.as_ref().and_then(|e| e.etag.as_deref()) {
-            req = req.header(IF_NONE_MATCH, tag);
-        }
-        let resp = req.send().await?;
+        let tag = entry.as_ref().and_then(|e| e.etag.as_deref());
+        let resp = send_retrying(|| match tag {
+            Some(t) => build().header(IF_NONE_MATCH, t),
+            None => build(),
+        })
+        .await?;
         if resp.status() == StatusCode::NOT_MODIFIED {
             if let Some(e) = &entry {
                 self.touch(key, ttl_from(resp.headers()));
@@ -230,11 +236,12 @@ impl ConditionalCache {
             }
         }
 
-        let mut req = build_page(1);
-        if let Some(tag) = entry.as_ref().and_then(|e| e.etag.as_deref()) {
-            req = req.header(IF_NONE_MATCH, tag);
-        }
-        let resp = req.send().await?;
+        let tag = entry.as_ref().and_then(|e| e.etag.as_deref());
+        let resp = send_retrying(|| match tag {
+            Some(t) => build_page(1).header(IF_NONE_MATCH, t),
+            None => build_page(1),
+        })
+        .await?;
         if resp.status() == StatusCode::NOT_MODIFIED {
             if let Some(e) = &entry {
                 self.touch(key, ttl_from(resp.headers()));
@@ -247,8 +254,7 @@ impl ConditionalCache {
         let pages = x_pages(resp.headers());
         let mut all: Vec<Value> = resp.json().await?;
         for page in 2..=pages {
-            let more: Vec<Value> = build_page(page)
-                .send()
+            let more: Vec<Value> = send_retrying(|| build_page(page))
                 .await?
                 .error_for_status()?
                 .json()
@@ -270,12 +276,11 @@ impl ConditionalCache {
 
 /// Walk every page (no caching), concatenating the JSON arrays.
 async fn walk_pages<F: Fn(u32) -> RequestBuilder>(build_page: &F) -> Result<Vec<Value>, EsiError> {
-    let resp = build_page(1).send().await?.error_for_status()?;
+    let resp = send_retrying(|| build_page(1)).await?.error_for_status()?;
     let pages = x_pages(resp.headers());
     let mut all: Vec<Value> = resp.json().await?;
     for page in 2..=pages {
-        let more: Vec<Value> = build_page(page)
-            .send()
+        let more: Vec<Value> = send_retrying(|| build_page(page))
             .await?
             .error_for_status()?
             .json()
