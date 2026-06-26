@@ -50,8 +50,21 @@ export type SortKey =
   | "margin"
   | "profitPerUnit"
   | "productPrice"
+  | "unitCost"
   | "productVolume";
 export type SortDir = "asc" | "desc";
+
+/**
+ * Production cost per unit: materials + job fee + blueprint + invention,
+ * amortized over the units produced. `null` when nothing is produced.
+ */
+export function unitCost(row: ProfitBreakdown): number | null {
+  if (row.unitsProduced <= 0) return null;
+  return (
+    (row.materialCost + row.jobFee + row.blueprintCost + row.inventionCost) /
+    row.unitsProduced
+  );
+}
 
 /**
  * Generic row sort by a field name. Strings compare lexically; numbers
@@ -85,6 +98,8 @@ function value(row: ProfitBreakdown, key: SortKey): number | string | null {
       return row.profitPerUnit;
     case "productPrice":
       return row.productPrice;
+    case "unitCost":
+      return unitCost(row);
     case "productVolume":
       return row.productVolume;
   }
