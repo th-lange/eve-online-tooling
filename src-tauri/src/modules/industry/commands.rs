@@ -10,38 +10,9 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
-use crate::esi::{authed_get, corporation_id, resolve_names, AuthError, AuthState, ESI_BASE};
+use crate::esi::{authed_get, corporation_id, resolve_names, AuthState, ESI_BASE};
 use crate::sde::{Sde, SdePaths};
 use crate::storage;
-
-/// Fetch the character's jobs, retrying transient ESI failures (5xx / timeouts —
-/// the `include_completed` payload is heavy and ESI returns 504s under load).
-/// Real errors (e.g. 403 missing scope) fail fast — they aren't retried.
-async fn fetch_jobs_retrying(
-    auth: &AuthState,
-    character_id: i64,
-    url: &str,
-) -> Result<Vec<StoredJob>, String> {
-    let mut attempt = 0u32;
-    loop {
-        match authed_get::<Vec<StoredJob>>(auth, character_id, url).await {
-            Ok(v) => return Ok(v),
-            Err(e) => {
-                // Retry on 5xx or a status-less error (timeout/connection); a
-                // 4xx (403/401) is a real problem and returned immediately.
-                let retryable = match &e {
-                    AuthError::Http(he) => he.status().map(|s| s.is_server_error()).unwrap_or(true),
-                    _ => false,
-                };
-                attempt += 1;
-                if attempt >= 3 || !retryable {
-                    return Err(e.to_string());
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(700 * attempt as u64)).await;
-            }
-        }
-    }
-}
 
 /// Raw ESI industry job (the fields we keep). Stored durably, merged by job id.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,13 +157,16 @@ pub async fn industry_jobs(
     };
 
     // include_completed so delivered jobs (the cost-basis source) come through.
-    // Retried on transient ESI 5xx/timeouts (this endpoint 504s under load).
-    let incoming: Vec<StoredJob> = fetch_jobs_retrying(
+    // The shared ESI client retries transient 5xx/timeouts (this endpoint 504s
+    // under load) and backs off the error budget; a real 4xx (403 missing scope)
+    // still fails fast.
+    let incoming: Vec<StoredJob> = authed_get(
         &auth_state,
         character_id,
         &format!("/latest/characters/{character_id}/industry/jobs/?include_completed=true"),
     )
-    .await?;
+    .await
+    .map_err(|e| e.to_string())?;
 
     // Merge into the durable store, keyed by job id (delivered jobs persist).
     let key = format!("industry_jobs_{character_id}");
