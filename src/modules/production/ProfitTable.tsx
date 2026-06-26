@@ -17,6 +17,53 @@ import {
 
 const MAX_ROWS = 500;
 
+/**
+ * EVE in-game **Multibuy** format: one `name<TAB>quantity` per line. Lists the
+ * shortfall actually bought (required − owned), skipping fully-stocked inputs.
+ * Paste straight into the Multibuy window.
+ */
+function multibuyText(row: ProfitBreakdown): string {
+  return row.materials
+    .map((m) => ({ name: m.name, qty: Math.max(0, m.requiredQuantity - m.have) }))
+    .filter((m) => m.qty > 0)
+    .map((m) => `${m.name}\t${m.qty}`)
+    .join("\n");
+}
+
+/** A Markdown cost overview for one build — totals plus the material list. */
+function costMarkdown(row: ProfitBreakdown): string {
+  const where = row.sellHub ? `sell @ ${row.sellHub}` : row.market ?? "";
+  const out: string[] = [
+    `## ${row.productName} ×${formatInt(row.unitsProduced)}${where ? ` (${where})` : ""}`,
+    "",
+    "| | ISK |",
+    "| --- | ---: |",
+    `| Revenue (sell) | ${formatIsk(row.revenue)} |`,
+    `| Materials | ${formatIsk(row.materialCost)} |`,
+    `| Job fee | ${formatIsk(row.jobFee)} |`,
+  ];
+  if (row.blueprintCost > 0) out.push(`| Blueprint | ${formatIsk(row.blueprintCost)} |`);
+  if (row.inventionCost > 0) out.push(`| Invention | ${formatIsk(row.inventionCost)} |`);
+  out.push(
+    `| Cost/unit | ${formatIsk(unitCost(row))} |`,
+    `| **Profit** | **${formatIsk(row.profit)}** |`,
+    `| Profit/unit | ${formatIsk(row.profitPerUnit)} |`,
+    `| Margin | ${formatPercent(row.margin)} |`,
+    `| ROI | ${formatPercent(row.roi)} |`,
+    "",
+    "### Materials",
+    "| Material | Qty | Unit | Cost |",
+    "| --- | ---: | ---: | ---: |",
+  );
+  for (const m of row.materials) {
+    out.push(
+      `| ${m.name}${m.built ? " (built)" : ""} | ${formatInt(m.requiredQuantity)} | ${formatIsk(m.unitPrice)} | ${formatIsk(m.lineCost)} |`,
+    );
+  }
+  out.push(`| **Total** | | | **${formatIsk(row.materialCost)}** |`);
+  return out.join("\n");
+}
+
 const COLUMNS: SortColumn<SortKey>[] = [
   {
     key: "productName",
@@ -235,23 +282,47 @@ export function ProfitTable({
 }
 
 function BreakdownRow({ row }: { row: ProfitBreakdown }) {
+  const [copied, setCopied] = useState<"md" | "mb" | null>(null);
+  function copy(text: string, tag: "md" | "mb") {
+    void navigator.clipboard?.writeText(text);
+    setCopied(tag);
+    setTimeout(() => setCopied((c) => (c === tag ? null : c)), 1200);
+  }
   return (
     <tr className="border-t border-zinc-800 bg-zinc-900/40">
       <td />
       <td colSpan={9} className="px-3 py-3">
-        <div className="mb-2 text-xs text-zinc-400">
-          {row.runs} run(s) · ME {row.me} · {formatInt(row.unitsProduced)} unit(s)
-          {row.jobTimeSeconds > 0
-            ? ` · build ${formatDuration(row.jobTimeSeconds)}`
-            : ""}
-          · job fee {formatIsk(row.jobFee)}
-          {row.inventionCost > 0
-            ? ` · invention ${formatIsk(row.inventionCost)}`
-            : ""}
-          {row.blueprintCost > 0
-            ? ` · blueprint ${formatIsk(row.blueprintCost)}`
-            : ""}{" "}
-          · revenue {formatIsk(row.revenue)}
+        <div className="mb-2 flex items-start justify-between gap-3">
+          <div className="text-xs text-zinc-400">
+            {row.runs} run(s) · ME {row.me} · {formatInt(row.unitsProduced)} unit(s)
+            {row.jobTimeSeconds > 0
+              ? ` · build ${formatDuration(row.jobTimeSeconds)}`
+              : ""}
+            · job fee {formatIsk(row.jobFee)}
+            {row.inventionCost > 0
+              ? ` · invention ${formatIsk(row.inventionCost)}`
+              : ""}
+            {row.blueprintCost > 0
+              ? ` · blueprint ${formatIsk(row.blueprintCost)}`
+              : ""}{" "}
+            · revenue {formatIsk(row.revenue)}
+          </div>
+          <div className="flex shrink-0 gap-1">
+            <button
+              onClick={() => copy(costMarkdown(row), "md")}
+              title="Copy a Markdown cost overview to the clipboard"
+              className="rounded border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
+            >
+              {copied === "md" ? "Copied ✓" : "Export"}
+            </button>
+            <button
+              onClick={() => copy(multibuyText(row), "mb")}
+              title="Copy the materials for the in-game Multibuy window"
+              className="rounded border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
+            >
+              {copied === "mb" ? "Copied ✓" : "Multibuy"}
+            </button>
+          </div>
         </div>
         <table className="w-full text-xs">
           <thead className="text-zinc-500">
