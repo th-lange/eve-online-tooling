@@ -16,6 +16,7 @@ import { SdeSetup } from "../production/SdeSetup";
 import { formatInt } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
+import { DataAge } from "../../components/DataAge";
 
 export function RoutePage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
@@ -124,13 +125,16 @@ function Workbench() {
             kills. Known-space only (CCP excludes wormhole systems).
           </p>
         </div>
-        <button
-          onClick={() => activity.refetch()}
-          disabled={activity.isFetching}
-          className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-        >
-          {activity.isFetching ? "Loading…" : "Refresh"}
-        </button>
+        <div className="flex flex-col items-end gap-1">
+          <button
+            onClick={() => activity.refetch()}
+            disabled={activity.isFetching}
+            className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            {activity.isFetching ? "Loading…" : "Refresh"}
+          </button>
+          <DataAge updatedAt={activity.dataUpdatedAt} fetching={activity.isFetching} />
+        </div>
       </div>
 
       {activity.isError && (

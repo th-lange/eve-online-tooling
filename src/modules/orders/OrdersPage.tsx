@@ -4,6 +4,7 @@ import { marketOrders, type OrderRow } from "../../lib/api";
 import { formatInt, formatIsk } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
+import { DataAge } from "../../components/DataAge";
 
 export function OrdersPage() {
   const orders = useQuery({ queryKey: ["orders", "market"], queryFn: marketOrders });
@@ -20,13 +21,16 @@ export function OrdersPage() {
             current best price.
           </p>
         </div>
-        <button
-          onClick={() => orders.refetch()}
-          disabled={orders.isFetching}
-          className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-        >
-          {orders.isFetching ? "Loading…" : "Refresh"}
-        </button>
+        <div className="flex flex-col items-end gap-1">
+          <button
+            onClick={() => orders.refetch()}
+            disabled={orders.isFetching}
+            className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            {orders.isFetching ? "Loading…" : "Refresh"}
+          </button>
+          <DataAge updatedAt={orders.dataUpdatedAt} fetching={orders.isFetching} />
+        </div>
       </div>
 
       {orders.isError && (

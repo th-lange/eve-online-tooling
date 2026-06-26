@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { DataAge } from "../../components/DataAge";
 import {
   marketRegions,
   sdeStatus,
@@ -132,13 +133,19 @@ function Workbench() {
             Buy→sell margins at a hub, after broker fee &amp; sales tax.
           </p>
         </div>
-        <button
-          onClick={calculate}
-          disabled={run.isPending}
-          className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-        >
-          {run.isPending ? "Scanning…" : "Calculate"}
-        </button>
+        <div className="flex flex-col items-end gap-1">
+          <button
+            onClick={calculate}
+            disabled={run.isPending}
+            className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            {run.isPending ? "Scanning…" : "Calculate"}
+          </button>
+          <DataAge
+            updatedAt={run.isSuccess ? run.submittedAt : undefined}
+            fetching={run.isPending}
+          />
+        </div>
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3 rounded border border-zinc-800 bg-zinc-900 p-3 md:grid-cols-5">

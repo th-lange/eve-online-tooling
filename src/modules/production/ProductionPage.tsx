@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { DataAge } from "../../components/DataAge";
 import {
   marketRegions,
   ownedBlueprints,
@@ -298,28 +299,34 @@ function Workbench() {
             then filter.
           </p>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => update.mutate()}
-            disabled={update.isPending}
-            className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-            title="Re-download the SDE only if it changed"
-          >
-            {update.isPending
-              ? "Checking…"
-              : update.data
-                ? update.data.updated
-                  ? "Updated ✓"
-                  : "Up to date ✓"
-                : "Update data"}
-          </button>
-          <button
-            onClick={calculate}
-            disabled={profit.isPending}
-            className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-          >
-            {profit.isPending ? "Calculating…" : "Calculate"}
-          </button>
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex gap-2">
+            <button
+              onClick={() => update.mutate()}
+              disabled={update.isPending}
+              className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+              title="Re-download the SDE only if it changed"
+            >
+              {update.isPending
+                ? "Checking…"
+                : update.data
+                  ? update.data.updated
+                    ? "Updated ✓"
+                    : "Up to date ✓"
+                  : "Update data"}
+            </button>
+            <button
+              onClick={calculate}
+              disabled={profit.isPending}
+              className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {profit.isPending ? "Calculating…" : "Calculate"}
+            </button>
+          </div>
+          <DataAge
+            updatedAt={profit.isSuccess ? profit.submittedAt : undefined}
+            fetching={profit.isPending}
+          />
         </div>
       </div>
 
