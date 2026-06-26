@@ -1,8 +1,9 @@
 name: Release
 
-# Builds installers for Linux, macOS and Windows and attaches them to the
-# GitHub Release when a v* tag is pushed. Can also be run manually against a
-# tag via "Run workflow".
+# Builds installers and attaches them to the GitHub Release when a v* tag is
+# pushed. Can also be run manually against a tag via "Run workflow".
+# NOTE: Linux + macOS are temporarily disabled (Windows-only) to save Actions
+# minutes — see the commented matrix entries below to restore them.
 on:
   push:
     tags:
@@ -17,13 +18,15 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux + macOS temporarily disabled to save Actions minutes — uncomment
+          # to restore the full multi-platform build.
           # Universal binary -> runs on Intel + Apple Silicon.
-          - platform: macos-latest
-            args: "--target universal-apple-darwin"
-            rust-targets: "aarch64-apple-darwin,x86_64-apple-darwin"
-          - platform: ubuntu-22.04
-            args: ""
-            rust-targets: ""
+          # - platform: macos-latest
+          #   args: "--target universal-apple-darwin"
+          #   rust-targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+          # - platform: ubuntu-22.04
+          #   args: ""
+          #   rust-targets: ""
           - platform: windows-latest
             args: ""
             rust-targets: ""
