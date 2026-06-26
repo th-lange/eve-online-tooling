@@ -121,7 +121,13 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
   - **Owned-only** / **Favorites-only** filters, plus persisted **blacklist** and **favorites**
     (★/✕ on each row, with Opportunities / Favorites / Blacklist tabs).
 - **Smart SDE caching** — the static data only re-downloads when Fuzzwork's published md5 changes
-  ("Update data" button reports updated vs already-current).
+  ("Update data" button reports updated vs already-current), and a best-effort daily check on startup
+  keeps it current automatically.
+- **Conditional ESI caching** — all ESI traffic flows through one client that revalidates with
+  **ETags** (cheap `304 Not Modified` instead of full re-downloads), honours each response's cache
+  timer (`Cache-Control`/`Expires`) instead of guessing, persists across restarts, and backs off
+  ESI's error budget (with transient-failure retries). Data pages show an "Updated N ago" freshness
+  label.
 - **EVE SSO login (multi-character)** — add one or more characters via OAuth2 PKCE (sidebar →
   "Add character"); each refresh token is stored in the OS keychain, the roster persists across
   restarts, and removing a character clears its credential.
