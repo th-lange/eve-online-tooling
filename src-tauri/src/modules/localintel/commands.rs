@@ -13,7 +13,7 @@ use tauri::{AppHandle, Manager, State};
 
 use futures_util::stream::{self, StreamExt};
 
-use crate::esi::{authed_get, resolve_names, AuthState, ESI_BASE, USER_AGENT};
+use crate::esi::{authed_get, authed_get_paged_pub, resolve_names, AuthState, ESI_BASE, USER_AGENT};
 use crate::storage;
 
 /// Cap on pasted names per scan (Local tops out well below this).
@@ -91,6 +91,13 @@ struct Affiliation {
 #[derive(Deserialize)]
 struct EsiStanding {
     from_id: i64,
+    standing: f64,
+}
+/// One personal contact (`/characters/{id}/contacts/`): the blue/red marks you
+/// set on a character, corp, alliance or faction. `contact_id` is the entity id.
+#[derive(Deserialize)]
+struct Contact {
+    contact_id: i64,
     standing: f64,
 }
 
@@ -180,13 +187,16 @@ pub async fn local_scan(
         let alliance = aff
             .and_then(|a| a.alliance_id)
             .and_then(|al| org_names.get(&al).cloned());
-        // Standing: most specific entry wins (corp → alliance → faction).
-        let standing = aff.and_then(|a| {
-            standings
-                .get(&a.corporation_id)
-                .or_else(|| a.alliance_id.and_then(|al| standings.get(&al)))
-                .or_else(|| a.faction_id.and_then(|f| standings.get(&f)))
-                .copied()
+        // Standing: most specific entry wins — a personal contact on the pilot
+        // themselves, then corp → alliance → faction.
+        let standing = standings.get(&c.id).copied().or_else(|| {
+            aff.and_then(|a| {
+                standings
+                    .get(&a.corporation_id)
+                    .or_else(|| a.alliance_id.and_then(|al| standings.get(&al)))
+                    .or_else(|| a.faction_id.and_then(|f| standings.get(&f)))
+                    .copied()
+            })
         });
         let threat = threat_of(standing);
         match threat {
@@ -229,25 +239,50 @@ fn threat_rank(threat: &str) -> u8 {
     }
 }
 
-/// The logged-in character's standings as an entity-id → standing map. Returns
-/// empty (everyone neutral) if no character is logged in or the fetch fails.
+/// The active character's standings as an entity-id → standing map, used to
+/// classify Local. Combines two sources, most-personal winning:
+///   1. NPC **standings** (`/standings/`) — factions/agents earned from missions.
+///   2. Personal **contacts** (`/contacts/`) — the blue/red you set on players,
+///      corps and alliances (this is what actually "watches Local").
+/// Contacts overlay standings. Returns empty (everyone neutral) if no character
+/// is active or both fetches fail; a missing `read_contacts` scope just means
+/// contacts are skipped until the character re-logs in with it granted.
 async fn load_standings(app: &AppHandle, auth_state: &AuthState) -> HashMap<i64, f64> {
     let Ok(dir) = app.path().app_data_dir() else {
         return HashMap::new();
     };
-    let Some(character_id) = storage::active_character(&dir)
-    else {
+    let Some(character_id) = storage::active_character(&dir) else {
         return HashMap::new();
     };
-    let standings: Result<Vec<EsiStanding>, _> = authed_get(
+
+    let mut map: HashMap<i64, f64> = HashMap::new();
+    // NPC standings (already-granted scope).
+    if let Ok(rows) = authed_get::<Vec<EsiStanding>>(
         auth_state,
         character_id,
         &format!("/latest/characters/{character_id}/standings/"),
     )
-    .await;
-    standings
-        .map(|rows| rows.into_iter().map(|s| (s.from_id, s.standing)).collect())
-        .unwrap_or_default()
+    .await
+    {
+        for s in rows {
+            map.insert(s.from_id, s.standing);
+        }
+    }
+    // Personal contacts (needs esi-characters.read_contacts.v1). These are the
+    // player's explicit marks, so they overwrite any NPC standing for the same
+    // entity. Paginated; a 403 (scope not yet granted) is treated as "none".
+    if let Ok(rows) = authed_get_paged_pub::<Contact>(
+        auth_state,
+        character_id,
+        &format!("/latest/characters/{character_id}/contacts/"),
+    )
+    .await
+    {
+        for c in rows {
+            map.insert(c.contact_id, c.standing);
+        }
+    }
+    map
 }
 
 /// zKillboard etiquette: a descriptive UA (we have one) and low concurrency.
