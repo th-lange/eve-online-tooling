@@ -11,11 +11,15 @@ import {
   localintelGetWatchlist,
   localintelSetWatchlist,
   localintelZkill,
+  routeLocation,
+  systemNeighbourhood,
   type LocalPilot,
   type LocalScanResult,
+  type NeighbourNode,
   type ZkillStats,
 } from "../../lib/api";
 import { formatInt } from "../../lib/format";
+import { usePersistentState } from "../../lib/usePersistentState";
 
 /** Best-effort desktop notification — requests permission, never throws. */
 async function notify(title: string, body: string) {
@@ -112,6 +116,20 @@ export function LocalIntelPage() {
     }
     return [...map.values()].sort((a, b) => a.standing - b.standing || b.count - a.count);
   }, [result]);
+
+  // Neighbourhood intel: recent kills/jumps in systems around the active
+  // character's current location (CCP hourly aggregates, k-space only).
+  const [hoodDepth, setHoodDepth] = usePersistentState("localintel.hoodDepth", 2);
+  const location = useQuery({
+    queryKey: ["localintel", "location"],
+    queryFn: routeLocation,
+  });
+  const here = location.data?.[location.data.length - 1];
+  const hood = useQuery({
+    queryKey: ["localintel", "hood", here?.systemId ?? null, hoodDepth],
+    queryFn: () => systemNeighbourhood(here!.systemId, hoodDepth),
+    enabled: here != null,
+  });
 
   return (
     <div className="flex h-full">
@@ -213,12 +231,26 @@ export function LocalIntelPage() {
         </div>
       )}
       </div>
-      <HostileSidebar
-        corps={hostileCorps}
-        scanned={!!result}
-        watchIds={watchIds}
-        onWatch={(id, name) => setWatch.mutate({ id, name, add: true })}
-      />
+      <aside className="flex w-64 shrink-0 flex-col overflow-auto border-l border-zinc-800 bg-zinc-900/40">
+        <HostileCorpsPanel
+          corps={hostileCorps}
+          scanned={!!result}
+          watchIds={watchIds}
+          onWatch={(id, name) => setWatch.mutate({ id, name, add: true })}
+        />
+        <NeighbourhoodPanel
+          here={here}
+          nodes={hood.data?.nodes}
+          depth={hoodDepth}
+          onDepth={setHoodDepth}
+          loading={location.isFetching || hood.isFetching}
+          locError={location.isError}
+          onRefresh={() => {
+            void location.refetch();
+            void hood.refetch();
+          }}
+        />
+      </aside>
     </div>
   );
 }
@@ -226,8 +258,8 @@ export function LocalIntelPage() {
 /** Hostile player-corp standing threshold: flag corps you've set below this. */
 const HOSTILE_STANDING = -4;
 
-/** Right rail: player corporations in local with a standing below −4. */
-function HostileSidebar({
+/** Right-rail panel: player corporations in local with a standing below −4. */
+function HostileCorpsPanel({
   corps,
   scanned,
   watchIds,
@@ -239,7 +271,7 @@ function HostileSidebar({
   onWatch: (id: number, name: string) => void;
 }) {
   return (
-    <aside className="w-60 shrink-0 overflow-auto border-l border-zinc-800 bg-zinc-900/40 p-3">
+    <div className="border-b border-zinc-800 p-3">
       <div className="text-xs font-semibold uppercase tracking-wide text-rose-400">
         Hostile corps
       </div>
@@ -280,7 +312,135 @@ function HostileSidebar({
           ))}
         </ul>
       )}
-    </aside>
+    </div>
+  );
+}
+
+/** Security-status colour: hisec green, lowsec amber, null/WH red. */
+function secColor(s: number): string {
+  if (s >= 0.45) return "text-emerald-400";
+  if (s > 0.0) return "text-amber-400";
+  return "text-rose-400";
+}
+
+/**
+ * Right-rail panel: recent ship/pod kills (CCP hourly, k-space) in systems
+ * within N jumps of the active character's current location — "what's happening
+ * around me" while watching Local. Empty in wormholes (no stargate graph / no
+ * k-space kill data).
+ */
+function NeighbourhoodPanel({
+  here,
+  nodes,
+  depth,
+  onDepth,
+  loading,
+  locError,
+  onRefresh,
+}: {
+  here?: { systemId: number; name: string; security: number };
+  nodes?: NeighbourNode[];
+  depth: number;
+  onDepth: (d: number) => void;
+  loading: boolean;
+  locError: boolean;
+  onRefresh: () => void;
+}) {
+  const nearby = useMemo(
+    () =>
+      [...(nodes ?? [])]
+        .filter((n) => n.distance > 0)
+        .sort(
+          (a, b) =>
+            b.shipKills + b.podKills - (a.shipKills + a.podKills) ||
+            a.distance - b.distance ||
+            a.name.localeCompare(b.name),
+        )
+        .slice(0, 15),
+    [nodes],
+  );
+
+  return (
+    <div className="p-3">
+      <div className="flex items-center justify-between">
+        <div className="text-xs font-semibold uppercase tracking-wide text-zinc-300">
+          Neighbourhood
+        </div>
+        <button
+          onClick={onRefresh}
+          disabled={loading}
+          title="Refresh location + nearby activity"
+          className="rounded border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+        >
+          {loading ? "…" : "↻"}
+        </button>
+      </div>
+      <div className="mb-2 flex items-center gap-1 text-[11px] text-zinc-500">
+        kills/hr · ≤
+        {[1, 2, 3].map((d) => (
+          <button
+            key={d}
+            onClick={() => onDepth(d)}
+            className={`rounded px-1 ${
+              depth === d ? "bg-zinc-700 text-zinc-100" : "bg-zinc-800 text-zinc-400"
+            }`}
+          >
+            {d}
+          </button>
+        ))}
+        jumps
+      </div>
+
+      {locError || !here ? (
+        <div className="text-xs text-zinc-600">
+          Needs your in-game location (the <code>esi-location.read_location.v1</code>{" "}
+          scope) — set an active character and re-login if just enabled.
+        </div>
+      ) : (
+        <>
+          <div className="mb-1 text-xs text-zinc-400">
+            You: <span className="text-zinc-200">{here.name}</span>{" "}
+            <span className={`tabular-nums ${secColor(here.security)}`}>
+              {here.security.toFixed(1)}
+            </span>
+          </div>
+          {nearby.length === 0 ? (
+            <div className="text-xs text-zinc-600">
+              {loading ? "Loading…" : "Quiet — no kills nearby this hour."}
+            </div>
+          ) : (
+            <ul className="space-y-0.5">
+              {nearby.map((n) => (
+                <li
+                  key={n.systemId}
+                  className="flex items-center justify-between gap-1 text-xs"
+                >
+                  <span
+                    className="min-w-0 truncate text-zinc-300"
+                    title={`${n.name} · ${n.region}`}
+                  >
+                    <span className={secColor(n.security)}>•</span> {n.name}{" "}
+                    <span className="text-zinc-600">{n.distance}j</span>
+                  </span>
+                  <span className="shrink-0 tabular-nums">
+                    {n.podKills > 0 && (
+                      <span className="text-rose-400" title="pod kills">
+                        💀{n.podKills}{" "}
+                      </span>
+                    )}
+                    {n.shipKills > 0 && (
+                      <span className="text-amber-400" title="ship kills">
+                        ⚔{n.shipKills}
+                      </span>
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
