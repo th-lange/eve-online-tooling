@@ -43,8 +43,19 @@ impl Default for MarketService {
 
 impl MarketService {
     pub fn new() -> Self {
+        Self::with_client(EsiClient::new())
+    }
+
+    /// Market service whose ESI reads are conditionally cached on disk under
+    /// `<dir>/esi-cache/`, so price/order/history data survives restarts and
+    /// revalidates with ETags instead of full re-downloads.
+    pub fn with_cache(dir: std::path::PathBuf) -> Self {
+        Self::with_client(EsiClient::with_cache(dir))
+    }
+
+    fn with_client(esi: EsiClient) -> Self {
         Self {
-            esi: EsiClient::new(),
+            esi,
             fuzzwork: FuzzworkClient::new(),
             ma_days: MA_DAYS,
             // TTLs roughly track ESI cache timers.

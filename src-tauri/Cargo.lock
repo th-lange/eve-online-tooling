@@ -1013,6 +1013,7 @@ dependencies = [
  "base64 0.22.1",
  "flate2",
  "futures-util",
+ "httpdate",
  "keyring",
  "rand 0.8.6",
  "reqwest 0.12.28",
