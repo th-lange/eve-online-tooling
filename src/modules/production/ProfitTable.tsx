@@ -6,6 +6,7 @@ import {
   formatIsk,
   formatPercent,
   sortBreakdowns,
+  unitCost,
   type SortKey,
 } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
@@ -25,9 +26,16 @@ const COLUMNS: SortColumn<SortKey>[] = [
   },
   {
     key: "productPrice",
-    label: "Price",
+    label: "Sell",
     numeric: true,
-    description: "Product sell price at the chosen market and price basis.",
+    description: "Product sell price per unit at the chosen market and price basis.",
+  },
+  {
+    key: "unitCost",
+    label: "Cost",
+    numeric: true,
+    description:
+      "Production cost per unit — materials + job fee + blueprint + invention, amortized over units produced.",
   },
   {
     key: "roi",
@@ -175,6 +183,9 @@ export function ProfitTable({
                     <td className="px-3 py-1.5 text-right tabular-nums text-zinc-200">
                       {formatIsk(r.productPrice)}
                     </td>
+                    <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                      {formatIsk(unitCost(r))}
+                    </td>
                     <td
                       className={`px-3 py-1.5 text-right tabular-nums ${
                         (r.roi ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"
@@ -211,7 +222,7 @@ export function ProfitTable({
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-3 py-6 text-center text-zinc-500">
+                <td colSpan={10} className="px-3 py-6 text-center text-zinc-500">
                   No rows.
                 </td>
               </tr>
@@ -227,7 +238,7 @@ function BreakdownRow({ row }: { row: ProfitBreakdown }) {
   return (
     <tr className="border-t border-zinc-800 bg-zinc-900/40">
       <td />
-      <td colSpan={8} className="px-3 py-3">
+      <td colSpan={9} className="px-3 py-3">
         <div className="mb-2 text-xs text-zinc-400">
           {row.runs} run(s) · ME {row.me} · {formatInt(row.unitsProduced)} unit(s)
           {row.jobTimeSeconds > 0
