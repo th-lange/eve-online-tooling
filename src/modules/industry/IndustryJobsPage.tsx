@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { activeCharacter, authCharacters, industryJobs, type JobRow, type Slot } from "../../lib/api";
 import { formatInt, formatIsk } from "../../lib/format";
+import { DataAge } from "../../components/DataAge";
 
 type StatusFilter = "active" | "delivered" | "all";
 type Period = "1w" | "1m" | "3m" | "all";
@@ -70,13 +71,16 @@ export function IndustryJobsPage() {
             and when it finishes.
           </p>
         </div>
-        <button
-          onClick={() => jobs.refetch()}
-          disabled={jobs.isFetching}
-          className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-        >
-          {jobs.isFetching ? "Loading…" : "Refresh"}
-        </button>
+        <div className="flex flex-col items-end gap-1">
+          <button
+            onClick={() => jobs.refetch()}
+            disabled={jobs.isFetching}
+            className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            {jobs.isFetching ? "Loading…" : "Refresh"}
+          </button>
+          <DataAge updatedAt={jobs.dataUpdatedAt} fetching={jobs.isFetching} />
+        </div>
       </div>
 
       {jobs.isError && (
