@@ -6,7 +6,8 @@
 //! (native PKCE app); there is no client secret.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -14,6 +15,7 @@ use base64::Engine;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
+use super::cache::ConditionalCache;
 use super::USER_AGENT;
 use crate::model::Character;
 
@@ -64,13 +66,17 @@ pub enum AuthError {
     NotLoggedIn,
     #[error("credential storage error: {0}")]
     Storage(String),
+    #[error(transparent)]
+    Esi(#[from] super::error::EsiError),
 }
 
-/// In-memory auth state: an HTTP client and a per-character access-token cache.
-/// Refresh tokens live in the keychain, not here.
+/// In-memory auth state: an HTTP client and a per-character access-token cache,
+/// plus the shared conditional response cache for authed ESI reads. Refresh
+/// tokens live in the keychain, not here.
 pub struct AuthState {
     http: reqwest::Client,
     tokens: Mutex<HashMap<i64, CachedToken>>,
+    cache: Arc<ConditionalCache>,
 }
 
 struct CachedToken {
@@ -85,7 +91,18 @@ impl Default for AuthState {
 }
 
 impl AuthState {
+    /// Auth state with no persistent response cache (pass-through).
     pub fn new() -> Self {
+        Self::build(ConditionalCache::disabled())
+    }
+
+    /// Auth state whose authed reads are conditionally cached under
+    /// `<dir>/esi-cache/`, surviving restarts.
+    pub fn with_cache(dir: PathBuf) -> Self {
+        Self::build(ConditionalCache::on_disk(dir))
+    }
+
+    fn build(cache: ConditionalCache) -> Self {
         let http = reqwest::Client::builder()
             .user_agent(USER_AGENT)
             .build()
@@ -93,7 +110,13 @@ impl AuthState {
         Self {
             http,
             tokens: Mutex::new(HashMap::new()),
+            cache: Arc::new(cache),
         }
+    }
+
+    /// The shared conditional cache, for authed endpoint wrappers.
+    pub fn cache(&self) -> &ConditionalCache {
+        &self.cache
     }
 
     fn cache_token(&self, character_id: i64, access_token: String, expires_in: u64) {

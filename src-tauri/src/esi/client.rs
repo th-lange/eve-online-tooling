@@ -1,10 +1,17 @@
-//! Minimal public ESI HTTP client.
+//! Public ESI HTTP client.
 //!
-//! Covers the unauthenticated endpoints the market service needs. Auth (SSO)
-//! and the full error-limit backoff are layered on in issues #3/#4.
+//! Covers the unauthenticated endpoints the market service needs. Requests go
+//! through a [`ConditionalCache`] (ETag + `Expires`/`max-age`), so repeated
+//! reads serve from cache or revalidate with a cheap 304 rather than
+//! re-downloading. Build with [`EsiClient::with_cache`] to persist across
+//! restarts; [`EsiClient::new`] is a non-persisting pass-through.
+
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::de::DeserializeOwned;
 
+use super::cache::{cache_key, ConditionalCache};
 use super::error::EsiError;
 use super::{ESI_BASE, USER_AGENT};
 
@@ -12,6 +19,7 @@ use super::{ESI_BASE, USER_AGENT};
 pub struct EsiClient {
     http: reqwest::Client,
     base: String,
+    cache: Arc<ConditionalCache>,
 }
 
 impl Default for EsiClient {
@@ -21,7 +29,17 @@ impl Default for EsiClient {
 }
 
 impl EsiClient {
+    /// A client with no persistent cache (transparent pass-through).
     pub fn new() -> Self {
+        Self::build(ConditionalCache::disabled())
+    }
+
+    /// A client whose conditional cache persists under `<dir>/esi-cache/`.
+    pub fn with_cache(dir: PathBuf) -> Self {
+        Self::build(ConditionalCache::on_disk(dir))
+    }
+
+    fn build(cache: ConditionalCache) -> Self {
         let http = reqwest::Client::builder()
             .user_agent(USER_AGENT)
             .build()
@@ -29,62 +47,38 @@ impl EsiClient {
         Self {
             http,
             base: ESI_BASE.to_string(),
+            cache: Arc::new(cache),
         }
     }
 
-    /// GET a single JSON document.
+    /// GET a single JSON document (conditionally cached).
     pub async fn get_json<T: DeserializeOwned>(
         &self,
         path: &str,
         query: &[(&str, String)],
     ) -> Result<T, EsiError> {
         let url = format!("{}{}", self.base, path);
-        let resp = self
-            .http
-            .get(&url)
-            .query(query)
-            .send()
-            .await?
-            .error_for_status()?;
-        Ok(resp.json::<T>().await?)
+        let key = cache_key(&url, query);
+        self.cache
+            .get_json(&key, || self.http.get(&url).query(query))
+            .await
     }
 
     /// GET a paginated collection, following the `X-Pages` header and
-    /// concatenating every page.
+    /// concatenating every page (conditionally cached on page 1).
     pub async fn get_paged<T: DeserializeOwned>(
         &self,
         path: &str,
         query: &[(&str, String)],
     ) -> Result<Vec<T>, EsiError> {
         let url = format!("{}{}", self.base, path);
-        let resp = self
-            .http
-            .get(&url)
-            .query(query)
-            .send()
-            .await?
-            .error_for_status()?;
-        let pages: u32 = resp
-            .headers()
-            .get("x-pages")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(1);
-        let mut out: Vec<T> = resp.json().await?;
-
-        for page in 2..=pages {
-            let mut q = query.to_vec();
-            q.push(("page", page.to_string()));
-            let resp = self
-                .http
-                .get(&url)
-                .query(&q)
-                .send()
-                .await?
-                .error_for_status()?;
-            let mut more: Vec<T> = resp.json().await?;
-            out.append(&mut more);
-        }
-        Ok(out)
+        let key = cache_key(&url, query);
+        self.cache
+            .get_paged(&key, |page| {
+                let mut q = query.to_vec();
+                q.push(("page", page.to_string()));
+                self.http.get(&url).query(&q)
+            })
+            .await
     }
 }

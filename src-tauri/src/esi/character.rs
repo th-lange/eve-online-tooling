@@ -30,7 +30,8 @@ pub struct RawAsset {
     pub item_id: i64,
 }
 
-/// Authenticated, paginated ESI GET for the given character.
+/// Authenticated, paginated ESI GET for the given character. Conditionally
+/// cached per (character, path) — see [`super::cache::ConditionalCache`].
 async fn authed_get_paged<T: DeserializeOwned>(
     auth: &AuthState,
     character_id: i64,
@@ -38,50 +39,35 @@ async fn authed_get_paged<T: DeserializeOwned>(
 ) -> Result<Vec<T>, AuthError> {
     let token = auth.access_token_for(character_id).await?;
     let url = format!("{ESI_BASE}{path}");
-    let resp = auth
-        .http()
-        .get(&url)
-        .bearer_auth(&token)
-        .send()
-        .await?
-        .error_for_status()?;
-    let pages: u32 = resp
-        .headers()
-        .get("x-pages")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1);
-    let mut out: Vec<T> = resp.json().await?;
-    for page in 2..=pages {
-        let resp = auth
-            .http()
-            .get(&url)
-            .query(&[("page", page.to_string())])
-            .bearer_auth(&token)
-            .send()
-            .await?
-            .error_for_status()?;
-        out.extend(resp.json::<Vec<T>>().await?);
-    }
+    let key = format!("c{character_id}:{path}");
+    let out = auth
+        .cache()
+        .get_paged(&key, |page| {
+            auth.http()
+                .get(&url)
+                .query(&[("page", page.to_string())])
+                .bearer_auth(&token)
+        })
+        .await?;
     Ok(out)
 }
 
 /// Authenticated single-page ESI GET (deserialized). Shared by the character
-/// data viewers (skills, standings, research, mining, fleet).
+/// data viewers (skills, standings, research, mining, fleet). Conditionally
+/// cached per (character, path).
 pub async fn authed_get<T: DeserializeOwned>(
     auth: &AuthState,
     character_id: i64,
     path: &str,
 ) -> Result<T, AuthError> {
     let token = auth.access_token_for(character_id).await?;
-    let resp = auth
-        .http()
-        .get(format!("{ESI_BASE}{path}"))
-        .bearer_auth(&token)
-        .send()
-        .await?
-        .error_for_status()?;
-    Ok(resp.json().await?)
+    let url = format!("{ESI_BASE}{path}");
+    let key = format!("c{character_id}:{path}");
+    let val = auth
+        .cache()
+        .get_json(&key, || auth.http().get(&url).bearer_auth(&token))
+        .await?;
+    Ok(val)
 }
 
 /// Public wrapper over the paginated authed GET (for the mining ledger).
@@ -174,16 +160,13 @@ struct CharacterPublic {
     corporation_id: i64,
 }
 
-/// The character's corporation id (public endpoint).
+/// The character's corporation id (public endpoint, conditionally cached).
 pub async fn corporation_id(auth: &AuthState, character_id: i64) -> Result<i64, AuthError> {
     let url = format!("{ESI_BASE}/latest/characters/{character_id}/");
+    let key = format!("pub:char:{character_id}");
     let info: CharacterPublic = auth
-        .http()
-        .get(&url)
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
+        .cache()
+        .get_json(&key, || auth.http().get(&url))
         .await?;
     Ok(info.corporation_id)
 }

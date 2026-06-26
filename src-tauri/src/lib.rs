@@ -28,8 +28,19 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
-        .manage(market::MarketService::new())
-        .manage(esi::AuthState::new())
+        .setup(|app| {
+            // Resolve the app data dir once and give the shared services a
+            // disk-backed conditional cache rooted there, so ESI reads survive
+            // restarts and revalidate with ETags (see esi::cache).
+            use tauri::Manager;
+            let dir = app
+                .path()
+                .app_data_dir()
+                .expect("could not resolve the app data directory");
+            app.manage(market::MarketService::with_cache(dir.clone()));
+            app.manage(esi::AuthState::with_cache(dir));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::ping,
             esi::commands::auth_login,

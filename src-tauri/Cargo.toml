@@ -34,6 +34,8 @@ tokio = { version = "1", features = ["fs", "io-util", "rt", "time"] }
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 sha2 = "0.10"
 base64 = "0.22"
+# Parse HTTP `Expires`/`Date` headers for ESI's caching contract.
+httpdate = "1"
 rand = "0.8"
 tiny_http = "0.12"
 

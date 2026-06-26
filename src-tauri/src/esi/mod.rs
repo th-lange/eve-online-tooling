@@ -7,6 +7,7 @@
 //! Tracking: issues #3 (SSO), #4 (assets/blueprints), #5 (market).
 
 mod auth;
+mod cache;
 mod character;
 mod client;
 pub mod commands;
