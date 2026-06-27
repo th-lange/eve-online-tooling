@@ -420,6 +420,24 @@ function Workbench() {
 
           {/* Right: stats */}
           <aside className="w-72 shrink-0 space-y-4 overflow-auto">
+            <div className="flex h-5 items-center justify-between">
+              <h2 className="text-sm font-medium text-zinc-200">Stats</h2>
+              {stats.isFetching && (
+                <span className="flex items-center gap-1.5 text-xs text-zinc-400">
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-300" />
+                  Evaluating…
+                </span>
+              )}
+            </div>
+            {stats.isError && (
+              <p className="text-xs text-red-400">
+                Eval failed: {(stats.error as Error)?.message ?? String(stats.error)}
+              </p>
+            )}
+            {!stats.data && !stats.isFetching && !stats.isError && (
+              <p className="text-xs text-zinc-500">Add modules to see stats.</p>
+            )}
+            <div className={stats.isFetching ? "space-y-4 opacity-50 transition-opacity" : "space-y-4"}>
             {stats.data && (
               <div className="space-y-2">
                 <h3 className="text-xs uppercase tracking-wide text-zinc-500">Fitting</h3>
@@ -494,6 +512,7 @@ function Workbench() {
                 </div>
               </div>
             )}
+            </div>
 
             <div className="space-y-1">
               <div className="flex items-center justify-between">
