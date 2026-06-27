@@ -123,12 +123,16 @@ export function LocalIntelPage() {
   const location = useQuery({
     queryKey: ["localintel", "location"],
     queryFn: routeLocation,
+    // Auto-refresh so the panel follows the character as they move.
+    refetchInterval: 30_000,
   });
   const here = location.data?.[location.data.length - 1];
   const hood = useQuery({
     queryKey: ["localintel", "hood", here?.systemId ?? null, hoodDepth],
     queryFn: () => systemNeighbourhood(here!.systemId, hoodDepth),
     enabled: here != null,
+    // Keep neighbourhood kills/jumps live (CCP aggregates update ~hourly).
+    refetchInterval: 30_000,
   });
 
   return (
