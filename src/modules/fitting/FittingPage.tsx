@@ -15,6 +15,7 @@ import {
   sdeStatus,
   type Fit,
   type FitItem,
+  type SkillSource,
   type SlotKind,
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
@@ -38,6 +39,8 @@ function Workbench() {
   const [query, setQuery] = useState("");
   const [regionId, setRegionId] = useState(FORGE);
   const [eft, setEft] = useState("");
+  const [skillSource, setSkillSource] = useState<SkillSource>("allFive");
+  const skillLabel = skillSource === "character" ? "character" : "all V";
 
   const regions = useQuery({ queryKey: ["market", "regions"], queryFn: marketRegions });
   const results = useQuery({
@@ -56,8 +59,8 @@ function Workbench() {
   // Re-run validation whenever the fit changes (its JSON is the cache key).
   const fitKey = useMemo(() => (fit ? JSON.stringify(fit) : ""), [fit]);
   const stats = useQuery({
-    queryKey: ["fitting", "simulate", fitKey],
-    queryFn: () => fittingSimulate(fit!),
+    queryKey: ["fitting", "simulate", fitKey, skillSource],
+    queryFn: () => fittingSimulate(fit!, skillSource),
     enabled: fit != null,
   });
 
@@ -150,6 +153,19 @@ function Workbench() {
             ))}
           </select>
         </label>
+        <label className="flex flex-col gap-1 text-xs text-zinc-400">
+          Skills
+          <select
+            value={skillSource}
+            onChange={(e) =>
+              setSkillSource(e.currentTarget.value as SkillSource)
+            }
+            className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+          >
+            <option value="allFive">All V</option>
+            <option value="character">Character</option>
+          </select>
+        </label>
       </div>
 
       <div className="flex items-start gap-2">
@@ -234,7 +250,7 @@ function Workbench() {
             {stats.data?.dps && stats.data.dps.total > 0 && (
               <div className="space-y-1">
                 <h3 className="text-xs uppercase tracking-wide text-zinc-500">
-                  DPS (all V)
+                  DPS ({skillLabel})
                 </h3>
                 <div className="text-sm text-zinc-300">
                   {stats.data.dps.total.toFixed(1)} dps
@@ -253,7 +269,7 @@ function Workbench() {
             {stats.data?.tank && (
               <div className="space-y-1">
                 <h3 className="text-xs uppercase tracking-wide text-zinc-500">
-                  Tank (all V)
+                  Tank ({skillLabel})
                 </h3>
                 <div className="text-sm text-zinc-300">
                   {Math.round(stats.data.tank.ehp).toLocaleString()} EHP
@@ -280,7 +296,7 @@ function Workbench() {
             {stats.data?.navigation && (
               <div className="space-y-1">
                 <h3 className="text-xs uppercase tracking-wide text-zinc-500">
-                  Navigation (all V)
+                  Navigation ({skillLabel})
                 </h3>
                 <div className="text-xs text-zinc-400">
                   {Math.round(stats.data.navigation.maxVelocity)} m/s · align{" "}
@@ -293,7 +309,7 @@ function Workbench() {
             {stats.data?.capacitor && (
               <div className="space-y-1">
                 <h3 className="text-xs uppercase tracking-wide text-zinc-500">
-                  Capacitor (all V)
+                  Capacitor ({skillLabel})
                 </h3>
                 <div className="text-sm text-zinc-300">
                   {stats.data.capacitor.stable ? (

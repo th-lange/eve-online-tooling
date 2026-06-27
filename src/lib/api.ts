@@ -1408,9 +1408,15 @@ export function fittingExportEft(fit: Fit): Promise<string> {
   return invoke<string>("fitting_export_eft", { fit });
 }
 
-/** Simulate a fit: slot/resource validation (P1). */
-export function fittingSimulate(fit: Fit): Promise<FitStats> {
-  return invoke<FitStats>("fitting_simulate", { fit });
+/** Skills basis for simulation: best-case all-V, or the logged-in character. */
+export type SkillSource = "allFive" | "character";
+
+/** Simulate a fit: validation + dogma stats at the chosen skill basis. */
+export function fittingSimulate(
+  fit: Fit,
+  skillSource: SkillSource = "allFive",
+): Promise<FitStats> {
+  return invoke<FitStats>("fitting_simulate", { fit, skillSource });
 }
 
 /** Price a whole fit at a market. */
