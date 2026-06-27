@@ -1336,12 +1336,21 @@ export interface TankStats {
   armorRepS: number;
 }
 
+/** Full-application DPS by weapon kind. */
+export interface DpsBreakdown {
+  turret: number;
+  missile: number;
+  drone: number;
+  total: number;
+}
+
 /** Computed result of simulating a fit (resources + validation + dogma stats). */
 export interface FitStats {
   resources: ResourceUsage;
   validation: FitProblem[];
   capacitor?: CapStats | null;
   tank?: TankStats | null;
+  dps?: DpsBreakdown | null;
   price?: number | null;
 }
 
