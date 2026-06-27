@@ -20,7 +20,12 @@ mod types;
 pub use db::Sde;
 pub use download::download_sde;
 pub use error::SdeError;
-pub use types::{BlueprintMaterial, BlueprintProduct, Decryptor, Recipe, ReprocessRecipe};
+pub use types::{
+    BlueprintMaterial, BlueprintProduct, Decryptor, Recipe, ReprocessRecipe, ShipLayout,
+};
+// `AttrMeta` / `EffectMeta` / `ModifierInfo` are reached through the SDE query
+// return types today; they'll be re-exported here when the dogma engine (P2)
+// names them directly.
 
 use std::path::PathBuf;
 
