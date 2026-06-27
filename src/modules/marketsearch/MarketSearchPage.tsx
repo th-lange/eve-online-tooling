@@ -627,12 +627,11 @@ function HistoryView({ series }: { series: HistoryPoint[] }) {
 
   const last = series[series.length - 1];
   const avgVol = Math.round(series.reduce((s, p) => s + p.volume, 0) / series.length);
-  const med = useMemo(() => median(series.map((p) => p.average)), [series]);
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
         <Stat label="Latest avg" value={formatIsk(last.average)} />
-        <Stat label="Median price" value={formatIsk(med)} />
+        <Stat label="Latest median" value={formatIsk(dailyMedian(last))} />
         <Stat label="Latest volume" value={formatInt(last.volume)} />
         <Stat label="Avg volume/day" value={formatInt(avgVol)} />
         <div className="ml-auto flex items-center gap-3 text-xs text-zinc-400">
@@ -682,7 +681,6 @@ function HistoryView({ series }: { series: HistoryPoint[] }) {
       <PriceChart
         series={series}
         period={period}
-        median={med}
         showChannel={showChannel}
         showMa={showMa}
         showMedian={showMedian}
@@ -736,12 +734,11 @@ function sma(vals: number[], period: number): number[] {
   });
 }
 
-/** Median of `vals` (robust "typical" value, unmoved by price spikes). */
-function median(vals: number[]): number {
-  if (vals.length === 0) return 0;
-  const sorted = [...vals].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+/** A day's median price. ESI daily history has no true intraday median, so we
+ *  use the midpoint of that day's high/low range (falling back to the day's
+ *  average when a high/low is missing). One value per day, not over the window. */
+function dailyMedian(p: HistoryPoint): number {
+  return p.highest > 0 && p.lowest > 0 ? (p.highest + p.lowest) / 2 : p.average;
 }
 
 /** Donchian channel: rolling max of the daily high / min of the daily low over
@@ -769,14 +766,12 @@ function donchian(series: HistoryPoint[], period: number): { upper: number[]; lo
 function PriceChart({
   series,
   period,
-  median: med,
   showChannel,
   showMa,
   showMedian,
 }: {
   series: HistoryPoint[];
   period: number;
-  median: number;
   showChannel: boolean;
   showMa: boolean;
   showMedian: boolean;
@@ -788,12 +783,13 @@ function PriceChart({
   const padY = 10;
 
   const avg = series.map((p) => p.average);
+  const med = series.map(dailyMedian);
   const ma = sma(avg, period);
   const { upper, lower } = donchian(series, period);
 
   // Scale to fit whatever is shown (the band widens the range when on).
-  const highs = showChannel ? upper : avg;
-  const lows = showChannel ? lower : avg;
+  const highs = showChannel ? upper : showMedian ? avg.map((v, i) => Math.max(v, med[i])) : avg;
+  const lows = showChannel ? lower : showMedian ? avg.map((v, i) => Math.min(v, med[i])) : avg;
   const min = Math.min(...lows);
   const max = Math.max(...highs);
   const span = max - min || 1;
@@ -821,10 +817,11 @@ function PriceChart({
         <Legend color="#34d399" label="Average price" />
         {showMa && <Legend color="#f59e0b" label={`MA ${period}d`} />}
         {showChannel && <Legend color="#38bdf8" label={`Donchian ${period}d`} />}
-        {showMedian && <Legend color="#a78bfa" label={`Median ${formatIsk(med)}`} />}
+        {showMedian && <Legend color="#a78bfa" label="Daily median" />}
         <span className="ml-auto tabular-nums text-zinc-300">
           {hover != null
             ? `${series[hover].date} · ${formatIsk(avg[hover])}` +
+              (showMedian ? ` · med ${formatIsk(med[hover])}` : "") +
               (showChannel ? ` · ${formatIsk(lower[hover])}–${formatIsk(upper[hover])}` : "")
             : `${formatIsk(min)} – ${formatIsk(max)}`}
         </span>
@@ -848,15 +845,7 @@ function PriceChart({
           </>
         )}
         {showMedian && (
-          <line
-            x1={padX}
-            x2={w - padX}
-            y1={y(med)}
-            y2={y(med)}
-            stroke="#a78bfa"
-            strokeWidth="1"
-            strokeDasharray="5 4"
-          />
+          <polyline points={line(med)} fill="none" stroke="#a78bfa" strokeWidth="1.5" strokeDasharray="5 4" />
         )}
         <polyline points={line(avg)} fill="none" stroke="#34d399" strokeWidth="1.5" />
         {showMa && <polyline points={line(ma)} fill="none" stroke="#f59e0b" strokeWidth="1.5" />}
