@@ -1540,19 +1540,49 @@ export function fittingPrice(
 /** What the optimizer maximizes when filling empty slots. */
 export type OptimizeObjective = "tank" | "damage" | "repair" | "yield";
 
-/** Fill a fit's empty slots with the best modules for an objective, drawn from
- * the allowed meta groups (metaGroupIDs; e.g. [1,2] = Tech I + Tech II). Returns
- * the optimized fit. */
 /** Optimizer slot scope: rework every relevant slot, or fill only empty ones. */
 export type OptimizeMode = "all" | "empty";
 
+/** Optional hard constraints the optimizer keeps the result within. */
+export interface OptimizeConstraints {
+  /** Require the result to be capacitor-stable. */
+  capStable?: boolean;
+  /** Cap total fit ISK cost; needs a region for pricing. */
+  maxCost?: number | null;
+  /** Region the budget is priced in (defaults to The Forge / Jita). */
+  regionId?: number;
+  stationId?: number | null;
+}
+
+/** Result of an optimize pass: the reworked fit plus whether it met the requested
+ * hard constraints. */
+export interface OptimizeResult {
+  fit: Fit;
+  capStable: boolean;
+  withinBudget: boolean;
+}
+
+/** Rework a fit's objective-relevant slots for the best build, drawn from the
+ * allowed meta groups (metaGroupIDs; e.g. [1,2] = Tech I + Tech II), optionally
+ * kept capacitor-stable and/or within an ISK budget. Returns the optimized fit and
+ * whether each constraint was met. */
 export function fittingOptimize(
   fit: Fit,
   objective: OptimizeObjective,
   metaGroups: number[],
   mode: OptimizeMode = "all",
-): Promise<Fit> {
-  return invoke<Fit>("fitting_optimize", { fit, objective, metaGroups, mode });
+  constraints: OptimizeConstraints = {},
+): Promise<OptimizeResult> {
+  return invoke<OptimizeResult>("fitting_optimize", {
+    fit,
+    objective,
+    metaGroups,
+    mode,
+    capStable: constraints.capStable ?? false,
+    maxCost: constraints.maxCost ?? null,
+    regionId: constraints.regionId ?? null,
+    stationId: constraints.stationId ?? null,
+  });
 }
 
 /** Save (insert or update) a fit locally; returns its id. */

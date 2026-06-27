@@ -48,6 +48,10 @@ function Workbench() {
   const skillLabel = skillSource === "character" ? "character" : "all V";
   const [objective, setObjective] = useState<OptimizeObjective>("tank");
   const [optimizeMode, setOptimizeMode] = useState<OptimizeMode>("all");
+  const [capStable, setCapStable] = useState(false);
+  // ISK budget cap as a string (millions); empty = no budget.
+  const [maxCostM, setMaxCostM] = useState("");
+  const [optimizeNotice, setOptimizeNotice] = useState<string | null>(null);
   const [meta, setMeta] = useState<Record<number, boolean>>({
     1: true,
     2: true,
@@ -138,16 +142,27 @@ function Workbench() {
     },
   });
   const optimize = useMutation({
-    mutationFn: () =>
-      fittingOptimize(
+    mutationFn: () => {
+      const maxCost = maxCostM.trim() ? Number(maxCostM) * 1_000_000 : null;
+      return fittingOptimize(
         fit!,
         objective,
         Object.entries(meta)
           .filter(([, on]) => on)
           .map(([id]) => Number(id)),
         optimizeMode,
-      ),
-    onSuccess: (f) => setFit(f),
+        { capStable, maxCost, regionId },
+      );
+    },
+    onSuccess: (res) => {
+      setFit(res.fit);
+      const unmet: string[] = [];
+      if (capStable && !res.capStable) unmet.push("cap-stable");
+      if (maxCostM.trim() && !res.withinBudget) unmet.push("ISK budget");
+      setOptimizeNotice(
+        unmet.length ? `Couldn't meet ${unmet.join(" + ")} — showing the closest fit.` : null,
+      );
+    },
     onError: (e) => alert(`Optimize failed: ${e}`),
   });
 
@@ -404,6 +419,30 @@ function Workbench() {
                   {label}
                 </label>
               ))}
+              <span className="text-zinc-700">·</span>
+              <label
+                className="flex items-center gap-1 text-zinc-400"
+                title="Keep the result capacitor-stable"
+              >
+                <input
+                  type="checkbox"
+                  checked={capStable}
+                  onChange={(e) => setCapStable(e.currentTarget.checked)}
+                />
+                Cap-stable
+              </label>
+              <label className="flex items-center gap-1 text-zinc-400" title="Cap total fit cost">
+                Max
+                <input
+                  type="number"
+                  min={0}
+                  value={maxCostM}
+                  onChange={(e) => setMaxCostM(e.currentTarget.value)}
+                  placeholder="∞"
+                  className="w-16 rounded bg-zinc-800 px-1 py-0.5 text-zinc-100 outline-none"
+                />
+                M ISK
+              </label>
               <button
                 onClick={() => optimize.mutate()}
                 disabled={optimize.isPending}
@@ -411,6 +450,9 @@ function Workbench() {
               >
                 {optimize.isPending ? "Optimizing…" : "Optimize"}
               </button>
+              {optimizeNotice && (
+                <span className="w-full text-amber-400">{optimizeNotice}</span>
+              )}
             </div>
 
             {layout.data && (
