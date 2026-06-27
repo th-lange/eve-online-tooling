@@ -11,6 +11,7 @@ pub mod capacitor;
 pub mod damage;
 pub mod effects;
 pub mod modifier;
+pub mod navigation;
 pub mod resolve;
 pub mod stacking;
 pub mod tank;
