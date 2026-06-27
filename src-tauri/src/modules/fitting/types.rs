@@ -115,9 +115,26 @@ pub struct CapStats {
     pub stable_pct: Option<f64>,
 }
 
+/// Tank: HP, resists, EHP and local reps (#173). Resist arrays are
+/// `[em, thermal, kinetic, explosive]` fractions (0.0–1.0).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TankStats {
+    pub shield_hp: f64,
+    pub armor_hp: f64,
+    pub hull_hp: f64,
+    /// Effective HP against the chosen damage profile (default even 25/25/25/25).
+    pub ehp: f64,
+    pub shield_resists: [f64; 4],
+    pub armor_resists: [f64; 4],
+    pub hull_resists: [f64; 4],
+    pub shield_rep_s: f64,
+    pub armor_rep_s: f64,
+}
+
 /// Computed result of simulating a fit. Filled incrementally: P1 populates
 /// `resources`, `validation` and `price`; the dogma engine (P2) adds capacitor
-/// now, with DPS, tank, navigation and targeting alongside as they land.
+/// and tank now, with DPS, navigation and targeting alongside as they land.
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FitStats {
@@ -126,6 +143,9 @@ pub struct FitStats {
     /// Capacitor stability (#172); `None` until the dogma engine runs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capacitor: Option<CapStats>,
+    /// Tank (#173); `None` until the dogma engine runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tank: Option<TankStats>,
     /// Whole-fit market value (#163); `None` until priced.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub price: Option<f64>,

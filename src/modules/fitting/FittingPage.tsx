@@ -231,6 +231,33 @@ function Workbench() {
               </div>
             )}
 
+            {stats.data?.tank && (
+              <div className="space-y-1">
+                <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+                  Tank (all V)
+                </h3>
+                <div className="text-sm text-zinc-300">
+                  {Math.round(stats.data.tank.ehp).toLocaleString()} EHP
+                </div>
+                <div className="text-xs text-zinc-500">
+                  S {Math.round(stats.data.tank.shieldHp)} · A{" "}
+                  {Math.round(stats.data.tank.armorHp)} · H{" "}
+                  {Math.round(stats.data.tank.hullHp)}
+                  {(stats.data.tank.shieldRepS > 0 ||
+                    stats.data.tank.armorRepS > 0) && (
+                    <>
+                      {" "}
+                      · reps{" "}
+                      {(
+                        stats.data.tank.shieldRepS + stats.data.tank.armorRepS
+                      ).toFixed(1)}
+                      /s
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
             {stats.data?.capacitor && (
               <div className="space-y-1">
                 <h3 className="text-xs uppercase tracking-wide text-zinc-500">
