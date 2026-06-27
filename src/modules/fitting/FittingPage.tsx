@@ -125,6 +125,11 @@ function Workbench() {
     mutationFn: (id: string) => fittingDeleteLocal(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["fitting", "saved"] }),
   });
+  // Force-refresh in-game fits past the server cache and update the query.
+  const refreshEsi = useMutation({
+    mutationFn: () => fittingEsiList(true),
+    onSuccess: (fits) => qc.setQueryData(["fitting", "esi"], fits),
+  });
   const exportEft = useMutation({
     mutationFn: () => fittingExportEft(fit!),
     onSuccess: (text) => {
@@ -291,14 +296,15 @@ function Workbench() {
                 </optgroup>
               ))}
             </select>
+            <EsiFitStatus esi={esiFits} refresh={refreshEsi} />
           </label>
           <button
-            onClick={() => esiFits.refetch()}
-            disabled={esiFits.isFetching}
-            title="Refresh in-game fittings from EVE"
+            onClick={() => refreshEsi.mutate()}
+            disabled={refreshEsi.isPending}
+            title="Refresh in-game fittings from EVE (bypasses the cache)"
             className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
           >
-            {esiFits.isFetching ? "…" : "Refresh"}
+            {refreshEsi.isPending ? "…" : "Refresh"}
           </button>
         </div>
       </div>
@@ -640,6 +646,30 @@ function ResourceBar({
       </div>
     </div>
   );
+}
+
+/** In-game fittings status: an error (e.g. missing scope) or "none found". */
+function EsiFitStatus({
+  esi,
+  refresh,
+}: {
+  esi: { data?: Fit[]; error: unknown; isFetched: boolean };
+  refresh: { error: unknown };
+}) {
+  const err = refresh.error ?? esi.error;
+  if (err) {
+    return (
+      <span className="mt-0.5 block w-72 text-[11px] text-rose-400">{String(err)}</span>
+    );
+  }
+  if (esi.isFetched && (esi.data?.length ?? 0) === 0) {
+    return (
+      <span className="mt-0.5 block text-[11px] text-zinc-500">
+        No in-game fittings for this character.
+      </span>
+    );
+  }
+  return null;
 }
 
 function Centered({ children }: { children: ReactNode }) {

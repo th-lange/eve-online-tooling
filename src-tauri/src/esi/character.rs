@@ -263,19 +263,23 @@ fn one_i64() -> i64 {
 }
 
 /// The character's in-game saved fittings (#178). Requires the
-/// `esi-fittings.read_fittings.v1` scope; if it isn't granted ESI returns 403,
-/// which we treat as "none" so the app degrades gracefully.
+/// `esi-fittings.read_fittings.v1` scope. Errors (including a 403 from a missing
+/// scope) surface to the caller so the UI can explain why nothing loaded — an
+/// empty result here means the character genuinely has no saved fittings.
 pub async fn fetch_character_fittings(
     auth: &AuthState,
     character_id: i64,
 ) -> Result<Vec<EsiFitting>, AuthError> {
     let token = auth.access_token_for(character_id).await?;
     let url = format!("{ESI_BASE}/latest/characters/{character_id}/fittings/");
-    let resp = auth.http().get(&url).bearer_auth(&token).send().await?;
-    if resp.status() == reqwest::StatusCode::FORBIDDEN {
-        return Ok(Vec::new());
-    }
-    Ok(resp.error_for_status()?.json().await?)
+    let resp = auth
+        .http()
+        .get(&url)
+        .bearer_auth(&token)
+        .send()
+        .await?
+        .error_for_status()?;
+    Ok(resp.json().await?)
 }
 
 /// The corporation's saved fittings, using the character's token. Requires the
