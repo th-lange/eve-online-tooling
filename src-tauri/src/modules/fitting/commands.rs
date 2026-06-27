@@ -707,6 +707,18 @@ fn is_ship_module(slot: SlotKind) -> bool {
     )
 }
 
+/// A freshly-added optimizer module (active, no charge).
+fn new_module(type_id: i64, slot: SlotKind, index: i32) -> FitItem {
+    FitItem {
+        type_id,
+        slot,
+        index,
+        state: ModuleState::Active,
+        charge_type_id: None,
+        quantity: 1,
+    }
+}
+
 type AttrMap = HashMap<i64, Vec<(i64, f64)>>;
 type EffectMap = HashMap<i64, Vec<i64>>;
 type GroupMap = HashMap<i64, i64>;
@@ -830,11 +842,13 @@ fn objective_value(
     Some(value)
 }
 
-/// Optimize a fit by **filling its empty slots** with the best modules for an
-/// objective (`"tank"` | `"damage"` | `"repair"` | `"yield"`), drawn from the
-/// allowed meta groups (`meta_groups`; default Tech I + Tech II). Existing
-/// modules are left untouched. Scored at all-V via the dogma engine; only
-/// additions that keep the fit valid are kept (#156).
+/// Optimize a fit for an objective (`"tank"` | `"damage"` | `"repair"` |
+/// `"yield"`) by **reworking all of its objective-relevant slots** (clearing
+/// and rebuilding mid/low/rig — or high for mining — while leaving everything
+/// else). Candidates are drawn from the allowed meta groups (`meta_groups`;
+/// default Tech I + Tech II). A greedy seed + iterated local search finds a
+/// strong, near-global combination, scored at all-V via the dogma engine; only
+/// valid (fitting) configurations are kept (#156).
 #[tauri::command]
 pub fn fitting_optimize(
     app: AppHandle,
@@ -912,39 +926,41 @@ fn optimize_fit(
     };
 
     let mut fit = fit;
-    let mut current = score(&fit).unwrap_or(0.0);
 
-    // Greedy: for each empty slot of the relevant kinds, add the best candidate
-    // that improves the objective and still fits; repeat until full or stuck.
+    // Optimize ALL relevant slots, not just empty ones: clear the objective's
+    // slot kinds (keeping everything else — high slots, drones, cargo) and
+    // rebuild them for the best overall result.
+    let relevant_kinds: Vec<SlotKind> = slot_candidates.iter().map(|(s, _)| *s).collect();
+    let cands_for: HashMap<SlotKind, Vec<i64>> =
+        slot_candidates.iter().map(|(s, c)| (*s, c.clone())).collect();
+    fit.items.retain(|i| !relevant_kinds.contains(&i.slot));
+
+    // Whether placing `tid` is allowed under the one-per-fit rule, ignoring the
+    // item at `skip` (so a swap can replace a unique module with itself's kind).
+    let unique_ok = |fit: &Fit, tid: i64, skip: Option<usize>| -> bool {
+        let group = groups.get(&tid).copied().unwrap_or(0);
+        if !UNIQUE_GROUPS.contains(&group) {
+            return true;
+        }
+        !fit.items
+            .iter()
+            .enumerate()
+            .any(|(j, i)| Some(j) != skip && groups.get(&i.type_id).copied() == Some(group))
+    };
+
+    // 1) Seed — greedily fill each cleared slot with the best valid candidate.
+    let mut current = score(&fit).unwrap_or(0.0);
     for (slot, cands) in &slot_candidates {
         let cap = slot_capacity(&layout, *slot);
-        loop {
-            let used = fit.items.iter().filter(|i| i.slot == *slot).count() as i64;
-            if used >= cap {
-                break;
-            }
-            let index = used as i32;
+        while (fit.items.iter().filter(|i| i.slot == *slot).count() as i64) < cap {
+            let index = fit.items.iter().filter(|i| i.slot == *slot).count() as i32;
             let mut best: Option<(i64, f64)> = None;
             for &tid in cands {
-                let group = groups.get(&tid).copied().unwrap_or(0);
-                // One-per-fit groups (e.g. Damage Control).
-                if UNIQUE_GROUPS.contains(&group)
-                    && fit
-                        .items
-                        .iter()
-                        .any(|i| groups.get(&i.type_id).copied() == Some(group))
-                {
+                if !unique_ok(&fit, tid, None) {
                     continue;
                 }
                 let mut trial = fit.clone();
-                trial.items.push(FitItem {
-                    type_id: tid,
-                    slot: *slot,
-                    index,
-                    state: ModuleState::Active,
-                    charge_type_id: None,
-                    quantity: 1,
-                });
+                trial.items.push(new_module(tid, *slot, index));
                 if let Some(v) = score(&trial) {
                     if v > current + 1e-6 && best.is_none_or(|(_, bv)| v > bv) {
                         best = Some((tid, v));
@@ -953,18 +969,49 @@ fn optimize_fit(
             }
             match best {
                 Some((tid, v)) => {
-                    fit.items.push(FitItem {
-                        type_id: tid,
-                        slot: *slot,
-                        index,
-                        state: ModuleState::Active,
-                        charge_type_id: None,
-                        quantity: 1,
-                    });
+                    fit.items.push(new_module(tid, *slot, index));
                     current = v;
                 }
-                None => break, // nothing improves/fits in this slot kind
+                None => break, // nothing further improves this slot kind
             }
+        }
+    }
+
+    // 2) Local search — re-pick each relevant slot given the final mix (stacking
+    // penalties make the best choice interdependent), iterating to a local
+    // optimum. Seed + local search is a strong, near-global result over the
+    // curated candidate pool (a true global optimum is combinatorially
+    // intractable for the full module catalogue).
+    loop {
+        let mut improved = false;
+        for idx in 0..fit.items.len() {
+            let slot = fit.items[idx].slot;
+            let Some(cands) = cands_for.get(&slot) else {
+                continue; // not a relevant (optimized) slot
+            };
+            let orig = fit.items[idx].type_id;
+            let (mut best_tid, mut best_val) = (orig, current);
+            for &tid in cands {
+                if tid == orig || !unique_ok(&fit, tid, Some(idx)) {
+                    continue;
+                }
+                let mut trial = fit.clone();
+                trial.items[idx].type_id = tid;
+                if let Some(v) = score(&trial) {
+                    if v > best_val + 1e-6 {
+                        best_val = v;
+                        best_tid = tid;
+                    }
+                }
+            }
+            if best_tid != orig {
+                fit.items[idx].type_id = best_tid;
+                current = best_val;
+                improved = true;
+            }
+        }
+        if !improved {
+            break;
         }
     }
 
@@ -1014,4 +1061,5 @@ pub fn fitting_delete_local(app: AppHandle, id: String) -> Result<(), String> {
     fits.retain(|f| f.id != id);
     storage::save_data(&dir, FITS_KEY, &fits)
 }
+
 
