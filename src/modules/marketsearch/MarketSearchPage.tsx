@@ -17,6 +17,8 @@ import {
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
 import { formatInt, formatIsk } from "../../lib/format";
+import { usePersistentSort } from "../../lib/usePersistentSort";
+import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
 
 const FORGE = 10000002;
 
@@ -322,33 +324,102 @@ function SearchTab({
   );
 }
 
+type OrderSortKey = "price" | "volumeRemain" | "stationName" | "systemName" | "regionName" | "jumps";
+
+const ORDER_SORT_KEYS = [
+  "price",
+  "volumeRemain",
+  "stationName",
+  "systemName",
+  "regionName",
+  "jumps",
+] as const;
+
+const ORDER_TEXT_KEYS: OrderSortKey[] = ["stationName", "systemName", "regionName"];
+
+const ORDER_COLUMNS: SortColumn<OrderSortKey>[] = [
+  { key: "price", label: "Price", numeric: true, description: "Sell price per unit." },
+  {
+    key: "volumeRemain",
+    label: "Qty",
+    numeric: true,
+    description: "Units still on offer in this order.",
+  },
+  {
+    key: "stationName",
+    label: "Station",
+    numeric: false,
+    description: "Station (or structure) the order sits at.",
+  },
+  {
+    key: "systemName",
+    label: "System",
+    numeric: false,
+    description: "Solar system, with its security status.",
+  },
+  { key: "regionName", label: "Region", numeric: false, description: "Region the order is in." },
+  {
+    key: "jumps",
+    label: "Jumps",
+    numeric: true,
+    description: "Jumps from your origin to the station (∞ = unreachable with current routing).",
+  },
+];
+
 function OrderTable({ orders, hasOrigin }: { orders: SellOrder[]; hasOrigin: boolean }) {
+  const { sortKey, sortDir, toggleSort } = usePersistentSort<OrderSortKey>(
+    "sort.market-search-orders",
+    ORDER_SORT_KEYS,
+    "price",
+    "asc",
+    ORDER_TEXT_KEYS,
+  );
+
+  const sorted = useMemo(() => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...orders].sort((a, b) => {
+      if (ORDER_TEXT_KEYS.includes(sortKey)) {
+        return dir * String(a[sortKey]).localeCompare(String(b[sortKey]));
+      }
+      if (sortKey === "jumps") {
+        // Unreachable / no-origin rows sort to the bottom regardless of dir.
+        const av = a.jumps ?? Infinity;
+        const bv = b.jumps ?? Infinity;
+        return dir * (av - bv);
+      }
+      return dir * ((a[sortKey] as number) - (b[sortKey] as number));
+    });
+  }, [orders, sortKey, sortDir]);
+
   return (
     <div className="max-h-[28rem] overflow-auto rounded border border-zinc-800">
-      <table className="w-full text-xs">
-        <thead className="sticky top-0 bg-zinc-900 text-zinc-500">
+      <table className="w-full border-collapse text-xs">
+        <thead className="bg-zinc-900 text-zinc-400">
           <tr>
-            <th className="px-2 py-1 text-right font-medium">Price</th>
-            <th className="px-2 py-1 text-right font-medium">Qty</th>
-            <th className="px-2 py-1 text-left font-medium">Station</th>
-            <th className="px-2 py-1 text-left font-medium">System</th>
-            <th className="px-2 py-1 text-left font-medium">Region</th>
-            <th className="px-2 py-1 text-right font-medium">Jumps</th>
+            {ORDER_COLUMNS.map((c) => (
+              <SortHeaderCell
+                key={c.key}
+                column={c}
+                active={sortKey === c.key}
+                dir={sortDir}
+                onClick={toggleSort}
+              />
+            ))}
           </tr>
         </thead>
         <tbody>
-          {orders.map((o, i) => (
+          {sorted.map((o, i) => (
             <tr key={i} className="border-t border-zinc-800/60 text-zinc-300">
-              <td className="px-2 py-0.5 text-right tabular-nums text-rose-300">
+              <td className="px-3 py-0.5 text-right tabular-nums text-rose-300">
                 {formatIsk(o.price)}
               </td>
-              <td className="px-2 py-0.5 text-right tabular-nums">{formatInt(o.volumeRemain)}</td>
-              <td className="px-2 py-0.5">{o.stationName}</td>
-              <td className="px-2 py-0.5">
+              <td className="px-3 py-0.5 text-right tabular-nums">{formatInt(o.volumeRemain)}</td>
+              <td className="px-3 py-0.5">{o.stationName}</td>
+              <td className="px-3 py-0.5">
                 <SecDot security={o.security} /> {o.systemName}
               </td>
-              <td className="px-2 py-0.5 text-zinc-400">{o.regionName}</td>
-              <td className="px-2 py-0.5 text-right tabular-nums">
+              <td className="px-3 py-0.5 text-zinc-400">{o.regionName}</td>
+              <td className="px-3 py-0.5 text-right tabular-nums">
                 {!hasOrigin ? "—" : o.jumps == null ? "∞" : o.jumps}
               </td>
             </tr>
@@ -546,23 +617,57 @@ function spread(sell?: number | null, buy?: number | null): string {
   return `${(((sell - buy) / sell) * 100).toFixed(1)}%`;
 }
 
+const MA_PERIODS = [7, 20, 50, 90] as const;
+
 function HistoryView({ series }: { series: HistoryPoint[] }) {
+  const [period, setPeriod] = useState(20);
+  const [showChannel, setShowChannel] = useState(true);
+  const [showMa, setShowMa] = useState(true);
+
   const last = series[series.length - 1];
   const avgVol = Math.round(series.reduce((s, p) => s + p.volume, 0) / series.length);
   return (
     <div>
-      <div className="mb-3 flex gap-6 text-sm">
+      <div className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
         <Stat label="Latest avg" value={formatIsk(last.average)} />
         <Stat label="Latest volume" value={formatInt(last.volume)} />
         <Stat label="Avg volume/day" value={formatInt(avgVol)} />
+        <div className="ml-auto flex items-center gap-3 text-xs text-zinc-400">
+          <label className="flex items-center gap-1">
+            Period
+            <select
+              value={period}
+              onChange={(e) => setPeriod(Number(e.currentTarget.value))}
+              className="rounded bg-zinc-800 px-2 py-1 text-zinc-100 outline-none"
+            >
+              {MA_PERIODS.map((p) => (
+                <option key={p} value={p}>
+                  {p}d
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={showMa}
+              onChange={(e) => setShowMa(e.currentTarget.checked)}
+              className="accent-amber-500"
+            />
+            MA
+          </label>
+          <label className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={showChannel}
+              onChange={(e) => setShowChannel(e.currentTarget.checked)}
+              className="accent-sky-500"
+            />
+            Donchian
+          </label>
+        </div>
       </div>
-      <Chart
-        series={series}
-        pick={(p) => p.average}
-        label="Average price"
-        color="#34d399"
-        fmt={formatIsk}
-      />
+      <PriceChart series={series} period={period} showChannel={showChannel} showMa={showMa} />
       <div className="h-3" />
       <Chart
         series={series}
@@ -598,6 +703,137 @@ function HistoryView({ series }: { series: HistoryPoint[] }) {
         </table>
       </div>
     </div>
+  );
+}
+
+/** Simple moving average of `vals` over `period` (uses the available window at
+ *  the head so the line spans the whole series). */
+function sma(vals: number[], period: number): number[] {
+  return vals.map((_, i) => {
+    const start = Math.max(0, i - period + 1);
+    let sum = 0;
+    for (let j = start; j <= i; j++) sum += vals[j];
+    return sum / (i - start + 1);
+  });
+}
+
+/** Donchian channel: rolling max of the daily high / min of the daily low over
+ *  `period`. Falls back to the day's average when a high/low is missing. */
+function donchian(series: HistoryPoint[], period: number): { upper: number[]; lower: number[] } {
+  const upper = series.map((_, i) => {
+    const start = Math.max(0, i - period + 1);
+    let m = -Infinity;
+    for (let j = start; j <= i; j++) m = Math.max(m, series[j].highest || series[j].average);
+    return m;
+  });
+  const lower = series.map((_, i) => {
+    const start = Math.max(0, i - period + 1);
+    let m = Infinity;
+    for (let j = start; j <= i; j++) {
+      m = Math.min(m, series[j].lowest > 0 ? series[j].lowest : series[j].average);
+    }
+    return m;
+  });
+  return { upper, lower };
+}
+
+/** Price chart with a Donchian channel band and a moving-average overlay on top
+ *  of the daily average price (no chart dependency). */
+function PriceChart({
+  series,
+  period,
+  showChannel,
+  showMa,
+}: {
+  series: HistoryPoint[];
+  period: number;
+  showChannel: boolean;
+  showMa: boolean;
+}) {
+  const [hover, setHover] = useState<number | null>(null);
+  const w = 720;
+  const h = 180;
+  const padX = 8;
+  const padY = 10;
+
+  const avg = series.map((p) => p.average);
+  const ma = sma(avg, period);
+  const { upper, lower } = donchian(series, period);
+
+  // Scale to fit whatever is shown (the band widens the range when on).
+  const highs = showChannel ? upper : avg;
+  const lows = showChannel ? lower : avg;
+  const min = Math.min(...lows);
+  const max = Math.max(...highs);
+  const span = max - min || 1;
+  const x = (i: number) => padX + (i / Math.max(series.length - 1, 1)) * (w - 2 * padX);
+  const y = (v: number) => padY + (1 - (v - min) / span) * (h - 2 * padY);
+  const line = (vals: number[]) => vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => padY + f * (h - 2 * padY));
+
+  // Band = upper across, then lower back (a closed polygon).
+  const band = [
+    ...upper.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`),
+    ...lower.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).reverse(),
+  ].join(" ");
+
+  function onMove(e: React.MouseEvent<SVGSVGElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const rx = ((e.clientX - rect.left) / rect.width) * w;
+    const i = Math.round(((rx - padX) / (w - 2 * padX)) * Math.max(series.length - 1, 1));
+    setHover(Math.max(0, Math.min(series.length - 1, i)));
+  }
+
+  return (
+    <div className="rounded border border-zinc-800 bg-zinc-900 p-2">
+      <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        <Legend color="#34d399" label="Average price" />
+        {showMa && <Legend color="#f59e0b" label={`MA ${period}d`} />}
+        {showChannel && <Legend color="#38bdf8" label={`Donchian ${period}d`} />}
+        <span className="ml-auto tabular-nums text-zinc-300">
+          {hover != null
+            ? `${series[hover].date} · ${formatIsk(avg[hover])}` +
+              (showChannel ? ` · ${formatIsk(lower[hover])}–${formatIsk(upper[hover])}` : "")
+            : `${formatIsk(min)} – ${formatIsk(max)}`}
+        </span>
+      </div>
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        preserveAspectRatio="none"
+        className="w-full"
+        style={{ height: h }}
+        onMouseMove={onMove}
+        onMouseLeave={() => setHover(null)}
+      >
+        {grid.map((gy, i) => (
+          <line key={i} x1={padX} x2={w - padX} y1={gy} y2={gy} stroke="#27272a" strokeWidth="0.75" />
+        ))}
+        {showChannel && (
+          <>
+            <polygon points={band} fill="#38bdf8" fillOpacity="0.08" stroke="none" />
+            <polyline points={line(upper)} fill="none" stroke="#38bdf8" strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.8" />
+            <polyline points={line(lower)} fill="none" stroke="#38bdf8" strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.8" />
+          </>
+        )}
+        <polyline points={line(avg)} fill="none" stroke="#34d399" strokeWidth="1.5" />
+        {showMa && <polyline points={line(ma)} fill="none" stroke="#f59e0b" strokeWidth="1.5" />}
+        {hover != null && (
+          <g>
+            <line x1={x(hover)} x2={x(hover)} y1={padY} y2={h - padY} stroke="#52525b" strokeWidth="0.75" />
+            <circle cx={x(hover)} cy={y(avg[hover])} r="3" fill="#34d399" />
+          </g>
+        )}
+      </svg>
+    </div>
+  );
+}
+
+function Legend({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: color }} />
+      <span className="text-zinc-400">{label}</span>
+    </span>
   );
 }
 
