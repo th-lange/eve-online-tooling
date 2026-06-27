@@ -21,11 +21,11 @@ pub use db::Sde;
 pub use download::download_sde;
 pub use error::SdeError;
 pub use types::{
-    BlueprintMaterial, BlueprintProduct, Decryptor, Recipe, ReprocessRecipe, ShipLayout,
+    BlueprintMaterial, BlueprintProduct, Decryptor, EffectMeta, ModifierInfo, Recipe,
+    ReprocessRecipe, ShipLayout,
 };
-// `AttrMeta` / `EffectMeta` / `ModifierInfo` are reached through the SDE query
-// return types today; they'll be re-exported here when the dogma engine (P2)
-// names them directly.
+// `AttrMeta` is reached through `attribute_defaults`'s return type today; it'll
+// be re-exported when the stat calculators name it (#172).
 
 use std::path::PathBuf;
 

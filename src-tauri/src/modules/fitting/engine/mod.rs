@@ -7,6 +7,8 @@
 //! P2 alongside this module.
 
 pub mod attr;
+pub mod effects;
 pub mod modifier;
+pub mod resolve;
 pub mod stacking;
 pub mod validate;

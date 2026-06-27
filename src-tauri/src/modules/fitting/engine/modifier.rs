@@ -67,6 +67,8 @@ pub enum Domain {
     Char,
     /// A projected target ship.
     Target,
+    /// Every module on the ship (`LocationModifier`).
+    Location,
     /// Items on the ship in a given group (`LocationGroupModifier`).
     GroupOnShip(i64),
     /// Items on the ship requiring a given skill (`*RequiredSkillModifier`).
