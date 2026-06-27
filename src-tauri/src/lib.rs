@@ -89,6 +89,8 @@ pub fn run() {
             modules::daytrading::commands::daytrading_get_list,
             modules::daytrading::commands::daytrading_set_list,
             modules::fitting::commands::fitting_ship_layout,
+            modules::fitting::commands::fitting_import_eft,
+            modules::fitting::commands::fitting_export_eft,
             modules::appraisal::commands::appraisal,
             modules::appraisal::commands::appraisal_reprocess,
             modules::assets::commands::assets_value,

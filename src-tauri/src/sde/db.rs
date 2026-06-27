@@ -416,6 +416,22 @@ impl Sde {
         }))
     }
 
+    /// The category id for a type (Ship 6, Module 7, Charge 8, Drone 18, …), or
+    /// `None` if the type is unknown. The EFT importer uses it to tell drones
+    /// from cargo among the trailing `xN` lines (#162).
+    pub fn type_category(&self, type_id: i64) -> Result<Option<i64>, SdeError> {
+        self.conn
+            .query_row(
+                "SELECT g.categoryID FROM invTypes t
+                 JOIN invGroups g ON g.groupID = t.groupID
+                 WHERE t.typeID = ?1",
+                params![type_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
     /// Resolve an item by (case-insensitive) name → `(type_id, packaged_volume)`.
     /// For the appraisal tool's clipboard parsing.
     pub fn type_by_name(&self, name: &str) -> Result<Option<(i64, Option<f64>)>, SdeError> {
@@ -626,8 +642,8 @@ impl Sde {
 
     /// The effects attached to a type as `(effectID, isDefault)` from
     /// `dgmTypeEffects` (#159). `isDefault` marks a module's auto-selected
-    /// effect (e.g. the charge a launcher fires).
-    #[allow(dead_code)] // consumed by the dogma engine (P2, #171)
+    /// effect (e.g. the charge a launcher fires). Also used by the EFT importer
+    /// to classify a module into its slot (#162).
     pub fn type_effects(&self, type_id: i64) -> Result<Vec<(i64, bool)>, SdeError> {
         let mut stmt = self
             .conn
