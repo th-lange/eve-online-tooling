@@ -1325,6 +1325,63 @@ fn optimize_fit(
         }
     }
 
+    // 3) Drones — for a damage objective, arm the drone bay. Drones aren't slots:
+    // the number flying is capped by the ship's bandwidth (1271) divided by each
+    // drone's bandwidth use (1272) and the 5-in-space limit (Drones V), not a slot
+    // count, so they get their own pass. Pick the combat drone (group 100) whose
+    // full flight does the most damage — bigger drones hit harder but fewer fit
+    // the bandwidth (e.g. a Vexor's 75 fields 5 medium or 3 heavy). Honors `mode`:
+    // "all" refits the bay, "empty" only arms an empty bay.
+    if matches!(obj, Objective::Damage) {
+        let has_drones = fit.items.iter().any(|i| i.slot == SlotKind::Drone);
+        if mode != "empty" || !has_drones {
+            let bandwidth = attrs
+                .get(&fit.ship_type_id)
+                .and_then(|a| a.iter().find(|(k, _)| *k == 1271).map(|(_, v)| *v))
+                .unwrap_or(0.0);
+            if bandwidth > 0.0 {
+                let drone_cands = sde.modules_in_groups(&[100], &meta).map_err(|e| e.to_string())?;
+                let drone_ids: Vec<i64> = drone_cands.iter().map(|(t, _)| *t).collect();
+                let drone_attrs = sde.types_attributes_raw(&drone_ids).map_err(|e| e.to_string())?;
+                // (type id, flight size, total flight damage proxy).
+                let mut best: Option<(i64, i64, f64)> = None;
+                for tid in &drone_ids {
+                    let get = |id: i64| {
+                        drone_attrs
+                            .get(tid)
+                            .and_then(|a| a.iter().find(|(k, _)| *k == id).map(|(_, v)| *v))
+                            .unwrap_or(0.0)
+                    };
+                    let bw = get(1272);
+                    let rof = get(51) / 1000.0;
+                    if bw <= 0.0 || rof <= 0.0 {
+                        continue;
+                    }
+                    let per = get(64) * base_damage(&drone_attrs, *tid) / rof;
+                    let count = (bandwidth / bw).floor().min(5.0) as i64;
+                    if per <= 0.0 || count <= 0 {
+                        continue;
+                    }
+                    let total = per * count as f64;
+                    if best.is_none_or(|(_, _, bt)| total > bt) {
+                        best = Some((*tid, count, total));
+                    }
+                }
+                if let Some((tid, count, _)) = best {
+                    fit.items.retain(|i| i.slot != SlotKind::Drone);
+                    fit.items.push(FitItem {
+                        type_id: tid,
+                        slot: SlotKind::Drone,
+                        index: 0,
+                        state: ModuleState::Active,
+                        charge_type_id: None,
+                        quantity: count as i32,
+                    });
+                }
+            }
+        }
+    }
+
     Ok(fit)
 }
 
@@ -1371,6 +1428,7 @@ pub fn fitting_delete_local(app: AppHandle, id: String) -> Result<(), String> {
     fits.retain(|f| f.id != id);
     storage::save_data(&dir, FITS_KEY, &fits)
 }
+
 
 
 
