@@ -71,8 +71,8 @@ export const modules: ModuleDef[] = [
   },
   {
     id: "market-history",
-    title: "Market History",
-    description: "Daily price & volume trend for an item in a region.",
+    title: "Market",
+    description: "Current prices + daily price & volume history for an item in a region.",
     Component: MarketHistoryPage,
   },
   {

@@ -1054,6 +1054,37 @@ export function marketHistory(regionId: number, typeId: number): Promise<History
   return invoke<HistoryPoint[]>("market_history", { regionId, typeId });
 }
 
+/** Multi-vector price model for a type at a market (current order book + globals). */
+export interface PriceModel {
+  typeId: number;
+  /** Lowest sell order (what you pay to buy now). */
+  sellMin?: number | null;
+  /** Highest buy order (what you get selling now). */
+  buyMax?: number | null;
+  sellPercentile?: number | null;
+  buyPercentile?: number | null;
+  adjustedPrice?: number | null;
+  averagePrice?: number | null;
+  dailyAverage?: number | null;
+  dailyVolume?: number | null;
+  buyVolume?: number | null;
+  orderCount?: number | null;
+  movingAverage?: number | null;
+}
+
+/** Current prices for a type in a region (optionally a single station). */
+export function marketPrice(
+  regionId: number,
+  typeId: number,
+  stationId?: number | null,
+): Promise<PriceModel> {
+  return invoke<PriceModel>("market_price", {
+    regionId,
+    stationId: stationId ?? null,
+    typeId,
+  });
+}
+
 /** Subscribe to SDE download/decompress progress. */
 export function onSdeProgress(
   handler: (progress: SdeProgress) => void,
