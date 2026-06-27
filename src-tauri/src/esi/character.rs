@@ -249,12 +249,13 @@ pub struct EsiFitting {
     pub items: Vec<EsiFitItem>,
 }
 
-/// One item in an ESI fitting: a module/charge/drone and its inventory `flag`
-/// (slot location), plus a quantity (drones/charges).
+/// One item in an ESI fitting: a module/charge/drone and its slot `flag` (a
+/// string enum like `"HiSlot0"` / `"LoSlot3"` / `"DroneBay"` / `"Cargo"`), plus a
+/// quantity (drones/charges).
 #[derive(Debug, Clone, Deserialize)]
 pub struct EsiFitItem {
     pub type_id: i64,
-    pub flag: i64,
+    pub flag: String,
     #[serde(default = "one_i64")]
     pub quantity: i64,
 }

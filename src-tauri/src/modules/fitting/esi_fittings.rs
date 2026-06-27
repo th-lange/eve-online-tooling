@@ -10,19 +10,30 @@ use crate::esi::EsiFitting;
 
 use super::types::{Fit, FitItem, ModuleState, SlotKind};
 
-/// Map an EVE inventory `flag` to `(slot kind, index within the slot)`.
-/// Flags: LoSlot0–7 = 11–18, MedSlot0–7 = 19–26, HiSlot0–7 = 27–34,
-/// RigSlot0–2 = 92–94, SubSystemSlot0–4 = 125–129, DroneBay = 87, Cargo = 5.
-pub fn flag_to_slot(flag: i64) -> Option<(SlotKind, i32)> {
+/// Map an ESI fitting `flag` string to `(slot kind, index within the slot)`.
+/// ESI uses names like `HiSlot0`–`HiSlot7`, `MedSlot0`–7, `LoSlot0`–7,
+/// `RigSlot0`–2, `SubSystemSlot0`–4, `DroneBay`, `Cargo`.
+pub fn flag_to_slot(flag: &str) -> Option<(SlotKind, i32)> {
+    let index_of = |prefix: &str| flag.strip_prefix(prefix).and_then(|n| n.parse::<i32>().ok());
+    if let Some(i) = index_of("HiSlot") {
+        return Some((SlotKind::High, i));
+    }
+    if let Some(i) = index_of("MedSlot") {
+        return Some((SlotKind::Mid, i));
+    }
+    if let Some(i) = index_of("LoSlot") {
+        return Some((SlotKind::Low, i));
+    }
+    if let Some(i) = index_of("RigSlot") {
+        return Some((SlotKind::Rig, i));
+    }
+    if let Some(i) = index_of("SubSystemSlot") {
+        return Some((SlotKind::Subsystem, i));
+    }
     match flag {
-        11..=18 => Some((SlotKind::Low, (flag - 11) as i32)),
-        19..=26 => Some((SlotKind::Mid, (flag - 19) as i32)),
-        27..=34 => Some((SlotKind::High, (flag - 27) as i32)),
-        92..=98 => Some((SlotKind::Rig, (flag - 92) as i32)),
-        125..=132 => Some((SlotKind::Subsystem, (flag - 125) as i32)),
-        87 => Some((SlotKind::Drone, 0)),
-        5 => Some((SlotKind::Cargo, 0)),
-        _ => None, // implants/boosters/etc. — not placed in the editor
+        "DroneBay" => Some((SlotKind::Drone, 0)),
+        "Cargo" => Some((SlotKind::Cargo, 0)),
+        _ => None, // FighterBay / ServiceSlot / implants — not placed in the editor
     }
 }
 
@@ -35,7 +46,7 @@ pub fn esi_fitting_to_fit(esi: &EsiFitting, is_charge: &impl Fn(i64) -> bool) ->
 
     // Pass 1 — modules, drones and cargo (slot charges handled in pass 2).
     for it in &esi.items {
-        let Some((slot, index)) = flag_to_slot(it.flag) else {
+        let Some((slot, index)) = flag_to_slot(&it.flag) else {
             continue;
         };
         let qty = it.quantity.max(1) as i32;
@@ -59,7 +70,7 @@ pub fn esi_fitting_to_fit(esi: &EsiFitting, is_charge: &impl Fn(i64) -> bool) ->
         if !is_charge(it.type_id) {
             continue;
         }
-        let Some((slot, index)) = flag_to_slot(it.flag) else {
+        let Some((slot, index)) = flag_to_slot(&it.flag) else {
             continue;
         };
         if matches!(slot, SlotKind::Drone | SlotKind::Cargo) {
@@ -116,27 +127,27 @@ mod tests {
 
     #[test]
     fn maps_flags_to_slots() {
-        assert_eq!(flag_to_slot(11), Some((SlotKind::Low, 0)));
-        assert_eq!(flag_to_slot(14), Some((SlotKind::Low, 3)));
-        assert_eq!(flag_to_slot(19), Some((SlotKind::Mid, 0)));
-        assert_eq!(flag_to_slot(27), Some((SlotKind::High, 0)));
-        assert_eq!(flag_to_slot(92), Some((SlotKind::Rig, 0)));
-        assert_eq!(flag_to_slot(87), Some((SlotKind::Drone, 0)));
-        assert_eq!(flag_to_slot(5), Some((SlotKind::Cargo, 0)));
-        assert_eq!(flag_to_slot(125), Some((SlotKind::Subsystem, 0)));
-        assert_eq!(flag_to_slot(2000), None);
+        assert_eq!(flag_to_slot("LoSlot0"), Some((SlotKind::Low, 0)));
+        assert_eq!(flag_to_slot("LoSlot3"), Some((SlotKind::Low, 3)));
+        assert_eq!(flag_to_slot("MedSlot0"), Some((SlotKind::Mid, 0)));
+        assert_eq!(flag_to_slot("HiSlot0"), Some((SlotKind::High, 0)));
+        assert_eq!(flag_to_slot("RigSlot0"), Some((SlotKind::Rig, 0)));
+        assert_eq!(flag_to_slot("DroneBay"), Some((SlotKind::Drone, 0)));
+        assert_eq!(flag_to_slot("Cargo"), Some((SlotKind::Cargo, 0)));
+        assert_eq!(flag_to_slot("SubSystemSlot0"), Some((SlotKind::Subsystem, 0)));
+        assert_eq!(flag_to_slot("FighterBay"), None);
     }
 
     #[test]
     fn pairs_charge_with_its_module_and_keeps_drones() {
-        // HiSlot0 (27): a gun (100) + its charge (200). DroneBay (87): 5 drones.
+        // HiSlot0: a gun (100) + its charge (200). DroneBay: 5 drones.
         let f = fitting(
             r#"{"fitting_id": 7, "name": "Rifter", "description": "", "ship_type_id": 587,
                 "items": [
-                  {"type_id": 100, "flag": 27, "quantity": 1},
-                  {"type_id": 200, "flag": 27, "quantity": 1},
-                  {"type_id": 300, "flag": 87, "quantity": 5},
-                  {"type_id": 200, "flag": 5, "quantity": 1000}
+                  {"type_id": 100, "flag": "HiSlot0", "quantity": 1},
+                  {"type_id": 200, "flag": "HiSlot0", "quantity": 1},
+                  {"type_id": 300, "flag": "DroneBay", "quantity": 5},
+                  {"type_id": 200, "flag": "Cargo", "quantity": 1000}
                 ]}"#,
         );
         // 200 is a charge; 100/300 are not.
