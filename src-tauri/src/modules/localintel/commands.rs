@@ -104,6 +104,50 @@ struct Contact {
     contact_id: i64,
     standing: f64,
 }
+/// A cached character affiliation (corp/alliance/faction) + when it was fetched.
+#[derive(Serialize, Deserialize, Clone)]
+struct CachedAff {
+    corporation_id: i64,
+    alliance_id: Option<i64>,
+    faction_id: Option<i64>,
+    /// Unix epoch (secs) of the fetch, for the affiliation TTL.
+    ts: u64,
+}
+
+// Cache keys (under the app data dir) + TTLs. name↔id never change, so those
+// caches are durable; affiliations (corp moves) and standings (contact edits)
+// can change, so they carry a TTL.
+const CACHE_CHAR_IDS: &str = "esi_char_ids"; // lowercased name → character id
+const CACHE_NAMES: &str = "esi_names"; // entity id → name
+const CACHE_AFFILIATIONS: &str = "esi_affiliations"; // character id → CachedAff
+const AFFILIATION_TTL: u64 = 60 * 60; // 1 hour
+const STANDINGS_TTL: u64 = 30 * 60; // 30 minutes
+
+fn now_epoch() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// The logged-in character's standings, cached for [`STANDINGS_TTL`] so repeated
+/// scans don't re-pull the (3-call) contacts set every time.
+async fn cached_standings(app: &AppHandle, auth_state: &AuthState) -> HashMap<i64, f64> {
+    let Ok(dir) = app.path().app_data_dir() else {
+        return load_standings(app, auth_state).await;
+    };
+    let Some(character_id) = storage::active_character(&dir) else {
+        return HashMap::new();
+    };
+    let key = format!("localintel_standings_{character_id}");
+    if let Some(cached) = storage::cache_get::<HashMap<i64, f64>>(&dir, &key) {
+        return cached;
+    }
+    let fresh = load_standings(app, auth_state).await;
+    let _ = storage::cache_put(&dir, &key, &fresh, STANDINGS_TTL);
+    fresh
+}
+
 /// Corporation public info — we only need its alliance membership.
 #[derive(Deserialize)]
 struct CorpInfo {
@@ -131,46 +175,120 @@ pub async fn local_scan(
         });
     }
     let http = auth_state.http();
+    let dir = app.path().app_data_dir().ok();
+    let lower = |n: &str| n.to_lowercase();
 
-    // 1. names → character ids (public POST /universe/ids/). Non-character
-    //    matches (corp/alliance names someone pasted) are ignored.
-    let ids: UniverseIds = http
-        .post(format!("{ESI_BASE}/latest/universe/ids/"))
-        .json(&names)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .error_for_status()
-        .map_err(|e| e.to_string())?
-        .json()
-        .await
-        .map_err(|e| e.to_string())?;
-    let resolved: HashMap<String, i64> =
-        ids.characters.iter().map(|c| (c.name.clone(), c.id)).collect();
-    let unresolved: Vec<String> = names
+    // 1. names → character ids — cached (a character's name→id never changes), so
+    //    only names we haven't seen before hit /universe/ids/.
+    let mut id_cache: HashMap<String, i64> = dir
+        .as_ref()
+        .and_then(|d| storage::load_data(d, CACHE_CHAR_IDS))
+        .unwrap_or_default();
+    let missing: Vec<String> = names
         .iter()
-        .filter(|n| !resolved.contains_key(*n))
+        .filter(|n| !id_cache.contains_key(&lower(n)))
         .cloned()
         .collect();
-    let char_ids: Vec<i64> = ids.characters.iter().map(|c| c.id).collect();
+    if !missing.is_empty() {
+        if let Ok(ids) = (async {
+            http.post(format!("{ESI_BASE}/latest/universe/ids/"))
+                .json(&missing)
+                .send()
+                .await
+                .ok()?
+                .error_for_status()
+                .ok()?
+                .json::<UniverseIds>()
+                .await
+                .ok()
+        })
+        .await
+        .ok_or(())
+        {
+            for c in ids.characters {
+                id_cache.insert(lower(&c.name), c.id);
+            }
+            if let Some(d) = &dir {
+                let _ = storage::save_data(d, CACHE_CHAR_IDS, &id_cache);
+            }
+        }
+    }
+    // Resolved pilots (deduped by id), and the names we still couldn't resolve.
+    let mut seen = HashSet::new();
+    let characters: Vec<IdName> = names
+        .iter()
+        .filter_map(|n| id_cache.get(&lower(n)).map(|&id| IdName { id, name: n.clone() }))
+        .filter(|c| seen.insert(c.id))
+        .collect();
+    let unresolved: Vec<String> = names
+        .iter()
+        .filter(|n| !id_cache.contains_key(&lower(n)))
+        .cloned()
+        .collect();
+    let char_ids: Vec<i64> = characters.iter().map(|c| c.id).collect();
 
-    // 2. character ids → corp/alliance/faction (public POST /characters/affiliation/).
-    let affiliations: Vec<Affiliation> = if char_ids.is_empty() {
-        Vec::new()
-    } else {
-        http.post(format!("{ESI_BASE}/latest/characters/affiliation/"))
-            .json(&char_ids)
-            .send()
-            .await
-            .map_err(|e| e.to_string())?
-            .error_for_status()
-            .map_err(|e| e.to_string())?
-            .json()
-            .await
-            .map_err(|e| e.to_string())?
-    };
+    // 2. character ids → corp/alliance/faction — cached with a 1h TTL (corp moves
+    //    are infrequent); only stale/unknown ids hit /characters/affiliation/.
+    let now = now_epoch();
+    let mut aff_cache: HashMap<i64, CachedAff> = dir
+        .as_ref()
+        .and_then(|d| storage::load_data(d, CACHE_AFFILIATIONS))
+        .unwrap_or_default();
+    let stale: Vec<i64> = char_ids
+        .iter()
+        .copied()
+        .filter(|id| {
+            aff_cache
+                .get(id)
+                .is_none_or(|c| now.saturating_sub(c.ts) >= AFFILIATION_TTL)
+        })
+        .collect();
+    if !stale.is_empty() {
+        if let Ok(rows) = (async {
+            http.post(format!("{ESI_BASE}/latest/characters/affiliation/"))
+                .json(&stale)
+                .send()
+                .await
+                .ok()?
+                .error_for_status()
+                .ok()?
+                .json::<Vec<Affiliation>>()
+                .await
+                .ok()
+        })
+        .await
+        .ok_or(())
+        {
+            for a in rows {
+                aff_cache.insert(
+                    a.character_id,
+                    CachedAff {
+                        corporation_id: a.corporation_id,
+                        alliance_id: a.alliance_id,
+                        faction_id: a.faction_id,
+                        ts: now,
+                    },
+                );
+            }
+            if let Some(d) = &dir {
+                let _ = storage::save_data(d, CACHE_AFFILIATIONS, &aff_cache);
+            }
+        }
+    }
+    let affiliations: Vec<Affiliation> = char_ids
+        .iter()
+        .filter_map(|id| {
+            aff_cache.get(id).map(|c| Affiliation {
+                character_id: *id,
+                corporation_id: c.corporation_id,
+                alliance_id: c.alliance_id,
+                faction_id: c.faction_id,
+            })
+        })
+        .collect();
 
-    // 3. resolve corp/alliance ids → names (POST /universe/names/).
+    // 3. resolve corp/alliance/char ids → names — cached durably (names never
+    //    change), so only ids we've never resolved hit /universe/names/.
     let mut org_ids: Vec<i64> = Vec::new();
     for a in &affiliations {
         org_ids.push(a.corporation_id);
@@ -179,17 +297,35 @@ pub async fn local_scan(
         }
     }
     org_ids.extend(char_ids.iter().copied());
-    let org_names = resolve_names(&auth_state, &org_ids).await;
+    let mut name_cache: HashMap<i64, String> = dir
+        .as_ref()
+        .and_then(|d| storage::load_data(d, CACHE_NAMES))
+        .unwrap_or_default();
+    let missing_names: Vec<i64> = org_ids
+        .iter()
+        .copied()
+        .filter(|id| !name_cache.contains_key(id))
+        .collect();
+    if !missing_names.is_empty() {
+        let fresh = resolve_names(&auth_state, &missing_names).await;
+        if !fresh.is_empty() {
+            name_cache.extend(fresh);
+            if let Some(d) = &dir {
+                let _ = storage::save_data(d, CACHE_NAMES, &name_cache);
+            }
+        }
+    }
+    let org_names = &name_cache;
 
-    // 4. the logged-in character's standings, keyed by entity id.
-    let standings = load_standings(&app, &auth_state).await;
+    // 4. the logged-in character's standings, keyed by entity id (cached 30m).
+    let standings = cached_standings(&app, &auth_state).await;
 
     let aff_by_id: HashMap<i64, &Affiliation> =
         affiliations.iter().map(|a| (a.character_id, a)).collect();
 
     let mut pilots: Vec<LocalPilot> = Vec::new();
     let (mut reds, mut neutrals, mut blues) = (0i64, 0i64, 0i64);
-    for c in &ids.characters {
+    for c in &characters {
         let aff = aff_by_id.get(&c.id);
         let corporation = aff
             .and_then(|a| org_names.get(&a.corporation_id).cloned())
