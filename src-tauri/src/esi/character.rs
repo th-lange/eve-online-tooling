@@ -207,6 +207,66 @@ pub async fn fetch_corp_blueprints(
     Ok(out)
 }
 
+/// An in-game saved fitting from ESI (`/characters|corporations/{id}/fittings/`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct EsiFitting {
+    pub fitting_id: i64,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    #[allow(dead_code)] // part of the ESI shape; not surfaced in the editor yet
+    pub description: String,
+    pub ship_type_id: i64,
+    #[serde(default)]
+    pub items: Vec<EsiFitItem>,
+}
+
+/// One item in an ESI fitting: a module/charge/drone and its inventory `flag`
+/// (slot location), plus a quantity (drones/charges).
+#[derive(Debug, Clone, Deserialize)]
+pub struct EsiFitItem {
+    pub type_id: i64,
+    pub flag: i64,
+    #[serde(default = "one_i64")]
+    pub quantity: i64,
+}
+fn one_i64() -> i64 {
+    1
+}
+
+/// The character's in-game saved fittings (#178). Requires the
+/// `esi-fittings.read_fittings.v1` scope; if it isn't granted ESI returns 403,
+/// which we treat as "none" so the app degrades gracefully.
+pub async fn fetch_character_fittings(
+    auth: &AuthState,
+    character_id: i64,
+) -> Result<Vec<EsiFitting>, AuthError> {
+    let token = auth.access_token_for(character_id).await?;
+    let url = format!("{ESI_BASE}/latest/characters/{character_id}/fittings/");
+    let resp = auth.http().get(&url).bearer_auth(&token).send().await?;
+    if resp.status() == reqwest::StatusCode::FORBIDDEN {
+        return Ok(Vec::new());
+    }
+    Ok(resp.error_for_status()?.json().await?)
+}
+
+/// The corporation's saved fittings, using the character's token. Requires the
+/// scope **and** the Fitting Manager role; lacking either, ESI returns 403 and
+/// we treat it as "none".
+pub async fn fetch_corp_fittings(
+    auth: &AuthState,
+    character_id: i64,
+    corporation_id: i64,
+) -> Result<Vec<EsiFitting>, AuthError> {
+    let token = auth.access_token_for(character_id).await?;
+    let url = format!("{ESI_BASE}/latest/corporations/{corporation_id}/fittings/");
+    let resp = auth.http().get(&url).bearer_auth(&token).send().await?;
+    if resp.status() == reqwest::StatusCode::FORBIDDEN {
+        return Ok(Vec::new());
+    }
+    Ok(resp.error_for_status()?.json().await?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

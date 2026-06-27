@@ -1483,6 +1483,12 @@ export function fittingListLocal(): Promise<Fit[]> {
   return invoke<Fit[]>("fitting_list_local");
 }
 
+/** The active character's (and corp's) in-game saved fittings from ESI. Empty
+ * if the `esi-fittings` scope isn't granted (enable it on the EVE app + re-login). */
+export function fittingEsiList(): Promise<Fit[]> {
+  return invoke<Fit[]>("fitting_esi_list");
+}
+
 /** A single locally saved fit by id, or `null`. */
 export function fittingLoadLocal(id: string): Promise<Fit | null> {
   return invoke<Fit | null>("fitting_load_local", { id });

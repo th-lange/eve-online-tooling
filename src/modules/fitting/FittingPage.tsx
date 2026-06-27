@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fittingDeleteLocal,
+  fittingEsiList,
   fittingExportEft,
   fittingImportEft,
   fittingListLocal,
@@ -60,6 +61,12 @@ function Workbench() {
     enabled: query.trim().length >= 2,
   });
   const saved = useQuery({ queryKey: ["fitting", "saved"], queryFn: fittingListLocal });
+  // In-game (ESI) fittings — fetched on demand (hits ESI), not on mount.
+  const esiFits = useQuery({
+    queryKey: ["fitting", "esi"],
+    queryFn: fittingEsiList,
+    enabled: false,
+  });
 
   const layout = useQuery({
     queryKey: ["fitting", "layout", fit?.shipTypeId],
@@ -411,6 +418,36 @@ function Workbench() {
                   <div>Buy: {formatIsk(price.data.buyTotal)}</div>
                   <div>Sell: {formatIsk(price.data.sellTotal)}</div>
                 </div>
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+                  In-game fits
+                </h3>
+                <button
+                  onClick={() => esiFits.refetch()}
+                  className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
+                >
+                  {esiFits.isFetching ? "…" : "Load from EVE"}
+                </button>
+              </div>
+              {esiFits.data?.map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => setFit(f)}
+                  className="block w-full truncate text-left text-sm text-zinc-300 hover:text-zinc-100"
+                  title={`Load ${f.name}`}
+                >
+                  {f.name}
+                </button>
+              ))}
+              {esiFits.isFetched && (esiFits.data?.length ?? 0) === 0 && (
+                <p className="text-xs text-zinc-600">
+                  None found — needs the esi-fittings scope (enable it on the EVE
+                  app + re-add the character).
+                </p>
               )}
             </div>
 

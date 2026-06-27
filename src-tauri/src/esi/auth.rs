@@ -49,6 +49,10 @@ const SCOPES: &[&str] = &[
     "esi-markets.read_character_orders.v1",
     "esi-location.read_location.v1",
     "esi-fleets.read_fleet.v1",
+    // Character + corp saved fittings (#178). These must also be enabled on the
+    // EVE developer application registration before the SSO grant includes them.
+    "esi-fittings.read_fittings.v1",
+    "esi-fittings.write_fittings.v1",
 ];
 /// How long to wait for the user to complete the browser login.
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(180);
