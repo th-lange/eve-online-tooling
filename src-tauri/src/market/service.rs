@@ -91,6 +91,16 @@ impl MarketService {
         Ok(orders)
     }
 
+    /// All live orders (buy + sell) for a type in a region, cached per region.
+    /// Feeds the market-search order list, which fans this out across regions.
+    pub async fn region_orders(
+        &self,
+        region_id: i64,
+        type_id: i64,
+    ) -> Result<Vec<Order>, EsiError> {
+        self.orders_for(region_id, type_id).await
+    }
+
     /// Daily history for a type in a region (cached per region).
     async fn history_for(&self, region_id: i64, type_id: i64) -> Result<Vec<HistoryDay>, EsiError> {
         if let Some(cached) = self.history.get(&(region_id, type_id)) {

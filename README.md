@@ -10,7 +10,9 @@ built as a set of feature **modules** over a shared service layer.
   cross-region flip (buy cheapest → sell dearest) after taxes/fees, ranked by ISK/m³.
 - **Reprocessing** — ranks ores by reprocess-vs-sell at your refining efficiency.
 - **Appraisal** — paste items for a buy/sell valuation across hubs, or a reprocessing mineral yield.
-- **Universe**, **Market History**, **Assets**, **Character** (skills/standings/research/mining/fleet),
+- **Market Search** — find an item's sell orders across any region (or everywhere), with a
+  jumps-to-station column (high-sec-only or shortest routing), plus a price &amp; volume history tab.
+- **Universe**, **Assets**, **Character** (skills/standings/research/mining/fleet),
   **Accounting** (wallet + FIFO profit), **Public Contracts**, and **LP Store** tools.
 - **Route** — per-system jumps & ship/pod/NPC kills (last hour) across known space, a stargate
   neighbourhood "fog-of-war" map, and a live travel breadcrumb spanning known space and wormholes.

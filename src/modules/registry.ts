@@ -5,7 +5,7 @@ import { DaytradingPage } from "./daytrading/DaytradingPage";
 import { ReprocessingPage } from "./reprocessing/ReprocessingPage";
 import { AppraisalPage } from "./appraisal/AppraisalPage";
 import { UniversePage } from "./universe/UniversePage";
-import { MarketHistoryPage } from "./markethistory/MarketHistoryPage";
+import { MarketSearchPage } from "./marketsearch/MarketSearchPage";
 import { AssetsPage } from "./assets/AssetsPage";
 import { CharacterPage } from "./character/CharacterPage";
 import { AccountingPage } from "./accounting/AccountingPage";
@@ -70,10 +70,10 @@ export const modules: ModuleDef[] = [
     Component: UniversePage,
   },
   {
-    id: "market-history",
-    title: "Market",
-    description: "Current prices + daily price & volume history for an item in a region.",
-    Component: MarketHistoryPage,
+    id: "market-search",
+    title: "Market Search",
+    description: "Find an item's sell orders across the market, plus price & volume history.",
+    Component: MarketSearchPage,
   },
   {
     id: "assets",

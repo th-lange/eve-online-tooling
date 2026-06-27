@@ -896,6 +896,56 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Every known-space market region `(id, name)`, sorted by name. Region ids
+    /// below 11000000 are k-space (wormhole/abyssal regions start at 11000000
+    /// and have no public market); a handful of these (Jove space, dev regions)
+    /// trade nothing, but ESI simply returns no orders for them.
+    pub fn market_regions(&self) -> Result<Vec<(i64, String)>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT regionID, regionName FROM mapRegions
+             WHERE regionID < 11000000 ORDER BY regionName",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Search NPC stations by name `(id, name)`, shortest-name-first. Player
+    /// structures aren't in the SDE, so they're not searchable here.
+    pub fn search_stations(&self, query: &str, limit: i64) -> Result<Vec<(i64, String)>, SdeError> {
+        let pattern = format!("%{}%", query.trim());
+        let mut stmt = self.conn.prepare(
+            "SELECT stationID, stationName FROM staStations
+             WHERE stationName LIKE ?1
+             ORDER BY LENGTH(stationName), stationName LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![pattern, limit], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// The `(solar_system_id, region_id)` an NPC station sits in, if known.
+    pub fn station_location(&self, station_id: i64) -> Result<Option<(i64, i64)>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT solarSystemID, regionID FROM staStations WHERE stationID = ?1",
+        )?;
+        let mut rows = stmt.query(params![station_id])?;
+        match rows.next()? {
+            Some(r) => Ok(Some((r.get(0)?, r.get(1)?))),
+            None => Ok(None),
+        }
+    }
+
+    /// The region a solar system belongs to, if known.
+    pub fn system_region(&self, system_id: i64) -> Result<Option<i64>, SdeError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT regionID FROM mapSolarSystems WHERE solarSystemID = ?1")?;
+        let mut rows = stmt.query(params![system_id])?;
+        match rows.next()? {
+            Some(r) => Ok(Some(r.get(0)?)),
+            None => Ok(None),
+        }
+    }
+
     /// Stargate edges `(from, to)` whose source is one of `ids` — for building a
     /// system neighbourhood by BFS. K-space only (wormhole systems have no
     /// stargates). One query; the caller walks levels.
