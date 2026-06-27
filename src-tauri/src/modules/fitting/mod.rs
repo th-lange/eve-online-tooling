@@ -10,4 +10,5 @@
 //! Tracking: epic #156.
 
 pub mod commands;
+pub mod eft;
 pub mod types;

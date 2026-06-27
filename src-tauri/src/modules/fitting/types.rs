@@ -13,7 +13,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Where a fitted item sits on the hull.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SlotKind {
     High,
