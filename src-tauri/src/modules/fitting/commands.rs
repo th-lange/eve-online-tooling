@@ -418,7 +418,7 @@ fn run_dogma(
     let defaults = sde.attribute_defaults().map_err(|e| e.to_string())?;
     let is_stackable = |attr: i64| defaults.get(&attr).map(|m| m.stackable).unwrap_or(true);
 
-    let entity = |type_id: i64, required_skill: Option<i64>| -> Result<EntityInput, String> {
+    let entity = |type_id: i64, required_skills: Vec<i64>| -> Result<EntityInput, String> {
         let group_id = sde
             .type_info(type_id)
             .map_err(|e| e.to_string())?
@@ -428,19 +428,16 @@ fn run_dogma(
             attrs: attrs.get(&type_id).cloned().unwrap_or_default(),
             effect_ids: effects_by_type.get(&type_id).cloned().unwrap_or_default(),
             group_id,
-            required_skill,
+            required_skills,
         })
     };
 
-    let ship = entity(fit.ship_type_id, None)?;
+    let ship = entity(fit.ship_type_id, Vec::new())?;
 
     let mut modules = Vec::with_capacity(module_items.len());
     for it in &module_items {
-        // requiredSkill1 (attr 182) drives *RequiredSkillModifier targeting.
-        let required_skill = attrs
-            .get(&it.type_id)
-            .and_then(|a| a.iter().find(|(k, _)| *k == 182).map(|(_, v)| *v as i64));
-        modules.push(entity(it.type_id, required_skill)?);
+        // All required skills (182/183/184) drive *RequiredSkillModifier targeting.
+        modules.push(entity(it.type_id, required_skills_of(&attrs, it.type_id))?);
     }
 
     // Skills at the chosen level (all-V or the character's). skillLevel (280) is
@@ -460,7 +457,7 @@ fn run_dogma(
             attrs: a,
             effect_ids: effects_by_type.get(sid).cloned().unwrap_or_default(),
             group_id: 0,
-            required_skill: None,
+            required_skills: Vec::new(),
         });
     }
 
@@ -915,9 +912,23 @@ type AttrMap = HashMap<i64, Vec<(i64, f64)>>;
 type EffectMap = HashMap<i64, Vec<i64>>;
 type GroupMap = HashMap<i64, i64>;
 
+/// A type's required-skill ids (requiredSkill1/2/3 = attrs 182/183/184), for
+/// `*RequiredSkillModifier` targeting.
+fn required_skills_of(attrs: &AttrMap, type_id: i64) -> Vec<i64> {
+    attrs
+        .get(&type_id)
+        .map(|a| {
+            a.iter()
+                .filter(|(k, _)| matches!(k, 182 | 183 | 184))
+                .map(|(_, v)| *v as i64)
+                .filter(|s| *s > 0)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn entity_from_maps(
     type_id: i64,
-    required_skill: Option<i64>,
     attrs: &AttrMap,
     effects: &EffectMap,
     groups: &GroupMap,
@@ -926,7 +937,7 @@ fn entity_from_maps(
         attrs: attrs.get(&type_id).cloned().unwrap_or_default(),
         effect_ids: effects.get(&type_id).cloned().unwrap_or_default(),
         group_id: groups.get(&type_id).copied().unwrap_or(0),
-        required_skill,
+        required_skills: required_skills_of(attrs, type_id),
     }
 }
 
@@ -1001,15 +1012,10 @@ fn objective_value(
     let drone_items: Vec<&FitItem> =
         fit.items.iter().filter(|i| i.slot == SlotKind::Drone).collect();
 
-    let ship = entity_from_maps(fit.ship_type_id, None, attrs, effects, groups);
+    let ship = entity_from_maps(fit.ship_type_id, attrs, effects, groups);
     let modules: Vec<EntityInput> = module_items
         .iter()
-        .map(|it| {
-            let rs = attrs
-                .get(&it.type_id)
-                .and_then(|a| a.iter().find(|(k, _)| *k == 182).map(|(_, v)| *v as i64));
-            entity_from_maps(it.type_id, rs, attrs, effects, groups)
-        })
+        .map(|it| entity_from_maps(it.type_id, attrs, effects, groups))
         .collect();
 
     let resolved = resolve(
@@ -1116,7 +1122,7 @@ fn optimize_fit(
                 attrs: a,
                 effect_ids: effects.get(sid).cloned().unwrap_or_default(),
                 group_id: 0,
-                required_skill: None,
+                required_skills: Vec::new(),
             }
         })
         .collect();
@@ -1271,6 +1277,7 @@ pub fn fitting_delete_local(app: AppHandle, id: String) -> Result<(), String> {
     fits.retain(|f| f.id != id);
     storage::save_data(&dir, FITS_KEY, &fits)
 }
+
 
 
 
