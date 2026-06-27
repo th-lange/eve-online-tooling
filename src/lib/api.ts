@@ -1344,6 +1344,23 @@ export interface DpsBreakdown {
   total: number;
 }
 
+/** Navigation: speed, agility, align and signature. */
+export interface NavStats {
+  maxVelocity: number;
+  alignTime: number;
+  agility: number;
+  signatureRadius: number;
+}
+
+/** Targeting: locks, range, scan resolution and sensor strength
+ * `[radar, ladar, magnetometric, gravimetric]`. */
+export interface TargetStats {
+  maxTargets: number;
+  lockRange: number;
+  scanResolution: number;
+  sensorStrength: [number, number, number, number];
+}
+
 /** Computed result of simulating a fit (resources + validation + dogma stats). */
 export interface FitStats {
   resources: ResourceUsage;
@@ -1351,6 +1368,8 @@ export interface FitStats {
   capacitor?: CapStats | null;
   tank?: TankStats | null;
   dps?: DpsBreakdown | null;
+  navigation?: NavStats | null;
+  targeting?: TargetStats | null;
   price?: number | null;
 }
 

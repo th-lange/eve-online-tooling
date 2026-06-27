@@ -13,11 +13,12 @@ use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule};
 use super::engine::validate::{validate, ValItem};
 use super::engine::capacitor::capacitor;
 use super::engine::damage::{damage, Weapon};
+use super::engine::navigation::{navigation, targeting};
 use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
 use super::engine::tank::{tank, DamageProfile, Layer};
 use super::types::{
-    CapStats, DpsBreakdown, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind,
-    TankStats,
+    CapStats, DpsBreakdown, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, NavStats,
+    SlotKind, TankStats, TargetStats,
 };
 use crate::market::{resolve_location, MarketService, PriceModel};
 use crate::sde::{Sde, SdePaths, ShipLayout};
@@ -251,17 +252,16 @@ pub fn fitting_simulate(app: AppHandle, fit: Fit) -> Result<FitStats, String> {
 
     // Dogma engine (all-V): resolve finalized attributes and derive stats.
     // Best-effort — if the engine can't run, those stats are simply absent.
-    let (capacitor, tank, dps) = match run_dogma(&sde, &fit) {
-        Ok(d) => (Some(d.capacitor), Some(d.tank), Some(d.dps)),
-        Err(_) => (None, None, None),
-    };
+    let dogma = run_dogma(&sde, &fit).ok();
 
     Ok(FitStats {
         resources,
         validation,
-        capacitor,
-        tank,
-        dps,
+        capacitor: dogma.as_ref().map(|d| d.capacitor.clone()),
+        tank: dogma.as_ref().map(|d| d.tank.clone()),
+        dps: dogma.as_ref().map(|d| d.dps.clone()),
+        navigation: dogma.as_ref().map(|d| d.navigation.clone()),
+        targeting: dogma.map(|d| d.targeting),
         price: None,
     })
 }
@@ -271,6 +271,8 @@ struct DogmaStats {
     capacitor: CapStats,
     tank: TankStats,
     dps: DpsBreakdown,
+    navigation: NavStats,
+    targeting: TargetStats,
 }
 
 /// Build the engine inputs (ship + modules + all-V skills) from the SDE, resolve
@@ -350,10 +352,33 @@ fn run_dogma(sde: &Sde, fit: &Fit) -> Result<DogmaStats, String> {
 
     let resolved = resolve(&FitInput { ship, modules, skills }, &effect_meta, &is_stackable);
 
+    // Mass for align time: prefer the finalized dogma value, else invTypes.mass
+    // (some hulls carry mass only on the type row, not as a dogma attribute).
+    let mass = {
+        let m = resolved.ship.get(4);
+        if m > 0.0 {
+            m
+        } else {
+            sde.type_detail(fit.ship_type_id)
+                .ok()
+                .flatten()
+                .and_then(|d| d.mass)
+                .unwrap_or(0.0)
+        }
+    };
+    let s = &resolved.ship;
+
     Ok(DogmaStats {
         capacitor: capacitor_of(&resolved),
         tank: tank_of(&resolved),
         dps: dps_of(&resolved, &module_items, &drone_items, &attrs),
+        navigation: navigation(s.get(37), mass, s.get(70), s.get(552)),
+        targeting: targeting(
+            s.get(192),
+            s.get(76),
+            s.get(564),
+            [s.get(208), s.get(209), s.get(210), s.get(211)],
+        ),
     })
 }
 

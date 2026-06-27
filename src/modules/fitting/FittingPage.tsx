@@ -277,6 +277,19 @@ function Workbench() {
               </div>
             )}
 
+            {stats.data?.navigation && (
+              <div className="space-y-1">
+                <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+                  Navigation (all V)
+                </h3>
+                <div className="text-xs text-zinc-400">
+                  {Math.round(stats.data.navigation.maxVelocity)} m/s · align{" "}
+                  {stats.data.navigation.alignTime.toFixed(1)}s · sig{" "}
+                  {Math.round(stats.data.navigation.signatureRadius)}m
+                </div>
+              </div>
+            )}
+
             {stats.data?.capacitor && (
               <div className="space-y-1">
                 <h3 className="text-xs uppercase tracking-wide text-zinc-500">

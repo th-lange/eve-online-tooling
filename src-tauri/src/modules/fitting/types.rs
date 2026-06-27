@@ -142,9 +142,30 @@ pub struct DpsBreakdown {
     pub total: f64,
 }
 
+/// Navigation: speed, agility, align and signature (#175).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NavStats {
+    pub max_velocity: f64,
+    pub align_time: f64,
+    pub agility: f64,
+    pub signature_radius: f64,
+}
+
+/// Targeting: locks, range, scan resolution and sensor strength (#175).
+/// `sensor_strength` is `[radar, ladar, magnetometric, gravimetric]`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetStats {
+    pub max_targets: i64,
+    pub lock_range: f64,
+    pub scan_resolution: f64,
+    pub sensor_strength: [f64; 4],
+}
+
 /// Computed result of simulating a fit. Filled incrementally: P1 populates
 /// `resources`, `validation` and `price`; the dogma engine (P2) adds capacitor,
-/// tank and DPS now, with navigation and targeting alongside as they land.
+/// tank, DPS, navigation and targeting.
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FitStats {
@@ -159,6 +180,12 @@ pub struct FitStats {
     /// DPS (#174); `None` until the dogma engine runs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dps: Option<DpsBreakdown>,
+    /// Navigation (#175); `None` until the dogma engine runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub navigation: Option<NavStats>,
+    /// Targeting (#175); `None` until the dogma engine runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub targeting: Option<TargetStats>,
     /// Whole-fit market value (#163); `None` until priced.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub price: Option<f64>,
