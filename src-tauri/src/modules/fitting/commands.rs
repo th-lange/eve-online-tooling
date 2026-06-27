@@ -924,6 +924,43 @@ type AttrMap = HashMap<i64, Vec<(i64, f64)>>;
 type EffectMap = HashMap<i64, Vec<i64>>;
 type GroupMap = HashMap<i64, i64>;
 
+/// The weapon group ids and weapon skill ids a hull is *bonused* for, read from
+/// its own effects' `modifierInfo` (domain `shipID`) that touch a weapon-level
+/// attribute — rate of fire (51) or turret damage multiplier (64). A ship that
+/// bonuses energy turrets keys off skill 3306 (Medium Energy Turret); one that
+/// bonuses rockets keys off groups 771/510/511; etc. Used to steer the damage
+/// optimizer toward the weapons the hull is actually built for, instead of
+/// whatever has the highest raw paper-DPS (e.g. blasters on a laser boat).
+/// Empty sets ⇒ no weapon bonus found ⇒ don't restrict.
+fn ship_weapon_bonus(
+    ship_type_id: i64,
+    effects: &EffectMap,
+    effect_meta: &HashMap<i64, crate::sde::EffectMeta>,
+) -> (Vec<i64>, Vec<i64>) {
+    const WEAPON_ATTRS: [i64; 2] = [51, 64]; // rate of fire, damageMultiplier
+    let mut groups = Vec::new();
+    let mut skills = Vec::new();
+    for eid in effects.get(&ship_type_id).into_iter().flatten() {
+        let Some(meta) = effect_meta.get(eid) else { continue };
+        for m in &meta.modifiers {
+            // Only the ship bonusing its own fitted weapons (skip drone/owner bonuses).
+            if m.domain.as_deref() != Some("shipID") {
+                continue;
+            }
+            if !m.modified_attribute_id.is_some_and(|a| WEAPON_ATTRS.contains(&a)) {
+                continue;
+            }
+            if let Some(g) = m.group_id {
+                groups.push(g);
+            }
+            if let Some(s) = m.skill_type_id {
+                skills.push(s);
+            }
+        }
+    }
+    (groups, skills)
+}
+
 /// A type's required-skill ids (requiredSkill1/2/3 = attrs 182/183/184), for
 /// `*RequiredSkillModifier` targeting.
 fn required_skills_of(attrs: &AttrMap, type_id: i64) -> Vec<i64> {
@@ -1137,6 +1174,36 @@ fn optimize_fit(
     let defaults = sde.attribute_defaults().map_err(|e| e.to_string())?;
     let is_stackable = |attr: i64| defaults.get(&attr).map(|m| m.stackable).unwrap_or(true);
 
+    // Steer the damage optimizer to the hull's *bonused* weapons. Without this it
+    // maximizes raw paper-DPS and fits, say, hybrid blasters on an Amarr laser
+    // hull. Restrict the high-slot weapon candidates to the groups/skills the ship
+    // bonuses — but only per slot where that leaves at least one weapon, so a hull
+    // with no turret/launcher bonus (e.g. a drone boat) still gets armed.
+    if matches!(obj, Objective::Damage) {
+        let (bgroups, bskills) = ship_weapon_bonus(fit.ship_type_id, &effects, &effect_meta);
+        if !(bgroups.is_empty() && bskills.is_empty()) {
+            for (slot, cands) in &mut slot_candidates {
+                if *slot != SlotKind::High {
+                    continue;
+                }
+                let kept: Vec<i64> = cands
+                    .iter()
+                    .copied()
+                    .filter(|tid| {
+                        let g = groups.get(tid).copied().unwrap_or(0);
+                        bgroups.contains(&g)
+                            || required_skills_of(&attrs, *tid)
+                                .iter()
+                                .any(|s| bskills.contains(s))
+                    })
+                    .collect();
+                if !kept.is_empty() {
+                    *cands = kept;
+                }
+            }
+        }
+    }
+
     let skills: Vec<EntityInput> = skill_ids
         .iter()
         .map(|sid| {
@@ -1304,6 +1371,8 @@ pub fn fitting_delete_local(app: AppHandle, id: String) -> Result<(), String> {
     fits.retain(|f| f.id != id);
     storage::save_data(&dir, FITS_KEY, &fits)
 }
+
+
 
 
 
