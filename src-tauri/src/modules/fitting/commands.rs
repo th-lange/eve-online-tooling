@@ -210,6 +210,26 @@ pub async fn fitting_esi_list(
     let character_id =
         storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?;
 
+    // Up-front, actionable error when the active character never granted the
+    // fittings scope (the common reason nothing loads).
+    let granted = storage::load_roster(&dir)
+        .iter()
+        .find(|c| c.character_id == character_id)
+        .map(|c| {
+            c.scopes
+                .iter()
+                .any(|s| s == "esi-fittings.read_fittings.v1")
+        })
+        .unwrap_or(false);
+    if !granted {
+        return Err(
+            "This character hasn't granted the fittings scope. Add \
+             esi-fittings.read_fittings.v1 to your EVE application, then remove \
+             and re-add the character."
+                .to_string(),
+        );
+    }
+
     // Cached per character (30 min) so the picker doesn't re-hit ESI each open;
     // `force` (the refresh button) bypasses it.
     let cache_key = format!("fitting_esi_{character_id}");
