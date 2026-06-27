@@ -16,6 +16,7 @@ import {
   type SellOrder,
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
+import { AddToListButton } from "../../components/AddToListButton";
 import { formatInt, formatIsk } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
@@ -159,6 +160,13 @@ function Workbench() {
           >
             Open in EVE
           </button>
+        )}
+        {picked && (
+          <AddToListButton
+            typeId={picked.id}
+            label="Add to list"
+            className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+          />
         )}
       </div>
 

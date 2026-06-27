@@ -26,6 +26,9 @@ built as a set of feature **modules** over a shared service layer.
 - **Fitting** — build a ship fit (EFT import/export + local saves), validate slots / CPU / powergrid /
   calibration / drone bay, price the whole fit, and simulate PYFA-style stats — **DPS, EHP/tank,
   capacitor stability, speed/align and targeting** — at all-V or your character's real skills.
+- **Shopping Lists** — keep named lists of items to buy (a built-in *default* and *production* list,
+  plus your own), fed by "add to list" buttons across Market Search, Production, Station Trading and
+  Daytrading, with quantity editing and one-click in-game Multibuy export.
 - **Mission-running** and more — planned.
 
 Built with **Tauri 2** (Rust core) + **React / TypeScript** (Vite). Market and character data come
@@ -156,6 +159,10 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
   and **targeting** — at **all-V** or the logged-in character's **real skills**. The engine resolves
   effects from the SDE's `dgmEffects.modifierInfo` (stacking penalties, ship/skill bonuses applied in
   fixed passes), so it's additive as coverage grows. Fits import/export as **EFT** and save locally.
+- **Shopping Lists module** — a group of named item lists (a non-removable *default* and *production*,
+  plus any you create). Add items via a known-item search field, edit quantities inline, and export a
+  list straight to the in-game **Multibuy** window. Market Search, Production (a build's material
+  shortfall), Station Trading and Daytrading all have an "add to list" button that pushes onto any list.
 
 ## Releasing
 

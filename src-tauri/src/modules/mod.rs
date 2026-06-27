@@ -15,5 +15,6 @@ pub mod orders;
 pub mod production;
 pub mod reprocessing;
 pub mod route;
+pub mod shopping;
 pub mod trading;
 pub mod wormholes;
