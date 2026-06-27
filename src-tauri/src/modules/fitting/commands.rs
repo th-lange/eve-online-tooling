@@ -20,6 +20,7 @@ use super::types::{
     CapStats, DpsBreakdown, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, NavStats,
     SlotKind, TankStats, TargetStats,
 };
+use crate::esi::{authed_get, AuthState};
 use crate::market::{resolve_location, MarketService, PriceModel};
 use crate::sde::{Sde, SdePaths, ShipLayout};
 use crate::storage;
@@ -195,11 +196,31 @@ pub fn fitting_export_eft(app: AppHandle, fit: Fit) -> Result<String, String> {
     }))
 }
 
-/// Simulate a fit: slot/resource validation over base attributes (#165). The
-/// dogma stats (DPS/tank/cap/…) fill `FitStats` in P2; `price` stays `None`
-/// here (priced separately via [`fitting_price`]).
+/// Simulate a fit: slot/resource validation plus the dogma stats (capacitor,
+/// tank, DPS, navigation, targeting). `skill_source` is `"character"` for the
+/// logged-in pilot's real skills, anything else (default) for all-V (#172–#177).
+/// `price` stays `None` here (priced separately via [`fitting_price`]).
 #[tauri::command]
-pub fn fitting_simulate(app: AppHandle, fit: Fit) -> Result<FitStats, String> {
+pub async fn fitting_simulate(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+    fit: Fit,
+    skill_source: Option<String>,
+) -> Result<FitStats, String> {
+    // Fetch the character's skills (async) *before* opening the SDE — the SDE
+    // connection isn't Send, so it must not be held across an await.
+    let levels: Option<HashMap<i64, i64>> = if skill_source.as_deref() == Some("character") {
+        character_skill_levels(&app, &auth_state).await.ok()
+    } else {
+        None
+    };
+    let skill_level_for = |sid: i64| -> f64 {
+        match &levels {
+            Some(map) => map.get(&sid).copied().unwrap_or(0) as f64,
+            None => 5.0, // all-V
+        }
+    };
+
     let sde = open_sde(&app)?;
     let Some(ship) = sde.ship_layout(fit.ship_type_id).map_err(|e| e.to_string())? else {
         return Err(format!("unknown ship: {}", fit.ship_type_id));
@@ -252,7 +273,7 @@ pub fn fitting_simulate(app: AppHandle, fit: Fit) -> Result<FitStats, String> {
 
     // Dogma engine (all-V): resolve finalized attributes and derive stats.
     // Best-effort — if the engine can't run, those stats are simply absent.
-    let dogma = run_dogma(&sde, &fit).ok();
+    let dogma = run_dogma(&sde, &fit, &skill_level_for).ok();
 
     Ok(FitStats {
         resources,
@@ -278,7 +299,11 @@ struct DogmaStats {
 /// Build the engine inputs (ship + modules + all-V skills) from the SDE, resolve
 /// the fit once, and derive the dogma stats from the finalized attributes
 /// (capacitor #172, tank #173).
-fn run_dogma(sde: &Sde, fit: &Fit) -> Result<DogmaStats, String> {
+fn run_dogma(
+    sde: &Sde,
+    fit: &Fit,
+    skill_level_for: &dyn Fn(i64) -> f64,
+) -> Result<DogmaStats, String> {
     // Only slots that affect ship stats (drones/cargo/implants don't here).
     let module_items: Vec<&FitItem> = fit
         .items
@@ -334,13 +359,18 @@ fn run_dogma(sde: &Sde, fit: &Fit) -> Result<DogmaStats, String> {
         modules.push(entity(it.type_id, required_skill)?);
     }
 
-    // All skills at level V: skillLevel (280) forced to 5.
+    // Skills at the chosen level (all-V or the character's). skillLevel (280) is
+    // forced to that level; untrained (level 0) skills are skipped entirely.
     let mut skills = Vec::with_capacity(skill_ids.len());
     for sid in &skill_ids {
+        let level = skill_level_for(*sid);
+        if level <= 0.0 {
+            continue;
+        }
         let mut a = attrs.get(sid).cloned().unwrap_or_default();
         match a.iter_mut().find(|(k, _)| *k == 280) {
-            Some(p) => p.1 = 5.0,
-            None => a.push((280, 5.0)),
+            Some(p) => p.1 = level,
+            None => a.push((280, level)),
         }
         skills.push(EntityInput {
             attrs: a,
@@ -380,6 +410,41 @@ fn run_dogma(sde: &Sde, fit: &Fit) -> Result<DogmaStats, String> {
             [s.get(208), s.get(209), s.get(210), s.get(211)],
         ),
     })
+}
+
+/// The active character's actual skill levels (`skillTypeId → level`), via ESI
+/// `/characters/{id}/skills/` (#177). Reuses the existing `esi-skills` scope.
+async fn character_skill_levels(
+    app: &AppHandle,
+    auth_state: &AuthState,
+) -> Result<HashMap<i64, i64>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let character_id =
+        storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?;
+
+    #[derive(serde::Deserialize)]
+    struct Skills {
+        skills: Vec<Skill>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Skill {
+        skill_id: i64,
+        #[serde(default)]
+        active_skill_level: i64,
+    }
+
+    let skills: Skills = authed_get(
+        auth_state,
+        character_id,
+        &format!("/latest/characters/{character_id}/skills/"),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(skills
+        .skills
+        .into_iter()
+        .map(|s| (s.skill_id, s.active_skill_level))
+        .collect())
 }
 
 /// Sum the four base damage types (em 114 / explosive 116 / kinetic 117 /
