@@ -289,6 +289,25 @@ pub fn sde_type_names(app: AppHandle, type_ids: Vec<i64>) -> Result<Vec<IdName>,
         .map_err(|e| e.to_string())
 }
 
+/// `(id, name, group)` for a set of type ids — for grouping fits by ship group.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TypeBrief {
+    pub id: i64,
+    pub name: String,
+    pub group: String,
+}
+
+#[tauri::command]
+pub fn sde_type_infos(app: AppHandle, type_ids: Vec<i64>) -> Result<Vec<TypeBrief>, String> {
+    Ok(open(&app)?
+        .type_infos(&type_ids)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|(id, name, group)| TypeBrief { id, name, group })
+        .collect())
+}
+
 #[tauri::command]
 pub fn sde_type_attributes(app: AppHandle, type_id: i64) -> Result<Vec<AttrPair>, String> {
     let attrs = open(&app)?
