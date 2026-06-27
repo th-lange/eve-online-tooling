@@ -1241,3 +1241,149 @@ export function productionSetList(
 ): Promise<void> {
   return invoke<void>("production_set_list", { list, typeId, add });
 }
+
+// --- Fitting ---
+
+/** Where a fitted item sits on the hull. */
+export type SlotKind =
+  | "high"
+  | "mid"
+  | "low"
+  | "rig"
+  | "subsystem"
+  | "drone"
+  | "implant"
+  | "booster"
+  | "cargo";
+
+/** A module's activation state. */
+export type ModuleState = "offline" | "online" | "active" | "overheated";
+
+/** One fitted item: a module/rig/drone slot entry, optionally with a charge. */
+export interface FitItem {
+  typeId: number;
+  slot: SlotKind;
+  index: number;
+  state: ModuleState;
+  chargeTypeId?: number | null;
+  quantity: number;
+}
+
+/** The editable fit document. */
+export interface Fit {
+  id: string;
+  name: string;
+  shipTypeId: number;
+  items: FitItem[];
+}
+
+/** A hull's slot layout + fitting resources, for the empty editor. */
+export interface ShipLayout {
+  typeId: number;
+  name: string;
+  highSlots: number;
+  midSlots: number;
+  lowSlots: number;
+  rigSlots: number;
+  subsystemSlots: number;
+  turretHardpoints: number;
+  launcherHardpoints: number;
+  cpuOutput: number;
+  powergridOutput: number;
+  calibration: number;
+  droneBay: number;
+  droneBandwidth: number;
+}
+
+/** Fitting-resource usage vs the hull's output. */
+export interface ResourceUsage {
+  cpuUsed: number;
+  cpuOutput: number;
+  powergridUsed: number;
+  powergridOutput: number;
+  calibrationUsed: number;
+  calibrationOutput: number;
+}
+
+/** A validation finding (over-CPU, too many turrets, …). */
+export interface FitProblem {
+  severity: "error" | "warning";
+  message: string;
+  itemIndex?: number | null;
+}
+
+/** Computed result of simulating a fit (P1: resources + validation). */
+export interface FitStats {
+  resources: ResourceUsage;
+  validation: FitProblem[];
+  price?: number | null;
+}
+
+/** One priced line of a whole-fit valuation. */
+export interface FitPriceLine {
+  typeId: number;
+  name: string;
+  quantity: number;
+  buyUnit?: number | null;
+  sellUnit?: number | null;
+}
+
+/** Whole-fit market valuation. */
+export interface FitPrice {
+  buyTotal: number;
+  sellTotal: number;
+  lines: FitPriceLine[];
+}
+
+/** A hull's slot layout + fitting resources; `null` if it isn't a known ship. */
+export function fittingShipLayout(
+  shipTypeId: number,
+): Promise<ShipLayout | null> {
+  return invoke<ShipLayout | null>("fitting_ship_layout", {
+    typeId: shipTypeId,
+  });
+}
+
+/** Parse an EFT clipboard string into a resolved fit. */
+export function fittingImportEft(text: string): Promise<Fit> {
+  return invoke<Fit>("fitting_import_eft", { text });
+}
+
+/** Serialize a fit to an EFT clipboard string. */
+export function fittingExportEft(fit: Fit): Promise<string> {
+  return invoke<string>("fitting_export_eft", { fit });
+}
+
+/** Simulate a fit: slot/resource validation (P1). */
+export function fittingSimulate(fit: Fit): Promise<FitStats> {
+  return invoke<FitStats>("fitting_simulate", { fit });
+}
+
+/** Price a whole fit at a market. */
+export function fittingPrice(
+  fit: Fit,
+  regionId: number,
+  stationId?: number | null,
+): Promise<FitPrice> {
+  return invoke<FitPrice>("fitting_price", { fit, regionId, stationId });
+}
+
+/** Save (insert or update) a fit locally; returns its id. */
+export function fittingSaveLocal(fit: Fit): Promise<string> {
+  return invoke<string>("fitting_save_local", { fit });
+}
+
+/** All locally saved fits. */
+export function fittingListLocal(): Promise<Fit[]> {
+  return invoke<Fit[]>("fitting_list_local");
+}
+
+/** A single locally saved fit by id, or `null`. */
+export function fittingLoadLocal(id: string): Promise<Fit | null> {
+  return invoke<Fit | null>("fitting_load_local", { id });
+}
+
+/** Delete a locally saved fit by id. */
+export function fittingDeleteLocal(id: string): Promise<void> {
+  return invoke<void>("fitting_delete_local", { id });
+}

@@ -7,6 +7,11 @@ describe("module registry", () => {
     expect(ids).toContain("production");
   });
 
+  it("registers the fitting module", () => {
+    const ids = modules.map((m) => m.id);
+    expect(ids).toContain("fitting");
+  });
+
   it("gives every module a unique id, title and component", () => {
     const ids = modules.map((m) => m.id);
     expect(new Set(ids).size).toBe(ids.length);
