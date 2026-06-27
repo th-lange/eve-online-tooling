@@ -17,8 +17,8 @@ use super::engine::navigation::{navigation, targeting};
 use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
 use super::engine::tank::{tank, DamageProfile, Layer};
 use super::types::{
-    CapStats, DpsBreakdown, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, NavStats,
-    Severity, SlotKind, TankStats, TargetStats,
+    CapStats, DpsBreakdown, Fit, FitItem, FitPrice, FitPriceLine, FitProblem, FitStats,
+    ModuleState, NavStats, ResourceUsage, Severity, SlotKind, TankStats, TargetStats,
 };
 use crate::esi::{authed_get, corporation_id, AuthState};
 use crate::market::{resolve_location, MarketService, PriceModel};
@@ -343,15 +343,20 @@ pub async fn fitting_simulate(
         });
     }
 
-    let (resources, validation) = validate(&ship, &val_items);
+    // Base-attribute resources/validation — only a fallback for when the dogma
+    // engine can't run; otherwise the finalized (skill-adjusted) ones are used.
+    let (base_resources, base_validation) = validate(&ship, &val_items);
 
-    // Dogma engine (all-V): resolve finalized attributes and derive stats.
-    // Best-effort — if the engine can't run, those stats are simply absent.
-    let dogma = run_dogma(&sde, &fit, &skill_level_for).ok();
+    // Dogma engine: resolve finalized attributes and derive stats (incl. the
+    // skill-adjusted resources/validation). Best-effort.
+    let dogma = run_dogma(&sde, &fit, &ship, &skill_level_for).ok();
 
     Ok(FitStats {
-        resources,
-        validation,
+        resources: dogma.as_ref().map(|d| d.resources.clone()).unwrap_or(base_resources),
+        validation: dogma
+            .as_ref()
+            .map(|d| d.validation.clone())
+            .unwrap_or(base_validation),
         capacitor: dogma.as_ref().map(|d| d.capacitor.clone()),
         tank: dogma.as_ref().map(|d| d.tank.clone()),
         dps: dogma.as_ref().map(|d| d.dps.clone()),
@@ -363,6 +368,10 @@ pub async fn fitting_simulate(
 
 /// Dogma-engine stats derived from one resolution pass.
 struct DogmaStats {
+    /// CPU/PG/calibration usage + output, from *finalized* attributes.
+    resources: ResourceUsage,
+    /// Slot/resource validation against the *finalized* attributes.
+    validation: Vec<FitProblem>,
     capacitor: CapStats,
     tank: TankStats,
     dps: DpsBreakdown,
@@ -376,6 +385,7 @@ struct DogmaStats {
 fn run_dogma(
     sde: &Sde,
     fit: &Fit,
+    base_layout: &ShipLayout,
     skill_level_for: &dyn Fn(i64) -> f64,
 ) -> Result<DogmaStats, String> {
     // Only slots that affect ship stats (drones/cargo/implants don't here).
@@ -472,7 +482,70 @@ fn run_dogma(
     };
     let s = &resolved.ship;
 
+    // Finalized fitting resources + validation: read CPU/PG/calibration from the
+    // *resolved* ship + modules so skills (CPU/PG Management, weapon CPU, …) and
+    // rigs/modules are reflected — not base attributes. Slot/hardpoint counts and
+    // drone bay come from the resolved hull too (also handles T3 subsystems).
+    let resolved_layout = ShipLayout {
+        type_id: base_layout.type_id,
+        name: base_layout.name.clone(),
+        high_slots: s.get(14) as i64,
+        mid_slots: s.get(13) as i64,
+        low_slots: s.get(12) as i64,
+        rig_slots: s.get(1137) as i64,
+        subsystem_slots: s.get(1367) as i64,
+        turret_hardpoints: s.get(102) as i64,
+        launcher_hardpoints: s.get(101) as i64,
+        cpu_output: s.get(48),
+        powergrid_output: s.get(11),
+        calibration: s.get(1132),
+        drone_bay: s.get(283),
+        drone_bandwidth: s.get(1271),
+    };
+    let mut module_stores = resolved.modules.iter();
+    let mut val_items: Vec<ValItem> = Vec::with_capacity(fit.items.len());
+    for item in &fit.items {
+        if is_ship_module(item.slot) {
+            let Some(store) = module_stores.next() else {
+                continue;
+            };
+            let eff = effects_by_type.get(&item.type_id);
+            let is_turret = item.slot == SlotKind::High && eff.is_some_and(|e| e.contains(&42));
+            let is_launcher = item.slot == SlotKind::High && eff.is_some_and(|e| e.contains(&40));
+            val_items.push(ValItem {
+                slot: item.slot,
+                cpu: store.get(50),
+                powergrid: store.get(30),
+                calibration: store.get(1153),
+                is_turret,
+                is_launcher,
+                drone_volume: 0.0,
+                quantity: item.quantity.max(1),
+            });
+        } else if item.slot == SlotKind::Drone {
+            let drone_volume = sde
+                .type_info(item.type_id)
+                .ok()
+                .flatten()
+                .and_then(|t| t.volume)
+                .unwrap_or(0.0);
+            val_items.push(ValItem {
+                slot: SlotKind::Drone,
+                cpu: 0.0,
+                powergrid: 0.0,
+                calibration: 0.0,
+                is_turret: false,
+                is_launcher: false,
+                drone_volume,
+                quantity: item.quantity.max(1),
+            });
+        }
+    }
+    let (resources, validation) = validate(&resolved_layout, &val_items);
+
     Ok(DogmaStats {
+        resources,
+        validation,
         capacitor: capacitor_of(&resolved),
         tank: tank_of(&resolved),
         dps: dps_of(&resolved, &module_items, &drone_items, &attrs),
@@ -1198,6 +1271,7 @@ pub fn fitting_delete_local(app: AppHandle, id: String) -> Result<(), String> {
     fits.retain(|f| f.id != id);
     storage::save_data(&dir, FITS_KEY, &fits)
 }
+
 
 
 
