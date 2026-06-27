@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DataAge } from "../../components/DataAge";
+import { AddToListButton } from "../../components/AddToListButton";
 import {
   marketRegions,
   sdeStatus,
@@ -412,6 +413,13 @@ function TradeTable({
                 >
                   ✕
                 </button>
+                <span className="ml-2">
+                  <AddToListButton
+                    typeId={r.typeId}
+                    label="+List"
+                    className="text-zinc-600 hover:text-emerald-400"
+                  />
+                </span>
               </td>
               <td className="px-3 py-1.5">
                 <div className="text-zinc-200">

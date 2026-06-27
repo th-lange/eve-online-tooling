@@ -14,6 +14,7 @@ import {
   SortHeaderCell,
   type SortColumn,
 } from "../../components/SortHeaderCell";
+import { AddToListButton } from "../../components/AddToListButton";
 
 const MAX_ROWS = 500;
 
@@ -322,6 +323,17 @@ function BreakdownRow({ row }: { row: ProfitBreakdown }) {
             >
               {copied === "mb" ? "Copied ✓" : "Multibuy"}
             </button>
+            <AddToListButton
+              items={row.materials
+                .map((m) => ({
+                  typeId: m.typeId,
+                  quantity: Math.max(0, m.requiredQuantity - m.have),
+                }))
+                .filter((m) => m.quantity > 0)}
+              label="2 list"
+              title="Add this build's materials (the shortfall) to a shopping list"
+              className="rounded border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
+            />
           </div>
         </div>
         <table className="w-full text-xs">

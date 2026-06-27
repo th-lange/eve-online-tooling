@@ -17,6 +17,7 @@ import { OrdersPage } from "./orders/OrdersPage";
 import { IndustryJobsPage } from "./industry/IndustryJobsPage";
 import { WormholesPage } from "./wormholes/WormholesPage";
 import { FittingPage } from "./fitting/FittingPage";
+import { ShoppingPage } from "./shopping/ShoppingPage";
 
 // A feature module = a nav entry + the page rendered at `/{id}`. Adding a new
 // module (daytrading, station-trading, …) is a one-line entry here plus its
@@ -140,5 +141,11 @@ export const modules: ModuleDef[] = [
     title: "Fitting",
     description: "Build ship fits and validate slots, resources and price.",
     Component: FittingPage,
+  },
+  {
+    id: "shopping",
+    title: "Shopping Lists",
+    description: "Named lists of items to buy, fed from across the app.",
+    Component: ShoppingPage,
   },
 ];

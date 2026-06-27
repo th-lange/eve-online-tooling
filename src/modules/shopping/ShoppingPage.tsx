@@ -1,0 +1,342 @@
+import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+
+import { SHOPPING_LISTS_KEY } from "../../components/AddToListButton";
+import {
+  shoppingAddText,
+  shoppingClearList,
+  shoppingCreateList,
+  shoppingDeleteList,
+  shoppingLists,
+  shoppingRemoveItem,
+  shoppingSetQuantity,
+  type ShoppingList,
+} from "../../lib/api";
+
+/**
+ * Shopping Lists — a group of named lists you fill while browsing other modules.
+ * The `default` and `production` lists are built in and can't be removed; you
+ * can add more. Each list holds items + quantities; add items here via the
+ * known-item search field, or from the "add to list" buttons on Market Search,
+ * Production, Station Trading and Daytrading.
+ */
+export function ShoppingPage() {
+  const qc = useQueryClient();
+  const lists = useQuery({ queryKey: SHOPPING_LISTS_KEY, queryFn: shoppingLists });
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [newName, setNewName] = useState("");
+
+  const refresh = () => qc.invalidateQueries({ queryKey: SHOPPING_LISTS_KEY });
+
+  // Keep a valid selection as lists load / change.
+  const data = lists.data;
+  useEffect(() => {
+    if (!data || data.length === 0) return;
+    if (!selectedId || !data.some((l) => l.id === selectedId)) {
+      setSelectedId(data[0].id);
+    }
+  }, [data, selectedId]);
+
+  const selected = data?.find((l) => l.id === selectedId) ?? null;
+
+  async function createList() {
+    const name = newName.trim();
+    if (!name) return;
+    const list = await shoppingCreateList(name);
+    setNewName("");
+    setSelectedId(list.id);
+    await refresh();
+  }
+
+  async function deleteList(id: string) {
+    await shoppingDeleteList(id);
+    await refresh();
+  }
+
+  return (
+    <div className="p-6">
+      <div>
+        <h1 className="text-2xl font-semibold text-zinc-100">Shopping Lists</h1>
+        <p className="mt-1 text-sm text-zinc-400">
+          Build named lists of items to buy. Add from here, or with the “add to
+          list” buttons on Market Search, Production, Station Trading and
+          Daytrading.
+        </p>
+      </div>
+
+      <div className="mt-5 flex gap-6">
+        {/* List selector. */}
+        <div className="w-56 shrink-0">
+          <div className="space-y-1">
+            {(data ?? []).map((l) => (
+              <div
+                key={l.id}
+                className={`group flex items-center rounded ${
+                  l.id === selectedId ? "bg-zinc-800" : "hover:bg-zinc-900"
+                }`}
+              >
+                <button
+                  onClick={() => setSelectedId(l.id)}
+                  className="flex-1 px-2 py-1 text-left text-sm text-zinc-200"
+                >
+                  {l.name}
+                  <span className="ml-1 text-xs text-zinc-500">
+                    {l.items.length}
+                  </span>
+                </button>
+                {l.removable && (
+                  <button
+                    onClick={() => void deleteList(l.id)}
+                    title="Delete this list"
+                    className="px-2 text-xs text-zinc-600 opacity-0 hover:text-red-400 group-hover:opacity-100"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* New list. */}
+          <div className="mt-3 flex gap-1">
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void createList();
+              }}
+              placeholder="new list…"
+              className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+            />
+            <button
+              onClick={() => void createList()}
+              className="rounded border border-zinc-700 px-2 py-1 text-sm text-zinc-300 hover:bg-zinc-800"
+            >
+              +
+            </button>
+          </div>
+        </div>
+
+        {/* Selected list. */}
+        <div className="min-w-0 flex-1">
+          {selected ? (
+            <ListDetail list={selected} onChange={refresh} />
+          ) : (
+            <p className="text-sm text-zinc-500">No list selected.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- One list's items + add field ---
+
+function ListDetail({
+  list,
+  onChange,
+}: {
+  list: ShoppingList;
+  onChange: () => Promise<unknown>;
+}) {
+  const totalQty = useMemo(
+    () => list.items.reduce((sum, i) => sum + i.quantity, 0),
+    [list.items],
+  );
+
+  // EVE Multibuy: one `name<TAB>quantity` per line.
+  const multibuy = useMemo(
+    () => list.items.map((i) => `${i.name}\t${i.quantity}`).join("\n"),
+    [list.items],
+  );
+  const [copied, setCopied] = useState(false);
+
+  async function setQty(typeId: number, quantity: number) {
+    await shoppingSetQuantity(list.id, typeId, quantity);
+    await onChange();
+  }
+  async function remove(typeId: number) {
+    await shoppingRemoveItem(list.id, typeId);
+    await onChange();
+  }
+  async function clear() {
+    await shoppingClearList(list.id);
+    await onChange();
+  }
+  function copy() {
+    void navigator.clipboard?.writeText(multibuy);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-zinc-100">{list.name}</h2>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={copy}
+            disabled={list.items.length === 0}
+            title="Copy the items for the in-game Multibuy window"
+            className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+          >
+            {copied ? "Copied ✓" : "Multibuy"}
+          </button>
+          <button
+            onClick={() => void clear()}
+            disabled={list.items.length === 0}
+            className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+          >
+            Clear
+          </button>
+        </div>
+      </div>
+
+      <AddItemField listId={list.id} onAdded={onChange} />
+
+      {list.items.length === 0 ? (
+        <p className="mt-4 text-sm text-zinc-500">
+          No items yet — search above, or use an “add to list” button elsewhere.
+        </p>
+      ) : (
+        <table className="mt-4 w-full text-sm">
+          <thead>
+            <tr className="border-b border-zinc-800 text-left text-xs text-zinc-500">
+              <th className="py-1 font-medium">Item</th>
+              <th className="w-28 py-1 text-right font-medium">Quantity</th>
+              <th className="w-8" />
+            </tr>
+          </thead>
+          <tbody>
+            {list.items.map((i) => (
+              <tr key={i.typeId} className="border-b border-zinc-900">
+                <td className="py-1 text-zinc-200">{i.name}</td>
+                <td className="py-1 text-right">
+                  <input
+                    type="number"
+                    min={1}
+                    value={i.quantity}
+                    onChange={(e) => {
+                      const q = Number(e.currentTarget.value);
+                      if (Number.isFinite(q)) void setQty(i.typeId, q);
+                    }}
+                    className="w-24 rounded bg-zinc-800 px-2 py-0.5 text-right text-zinc-100 outline-none"
+                  />
+                </td>
+                <td className="py-1 text-right">
+                  <button
+                    onClick={() => void remove(i.typeId)}
+                    title="Remove from list"
+                    className="px-1 text-zinc-600 hover:text-red-400"
+                  >
+                    ✕
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="text-xs text-zinc-500">
+              <td className="py-1">{list.items.length} items</td>
+              <td className="py-1 text-right">{totalQty.toLocaleString()}</td>
+              <td />
+            </tr>
+          </tfoot>
+        </table>
+      )}
+    </div>
+  );
+}
+
+// --- Bulk add field (Multibuy-style paste; only adds known items) ---
+
+function AddItemField({
+  listId,
+  onAdded,
+}: {
+  listId: string;
+  onAdded: () => Promise<unknown>;
+}) {
+  const [text, setText] = useState("");
+  const [unresolved, setUnresolved] = useState<string[] | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const parsed = useMemo(() => parseItems(text), [text]);
+
+  async function add() {
+    if (parsed.length === 0 || busy) return;
+    setBusy(true);
+    try {
+      const missed = await shoppingAddText(listId, parsed);
+      setUnresolved(missed);
+      // Keep only the lines we couldn't resolve so they can be fixed; clear the
+      // field entirely when everything landed.
+      setText(missed.join("\n"));
+      await onAdded();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-4">
+      <textarea
+        value={text}
+        onChange={(e) => {
+          setText(e.currentTarget.value);
+          setUnresolved(null);
+        }}
+        onKeyDown={(e) => {
+          // Ctrl/⌘+Enter adds; plain Enter keeps making new lines.
+          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            void add();
+          }
+        }}
+        rows={5}
+        placeholder={"Tritanium\t1000\nHobgoblin II\t5\nRifter"}
+        className="w-full max-w-2xl resize-y rounded bg-zinc-800 px-3 py-2 font-mono text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
+      />
+      <div className="mt-2 flex items-center gap-3">
+        <button
+          onClick={() => void add()}
+          disabled={parsed.length === 0 || busy}
+          className="rounded border border-zinc-700 px-3 py-1 text-sm text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
+        >
+          Add {parsed.length > 0 ? `${parsed.length} line(s)` : "items"}
+        </button>
+        <span className="text-xs text-zinc-500">
+          Paste names or <code>name⇥qty</code> per line · Ctrl/⌘+Enter to add
+        </span>
+      </div>
+      {unresolved && unresolved.length > 0 && (
+        <p className="mt-2 text-xs text-amber-400">
+          Couldn't find {unresolved.length} item(s) — left in the box to fix:{" "}
+          {unresolved.join(", ")}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Parse Multibuy-style paste: one item per line, optional trailing quantity
+ * after a tab or 2+ spaces (mirrors the appraisal tool). */
+function parseItems(text: string): { name: string; quantity: number }[] {
+  const out: { name: string; quantity: number }[] = [];
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    let name = line;
+    let qty = 1;
+    const parts = line.split(/\t| {2,}/).filter(Boolean);
+    if (parts.length >= 2) {
+      const last = parts[parts.length - 1].replace(/[.,\s]/g, "");
+      if (/^\d+$/.test(last)) {
+        qty = Number(last);
+        name = parts.slice(0, -1).join(" ").trim();
+      }
+    }
+    if (name) out.push({ name, quantity: qty });
+  }
+  return out;
+}
