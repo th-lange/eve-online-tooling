@@ -1380,6 +1380,67 @@ fn optimize_fit(
                 }
             }
         }
+
+        // 4) Ammo — a turret/launcher with no charge does **zero** damage, so an
+        // unarmed "optimize for damage" result reads as 0 DPS (and the UI hides the
+        // panel). Load each empty weapon with the highest-damage compatible charge:
+        // matching charge size (128) and one of the weapon's allowed charge groups
+        // (604/605/606/609/610), in the allowed meta.
+        let attr_of = |tid: i64, aid: i64| -> Option<f64> {
+            attrs
+                .get(&tid)
+                .and_then(|a| a.iter().find(|(k, _)| *k == aid).map(|(_, v)| *v))
+        };
+        // Every charge group any fitted weapon accepts, gathered once.
+        let mut all_charge_groups: Vec<i64> = fit
+            .items
+            .iter()
+            .filter(|i| i.slot == SlotKind::High && i.charge_type_id.is_none())
+            .flat_map(|i| [604, 605, 606, 609, 610].iter().filter_map(|g| attr_of(i.type_id, *g)))
+            .map(|v| v as i64)
+            .collect();
+        all_charge_groups.sort_unstable();
+        all_charge_groups.dedup();
+        if !all_charge_groups.is_empty() {
+            let charge_cands = sde
+                .modules_in_groups(&all_charge_groups, &meta)
+                .map_err(|e| e.to_string())?;
+            let charge_ids: Vec<i64> = charge_cands.iter().map(|(t, _)| *t).collect();
+            let charge_attrs = sde.types_attributes_raw(&charge_ids).map_err(|e| e.to_string())?;
+            let charge_size_of = |tid: i64| -> Option<f64> {
+                charge_attrs
+                    .get(&tid)
+                    .and_then(|a| a.iter().find(|(k, _)| *k == 128).map(|(_, v)| *v))
+            };
+            for item in fit.items.iter_mut() {
+                if item.slot != SlotKind::High || item.charge_type_id.is_some() {
+                    continue;
+                }
+                let groups: Vec<i64> = [604, 605, 606, 609, 610]
+                    .iter()
+                    .filter_map(|g| attr_of(item.type_id, *g))
+                    .map(|v| v as i64)
+                    .collect();
+                if groups.is_empty() {
+                    continue; // not a charged weapon (e.g. smartbomb)
+                }
+                let size = attr_of(item.type_id, 128);
+                let best = charge_cands
+                    .iter()
+                    .filter(|(_, g)| groups.contains(g))
+                    // Match charge size when both sides declare one.
+                    .filter(|(c, _)| match (size, charge_size_of(*c)) {
+                        (Some(w), Some(cs)) => (w - cs).abs() < 0.5,
+                        _ => true,
+                    })
+                    .map(|(c, _)| (*c, base_damage(&charge_attrs, *c)))
+                    .filter(|(_, d)| *d > 0.0)
+                    .max_by(|a, b| a.1.total_cmp(&b.1));
+                if let Some((charge, _)) = best {
+                    item.charge_type_id = Some(charge);
+                }
+            }
+        }
     }
 
     Ok(fit)
@@ -1428,6 +1489,10 @@ pub fn fitting_delete_local(app: AppHandle, id: String) -> Result<(), String> {
     fits.retain(|f| f.id != id);
     storage::save_data(&dir, FITS_KEY, &fits)
 }
+
+
+
+
 
 
 
