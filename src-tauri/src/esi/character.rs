@@ -81,6 +81,11 @@ pub async fn authed_get_paged_pub<T: DeserializeOwned>(
 
 /// Public `/universe/names/` resolver: ids → names (characters, corps, factions,
 /// systems, types). Unauthenticated POST; unknown ids are simply absent.
+///
+/// ESI **fails the whole batch with a 404 if any single id is unresolvable**, so
+/// a naive request would drop every name (this is why hostile corps showed as
+/// ids). We split-and-retry on failure to isolate the bad id, so one bad id only
+/// costs itself, not the rest of the batch.
 pub async fn resolve_names(
     auth: &AuthState,
     ids: &[i64],
@@ -90,28 +95,51 @@ pub async fn resolve_names(
         id: i64,
         name: String,
     }
+
     let mut out = std::collections::HashMap::new();
     if ids.is_empty() {
         return out;
     }
-    // ESI caps the batch at 1000 ids per call. Failures are skipped, not fatal.
-    for chunk in ids.chunks(1000) {
-        let Ok(resp) = auth
-            .http()
-            .post(format!("{ESI_BASE}/latest/universe/names/"))
-            .json(&chunk)
-            .send()
-            .await
-        else {
+
+    // Dedup (callers pass many duplicate corp/alliance ids) and seed the work
+    // stack with ESI-sized batches (cap 1000 per call).
+    let mut unique: Vec<i64> = ids.iter().copied().filter(|&id| id > 0).collect();
+    unique.sort_unstable();
+    unique.dedup();
+    let mut stack: Vec<Vec<i64>> = unique.chunks(1000).map(<[i64]>::to_vec).collect();
+
+    while let Some(batch) = stack.pop() {
+        if batch.is_empty() {
             continue;
-        };
-        let Ok(resp) = resp.error_for_status() else {
-            continue;
-        };
-        if let Ok(rows) = resp.json::<Vec<NameRow>>().await {
-            for r in rows {
-                out.insert(r.id, r.name);
+        }
+        let result = async {
+            let resp = auth
+                .http()
+                .post(format!("{ESI_BASE}/latest/universe/names/"))
+                .json(&batch)
+                .send()
+                .await
+                .ok()?
+                .error_for_status()
+                .ok()?;
+            resp.json::<Vec<NameRow>>().await.ok()
+        }
+        .await;
+
+        match result {
+            Some(rows) => {
+                for r in rows {
+                    out.insert(r.id, r.name);
+                }
             }
+            // Failed — a single id can poison the whole batch. Split to isolate
+            // it; a lone id that still fails is simply unresolvable and dropped.
+            None if batch.len() > 1 => {
+                let mid = batch.len() / 2;
+                stack.push(batch[mid..].to_vec());
+                stack.push(batch[..mid].to_vec());
+            }
+            None => {}
         }
     }
     out
