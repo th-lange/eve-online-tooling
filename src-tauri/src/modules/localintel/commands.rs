@@ -91,11 +91,6 @@ struct Affiliation {
     #[serde(default)]
     faction_id: Option<i64>,
 }
-#[derive(Deserialize)]
-struct EsiStanding {
-    from_id: i64,
-    standing: f64,
-}
 /// One contact (`/{characters|corporations|alliances}/{id}/contacts/`): a
 /// blue/red mark on a character, corp, alliance or faction. `contact_id` is the
 /// entity id. Same shape across the personal/corp/alliance endpoints.
@@ -335,12 +330,15 @@ pub async fn local_scan(
             .and_then(|al| org_names.get(&al).cloned());
         // Standing: most specific entry wins — a personal contact on the pilot
         // themselves, then corp → alliance → faction.
+        // Most specific player standing wins: the pilot, then their corp, then
+        // their alliance. NPC *faction* standings are deliberately NOT applied —
+        // your standing toward an empire faction (e.g. −10 from missions) must
+        // not flag every faction-warfare militia player as hostile.
         let standing = standings.get(&c.id).copied().or_else(|| {
             aff.and_then(|a| {
                 standings
                     .get(&a.corporation_id)
                     .or_else(|| a.alliance_id.and_then(|al| standings.get(&al)))
-                    .or_else(|| a.faction_id.and_then(|f| standings.get(&f)))
                     .copied()
             })
         });
@@ -385,13 +383,14 @@ fn threat_rank(threat: &str) -> u8 {
     }
 }
 
-/// The active character's standings as an entity-id → standing map, used to
-/// classify Local. Layered, **most-specific winning** (matching EVE):
-///   1. NPC **standings** (`/standings/`) — factions/agents earned from missions.
-///   2. **Alliance** contacts — set by your alliance leadership.
-///   3. **Corp** contacts — set by your corp leadership.
-///   4. Your **personal** contacts — the blue/red you set yourself (highest).
-/// Each layer overwrites the previous for the same entity. Returns empty
+/// The active character's standings toward **players** as an entity-id →
+/// standing map, used to classify Local. Layered, **most-specific winning**:
+///   1. **Alliance** contacts — set by your alliance leadership.
+///   2. **Corp** contacts — set by your corp leadership.
+///   3. Your **personal** contacts — the blue/red you set yourself (highest).
+/// Each layer overwrites the previous for the same entity. NPC faction/agent
+/// standings are intentionally excluded — they describe NPCs, not players, and
+/// applying them flagged faction-warfare pilots as false −10 reds. Returns empty
 /// (everyone neutral) if no character is active or every fetch fails; any layer
 /// whose scope/role isn't granted (403) is simply skipped.
 async fn load_standings(app: &AppHandle, auth_state: &AuthState) -> HashMap<i64, f64> {
@@ -409,20 +408,7 @@ async fn load_standings(app: &AppHandle, auth_state: &AuthState) -> HashMap<i64,
         }
     };
 
-    // 1. NPC standings (already-granted scope).
-    if let Ok(rows) = authed_get::<Vec<EsiStanding>>(
-        auth_state,
-        character_id,
-        &format!("/latest/characters/{character_id}/standings/"),
-    )
-    .await
-    {
-        for s in rows {
-            map.insert(s.from_id, s.standing);
-        }
-    }
-
-    // 2/3. Alliance then corp contacts (needs esi-alliances.read_contacts.v1 /
+    // 1/2. Alliance then corp contacts (needs esi-alliances.read_contacts.v1 /
     // esi-corporations.read_contacts.v1 + membership/role). The character's corp
     // gives both ids; a 403 (no scope/role, or not in an alliance) is skipped.
     if let Ok(corp_id) = corporation_id(auth_state, character_id).await {
@@ -456,8 +442,8 @@ async fn load_standings(app: &AppHandle, auth_state: &AuthState) -> HashMap<i64,
         }
     }
 
-    // 4. Personal contacts (needs esi-characters.read_contacts.v1) — your own
-    // explicit marks win over corp/alliance and NPC standings.
+    // 3. Personal contacts (needs esi-characters.read_contacts.v1) — your own
+    // explicit marks win over corp/alliance.
     if let Ok(rows) = authed_get_paged_pub::<Contact>(
         auth_state,
         character_id,
