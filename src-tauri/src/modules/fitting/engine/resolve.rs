@@ -29,8 +29,11 @@ pub struct EntityInput {
     pub effect_ids: Vec<i64>,
     /// `invGroups.groupID` (for `LocationGroupModifier` targeting).
     pub group_id: i64,
-    /// `requiredSkill1` type id (for `*RequiredSkillModifier` targeting).
-    pub required_skill: Option<i64>,
+    /// All required-skill type ids (requiredSkill1/2/3 = attrs 182/183/184), for
+    /// `*RequiredSkillModifier` targeting — a skill bonus can key off **any** of
+    /// them (e.g. Weapon Upgrades reduces CPU of modules requiring Gunnery, which
+    /// is a turret's *second* required skill, not its first).
+    pub required_skills: Vec<i64>,
 }
 
 /// A whole fit reduced to resolution inputs.
@@ -64,7 +67,7 @@ pub fn resolve(
     let mut modules: Vec<AttrStore> = input.modules.iter().map(seed).collect();
     let mut skills: Vec<AttrStore> = input.skills.iter().map(seed).collect();
     let group_ids: Vec<i64> = input.modules.iter().map(|m| m.group_id).collect();
-    let req_skills: Vec<Option<i64>> = input.modules.iter().map(|m| m.required_skill).collect();
+    let req_skills: Vec<&Vec<i64>> = input.modules.iter().map(|m| &m.required_skills).collect();
     let mut unresolved = 0;
 
     // Precompute each entity's modifiers once.
@@ -143,7 +146,7 @@ fn apply_outward(
     ship: &mut AttrStore,
     modules: &mut [AttrStore],
     group_ids: &[i64],
-    req_skills: &[Option<i64>],
+    req_skills: &[&Vec<i64>],
 ) {
     for m in mods {
         if m.domain == Domain::Item {
@@ -161,7 +164,7 @@ fn apply_outward_from_ship(
     ship: &mut AttrStore,
     modules: &mut [AttrStore],
     group_ids: &[i64],
-    req_skills: &[Option<i64>],
+    req_skills: &[&Vec<i64>],
 ) {
     let vals: Vec<f64> = mods.iter().map(|m| ship.get(m.src_attr)).collect();
     for (m, value) in mods.iter().zip(vals) {
@@ -179,7 +182,7 @@ fn apply_to_targets(
     ship: &mut AttrStore,
     modules: &mut [AttrStore],
     group_ids: &[i64],
-    req_skills: &[Option<i64>],
+    req_skills: &[&Vec<i64>],
     self_index: Option<usize>,
 ) {
     match m.domain {
@@ -198,7 +201,7 @@ fn apply_to_targets(
         }
         Domain::SkillReqOnShip(skill) => {
             for (i, s) in modules.iter_mut().enumerate() {
-                if req_skills[i] == Some(skill) {
+                if req_skills[i].contains(&skill) {
                     s.apply(m.tgt_attr, m.op, value, m.penalized);
                 }
             }
@@ -261,13 +264,13 @@ mod tests {
                 attrs: vec![(64, 1.0)], // turret base damageMultiplier
                 effect_ids: vec![],
                 group_id: 55,
-                required_skill: None,
+                required_skills: Vec::new(),
             }],
             skills: vec![EntityInput {
                 attrs: vec![(280, 5.0), (292, 3.0)], // level V, 3%/level
                 effect_ids: vec![100, 101],
                 group_id: 0,
-                required_skill: None,
+                required_skills: Vec::new(),
             }],
         };
 
@@ -292,13 +295,13 @@ mod tests {
                 attrs: vec![(64, 1.0)],
                 effect_ids: vec![],
                 group_id: 55, // projectile, not the hybrid group 74
-                required_skill: None,
+                required_skills: Vec::new(),
             }],
             skills: vec![EntityInput {
                 attrs: vec![(292, 15.0)],
                 effect_ids: vec![101],
                 group_id: 0,
-                required_skill: None,
+                required_skills: Vec::new(),
             }],
         };
         let resolved = resolve(&input, &effects, &|_| true);
