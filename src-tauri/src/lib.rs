@@ -76,6 +76,7 @@ pub fn run() {
             sde::commands::sde_search,
             sde::commands::sde_search_ships,
             sde::commands::sde_type_names,
+            sde::commands::sde_type_infos,
             market::commands::market_regions,
             market::commands::market_price,
             market::commands::market_prices,

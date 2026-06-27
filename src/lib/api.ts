@@ -1048,6 +1048,18 @@ export function sdeTypeNames(typeIds: number[]): Promise<IdName[]> {
   return invoke<IdName[]>("sde_type_names", { typeIds });
 }
 
+/** A type's id, name and group (for grouping fits by ship group). */
+export interface TypeBrief {
+  id: number;
+  name: string;
+  group: string;
+}
+
+/** `(id, name, group)` for a set of type ids (bulk). */
+export function sdeTypeInfos(typeIds: number[]): Promise<TypeBrief[]> {
+  return invoke<TypeBrief[]>("sde_type_infos", { typeIds });
+}
+
 // --- Market history ---
 
 export interface HistoryPoint {

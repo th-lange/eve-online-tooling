@@ -14,6 +14,7 @@ import {
   marketRegions,
   sdeSearchShips,
   sdeStatus,
+  sdeTypeInfos,
   sdeTypeNames,
   type CapStats,
   type Fit,
@@ -55,10 +56,6 @@ function Workbench() {
     5: false,
   });
 
-  // --- Fit picker (top-right): search local + in-game fits by name ---
-  const [fitQuery, setFitQuery] = useState("");
-  const [fitsOpen, setFitsOpen] = useState(false);
-
   const regions = useQuery({ queryKey: ["market", "regions"], queryFn: marketRegions });
   // Ship-only search (no modules/charges/blueprints).
   const ships = useQuery({
@@ -68,10 +65,10 @@ function Workbench() {
   });
   const saved = useQuery({ queryKey: ["fitting", "saved"], queryFn: fittingListLocal });
   // In-game (ESI) fittings — fetched on demand (cached server-side), not on mount.
+  // Auto-load in-game fits (cached server-side 30m); "Refresh" forces a fetch.
   const esiFits = useQuery({
     queryKey: ["fitting", "esi"],
     queryFn: () => fittingEsiList(),
-    enabled: false,
   });
 
   const layout = useQuery({
@@ -149,16 +146,54 @@ function Workbench() {
     onError: (e) => alert(`Optimize failed: ${e}`),
   });
 
-  // Combined, searchable fit list (local + in-game).
+  // All fits (local + in-game), each tagged with its source.
   const allFits = useMemo(() => {
     const local = (saved.data ?? []).map((f) => ({ fit: f, source: "saved" as const }));
     const esi = (esiFits.data ?? []).map((f) => ({ fit: f, source: "in-game" as const }));
     return [...local, ...esi];
   }, [saved.data, esiFits.data]);
-  const filteredFits = useMemo(() => {
-    const q = fitQuery.trim().toLowerCase();
-    return allFits.filter(({ fit }) => !q || fit.name.toLowerCase().includes(q));
-  }, [allFits, fitQuery]);
+
+  // Resolve each fit's hull to its name + ship group, for grouping the dropdown.
+  const hullIds = useMemo(
+    () => [...new Set(allFits.map((f) => f.fit.shipTypeId))],
+    [allFits],
+  );
+  const hulls = useQuery({
+    queryKey: ["fitting", "hullInfos", hullIds],
+    queryFn: () => sdeTypeInfos(hullIds),
+    enabled: hullIds.length > 0,
+  });
+  const hullInfo = useMemo(
+    () => new Map((hulls.data ?? []).map((h) => [h.id, h])),
+    [hulls.data],
+  );
+
+  // Group fits by ship group → (hull, fit name), sorted, for the dropdown.
+  const fitGroups = useMemo(() => {
+    const byGroup = new Map<
+      string,
+      { key: string; hull: string; name: string; source: string; fit: Fit }[]
+    >();
+    allFits.forEach(({ fit: f, source }, i) => {
+      const info = hullInfo.get(f.shipTypeId);
+      const group = info?.group || "Other";
+      const hull = info?.name || `#${f.shipTypeId}`;
+      const list = byGroup.get(group) ?? [];
+      list.push({ key: `${source}:${f.id}:${i}`, hull, name: f.name, source, fit: f });
+      byGroup.set(group, list);
+    });
+    return [...byGroup.entries()]
+      .map(([group, fits]) => ({
+        group,
+        fits: fits.sort((a, b) => a.hull.localeCompare(b.hull) || a.name.localeCompare(b.name)),
+      }))
+      .sort((a, b) => a.group.localeCompare(b.group));
+  }, [allFits, hullInfo]);
+  const fitByKey = useMemo(() => {
+    const m = new Map<string, Fit>();
+    for (const g of fitGroups) for (const f of g.fits) m.set(f.key, f.fit);
+    return m;
+  }, [fitGroups]);
 
   function pickShip(id: number, name: string) {
     setQuery("");
@@ -232,68 +267,39 @@ function Workbench() {
           </select>
         </label>
 
-        {/* Fits picker — independent of the hull selection */}
-        <div className="relative ml-auto">
+        {/* Fits picker — independent of the hull, grouped by ship group → hull → name */}
+        <div className="ml-auto flex items-end gap-2">
           <label className="flex flex-col gap-1 text-xs text-zinc-400">
-            Fits (saved + in-game)
-            <input
-              value={fitQuery}
-              onChange={(e) => setFitQuery(e.currentTarget.value)}
-              onFocus={() => setFitsOpen(true)}
-              onBlur={() => setTimeout(() => setFitsOpen(false), 150)}
-              placeholder="search your fits by name…"
-              className="w-64 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
-            />
+            Fits ({allFits.length} saved + in-game)
+            <select
+              value=""
+              onChange={(e) => {
+                const f = fitByKey.get(e.currentTarget.value);
+                if (f) setFit(f);
+              }}
+              className="w-72 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+            >
+              <option value="">load a fit…</option>
+              {fitGroups.map((g) => (
+                <optgroup key={g.group} label={g.group}>
+                  {g.fits.map((f) => (
+                    <option key={f.key} value={f.key}>
+                      {f.hull} — {f.name}
+                      {f.source === "in-game" ? "  (EVE)" : ""}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
           </label>
-          {fitsOpen && (
-            <div className="absolute right-0 z-20 mt-1 max-h-72 w-72 overflow-auto rounded border border-zinc-700 bg-zinc-900 text-sm shadow-lg">
-              <div className="flex items-center justify-between border-b border-zinc-800 px-2 py-1 text-[11px] text-zinc-500">
-                <span>{filteredFits.length} fit(s)</span>
-                <button
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => esiFits.refetch()}
-                  className="rounded border border-zinc-700 px-1.5 text-zinc-300 hover:bg-zinc-800"
-                >
-                  {esiFits.isFetching ? "…" : "Load from EVE"}
-                </button>
-              </div>
-              {filteredFits.length === 0 ? (
-                <div className="px-2 py-2 text-xs text-zinc-600">
-                  No fits. Save one, or “Load from EVE” (needs the esi-fittings scope).
-                </div>
-              ) : (
-                filteredFits.map(({ fit: f, source }) => (
-                  <div
-                    key={`${source}:${f.id}`}
-                    className="group flex items-center gap-1 px-2 py-1 hover:bg-zinc-800"
-                  >
-                    <button
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => {
-                        setFit(f);
-                        setFitsOpen(false);
-                      }}
-                      className="min-w-0 flex-1 truncate text-left text-zinc-300"
-                      title={f.name}
-                    >
-                      {f.name}
-                    </button>
-                    <span className="shrink-0 text-[10px] text-zinc-600">{source}</span>
-                    {source === "saved" && (
-                      <button
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => del.mutate(f.id)}
-                        className="shrink-0 text-zinc-600 opacity-0 hover:text-rose-400 group-hover:opacity-100"
-                        title="Delete saved fit"
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          )}
+          <button
+            onClick={() => esiFits.refetch()}
+            disabled={esiFits.isFetching}
+            title="Refresh in-game fittings from EVE"
+            className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+          >
+            {esiFits.isFetching ? "…" : "Refresh"}
+          </button>
         </div>
       </div>
 
@@ -335,6 +341,17 @@ function Workbench() {
               >
                 Export EFT
               </button>
+              {saved.data?.some((s) => s.id === fit.id) && (
+                <button
+                  onClick={() => {
+                    del.mutate(fit.id);
+                    setFit(null);
+                  }}
+                  className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-rose-400"
+                >
+                  Delete
+                </button>
+              )}
             </div>
 
             {/* Optimize */}

@@ -403,6 +403,25 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// `(type_id, name, group_name)` for the given type ids (bulk) — for grouping
+    /// fits by their hull's ship group.
+    pub fn type_infos(&self, type_ids: &[i64]) -> Result<Vec<(i64, String, String)>, SdeError> {
+        if type_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = vec!["?"; type_ids.len()].join(", ");
+        let sql = format!(
+            "SELECT t.typeID, t.typeName, COALESCE(g.groupName, '')
+             FROM invTypes t LEFT JOIN invGroups g ON g.groupID = t.groupID
+             WHERE t.typeID IN ({placeholders})",
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(type_ids.iter()), |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// The reprocessing recipe for a single type (any item with refine outputs),
     /// or `None`. For the reprocess-appraisal tool.
     pub fn reprocess_recipe(&self, type_id: i64) -> Result<Option<ReprocessRecipe>, SdeError> {

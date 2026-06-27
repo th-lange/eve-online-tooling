@@ -561,6 +561,51 @@ fn dps_of(
     damage(&turrets, &missiles, &drones)
 }
 
+/// Damage-objective score for the optimizer. Like DPS, but a turret with **no
+/// charge loaded** still contributes `mult / RoF` (a unit shot), so optimizing
+/// for damage works even when the fit's weapons aren't ammoed — it ranks by
+/// weapon damage *potential*, which is monotonic with real DPS for fixed ammo.
+/// (`dps_of` keeps showing 0 for unarmed weapons in the stats panel.)
+fn damage_score(
+    resolved: &ResolvedFit,
+    module_items: &[&FitItem],
+    drone_items: &[&FitItem],
+    attrs: &AttrMap,
+) -> f64 {
+    let mut total = 0.0;
+    for (item, store) in module_items.iter().zip(&resolved.modules) {
+        let rof = store.get(51) / 1000.0;
+        if rof <= 0.0 {
+            continue;
+        }
+        let charge_dmg = item
+            .charge_type_id
+            .map(|c| base_damage(attrs, c))
+            .filter(|d| *d > 0.0);
+        let mult = store.get(64);
+        if mult > 0.0 {
+            // Turret: mult × (ammo damage, or a unit shot when unloaded).
+            total += mult * charge_dmg.unwrap_or(1.0) / rof;
+        } else if let Some(dmg) = charge_dmg {
+            // Missile (charged, no multiplier).
+            total += dmg / rof;
+        }
+    }
+    for d in drone_items {
+        let get = |id: i64| {
+            attrs
+                .get(&d.type_id)
+                .and_then(|a| a.iter().find(|(k, _)| *k == id).map(|(_, v)| *v))
+                .unwrap_or(0.0)
+        };
+        let rof = get(51) / 1000.0;
+        if rof > 0.0 {
+            total += get(64) * base_damage(attrs, d.type_id) / rof * d.quantity.max(1) as f64;
+        }
+    }
+    total
+}
+
 /// Capacitor stability from a resolved fit (#172). Steady drain assumes every
 /// cap-using module runs (capacitorNeed 6 / duration 73 ms); per-module on/off
 /// toggling is a UI follow-up.
@@ -890,7 +935,7 @@ fn objective_value(
             let t = tank_of(&resolved);
             t.shield_rep_s + t.armor_rep_s
         }
-        Objective::Damage => dps_of(&resolved, &module_items, &drone_items, attrs).total,
+        Objective::Damage => damage_score(&resolved, &module_items, &drone_items, attrs),
         Objective::Yield => mining_yield(&resolved),
     };
     Some(value)
@@ -1133,5 +1178,7 @@ pub fn fitting_delete_local(app: AppHandle, id: String) -> Result<(), String> {
     fits.retain(|f| f.id != id);
     storage::save_data(&dir, FITS_KEY, &fits)
 }
+
+
 
 
