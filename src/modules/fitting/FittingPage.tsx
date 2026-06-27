@@ -562,19 +562,23 @@ function SlotGrid({
             ) : (
               <ul className="text-sm text-zinc-300">
                 {items.map(({ it, i }) => (
-                  <li key={i} className="group flex items-center justify-between">
+                  <li
+                    key={i}
+                    className="group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-zinc-800/70"
+                  >
+                    <button
+                      onClick={() => onRemove(i)}
+                      className="shrink-0 text-zinc-600 group-hover:text-red-400"
+                      title="Remove from slot"
+                      aria-label={`Remove ${nameOf(it.typeId)}`}
+                    >
+                      ✕
+                    </button>
                     <span className="truncate">
                       {nameOf(it.typeId)}
                       {it.chargeTypeId ? ` + ${nameOf(it.chargeTypeId)}` : ""}
                       {it.quantity > 1 ? ` x${it.quantity}` : ""}
                     </span>
-                    <button
-                      onClick={() => onRemove(i)}
-                      className="ml-2 shrink-0 text-zinc-600 opacity-0 hover:text-red-400 group-hover:opacity-100"
-                      title="Remove from slot"
-                    >
-                      ✕
-                    </button>
                   </li>
                 ))}
               </ul>
