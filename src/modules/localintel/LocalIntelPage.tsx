@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   isPermissionGranted,
@@ -65,9 +65,16 @@ export function LocalIntelPage() {
   const qc = useQueryClient();
   const [text, setText] = useState("");
   const [alertAnyRed, setAlertAnyRed] = useState(true);
+  const [alertNeutrals, setAlertNeutrals] = useState(
+    () => localStorage.getItem("localintel.alertNeutrals") === "on",
+  );
   const [soundOn, setSoundOn] = useState(
     () => localStorage.getItem("localintel.sound") !== "off",
   );
+  // Pilot ids from the previous scan, so we can alert only when a *new* threat
+  // enters Local (re-pasting the same list doesn't re-alarm), and flag arrivals.
+  const prevIdsRef = useRef<Set<number>>(new Set());
+  const [newIds, setNewIds] = useState<Set<number>>(new Set());
   // EVE logs folder (Chatlogs); persisted. Used to prefill names from the
   // newest Local log — only pilots who chatted (logs lack the member list).
   const [logsDir, setLogsDir] = useState(() => localStorage.getItem("eveLogsDir") ?? "");
@@ -101,20 +108,39 @@ export function LocalIntelPage() {
       setZkill(new Map());
       const ids = res.pilots.map((p) => p.characterId);
       if (ids.length > 0) zkillRun.mutate(ids);
-      const watched = res.pilots.filter(
-        (p) => watchIds.has(p.corporationId) || (p.allianceId != null && watchIds.has(p.allianceId)),
+
+      // Pilots new since the last scan (first scan: everyone is "new").
+      const prev = prevIdsRef.current;
+      const fresh = new Set(
+        res.pilots.filter((p) => !prev.has(p.characterId)).map((p) => p.characterId),
       );
-      const threat =
-        watched.length > 0 || (alertAnyRed && res.reds > 0);
-      if (watched.length > 0) {
+      setNewIds(fresh);
+      const isWatch = (p: LocalPilot) =>
+        watchIds.has(p.corporationId) || (p.allianceId != null && watchIds.has(p.allianceId));
+      const arrivals = res.pilots.filter((p) => fresh.has(p.characterId));
+      const newWatched = arrivals.filter(isWatch);
+      const newReds = arrivals.filter((p) => p.threat === "red");
+      const newNeutrals = arrivals.filter((p) => p.threat === "neutral");
+
+      // Alert when a qualifying threat *enters* — watchlisted, red, or (opt-in)
+      // any neutral/unknown.
+      if (newWatched.length > 0) {
         notify(
-          "⚠️ Watchlisted pilots in local",
-          `${watched.length}: ${watched.slice(0, 5).map((p) => p.name).join(", ")}`,
+          "⚠️ Watchlisted pilots entered local",
+          `${newWatched.length}: ${newWatched.slice(0, 5).map((p) => p.name).join(", ")}`,
         );
-      } else if (alertAnyRed && res.reds > 0) {
-        notify("⚠️ Reds in local", `${res.reds} hostile pilot(s)`);
+      } else if (alertAnyRed && newReds.length > 0) {
+        notify("⚠️ Reds entered local", `${newReds.length} hostile pilot(s)`);
+      } else if (alertNeutrals && newNeutrals.length > 0) {
+        notify("⚠️ Neutrals entered local", `${newNeutrals.length} unknown pilot(s)`);
       }
-      if (threat && soundOn) playAlarm();
+      const alarm =
+        newWatched.length > 0 ||
+        (alertAnyRed && newReds.length > 0) ||
+        (alertNeutrals && newNeutrals.length > 0);
+      if (alarm && soundOn) playAlarm();
+
+      prevIdsRef.current = new Set(ids);
     },
   });
 
@@ -226,13 +252,33 @@ export function LocalIntelPage() {
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-zinc-400">
-        <label className="flex cursor-pointer items-center gap-2">
+        <label
+          className="flex cursor-pointer items-center gap-2"
+          title="Alarm when a red enters Local"
+        >
           <input
             type="checkbox"
             checked={alertAnyRed}
             onChange={(e) => setAlertAnyRed(e.currentTarget.checked)}
           />
           Alert on any red
+        </label>
+        <label
+          className="flex cursor-pointer items-center gap-2"
+          title="Also alarm when any neutral/unknown pilot enters Local"
+        >
+          <input
+            type="checkbox"
+            checked={alertNeutrals}
+            onChange={(e) => {
+              setAlertNeutrals(e.currentTarget.checked);
+              localStorage.setItem(
+                "localintel.alertNeutrals",
+                e.currentTarget.checked ? "on" : "off",
+              );
+            }}
+          />
+          Alert on neutrals
         </label>
         <label className="flex cursor-pointer items-center gap-2">
           <input
@@ -277,6 +323,7 @@ export function LocalIntelPage() {
           zkill={zkill}
           zkillLoading={zkillRun.isPending}
           isWatched={isWatched}
+          newIds={newIds}
           onWatch={(id, name) => setWatch.mutate({ id, name, add: true })}
         />
       )}
@@ -517,12 +564,14 @@ function PilotTable({
   zkill,
   zkillLoading,
   isWatched,
+  newIds,
   onWatch,
 }: {
   pilots: LocalPilot[];
   zkill: Map<number, ZkillStats>;
   zkillLoading: boolean;
   isWatched: (p: LocalPilot) => boolean;
+  newIds: Set<number>;
   onWatch: (id: number, name: string) => void;
 }) {
   return (
@@ -553,6 +602,14 @@ function PilotTable({
               <td className="px-3 py-1.5">
                 <span className={dot(p.threat)}>●</span>{" "}
                 <span className="text-zinc-200">{p.name}</span>
+                {newIds.has(p.characterId) && (
+                  <span
+                    className="ml-2 rounded bg-amber-500/20 px-1 text-[10px] font-medium text-amber-300"
+                    title="Entered Local since your last scan"
+                  >
+                    NEW
+                  </span>
+                )}
               </td>
               <td className="px-3 py-1.5 text-zinc-400">{p.corporation || "—"}</td>
               <td className="px-3 py-1.5 text-zinc-400">{p.alliance ?? "—"}</td>
