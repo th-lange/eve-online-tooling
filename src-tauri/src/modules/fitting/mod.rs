@@ -11,4 +11,5 @@
 
 pub mod commands;
 pub mod eft;
+pub mod engine;
 pub mod types;
