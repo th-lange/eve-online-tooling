@@ -6,4 +6,7 @@
 //! capacitor, …, with stacking penalties and skill/ship bonuses) lands here in
 //! P2 alongside this module.
 
+pub mod attr;
+pub mod modifier;
+pub mod stacking;
 pub mod validate;
