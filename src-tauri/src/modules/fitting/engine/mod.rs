@@ -8,6 +8,7 @@
 
 pub mod attr;
 pub mod capacitor;
+pub mod damage;
 pub mod effects;
 pub mod modifier;
 pub mod resolve;

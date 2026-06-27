@@ -132,9 +132,19 @@ pub struct TankStats {
     pub armor_rep_s: f64,
 }
 
+/// Full-application DPS by weapon kind (#174).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DpsBreakdown {
+    pub turret: f64,
+    pub missile: f64,
+    pub drone: f64,
+    pub total: f64,
+}
+
 /// Computed result of simulating a fit. Filled incrementally: P1 populates
-/// `resources`, `validation` and `price`; the dogma engine (P2) adds capacitor
-/// and tank now, with DPS, navigation and targeting alongside as they land.
+/// `resources`, `validation` and `price`; the dogma engine (P2) adds capacitor,
+/// tank and DPS now, with navigation and targeting alongside as they land.
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FitStats {
@@ -146,6 +156,9 @@ pub struct FitStats {
     /// Tank (#173); `None` until the dogma engine runs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tank: Option<TankStats>,
+    /// DPS (#174); `None` until the dogma engine runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dps: Option<DpsBreakdown>,
     /// Whole-fit market value (#163); `None` until priced.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub price: Option<f64>,

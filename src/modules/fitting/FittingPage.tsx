@@ -231,6 +231,25 @@ function Workbench() {
               </div>
             )}
 
+            {stats.data?.dps && stats.data.dps.total > 0 && (
+              <div className="space-y-1">
+                <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+                  DPS (all V)
+                </h3>
+                <div className="text-sm text-zinc-300">
+                  {stats.data.dps.total.toFixed(1)} dps
+                </div>
+                <div className="text-xs text-zinc-500">
+                  {stats.data.dps.turret > 0 &&
+                    `turret ${stats.data.dps.turret.toFixed(1)} `}
+                  {stats.data.dps.missile > 0 &&
+                    `· missile ${stats.data.dps.missile.toFixed(1)} `}
+                  {stats.data.dps.drone > 0 &&
+                    `· drone ${stats.data.dps.drone.toFixed(1)}`}
+                </div>
+              </div>
+            )}
+
             {stats.data?.tank && (
               <div className="space-y-1">
                 <h3 className="text-xs uppercase tracking-wide text-zinc-500">

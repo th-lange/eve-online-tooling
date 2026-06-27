@@ -12,10 +12,12 @@ use tauri::{AppHandle, Manager, State};
 use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule};
 use super::engine::validate::{validate, ValItem};
 use super::engine::capacitor::capacitor;
+use super::engine::damage::{damage, Weapon};
 use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
 use super::engine::tank::{tank, DamageProfile, Layer};
 use super::types::{
-    CapStats, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind, TankStats,
+    CapStats, DpsBreakdown, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind,
+    TankStats,
 };
 use crate::market::{resolve_location, MarketService, PriceModel};
 use crate::sde::{Sde, SdePaths, ShipLayout};
@@ -249,9 +251,9 @@ pub fn fitting_simulate(app: AppHandle, fit: Fit) -> Result<FitStats, String> {
 
     // Dogma engine (all-V): resolve finalized attributes and derive stats.
     // Best-effort — if the engine can't run, those stats are simply absent.
-    let (capacitor, tank) = match run_dogma(&sde, &fit) {
-        Ok(d) => (Some(d.capacitor), Some(d.tank)),
-        Err(_) => (None, None),
+    let (capacitor, tank, dps) = match run_dogma(&sde, &fit) {
+        Ok(d) => (Some(d.capacitor), Some(d.tank), Some(d.dps)),
+        Err(_) => (None, None, None),
     };
 
     Ok(FitStats {
@@ -259,6 +261,7 @@ pub fn fitting_simulate(app: AppHandle, fit: Fit) -> Result<FitStats, String> {
         validation,
         capacitor,
         tank,
+        dps,
         price: None,
     })
 }
@@ -267,6 +270,7 @@ pub fn fitting_simulate(app: AppHandle, fit: Fit) -> Result<FitStats, String> {
 struct DogmaStats {
     capacitor: CapStats,
     tank: TankStats,
+    dps: DpsBreakdown,
 }
 
 /// Build the engine inputs (ship + modules + all-V skills) from the SDE, resolve
@@ -285,10 +289,16 @@ fn run_dogma(sde: &Sde, fit: &Fit) -> Result<DogmaStats, String> {
         })
         .collect();
 
+    // Drones (DPS) and charges (weapon damage) need their base attributes too.
+    let drone_items: Vec<&FitItem> =
+        fit.items.iter().filter(|i| i.slot == SlotKind::Drone).collect();
+
     let skill_ids = sde.skill_type_ids().map_err(|e| e.to_string())?;
     let mut all_ids = Vec::with_capacity(1 + module_items.len() + skill_ids.len());
     all_ids.push(fit.ship_type_id);
     all_ids.extend(module_items.iter().map(|i| i.type_id));
+    all_ids.extend(module_items.iter().filter_map(|i| i.charge_type_id));
+    all_ids.extend(drone_items.iter().map(|i| i.type_id));
     all_ids.extend(&skill_ids);
 
     let attrs = sde.types_attributes_raw(&all_ids).map_err(|e| e.to_string())?;
@@ -343,7 +353,68 @@ fn run_dogma(sde: &Sde, fit: &Fit) -> Result<DogmaStats, String> {
     Ok(DogmaStats {
         capacitor: capacitor_of(&resolved),
         tank: tank_of(&resolved),
+        dps: dps_of(&resolved, &module_items, &drone_items, &attrs),
     })
+}
+
+/// Sum the four base damage types (em 114 / explosive 116 / kinetic 117 /
+/// thermal 118) for a type id from the batched attributes.
+fn base_damage(attrs: &HashMap<i64, Vec<(i64, f64)>>, type_id: i64) -> f64 {
+    let a = match attrs.get(&type_id) {
+        Some(a) => a,
+        None => return 0.0,
+    };
+    a.iter()
+        .filter(|(k, _)| matches!(k, 114 | 116 | 117 | 118))
+        .map(|(_, v)| v)
+        .sum()
+}
+
+/// DPS from a resolved fit (#174). Turrets read finalized `damageMultiplier`
+/// (64) + `speed` (51); missiles (a charged weapon with no multiplier) ride on
+/// the charge; drones use base attributes (their skill bonuses await drone
+/// resolution). `module_items` is parallel to `resolved.modules`.
+fn dps_of(
+    resolved: &ResolvedFit,
+    module_items: &[&FitItem],
+    drone_items: &[&FitItem],
+    attrs: &HashMap<i64, Vec<(i64, f64)>>,
+) -> DpsBreakdown {
+    let mut turrets = Vec::new();
+    let mut missiles = Vec::new();
+    for (item, store) in module_items.iter().zip(&resolved.modules) {
+        let Some(charge) = item.charge_type_id else {
+            continue;
+        };
+        let damage_per_shot = base_damage(attrs, charge);
+        let rof_seconds = store.get(51) / 1000.0;
+        let mult = store.get(64);
+        if mult > 0.0 {
+            turrets.push(Weapon { damage_mult: mult, damage_per_shot, rof_seconds, count: 1 });
+        } else if rof_seconds > 0.0 {
+            missiles.push(Weapon { damage_mult: 1.0, damage_per_shot, rof_seconds, count: 1 });
+        }
+    }
+
+    let drones: Vec<Weapon> = drone_items
+        .iter()
+        .map(|d| {
+            let get = |id: i64| {
+                attrs
+                    .get(&d.type_id)
+                    .and_then(|a| a.iter().find(|(k, _)| *k == id).map(|(_, v)| *v))
+                    .unwrap_or(0.0)
+            };
+            Weapon {
+                damage_mult: get(64),
+                damage_per_shot: base_damage(attrs, d.type_id),
+                rof_seconds: get(51) / 1000.0,
+                count: d.quantity.max(1),
+            }
+        })
+        .collect();
+
+    damage(&turrets, &missiles, &drones)
 }
 
 /// Capacitor stability from a resolved fit (#172). Steady drain assumes every
