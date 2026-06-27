@@ -32,10 +32,42 @@ async function notify(title: string, body: string) {
   }
 }
 
+/** Short two-tone alarm beep via Web Audio (no asset). Best-effort. */
+function playAlarm() {
+  try {
+    const Ctx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext;
+    const ctx = new Ctx();
+    const beep = (start: number, freq: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "square";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + start);
+      gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + 0.18);
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + 0.2);
+    };
+    beep(0, 880);
+    beep(0.22, 1175);
+    setTimeout(() => ctx.close().catch(() => {}), 600);
+  } catch {
+    /* audio unavailable */
+  }
+}
+
 export function LocalIntelPage() {
   const qc = useQueryClient();
   const [text, setText] = useState("");
   const [alertAnyRed, setAlertAnyRed] = useState(true);
+  const [soundOn, setSoundOn] = useState(
+    () => localStorage.getItem("localintel.sound") !== "off",
+  );
   // EVE logs folder (Chatlogs); persisted. Used to prefill names from the
   // newest Local log — only pilots who chatted (logs lack the member list).
   const [logsDir, setLogsDir] = useState(() => localStorage.getItem("eveLogsDir") ?? "");
@@ -72,6 +104,8 @@ export function LocalIntelPage() {
       const watched = res.pilots.filter(
         (p) => watchIds.has(p.corporationId) || (p.allianceId != null && watchIds.has(p.allianceId)),
       );
+      const threat =
+        watched.length > 0 || (alertAnyRed && res.reds > 0);
       if (watched.length > 0) {
         notify(
           "⚠️ Watchlisted pilots in local",
@@ -80,6 +114,7 @@ export function LocalIntelPage() {
       } else if (alertAnyRed && res.reds > 0) {
         notify("⚠️ Reds in local", `${res.reds} hostile pilot(s)`);
       }
+      if (threat && soundOn) playAlarm();
     },
   });
 
@@ -93,9 +128,10 @@ export function LocalIntelPage() {
   const isWatched = (p: LocalPilot) =>
     watchIds.has(p.corporationId) || (p.allianceId != null && watchIds.has(p.allianceId));
 
-  // Right-rail danger list: player corporations in local you've set below −4.
-  // Player corp ids start at 98,000,000 (NPC corps are far lower), so this skips
-  // the empire NPC corps everyone in highsec belongs to.
+  // Right-rail danger list: player corporations in local you've set a negative
+  // (red) standing toward. Player corp ids start at 98,000,000 (NPC corps are
+  // far lower), so this skips the empire NPC corps everyone in highsec belongs
+  // to. Pilots with no standing set (neutrals/unknowns) aren't flagged here.
   const hostileCorps = useMemo(() => {
     const map = new Map<number, { id: number; name: string; standing: number; count: number }>();
     for (const p of result?.pilots ?? []) {
@@ -198,6 +234,21 @@ export function LocalIntelPage() {
           />
           Alert on any red
         </label>
+        <label className="flex cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={soundOn}
+            onChange={(e) => {
+              setSoundOn(e.currentTarget.checked);
+              localStorage.setItem(
+                "localintel.sound",
+                e.currentTarget.checked ? "on" : "off",
+              );
+              if (e.currentTarget.checked) playAlarm(); // confirm it's audible
+            }}
+          />
+          Sound alarm
+        </label>
         {(watchlist.data ?? []).length > 0 && (
           <span>
             Watching:{" "}
@@ -259,10 +310,12 @@ export function LocalIntelPage() {
   );
 }
 
-/** Hostile player-corp standing threshold: flag corps you've set below this. */
-const HOSTILE_STANDING = -4;
+/** Hostile player-corp threshold: any negative standing — matches the "red"
+ *  classification the pilot list uses (standing < 0), rather than the old, much
+ *  stricter < −4 that hid most reds. */
+const HOSTILE_STANDING = 0;
 
-/** Right-rail panel: player corporations in local with a standing below −4. */
+/** Right-rail panel: player corporations in local with a negative (red) standing. */
 function HostileCorpsPanel({
   corps,
   scanned,
@@ -279,7 +332,7 @@ function HostileCorpsPanel({
       <div className="text-xs font-semibold uppercase tracking-wide text-rose-400">
         Hostile corps
       </div>
-      <div className="mb-2 text-[11px] text-zinc-500">player corps · standing &lt; −4</div>
+      <div className="mb-2 text-[11px] text-zinc-500">player corps · red (standing &lt; 0)</div>
       {corps.length === 0 ? (
         <div className="text-xs text-zinc-600">{scanned ? "None in local." : "Scan to populate."}</div>
       ) : (
