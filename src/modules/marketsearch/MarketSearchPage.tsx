@@ -623,13 +623,16 @@ function HistoryView({ series }: { series: HistoryPoint[] }) {
   const [period, setPeriod] = useState(20);
   const [showChannel, setShowChannel] = useState(true);
   const [showMa, setShowMa] = useState(true);
+  const [showMedian, setShowMedian] = useState(true);
 
   const last = series[series.length - 1];
   const avgVol = Math.round(series.reduce((s, p) => s + p.volume, 0) / series.length);
+  const med = useMemo(() => median(series.map((p) => p.average)), [series]);
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
         <Stat label="Latest avg" value={formatIsk(last.average)} />
+        <Stat label="Median price" value={formatIsk(med)} />
         <Stat label="Latest volume" value={formatInt(last.volume)} />
         <Stat label="Avg volume/day" value={formatInt(avgVol)} />
         <div className="ml-auto flex items-center gap-3 text-xs text-zinc-400">
@@ -665,9 +668,25 @@ function HistoryView({ series }: { series: HistoryPoint[] }) {
             />
             Donchian
           </label>
+          <label className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={showMedian}
+              onChange={(e) => setShowMedian(e.currentTarget.checked)}
+              className="accent-violet-500"
+            />
+            Median
+          </label>
         </div>
       </div>
-      <PriceChart series={series} period={period} showChannel={showChannel} showMa={showMa} />
+      <PriceChart
+        series={series}
+        period={period}
+        median={med}
+        showChannel={showChannel}
+        showMa={showMa}
+        showMedian={showMedian}
+      />
       <div className="h-3" />
       <Chart
         series={series}
@@ -717,6 +736,14 @@ function sma(vals: number[], period: number): number[] {
   });
 }
 
+/** Median of `vals` (robust "typical" value, unmoved by price spikes). */
+function median(vals: number[]): number {
+  if (vals.length === 0) return 0;
+  const sorted = [...vals].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
 /** Donchian channel: rolling max of the daily high / min of the daily low over
  *  `period`. Falls back to the day's average when a high/low is missing. */
 function donchian(series: HistoryPoint[], period: number): { upper: number[]; lower: number[] } {
@@ -742,17 +769,21 @@ function donchian(series: HistoryPoint[], period: number): { upper: number[]; lo
 function PriceChart({
   series,
   period,
+  median: med,
   showChannel,
   showMa,
+  showMedian,
 }: {
   series: HistoryPoint[];
   period: number;
+  median: number;
   showChannel: boolean;
   showMa: boolean;
+  showMedian: boolean;
 }) {
   const [hover, setHover] = useState<number | null>(null);
-  const w = 720;
-  const h = 180;
+  const w = 960;
+  const h = 320;
   const padX = 8;
   const padY = 10;
 
@@ -790,6 +821,7 @@ function PriceChart({
         <Legend color="#34d399" label="Average price" />
         {showMa && <Legend color="#f59e0b" label={`MA ${period}d`} />}
         {showChannel && <Legend color="#38bdf8" label={`Donchian ${period}d`} />}
+        {showMedian && <Legend color="#a78bfa" label={`Median ${formatIsk(med)}`} />}
         <span className="ml-auto tabular-nums text-zinc-300">
           {hover != null
             ? `${series[hover].date} · ${formatIsk(avg[hover])}` +
@@ -814,6 +846,17 @@ function PriceChart({
             <polyline points={line(upper)} fill="none" stroke="#38bdf8" strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.8" />
             <polyline points={line(lower)} fill="none" stroke="#38bdf8" strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.8" />
           </>
+        )}
+        {showMedian && (
+          <line
+            x1={padX}
+            x2={w - padX}
+            y1={y(med)}
+            y2={y(med)}
+            stroke="#a78bfa"
+            strokeWidth="1"
+            strokeDasharray="5 4"
+          />
         )}
         <polyline points={line(avg)} fill="none" stroke="#34d399" strokeWidth="1.5" />
         {showMa && <polyline points={line(ma)} fill="none" stroke="#f59e0b" strokeWidth="1.5" />}
@@ -853,8 +896,8 @@ function Chart({
   fmt: (v: number) => string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
-  const w = 720;
-  const h = 150;
+  const w = 960;
+  const h = 200;
   const padX = 8;
   const padY = 10;
   const vals = series.map(pick);
