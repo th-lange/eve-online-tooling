@@ -396,7 +396,10 @@ function Workbench() {
                   <input
                     type="checkbox"
                     checked={!!meta[id]}
-                    onChange={(e) => setMeta((m) => ({ ...m, [id]: e.currentTarget.checked }))}
+                    onChange={(e) => {
+                      const checked = e.currentTarget.checked;
+                      setMeta((m) => ({ ...m, [id]: checked }));
+                    }}
                   />
                   {label}
                 </label>
