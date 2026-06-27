@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Activity ids as used by the SDE `industryActivity*` tables.
 pub mod activity {
@@ -122,4 +122,99 @@ pub struct ManufacturableBlueprint {
     pub product_type_id: i64,
     pub product_name: String,
     pub product_quantity: i64,
+}
+
+// --- Fitting / dogma (#159, #160) ---
+
+/// One parsed entry of a `dgmEffects.modifierInfo` JSON array — the SDE's
+/// pre-parsed description of *how* an effect modifies an attribute. The fitting
+/// engine turns these into its internal modifier representation; we keep the
+/// SDE's own field names here. `dgmExpressions` is empty in the Fuzzwork dump,
+/// so this is the only structured modifier source (see #157).
+///
+/// Example (Gyrostabilizer II, effect 92):
+/// `{"domain":"shipID","func":"LocationGroupModifier","groupID":55,
+///   "modifiedAttributeID":64,"modifyingAttributeID":64,"operation":4}`
+// Consumed by the dogma engine (P2, #170/#171); landed here with the SDE query.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ModifierInfo {
+    /// `shipID` | `charID` | `itemID` | `targetID` | `otherID` (where the target lives).
+    #[serde(default)]
+    pub domain: Option<String>,
+    /// `ItemModifier` | `LocationModifier` | `LocationGroupModifier` |
+    /// `(Owner|Location)RequiredSkillModifier` | `EffectStopper` | …
+    #[serde(default)]
+    pub func: Option<String>,
+    /// Attribute being changed on each target.
+    #[serde(rename = "modifiedAttributeID", default)]
+    pub modified_attribute_id: Option<i64>,
+    /// Attribute on the affecting item carrying the magnitude.
+    #[serde(rename = "modifyingAttributeID", default)]
+    pub modifying_attribute_id: Option<i64>,
+    /// EVE operation code: 0 preAssign, 1 preMul, 2 modAdd, 3 modSub,
+    /// 4 postMul, 5 postPercent, 6 postDiv, 7 postAssign.
+    #[serde(default)]
+    pub operation: Option<i64>,
+    /// For `LocationGroupModifier`: restrict targets to this group.
+    #[serde(rename = "groupID", default)]
+    pub group_id: Option<i64>,
+    /// For skill modifiers: restrict to items requiring this skill.
+    #[serde(rename = "skillTypeID", default)]
+    pub skill_type_id: Option<i64>,
+}
+
+/// Metadata for one dogma effect (`dgmEffects`) plus its parsed modifiers.
+#[allow(dead_code)] // consumed by the dogma engine (P2, #171)
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EffectMeta {
+    pub effect_id: i64,
+    pub name: String,
+    /// Effect category (1 passive, 2 online, 3 active, 4 overload, …).
+    pub category: i64,
+    pub is_offensive: bool,
+    pub is_assistance: bool,
+    /// Attribute ids describing an active effect's cycle, if any.
+    pub duration_attribute_id: Option<i64>,
+    pub discharge_attribute_id: Option<i64>,
+    pub range_attribute_id: Option<i64>,
+    pub falloff_attribute_id: Option<i64>,
+    pub tracking_speed_attribute_id: Option<i64>,
+    /// Parsed `modifierInfo` (empty when the effect carries none).
+    pub modifiers: Vec<ModifierInfo>,
+}
+
+/// Metadata for one dogma attribute (`dgmAttributeTypes`).
+#[allow(dead_code)] // consumed by the dogma engine's stacking logic (P2, #170)
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AttrMeta {
+    pub attribute_id: i64,
+    pub default_value: f64,
+    /// `stackable = 0` ⇒ multiplicative bonuses to this attribute are subject to
+    /// the stacking penalty.
+    pub stackable: bool,
+    /// Whether a higher value is better (orients the stacking-penalty sort).
+    pub high_is_good: bool,
+}
+
+/// A ship hull's slot layout and fitting resources, for the empty editor (#160).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ShipLayout {
+    pub type_id: i64,
+    pub name: String,
+    pub high_slots: i64,
+    pub mid_slots: i64,
+    pub low_slots: i64,
+    pub rig_slots: i64,
+    pub subsystem_slots: i64,
+    pub turret_hardpoints: i64,
+    pub launcher_hardpoints: i64,
+    pub cpu_output: f64,
+    pub powergrid_output: f64,
+    pub calibration: f64,
+    pub drone_bay: f64,
+    pub drone_bandwidth: f64,
 }

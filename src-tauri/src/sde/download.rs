@@ -95,6 +95,13 @@ fn verify(db: &Path) -> Result<(), SdeError> {
         "invTypes",
         "industryActivityProducts",
         "industryActivityMaterials",
+        // Dogma tables the fitting engine relies on (#157). `dgmExpressions` is
+        // intentionally absent: the Fuzzwork dump ships it empty, so modifiers
+        // are driven off `dgmEffects.modifierInfo` instead.
+        "dgmTypeAttributes",
+        "dgmAttributeTypes",
+        "dgmTypeEffects",
+        "dgmEffects",
     ] {
         let exists: i64 = conn.query_row(
             "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",

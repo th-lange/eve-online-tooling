@@ -5,8 +5,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use super::types::{
-    activity, BlueprintMaterial, BlueprintProduct, Decryptor, InventionData,
-    ManufacturableBlueprint, MarketItem, Recipe, ReprocessRecipe, TypeDetail, TypeInfo,
+    activity, AttrMeta, BlueprintMaterial, BlueprintProduct, Decryptor, EffectMeta, InventionData,
+    ManufacturableBlueprint, MarketItem, ModifierInfo, Recipe, ReprocessRecipe, ShipLayout,
+    TypeDetail, TypeInfo,
 };
 use super::SdeError;
 
@@ -576,6 +577,173 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// All dogma attributes for a type as `(attributeID, value)`. Unlike
+    /// [`type_attributes`](Self::type_attributes) this keys by id and keeps
+    /// unpublished attributes, because the fitting engine reads by id (#158).
+    pub fn type_attributes_raw(&self, type_id: i64) -> Result<Vec<(i64, f64)>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT attributeID, COALESCE(valueFloat, valueInt)
+             FROM dgmTypeAttributes WHERE typeID = ?1",
+        )?;
+        let rows = stmt.query_map(params![type_id], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, Option<f64>>(1)?.unwrap_or(0.0)))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Batched [`type_attributes_raw`](Self::type_attributes_raw): one query for
+    /// many types (a whole fit + its skills), grouped by typeID in Rust. Avoids
+    /// the per-item round-trips that resolving a full fit would otherwise need.
+    #[allow(dead_code)] // consumed by the dogma engine (P2, #171)
+    pub fn types_attributes_raw(
+        &self,
+        type_ids: &[i64],
+    ) -> Result<HashMap<i64, Vec<(i64, f64)>>, SdeError> {
+        if type_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        // Build a `(?, ?, …)` placeholder list — rusqlite has no native array bind.
+        let placeholders = vec!["?"; type_ids.len()].join(", ");
+        let sql = format!(
+            "SELECT typeID, attributeID, COALESCE(valueFloat, valueInt)
+             FROM dgmTypeAttributes WHERE typeID IN ({placeholders})",
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(type_ids.iter()), |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, Option<f64>>(2)?.unwrap_or(0.0),
+            ))
+        })?;
+        let mut map: HashMap<i64, Vec<(i64, f64)>> = HashMap::new();
+        for row in rows {
+            let (type_id, attr_id, value) = row?;
+            map.entry(type_id).or_default().push((attr_id, value));
+        }
+        Ok(map)
+    }
+
+    /// The effects attached to a type as `(effectID, isDefault)` from
+    /// `dgmTypeEffects` (#159). `isDefault` marks a module's auto-selected
+    /// effect (e.g. the charge a launcher fires).
+    #[allow(dead_code)] // consumed by the dogma engine (P2, #171)
+    pub fn type_effects(&self, type_id: i64) -> Result<Vec<(i64, bool)>, SdeError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT effectID, COALESCE(isDefault, 0) FROM dgmTypeEffects WHERE typeID = ?1")?;
+        let rows = stmt.query_map(params![type_id], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)? != 0))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Every dogma effect with its parsed `modifierInfo`, keyed by effectID
+    /// (#159). `dgmExpressions` is empty in the Fuzzwork dump, so `modifierInfo`
+    /// is the engine's structured modifier source. A malformed payload is logged
+    /// and skipped rather than failing the whole map.
+    #[allow(dead_code)] // consumed by the dogma engine (P2, #171)
+    pub fn effect_meta(&self) -> Result<HashMap<i64, EffectMeta>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT effectID, effectName, effectCategory, isOffensive, isAssistance,
+                    durationAttributeID, dischargeAttributeID, rangeAttributeID,
+                    falloffAttributeID, trackingSpeedAttributeID, modifierInfo
+             FROM dgmEffects",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            let meta = EffectMeta {
+                effect_id: r.get(0)?,
+                name: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                category: r.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                is_offensive: r.get::<_, Option<i64>>(3)?.unwrap_or(0) != 0,
+                is_assistance: r.get::<_, Option<i64>>(4)?.unwrap_or(0) != 0,
+                duration_attribute_id: r.get(5)?,
+                discharge_attribute_id: r.get(6)?,
+                range_attribute_id: r.get(7)?,
+                falloff_attribute_id: r.get(8)?,
+                tracking_speed_attribute_id: r.get(9)?,
+                modifiers: Vec::new(),
+            };
+            let modifier_json: Option<String> = r.get(10)?;
+            Ok((meta, modifier_json))
+        })?;
+        let mut map = HashMap::new();
+        for row in rows {
+            let (mut meta, modifier_json) = row?;
+            if let Some(json) = modifier_json.filter(|s| !s.trim().is_empty()) {
+                match serde_json::from_str::<Vec<ModifierInfo>>(&json) {
+                    Ok(mods) => meta.modifiers = mods,
+                    Err(e) => {
+                        eprintln!("effect {} has unparseable modifierInfo: {e}", meta.effect_id)
+                    }
+                }
+            }
+            map.insert(meta.effect_id, meta);
+        }
+        Ok(map)
+    }
+
+    /// Per-attribute metadata from `dgmAttributeTypes`, keyed by attributeID
+    /// (#159). `stackable`/`highIsGood` drive the stacking-penalty logic.
+    #[allow(dead_code)] // consumed by the dogma engine's stacking logic (P2, #170)
+    pub fn attribute_defaults(&self) -> Result<HashMap<i64, AttrMeta>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT attributeID, COALESCE(defaultValue, 0), COALESCE(stackable, 1),
+                    COALESCE(highIsGood, 1)
+             FROM dgmAttributeTypes",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(AttrMeta {
+                attribute_id: r.get(0)?,
+                default_value: r.get::<_, f64>(1)?,
+                stackable: r.get::<_, i64>(2)? != 0,
+                high_is_good: r.get::<_, i64>(3)? != 0,
+            })
+        })?;
+        let mut map = HashMap::new();
+        for row in rows {
+            let meta = row?;
+            map.insert(meta.attribute_id, meta);
+        }
+        Ok(map)
+    }
+
+    /// A ship hull's slot layout + fitting resources for the editor (#160).
+    /// Reads the relevant dogma attributes by id (verified against the SDE);
+    /// `None` if the type doesn't exist.
+    pub fn ship_layout(&self, type_id: i64) -> Result<Option<ShipLayout>, SdeError> {
+        let name: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT typeName FROM invTypes WHERE typeID = ?1",
+                params![type_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let Some(name) = name else {
+            return Ok(None);
+        };
+        // attributeID -> value for this hull; missing attributes default to 0.
+        let attrs: HashMap<i64, f64> = self.type_attributes_raw(type_id)?.into_iter().collect();
+        let a = |id: i64| attrs.get(&id).copied().unwrap_or(0.0);
+        Ok(Some(ShipLayout {
+            type_id,
+            name,
+            high_slots: a(14) as i64,         // hiSlots
+            mid_slots: a(13) as i64,          // medSlots
+            low_slots: a(12) as i64,          // lowSlots
+            rig_slots: a(1137) as i64,        // rigSlots
+            subsystem_slots: a(1367) as i64,  // maxSubSystems
+            turret_hardpoints: a(102) as i64, // turretSlotsLeft
+            launcher_hardpoints: a(101) as i64, // launcherSlotsLeft
+            cpu_output: a(48),                // cpuOutput
+            powergrid_output: a(11),          // powerOutput
+            calibration: a(1132),             // upgradeCapacity
+            drone_bay: a(283),                // droneCapacity
+            drone_bandwidth: a(1271),         // droneBandwidth
+        }))
+    }
+
     /// Search solar systems by name substring (case-insensitive), capped. For
     /// the route neighbourhood picker.
     pub fn search_systems(&self, query: &str, limit: i64) -> Result<Vec<(i64, String)>, SdeError> {
@@ -1063,5 +1231,94 @@ mod tests {
         assert_eq!(bps.len(), 1);
         assert_eq!(bps[0].blueprint_type_id, 999);
         assert_eq!(bps[0].product_type_id, 100);
+    }
+
+    /// A tiny dogma fixture: a hull (587) with slots/resources and a damage
+    /// module (519) carrying a `LocationGroupModifier` effect, plus the
+    /// attribute/effect metadata tables. Mirrors the real SDE shapes (#158–#160).
+    fn dogma_fixture() -> Sde {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE invTypes(typeID INT, groupID INT, typeName TEXT, volume REAL, published INT);
+             CREATE TABLE dgmTypeAttributes(typeID INT, attributeID INT, valueFloat REAL, valueInt INT);
+             CREATE TABLE dgmAttributeTypes(attributeID INT, attributeName TEXT, defaultValue REAL, stackable INT, highIsGood INT);
+             CREATE TABLE dgmTypeEffects(typeID INT, effectID INT, isDefault INT);
+             CREATE TABLE dgmEffects(effectID INT, effectName TEXT, effectCategory INT, isOffensive INT, isAssistance INT, durationAttributeID INT, dischargeAttributeID INT, rangeAttributeID INT, falloffAttributeID INT, trackingSpeedAttributeID INT, modifierInfo TEXT);
+
+             INSERT INTO invTypes VALUES (587, 25, 'Rifter', 27.0, 1), (519, 60, 'Gyrostabilizer II', 5.0, 1);
+             INSERT INTO dgmTypeAttributes(typeID, attributeID, valueFloat) VALUES
+               (587,14,3),(587,13,3),(587,12,4),(587,1137,3),(587,102,3),(587,101,2),
+               (587,48,130),(587,11,41),(587,1132,400),(587,283,0),(587,1271,0),
+               (519,64,1.1);
+             INSERT INTO dgmAttributeTypes VALUES
+               (64,'damageMultiplier',1.0,0,1),
+               (48,'cpuOutput',0.0,1,1);
+             INSERT INTO dgmTypeEffects VALUES (519, 92, 1);
+             INSERT INTO dgmEffects VALUES
+               (92,'projectileWeaponDamageMultiply',1,0,0,NULL,NULL,NULL,NULL,NULL,
+                '[{\"domain\": \"shipID\", \"func\": \"LocationGroupModifier\", \"groupID\": 55, \"modifiedAttributeID\": 64, \"modifyingAttributeID\": 64, \"operation\": 4}]'),
+               (16,'online',0,0,0,NULL,NULL,NULL,NULL,NULL,NULL);",
+        )
+        .unwrap();
+        Sde::from_connection(conn)
+    }
+
+    #[test]
+    fn raw_attributes_by_id_single_and_batch() {
+        let sde = dogma_fixture();
+        let single: HashMap<i64, f64> =
+            sde.type_attributes_raw(587).unwrap().into_iter().collect();
+        assert_eq!(single.get(&14), Some(&3.0));
+        assert_eq!(single.get(&48), Some(&130.0));
+
+        let batch = sde.types_attributes_raw(&[587, 519]).unwrap();
+        assert_eq!(batch.len(), 2);
+        assert!(batch[&519].iter().any(|&(id, v)| id == 64 && (v - 1.1).abs() < 1e-9));
+        assert!(sde.types_attributes_raw(&[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn type_effects_and_effect_meta_parse_modifier_info() {
+        let sde = dogma_fixture();
+        assert_eq!(sde.type_effects(519).unwrap(), vec![(92, true)]);
+
+        let meta = sde.effect_meta().unwrap();
+        let dmg = meta.get(&92).unwrap();
+        assert_eq!(dmg.name, "projectileWeaponDamageMultiply");
+        assert_eq!(dmg.modifiers.len(), 1);
+        let m = &dmg.modifiers[0];
+        assert_eq!(m.func.as_deref(), Some("LocationGroupModifier"));
+        assert_eq!(m.group_id, Some(55));
+        assert_eq!(m.modified_attribute_id, Some(64));
+        assert_eq!(m.operation, Some(4));
+        // An effect with no modifierInfo parses to zero modifiers.
+        assert!(meta.get(&16).unwrap().modifiers.is_empty());
+    }
+
+    #[test]
+    fn attribute_defaults_expose_stacking_flags() {
+        let sde = dogma_fixture();
+        let defs = sde.attribute_defaults().unwrap();
+        let dmg = defs.get(&64).unwrap();
+        assert_eq!(dmg.default_value, 1.0);
+        assert!(!dmg.stackable); // stackable = 0 -> penalized
+        assert!(dmg.high_is_good);
+    }
+
+    #[test]
+    fn ship_layout_reads_slots_and_resources() {
+        let sde = dogma_fixture();
+        let layout = sde.ship_layout(587).unwrap().unwrap();
+        assert_eq!(layout.name, "Rifter");
+        assert_eq!(layout.high_slots, 3);
+        assert_eq!(layout.mid_slots, 3);
+        assert_eq!(layout.low_slots, 4);
+        assert_eq!(layout.rig_slots, 3);
+        assert_eq!(layout.turret_hardpoints, 3);
+        assert_eq!(layout.launcher_hardpoints, 2);
+        assert_eq!(layout.cpu_output, 130.0);
+        assert_eq!(layout.powergrid_output, 41.0);
+        assert_eq!(layout.calibration, 400.0);
+        assert!(sde.ship_layout(424242).unwrap().is_none());
     }
 }
