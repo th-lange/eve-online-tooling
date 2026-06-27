@@ -20,7 +20,7 @@ use super::types::{
     CapStats, DpsBreakdown, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, NavStats,
     Severity, SlotKind, TankStats, TargetStats,
 };
-use crate::esi::{authed_get, AuthState};
+use crate::esi::{authed_get, corporation_id, AuthState};
 use crate::market::{resolve_location, MarketService, PriceModel};
 use crate::sde::{Sde, SdePaths, ShipLayout};
 use crate::storage;
@@ -194,6 +194,48 @@ pub fn fitting_export_eft(app: AppHandle, fit: Fit) -> Result<String, String> {
         modules,
         extras,
     }))
+}
+
+/// Load the active character's (and corp's) in-game saved fittings from ESI as
+/// [`Fit`]s the editor can open (#178). Best-effort: needs the `esi-fittings`
+/// scope enabled on the app + a re-login; without it ESI returns 403 and this
+/// yields an empty list (corp also needs the Fitting Manager role).
+#[tauri::command]
+pub async fn fitting_esi_list(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+) -> Result<Vec<Fit>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let character_id =
+        storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?;
+
+    // Fetch (async) before opening the SDE — its Connection isn't Send.
+    let mut esi = crate::esi::fetch_character_fittings(&auth_state, character_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    if let Ok(corp_id) = corporation_id(&auth_state, character_id).await {
+        if let Ok(mut corp) =
+            crate::esi::fetch_corp_fittings(&auth_state, character_id, corp_id).await
+        {
+            esi.append(&mut corp);
+        }
+    }
+
+    // Classify charges (SDE category 8 = Charge) and convert each fitting.
+    let sde = open_sde(&app)?;
+    let mut charge: HashMap<i64, bool> = HashMap::new();
+    for f in &esi {
+        for it in &f.items {
+            charge.entry(it.type_id).or_insert_with(|| {
+                sde.type_category(it.type_id).ok().flatten() == Some(8)
+            });
+        }
+    }
+    let is_charge = |tid: i64| charge.get(&tid).copied().unwrap_or(false);
+    Ok(esi
+        .iter()
+        .map(|f| super::esi_fittings::esi_fitting_to_fit(f, &is_charge))
+        .collect())
 }
 
 /// Simulate a fit: slot/resource validation plus the dogma stats (capacitor,

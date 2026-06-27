@@ -91,6 +91,7 @@ pub fn run() {
             modules::fitting::commands::fitting_ship_layout,
             modules::fitting::commands::fitting_import_eft,
             modules::fitting::commands::fitting_export_eft,
+            modules::fitting::commands::fitting_esi_list,
             modules::fitting::commands::fitting_simulate,
             modules::fitting::commands::fitting_optimize,
             modules::fitting::commands::fitting_price,
