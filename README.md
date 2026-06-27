@@ -21,6 +21,9 @@ built as a set of feature **modules** over a shared service layer.
   filters, and production/science/reaction slot usage.
 - **Wormholes** — map your chain by hand with mass/EOL tracking, cross-chain routing (stargates ∪ your
   scanned holes), and probe-scanner signature paste.
+- **Fitting** — build a ship fit (EFT import/export + local saves), validate slots / CPU / powergrid /
+  calibration / drone bay, price the whole fit, and simulate PYFA-style stats — **DPS, EHP/tank,
+  capacitor stability, speed/align and targeting** — at all-V or your character's real skills.
 - **Mission-running** and more — planned.
 
 Built with **Tauri 2** (Rust core) + **React / TypeScript** (Vite). Market and character data come
@@ -144,6 +147,13 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
   less market data pulled per hub — faster scans, lighter API load. Ranked by **ISK/m³** (cargo is the
   constraint), with the buy→sell route, per-unit profit, margin, item volume, and sell-hub daily-traded
   volume — sortable, searchable, with the same blacklist/favorites.
+- **Fitting module** — a ship-fit editor with a **data-driven dogma engine**. Pick a hull (or paste an
+  EFT fit), and it validates slot/hardpoint counts and CPU / powergrid / calibration / drone-bay usage,
+  prices the whole fit at a market, and computes PYFA-style stats — turret/missile/drone **DPS**,
+  **EHP** (resists × HP) + local reps, **capacitor** peak-recharge stability, **speed/align/signature**
+  and **targeting** — at **all-V** or the logged-in character's **real skills**. The engine resolves
+  effects from the SDE's `dgmEffects.modifierInfo` (stacking penalties, ship/skill bonuses applied in
+  fixed passes), so it's additive as coverage grows. Fits import/export as **EFT** and save locally.
 
 ## Releasing
 
