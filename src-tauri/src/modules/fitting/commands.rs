@@ -676,9 +676,11 @@ fn damage_score(
         if mult > 0.0 {
             // Turret: mult × (ammo damage, or a unit shot when unloaded).
             total += mult * charge_dmg.unwrap_or(1.0) / rof;
-        } else if let Some(dmg) = charge_dmg {
-            // Missile (charged, no multiplier).
-            total += dmg / rof;
+        } else {
+            // Missile/launcher (no multiplier): count a unit shot even when
+            // unloaded, so launcher RoF bonuses (BCS) register and launchers get
+            // fitted/optimized without missiles loaded.
+            total += charge_dmg.unwrap_or(1.0) / rof;
         }
     }
     for d in drone_items {
@@ -855,8 +857,18 @@ fn opt_config(obj: Objective) -> Vec<(SlotKind, Vec<i64>)> {
             (SlotKind::Low, vec![329, 328, 98, 1150, 60, 78]),
             (SlotKind::Rig, vec![773, 774]),
         ],
-        // Low-slot damage amplifiers + weapon-damage rigs.
+        // Weapons in the highs (turrets + missile launchers) so even an empty
+        // hull gets armed — the hull's turret/launcher hardpoints (validated) and
+        // CPU/PG fitting steer the weapon type and size — plus low-slot damage
+        // amplifiers and weapon-damage rigs.
         Objective::Damage => vec![
+            (
+                SlotKind::High,
+                vec![
+                    53, 74, 55, 1986, // turrets: energy / hybrid / projectile / precursor
+                    507, 509, 511, 510, 771, 1245, 506, 508, // missile launchers
+                ],
+            ),
             (SlotKind::Low, vec![59, 302, 205, 367, 645, 1988]),
             (SlotKind::Rig, vec![775, 776, 777, 779, 778]),
         ],
@@ -1093,6 +1105,21 @@ fn optimize_fit(
         slot_candidates.push((slot, mods.into_iter().map(|(t, _)| t).collect()));
     }
 
+    // Drop "Polarized" weapons (Tech II, so they pass the meta filter): their
+    // huge damage comes with disabled resistances, a drawback the engine doesn't
+    // model — so a damage objective would always pick them. Exclude by name.
+    {
+        let ids: Vec<i64> = slot_candidates.iter().flat_map(|(_, c)| c.clone()).collect();
+        let names: HashMap<i64, String> = sde
+            .type_names(&ids)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .collect();
+        for (_, c) in &mut slot_candidates {
+            c.retain(|tid| !names.get(tid).is_some_and(|n| n.starts_with("Polarized")));
+        }
+    }
+
     // Preload everything the scorer needs in a few bulk queries.
     let skill_ids = sde.skill_type_ids().map_err(|e| e.to_string())?;
     let mut all_ids: Vec<i64> = vec![fit.ship_type_id];
@@ -1277,6 +1304,9 @@ pub fn fitting_delete_local(app: AppHandle, id: String) -> Result<(), String> {
     fits.retain(|f| f.id != id);
     storage::save_data(&dir, FITS_KEY, &fits)
 }
+
+
+
 
 
 
