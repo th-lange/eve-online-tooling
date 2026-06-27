@@ -1038,6 +1038,16 @@ export function sdeSearch(query: string): Promise<IdName[]> {
   return invoke<IdName[]>("sde_search", { query });
 }
 
+/** Search published ships only (for the fitting hull picker). */
+export function sdeSearchShips(query: string): Promise<IdName[]> {
+  return invoke<IdName[]>("sde_search_ships", { query });
+}
+
+/** Names for a set of type ids (bulk) — for showing item names instead of ids. */
+export function sdeTypeNames(typeIds: number[]): Promise<IdName[]> {
+  return invoke<IdName[]>("sde_type_names", { typeIds });
+}
+
 // --- Market history ---
 
 export interface HistoryPoint {
@@ -1351,6 +1361,8 @@ export interface CapStats {
   drain: number;
   stable: boolean;
   stablePct?: number | null;
+  /** Seconds until empty when not stable; `null`/absent when stable. */
+  depletionSeconds?: number | null;
 }
 
 /** Tank: HP, resists, EHP and local reps. Resist arrays are
@@ -1465,12 +1477,16 @@ export type OptimizeObjective = "tank" | "damage" | "repair" | "yield";
 /** Fill a fit's empty slots with the best modules for an objective, drawn from
  * the allowed meta groups (metaGroupIDs; e.g. [1,2] = Tech I + Tech II). Returns
  * the optimized fit. */
+/** Optimizer slot scope: rework every relevant slot, or fill only empty ones. */
+export type OptimizeMode = "all" | "empty";
+
 export function fittingOptimize(
   fit: Fit,
   objective: OptimizeObjective,
   metaGroups: number[],
+  mode: OptimizeMode = "all",
 ): Promise<Fit> {
-  return invoke<Fit>("fitting_optimize", { fit, objective, metaGroups });
+  return invoke<Fit>("fitting_optimize", { fit, objective, metaGroups, mode });
 }
 
 /** Save (insert or update) a fit locally; returns its id. */
@@ -1485,8 +1501,8 @@ export function fittingListLocal(): Promise<Fit[]> {
 
 /** The active character's (and corp's) in-game saved fittings from ESI. Empty
  * if the `esi-fittings` scope isn't granted (enable it on the EVE app + re-login). */
-export function fittingEsiList(): Promise<Fit[]> {
-  return invoke<Fit[]>("fitting_esi_list");
+export function fittingEsiList(force = false): Promise<Fit[]> {
+  return invoke<Fit[]>("fitting_esi_list", { force });
 }
 
 /** A single locally saved fit by id, or `null`. */
