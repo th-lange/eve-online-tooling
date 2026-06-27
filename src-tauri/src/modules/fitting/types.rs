@@ -99,14 +99,33 @@ pub struct ResourceUsage {
     pub calibration_output: f64,
 }
 
+/// Capacitor stability (#172), computed from finalized attributes.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapStats {
+    pub capacity: f64,
+    pub recharge_seconds: f64,
+    /// Peak recharge rate (GJ/s) — the stability threshold.
+    pub peak_recharge: f64,
+    /// Steady cap use (GJ/s) from active modules.
+    pub drain: f64,
+    pub stable: bool,
+    /// Stable cap level (%) when `stable`; `None` when it runs dry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stable_pct: Option<f64>,
+}
+
 /// Computed result of simulating a fit. Filled incrementally: P1 populates
-/// `resources`, `validation` and `price`; the dogma engine (P2) adds DPS, tank,
-/// capacitor, navigation and targeting alongside these.
+/// `resources`, `validation` and `price`; the dogma engine (P2) adds capacitor
+/// now, with DPS, tank, navigation and targeting alongside as they land.
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FitStats {
     pub resources: ResourceUsage,
     pub validation: Vec<FitProblem>,
+    /// Capacitor stability (#172); `None` until the dogma engine runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capacitor: Option<CapStats>,
     /// Whole-fit market value (#163); `None` until priced.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub price: Option<f64>,

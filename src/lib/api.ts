@@ -1312,10 +1312,21 @@ export interface FitProblem {
   itemIndex?: number | null;
 }
 
-/** Computed result of simulating a fit (P1: resources + validation). */
+/** Capacitor stability, computed from finalized (all-V) attributes. */
+export interface CapStats {
+  capacity: number;
+  rechargeSeconds: number;
+  peakRecharge: number;
+  drain: number;
+  stable: boolean;
+  stablePct?: number | null;
+}
+
+/** Computed result of simulating a fit (resources + validation + capacitor). */
 export interface FitStats {
   resources: ResourceUsage;
   validation: FitProblem[];
+  capacitor?: CapStats | null;
   price?: number | null;
 }
 

@@ -6,10 +6,6 @@
 //! [`Domain`]/[`Op`] model; only genuinely procedural effects (capacitor
 //! recharge curve, resist combination, hit quality) need bespoke handling, and
 //! those live in the stat calculators.
-//!
-//! Consumed by [`super::resolve`] and the stat calculators (#172+); the
-//! module-level allow lets it land ahead of the command wiring.
-#![allow(dead_code)]
 
 use crate::sde::{EffectMeta, ModifierInfo};
 

@@ -7,6 +7,7 @@
 //! P2 alongside this module.
 
 pub mod attr;
+pub mod capacitor;
 pub mod effects;
 pub mod modifier;
 pub mod resolve;

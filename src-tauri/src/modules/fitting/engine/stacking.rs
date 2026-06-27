@@ -4,10 +4,6 @@
 //! attribute: each additional module of the same kind is less effective. The
 //! i-th (0-based) penalized modifier's effectiveness is `exp(-((i/2.67)^2))`,
 //! giving the familiar sequence 100%, 86.9%, 57.1%, 28.3%, 10.6%, 3.0%, …
-//!
-//! Consumed by the attribute store (#170) and the stat calculators (#171+);
-//! the module-level allow lets the core land ahead of those consumers.
-#![allow(dead_code)]
 
 /// Effectiveness multiplier of the `index`-th (0-based) penalized modifier.
 pub fn penalty(index: usize) -> f64 {

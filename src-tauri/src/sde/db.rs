@@ -654,11 +654,44 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Published Skill (category 16) type ids — the "all V" skill set the
+    /// fitting engine applies (#172).
+    pub fn skill_type_ids(&self) -> Result<Vec<i64>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.typeID FROM invTypes t
+             JOIN invGroups g ON g.groupID = t.groupID
+             WHERE g.categoryID = 16 AND t.published = 1",
+        )?;
+        let rows = stmt.query_map([], |r| r.get::<_, i64>(0))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Batched [`type_effects`](Self::type_effects): effect ids per type for many
+    /// types at once (the fit + all skills), keyed by typeID (#172).
+    pub fn types_effects(&self, type_ids: &[i64]) -> Result<HashMap<i64, Vec<i64>>, SdeError> {
+        if type_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let placeholders = vec!["?"; type_ids.len()].join(", ");
+        let sql = format!(
+            "SELECT typeID, effectID FROM dgmTypeEffects WHERE typeID IN ({placeholders})",
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(type_ids.iter()), |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        let mut map: HashMap<i64, Vec<i64>> = HashMap::new();
+        for row in rows {
+            let (type_id, effect_id) = row?;
+            map.entry(type_id).or_default().push(effect_id);
+        }
+        Ok(map)
+    }
+
     /// Every dogma effect with its parsed `modifierInfo`, keyed by effectID
     /// (#159). `dgmExpressions` is empty in the Fuzzwork dump, so `modifierInfo`
     /// is the engine's structured modifier source. A malformed payload is logged
     /// and skipped rather than failing the whole map.
-    #[allow(dead_code)] // consumed by the dogma engine (P2, #171)
     pub fn effect_meta(&self) -> Result<HashMap<i64, EffectMeta>, SdeError> {
         let mut stmt = self.conn.prepare(
             "SELECT effectID, effectName, effectCategory, isOffensive, isAssistance,
@@ -701,7 +734,6 @@ impl Sde {
 
     /// Per-attribute metadata from `dgmAttributeTypes`, keyed by attributeID
     /// (#159). `stackable`/`highIsGood` drive the stacking-penalty logic.
-    #[allow(dead_code)] // consumed by the dogma engine's stacking logic (P2, #170)
     pub fn attribute_defaults(&self) -> Result<HashMap<i64, AttrMeta>, SdeError> {
         let mut stmt = self.conn.prepare(
             "SELECT attributeID, COALESCE(defaultValue, 0), COALESCE(stackable, 1),
