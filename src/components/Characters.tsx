@@ -7,9 +7,10 @@ import {
   setActiveCharacter,
 } from "../lib/api";
 
-// Roster of logged-in EVE characters. Add opens the browser SSO flow; each
-// character can be removed (which clears its keychain entry). One character is
-// the "active" one (★) — the default used by per-character features.
+// Logged-in EVE characters. The active character (the default used by every
+// per-character feature) is picked from a dropdown selector; Add opens the
+// browser SSO flow, and ✕ removes the selected character (clearing its keychain
+// entry).
 export function Characters() {
   const qc = useQueryClient();
   const invalidate = () => {
@@ -34,52 +35,45 @@ export function Characters() {
   });
 
   const activeId = active.data ?? chars.data?.[0]?.characterId ?? null;
+  const hasChars = (chars.data?.length ?? 0) > 0;
 
   return (
     <div className="border-t border-zinc-800 px-3 py-3">
       <div className="mb-1 flex items-center justify-between">
         <span className="text-xs font-medium uppercase tracking-wide text-zinc-500">
-          Characters
+          Character
         </span>
       </div>
 
-      <ul className="space-y-1">
-        {chars.data?.map((c) => {
-          const isActive = c.characterId === activeId;
-          return (
-            <li
-              key={c.characterId}
-              className="group flex items-center gap-1 rounded px-2 py-1 text-sm text-zinc-300 hover:bg-zinc-800/60"
-            >
-              <button
-                onClick={() => setActive.mutate(c.characterId)}
-                title={isActive ? "Active character" : "Set as active character"}
-                aria-label={isActive ? `${c.name} is active` : `Set ${c.name} active`}
-                className={`shrink-0 text-xs ${
-                  isActive
-                    ? "text-amber-400"
-                    : "text-zinc-600 opacity-0 hover:text-amber-400 group-hover:opacity-100"
-                }`}
-              >
-                {isActive ? "★" : "☆"}
-              </button>
-              <span className={`flex-1 truncate ${isActive ? "text-zinc-100" : ""}`} title={c.name}>
+      {hasChars ? (
+        <div className="flex items-center gap-1">
+          <select
+            value={activeId ?? ""}
+            onChange={(e) => setActive.mutate(Number(e.currentTarget.value))}
+            title="Active character"
+            aria-label="Active character"
+            className="min-w-0 flex-1 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+          >
+            {chars.data!.map((c) => (
+              <option key={c.characterId} value={c.characterId}>
                 {c.name}
-              </span>
-              <button
-                onClick={() => logout.mutate(c.characterId)}
-                className="ml-2 text-zinc-600 opacity-0 hover:text-rose-400 group-hover:opacity-100"
-                title="Remove character"
-              >
-                ✕
-              </button>
-            </li>
-          );
-        })}
-        {chars.data && chars.data.length === 0 && (
-          <li className="px-2 py-1 text-xs text-zinc-600">No characters yet.</li>
-        )}
-      </ul>
+              </option>
+            ))}
+          </select>
+          {activeId != null && (
+            <button
+              onClick={() => logout.mutate(activeId)}
+              className="shrink-0 rounded px-1 text-zinc-600 hover:text-rose-400"
+              title="Remove the selected character"
+              aria-label="Remove the selected character"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      ) : (
+        <p className="px-1 py-1 text-xs text-zinc-600">No characters yet.</p>
+      )}
 
       <button
         onClick={() => login.mutate()}
