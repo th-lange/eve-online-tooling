@@ -88,6 +88,8 @@ mod tests {
             price,
             is_buy_order: is_buy,
             location_id: station,
+            volume_remain: 0,
+            system_id: 0,
         }
     }
 

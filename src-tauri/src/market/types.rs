@@ -7,6 +7,13 @@ pub struct Order {
     pub price: f64,
     pub is_buy_order: bool,
     pub location_id: i64,
+    /// Units still on offer. Absent in older fixtures → 0.
+    #[serde(default)]
+    pub volume_remain: i64,
+    /// Solar system the order sits in (for the order-list jumps column). Absent
+    /// in older fixtures → 0.
+    #[serde(default)]
+    pub system_id: i64,
 }
 
 /// One day of `/markets/{region}/history/`.
