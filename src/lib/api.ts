@@ -1322,11 +1322,26 @@ export interface CapStats {
   stablePct?: number | null;
 }
 
-/** Computed result of simulating a fit (resources + validation + capacitor). */
+/** Tank: HP, resists, EHP and local reps. Resist arrays are
+ * `[em, thermal, kinetic, explosive]` fractions (0–1). */
+export interface TankStats {
+  shieldHp: number;
+  armorHp: number;
+  hullHp: number;
+  ehp: number;
+  shieldResists: [number, number, number, number];
+  armorResists: [number, number, number, number];
+  hullResists: [number, number, number, number];
+  shieldRepS: number;
+  armorRepS: number;
+}
+
+/** Computed result of simulating a fit (resources + validation + dogma stats). */
 export interface FitStats {
   resources: ResourceUsage;
   validation: FitProblem[];
   capacitor?: CapStats | null;
+  tank?: TankStats | null;
   price?: number | null;
 }
 

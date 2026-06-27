@@ -12,8 +12,11 @@ use tauri::{AppHandle, Manager, State};
 use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule};
 use super::engine::validate::{validate, ValItem};
 use super::engine::capacitor::capacitor;
-use super::engine::resolve::{resolve, EntityInput, FitInput};
-use super::types::{CapStats, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind};
+use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
+use super::engine::tank::{tank, DamageProfile, Layer};
+use super::types::{
+    CapStats, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind, TankStats,
+};
 use crate::market::{resolve_location, MarketService, PriceModel};
 use crate::sde::{Sde, SdePaths, ShipLayout};
 use crate::storage;
@@ -244,21 +247,32 @@ pub fn fitting_simulate(app: AppHandle, fit: Fit) -> Result<FitStats, String> {
 
     let (resources, validation) = validate(&ship, &val_items);
 
-    // Dogma engine (all-V): resolve finalized attributes and derive capacitor
-    // stability. Best-effort — if the engine can't run, the stat is just absent.
-    let capacitor = run_dogma_capacitor(&sde, &fit).ok();
+    // Dogma engine (all-V): resolve finalized attributes and derive stats.
+    // Best-effort — if the engine can't run, those stats are simply absent.
+    let (capacitor, tank) = match run_dogma(&sde, &fit) {
+        Ok(d) => (Some(d.capacitor), Some(d.tank)),
+        Err(_) => (None, None),
+    };
 
     Ok(FitStats {
         resources,
         validation,
         capacitor,
+        tank,
         price: None,
     })
 }
 
+/// Dogma-engine stats derived from one resolution pass.
+struct DogmaStats {
+    capacitor: CapStats,
+    tank: TankStats,
+}
+
 /// Build the engine inputs (ship + modules + all-V skills) from the SDE, resolve
-/// the fit, and compute capacitor stability from the finalized attributes (#172).
-fn run_dogma_capacitor(sde: &Sde, fit: &Fit) -> Result<CapStats, String> {
+/// the fit once, and derive the dogma stats from the finalized attributes
+/// (capacitor #172, tank #173).
+fn run_dogma(sde: &Sde, fit: &Fit) -> Result<DogmaStats, String> {
     // Only slots that affect ship stats (drones/cargo/implants don't here).
     let module_items: Vec<&FitItem> = fit
         .items
@@ -326,8 +340,16 @@ fn run_dogma_capacitor(sde: &Sde, fit: &Fit) -> Result<CapStats, String> {
 
     let resolved = resolve(&FitInput { ship, modules, skills }, &effect_meta, &is_stackable);
 
-    // Steady cap drain: assume every cap-using module runs (capacitorNeed 6 per
-    // cycle / duration 73 ms). Per-module on/off toggling is a UI follow-up.
+    Ok(DogmaStats {
+        capacitor: capacitor_of(&resolved),
+        tank: tank_of(&resolved),
+    })
+}
+
+/// Capacitor stability from a resolved fit (#172). Steady drain assumes every
+/// cap-using module runs (capacitorNeed 6 / duration 73 ms); per-module on/off
+/// toggling is a UI follow-up.
+fn capacitor_of(resolved: &ResolvedFit) -> CapStats {
     let mut drain = 0.0;
     for store in &resolved.modules {
         let need = store.get(6);
@@ -336,11 +358,52 @@ fn run_dogma_capacitor(sde: &Sde, fit: &Fit) -> Result<CapStats, String> {
             drain += need / (dur / 1000.0);
         }
     }
-    Ok(capacitor(
-        resolved.ship.get(482), // capacitorCapacity
-        resolved.ship.get(55),  // rechargeRate (ms)
-        drain,
-    ))
+    capacitor(resolved.ship.get(482), resolved.ship.get(55), drain)
+}
+
+/// Tank from a resolved fit (#173): HP + resonances from the ship, local rep/s
+/// from shield boosters (shieldBonus 68) and armor repairers (armorDamageAmount
+/// 84). Even 25/25/25/25 damage profile.
+fn tank_of(resolved: &ResolvedFit) -> TankStats {
+    let s = &resolved.ship;
+    // Resonance attribute ids verified vs the SDE: [em, thermal, kinetic, explosive].
+    let shield = Layer {
+        hp: s.get(263),
+        resonance: [s.get(271), s.get(274), s.get(273), s.get(272)],
+    };
+    let armor = Layer {
+        hp: s.get(265),
+        resonance: [s.get(267), s.get(270), s.get(269), s.get(268)],
+    };
+    let hull = Layer {
+        hp: s.get(9),
+        resonance: [s.get(113), s.get(110), s.get(109), s.get(111)],
+    };
+
+    let (mut shield_rep_s, mut armor_rep_s) = (0.0, 0.0);
+    for store in &resolved.modules {
+        let dur = store.get(73);
+        if dur <= 0.0 {
+            continue;
+        }
+        let sb = store.get(68);
+        if sb > 0.0 {
+            shield_rep_s += sb / (dur / 1000.0);
+        }
+        let ar = store.get(84);
+        if ar > 0.0 {
+            armor_rep_s += ar / (dur / 1000.0);
+        }
+    }
+
+    tank(
+        shield,
+        armor,
+        hull,
+        &DamageProfile::default(),
+        shield_rep_s,
+        armor_rep_s,
+    )
 }
 
 /// Price a whole fit (hull + modules + charges + drones/cargo) at a market

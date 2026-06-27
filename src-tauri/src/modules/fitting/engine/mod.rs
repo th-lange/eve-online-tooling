@@ -12,4 +12,5 @@ pub mod effects;
 pub mod modifier;
 pub mod resolve;
 pub mod stacking;
+pub mod tank;
 pub mod validate;
