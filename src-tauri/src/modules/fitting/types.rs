@@ -4,11 +4,6 @@
 //! local-storage record); [`FitStats`] is the computed result the engine
 //! produces. P1 populates `resources`, `validation` and `price`; the dogma
 //! engine (P2) fills the combat/tank/cap fields as they land.
-//!
-//! These types are constructed by the P1 tickets that follow (EFT import #162,
-//! pricing #163, validation #165) and the dogma engine (P2); the module-level
-//! `allow(dead_code)` lets them exist ahead of their first constructor.
-#![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 
@@ -76,6 +71,8 @@ pub struct Fit {
 #[serde(rename_all = "camelCase")]
 pub enum Severity {
     Error,
+    /// Non-blocking advisory (e.g. a soft cap); emitted as the engine grows.
+    #[allow(dead_code)]
     Warning,
 }
 
@@ -113,6 +110,29 @@ pub struct FitStats {
     /// Whole-fit market value (#163); `None` until priced.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub price: Option<f64>,
+}
+
+/// Whole-fit market valuation (#163): hull + modules + charges + drones/cargo.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FitPrice {
+    /// Total cost to buy the whole fit now (Σ qty × sell-min).
+    pub buy_total: f64,
+    /// Total liquidation value of the whole fit now (Σ qty × buy-max).
+    pub sell_total: f64,
+    pub lines: Vec<FitPriceLine>,
+}
+
+/// One priced line of a [`FitPrice`].
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FitPriceLine {
+    pub type_id: i64,
+    pub name: String,
+    pub quantity: i32,
+    /// Per-unit buy price (sell-min) and liquidation price (buy-max).
+    pub buy_unit: Option<f64>,
+    pub sell_unit: Option<f64>,
 }
 
 #[cfg(test)]

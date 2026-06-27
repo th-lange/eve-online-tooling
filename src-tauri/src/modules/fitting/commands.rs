@@ -5,12 +5,19 @@
 //! commands here; the dogma `simulate` command lands with the engine (P2).
 
 use std::collections::HashMap;
+use std::path::Path;
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 
 use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule};
-use super::types::{Fit, FitItem, ModuleState, SlotKind};
+use super::engine::validate::{validate, ValItem};
+use super::types::{Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind};
+use crate::market::{resolve_location, MarketService, PriceModel};
 use crate::sde::{Sde, SdePaths, ShipLayout};
+use crate::storage;
+
+/// Storage key for the local saved-fits document (a `Vec<Fit>`).
+const FITS_KEY: &str = "fitting_fits";
 
 /// Open the SDE for the current app data dir (read-only, cheap per call).
 fn open_sde(app: &AppHandle) -> Result<Sde, String> {
@@ -178,4 +185,177 @@ pub fn fitting_export_eft(app: AppHandle, fit: Fit) -> Result<String, String> {
         modules,
         extras,
     }))
+}
+
+/// Simulate a fit: slot/resource validation over base attributes (#165). The
+/// dogma stats (DPS/tank/cap/…) fill `FitStats` in P2; `price` stays `None`
+/// here (priced separately via [`fitting_price`]).
+#[tauri::command]
+pub fn fitting_simulate(app: AppHandle, fit: Fit) -> Result<FitStats, String> {
+    let sde = open_sde(&app)?;
+    let Some(ship) = sde.ship_layout(fit.ship_type_id).map_err(|e| e.to_string())? else {
+        return Err(format!("unknown ship: {}", fit.ship_type_id));
+    };
+
+    // Batch every fitted item's base attributes in one query.
+    let ids: Vec<i64> = fit.items.iter().map(|i| i.type_id).collect();
+    let attrs = sde.types_attributes_raw(&ids).map_err(|e| e.to_string())?;
+
+    let mut val_items = Vec::with_capacity(fit.items.len());
+    for item in &fit.items {
+        let a: HashMap<i64, f64> = attrs
+            .get(&item.type_id)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        let get = |id: i64| a.get(&id).copied().unwrap_or(0.0);
+        // Turret/launcher only matter for high-slot modules (effects 42/40).
+        let (is_turret, is_launcher) = if item.slot == SlotKind::High {
+            let effects = sde.type_effects(item.type_id).map_err(|e| e.to_string())?;
+            (
+                effects.iter().any(|(e, _)| *e == 42),
+                effects.iter().any(|(e, _)| *e == 40),
+            )
+        } else {
+            (false, false)
+        };
+        let drone_volume = if item.slot == SlotKind::Drone {
+            sde.type_info(item.type_id)
+                .map_err(|e| e.to_string())?
+                .and_then(|t| t.volume)
+                .unwrap_or(0.0)
+        } else {
+            0.0
+        };
+        val_items.push(ValItem {
+            slot: item.slot,
+            cpu: get(50),          // cpu usage
+            powergrid: get(30),    // power usage
+            calibration: get(1153), // rig calibration cost
+            is_turret,
+            is_launcher,
+            drone_volume,
+            quantity: item.quantity.max(1),
+        });
+    }
+
+    let (resources, validation) = validate(&ship, &val_items);
+    Ok(FitStats {
+        resources,
+        validation,
+        price: None,
+    })
+}
+
+/// Price a whole fit (hull + modules + charges + drones/cargo) at a market
+/// (#163), reusing the shared market service's bulk aggregates.
+#[tauri::command]
+pub async fn fitting_price(
+    app: AppHandle,
+    market: State<'_, MarketService>,
+    fit: Fit,
+    region_id: i64,
+    station_id: Option<i64>,
+) -> Result<FitPrice, String> {
+    let sde = open_sde(&app)?;
+
+    // type_id -> total quantity (hull + items + charges), summing duplicates.
+    let mut qty: HashMap<i64, i32> = HashMap::new();
+    *qty.entry(fit.ship_type_id).or_default() += 1;
+    for item in &fit.items {
+        *qty.entry(item.type_id).or_default() += item.quantity.max(1);
+        if let Some(charge) = item.charge_type_id {
+            *qty.entry(charge).or_default() += 1;
+        }
+    }
+
+    let ids: Vec<i64> = qty.keys().copied().collect();
+    let location = resolve_location(region_id, station_id);
+    let prices: HashMap<i64, PriceModel> = market
+        .price_models_at(location, &ids)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|m| (m.type_id, m))
+        .collect();
+
+    let mut lines = Vec::with_capacity(qty.len());
+    let (mut buy_total, mut sell_total) = (0.0, 0.0);
+    for (type_id, quantity) in qty {
+        let model = prices.get(&type_id);
+        let buy_unit = model.and_then(|m| m.sell_min);
+        let sell_unit = model.and_then(|m| m.buy_max);
+        buy_total += buy_unit.unwrap_or(0.0) * quantity as f64;
+        sell_total += sell_unit.unwrap_or(0.0) * quantity as f64;
+        let name = sde
+            .type_info(type_id)
+            .map_err(|e| e.to_string())?
+            .map(|t| t.name)
+            .unwrap_or_else(|| format!("Type {type_id}"));
+        lines.push(FitPriceLine {
+            type_id,
+            name,
+            quantity,
+            buy_unit,
+            sell_unit,
+        });
+    }
+    // Most valuable lines first.
+    lines.sort_by(|a, b| {
+        b.buy_unit
+            .unwrap_or(0.0)
+            .partial_cmp(&a.buy_unit.unwrap_or(0.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    Ok(FitPrice {
+        buy_total,
+        sell_total,
+        lines,
+    })
+}
+
+/// The local saved-fits document.
+fn load_fits(dir: &Path) -> Vec<Fit> {
+    storage::load_data(dir, FITS_KEY).unwrap_or_default()
+}
+
+/// Save (insert or update by id) a fit locally; returns its id (#164).
+#[tauri::command]
+pub fn fitting_save_local(app: AppHandle, mut fit: Fit) -> Result<String, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    if fit.id.is_empty() {
+        fit.id = new_fit_id();
+    }
+    let mut fits = load_fits(&dir);
+    match fits.iter_mut().find(|f| f.id == fit.id) {
+        Some(existing) => *existing = fit.clone(),
+        None => fits.push(fit.clone()),
+    }
+    storage::save_data(&dir, FITS_KEY, &fits)?;
+    Ok(fit.id)
+}
+
+/// All locally saved fits (#164).
+#[tauri::command]
+pub fn fitting_list_local(app: AppHandle) -> Result<Vec<Fit>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(load_fits(&dir))
+}
+
+/// A single locally saved fit by id, or `None` (#164).
+#[tauri::command]
+pub fn fitting_load_local(app: AppHandle, id: String) -> Result<Option<Fit>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(load_fits(&dir).into_iter().find(|f| f.id == id))
+}
+
+/// Delete a locally saved fit by id (no-op if absent) (#164).
+#[tauri::command]
+pub fn fitting_delete_local(app: AppHandle, id: String) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let mut fits = load_fits(&dir);
+    fits.retain(|f| f.id != id);
+    storage::save_data(&dir, FITS_KEY, &fits)
 }
