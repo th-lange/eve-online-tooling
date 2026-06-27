@@ -6,6 +6,7 @@ import {
   fittingImportEft,
   fittingListLocal,
   fittingLoadLocal,
+  fittingOptimize,
   fittingPrice,
   fittingSaveLocal,
   fittingShipLayout,
@@ -15,6 +16,7 @@ import {
   sdeStatus,
   type Fit,
   type FitItem,
+  type OptimizeObjective,
   type SkillSource,
   type SlotKind,
 } from "../../lib/api";
@@ -41,6 +43,15 @@ function Workbench() {
   const [eft, setEft] = useState("");
   const [skillSource, setSkillSource] = useState<SkillSource>("allFive");
   const skillLabel = skillSource === "character" ? "character" : "all V";
+  const [objective, setObjective] = useState<OptimizeObjective>("tank");
+  // Allowed module meta groups (metaGroupID → on). T1+T2 (incl. named) by default.
+  const [meta, setMeta] = useState<Record<number, boolean>>({
+    1: true,
+    2: true,
+    4: false,
+    6: false,
+    5: false,
+  });
 
   const regions = useQuery({ queryKey: ["market", "regions"], queryFn: marketRegions });
   const results = useQuery({
@@ -92,6 +103,18 @@ function Workbench() {
       navigator.clipboard?.writeText(text).catch(() => {});
       setEft(text);
     },
+  });
+  const optimize = useMutation({
+    mutationFn: () =>
+      fittingOptimize(
+        fit!,
+        objective,
+        Object.entries(meta)
+          .filter(([, on]) => on)
+          .map(([id]) => Number(id)),
+      ),
+    onSuccess: (f) => setFit(f),
+    onError: (e) => alert(`Optimize failed: ${e}`),
   });
 
   function pickShip(id: number, name: string) {
@@ -207,6 +230,50 @@ function Workbench() {
                 Export EFT
               </button>
             </div>
+            <div className="mb-3 flex flex-wrap items-center gap-2 rounded border border-zinc-800 bg-zinc-900/40 p-2 text-xs">
+              <span className="text-zinc-500">Optimize empty slots for</span>
+              <select
+                value={objective}
+                onChange={(e) =>
+                  setObjective(e.currentTarget.value as OptimizeObjective)
+                }
+                className="rounded bg-zinc-800 px-2 py-0.5 text-zinc-100 outline-none"
+              >
+                <option value="tank">Tank</option>
+                <option value="damage">Damage</option>
+                <option value="repair">Repair</option>
+                <option value="yield">Yield (mining)</option>
+              </select>
+              <span className="text-zinc-700">·</span>
+              {(
+                [
+                  [1, "T1"],
+                  [2, "T2"],
+                  [4, "Faction"],
+                  [6, "Deadspace"],
+                  [5, "Officer"],
+                ] as [number, string][]
+              ).map(([id, label]) => (
+                <label key={id} className="flex items-center gap-1 text-zinc-400">
+                  <input
+                    type="checkbox"
+                    checked={!!meta[id]}
+                    onChange={(e) =>
+                      setMeta((m) => ({ ...m, [id]: e.currentTarget.checked }))
+                    }
+                  />
+                  {label}
+                </label>
+              ))}
+              <button
+                onClick={() => optimize.mutate()}
+                disabled={optimize.isPending}
+                className="rounded border border-zinc-700 px-2 py-0.5 text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+              >
+                {optimize.isPending ? "Optimizing…" : "Optimize"}
+              </button>
+            </div>
+
             {layout.data && (
               <SlotSummary fit={fit} layout={layout.data} />
             )}

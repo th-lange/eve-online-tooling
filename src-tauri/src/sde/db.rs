@@ -654,6 +654,48 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Published modules in the given groups whose meta group is allowed, for
+    /// the fitting optimizer (#156). Items with no meta entry count as Tech I
+    /// (metaGroup 1). Returns `(type_id, group_id)`.
+    pub fn modules_in_groups(
+        &self,
+        group_ids: &[i64],
+        allowed_meta: &[i64],
+    ) -> Result<Vec<(i64, i64)>, SdeError> {
+        if group_ids.is_empty() || allowed_meta.is_empty() {
+            return Ok(Vec::new());
+        }
+        let gph = vec!["?"; group_ids.len()].join(", ");
+        let mph = vec!["?"; allowed_meta.len()].join(", ");
+        let sql = format!(
+            "SELECT t.typeID, t.groupID
+             FROM invTypes t
+             LEFT JOIN invMetaTypes mt ON mt.typeID = t.typeID
+             WHERE t.groupID IN ({gph}) AND t.published = 1
+               AND COALESCE(mt.metaGroupID, 1) IN ({mph})",
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let params: Vec<i64> = group_ids.iter().chain(allowed_meta.iter()).copied().collect();
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Map of typeID → groupID for the given types (bulk; for the optimizer).
+    pub fn types_groups(&self, type_ids: &[i64]) -> Result<HashMap<i64, i64>, SdeError> {
+        if type_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let placeholders = vec!["?"; type_ids.len()].join(", ");
+        let sql = format!("SELECT typeID, groupID FROM invTypes WHERE typeID IN ({placeholders})");
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(type_ids.iter()), |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        rows.collect::<Result<HashMap<_, _>, _>>().map_err(Into::into)
+    }
+
     /// Published Skill (category 16) type ids — the "all V" skill set the
     /// fitting engine applies (#172).
     pub fn skill_type_ids(&self) -> Result<Vec<i64>, SdeError> {
