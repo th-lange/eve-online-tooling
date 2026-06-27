@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   marketHistory,
+  marketPrice,
   marketRegions,
   openMarketWindow,
   sdeSearch,
@@ -39,15 +40,21 @@ function Workbench() {
     queryFn: () => marketHistory(regionId, picked!.id),
     enabled: picked != null,
   });
+  // Current order-book prices for the picked item in the region.
+  const price = useQuery({
+    queryKey: ["price", regionId, picked?.id],
+    queryFn: () => marketPrice(regionId, picked!.id),
+    enabled: picked != null,
+  });
 
   const series = useMemo(() => (history.data ?? []).slice(-days), [history.data, days]);
 
   return (
     <div className="p-6">
       <div>
-        <h1 className="text-2xl font-semibold text-zinc-100">Market history</h1>
+        <h1 className="text-2xl font-semibold text-zinc-100">Market</h1>
         <p className="mt-1 text-sm text-zinc-400">
-          Daily price &amp; volume trend for an item in a region.
+          Current prices plus the daily price &amp; volume trend for an item in a region.
         </p>
       </div>
 
@@ -124,9 +131,22 @@ function Workbench() {
         )}
       </div>
 
+      {/* Current region prices */}
+      {picked && price.data && (
+        <div className="mt-4 flex flex-wrap gap-6 text-sm">
+          <Stat label="Sell (min)" value={formatIsk(price.data.sellMin)} accent="text-rose-300" />
+          <Stat label="Buy (max)" value={formatIsk(price.data.buyMax)} accent="text-emerald-300" />
+          <Stat
+            label="Spread"
+            value={spread(price.data.sellMin, price.data.buyMax)}
+          />
+          <Stat label="Daily volume" value={formatInt(price.data.dailyVolume)} />
+        </div>
+      )}
+
       <div className="mt-4">
         {!picked ? (
-          <Centered>Search for an item to see its history.</Centered>
+          <Centered>Search for an item to see its prices and history.</Centered>
         ) : history.isLoading ? (
           <Centered>Loading history…</Centered>
         ) : series.length === 0 ? (
@@ -139,6 +159,11 @@ function Workbench() {
   );
 }
 
+function spread(sell?: number | null, buy?: number | null): string {
+  if (sell == null || buy == null || sell <= 0) return "—";
+  return `${(((sell - buy) / sell) * 100).toFixed(1)}%`;
+}
+
 function HistoryView({ series }: { series: HistoryPoint[] }) {
   const last = series[series.length - 1];
   const avgVol = Math.round(series.reduce((s, p) => s + p.volume, 0) / series.length);
@@ -149,9 +174,21 @@ function HistoryView({ series }: { series: HistoryPoint[] }) {
         <Stat label="Latest volume" value={formatInt(last.volume)} />
         <Stat label="Avg volume/day" value={formatInt(avgVol)} />
       </div>
-      <Spark series={series} pick={(p) => p.average} label="Average price" color="#34d399" />
-      <div className="h-2" />
-      <Spark series={series} pick={(p) => p.volume} label="Daily volume" color="#60a5fa" />
+      <Chart
+        series={series}
+        pick={(p) => p.average}
+        label="Average price"
+        color="#34d399"
+        fmt={formatIsk}
+      />
+      <div className="h-3" />
+      <Chart
+        series={series}
+        pick={(p) => p.volume}
+        label="Daily volume"
+        color="#60a5fa"
+        fmt={(v) => formatInt(v)}
+      />
       <div className="mt-4 max-h-72 overflow-auto rounded border border-zinc-800">
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-zinc-900 text-zinc-500">
@@ -182,46 +219,108 @@ function HistoryView({ series }: { series: HistoryPoint[] }) {
   );
 }
 
-/** A minimal inline SVG sparkline (no chart dependency). */
-function Spark({
+/** An inline SVG line chart with horizontal gridlines, a legend, value-axis
+ *  labels and a hover readout (no chart dependency). */
+function Chart({
   series,
   pick,
   label,
   color,
+  fmt,
 }: {
   series: HistoryPoint[];
   pick: (p: HistoryPoint) => number;
   label: string;
   color: string;
+  fmt: (v: number) => string;
 }) {
+  const [hover, setHover] = useState<number | null>(null);
   const w = 720;
-  const h = 64;
+  const h = 150;
+  const padX = 8;
+  const padY = 10;
   const vals = series.map(pick);
   const min = Math.min(...vals);
   const max = Math.max(...vals);
   const span = max - min || 1;
-  const pts = vals
-    .map((v, i) => {
-      const x = (i / Math.max(vals.length - 1, 1)) * w;
-      const y = h - ((v - min) / span) * (h - 4) - 2;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
+  const x = (i: number) =>
+    padX + (i / Math.max(vals.length - 1, 1)) * (w - 2 * padX);
+  const y = (v: number) => padY + (1 - (v - min) / span) * (h - 2 * padY);
+  const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  // Four evenly-spaced horizontal gridlines across the value range.
+  const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => padY + f * (h - 2 * padY));
+
+  function onMove(e: React.MouseEvent<SVGSVGElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const rx = ((e.clientX - rect.left) / rect.width) * w;
+    const i = Math.round(
+      ((rx - padX) / (w - 2 * padX)) * Math.max(vals.length - 1, 1),
+    );
+    setHover(Math.max(0, Math.min(vals.length - 1, i)));
+  }
+
   return (
     <div className="rounded border border-zinc-800 bg-zinc-900 p-2">
-      <div className="mb-1 text-xs text-zinc-500">{label}</div>
-      <svg viewBox={`0 0 ${w} ${h}`} className="h-16 w-full" preserveAspectRatio="none">
+      <div className="mb-1 flex items-center gap-2 text-xs">
+        <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: color }} />
+        <span className="text-zinc-400">{label}</span>
+        <span className="ml-auto tabular-nums text-zinc-300">
+          {hover != null
+            ? `${series[hover].date} · ${fmt(vals[hover])}`
+            : `${fmt(min)} – ${fmt(max)}`}
+        </span>
+      </div>
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        preserveAspectRatio="none"
+        className="w-full"
+        style={{ height: h }}
+        onMouseMove={onMove}
+        onMouseLeave={() => setHover(null)}
+      >
+        {grid.map((gy, i) => (
+          <line
+            key={i}
+            x1={padX}
+            x2={w - padX}
+            y1={gy}
+            y2={gy}
+            stroke="#27272a"
+            strokeWidth="0.75"
+          />
+        ))}
         <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" />
+        {hover != null && (
+          <g>
+            <line
+              x1={x(hover)}
+              x2={x(hover)}
+              y1={padY}
+              y2={h - padY}
+              stroke="#52525b"
+              strokeWidth="0.75"
+            />
+            <circle cx={x(hover)} cy={y(vals[hover])} r="3" fill={color} />
+          </g>
+        )}
       </svg>
     </div>
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent?: string;
+}) {
   return (
     <div>
       <div className="text-xs text-zinc-500">{label}</div>
-      <div className="tabular-nums text-zinc-200">{value}</div>
+      <div className={`tabular-nums ${accent ?? "text-zinc-200"}`}>{value}</div>
     </div>
   );
 }
