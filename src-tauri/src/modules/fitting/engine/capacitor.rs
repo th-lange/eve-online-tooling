@@ -27,6 +27,13 @@ pub fn capacitor(capacity: f64, recharge_ms: f64, drain: f64) -> CapStats {
     } else {
         None
     };
+    // When unstable, integrate the cap equation from full to empty to get the
+    // time-to-dry (a small time-series sim; the closed form is messy).
+    let depletion_seconds = if !stable && capacity > 0.0 && tau > 0.0 && drain > 0.0 {
+        Some(time_to_empty(capacity, tau, drain))
+    } else {
+        None
+    };
     CapStats {
         capacity,
         recharge_seconds: tau,
@@ -34,7 +41,25 @@ pub fn capacitor(capacity: f64, recharge_ms: f64, drain: f64) -> CapStats {
         drain,
         stable,
         stable_pct,
+        depletion_seconds,
     }
+}
+
+/// Seconds for the capacitor to fall from full to empty under constant `drain`
+/// (GJ/s) that exceeds peak recharge. Integrates `dC/dt = regen(C) − drain` with
+/// `regen(C) = (10/τ)·Cmax·(√(C/Cmax) − C/Cmax)`.
+fn time_to_empty(capacity: f64, tau: f64, drain: f64) -> f64 {
+    let dt = 0.25;
+    let mut c = capacity;
+    let mut t = 0.0;
+    // Safety bound: if it somehow doesn't drain (shouldn't, drain > peak), bail.
+    while c > 0.0 && t < 36_000.0 {
+        let frac = (c / capacity).clamp(0.0, 1.0);
+        let regen = (10.0 / tau) * capacity * (frac.sqrt() - frac);
+        c += (regen - drain) * dt;
+        t += dt;
+    }
+    t
 }
 
 #[cfg(test)]
@@ -55,6 +80,14 @@ mod tests {
         let c = capacitor(250.0, 125_000.0, 6.0); // 6 > 5 peak
         assert!(!c.stable);
         assert_eq!(c.stable_pct, None);
+    }
+
+    #[test]
+    fn unstable_reports_a_finite_depletion_time() {
+        let c = capacitor(250.0, 125_000.0, 8.0); // well above the 5 peak
+        assert!(!c.stable);
+        let t = c.depletion_seconds.expect("unstable cap should report a time");
+        assert!(t > 0.0 && t < 36_000.0, "depletion = {t}");
     }
 
     #[test]

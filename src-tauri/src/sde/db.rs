@@ -373,6 +373,36 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Search published **ships** (category 6) by name substring, capped. For the
+    /// fitting hull picker (so it doesn't offer modules/charges/blueprints).
+    pub fn search_ships(&self, query: &str, limit: i64) -> Result<Vec<(i64, String)>, SdeError> {
+        let pattern = format!("%{}%", query.trim());
+        let mut stmt = self.conn.prepare(
+            "SELECT t.typeID, t.typeName FROM invTypes t
+             JOIN invGroups g ON g.groupID = t.groupID
+             WHERE g.categoryID = 6 AND t.published = 1 AND t.typeName LIKE ?1
+             ORDER BY LENGTH(t.typeName), t.typeName LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![pattern, limit], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Names for the given type ids (bulk), as `(type_id, name)`. For showing
+    /// fitted-item names instead of ids.
+    pub fn type_names(&self, type_ids: &[i64]) -> Result<Vec<(i64, String)>, SdeError> {
+        if type_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let placeholders = vec!["?"; type_ids.len()].join(", ");
+        let sql =
+            format!("SELECT typeID, typeName FROM invTypes WHERE typeID IN ({placeholders})");
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(type_ids.iter()), |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// The reprocessing recipe for a single type (any item with refine outputs),
     /// or `None`. For the reprocess-appraisal tool.
     pub fn reprocess_recipe(&self, type_id: i64) -> Result<Option<ReprocessRecipe>, SdeError> {

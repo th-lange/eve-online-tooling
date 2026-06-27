@@ -204,10 +204,20 @@ pub fn fitting_export_eft(app: AppHandle, fit: Fit) -> Result<String, String> {
 pub async fn fitting_esi_list(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
+    force: Option<bool>,
 ) -> Result<Vec<Fit>, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let character_id =
         storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?;
+
+    // Cached per character (30 min) so the picker doesn't re-hit ESI each open;
+    // `force` (the refresh button) bypasses it.
+    let cache_key = format!("fitting_esi_{character_id}");
+    if force != Some(true) {
+        if let Some(cached) = storage::cache_get::<Vec<Fit>>(&dir, &cache_key) {
+            return Ok(cached);
+        }
+    }
 
     // Fetch (async) before opening the SDE — its Connection isn't Send.
     let mut esi = crate::esi::fetch_character_fittings(&auth_state, character_id)
@@ -232,10 +242,12 @@ pub async fn fitting_esi_list(
         }
     }
     let is_charge = |tid: i64| charge.get(&tid).copied().unwrap_or(false);
-    Ok(esi
+    let fits: Vec<Fit> = esi
         .iter()
         .map(|f| super::esi_fittings::esi_fitting_to_fit(f, &is_charge))
-        .collect())
+        .collect();
+    let _ = storage::cache_put(&dir, &cache_key, &fits, 30 * 60);
+    Ok(fits)
 }
 
 /// Simulate a fit: slot/resource validation plus the dogma stats (capacitor,
@@ -897,16 +909,26 @@ pub fn fitting_optimize(
     fit: Fit,
     objective: String,
     meta_groups: Vec<i64>,
+    mode: Option<String>,
 ) -> Result<Fit, String> {
-    optimize_fit(&open_sde(&app)?, fit, &objective, meta_groups)
+    optimize_fit(
+        &open_sde(&app)?,
+        fit,
+        &objective,
+        meta_groups,
+        mode.as_deref().unwrap_or("all"),
+    )
 }
 
 /// Core of [`fitting_optimize`], taking the SDE directly so it's testable.
+/// `mode` is `"all"` (rework every relevant slot) or `"empty"` (fill only the
+/// objective's empty slots, leaving existing modules untouched).
 fn optimize_fit(
     sde: &Sde,
     fit: Fit,
     objective: &str,
     meta_groups: Vec<i64>,
+    mode: &str,
 ) -> Result<Fit, String> {
     let obj = parse_objective(objective)?;
     let Some(layout) = sde.ship_layout(fit.ship_type_id).map_err(|e| e.to_string())? else {
@@ -975,7 +997,14 @@ fn optimize_fit(
     let relevant_kinds: Vec<SlotKind> = slot_candidates.iter().map(|(s, _)| *s).collect();
     let cands_for: HashMap<SlotKind, Vec<i64>> =
         slot_candidates.iter().map(|(s, c)| (*s, c.clone())).collect();
-    fit.items.retain(|i| !relevant_kinds.contains(&i.slot));
+    // "all" reworks every relevant slot (clear + rebuild); "empty" fills only the
+    // objective's empty slots, leaving your existing modules untouched.
+    if mode != "empty" {
+        fit.items.retain(|i| !relevant_kinds.contains(&i.slot));
+    }
+    // Only modules the optimizer adds from here are eligible for local-search
+    // swaps, so "empty" mode never rewrites your existing choices.
+    let added_start = fit.items.len();
 
     // Whether placing `tid` is allowed under the one-per-fit rule, ignoring the
     // item at `skip` (so a swap can replace a unique module with itself's kind).
@@ -1024,9 +1053,10 @@ fn optimize_fit(
     // optimum. Seed + local search is a strong, near-global result over the
     // curated candidate pool (a true global optimum is combinatorially
     // intractable for the full module catalogue).
+    let n = fit.items.len();
     loop {
         let mut improved = false;
-        for idx in 0..fit.items.len() {
+        for idx in added_start..n {
             let slot = fit.items[idx].slot;
             let Some(cands) = cands_for.get(&slot) else {
                 continue; // not a relevant (optimized) slot

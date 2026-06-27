@@ -268,6 +268,27 @@ pub fn sde_search(app: AppHandle, query: String) -> Result<Vec<IdName>, String> 
         .map_err(|e| e.to_string())
 }
 
+/// Search published ships only (for the fitting hull picker).
+#[tauri::command]
+pub fn sde_search_ships(app: AppHandle, query: String) -> Result<Vec<IdName>, String> {
+    if query.trim().len() < 2 {
+        return Ok(Vec::new());
+    }
+    open(&app)?
+        .search_ships(&query, 25)
+        .map(id_names)
+        .map_err(|e| e.to_string())
+}
+
+/// Names for a set of type ids (bulk) — for showing fitted-item names.
+#[tauri::command]
+pub fn sde_type_names(app: AppHandle, type_ids: Vec<i64>) -> Result<Vec<IdName>, String> {
+    open(&app)?
+        .type_names(&type_ids)
+        .map(id_names)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn sde_type_attributes(app: AppHandle, type_id: i64) -> Result<Vec<AttrPair>, String> {
     let attrs = open(&app)?

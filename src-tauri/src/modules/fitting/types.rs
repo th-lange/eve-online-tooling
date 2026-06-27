@@ -113,6 +113,9 @@ pub struct CapStats {
     /// Stable cap level (%) when `stable`; `None` when it runs dry.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stable_pct: Option<f64>,
+    /// Seconds until the capacitor empties when **not** stable; `None` when stable.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depletion_seconds: Option<f64>,
 }
 
 /// Tank: HP, resists, EHP and local reps (#173). Resist arrays are
