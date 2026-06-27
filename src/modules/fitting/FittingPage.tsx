@@ -231,6 +231,29 @@ function Workbench() {
               </div>
             )}
 
+            {stats.data?.capacitor && (
+              <div className="space-y-1">
+                <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+                  Capacitor (all V)
+                </h3>
+                <div className="text-sm text-zinc-300">
+                  {stats.data.capacitor.stable ? (
+                    <span className="text-emerald-400">
+                      Stable at {stats.data.capacitor.stablePct?.toFixed(1)}%
+                    </span>
+                  ) : (
+                    <span className="text-red-400">Unstable</span>
+                  )}
+                </div>
+                <div className="text-xs text-zinc-500">
+                  {stats.data.capacitor.capacity.toFixed(0)} GJ ·{" "}
+                  {stats.data.capacitor.rechargeSeconds.toFixed(0)}s · peak{" "}
+                  {stats.data.capacitor.peakRecharge.toFixed(1)} / drain{" "}
+                  {stats.data.capacitor.drain.toFixed(1)} GJ/s
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs uppercase tracking-wide text-zinc-500">Price</h3>

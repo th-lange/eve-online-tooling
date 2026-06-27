@@ -12,10 +12,6 @@
 //! | 1 | preDiv | 6 | postPercent |
 //! | 2 | modAdd | 7 | postAssign |
 //! | 3 | modSub | | |
-//!
-//! These types are constructed by the effect registry (#171); the module-level
-//! allow lets the model land ahead of that consumer.
-#![allow(dead_code)]
 
 /// An EVE dogma operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -10,10 +10,6 @@
 //!
 //! Inputs are SDE-agnostic ([`EntityInput`]) so the whole engine is unit-
 //! testable without a database; the command layer populates them from the SDE.
-//!
-//! Wired into `fitting_simulate` by the first stat calculator (#172); the
-//! module-level allow lets the resolution engine land tested-but-unwired.
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 
@@ -53,6 +49,7 @@ pub struct ResolvedFit {
     pub ship: AttrStore,
     pub modules: Vec<AttrStore>,
     /// Effect modifiers we couldn't model (coverage metric).
+    #[allow(dead_code)] // surfaced by the golden-coverage harness (#176)
     pub unresolved: usize,
 }
 

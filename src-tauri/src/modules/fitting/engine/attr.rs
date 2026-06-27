@@ -6,10 +6,6 @@
 //! [`AttrStore::get`] collapses the buckets on read in the fixed EVE order
 //! (preAssign → pre-multiply → add → post-multiply (stacking) → postAssign), so
 //! the engine is a pure function of its inputs.
-//!
-//! Consumed by the effect registry and stat calculators (#171+); the
-//! module-level allow lets the store land ahead of those consumers.
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 
@@ -17,8 +13,9 @@ use super::modifier::Op;
 use super::stacking::combine_penalized;
 
 /// Named dogma attribute ids used across the engine (verified against the SDE).
-/// Centralised so the stat calculators (#172–#175) read `attr::CPU_OUTPUT`, not
+/// Centralised so the stat calculators (#173–#175) read `attr::CPU_OUTPUT`, not
 /// magic numbers.
+#[allow(dead_code)] // ids land here as the tank/damage/nav calculators consume them
 pub mod attr {
     pub const MASS: i64 = 4;
     pub const POWER_OUTPUT: i64 = 11;
@@ -112,6 +109,7 @@ impl AttrStore {
     }
 
     /// Set a single base attribute value.
+    #[allow(dead_code)] // used in tests + by calculators that inject derived bases (#173+)
     pub fn set_base(&mut self, attr: i64, value: f64) {
         self.values.entry(attr).or_default().base = value;
     }
@@ -148,6 +146,7 @@ impl AttrStore {
     }
 
     /// The unmodified base value (0.0 if unknown).
+    #[allow(dead_code)] // calculators that need pre-modifier values (#173+)
     pub fn base(&self, attr: i64) -> f64 {
         self.values.get(&attr).map(|v| v.base).unwrap_or(0.0)
     }

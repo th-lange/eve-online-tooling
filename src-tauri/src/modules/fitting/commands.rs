@@ -11,7 +11,9 @@ use tauri::{AppHandle, Manager, State};
 
 use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule};
 use super::engine::validate::{validate, ValItem};
-use super::types::{Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind};
+use super::engine::capacitor::capacitor;
+use super::engine::resolve::{resolve, EntityInput, FitInput};
+use super::types::{CapStats, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind};
 use crate::market::{resolve_location, MarketService, PriceModel};
 use crate::sde::{Sde, SdePaths, ShipLayout};
 use crate::storage;
@@ -241,11 +243,104 @@ pub fn fitting_simulate(app: AppHandle, fit: Fit) -> Result<FitStats, String> {
     }
 
     let (resources, validation) = validate(&ship, &val_items);
+
+    // Dogma engine (all-V): resolve finalized attributes and derive capacitor
+    // stability. Best-effort — if the engine can't run, the stat is just absent.
+    let capacitor = run_dogma_capacitor(&sde, &fit).ok();
+
     Ok(FitStats {
         resources,
         validation,
+        capacitor,
         price: None,
     })
+}
+
+/// Build the engine inputs (ship + modules + all-V skills) from the SDE, resolve
+/// the fit, and compute capacitor stability from the finalized attributes (#172).
+fn run_dogma_capacitor(sde: &Sde, fit: &Fit) -> Result<CapStats, String> {
+    // Only slots that affect ship stats (drones/cargo/implants don't here).
+    let module_items: Vec<&FitItem> = fit
+        .items
+        .iter()
+        .filter(|i| {
+            matches!(
+                i.slot,
+                SlotKind::High | SlotKind::Mid | SlotKind::Low | SlotKind::Rig | SlotKind::Subsystem
+            )
+        })
+        .collect();
+
+    let skill_ids = sde.skill_type_ids().map_err(|e| e.to_string())?;
+    let mut all_ids = Vec::with_capacity(1 + module_items.len() + skill_ids.len());
+    all_ids.push(fit.ship_type_id);
+    all_ids.extend(module_items.iter().map(|i| i.type_id));
+    all_ids.extend(&skill_ids);
+
+    let attrs = sde.types_attributes_raw(&all_ids).map_err(|e| e.to_string())?;
+    let effects_by_type = sde.types_effects(&all_ids).map_err(|e| e.to_string())?;
+    let effect_meta = sde.effect_meta().map_err(|e| e.to_string())?;
+    let defaults = sde.attribute_defaults().map_err(|e| e.to_string())?;
+    let is_stackable = |attr: i64| defaults.get(&attr).map(|m| m.stackable).unwrap_or(true);
+
+    let entity = |type_id: i64, required_skill: Option<i64>| -> Result<EntityInput, String> {
+        let group_id = sde
+            .type_info(type_id)
+            .map_err(|e| e.to_string())?
+            .map(|t| t.group_id)
+            .unwrap_or(0);
+        Ok(EntityInput {
+            attrs: attrs.get(&type_id).cloned().unwrap_or_default(),
+            effect_ids: effects_by_type.get(&type_id).cloned().unwrap_or_default(),
+            group_id,
+            required_skill,
+        })
+    };
+
+    let ship = entity(fit.ship_type_id, None)?;
+
+    let mut modules = Vec::with_capacity(module_items.len());
+    for it in &module_items {
+        // requiredSkill1 (attr 182) drives *RequiredSkillModifier targeting.
+        let required_skill = attrs
+            .get(&it.type_id)
+            .and_then(|a| a.iter().find(|(k, _)| *k == 182).map(|(_, v)| *v as i64));
+        modules.push(entity(it.type_id, required_skill)?);
+    }
+
+    // All skills at level V: skillLevel (280) forced to 5.
+    let mut skills = Vec::with_capacity(skill_ids.len());
+    for sid in &skill_ids {
+        let mut a = attrs.get(sid).cloned().unwrap_or_default();
+        match a.iter_mut().find(|(k, _)| *k == 280) {
+            Some(p) => p.1 = 5.0,
+            None => a.push((280, 5.0)),
+        }
+        skills.push(EntityInput {
+            attrs: a,
+            effect_ids: effects_by_type.get(sid).cloned().unwrap_or_default(),
+            group_id: 0,
+            required_skill: None,
+        });
+    }
+
+    let resolved = resolve(&FitInput { ship, modules, skills }, &effect_meta, &is_stackable);
+
+    // Steady cap drain: assume every cap-using module runs (capacitorNeed 6 per
+    // cycle / duration 73 ms). Per-module on/off toggling is a UI follow-up.
+    let mut drain = 0.0;
+    for store in &resolved.modules {
+        let need = store.get(6);
+        let dur = store.get(73);
+        if need > 0.0 && dur > 0.0 {
+            drain += need / (dur / 1000.0);
+        }
+    }
+    Ok(capacitor(
+        resolved.ship.get(482), // capacitorCapacity
+        resolved.ship.get(55),  // rechargeRate (ms)
+        drain,
+    ))
 }
 
 /// Price a whole fit (hull + modules + charges + drones/cargo) at a market
