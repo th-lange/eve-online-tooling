@@ -1428,6 +1428,20 @@ export function fittingPrice(
   return invoke<FitPrice>("fitting_price", { fit, regionId, stationId });
 }
 
+/** What the optimizer maximizes when filling empty slots. */
+export type OptimizeObjective = "tank" | "damage" | "repair" | "yield";
+
+/** Fill a fit's empty slots with the best modules for an objective, drawn from
+ * the allowed meta groups (metaGroupIDs; e.g. [1,2] = Tech I + Tech II). Returns
+ * the optimized fit. */
+export function fittingOptimize(
+  fit: Fit,
+  objective: OptimizeObjective,
+  metaGroups: number[],
+): Promise<Fit> {
+  return invoke<Fit>("fitting_optimize", { fit, objective, metaGroups });
+}
+
 /** Save (insert or update) a fit locally; returns its id. */
 export function fittingSaveLocal(fit: Fit): Promise<string> {
   return invoke<string>("fitting_save_local", { fit });

@@ -18,7 +18,7 @@ use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
 use super::engine::tank::{tank, DamageProfile, Layer};
 use super::types::{
     CapStats, DpsBreakdown, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, NavStats,
-    SlotKind, TankStats, TargetStats,
+    Severity, SlotKind, TankStats, TargetStats,
 };
 use crate::esi::{authed_get, AuthState};
 use crate::market::{resolve_location, MarketService, PriceModel};
@@ -635,6 +635,342 @@ pub async fn fitting_price(
     })
 }
 
+// --- Optimizer (#156) ---
+
+/// What to maximize when filling empty slots.
+#[derive(Clone, Copy, PartialEq)]
+enum Objective {
+    Tank,
+    Damage,
+    Repair,
+    Yield,
+}
+
+fn parse_objective(s: &str) -> Result<Objective, String> {
+    match s {
+        "tank" => Ok(Objective::Tank),
+        "damage" => Ok(Objective::Damage),
+        "repair" => Ok(Objective::Repair),
+        "yield" => Ok(Objective::Yield),
+        other => Err(format!("unknown objective: {other}")),
+    }
+}
+
+/// Candidate module groups per slot kind for an objective (group ids verified
+/// against the SDE). The optimizer fills empty slots of these kinds.
+fn opt_config(obj: Objective) -> Vec<(SlotKind, Vec<i64>)> {
+    match obj {
+        // Shield/armor buffer + resistance modules, plus HP/resist rigs.
+        Objective::Tank => vec![
+            (SlotKind::Mid, vec![38, 77, 295]),
+            (SlotKind::Low, vec![329, 328, 98, 1150, 60, 78]),
+            (SlotKind::Rig, vec![773, 774]),
+        ],
+        // Low-slot damage amplifiers + weapon-damage rigs.
+        Objective::Damage => vec![
+            (SlotKind::Low, vec![59, 302, 205, 367, 645, 1988]),
+            (SlotKind::Rig, vec![775, 776, 777, 779, 778]),
+        ],
+        // Shield boosters / armor repairers + HP rigs.
+        Objective::Repair => vec![
+            (SlotKind::Mid, vec![40]),
+            (SlotKind::Low, vec![62]),
+            (SlotKind::Rig, vec![773, 774]),
+        ],
+        // Mining lasers/strip miners + mining upgrades + mining rigs.
+        Objective::Yield => vec![
+            (SlotKind::High, vec![54, 464, 483]),
+            (SlotKind::Low, vec![546]),
+            (SlotKind::Rig, vec![904]),
+        ],
+    }
+}
+
+/// Groups limited to one per fit (the optimizer won't add a second).
+const UNIQUE_GROUPS: &[i64] = &[60]; // Damage Control
+
+fn slot_capacity(layout: &ShipLayout, slot: SlotKind) -> i64 {
+    match slot {
+        SlotKind::High => layout.high_slots,
+        SlotKind::Mid => layout.mid_slots,
+        SlotKind::Low => layout.low_slots,
+        SlotKind::Rig => layout.rig_slots,
+        SlotKind::Subsystem => layout.subsystem_slots,
+        _ => 0,
+    }
+}
+
+fn is_ship_module(slot: SlotKind) -> bool {
+    matches!(
+        slot,
+        SlotKind::High | SlotKind::Mid | SlotKind::Low | SlotKind::Rig | SlotKind::Subsystem
+    )
+}
+
+type AttrMap = HashMap<i64, Vec<(i64, f64)>>;
+type EffectMap = HashMap<i64, Vec<i64>>;
+type GroupMap = HashMap<i64, i64>;
+
+fn entity_from_maps(
+    type_id: i64,
+    required_skill: Option<i64>,
+    attrs: &AttrMap,
+    effects: &EffectMap,
+    groups: &GroupMap,
+) -> EntityInput {
+    EntityInput {
+        attrs: attrs.get(&type_id).cloned().unwrap_or_default(),
+        effect_ids: effects.get(&type_id).cloned().unwrap_or_default(),
+        group_id: groups.get(&type_id).copied().unwrap_or(0),
+        required_skill,
+    }
+}
+
+/// Slot/resource validation items from preloaded maps (no SDE calls).
+fn val_items_cached(fit: &Fit, attrs: &AttrMap, effects: &EffectMap) -> Vec<ValItem> {
+    fit.items
+        .iter()
+        .map(|item| {
+            let a: HashMap<i64, f64> = attrs
+                .get(&item.type_id)
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
+            let get = |id: i64| a.get(&id).copied().unwrap_or(0.0);
+            let eff = effects.get(&item.type_id);
+            let is_turret = item.slot == SlotKind::High && eff.is_some_and(|e| e.contains(&42));
+            let is_launcher = item.slot == SlotKind::High && eff.is_some_and(|e| e.contains(&40));
+            ValItem {
+                slot: item.slot,
+                cpu: get(50),
+                powergrid: get(30),
+                calibration: get(1153),
+                is_turret,
+                is_launcher,
+                drone_volume: 0.0, // optimizer doesn't change drones
+                quantity: item.quantity.max(1),
+            }
+        })
+        .collect()
+}
+
+/// Sum mining yield (m³/s) over a resolved fit's modules (miningAmount 77 /
+/// duration 73). Reflects all-V mining skills.
+fn mining_yield(resolved: &ResolvedFit) -> f64 {
+    resolved
+        .modules
+        .iter()
+        .map(|s| {
+            let amount = s.get(77);
+            let dur = s.get(73);
+            if amount > 0.0 && dur > 0.0 {
+                amount / (dur / 1000.0)
+            } else {
+                0.0
+            }
+        })
+        .sum()
+}
+
+/// The objective value for a fit, or `None` if the fit doesn't fit (over CPU/PG/
+/// calibration/slots/hardpoints). Uses preloaded maps + cached skills.
+#[allow(clippy::too_many_arguments)]
+fn objective_value(
+    obj: Objective,
+    fit: &Fit,
+    layout: &ShipLayout,
+    attrs: &AttrMap,
+    effects: &EffectMap,
+    groups: &GroupMap,
+    skills: &[EntityInput],
+    effect_meta: &HashMap<i64, crate::sde::EffectMeta>,
+    is_stackable: &impl Fn(i64) -> bool,
+) -> Option<f64> {
+    // Reject fits that don't fit.
+    let (_, problems) = validate(layout, &val_items_cached(fit, attrs, effects));
+    if problems.iter().any(|p| p.severity == Severity::Error) {
+        return None;
+    }
+
+    let module_items: Vec<&FitItem> = fit.items.iter().filter(|i| is_ship_module(i.slot)).collect();
+    let drone_items: Vec<&FitItem> =
+        fit.items.iter().filter(|i| i.slot == SlotKind::Drone).collect();
+
+    let ship = entity_from_maps(fit.ship_type_id, None, attrs, effects, groups);
+    let modules: Vec<EntityInput> = module_items
+        .iter()
+        .map(|it| {
+            let rs = attrs
+                .get(&it.type_id)
+                .and_then(|a| a.iter().find(|(k, _)| *k == 182).map(|(_, v)| *v as i64));
+            entity_from_maps(it.type_id, rs, attrs, effects, groups)
+        })
+        .collect();
+
+    let resolved = resolve(
+        &FitInput {
+            ship,
+            modules,
+            skills: skills.to_vec(),
+        },
+        effect_meta,
+        is_stackable,
+    );
+
+    let value = match obj {
+        Objective::Tank => tank_of(&resolved).ehp,
+        Objective::Repair => {
+            let t = tank_of(&resolved);
+            t.shield_rep_s + t.armor_rep_s
+        }
+        Objective::Damage => dps_of(&resolved, &module_items, &drone_items, attrs).total,
+        Objective::Yield => mining_yield(&resolved),
+    };
+    Some(value)
+}
+
+/// Optimize a fit by **filling its empty slots** with the best modules for an
+/// objective (`"tank"` | `"damage"` | `"repair"` | `"yield"`), drawn from the
+/// allowed meta groups (`meta_groups`; default Tech I + Tech II). Existing
+/// modules are left untouched. Scored at all-V via the dogma engine; only
+/// additions that keep the fit valid are kept (#156).
+#[tauri::command]
+pub fn fitting_optimize(
+    app: AppHandle,
+    fit: Fit,
+    objective: String,
+    meta_groups: Vec<i64>,
+) -> Result<Fit, String> {
+    optimize_fit(&open_sde(&app)?, fit, &objective, meta_groups)
+}
+
+/// Core of [`fitting_optimize`], taking the SDE directly so it's testable.
+fn optimize_fit(
+    sde: &Sde,
+    fit: Fit,
+    objective: &str,
+    meta_groups: Vec<i64>,
+) -> Result<Fit, String> {
+    let obj = parse_objective(objective)?;
+    let Some(layout) = sde.ship_layout(fit.ship_type_id).map_err(|e| e.to_string())? else {
+        return Err(format!("unknown ship: {}", fit.ship_type_id));
+    };
+    let meta = if meta_groups.is_empty() {
+        vec![1, 2] // Tech I (incl. named/meta) + Tech II
+    } else {
+        meta_groups
+    };
+
+    // Candidate type ids per slot kind, filtered to the allowed meta groups.
+    let mut slot_candidates: Vec<(SlotKind, Vec<i64>)> = Vec::new();
+    for (slot, group_ids) in opt_config(obj) {
+        let mods = sde
+            .modules_in_groups(&group_ids, &meta)
+            .map_err(|e| e.to_string())?;
+        slot_candidates.push((slot, mods.into_iter().map(|(t, _)| t).collect()));
+    }
+
+    // Preload everything the scorer needs in a few bulk queries.
+    let skill_ids = sde.skill_type_ids().map_err(|e| e.to_string())?;
+    let mut all_ids: Vec<i64> = vec![fit.ship_type_id];
+    all_ids.extend(fit.items.iter().map(|i| i.type_id));
+    all_ids.extend(fit.items.iter().filter_map(|i| i.charge_type_id));
+    for (_, ts) in &slot_candidates {
+        all_ids.extend(ts);
+    }
+    all_ids.extend(&skill_ids);
+
+    let attrs = sde.types_attributes_raw(&all_ids).map_err(|e| e.to_string())?;
+    let effects = sde.types_effects(&all_ids).map_err(|e| e.to_string())?;
+    let groups = sde.types_groups(&all_ids).map_err(|e| e.to_string())?;
+    let effect_meta = sde.effect_meta().map_err(|e| e.to_string())?;
+    let defaults = sde.attribute_defaults().map_err(|e| e.to_string())?;
+    let is_stackable = |attr: i64| defaults.get(&attr).map(|m| m.stackable).unwrap_or(true);
+
+    let skills: Vec<EntityInput> = skill_ids
+        .iter()
+        .map(|sid| {
+            let mut a = attrs.get(sid).cloned().unwrap_or_default();
+            match a.iter_mut().find(|(k, _)| *k == 280) {
+                Some(p) => p.1 = 5.0,
+                None => a.push((280, 5.0)),
+            }
+            EntityInput {
+                attrs: a,
+                effect_ids: effects.get(sid).cloned().unwrap_or_default(),
+                group_id: 0,
+                required_skill: None,
+            }
+        })
+        .collect();
+
+    let score = |f: &Fit| {
+        objective_value(
+            obj, f, &layout, &attrs, &effects, &groups, &skills, &effect_meta, &is_stackable,
+        )
+    };
+
+    let mut fit = fit;
+    let mut current = score(&fit).unwrap_or(0.0);
+
+    // Greedy: for each empty slot of the relevant kinds, add the best candidate
+    // that improves the objective and still fits; repeat until full or stuck.
+    for (slot, cands) in &slot_candidates {
+        let cap = slot_capacity(&layout, *slot);
+        loop {
+            let used = fit.items.iter().filter(|i| i.slot == *slot).count() as i64;
+            if used >= cap {
+                break;
+            }
+            let index = used as i32;
+            let mut best: Option<(i64, f64)> = None;
+            for &tid in cands {
+                let group = groups.get(&tid).copied().unwrap_or(0);
+                // One-per-fit groups (e.g. Damage Control).
+                if UNIQUE_GROUPS.contains(&group)
+                    && fit
+                        .items
+                        .iter()
+                        .any(|i| groups.get(&i.type_id).copied() == Some(group))
+                {
+                    continue;
+                }
+                let mut trial = fit.clone();
+                trial.items.push(FitItem {
+                    type_id: tid,
+                    slot: *slot,
+                    index,
+                    state: ModuleState::Active,
+                    charge_type_id: None,
+                    quantity: 1,
+                });
+                if let Some(v) = score(&trial) {
+                    if v > current + 1e-6 && best.is_none_or(|(_, bv)| v > bv) {
+                        best = Some((tid, v));
+                    }
+                }
+            }
+            match best {
+                Some((tid, v)) => {
+                    fit.items.push(FitItem {
+                        type_id: tid,
+                        slot: *slot,
+                        index,
+                        state: ModuleState::Active,
+                        charge_type_id: None,
+                        quantity: 1,
+                    });
+                    current = v;
+                }
+                None => break, // nothing improves/fits in this slot kind
+            }
+        }
+    }
+
+    Ok(fit)
+}
+
 /// The local saved-fits document.
 fn load_fits(dir: &Path) -> Vec<Fit> {
     storage::load_data(dir, FITS_KEY).unwrap_or_default()
@@ -678,3 +1014,4 @@ pub fn fitting_delete_local(app: AppHandle, id: String) -> Result<(), String> {
     fits.retain(|f| f.id != id);
     storage::save_data(&dir, FITS_KEY, &fits)
 }
+
