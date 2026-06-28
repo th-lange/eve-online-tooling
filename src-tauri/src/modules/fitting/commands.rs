@@ -809,7 +809,12 @@ fn capacitor_of(resolved: &ResolvedFit) -> CapStats {
     let mut drain = 0.0;
     for store in &resolved.modules {
         let need = store.get(6);
-        let dur = store.get(73);
+        // Cap-using modules cycle on `duration` (73); weapons (lasers, hybrids)
+        // cycle on rate of fire (`speed`, 51) instead, so fall back to it.
+        let dur = {
+            let d = store.get(73);
+            if d > 0.0 { d } else { store.get(51) }
+        };
         if need > 0.0 && dur > 0.0 {
             drain += need / (dur / 1000.0);
         }
@@ -2083,6 +2088,59 @@ mod tests {
                     cap_depletion: 175.5,
                     vel: 456.25,
                     align: 3.195,
+                },
+            ),
+            (
+                // Laser turrets + a T1 frequency crystal: basic crystal damage path.
+                "Punisher+MF",
+                fit(
+                    "Punisher",
+                    (0..3)
+                        .map(|i| {
+                            module(
+                                "Small Focused Pulse Laser II",
+                                SlotKind::High,
+                                Some("Multifrequency S"),
+                                i,
+                            )
+                        })
+                        .collect(),
+                ),
+                Golden {
+                    dps: 81.32,
+                    ehp: 2600.4,
+                    cap_stable: true,
+                    cap_pct: 90.29,
+                    cap_depletion: 0.0,
+                    vel: 443.75,
+                    align: 3.229,
+                },
+            ),
+            (
+                // Laser turrets + a T2 crystal (Conflagration): the crystal boosts
+                // its host turret's damage — the charge→host (bidirectional) case.
+                "Punisher+Conflag",
+                fit(
+                    "Punisher",
+                    (0..3)
+                        .map(|i| {
+                            module(
+                                "Small Focused Pulse Laser II",
+                                SlotKind::High,
+                                Some("Conflagration S"),
+                                i,
+                            )
+                        })
+                        .collect(),
+                ),
+                Golden {
+                    dps: 120.63,
+                    ehp: 2600.4,
+                    cap_stable: true,
+                    cap_pct: 87.76,
+                    cap_depletion: 0.0,
+                    vel: 443.75,
+                    align: 3.229,
                 },
             ),
         ];

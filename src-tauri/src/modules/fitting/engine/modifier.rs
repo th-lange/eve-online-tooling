@@ -57,6 +57,9 @@ impl Op {
 pub enum Domain {
     /// The affecting item itself.
     Item,
+    /// The linked item (`otherID`) — for a charge, its host module (and vice
+    /// versa). Carries charge↔host effects like ammo/crystal range & cap mods.
+    Other,
     /// The ship hull.
     Ship,
     /// The pilot (skills/implants).

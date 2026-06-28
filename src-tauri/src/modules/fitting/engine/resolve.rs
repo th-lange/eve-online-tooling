@@ -277,6 +277,19 @@ pub fn resolve(
         }
     }
 
+    // Pass 4b — charge→host (`otherID`): a loaded charge's `Other` modifiers
+    // apply to its host module (ammo/crystal cap, range, tracking penalties).
+    // Runs after the module pass so the host's base/skill attrs are resolved.
+    for (a, ms) in aux.iter().zip(&aux_mods) {
+        let AuxDest::Charge(host) = a.dest else { continue };
+        for m in ms {
+            if m.domain == Domain::Other {
+                let value = a.store.get(m.src_attr);
+                modules[host].apply(m.tgt_attr, m.op, value, m.penalized);
+            }
+        }
+    }
+
     // Scatter resolved aux stores back to their slots.
     let mut drones = vec![AttrStore::new(); input.drones.len()];
     let mut charges: Vec<Option<AttrStore>> = vec![None; input.charges.len()];
@@ -399,7 +412,9 @@ fn apply_to_targets(
             }
         }
         // Item handled in pass A; Char/Target not modelled here (P3 projection).
-        Domain::Item | Domain::Char | Domain::Target => {}
+        // Item handled in pass A; Other in the charge→host pass; Char/Target not
+        // modelled here (P3 projection).
+        Domain::Item | Domain::Other | Domain::Char | Domain::Target => {}
     }
 }
 
@@ -604,6 +619,32 @@ mod tests {
         let resolved = resolve(&input, &effects, &|_| true);
         let rof = resolved.modules[0].get(51);
         assert!((rof - 900.0).abs() < 1e-9, "rof = {rof}, want 900");
+    }
+
+    /// Charge→host (`otherID`, pass 4b): a loaded charge's `Other` modifier
+    /// applies to its host module — e.g. Conflagration's +cap-need penalty on the
+    /// turret. +50% capNeed on a base of 10 → 15.
+    #[test]
+    fn charge_modifies_its_host_module() {
+        // Effect 700: otherID ItemModifier, postPercent capNeed (6) by attr 317.
+        let mut effects = HashMap::new();
+        effects.insert(700, effect(700, vec![mi("ItemModifier", "otherID", 6, 6, 317, None)]));
+
+        let input = FitInput {
+            modules: vec![EntityInput {
+                attrs: vec![(6, 10.0)], // host turret base capacitorNeed
+                ..Default::default()
+            }],
+            charges: vec![Some(EntityInput {
+                attrs: vec![(317, 50.0)], // crystal cap-need bonus (+50%)
+                effect_ids: vec![700],
+                ..Default::default()
+            })],
+            ..Default::default()
+        };
+        let resolved = resolve(&input, &effects, &|_| true);
+        let cap_need = resolved.modules[0].get(6);
+        assert!((cap_need - 15.0).abs() < 1e-9, "host capNeed = {cap_need}, want 15");
     }
 
     /// Surgical Strike at level V: scales its own damageMultiplierBonus (292) by
