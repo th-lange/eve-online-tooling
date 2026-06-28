@@ -19,6 +19,25 @@ import { WormholesPage } from "./wormholes/WormholesPage";
 import { FittingPage } from "./fitting/FittingPage";
 import { ShoppingPage } from "./shopping/ShoppingPage";
 
+/** Sidebar section a module belongs to (the nav's information architecture). */
+export type ModuleGroup =
+  | "industry"
+  | "trading"
+  | "market"
+  | "assets"
+  | "character"
+  | "intel";
+
+/** Section labels + display order, driving the grouped sidebar nav (#224). */
+export const MODULE_GROUPS: { key: ModuleGroup; label: string }[] = [
+  { key: "industry", label: "Industry" },
+  { key: "trading", label: "Trading" },
+  { key: "market", label: "Market" },
+  { key: "assets", label: "Assets" },
+  { key: "character", label: "Character" },
+  { key: "intel", label: "Intel / Space" },
+];
+
 // A feature module = a nav entry + the page rendered at `/{id}`. Adding a new
 // module (daytrading, station-trading, …) is a one-line entry here plus its
 // page component; the Layout nav and router are driven entirely by this list.
@@ -29,6 +48,8 @@ export interface ModuleDef {
   title: string;
   /** Short description shown in the UI. */
   description: string;
+  /** Sidebar section this module is filed under. */
+  group: ModuleGroup;
   /** Page component rendered for this module. */
   Component: ComponentType;
 }
@@ -38,114 +59,133 @@ export const modules: ModuleDef[] = [
     id: "production",
     title: "Production",
     description: "Rank what you can build by build-vs-buy profit.",
+    group: "industry",
     Component: ProductionPage,
   },
   {
     id: "trading",
     title: "Station Trading",
     description: "Rank items by buy→sell margin at a market hub.",
+    group: "trading",
     Component: TradingPage,
   },
   {
     id: "daytrading",
     title: "Daytrading",
     description: "Cross-region price gaps on the same item, ranked by ISK/m³.",
+    group: "trading",
     Component: DaytradingPage,
   },
   {
     id: "reprocessing",
     title: "Reprocessing",
     description: "Rank ores by reprocess-vs-sell at your refining efficiency.",
+    group: "industry",
     Component: ReprocessingPage,
   },
   {
     id: "appraisal",
     title: "Appraisal",
     description: "Paste items → buy/sell ISK value and cargo volume.",
+    group: "market",
     Component: AppraisalPage,
   },
   {
     id: "universe",
     title: "Universe",
     description: "Browse every item type with stats and dogma attributes.",
+    group: "market",
     Component: UniversePage,
   },
   {
     id: "market-search",
     title: "Market Search",
     description: "Find an item's sell orders across the market, plus price & volume history.",
+    group: "market",
     Component: MarketSearchPage,
   },
   {
     id: "assets",
     title: "Assets",
     description: "Value your holdings and find where each stack sells best.",
+    group: "assets",
     Component: AssetsPage,
   },
   {
     id: "character",
     title: "Character",
     description: "Skills, standings and R&D research.",
+    group: "character",
     Component: CharacterPage,
   },
   {
     id: "accounting",
     title: "Accounting",
     description: "Wallet history and FIFO realized profit.",
+    group: "assets",
     Component: AccountingPage,
   },
   {
     id: "contracts",
     title: "Public Contracts",
     description: "Find item-exchange contracts worth more than their price.",
+    group: "trading",
     Component: ContractsPage,
   },
   {
     id: "lpstore",
     title: "LP Store",
     description: "Rank loyalty-store offers by ISK per LP.",
+    group: "trading",
     Component: LpStorePage,
   },
   {
     id: "route",
     title: "Route",
     description: "Per-system jumps & kills (last hour) across known space.",
+    group: "intel",
     Component: RoutePage,
   },
   {
     id: "local-intel",
     title: "Local Intel",
     description: "Paste Local → classify pilots by standing, corp and alliance.",
+    group: "intel",
     Component: LocalIntelPage,
   },
   {
     id: "orders",
     title: "Market Orders",
     description: "Your open buy/sell orders with undercut detection.",
+    group: "trading",
     Component: OrdersPage,
   },
   {
     id: "industry-jobs",
     title: "Industry Jobs",
     description: "Running and delivered industry jobs — what's cooking.",
+    group: "industry",
     Component: IndustryJobsPage,
   },
   {
     id: "wormholes",
     title: "Wormholes",
     description: "Map your wormhole chain with mass/EOL tracking.",
+    group: "intel",
     Component: WormholesPage,
   },
   {
     id: "fitting",
     title: "Fitting",
     description: "Build ship fits and validate slots, resources and price.",
+    group: "industry",
     Component: FittingPage,
   },
   {
     id: "shopping",
     title: "Shopping Lists",
     description: "Named lists of items to buy, fed from across the app.",
+    group: "assets",
     Component: ShoppingPage,
   },
 ];
