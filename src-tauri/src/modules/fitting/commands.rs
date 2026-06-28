@@ -2040,6 +2040,26 @@ mod tests {
                     align: 3.498,
                 },
             ),
+            (
+                // Two omni armor resist amps: exercises the stacking penalty on
+                // resonance attributes (the second module is penalized) → EHP.
+                "Rifter+2xEANM",
+                fit(
+                    "Rifter",
+                    vec![
+                        module("Multispectrum Energized Membrane II", SlotKind::Low, None, 0),
+                        module("Multispectrum Energized Membrane II", SlotKind::Low, None, 1),
+                    ],
+                ),
+                Golden {
+                    dps: 0.0,
+                    ehp: 2848.4,
+                    cap_stable: true,
+                    cap_pct: 100.0,
+                    vel: 456.25,
+                    align: 3.195,
+                },
+            ),
         ];
 
         let all5 = |_: i64| 5.0;
