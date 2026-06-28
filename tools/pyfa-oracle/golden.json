@@ -1,0 +1,35 @@
+[
+  {
+    "label": "Rifter - 3x 200mm AC II / Barrage S + 2x Warrior II",
+    "weaponDps": 107.15,
+    "droneDps": 32.18,
+    "totalDps": 139.32,
+    "ehp": 2262.2,
+    "capStable": true,
+    "capStatePct": 100,
+    "maxVelocity": 456.25,
+    "alignTime": 3.195
+  },
+  {
+    "label": "Caracal - 5x Heavy Missile Launcher II / Scourge Heavy Missile",
+    "weaponDps": 165.32,
+    "droneDps": 0,
+    "totalDps": 165.32,
+    "ehp": 7765.2,
+    "capStable": true,
+    "capStatePct": 100,
+    "maxVelocity": 287.5,
+    "alignTime": 5.238
+  },
+  {
+    "label": "Vexor - 5x Hammerhead II drones",
+    "weaponDps": 0,
+    "droneDps": 237.6,
+    "totalDps": 237.6,
+    "ehp": 9331.6,
+    "capStable": true,
+    "capStatePct": 100,
+    "maxVelocity": 243.75,
+    "alignTime": 5.817
+  }
+]
