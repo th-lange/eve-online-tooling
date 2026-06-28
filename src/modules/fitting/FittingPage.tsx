@@ -642,6 +642,7 @@ const SLOT_LABELS: [SlotKind, string][] = [
   ["low", "Low"],
   ["rig", "Rig"],
   ["subsystem", "Subsystem"],
+  ["implant", "Implants"],
   ["drone", "Drones"],
   ["cargo", "Cargo"],
 ];
@@ -826,6 +827,7 @@ const SLOT_BADGE: Partial<Record<SlotKind, string>> = {
   low: "Low",
   rig: "Rig",
   subsystem: "Sub",
+  implant: "Implant",
   drone: "Drone",
   cargo: "Cargo",
 };

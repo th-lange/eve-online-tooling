@@ -152,11 +152,13 @@ fn next_slot_index(items: &[FitItem], slot: SlotKind) -> i32 {
         .map_or(0, |m| m + 1)
 }
 
-/// Classify a type's slot: drones by category (18), otherwise from its
-/// slot-defining dogma effects, falling back to Cargo.
+/// Classify a type's slot: drones (category 18) and implants (20) by category,
+/// otherwise from its slot-defining dogma effects, falling back to Cargo.
 fn classify_slot(sde: &Sde, type_id: i64) -> Result<SlotKind, String> {
-    if sde.type_category(type_id).map_err(|e| e.to_string())? == Some(18) {
-        return Ok(SlotKind::Drone);
+    match sde.type_category(type_id).map_err(|e| e.to_string())? {
+        Some(18) => return Ok(SlotKind::Drone),
+        Some(20) => return Ok(SlotKind::Implant),
+        _ => {}
     }
     let effects: Vec<i64> = sde
         .type_effects(type_id)
@@ -474,6 +476,10 @@ fn run_dogma(
     // Drones (DPS) and charges (weapon damage) need their base attributes too.
     let drone_items: Vec<&FitItem> =
         fit.items.iter().filter(|i| i.slot == SlotKind::Drone).collect();
+    // Implants modify ship attributes via shipID effects, like skills (stacking-
+    // exempt), so they resolve as skill-like entities.
+    let implant_items: Vec<&FitItem> =
+        fit.items.iter().filter(|i| i.slot == SlotKind::Implant).collect();
 
     let skill_ids = sde.skill_type_ids().map_err(|e| e.to_string())?;
     let mut all_ids = Vec::with_capacity(1 + module_items.len() + skill_ids.len());
@@ -481,6 +487,7 @@ fn run_dogma(
     all_ids.extend(module_items.iter().map(|i| i.type_id));
     all_ids.extend(module_items.iter().filter_map(|i| i.charge_type_id));
     all_ids.extend(drone_items.iter().map(|i| i.type_id));
+    all_ids.extend(implant_items.iter().map(|i| i.type_id));
     all_ids.extend(fit.projected.iter().map(|i| i.type_id));
     all_ids.extend(&skill_ids);
 
@@ -561,6 +568,11 @@ fn run_dogma(
             group_id: 0,
             required_skills: Vec::new(),
         });
+    }
+    // Implants resolve alongside skills — their shipID effects modify the ship,
+    // stacking-exempt, which the skills pass already guarantees.
+    for it in &implant_items {
+        skills.push(entity(it.type_id, Vec::new())?);
     }
 
     let mut resolved = resolve(
@@ -2271,6 +2283,29 @@ mod tests {
                     vel: 456.25,
                     align: 3.195,
                     lock_range: 23821.9,
+                },
+            ),
+            (
+                // Navigation implant: +3% velocity via a shipID effect (#178).
+                "Rifter+implant",
+                fit(
+                    "Rifter",
+                    vec![module(
+                        "Eifyr and Co. 'Rogue' Navigation NN-603",
+                        SlotKind::Implant,
+                        None,
+                        0,
+                    )],
+                ),
+                Golden {
+                    dps: 0.0,
+                    ehp: 2262.2,
+                    cap_stable: true,
+                    cap_pct: 100.0,
+                    cap_depletion: 0.0,
+                    vel: 469.938,
+                    align: 3.195,
+                    lock_range: 0.0,
                 },
             ),
         ];
