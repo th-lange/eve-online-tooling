@@ -64,6 +64,10 @@ pub struct Fit {
     pub ship_type_id: i64,
     #[serde(default)]
     pub items: Vec<FitItem>,
+    /// Modules projected **onto** this fit (webs/paints/damps/…) — incoming
+    /// effects from a notional attacker, modelled at all-V (#178).
+    #[serde(default)]
+    pub projected: Vec<FitItem>,
 }
 
 /// Severity of a [`FitProblem`].
@@ -237,6 +241,7 @@ mod tests {
                 charge_type_id: None,
                 quantity: 1,
             }],
+            projected: Vec::new(),
         };
         let json = serde_json::to_string(&fit).unwrap();
         assert!(json.contains("\"shipTypeId\":587"));
