@@ -24,7 +24,6 @@ export type ModuleGroup =
   | "industry"
   | "trading"
   | "market"
-  | "assets"
   | "character"
   | "intel";
 
@@ -33,8 +32,7 @@ export const MODULE_GROUPS: { key: ModuleGroup; label: string }[] = [
   { key: "industry", label: "Industry" },
   { key: "trading", label: "Trading" },
   { key: "market", label: "Market" },
-  { key: "assets", label: "Assets" },
-  { key: "character", label: "Character" },
+  { key: "character", label: "Characters" },
   { key: "intel", label: "Intel / Space" },
 ];
 
@@ -108,7 +106,7 @@ export const modules: ModuleDef[] = [
     id: "assets",
     title: "Assets",
     description: "Value your holdings and find where each stack sells best.",
-    group: "assets",
+    group: "character",
     Component: AssetsPage,
   },
   {
@@ -122,7 +120,7 @@ export const modules: ModuleDef[] = [
     id: "accounting",
     title: "Accounting",
     description: "Wallet history and FIFO realized profit.",
-    group: "assets",
+    group: "character",
     Component: AccountingPage,
   },
   {
@@ -178,14 +176,14 @@ export const modules: ModuleDef[] = [
     id: "fitting",
     title: "Fitting",
     description: "Build ship fits and validate slots, resources and price.",
-    group: "industry",
+    group: "character",
     Component: FittingPage,
   },
   {
     id: "shopping",
     title: "Shopping Lists",
     description: "Named lists of items to buy, fed from across the app.",
-    group: "assets",
+    group: "character",
     Component: ShoppingPage,
   },
 ];
