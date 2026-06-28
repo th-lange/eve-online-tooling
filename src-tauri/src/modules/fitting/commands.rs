@@ -2031,6 +2031,8 @@ mod tests {
             cap_depletion: f64,
             vel: f64,
             align: f64,
+            /// Targeting lock range, metres (0 = not checked).
+            lock_range: f64,
         }
         let cases: Vec<(&str, Fit, Golden)> = vec![
             (
@@ -2052,6 +2054,7 @@ mod tests {
                     cap_depletion: 0.0,
                     vel: 456.25,
                     align: 3.195,
+                    lock_range: 0.0,
                 },
             ),
             (
@@ -2077,6 +2080,7 @@ mod tests {
                     cap_depletion: 0.0,
                     vel: 287.5,
                     align: 5.238,
+                    lock_range: 0.0,
                 },
             ),
             (
@@ -2090,6 +2094,7 @@ mod tests {
                     cap_depletion: 0.0,
                     vel: 243.75,
                     align: 5.817,
+                    lock_range: 0.0,
                 },
             ),
             (
@@ -2114,6 +2119,7 @@ mod tests {
                     cap_depletion: 0.0,
                     vel: 456.25,
                     align: 3.498,
+                    lock_range: 0.0,
                 },
             ),
             (
@@ -2135,6 +2141,7 @@ mod tests {
                     cap_depletion: 0.0,
                     vel: 456.25,
                     align: 3.195,
+                    lock_range: 0.0,
                 },
             ),
             (
@@ -2153,6 +2160,7 @@ mod tests {
                     cap_depletion: 175.5,
                     vel: 456.25,
                     align: 3.195,
+                    lock_range: 0.0,
                 },
             ),
             (
@@ -2177,6 +2185,7 @@ mod tests {
                     cap_depletion: 0.0,
                     vel: 1193.25,
                     align: 4.692,
+                    lock_range: 0.0,
                 },
             ),
             (
@@ -2203,6 +2212,7 @@ mod tests {
                     cap_depletion: 0.0,
                     vel: 443.75,
                     align: 3.229,
+                    lock_range: 0.0,
                 },
             ),
             (
@@ -2230,6 +2240,7 @@ mod tests {
                     cap_depletion: 0.0,
                     vel: 443.75,
                     align: 3.229,
+                    lock_range: 0.0,
                 },
             ),
             (
@@ -2244,6 +2255,22 @@ mod tests {
                     cap_depletion: 0.0,
                     vel: 182.5,
                     align: 3.195,
+                    lock_range: 0.0,
+                },
+            ),
+            (
+                // Projected sensor dampener: -15.3% lock range (#178).
+                "Rifter<damp",
+                fit_proj("Rifter", "Remote Sensor Dampener II"),
+                Golden {
+                    dps: 0.0,
+                    ehp: 2262.2,
+                    cap_stable: true,
+                    cap_pct: 100.0,
+                    cap_depletion: 0.0,
+                    vel: 456.25,
+                    align: 3.195,
+                    lock_range: 23821.9,
                 },
             ),
         ];
@@ -2280,6 +2307,12 @@ mod tests {
             }
             if !close(vel, g.vel, 0.005) { p.push(format!("vel {vel:.2}≠{:.2}", g.vel)); }
             if !close(align, g.align, 0.005) { p.push(format!("align {align:.3}≠{:.3}", g.align)); }
+            if g.lock_range > 0.0 {
+                let lr = d.targeting.lock_range;
+                if !close(lr, g.lock_range, 0.005) {
+                    p.push(format!("lock {lr:.1}≠{:.1}", g.lock_range));
+                }
+            }
             if !p.is_empty() {
                 failures.push(format!("{label}: {}", p.join(", ")));
             }
