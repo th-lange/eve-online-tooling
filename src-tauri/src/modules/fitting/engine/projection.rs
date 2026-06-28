@@ -50,6 +50,27 @@ pub fn apply_projection(ship: &mut AttrStore, projected: &[ProjectedInput]) {
     }
 }
 
+// T3 subsystem slot/hardpoint grants: `<x>SlotModifier`/`<x>HardPointModifier`
+// add to the matching ship slot count. Procedural (not in modifierInfo).
+const SUBSYSTEM_SLOT_GRANTS: [(i64, i64); 5] = [
+    (1374, 14),  // hiSlotModifier → hiSlots
+    (1375, 13),  // medSlotModifier → medSlots
+    (1376, 12),  // lowSlotModifier → lowSlots
+    (1368, 102), // turretHardPointModifier → turretHardpoints
+    (1369, 101), // launcherHardPointModifier → launcherHardpoints
+];
+
+/// Add a T3 subsystem's slot/hardpoint grants to the ship (#178). `get` reads the
+/// subsystem's finalized attributes.
+pub fn apply_subsystem_slots(ship: &mut AttrStore, get: impl Fn(i64) -> f64) {
+    for (modifier_attr, slot_attr) in SUBSYSTEM_SLOT_GRANTS {
+        let v = get(modifier_attr);
+        if v != 0.0 {
+            ship.apply(slot_attr, Op::ModAdd, v, false);
+        }
+    }
+}
+
 /// Build a [`ProjectedInput`] from a type's raw attributes.
 pub fn projected_from_attrs(get: impl Fn(i64) -> f64) -> ProjectedInput {
     ProjectedInput {
@@ -94,6 +115,21 @@ mod tests {
         );
         assert!((ship.get(MAX_TARGET_RANGE) - 23821.9).abs() < 0.1);
         assert!((ship.get(SCAN_RESOLUTION) - 698.78).abs() < 0.1);
+    }
+
+    #[test]
+    fn subsystem_grants_slots_to_a_zero_slot_hull() {
+        // A T3 hull starts with 0 slots; a subsystem adds 2 med + 2 low (#178).
+        let mut ship = AttrStore::new();
+        ship.seed(&[(14, 0.0), (13, 0.0), (12, 0.0)]);
+        apply_subsystem_slots(&mut ship, |id| match id {
+            1375 => 2.0, // medSlotModifier
+            1376 => 2.0, // lowSlotModifier
+            _ => 0.0,
+        });
+        assert_eq!(ship.get(13), 2.0);
+        assert_eq!(ship.get(12), 2.0);
+        assert_eq!(ship.get(14), 0.0);
     }
 
     #[test]
