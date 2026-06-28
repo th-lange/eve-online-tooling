@@ -875,6 +875,7 @@ fn damage_score(
 /// toggling is a UI follow-up.
 fn capacitor_of(resolved: &ResolvedFit) -> CapStats {
     let mut drain = 0.0;
+    let mut module_drains: Vec<(f64, f64)> = Vec::new();
     for store in &resolved.modules {
         let need = store.get(6);
         // Cap-using modules cycle on `duration` (73); weapons (lasers, hybrids)
@@ -885,9 +886,15 @@ fn capacitor_of(resolved: &ResolvedFit) -> CapStats {
         };
         if need > 0.0 && dur > 0.0 {
             drain += need / (dur / 1000.0);
+            module_drains.push((need, dur));
         }
     }
-    capacitor(resolved.ship.get(482), resolved.ship.get(55), drain)
+    capacitor(
+        resolved.ship.get(482),
+        resolved.ship.get(55),
+        drain,
+        &module_drains,
+    )
 }
 
 /// Tank from a resolved fit (#173): HP + resonances from the ship, local rep/s
@@ -2334,11 +2341,8 @@ mod tests {
             if stable && !close(cap_pct, g.cap_pct, 0.01) {
                 p.push(format!("cap% {cap_pct:.2}≠{:.2}", g.cap_pct));
             }
-            // Cap-stable detection is exact; the depletion *time* is a ballpark
-            // bound (our continuous-drain integration vs PYFA's discrete-activation
-            // capSim differ by a few %), so it's checked loosely.
-            if !stable && !close(depletion, g.cap_depletion, 0.15) {
-                p.push(format!("cap-depletion {depletion:.1}≉{:.1}", g.cap_depletion));
+            if !stable && !close(depletion, g.cap_depletion, 0.02) {
+                p.push(format!("cap-depletion {depletion:.1}≠{:.1}", g.cap_depletion));
             }
             if !close(vel, g.vel, 0.005) { p.push(format!("vel {vel:.2}≠{:.2}", g.vel)); }
             if !close(align, g.align, 0.005) { p.push(format!("align {align:.3}≠{:.3}", g.align)); }
