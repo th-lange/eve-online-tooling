@@ -477,6 +477,7 @@ fn run_dogma(
             .map(|t| t.group_id)
             .unwrap_or(0);
         Ok(EntityInput {
+            type_id,
             attrs: attrs.get(&type_id).cloned().unwrap_or_default(),
             effect_ids: effects_by_type.get(&type_id).cloned().unwrap_or_default(),
             group_id,
@@ -521,6 +522,7 @@ fn run_dogma(
             None => a.push((280, level)),
         }
         skills.push(EntityInput {
+            type_id: *sid,
             attrs: a,
             effect_ids: effects_by_type.get(sid).cloned().unwrap_or_default(),
             group_id: 0,
@@ -1081,6 +1083,7 @@ fn entity_from_maps(
     groups: &GroupMap,
 ) -> EntityInput {
     EntityInput {
+        type_id,
         attrs: attrs.get(&type_id).cloned().unwrap_or_default(),
         effect_ids: effects.get(&type_id).cloned().unwrap_or_default(),
         group_id: groups.get(&type_id).copied().unwrap_or(0),
@@ -1422,6 +1425,7 @@ fn optimize_fit(
                 None => a.push((280, 5.0)),
             }
             EntityInput {
+                type_id: *sid,
                 attrs: a,
                 effect_ids: effects.get(sid).cloned().unwrap_or_default(),
                 group_id: 0,
@@ -1997,10 +2001,13 @@ mod tests {
                 d.capacitor.stable,
             );
             eprintln!(
-                "{label}: TRACK dps {dps:.2} (want {:.2}, {:+.1}%) | \
+                "{label}: TRACK dps {dps:.2} (want {:.2}, {:+.1}%) [t{:.1} m{:.1} d{:.1}] | \
                  LOCK ehp {ehp:.1} vel {vel:.2} align {align:.3} cap_stable {stable}",
                 g.dps,
                 (dps - g.dps) / g.dps * 100.0,
+                d.dps.turret,
+                d.dps.missile,
+                d.dps.drone,
             );
             let mut p = Vec::new();
             if !close(ehp, g.ehp, 0.01) { p.push(format!("ehp {ehp:.1}≠{:.1}", g.ehp)); }
