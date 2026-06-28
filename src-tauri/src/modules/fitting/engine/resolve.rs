@@ -44,6 +44,13 @@ pub struct FitInput {
     pub modules: Vec<EntityInput>,
     /// Active skills (at the chosen level, baked into `attrs[280]`).
     pub skills: Vec<EntityInput>,
+    /// Drones in space (pass 4): targets of drone skills + ship/module drone
+    /// bonuses, but they never modify the ship.
+    pub drones: Vec<EntityInput>,
+    /// Loaded charges, parallel to `modules` (pass 4): a charge gets its host
+    /// module's group/skill-keyed bonuses plus missile-damage skills/ship role
+    /// bonuses, so its finalized damage drives missile DPS. `None` = empty slot.
+    pub charges: Vec<Option<EntityInput>>,
 }
 
 /// Resolved attribute stores for the ship and each module (parallel to input).
@@ -51,9 +58,28 @@ pub struct FitInput {
 pub struct ResolvedFit {
     pub ship: AttrStore,
     pub modules: Vec<AttrStore>,
+    /// Finalized drone stores (parallel to `FitInput::drones`).
+    pub drones: Vec<AttrStore>,
+    /// Finalized charge stores (parallel to `FitInput::charges`/`modules`).
+    pub charges: Vec<Option<AttrStore>>,
     /// Effect modifiers we couldn't model (coverage metric).
     #[allow(dead_code)] // surfaced by the golden-coverage harness (#176)
     pub unresolved: usize,
+}
+
+/// An auxiliary resolution target (a drone or a loaded charge): a store plus the
+/// group/required-skill keys that decide which outward modifiers reach it.
+struct Aux {
+    store: AttrStore,
+    group_id: i64,
+    req_skills: Vec<i64>,
+    /// Where this scatters back to in [`ResolvedFit`].
+    dest: AuxDest,
+}
+
+enum AuxDest {
+    Drone(usize),
+    Charge(usize),
 }
 
 /// Resolve a fit to final attributes. `effects` is the SDE effect catalogue
@@ -69,6 +95,30 @@ pub fn resolve(
     let group_ids: Vec<i64> = input.modules.iter().map(|m| m.group_id).collect();
     let req_skills: Vec<&Vec<i64>> = input.modules.iter().map(|m| &m.required_skills).collect();
     let mut unresolved = 0;
+
+    // Pass-4 auxiliary targets: drones and loaded charges. They receive the
+    // group/skill-keyed modifiers from skills, ship and modules (drone-damage
+    // skills, missile-damage role bonuses, Drone Damage Amplifiers, …) but never
+    // modify the ship, so they resolve as targets only.
+    let mut aux: Vec<Aux> = Vec::new();
+    for (j, d) in input.drones.iter().enumerate() {
+        aux.push(Aux {
+            store: seed(d),
+            group_id: d.group_id,
+            req_skills: d.required_skills.clone(),
+            dest: AuxDest::Drone(j),
+        });
+    }
+    for (i, c) in input.charges.iter().enumerate() {
+        if let Some(c) = c {
+            aux.push(Aux {
+                store: seed(c),
+                group_id: c.group_id,
+                req_skills: c.required_skills.clone(),
+                dest: AuxDest::Charge(i),
+            });
+        }
+    }
 
     // Precompute each entity's modifiers once.
     let mods = |e: &EntityInput, unresolved: &mut usize| -> Vec<ModifierDef> {
@@ -87,6 +137,13 @@ pub fn resolve(
     let ship_mods = mods(&input.ship, &mut unresolved);
     let module_mods: Vec<Vec<ModifierDef>> =
         input.modules.iter().map(|e| mods(e, &mut unresolved)).collect();
+    let aux_mods: Vec<Vec<ModifierDef>> = aux
+        .iter()
+        .map(|a| match &a.dest {
+            AuxDest::Drone(j) => mods(&input.drones[*j], &mut unresolved),
+            AuxDest::Charge(i) => mods(input.charges[*i].as_ref().unwrap(), &mut unresolved),
+        })
+        .collect();
 
     // Pass A — self (Item) modifiers on every entity (e.g. skill per-level scaling).
     for (s, ms) in skills.iter_mut().zip(&skill_mods) {
@@ -96,14 +153,22 @@ pub fn resolve(
     for (m, ms) in modules.iter_mut().zip(&module_mods) {
         apply_self(m, ms);
     }
+    for (a, ms) in aux.iter_mut().zip(&aux_mods) {
+        apply_self(&mut a.store, ms);
+    }
 
     // Pass B — outward modifiers, in tree order: skills → ship → modules.
+    // Bonuses from skills and ship role bonuses are **exempt** from the stacking
+    // penalty (EVE penalizes only module/drone-sourced bonuses), so those passes
+    // force `penalized = false`; the module pass keeps each modifier's own flag.
     for (s, ms) in skills.iter().zip(&skill_mods) {
-        apply_outward(s, ms, &mut ship, &mut modules, &group_ids, &req_skills);
+        apply_outward(s, ms, false, &mut ship, &mut modules, &group_ids, &req_skills, &mut aux);
     }
-    apply_outward_from_ship(&ship_mods, &mut ship, &mut modules, &group_ids, &req_skills);
+    apply_outward_from_ship(
+        &ship_mods, false, &mut ship, &mut modules, &group_ids, &req_skills, &mut aux,
+    );
     for i in 0..modules.len() {
-        // Read source from module i, apply to ship / other modules.
+        // Read source from module i, apply to ship / other modules / aux.
         let ms = module_mods[i].clone();
         let src_vals: Vec<(usize, f64)> = ms
             .iter()
@@ -112,13 +177,27 @@ pub fn resolve(
             .collect();
         for (k, value) in src_vals {
             let m = &ms[k];
-            apply_to_targets(m, value, &mut ship, &mut modules, &group_ids, &req_skills, Some(i));
+            apply_to_targets(
+                m, value, m.penalized, &mut ship, &mut modules, &group_ids, &req_skills, &mut aux,
+            );
+        }
+    }
+
+    // Scatter resolved aux stores back to their slots.
+    let mut drones = vec![AttrStore::new(); input.drones.len()];
+    let mut charges: Vec<Option<AttrStore>> = vec![None; input.charges.len()];
+    for a in aux {
+        match a.dest {
+            AuxDest::Drone(j) => drones[j] = a.store,
+            AuxDest::Charge(i) => charges[i] = Some(a.store),
         }
     }
 
     ResolvedFit {
         ship,
         modules,
+        drones,
+        charges,
         unresolved,
     }
 }
@@ -143,17 +222,19 @@ fn apply_self(store: &mut AttrStore, mods: &[ModifierDef]) {
 fn apply_outward(
     affecting: &AttrStore,
     mods: &[ModifierDef],
+    penalized: bool,
     ship: &mut AttrStore,
     modules: &mut [AttrStore],
     group_ids: &[i64],
     req_skills: &[&Vec<i64>],
+    aux: &mut [Aux],
 ) {
     for m in mods {
         if m.domain == Domain::Item {
             continue;
         }
         let value = affecting.get(m.src_attr);
-        apply_to_targets(m, value, ship, modules, group_ids, req_skills, None);
+        apply_to_targets(m, value, penalized, ship, modules, group_ids, req_skills, aux);
     }
 }
 
@@ -161,55 +242,70 @@ fn apply_outward(
 /// its source values first, then apply.
 fn apply_outward_from_ship(
     mods: &[ModifierDef],
+    penalized: bool,
     ship: &mut AttrStore,
     modules: &mut [AttrStore],
     group_ids: &[i64],
     req_skills: &[&Vec<i64>],
+    aux: &mut [Aux],
 ) {
     let vals: Vec<f64> = mods.iter().map(|m| ship.get(m.src_attr)).collect();
     for (m, value) in mods.iter().zip(vals) {
         if m.domain == Domain::Item {
             continue;
         }
-        apply_to_targets(m, value, ship, modules, group_ids, req_skills, None);
+        apply_to_targets(m, value, penalized, ship, modules, group_ids, req_skills, aux);
     }
 }
 
 /// Route one modifier (with its already-read `value`) to its target stores.
+/// `penalized` is supplied by the caller (skills/ship pass force it off — those
+/// bonuses are stacking-exempt — while the module pass keeps the modifier's own
+/// flag). Drones/charges (`aux`) only receive the group/skill-keyed domains —
+/// never the blanket `Location`/`Ship` domains, which don't reach them.
 fn apply_to_targets(
     m: &ModifierDef,
     value: f64,
+    penalized: bool,
     ship: &mut AttrStore,
     modules: &mut [AttrStore],
     group_ids: &[i64],
     req_skills: &[&Vec<i64>],
-    self_index: Option<usize>,
+    aux: &mut [Aux],
 ) {
     match m.domain {
-        Domain::Ship => ship.apply(m.tgt_attr, m.op, value, m.penalized),
+        Domain::Ship => ship.apply(m.tgt_attr, m.op, value, penalized),
         Domain::Location => {
             for s in modules.iter_mut() {
-                s.apply(m.tgt_attr, m.op, value, m.penalized);
+                s.apply(m.tgt_attr, m.op, value, penalized);
             }
         }
         Domain::GroupOnShip(g) => {
             for (i, s) in modules.iter_mut().enumerate() {
                 if group_ids[i] == g {
-                    s.apply(m.tgt_attr, m.op, value, m.penalized);
+                    s.apply(m.tgt_attr, m.op, value, penalized);
+                }
+            }
+            for a in aux.iter_mut() {
+                if a.group_id == g {
+                    a.store.apply(m.tgt_attr, m.op, value, penalized);
                 }
             }
         }
         Domain::SkillReqOnShip(skill) => {
             for (i, s) in modules.iter_mut().enumerate() {
                 if req_skills[i].contains(&skill) {
-                    s.apply(m.tgt_attr, m.op, value, m.penalized);
+                    s.apply(m.tgt_attr, m.op, value, penalized);
+                }
+            }
+            for a in aux.iter_mut() {
+                if a.req_skills.contains(&skill) {
+                    a.store.apply(m.tgt_attr, m.op, value, penalized);
                 }
             }
         }
         // Item handled in pass A; Char/Target not modelled here (P3 projection).
-        Domain::Item | Domain::Char | Domain::Target => {
-            let _ = self_index;
-        }
+        Domain::Item | Domain::Char | Domain::Target => {}
     }
 }
 
@@ -245,6 +341,60 @@ mod tests {
         }
     }
 
+    fn mi_skill(func: &str, dom: &str, op: i64, tgt: i64, src: i64, skill: i64) -> ModifierInfo {
+        ModifierInfo {
+            domain: Some(dom.into()),
+            func: Some(func.into()),
+            modified_attribute_id: Some(tgt),
+            modifying_attribute_id: Some(src),
+            operation: Some(op),
+            group_id: None,
+            skill_type_id: Some(skill),
+        }
+    }
+
+    /// Pass-4 ship role bonus reaching a drone (the Vexor mechanism, #176): the
+    /// racial-cruiser skill preMul-scales the ship bonus attr (658) by its level,
+    /// then the ship's OwnerRequiredSkillModifier applies that % to drones
+    /// requiring the Drones skill. 10%/level × V = +50% → a 1.0 drone ends at 1.5.
+    #[test]
+    fn ship_bonus_scales_by_skill_then_reaches_drone() {
+        let mut effects = HashMap::new();
+        // Ship effect: postPercent damageMultiplier (64) by bonus attr (658) on
+        // items requiring skill 3436 (Drones).
+        effects.insert(
+            200,
+            effect(200, vec![mi_skill("OwnerRequiredSkillModifier", "charID", 6, 64, 658, 3436)]),
+        );
+        // Gallente Cruiser skill effect: preMul the ship's 658 by skillLevel (280).
+        effects.insert(201, effect(201, vec![mi("ItemModifier", "shipID", 0, 658, 280, None)]));
+
+        let input = FitInput {
+            ship: EntityInput {
+                attrs: vec![(658, 10.0)], // 10%/level base bonus
+                effect_ids: vec![200],
+                group_id: 0,
+                required_skills: Vec::new(),
+            },
+            skills: vec![EntityInput {
+                attrs: vec![(280, 5.0)], // Gallente Cruiser V
+                effect_ids: vec![201],
+                group_id: 0,
+                required_skills: Vec::new(),
+            }],
+            drones: vec![EntityInput {
+                attrs: vec![(64, 1.0)],
+                effect_ids: vec![],
+                group_id: 0,
+                required_skills: vec![3436], // Hammerhead II requires Drones (184)
+            }],
+            ..Default::default()
+        };
+        let resolved = resolve(&input, &effects, &|_| true);
+        let dmg = resolved.drones[0].get(64);
+        assert!((dmg - 1.5).abs() < 1e-9, "drone damageMultiplier = {dmg}, want 1.5");
+    }
+
     /// Surgical Strike at level V: scales its own damageMultiplierBonus (292) by
     /// skillLevel (280) via self preMul, then +15% to turret damageMultiplier
     /// (64) on group 55. A fitted turret of group 55 should end at 1.15× damage.
@@ -272,6 +422,7 @@ mod tests {
                 group_id: 0,
                 required_skills: Vec::new(),
             }],
+            ..Default::default()
         };
 
         // damageMultiplier (64) is non-stackable, but a single bonus isn't reduced.
@@ -303,6 +454,7 @@ mod tests {
                 group_id: 0,
                 required_skills: Vec::new(),
             }],
+            ..Default::default()
         };
         let resolved = resolve(&input, &effects, &|_| true);
         assert_eq!(resolved.modules[0].get(64), 1.0);
