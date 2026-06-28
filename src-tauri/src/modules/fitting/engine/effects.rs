@@ -54,7 +54,8 @@ fn domain_of(mi: &ModifierInfo) -> Option<Domain> {
             "shipID" => Domain::Ship,
             "charID" => Domain::Char,
             "targetID" => Domain::Target,
-            // "itemID" / "otherID" / default: the affecting item itself.
+            "otherID" => Domain::Other,
+            // "itemID" / default: the affecting item itself.
             _ => Domain::Item,
         },
         "LocationModifier" => Domain::Location,
