@@ -491,10 +491,11 @@ function Workbench() {
               )}
             </div>
 
-            {layout.data && (
+            {/* Prefer the resolved layout (T3 subsystems grant slots). */}
+            {(stats.data?.layout ?? layout.data) && (
               <SlotGrid
                 fit={fit}
-                layout={layout.data}
+                layout={stats.data?.layout ?? layout.data!}
                 nameOf={nameOf}
                 onRemove={removeItem}
                 onAddToSlot={setSlotFilter}

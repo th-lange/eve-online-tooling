@@ -1480,6 +1480,8 @@ export interface FitStats {
   tank?: TankStats | null;
   dps?: DpsBreakdown | null;
   navigation?: NavStats | null;
+  /** Resolved slot layout (T3 subsystems grant slots). */
+  layout?: ShipLayout | null;
   targeting?: TargetStats | null;
   price?: number | null;
 }

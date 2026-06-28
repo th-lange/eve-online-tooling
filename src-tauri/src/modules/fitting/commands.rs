@@ -14,7 +14,9 @@ use super::engine::validate::{validate, ValItem};
 use super::engine::capacitor::capacitor;
 use super::engine::damage::{damage, Weapon};
 use super::engine::navigation::{navigation, prop_velocity, targeting};
-use super::engine::projection::{apply_projection, projected_from_attrs, ProjectedInput};
+use super::engine::projection::{
+    apply_projection, apply_subsystem_slots, projected_from_attrs, ProjectedInput,
+};
 use super::engine::attr::AttrStore;
 use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
 use super::engine::tank::{tank, DamageProfile, Layer};
@@ -434,6 +436,7 @@ pub async fn fitting_simulate(
         tank: dogma.as_ref().map(|d| d.tank.clone()),
         dps: dogma.as_ref().map(|d| d.dps.clone()),
         navigation: dogma.as_ref().map(|d| d.navigation.clone()),
+        layout: dogma.as_ref().map(|d| d.layout.clone()),
         targeting: dogma.map(|d| d.targeting),
         price: None,
     })
@@ -445,6 +448,8 @@ struct DogmaStats {
     resources: ResourceUsage,
     /// Slot/resource validation against the *finalized* attributes.
     validation: Vec<FitProblem>,
+    /// Resolved slot layout (T3 subsystems grant slots), for the editor.
+    layout: ShipLayout,
     capacitor: CapStats,
     tank: TankStats,
     dps: DpsBreakdown,
@@ -593,6 +598,13 @@ fn run_dogma(
         .collect();
     apply_projection(&mut resolved.ship, &projected);
 
+    // T3 subsystems grant slots/hardpoints to the ship procedurally (#178).
+    for (it, store) in module_items.iter().zip(&resolved.modules) {
+        if it.slot == SlotKind::Subsystem {
+            apply_subsystem_slots(&mut resolved.ship, |id| store.get(id));
+        }
+    }
+
     // Mass for align time: prefer the finalized dogma value, else invTypes.mass
     // (some hulls carry mass only on the type row, not as a dogma attribute).
     let mass = {
@@ -612,7 +624,7 @@ fn run_dogma(
     // Finalized fitting resources + validation from the *resolved* ship + modules
     // (skills/rigs/modules reflected, not base attributes) — shared with the
     // optimizer's feasibility gate. Drone-bay volume comes from the SDE.
-    let (resources, validation) = resolved_feasibility(
+    let (resources, validation, layout) = resolved_feasibility(
         &resolved,
         base_layout,
         &effects_by_type,
@@ -629,6 +641,7 @@ fn run_dogma(
     Ok(DogmaStats {
         resources,
         validation,
+        layout,
         capacitor: capacitor_of(&resolved),
         tank: tank_of(&resolved),
         dps: dps_of(&resolved, &drone_items),
@@ -678,7 +691,7 @@ fn resolved_feasibility(
     effects_by_type: &EffectMap,
     fit: &Fit,
     drone_volume_of: &dyn Fn(i64) -> f64,
-) -> (ResourceUsage, Vec<FitProblem>) {
+) -> (ResourceUsage, Vec<FitProblem>, ShipLayout) {
     let s = &resolved.ship;
     let resolved_layout = ShipLayout {
         type_id: base_layout.type_id,
@@ -729,7 +742,8 @@ fn resolved_feasibility(
             });
         }
     }
-    validate(&resolved_layout, &val_items)
+    let (resources, validation) = validate(&resolved_layout, &val_items);
+    (resources, validation, resolved_layout)
 }
 
 /// The active character's actual skill levels (`skillTypeId → level`), via ESI
@@ -1297,7 +1311,7 @@ fn evaluate(
 
     // Dogma-aware feasibility gate: reject fits that don't fit. The optimizer never
     // reworks drones in-search, so bay volume is 0 here.
-    let (_, problems) = resolved_feasibility(&resolved, layout, effects, fit, &|_| 0.0);
+    let (_, problems, _) = resolved_feasibility(&resolved, layout, effects, fit, &|_| 0.0);
     if problems.iter().any(|p| p.severity == Severity::Error) {
         return None;
     }

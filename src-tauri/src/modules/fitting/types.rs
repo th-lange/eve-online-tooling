@@ -190,6 +190,10 @@ pub struct FitStats {
     /// Navigation (#175); `None` until the dogma engine runs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub navigation: Option<NavStats>,
+    /// Resolved slot layout — T3 subsystems grant slots (#178); `None` until the
+    /// dogma engine runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout: Option<crate::sde::ShipLayout>,
     /// Targeting (#175); `None` until the dogma engine runs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub targeting: Option<TargetStats>,
