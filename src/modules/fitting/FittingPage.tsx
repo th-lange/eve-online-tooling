@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
 import {
@@ -45,6 +45,8 @@ export function FittingPage() {
 function Workbench() {
   const qc = useQueryClient();
   const [fit, setFit] = useState<Fit | null>(null);
+  // When set (from clicking a free slot), the add-module browser filters to it.
+  const [slotFilter, setSlotFilter] = useState<SlotKind | null>(null);
   const [query, setQuery] = useState("");
   const [regionId, setRegionId] = useState(FORGE);
   const [eft, setEft] = useState("");
@@ -468,12 +470,20 @@ function Workbench() {
             </div>
 
             {layout.data && (
-              <SlotGrid fit={fit} layout={layout.data} nameOf={nameOf} onRemove={removeItem} />
+              <SlotGrid
+                fit={fit}
+                layout={layout.data}
+                nameOf={nameOf}
+                onRemove={removeItem}
+                onAddToSlot={setSlotFilter}
+              />
             )}
 
             <ModuleBrowser
               onAdd={(typeId) => addItem.mutate(typeId)}
               pending={addItem.isPending}
+              slotFilter={slotFilter}
+              onSlotFilter={setSlotFilter}
             />
           </section>
 
@@ -616,37 +626,63 @@ const SLOT_LABELS: [SlotKind, string][] = [
 function ModuleBrowser({
   onAdd,
   pending,
+  slotFilter,
+  onSlotFilter,
 }: {
   onAdd: (typeId: number) => void;
   pending: boolean;
+  slotFilter: SlotKind | null;
+  onSlotFilter: (slot: SlotKind | null) => void;
 }) {
   const [q, setQ] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  // Focus the search when a slot is picked from the grid.
+  useEffect(() => {
+    if (slotFilter) inputRef.current?.focus();
+  }, [slotFilter]);
+
   const results = useQuery({
     queryKey: ["fitting", "module-search", q],
     queryFn: () => sdeSearch(q),
     enabled: q.trim().length >= 2,
   });
-  const shown = (results.data ?? []).slice(0, 30);
+  const matches = (results.data ?? []).slice(0, 40);
   // Classify the visible results' slots so each row shows where it'll land.
-  const ids = useMemo(() => shown.map((r) => r.id), [shown]);
+  const ids = useMemo(() => matches.map((r) => r.id), [matches]);
   const slots = useQuery({
     queryKey: ["fitting", "slot-classify", ids],
     queryFn: () => fittingClassifySlots(ids),
     enabled: ids.length > 0,
   });
-  const slotOf = useMemo(
-    () => new Map(slots.data ?? []),
-    [slots.data],
-  );
+  const slotOf = useMemo(() => new Map(slots.data ?? []), [slots.data]);
+  // With a slot filter active, keep only results that land in that slot.
+  const shown = (
+    slotFilter ? matches.filter((r) => slotOf.get(r.id) === slotFilter) : matches
+  ).slice(0, 30);
   return (
     <div className="mt-4 rounded border border-zinc-800 bg-zinc-900/40 p-3">
-      <div className="mb-2 text-xs uppercase tracking-wide text-zinc-500">
+      <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-zinc-500">
         Add module
+        {slotFilter && (
+          <button
+            onClick={() => onSlotFilter(null)}
+            title="Clear slot filter"
+            className="flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 normal-case text-zinc-200 hover:border-zinc-600"
+          >
+            {SLOT_BADGE[slotFilter] ?? slotFilter} only
+            <X size={11} className="text-zinc-400" />
+          </button>
+        )}
       </div>
       <input
+        ref={inputRef}
         value={q}
         onChange={(e) => setQ(e.currentTarget.value)}
-        placeholder="search a module, charge or drone…"
+        placeholder={
+          slotFilter
+            ? `search a ${SLOT_BADGE[slotFilter] ?? slotFilter} module…`
+            : "search a module, charge or drone…"
+        }
         className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
       />
       {q.trim().length >= 2 && (
@@ -665,7 +701,11 @@ function ModuleBrowser({
             </li>
           ))}
           {results.isFetched && shown.length === 0 && (
-            <li className="px-2 py-1 text-xs text-zinc-500">No matches.</li>
+            <li className="px-2 py-1 text-xs text-zinc-500">
+              {slotFilter && matches.length > 0
+                ? `No ${SLOT_BADGE[slotFilter] ?? slotFilter} modules match.`
+                : "No matches."}
+            </li>
           )}
         </ul>
       )}
@@ -699,11 +739,13 @@ function SlotGrid({
   layout,
   nameOf,
   onRemove,
+  onAddToSlot,
 }: {
   fit: Fit;
   layout: { highSlots: number; midSlots: number; lowSlots: number; rigSlots: number };
   nameOf: (id: number) => string;
   onRemove: (globalIndex: number) => void;
+  onAddToSlot: (slot: SlotKind) => void;
 }) {
   const counts: Partial<Record<SlotKind, number>> = {
     high: layout.highSlots,
@@ -720,15 +762,14 @@ function SlotGrid({
           .sort((a, b) => a.it.index - b.it.index);
         const cap = counts[slot];
         if (items.length === 0 && cap == null) return null;
+        const free = cap != null ? cap - items.length : 0;
         return (
           <div key={slot}>
             <div className="text-xs uppercase tracking-wide text-zinc-500">
               {label}
               {cap != null ? ` (${items.length}/${cap})` : ""}
             </div>
-            {items.length === 0 ? (
-              <div className="text-sm text-zinc-600">—</div>
-            ) : (
+            {items.length > 0 && (
               <ul className="text-sm text-zinc-300">
                 {items.map(({ it, i }) => (
                   <li
@@ -751,6 +792,17 @@ function SlotGrid({
                   </li>
                 ))}
               </ul>
+            )}
+            {/* Click a free slot to add a module to it (filters the browser). */}
+            {cap != null && free > 0 && (
+              <button
+                onClick={() => onAddToSlot(slot)}
+                className="mt-0.5 flex items-center gap-1 rounded px-1 py-0.5 text-sm text-zinc-600 hover:bg-zinc-800/70 hover:text-zinc-300"
+              >
+                <Plus size={13} className="shrink-0" />
+                Add to {label.toLowerCase()}
+                {free > 1 ? ` (${free} free)` : ""}
+              </button>
             )}
           </div>
         );
