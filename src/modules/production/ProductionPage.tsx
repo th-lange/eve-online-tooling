@@ -19,7 +19,7 @@ import {
 } from "../../lib/api";
 import { formatIsk, formatPercent } from "../../lib/format";
 import { SdeSetup } from "./SdeSetup";
-import { ProfitTable } from "./ProfitTable";
+import { ProfitTable, TableSkeleton, EmptyState } from "./ProfitTable";
 
 type ResultsView = "opportunities" | "favorites" | "blacklist" | "library";
 
@@ -628,9 +628,7 @@ function Workbench() {
               Calculation failed: {String(profit.error)}
             </div>
           ) : profit.isPending && rows.length === 0 ? (
-            <div className="p-10 text-center text-sm text-zinc-500">
-              Pricing the whole catalogue at the chosen market…
-            </div>
+            <TableSkeleton />
           ) : (
             <ProfitTable
               rows={filtered}
@@ -644,6 +642,8 @@ function Workbench() {
             items={favorites.data ?? []}
             rowsByType={rowsByType}
             removeLabel="Unfavorite"
+            emptyTitle="No favorites yet"
+            emptyHint="Star a row in the Opportunities table to track it here."
             onRemove={(id) =>
               setList.mutate({ list: "favorites", typeId: id, add: false })
             }
@@ -654,6 +654,8 @@ function Workbench() {
             items={blacklist.data ?? []}
             rowsByType={rowsByType}
             removeLabel="Remove"
+            emptyTitle="Nothing blacklisted"
+            emptyHint="Hide an item with the blacklist button in Opportunities and it’ll appear here."
             onRemove={(id) =>
               setList.mutate({ list: "blacklist", typeId: id, add: false })
             }
@@ -877,18 +879,18 @@ function ListView({
   rowsByType,
   removeLabel,
   onRemove,
+  emptyTitle,
+  emptyHint,
 }: {
   items: { typeId: number; name: string }[];
   rowsByType: Map<number, ProfitBreakdown>;
   removeLabel: string;
   onRemove: (typeId: number) => void;
+  emptyTitle: string;
+  emptyHint: string;
 }) {
   if (items.length === 0) {
-    return (
-      <div className="p-10 text-center text-sm text-zinc-500">
-        Nothing here yet.
-      </div>
-    );
+    return <EmptyState title={emptyTitle} hint={emptyHint} />;
   }
   return (
     <div className="overflow-auto rounded border border-zinc-800">
