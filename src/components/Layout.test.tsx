@@ -92,13 +92,20 @@ describe("Layout sidebar", () => {
     expect(navOrder().slice(0, 2)).toEqual([REPROCESSING, PRODUCTION]);
   });
 
-  it("pinning lifts a module into the Pinned section", () => {
+  it("has no Pinned section when nothing is pinned", () => {
+    renderLayout();
+    expect(screen.queryByText("Pinned")).toBeNull();
+  });
+
+  it("mirrors a pinned module into Pinned while keeping it in its group", () => {
     localStorage.setItem("sidebar.pins", JSON.stringify([id(TRADING)]));
     renderLayout();
     const nav = screen.getByRole("navigation");
     expect(within(nav).getByText("Pinned")).toBeInTheDocument();
-    // The pinned module now leads the whole nav.
+    // The pinned module leads the nav (Pinned section is first) …
     expect(navOrder()[0]).toBe(TRADING);
+    // … and still appears in its own Trading section, so it shows twice.
+    expect(screen.getAllByRole("link", { name: TRADING })).toHaveLength(2);
   });
 
   it("assigns an accent colour and persists it; clearing removes it", () => {
