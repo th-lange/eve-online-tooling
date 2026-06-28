@@ -108,6 +108,28 @@ describe("Layout sidebar", () => {
     expect(screen.getAllByRole("link", { name: TRADING })).toHaveLength(2);
   });
 
+  it("sections default to open", () => {
+    renderLayout();
+    expect(screen.getByRole("link", { name: PRODUCTION })).toBeInTheDocument();
+  });
+
+  it("collapses a section on header click and persists it", () => {
+    renderLayout();
+    fireEvent.click(screen.getByRole("button", { name: "Industry" }));
+    expect(screen.queryByRole("link", { name: PRODUCTION })).toBeNull();
+    expect(
+      JSON.parse(localStorage.getItem("sidebar.collapsed") ?? "[]"),
+    ).toContain("industry");
+  });
+
+  it("restores collapsed sections on mount", () => {
+    localStorage.setItem("sidebar.collapsed", JSON.stringify(["industry"]));
+    renderLayout();
+    expect(screen.queryByRole("link", { name: PRODUCTION })).toBeNull();
+    // Other sections stay open.
+    expect(screen.getByRole("link", { name: TRADING })).toBeInTheDocument();
+  });
+
   it("assigns an accent colour and persists it; clearing removes it", () => {
     renderLayout();
     const row = rowFor(PRODUCTION);

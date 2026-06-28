@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { GripVertical, Search, Star, X } from "lucide-react";
+import { ChevronDown, ChevronRight, GripVertical, Search, Star, X } from "lucide-react";
 import { modules, MODULE_GROUPS, type ModuleDef } from "../modules/registry";
 import { BridgeStatus } from "./BridgeStatus";
 import { Characters } from "./Characters";
@@ -10,6 +10,7 @@ import appIcon from "../assets/app-icon.png";
 const PINS_KEY = "sidebar.pins";
 const ORDER_KEY = "sidebar.order";
 const COLORS_KEY = "sidebar.colors";
+const COLLAPSED_KEY = "sidebar.collapsed";
 
 // Accent palette for tagging sidebar entries. Tailwind 400-level hues, spread
 // around the wheel so they stay distinct as small accents on the dark sidebar.
@@ -87,10 +88,19 @@ export function Layout() {
     applyOrder(loadIds(ORDER_KEY)).map((m) => m.id),
   );
   const [colors, setColors] = useState<Record<string, string>>(loadColors);
+  // Collapsed section ids (sections default to open — only collapsed ones persist).
+  const [collapsed, setCollapsed] = useState<string[]>(() => loadIds(COLLAPSED_KEY));
   // A drag in progress, tagged with the section it started in — a pinned module
   // shows in both the Pinned section and its group, so reordering is scoped to
   // the section the row was dragged from.
   const [drag, setDrag] = useState<{ id: string; section: string } | null>(null);
+
+  const toggleSection = (id: string) =>
+    setCollapsed((prev) => {
+      const next = prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id];
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next));
+      return next;
+    });
 
   // Assign (or clear, when `key` is null) a module's accent colour.
   const setColor = (id: string, key: string | null) =>
@@ -175,7 +185,11 @@ export function Layout() {
         </div>
         <nav className="flex-1 overflow-y-auto px-2 pb-2">
           {pinned.length > 0 && (
-            <NavSection label="Pinned">
+            <NavSection
+              label="Pinned"
+              collapsed={collapsed.includes("pinned")}
+              onToggle={() => toggleSection("pinned")}
+            >
               {pinned.map((m) => (
                 <NavRow key={m.id} {...rowProps(m, "pinned")} />
               ))}
@@ -185,7 +199,12 @@ export function Layout() {
             const items = ordered.filter((m) => m.group === g.key);
             if (items.length === 0) return null;
             return (
-              <NavSection key={g.key} label={g.label}>
+              <NavSection
+                key={g.key}
+                label={g.label}
+                collapsed={collapsed.includes(g.key)}
+                onToggle={() => toggleSection(g.key)}
+              >
                 {items.map((m) => (
                   <NavRow key={m.id} {...rowProps(m, g.key)} />
                 ))}
@@ -243,17 +262,26 @@ function ModuleHost() {
 /** A labelled sidebar section: a small caption above its grouped nav rows. */
 function NavSection({
   label,
+  collapsed,
+  onToggle,
   children,
 }: {
   label: string;
+  collapsed: boolean;
+  onToggle: () => void;
   children: ReactNode;
 }) {
   return (
     <div className="mb-2">
-      <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+      <button
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+        className="flex w-full items-center gap-1 px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-300"
+      >
+        {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
         {label}
-      </div>
-      <div className="space-y-0.5">{children}</div>
+      </button>
+      {!collapsed && <div className="space-y-0.5">{children}</div>}
     </div>
   );
 }
