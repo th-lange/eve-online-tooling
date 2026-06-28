@@ -485,7 +485,20 @@ fn run_dogma(
         })
     };
 
-    let ship = entity(fit.ship_type_id, Vec::new())?;
+    let mut ship = entity(fit.ship_type_id, Vec::new())?;
+    // Seed the hull's base mass (4) if it's only on the type row, not a dogma
+    // attribute — otherwise a mass-adding module (armor plate, AB) modAdds onto
+    // a zero base and the align-time calc loses the hull mass.
+    if !ship.attrs.iter().any(|(k, _)| *k == 4) {
+        if let Some(mass) = sde
+            .type_detail(fit.ship_type_id)
+            .ok()
+            .flatten()
+            .and_then(|d| d.mass)
+        {
+            ship.attrs.push((4, mass));
+        }
+    }
 
     let mut modules = Vec::with_capacity(module_items.len());
     for it in &module_items {
@@ -1942,6 +1955,8 @@ mod tests {
             dps: f64,
             ehp: f64,
             cap_stable: bool,
+            /// Stable capacitor level (%) when stable.
+            cap_pct: f64,
             vel: f64,
             align: f64,
         }
@@ -1957,7 +1972,14 @@ mod tests {
                         drone("Warrior II", 2),
                     ],
                 ),
-                Golden { dps: 139.32, ehp: 2262.2, cap_stable: true, vel: 456.25, align: 3.195 },
+                Golden {
+                    dps: 139.32,
+                    ehp: 2262.2,
+                    cap_stable: true,
+                    cap_pct: 100.0,
+                    vel: 456.25,
+                    align: 3.195,
+                },
             ),
             (
                 "Caracal",
@@ -1974,12 +1996,49 @@ mod tests {
                         })
                         .collect(),
                 ),
-                Golden { dps: 165.32, ehp: 7765.2, cap_stable: true, vel: 287.5, align: 5.238 },
+                Golden {
+                    dps: 165.32,
+                    ehp: 7765.2,
+                    cap_stable: true,
+                    cap_pct: 100.0,
+                    vel: 287.5,
+                    align: 5.238,
+                },
             ),
             (
                 "Vexor",
                 fit("Vexor", vec![drone("Hammerhead II", 5)]),
-                Golden { dps: 237.6, ehp: 9331.6, cap_stable: true, vel: 243.75, align: 5.817 },
+                Golden {
+                    dps: 237.6,
+                    ehp: 9331.6,
+                    cap_stable: true,
+                    cap_pct: 100.0,
+                    vel: 243.75,
+                    align: 5.817,
+                },
+            ),
+            (
+                // Armor plate: exercises module armor HP (EHP) and the plate's
+                // mass penalty on align time.
+                "Rifter+plate",
+                fit(
+                    "Rifter",
+                    vec![
+                        module("200mm AutoCannon II", SlotKind::High, Some("Barrage S"), 0),
+                        module("200mm AutoCannon II", SlotKind::High, Some("Barrage S"), 1),
+                        module("200mm AutoCannon II", SlotKind::High, Some("Barrage S"), 2),
+                        module("200mm Steel Plates II", SlotKind::Low, None, 0),
+                        drone("Warrior II", 2),
+                    ],
+                ),
+                Golden {
+                    dps: 139.32,
+                    ehp: 3373.3,
+                    cap_stable: true,
+                    cap_pct: 100.0,
+                    vel: 456.25,
+                    align: 3.498,
+                },
             ),
         ];
 
@@ -1998,10 +2057,14 @@ mod tests {
                 d.navigation.align_time,
                 d.capacitor.stable,
             );
+            let cap_pct = d.capacitor.stable_pct.unwrap_or(0.0);
             let mut p = Vec::new();
             if !close(dps, g.dps, 0.005) { p.push(format!("dps {dps:.2}≠{:.2}", g.dps)); }
             if !close(ehp, g.ehp, 0.01) { p.push(format!("ehp {ehp:.1}≠{:.1}", g.ehp)); }
             if stable != g.cap_stable { p.push(format!("cap {stable}≠{}", g.cap_stable)); }
+            if stable && !close(cap_pct, g.cap_pct, 0.01) {
+                p.push(format!("cap% {cap_pct:.2}≠{:.2}", g.cap_pct));
+            }
             if !close(vel, g.vel, 0.005) { p.push(format!("vel {vel:.2}≠{:.2}", g.vel)); }
             if !close(align, g.align, 0.005) { p.push(format!("align {align:.3}≠{:.3}", g.align)); }
             if !p.is_empty() {
