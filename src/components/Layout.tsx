@@ -87,7 +87,10 @@ export function Layout() {
     applyOrder(loadIds(ORDER_KEY)).map((m) => m.id),
   );
   const [colors, setColors] = useState<Record<string, string>>(loadColors);
-  const [dragId, setDragId] = useState<string | null>(null);
+  // A drag in progress, tagged with the section it started in — a pinned module
+  // shows in both the Pinned section and its group, so reordering is scoped to
+  // the section the row was dragged from.
+  const [drag, setDrag] = useState<{ id: string; section: string } | null>(null);
 
   // Assign (or clear, when `key` is null) a module's accent colour.
   const setColor = (id: string, key: string | null) =>
@@ -106,44 +109,37 @@ export function Layout() {
       return next;
     });
 
-  const groupOf = (id: string) => modules.find((m) => m.id === id)?.group;
-
-  // Drop `dragId` onto `targetId` — only reorders within the same visible
-  // section: the Pinned group, or a shared module group. This keeps dragging
-  // from silently (un)pinning an item or hopping it between sections.
-  const handleDrop = (targetId: string) => {
-    if (dragId === null) return;
-    const dPinned = pins.includes(dragId);
-    const tPinned = pins.includes(targetId);
-    const sameSection =
-      dPinned && tPinned
-        ? true
-        : !dPinned && !tPinned && groupOf(dragId) === groupOf(targetId);
-    if (sameSection) {
+  // Drop the dragged row onto `targetId` — only reorders within the same visible
+  // section (the row carries the section it was dragged from), so dragging never
+  // (un)pins an item or hops it between sections. Reordering the shared custom
+  // order reorders the row wherever it appears.
+  const handleDrop = (targetId: string, targetSection: string) => {
+    if (drag === null) return;
+    if (drag.section === targetSection && drag.id !== targetId) {
       setOrder((prev) => {
-        const next = moveBefore(prev, dragId, targetId);
+        const next = moveBefore(prev, drag.id, targetId);
         localStorage.setItem(ORDER_KEY, JSON.stringify(next));
         return next;
       });
     }
-    setDragId(null);
+    setDrag(null);
   };
 
   const ordered = applyOrder(order);
-  // Pinned modules first, then the rest — each keeps the custom order.
+  // Pinned modules mirror into a Pinned section on top; every module also stays
+  // in its own group section (so pinning doesn't remove it from the group).
   const pinned = ordered.filter((m) => pins.includes(m.id));
-  const rest = ordered.filter((m) => !pins.includes(m.id));
 
-  const rowProps = (m: ModuleDef) => ({
+  const rowProps = (m: ModuleDef, section: string) => ({
     module: m,
     pinned: pins.includes(m.id),
     onTogglePin: togglePin,
     color: colors[m.id] ?? null,
     onSetColor: setColor,
-    isDragging: dragId === m.id,
-    onDragStart: () => setDragId(m.id),
-    onDragEnd: () => setDragId(null),
-    onDropRow: () => handleDrop(m.id),
+    isDragging: drag?.id === m.id && drag.section === section,
+    onDragStart: () => setDrag({ id: m.id, section }),
+    onDragEnd: () => setDrag(null),
+    onDropRow: () => handleDrop(m.id, section),
   });
 
   return (
@@ -181,17 +177,17 @@ export function Layout() {
           {pinned.length > 0 && (
             <NavSection label="Pinned">
               {pinned.map((m) => (
-                <NavRow key={m.id} {...rowProps(m)} />
+                <NavRow key={m.id} {...rowProps(m, "pinned")} />
               ))}
             </NavSection>
           )}
           {MODULE_GROUPS.map((g) => {
-            const items = rest.filter((m) => m.group === g.key);
+            const items = ordered.filter((m) => m.group === g.key);
             if (items.length === 0) return null;
             return (
               <NavSection key={g.key} label={g.label}>
                 {items.map((m) => (
-                  <NavRow key={m.id} {...rowProps(m)} />
+                  <NavRow key={m.id} {...rowProps(m, g.key)} />
                 ))}
               </NavSection>
             );
