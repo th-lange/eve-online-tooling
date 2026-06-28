@@ -21,20 +21,27 @@ export function SortHeaderCell<K extends string>({
   active,
   dir,
   onClick,
+  demoted = false,
 }: {
   column: SortColumn<K>;
   active: boolean;
   dir: SortDir;
   onClick: (key: K) => void;
+  /** Render as a de-emphasised support column (smaller, muted, group rule). */
+  demoted?: boolean;
 }) {
   return (
     <th
       onClick={() => onClick(column.key)}
       title={column.description}
       aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
-      className={`cursor-pointer select-none px-3 py-2 font-medium text-zinc-300 ${
+      className={`cursor-pointer select-none px-3 py-2 font-medium hover:text-zinc-100 ${
         column.numeric ? "text-right" : "text-left"
-      } hover:text-zinc-100`}
+      } ${
+        demoted
+          ? "border-l border-zinc-800/60 text-xs text-zinc-500"
+          : "text-zinc-300"
+      }`}
     >
       <span
         className={`inline-flex items-center gap-1 ${

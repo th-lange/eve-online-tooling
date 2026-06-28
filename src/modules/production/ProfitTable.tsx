@@ -148,17 +148,32 @@ export function ProfitTable({
     [rows, sortKey, sortDir],
   );
   const shown = sorted.slice(0, MAX_ROWS);
+  // Scale the inline ROI bars relative to the strongest ROI on screen, so the
+  // bar length reads as "how good is this row vs. the best one here".
+  const maxAbsRoi = useMemo(
+    () => Math.max(1, ...shown.map((r) => Math.abs(r.roi ?? 0))),
+    [shown],
+  );
+
+  if (rows.length === 0) {
+    return (
+      <EmptyState
+        title="No builds match your filters"
+        hint="Loosen a filter — lower the min ROI/volume, clear the category, or turn off Owned-only — to bring rows back."
+      />
+    );
+  }
 
   return (
     <div>
-      <div className="mb-1 text-xs text-zinc-500">
+      <div className="mb-1 text-xs text-zinc-400">
         {rows.length > MAX_ROWS
           ? `Showing top ${MAX_ROWS} of ${rows.length}`
           : `${rows.length} item(s)`}
       </div>
-      <div className="overflow-auto rounded border border-zinc-800">
+      <div className="rounded border border-zinc-800">
         <table className="w-full border-collapse text-sm">
-          <thead className="bg-zinc-900 text-zinc-400">
+          <thead className="sticky top-0 z-10 bg-zinc-900 text-zinc-400 shadow-[0_1px_0_0_theme(colors.zinc.800)]">
             <tr>
               <th className="w-6" />
               <th className="w-16" />
@@ -169,10 +184,11 @@ export function ProfitTable({
                   active={sortKey === c.key}
                   dir={sortDir}
                   onClick={toggleSort}
+                  demoted={c.key === "productVolume"}
                 />
               ))}
               <th
-                className="px-3 py-2 text-left font-medium"
+                className="border-l border-zinc-800/60 px-3 py-2 text-left text-xs font-medium text-zinc-500"
                 title="The market this row was priced at."
               >
                 Market
@@ -263,17 +279,22 @@ export function ProfitTable({
                     <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
                       {formatPercent(r.margin)}
                     </td>
-                    <td
-                      className={`px-3 py-1.5 text-right tabular-nums ${
-                        r.profitPerUnit >= 0 ? "text-emerald-400" : "text-rose-400"
-                      }`}
-                    >
-                      {formatIsk(r.profitPerUnit)}
+                    <td className="px-3 py-1.5 text-right">
+                      <div
+                        className={`text-[15px] font-semibold tabular-nums ${
+                          r.profitPerUnit >= 0
+                            ? "text-emerald-400"
+                            : "text-rose-400"
+                        }`}
+                      >
+                        {formatIsk(r.profitPerUnit)}
+                      </div>
+                      <RoiBar roi={r.roi} max={maxAbsRoi} />
                     </td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                    <td className="border-l border-zinc-800/60 px-3 py-1.5 text-right text-xs tabular-nums text-zinc-500">
                       {formatInt(r.productVolume)}
                     </td>
-                    <td className="px-3 py-1.5 text-zinc-400">
+                    <td className="border-l border-zinc-800/60 px-3 py-1.5 text-xs text-zinc-500">
                       {r.sellHub ? (
                         <span
                           className="inline-flex items-center gap-1 text-emerald-400"
@@ -291,15 +312,62 @@ export function ProfitTable({
                 </Fragment>
               );
             })}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={10} className="px-3 py-6 text-center text-zinc-500">
-                  No rows.
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A thin horizontal bar whose length encodes ROI relative to the strongest ROI
+ * currently on screen — a quick "how good is this row" cue next to the profit.
+ */
+function RoiBar({ roi, max }: { roi: number | null; max: number }) {
+  const v = roi ?? 0;
+  const pct = Math.min(100, (Math.abs(v) / max) * 100);
+  return (
+    <div className="mt-0.5 ml-auto h-1 w-16 overflow-hidden rounded-full bg-zinc-800">
+      <div
+        className={`h-full rounded-full ${
+          v >= 0 ? "bg-emerald-500/70" : "bg-rose-500/70"
+        }`}
+        style={{ width: `${pct}%`, marginLeft: v >= 0 ? undefined : "auto" }}
+      />
+    </div>
+  );
+}
+
+/** A centred empty state: a headline plus a concrete next step. */
+export function EmptyState({ title, hint }: { title: string; hint?: string }) {
+  return (
+    <div className="rounded border border-dashed border-zinc-800 p-10 text-center">
+      <div className="text-sm font-medium text-zinc-300">{title}</div>
+      {hint && <div className="mx-auto mt-1 max-w-md text-xs text-zinc-500">{hint}</div>}
+    </div>
+  );
+}
+
+/**
+ * Placeholder rows shown while a full re-price is in flight. The table shape is
+ * known up front, so we render shimmering rows instead of one bare gray line.
+ */
+export function TableSkeleton({ rows = 12 }: { rows?: number }) {
+  return (
+    <div className="overflow-hidden rounded border border-zinc-800">
+      <div className="border-b border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-500">
+        Pricing the whole catalogue at the chosen market…
+      </div>
+      <div className="divide-y divide-zinc-800/60">
+        {Array.from({ length: rows }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3 px-3 py-2.5">
+            <div className="h-3 w-3 animate-pulse rounded-full bg-zinc-800" />
+            <div className="h-3 flex-1 animate-pulse rounded bg-zinc-800" />
+            <div className="h-3 w-16 animate-pulse rounded bg-zinc-800" />
+            <div className="h-3 w-12 animate-pulse rounded bg-zinc-800" />
+            <div className="h-4 w-20 animate-pulse rounded bg-zinc-800" />
+          </div>
+        ))}
       </div>
     </div>
   );
