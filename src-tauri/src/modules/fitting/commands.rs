@@ -137,6 +137,57 @@ pub fn fitting_import_eft(app: AppHandle, text: String) -> Result<Fit, String> {
     })
 }
 
+/// Next free 0-based index for `slot`, i.e. one past the highest currently used
+/// (or 0 when the slot is empty). Pure, so the placement logic is unit-tested
+/// without an SDE.
+fn next_slot_index(items: &[FitItem], slot: SlotKind) -> i32 {
+    items
+        .iter()
+        .filter(|it| it.slot == slot)
+        .map(|it| it.index)
+        .max()
+        .map_or(0, |m| m + 1)
+}
+
+/// Add a module/drone/charge-bearing item to a fit, classifying its slot from
+/// its dogma effects (drones by category) and placing it at the next free index
+/// in that slot. Slot capacity is guarded in the UI; an over-fit still surfaces
+/// as a validation problem on the next simulate. Returns the updated fit (#168).
+#[tauri::command]
+pub fn fitting_add_item(
+    app: AppHandle,
+    mut fit: Fit,
+    type_id: i64,
+    charge_type_id: Option<i64>,
+) -> Result<Fit, String> {
+    let sde = open_sde(&app)?;
+    // Category 18 = Drone; otherwise classify from the slot-defining effects.
+    let slot = if sde.type_category(type_id).map_err(|e| e.to_string())? == Some(18) {
+        SlotKind::Drone
+    } else {
+        let effects: Vec<i64> = sde
+            .type_effects(type_id)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|(e, _)| e)
+            .collect();
+        eft::slot_for_effects(&effects).unwrap_or(SlotKind::Cargo)
+    };
+    let state = match slot {
+        SlotKind::Drone | SlotKind::Cargo => ModuleState::Active,
+        _ => ModuleState::Online,
+    };
+    fit.items.push(FitItem {
+        type_id,
+        slot,
+        index: next_slot_index(&fit.items, slot),
+        state,
+        charge_type_id,
+        quantity: 1,
+    });
+    Ok(fit)
+}
+
 /// Serialize a [`Fit`] to an EFT clipboard string (#162). Modules are grouped by
 /// slot (high → mid → low → rig → subsystem) in index order; drones and cargo
 /// follow as `Name xN` lines.
@@ -1819,6 +1870,19 @@ mod tests {
             charge_type_id: charge,
             quantity: qty,
         }
+    }
+
+    /// `next_slot_index` fills from 0 and appends one past the highest in-slot.
+    #[test]
+    fn next_slot_index_appends_per_slot() {
+        let mut items = vec![item(10, SlotKind::Low, None, 1), item(20, SlotKind::High, None, 1)];
+        items[0].index = 0;
+        items[1].index = 0;
+        // Empty slot starts at 0; occupied slots continue past their max.
+        assert_eq!(next_slot_index(&items, SlotKind::Mid), 0);
+        assert_eq!(next_slot_index(&items, SlotKind::Low), 1);
+        items.push(FitItem { index: 1, ..item(11, SlotKind::Low, None, 1) });
+        assert_eq!(next_slot_index(&items, SlotKind::Low), 2);
     }
 
     /// `fit_cost` sums hull + modules×qty + charges; a missing price counts as 0.
