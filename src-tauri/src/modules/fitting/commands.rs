@@ -150,6 +150,34 @@ fn next_slot_index(items: &[FitItem], slot: SlotKind) -> i32 {
         .map_or(0, |m| m + 1)
 }
 
+/// Classify a type's slot: drones by category (18), otherwise from its
+/// slot-defining dogma effects, falling back to Cargo.
+fn classify_slot(sde: &Sde, type_id: i64) -> Result<SlotKind, String> {
+    if sde.type_category(type_id).map_err(|e| e.to_string())? == Some(18) {
+        return Ok(SlotKind::Drone);
+    }
+    let effects: Vec<i64> = sde
+        .type_effects(type_id)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|(e, _)| e)
+        .collect();
+    Ok(eft::slot_for_effects(&effects).unwrap_or(SlotKind::Cargo))
+}
+
+/// Classify each type id's slot (for the add-module browser's slot badges, #168).
+#[tauri::command]
+pub fn fitting_classify_slots(
+    app: AppHandle,
+    type_ids: Vec<i64>,
+) -> Result<Vec<(i64, SlotKind)>, String> {
+    let sde = open_sde(&app)?;
+    type_ids
+        .into_iter()
+        .map(|id| Ok((id, classify_slot(&sde, id)?)))
+        .collect()
+}
+
 /// Add a module/drone/charge-bearing item to a fit, classifying its slot from
 /// its dogma effects (drones by category) and placing it at the next free index
 /// in that slot. Slot capacity is guarded in the UI; an over-fit still surfaces
@@ -162,18 +190,7 @@ pub fn fitting_add_item(
     charge_type_id: Option<i64>,
 ) -> Result<Fit, String> {
     let sde = open_sde(&app)?;
-    // Category 18 = Drone; otherwise classify from the slot-defining effects.
-    let slot = if sde.type_category(type_id).map_err(|e| e.to_string())? == Some(18) {
-        SlotKind::Drone
-    } else {
-        let effects: Vec<i64> = sde
-            .type_effects(type_id)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|(e, _)| e)
-            .collect();
-        eft::slot_for_effects(&effects).unwrap_or(SlotKind::Cargo)
-    };
+    let slot = classify_slot(&sde, type_id)?;
     let state = match slot {
         SlotKind::Drone | SlotKind::Cargo => ModuleState::Active,
         _ => ModuleState::Online,

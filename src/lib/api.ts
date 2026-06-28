@@ -1524,6 +1524,13 @@ export function fittingAddItem(
   return invoke<Fit>("fitting_add_item", { fit, typeId, chargeTypeId });
 }
 
+/** Classify each type id's slot (for the add-module browser's slot badges). */
+export function fittingClassifySlots(
+  typeIds: number[],
+): Promise<[number, SlotKind][]> {
+  return invoke<[number, SlotKind][]>("fitting_classify_slots", { typeIds });
+}
+
 /** Serialize a fit to an EFT clipboard string. */
 export function fittingExportEft(fit: Fit): Promise<string> {
   return invoke<string>("fitting_export_eft", { fit });
