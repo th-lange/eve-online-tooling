@@ -1,3 +1,4 @@
+import { ChevronDown, ChevronUp, Info } from "lucide-react";
 import type { SortDir } from "../lib/usePersistentSort";
 
 /** Column metadata shared by the sortable tables. */
@@ -31,18 +32,20 @@ export function SortHeaderCell<K extends string>({
       onClick={() => onClick(column.key)}
       title={column.description}
       aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
-      className={`cursor-pointer select-none px-3 py-2 font-medium ${
+      className={`cursor-pointer select-none px-3 py-2 font-medium text-zinc-300 ${
         column.numeric ? "text-right" : "text-left"
-      } hover:text-zinc-200`}
+      } hover:text-zinc-100`}
     >
-      {column.label}
       <span
-        className="ml-0.5 align-super text-[9px] text-zinc-600"
-        aria-hidden="true"
+        className={`inline-flex items-center gap-1 ${
+          column.numeric ? "flex-row-reverse" : ""
+        }`}
       >
-        ⓘ
+        {column.label}
+        <Info size={12} className="text-zinc-400" aria-hidden="true" />
+        {active &&
+          (dir === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
       </span>
-      {active ? (dir === "asc" ? " ▲" : " ▼") : ""}
     </th>
   );
 }

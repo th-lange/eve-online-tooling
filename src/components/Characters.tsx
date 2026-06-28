@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { X } from "lucide-react";
 import {
   activeCharacter,
   authCharacters,
@@ -63,16 +64,16 @@ export function Characters() {
           {activeId != null && (
             <button
               onClick={() => logout.mutate(activeId)}
-              className="shrink-0 rounded px-1 text-zinc-600 hover:text-rose-400"
+              className="flex shrink-0 items-center rounded p-1.5 text-zinc-400 hover:text-rose-400"
               title="Remove the selected character"
               aria-label="Remove the selected character"
             >
-              ✕
+              <X size={14} />
             </button>
           )}
         </div>
       ) : (
-        <p className="px-1 py-1 text-xs text-zinc-600">No characters yet.</p>
+        <p className="px-1 py-1 text-xs text-zinc-400">No characters yet.</p>
       )}
 
       <button

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
+import { GripVertical, Star, X } from "lucide-react";
 import { modules, type ModuleDef } from "../modules/registry";
 import { BridgeStatus } from "./BridgeStatus";
 import { Characters } from "./Characters";
@@ -258,9 +259,9 @@ function NavRow({
           onDragStart();
         }}
         onDragEnd={onDragEnd}
-        className="shrink-0 cursor-grab select-none px-1 text-zinc-600 opacity-0 group-hover:opacity-100"
+        className="flex shrink-0 cursor-grab select-none items-center px-1 text-zinc-500 opacity-0 group-hover:opacity-100"
       >
-        ⠿
+        <GripVertical size={14} />
       </span>
       <NavLink
         to={`/${module.id}`}
@@ -294,13 +295,13 @@ function NavRow({
         onClick={() => onTogglePin(module.id)}
         title={pinned ? "Unpin" : "Pin to top"}
         aria-label={pinned ? `Unpin ${module.title}` : `Pin ${module.title}`}
-        className={`shrink-0 rounded px-1.5 py-1 text-xs transition-opacity ${
+        className={`flex shrink-0 items-center rounded p-1.5 transition-opacity ${
           pinned
             ? "text-amber-400 hover:text-amber-300"
             : "text-zinc-500 opacity-0 hover:text-zinc-200 group-hover:opacity-100"
         }`}
       >
-        {pinned ? "★" : "☆"}
+        <Star size={14} fill={pinned ? "currentColor" : "none"} />
       </button>
     </div>
   );
@@ -364,9 +365,9 @@ function ColorPicker({
                 onSetColor(null);
                 setOpen(false);
               }}
-              className="flex h-7 w-7 items-center justify-center rounded-full border border-zinc-600 text-xs leading-none text-zinc-400 transition-transform hover:scale-110 hover:text-zinc-200"
+              className="flex h-7 w-7 items-center justify-center rounded-full border border-zinc-600 text-zinc-400 transition-transform hover:scale-110 hover:text-zinc-200"
             >
-              ✕
+              <X size={14} />
             </button>
           </div>
         </>

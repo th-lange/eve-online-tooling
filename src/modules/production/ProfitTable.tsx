@@ -1,4 +1,13 @@
 import { Fragment, useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  Ban,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Star,
+  TrendingUp,
+} from "lucide-react";
 import type { ProfitBreakdown } from "../../lib/api";
 import {
   formatDuration,
@@ -183,8 +192,14 @@ export function ProfitTable({
                     onClick={() => setExpanded(open ? null : r.blueprintTypeId)}
                     className="cursor-pointer border-t border-zinc-800 hover:bg-zinc-800/40"
                   >
-                    <td className="px-2 text-center text-zinc-500">
-                      {open ? "▾" : "▸"}
+                    <td className="px-2 text-zinc-400">
+                      <span className="flex items-center justify-center">
+                        {open ? (
+                          <ChevronDown size={16} />
+                        ) : (
+                          <ChevronRight size={16} />
+                        )}
+                      </span>
                     </td>
                     <td className="px-2 whitespace-nowrap">
                       <button
@@ -193,13 +208,17 @@ export function ProfitTable({
                           onFavorite(r);
                         }}
                         title="Favorite"
-                        className={
+                        aria-label={r.favorite ? "Unfavorite" : "Favorite"}
+                        className={`rounded p-1 ${
                           r.favorite
                             ? "text-amber-400"
-                            : "text-zinc-600 hover:text-amber-400"
-                        }
+                            : "text-zinc-400 hover:text-amber-400"
+                        }`}
                       >
-                        ★
+                        <Star
+                          size={15}
+                          fill={r.favorite ? "currentColor" : "none"}
+                        />
                       </button>
                       <button
                         onClick={(e) => {
@@ -207,21 +226,21 @@ export function ProfitTable({
                           onBlacklist(r);
                         }}
                         title="Blacklist (hide from ranking)"
-                        className="ml-2 text-zinc-600 hover:text-rose-400"
+                        aria-label="Blacklist"
+                        className="ml-1 rounded p-1 text-zinc-400 hover:text-rose-400"
                       >
-                        ✕
+                        <Ban size={15} />
                       </button>
                     </td>
                     <td className="px-3 py-1.5">
                       <div className="text-zinc-200">
                         {r.productName}
                         {incomplete && (
-                          <span
-                            title={`Missing prices for ${r.missingPrices.length} item(s) — numbers are incomplete`}
-                            className="ml-1 text-amber-400"
-                          >
-                            ⚠
-                          </span>
+                          <AlertTriangle
+                            size={13}
+                            className="ml-1 inline align-text-bottom text-amber-400"
+                            aria-label={`Missing prices for ${r.missingPrices.length} item(s) — numbers are incomplete`}
+                          />
                         )}
                       </div>
                       {subtitle && (
@@ -256,8 +275,12 @@ export function ProfitTable({
                     </td>
                     <td className="px-3 py-1.5 text-zinc-400">
                       {r.sellHub ? (
-                        <span title="Best hub to sell at">
-                          <span className="text-emerald-400">↗ {r.sellHub}</span>
+                        <span
+                          className="inline-flex items-center gap-1 text-emerald-400"
+                          title="Best hub to sell at"
+                        >
+                          <TrendingUp size={13} />
+                          {r.sellHub}
                         </span>
                       ) : (
                         (r.market ?? "—")
@@ -312,16 +335,28 @@ function BreakdownRow({ row }: { row: ProfitBreakdown }) {
             <button
               onClick={() => copy(costMarkdown(row), "md")}
               title="Copy a Markdown cost overview to the clipboard"
-              className="rounded border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
+              className="inline-flex items-center gap-1 rounded border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
             >
-              {copied === "md" ? "Copied ✓" : "Export"}
+              {copied === "md" ? (
+                <>
+                  <Check size={12} /> Copied
+                </>
+              ) : (
+                "Export"
+              )}
             </button>
             <button
               onClick={() => copy(multibuyText(row), "mb")}
               title="Copy the materials for the in-game Multibuy window"
-              className="rounded border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
+              className="inline-flex items-center gap-1 rounded border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
             >
-              {copied === "mb" ? "Copied ✓" : "Multibuy"}
+              {copied === "mb" ? (
+                <>
+                  <Check size={12} /> Copied
+                </>
+              ) : (
+                "Multibuy"
+              )}
             </button>
             <AddToListButton
               items={row.materials
@@ -359,9 +394,11 @@ function BreakdownRow({ row }: { row: ProfitBreakdown }) {
                     </span>
                   )}
                   {m.unitPrice === null && (
-                    <span className="ml-1 text-amber-400" title="No price">
-                      ⚠
-                    </span>
+                    <AlertTriangle
+                      size={12}
+                      className="ml-1 inline align-text-bottom text-amber-400"
+                      aria-label="No price"
+                    />
                   )}
                   {m.have > 0 && (
                     <span
@@ -416,9 +453,11 @@ function BreakdownRow({ row }: { row: ProfitBreakdown }) {
                     <td className="py-0.5">
                       {d.name}
                       {d.unitPrice === null && (
-                        <span className="ml-1 text-amber-400" title="No price">
-                          ⚠
-                        </span>
+                        <AlertTriangle
+                          size={12}
+                          className="ml-1 inline align-text-bottom text-amber-400"
+                          aria-label="No price"
+                        />
                       )}
                     </td>
                     <td className="text-right tabular-nums">
