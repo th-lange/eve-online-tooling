@@ -5,6 +5,7 @@ import { modules, MODULE_GROUPS, type ModuleDef } from "../modules/registry";
 import { BridgeStatus } from "./BridgeStatus";
 import { Characters } from "./Characters";
 import { CommandPalette } from "./CommandPalette";
+import appIcon from "../assets/app-icon.png";
 
 const PINS_KEY = "sidebar.pins";
 const ORDER_KEY = "sidebar.order";
@@ -149,10 +150,21 @@ export function Layout() {
     <div className="flex h-full bg-zinc-950 text-zinc-200">
       <aside className="flex w-60 flex-col border-r border-zinc-800 bg-zinc-900">
         <div className="px-4 py-4">
-          <div className="text-sm font-semibold tracking-wide text-zinc-100">
-            EVE Online Tooling
+          <div className="flex items-center gap-2.5">
+            <img
+              src={appIcon}
+              alt=""
+              className="h-8 w-8 shrink-0 rounded-lg"
+            />
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold tracking-wide text-zinc-100">
+                EVE Online Tooling
+              </div>
+              <div className="truncate text-xs text-zinc-500">
+                production &amp; trading
+              </div>
+            </div>
           </div>
-          <div className="text-xs text-zinc-500">production &amp; trading</div>
           <button
             onClick={() => window.dispatchEvent(new Event("palette:open"))}
             title="Open command palette"
