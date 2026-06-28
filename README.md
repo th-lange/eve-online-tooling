@@ -100,7 +100,10 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
 
 ## What works today
 
-- **App shell** — Tauri 2 + React/TS, module-based navigation.
+- **App shell** — Tauri 2 + React/TS, module-based navigation. The sidebar groups modules into
+  labelled sections (Industry · Trading · Market · Assets · Character · Intel/Space), with
+  drag-to-reorder, pinning and per-module colour tags. A **⌘K / Ctrl+K command palette** fuzzy-jumps
+  to any module and looks up any item type (routing to Market Search). Lucide icon set throughout.
 - **SDE service** — download/verify the Fuzzwork SQLite; query blueprint materials, products, and
   type info.
 - **Market service** — live ESI prices for Jita/The Forge as a multi-vector model (spot sell/buy,
