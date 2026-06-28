@@ -100,6 +100,7 @@ pub fn esi_fitting_to_fit(esi: &EsiFitting, is_charge: &impl Fn(i64) -> bool) ->
         },
         ship_type_id: esi.ship_type_id,
         items,
+        projected: Vec::new(),
     }
 }
 

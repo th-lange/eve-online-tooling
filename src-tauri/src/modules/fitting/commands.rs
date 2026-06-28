@@ -14,6 +14,7 @@ use super::engine::validate::{validate, ValItem};
 use super::engine::capacitor::capacitor;
 use super::engine::damage::{damage, Weapon};
 use super::engine::navigation::{navigation, prop_velocity, targeting};
+use super::engine::projection::{apply_projection, projected_from_attrs, ProjectedInput};
 use super::engine::attr::AttrStore;
 use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
 use super::engine::tank::{tank, DamageProfile, Layer};
@@ -135,6 +136,7 @@ pub fn fitting_import_eft(app: AppHandle, text: String) -> Result<Fit, String> {
         name: parsed.fit_name,
         ship_type_id,
         items,
+        projected: Vec::new(),
     })
 }
 
@@ -479,6 +481,7 @@ fn run_dogma(
     all_ids.extend(module_items.iter().map(|i| i.type_id));
     all_ids.extend(module_items.iter().filter_map(|i| i.charge_type_id));
     all_ids.extend(drone_items.iter().map(|i| i.type_id));
+    all_ids.extend(fit.projected.iter().map(|i| i.type_id));
     all_ids.extend(&skill_ids);
 
     let attrs = sde.types_attributes_raw(&all_ids).map_err(|e| e.to_string())?;
@@ -560,11 +563,23 @@ fn run_dogma(
         });
     }
 
-    let resolved = resolve(
+    let mut resolved = resolve(
         &FitInput { ship, modules, skills, drones, charges },
         &effect_meta,
         &is_stackable,
     );
+
+    // Projected effects (#178): webs/paints/… modify this ship's attributes.
+    let projected: Vec<ProjectedInput> = fit
+        .projected
+        .iter()
+        .map(|p| {
+            let a: HashMap<i64, f64> =
+                attrs.get(&p.type_id).cloned().unwrap_or_default().into_iter().collect();
+            projected_from_attrs(|id| a.get(&id).copied().unwrap_or(0.0))
+        })
+        .collect();
+    apply_projection(&mut resolved.ship, &projected);
 
     // Mass for align time: prefer the finalized dogma value, else invTypes.mass
     // (some hulls carry mass only on the type row, not as a dogma attribute).
@@ -1995,6 +2010,15 @@ mod tests {
             name: name.into(),
             ship_type_id: tid(name),
             items,
+            projected: Vec::new(),
+        };
+        // A fit with a projected module on it (#178).
+        let fit_proj = |name: &str, proj: &str| Fit {
+            id: "t".into(),
+            name: name.into(),
+            ship_type_id: tid(name),
+            items: Vec::new(),
+            projected: vec![module(proj, SlotKind::Mid, None, 0)],
         };
 
         struct Golden {
@@ -2208,6 +2232,20 @@ mod tests {
                     align: 3.229,
                 },
             ),
+            (
+                // Projected stasis web onto the Rifter: -60% velocity (#178).
+                "Rifter<web",
+                fit_proj("Rifter", "Stasis Webifier II"),
+                Golden {
+                    dps: 0.0,
+                    ehp: 2262.2,
+                    cap_stable: true,
+                    cap_pct: 100.0,
+                    cap_depletion: 0.0,
+                    vel: 182.5,
+                    align: 3.195,
+                },
+            ),
         ];
 
         let all5 = |_: i64| 5.0;
@@ -2278,6 +2316,7 @@ mod tests {
                 item(20, SlotKind::High, Some(30), 1),
                 item(40, SlotKind::Drone, None, 5),
             ],
+            projected: Vec::new(),
         };
         let prices = HashMap::from([(100, 1000.0), (10, 50.0), (20, 200.0), (30, 5.0), (40, 10.0)]);
         // 1000 hull + 50 + 200 + 5 charge + 10×5 drones = 1305.

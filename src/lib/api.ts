@@ -1382,6 +1382,8 @@ export interface Fit {
   name: string;
   shipTypeId: number;
   items: FitItem[];
+  /** Modules projected onto this fit (webs/paints/…) — incoming effects (#178). */
+  projected?: FitItem[];
 }
 
 /** A hull's slot layout + fitting resources, for the empty editor. */
