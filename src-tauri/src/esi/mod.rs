@@ -16,8 +16,8 @@ mod net;
 
 pub use auth::AuthState;
 pub use character::{
-    authed_get, authed_get_paged_pub, corporation_id, fetch_assets, fetch_character_fittings,
-    fetch_corp_fittings, resolve_names, EsiFitting,
+    authed_get, authed_get_paged_pub, corporation_id, create_character_fitting, fetch_assets,
+    fetch_character_fittings, fetch_corp_fittings, resolve_names, EsiFitting,
 };
 pub use client::EsiClient;
 pub use error::EsiError;

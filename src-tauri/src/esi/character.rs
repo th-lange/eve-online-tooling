@@ -283,6 +283,43 @@ pub async fn fetch_character_fittings(
     Ok(resp.json().await?)
 }
 
+/// Save a fitting to the character's in-game fittings (POST). Requires the
+/// `esi-fittings.write_fittings.v1` scope; a 403 from a missing scope surfaces to
+/// the caller. Returns the new `fitting_id`. `items` serializes to ESI's body.
+pub async fn create_character_fitting<T: serde::Serialize>(
+    auth: &AuthState,
+    character_id: i64,
+    name: &str,
+    description: &str,
+    ship_type_id: i64,
+    items: &[T],
+) -> Result<i64, AuthError> {
+    #[derive(serde::Serialize)]
+    struct Body<'a, T> {
+        name: &'a str,
+        description: &'a str,
+        ship_type_id: i64,
+        items: &'a [T],
+    }
+    #[derive(Deserialize)]
+    struct Created {
+        fitting_id: i64,
+    }
+    let token = auth.access_token_for(character_id).await?;
+    let url = format!("{ESI_BASE}/latest/characters/{character_id}/fittings/");
+    let created: Created = auth
+        .http()
+        .post(&url)
+        .bearer_auth(&token)
+        .json(&Body { name, description, ship_type_id, items })
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    Ok(created.fitting_id)
+}
+
 /// The corporation's saved fittings, using the character's token. Requires the
 /// scope **and** the Fitting Manager role; lacking either, ESI returns 403 and
 /// we treat it as "none".
