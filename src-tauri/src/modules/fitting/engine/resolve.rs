@@ -29,6 +29,17 @@ const DAMAGE_MULT_SKILL_BONUS: &str = "damageMultiplierSkillBonus";
 /// while the module is overheated, which the simulator doesn't model yet.
 const OVERLOAD_CATEGORY: i64 = 5;
 
+/// `skillBoostDamageMultiplierBonus` — carried by both turret/drone skills (which
+/// also carry an explicit attr-64 application) and missile skills (Heavy Missiles,
+/// …). The Fuzzwork dump drops the missile skills' application (the `missile*Dmg
+/// Bonus` effects), so when this effect appears with no damage-attr modifier it's
+/// a missile skill, and the engine synthesizes +292% to the four damage attrs on
+/// charges requiring it (#176).
+const SKILL_BOOST_DAMAGE_MULT: &str = "skillBoostDamageMultiplierBonus";
+
+/// The four damage-type attributes (em / explosive / kinetic / thermal).
+const DAMAGE_ATTRS: [i64; 4] = [114, 116, 117, 118];
+
 /// One entity in the fit tree, reduced to what resolution needs.
 #[derive(Debug, Clone, Default)]
 pub struct EntityInput {
@@ -137,6 +148,7 @@ pub fn resolve(
     let mods = |e: &EntityInput, unresolved: &mut usize| -> Vec<ModifierDef> {
         let mut out = Vec::new();
         let mut has_dmg_skill_bonus = false;
+        let mut has_skill_boost_dmg = false;
         for &eid in &e.effect_ids {
             if let Some(meta) = effects.get(&eid) {
                 // Overload (category 5) effects only apply when the module is
@@ -147,6 +159,9 @@ pub fn resolve(
                 }
                 if meta.name == DAMAGE_MULT_SKILL_BONUS {
                     has_dmg_skill_bonus = true;
+                }
+                if meta.name == SKILL_BOOST_DAMAGE_MULT {
+                    has_skill_boost_dmg = true;
                 }
                 let (m, dropped) = modifiers_for(meta, is_stackable);
                 *unresolved += dropped;
@@ -164,6 +179,24 @@ pub fn resolve(
                 domain: Domain::SkillReqOnShip(e.type_id),
                 penalized: false,
             });
+        }
+        // Missile damage skill: `skillBoostDamageMultiplierBonus` with no explicit
+        // damage-attr application in the dump (turret skills carry an attr-64 one;
+        // Warhead Upgrades carries 114–118 ones) — synthesize +292% to each damage
+        // attr on charges requiring the skill.
+        let targets_damage = out.iter().any(|m| {
+            m.tgt_attr == 64 || DAMAGE_ATTRS.contains(&m.tgt_attr)
+        });
+        if has_skill_boost_dmg && !targets_damage && e.type_id != 0 {
+            for tgt in DAMAGE_ATTRS {
+                out.push(ModifierDef {
+                    src_attr: 292,
+                    op: Op::PostPercent,
+                    tgt_attr: tgt,
+                    domain: Domain::SkillReqOnShip(e.type_id),
+                    penalized: false,
+                });
+            }
         }
         out
     };
@@ -484,6 +517,37 @@ mod tests {
         let resolved = resolve(&input, &effects, &|_| true);
         let dmg = resolved.drones[0].get(64);
         assert!((dmg - 1.25).abs() < 1e-9, "drone damageMultiplier = {dmg}, want 1.25");
+    }
+
+    /// Missile damage skill synthesis (#176): a skill with
+    /// `skillBoostDamageMultiplierBonus` and no explicit damage-attr application
+    /// (the Fuzzwork dump drops the `missile*DmgBonus` rows) boosts the four
+    /// damage attrs of charges requiring it. 5%/level × V = +25% → kinetic 100→125.
+    #[test]
+    fn missile_damage_skill_bonus_is_synthesized() {
+        let mut boost = effect(500, vec![mi("ItemModifier", "itemID", 0, 292, 280, None)]);
+        boost.name = "skillBoostDamageMultiplierBonus".into();
+        let mut effects = HashMap::new();
+        effects.insert(500, boost);
+
+        let skill_id = 3324; // Heavy Missiles
+        let input = FitInput {
+            skills: vec![EntityInput {
+                type_id: skill_id,
+                attrs: vec![(280, 5.0), (292, 5.0)],
+                effect_ids: vec![500],
+                ..Default::default()
+            }],
+            charges: vec![Some(EntityInput {
+                attrs: vec![(117, 100.0)], // 100 kinetic
+                required_skills: vec![skill_id],
+                ..Default::default()
+            })],
+            ..Default::default()
+        };
+        let resolved = resolve(&input, &effects, &|_| true);
+        let kin = resolved.charges[0].as_ref().unwrap().get(117);
+        assert!((kin - 125.0).abs() < 1e-9, "charge kinetic = {kin}, want 125");
     }
 
     /// Surgical Strike at level V: scales its own damageMultiplierBonus (292) by
