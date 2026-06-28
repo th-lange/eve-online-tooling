@@ -37,15 +37,18 @@ function navOrder(): string[] {
     .map((a) => a.textContent ?? "");
 }
 
-/** The draggable handle within the row whose link text is `title`. */
-function handleFor(title: string): HTMLElement {
-  const link = screen.getByRole("link", { name: title });
-  const row = link.parentElement as HTMLElement;
-  return within(row).getByTitle("Drag to reorder");
-}
-
 function rowFor(title: string): HTMLElement {
   return screen.getByRole("link", { name: title }).parentElement as HTMLElement;
+}
+
+/** The row for `title` in the Pinned section (first instance, when mirrored). */
+function pinnedRowFor(title: string): HTMLElement {
+  return screen.getAllByRole("link", { name: title })[0].parentElement as HTMLElement;
+}
+
+/** The draggable handle of the Pinned-section row for `title`. */
+function pinnedHandleFor(title: string): HTMLElement {
+  return within(pinnedRowFor(title)).getByTitle("Drag to reorder");
 }
 
 describe("Layout sidebar", () => {
@@ -62,34 +65,32 @@ describe("Layout sidebar", () => {
     expect(navOrder().slice(0, 2)).toEqual([PRODUCTION, REPROCESSING]);
   });
 
-  it("drag-reorders within a section and persists the order", () => {
+  it("drag-reorders pinned modules and persists the order", () => {
+    localStorage.setItem("sidebar.pins", JSON.stringify([id(PRODUCTION), id(TRADING)]));
     renderLayout();
-    fireEvent.dragStart(handleFor(REPROCESSING));
-    fireEvent.drop(rowFor(PRODUCTION));
+    // Pinned section leads with [Production, Trading] (registry order).
+    expect(navOrder().slice(0, 2)).toEqual([PRODUCTION, TRADING]);
 
-    expect(navOrder().slice(0, 2)).toEqual([REPROCESSING, PRODUCTION]);
+    fireEvent.dragStart(pinnedHandleFor(TRADING));
+    fireEvent.drop(pinnedRowFor(PRODUCTION));
+
+    expect(navOrder()[0]).toBe(TRADING);
     const saved = JSON.parse(localStorage.getItem("sidebar.order") ?? "[]");
-    expect(saved.slice(0, 2)).toEqual([id(REPROCESSING), id(PRODUCTION)]);
+    expect(saved.slice(0, 2)).toEqual([id(TRADING), id(PRODUCTION)]);
   });
 
-  it("does not reorder across section boundaries", () => {
+  it("group sections are not drag-sortable (no handle)", () => {
     renderLayout();
-    const before = navOrder();
-    // Station Trading lives in a different section than Production.
-    fireEvent.dragStart(handleFor(TRADING));
-    fireEvent.drop(rowFor(PRODUCTION));
-
-    expect(navOrder()).toEqual(before);
-    expect(localStorage.getItem("sidebar.order")).toBeNull();
+    // Production (unpinned) sits only in its Industry group, with no drag handle.
+    expect(within(rowFor(PRODUCTION)).queryByTitle("Drag to reorder")).toBeNull();
   });
 
-  it("restores a saved within-section order on mount", () => {
-    localStorage.setItem(
-      "sidebar.order",
-      JSON.stringify([id(REPROCESSING), id(PRODUCTION)]),
-    );
+  it("restores a saved pinned order on mount", () => {
+    localStorage.setItem("sidebar.pins", JSON.stringify([id(PRODUCTION), id(TRADING)]));
+    localStorage.setItem("sidebar.order", JSON.stringify([id(TRADING), id(PRODUCTION)]));
     renderLayout();
-    expect(navOrder().slice(0, 2)).toEqual([REPROCESSING, PRODUCTION]);
+    // Pinned section reflects the saved order.
+    expect(navOrder()[0]).toBe(TRADING);
   });
 
   it("has no Pinned section when nothing is pinned", () => {

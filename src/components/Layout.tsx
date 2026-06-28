@@ -146,6 +146,8 @@ export function Layout() {
     onTogglePin: togglePin,
     color: colors[m.id] ?? null,
     onSetColor: setColor,
+    // Only the Pinned section is drag-sortable; group sections keep a fixed order.
+    sortable: section === "pinned",
     isDragging: drag?.id === m.id && drag.section === section,
     onDragStart: () => setDrag({ id: m.id, section }),
     onDragEnd: () => setDrag(null),
@@ -196,7 +198,8 @@ export function Layout() {
             </NavSection>
           )}
           {MODULE_GROUPS.map((g) => {
-            const items = ordered.filter((m) => m.group === g.key);
+            // Group sections keep a fixed (registry) order — only Pinned sorts.
+            const items = modules.filter((m) => m.group === g.key);
             if (items.length === 0) return null;
             return (
               <NavSection
@@ -297,6 +300,7 @@ function NavRow({
   onTogglePin,
   color,
   onSetColor,
+  sortable,
   isDragging,
   onDragStart,
   onDragEnd,
@@ -307,6 +311,7 @@ function NavRow({
   onTogglePin: (id: string) => void;
   color: string | null;
   onSetColor: (id: string, key: string | null) => void;
+  sortable: boolean;
   isDragging: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
@@ -315,36 +320,51 @@ function NavRow({
   const hex = color ? COLOR_HEX.get(color) : undefined;
   return (
     <div
-      onDragOver={(e) => {
-        // Only react while a row drag is in progress (effectAllowed === "move").
-        e.preventDefault();
-        if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        onDropRow();
-      }}
+      onDragOver={
+        sortable
+          ? (e) => {
+              // Only react while a row drag is in progress.
+              e.preventDefault();
+              if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+            }
+          : undefined
+      }
+      onDrop={
+        sortable
+          ? (e) => {
+              e.preventDefault();
+              onDropRow();
+            }
+          : undefined
+      }
       className={`group flex items-center gap-1 ${isDragging ? "opacity-40" : ""}`}
     >
-      <span
-        draggable
-        aria-hidden
-        title="Drag to reorder"
-        onDragStart={(e) => {
-          // Only the handle is the drag source, so dragging never competes with
-          // the NavLink anchor. The id is also kept in component state, which is
-          // what the drop handler actually reads.
-          if (e.dataTransfer) {
-            e.dataTransfer.setData("text/plain", module.id);
-            e.dataTransfer.effectAllowed = "move";
-          }
-          onDragStart();
-        }}
-        onDragEnd={onDragEnd}
-        className="flex shrink-0 cursor-grab select-none items-center px-1 text-zinc-500 opacity-0 group-hover:opacity-100"
-      >
-        <GripVertical size={14} />
-      </span>
+      {sortable ? (
+        <span
+          draggable
+          aria-hidden
+          title="Drag to reorder"
+          onDragStart={(e) => {
+            // Only the handle is the drag source, so dragging never competes with
+            // the NavLink anchor. The id is also kept in component state, which is
+            // what the drop handler actually reads.
+            if (e.dataTransfer) {
+              e.dataTransfer.setData("text/plain", module.id);
+              e.dataTransfer.effectAllowed = "move";
+            }
+            onDragStart();
+          }}
+          onDragEnd={onDragEnd}
+          className="flex shrink-0 cursor-grab select-none items-center px-1 text-zinc-500 opacity-0 group-hover:opacity-100"
+        >
+          <GripVertical size={14} />
+        </span>
+      ) : (
+        // Spacer keeping group rows aligned with the draggable pinned rows.
+        <span aria-hidden className="shrink-0 px-1">
+          <span className="block h-3.5 w-3.5" />
+        </span>
+      )}
       <NavLink
         to={`/${module.id}`}
         title={module.description}
