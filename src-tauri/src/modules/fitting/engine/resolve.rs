@@ -17,11 +17,20 @@ use crate::sde::EffectMeta;
 
 use super::attr::AttrStore;
 use super::effects::modifiers_for;
-use super::modifier::{Domain, ModifierDef};
+use super::modifier::{Domain, ModifierDef, Op};
+
+/// `damageMultiplierSkillBonus` — drone operation/specialization skills carry
+/// only the per-level self-scaling of attr 292 in their `modifierInfo`; the
+/// application (+292% to damageMultiplier on items requiring the skill) isn't in
+/// the Fuzzwork dump, so the engine synthesizes it (#176).
+const DAMAGE_MULT_SKILL_BONUS: &str = "damageMultiplierSkillBonus";
 
 /// One entity in the fit tree, reduced to what resolution needs.
 #[derive(Debug, Clone, Default)]
 pub struct EntityInput {
+    /// The entity's own type id (0 if irrelevant). Lets a skill synthesize a
+    /// self-referential `SkillReqOnShip` modifier (see [`DAMAGE_MULT_SKILL_BONUS`]).
+    pub type_id: i64,
     /// Base attributes `(attributeID, value)` — for skills, includes `skillLevel`
     /// (280) set to the desired level.
     pub attrs: Vec<(i64, f64)>,
@@ -123,12 +132,28 @@ pub fn resolve(
     // Precompute each entity's modifiers once.
     let mods = |e: &EntityInput, unresolved: &mut usize| -> Vec<ModifierDef> {
         let mut out = Vec::new();
+        let mut has_dmg_skill_bonus = false;
         for &eid in &e.effect_ids {
             if let Some(meta) = effects.get(&eid) {
+                if meta.name == DAMAGE_MULT_SKILL_BONUS {
+                    has_dmg_skill_bonus = true;
+                }
                 let (m, dropped) = modifiers_for(meta, is_stackable);
                 *unresolved += dropped;
                 out.extend(m);
             }
+        }
+        // Synthesize the missing application: this skill's scaled damageMultiplier
+        // bonus (292) postPercent-boosts damageMultiplier (64) on items requiring
+        // the skill itself (e.g. Medium Drone Operation → drones requiring it).
+        if has_dmg_skill_bonus && e.type_id != 0 {
+            out.push(ModifierDef {
+                src_attr: 292,
+                op: Op::PostPercent,
+                tgt_attr: 64,
+                domain: Domain::SkillReqOnShip(e.type_id),
+                penalized: false,
+            });
         }
         out
     };
@@ -371,18 +396,21 @@ mod tests {
 
         let input = FitInput {
             ship: EntityInput {
+                type_id: 0,
                 attrs: vec![(658, 10.0)], // 10%/level base bonus
                 effect_ids: vec![200],
                 group_id: 0,
                 required_skills: Vec::new(),
             },
             skills: vec![EntityInput {
+                type_id: 0,
                 attrs: vec![(280, 5.0)], // Gallente Cruiser V
                 effect_ids: vec![201],
                 group_id: 0,
                 required_skills: Vec::new(),
             }],
             drones: vec![EntityInput {
+                type_id: 0,
                 attrs: vec![(64, 1.0)],
                 effect_ids: vec![],
                 group_id: 0,
@@ -393,6 +421,37 @@ mod tests {
         let resolved = resolve(&input, &effects, &|_| true);
         let dmg = resolved.drones[0].get(64);
         assert!((dmg - 1.5).abs() < 1e-9, "drone damageMultiplier = {dmg}, want 1.5");
+    }
+
+    /// `damageMultiplierSkillBonus` synthesis (#176): a drone operation/spec
+    /// skill carries only the self-scale of attr 292 in its modifierInfo; the
+    /// engine synthesizes the application (+292% to attr 64 on items requiring
+    /// the skill). 5%/level × V = +25% → a 1.0 drone requiring the skill ends 1.25.
+    #[test]
+    fn damage_mult_skill_bonus_application_is_synthesized() {
+        let mut bonus = effect(300, vec![mi("ItemModifier", "itemID", 0, 292, 280, None)]);
+        bonus.name = "damageMultiplierSkillBonus".into();
+        let mut effects = HashMap::new();
+        effects.insert(300, bonus);
+
+        let skill_id = 33699; // e.g. Medium Drone Operation
+        let input = FitInput {
+            skills: vec![EntityInput {
+                type_id: skill_id,
+                attrs: vec![(280, 5.0), (292, 5.0)], // V, 5%/level
+                effect_ids: vec![300],
+                ..Default::default()
+            }],
+            drones: vec![EntityInput {
+                attrs: vec![(64, 1.0)],
+                required_skills: vec![skill_id], // the drone requires the skill
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let resolved = resolve(&input, &effects, &|_| true);
+        let dmg = resolved.drones[0].get(64);
+        assert!((dmg - 1.25).abs() < 1e-9, "drone damageMultiplier = {dmg}, want 1.25");
     }
 
     /// Surgical Strike at level V: scales its own damageMultiplierBonus (292) by
@@ -411,12 +470,14 @@ mod tests {
         let input = FitInput {
             ship: EntityInput::default(),
             modules: vec![EntityInput {
+                type_id: 0,
                 attrs: vec![(64, 1.0)], // turret base damageMultiplier
                 effect_ids: vec![],
                 group_id: 55,
                 required_skills: Vec::new(),
             }],
             skills: vec![EntityInput {
+                type_id: 0,
                 attrs: vec![(280, 5.0), (292, 3.0)], // level V, 3%/level
                 effect_ids: vec![100, 101],
                 group_id: 0,
@@ -443,12 +504,14 @@ mod tests {
         let input = FitInput {
             ship: EntityInput::default(),
             modules: vec![EntityInput {
+                type_id: 0,
                 attrs: vec![(64, 1.0)],
                 effect_ids: vec![],
                 group_id: 55, // projectile, not the hybrid group 74
                 required_skills: Vec::new(),
             }],
             skills: vec![EntityInput {
+                type_id: 0,
                 attrs: vec![(292, 15.0)],
                 effect_ids: vec![101],
                 group_id: 0,
