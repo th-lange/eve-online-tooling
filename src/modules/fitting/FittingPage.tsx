@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
 import {
   fittingAddItem,
+  fittingClassifySlots,
   fittingDeleteLocal,
   fittingEsiList,
   fittingExportEft,
@@ -625,6 +626,18 @@ function ModuleBrowser({
     queryFn: () => sdeSearch(q),
     enabled: q.trim().length >= 2,
   });
+  const shown = (results.data ?? []).slice(0, 30);
+  // Classify the visible results' slots so each row shows where it'll land.
+  const ids = useMemo(() => shown.map((r) => r.id), [shown]);
+  const slots = useQuery({
+    queryKey: ["fitting", "slot-classify", ids],
+    queryFn: () => fittingClassifySlots(ids),
+    enabled: ids.length > 0,
+  });
+  const slotOf = useMemo(
+    () => new Map(slots.data ?? []),
+    [slots.data],
+  );
   return (
     <div className="mt-4 rounded border border-zinc-800 bg-zinc-900/40 p-3">
       <div className="mb-2 text-xs uppercase tracking-wide text-zinc-500">
@@ -638,24 +651,46 @@ function ModuleBrowser({
       />
       {q.trim().length >= 2 && (
         <ul className="mt-2 max-h-48 overflow-y-auto text-sm">
-          {(results.data ?? []).slice(0, 30).map((r) => (
+          {shown.map((r) => (
             <li key={r.id}>
               <button
                 disabled={pending}
                 onClick={() => onAdd(r.id)}
-                className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+                className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
               >
-                <span className="truncate">{r.name}</span>
+                <span className="flex-1 truncate">{r.name}</span>
+                <SlotBadge slot={slotOf.get(r.id)} />
                 <Plus size={14} className="shrink-0 text-zinc-500" />
               </button>
             </li>
           ))}
-          {results.isFetched && (results.data?.length ?? 0) === 0 && (
+          {results.isFetched && shown.length === 0 && (
             <li className="px-2 py-1 text-xs text-zinc-500">No matches.</li>
           )}
         </ul>
       )}
     </div>
+  );
+}
+
+const SLOT_BADGE: Partial<Record<SlotKind, string>> = {
+  high: "High",
+  mid: "Mid",
+  low: "Low",
+  rig: "Rig",
+  subsystem: "Sub",
+  drone: "Drone",
+  cargo: "Cargo",
+};
+
+/** A small slot tag (High/Mid/Low/…) shown next to a search result. */
+function SlotBadge({ slot }: { slot?: SlotKind }) {
+  if (!slot) return null;
+  const label = SLOT_BADGE[slot] ?? slot;
+  return (
+    <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400">
+      {label}
+    </span>
   );
 }
 
