@@ -13,7 +13,7 @@ use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule};
 use super::engine::validate::{validate, ValItem};
 use super::engine::capacitor::capacitor;
 use super::engine::damage::{damage, Weapon};
-use super::engine::navigation::{navigation, targeting};
+use super::engine::navigation::{navigation, prop_velocity, targeting};
 use super::engine::attr::AttrStore;
 use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
 use super::engine::tank::{tank, DamageProfile, Layer};
@@ -588,7 +588,31 @@ fn run_dogma(
         capacitor: capacitor_of(&resolved),
         tank: tank_of(&resolved),
         dps: dps_of(&resolved, &drone_items),
-        navigation: navigation(s.get(37), mass, s.get(70), s.get(552)),
+        navigation: {
+            // Prop modules (AB/MWD) are identified by speedFactor (20) +
+            // speedBoostFactor (567). Their mass penalty (massAddition 796) and
+            // velocity boost are both procedural (not in modifierInfo), so add the
+            // mass here and feed the bumped mass into align time + the boost.
+            let props: Vec<(f64, f64)> = resolved
+                .modules
+                .iter()
+                .map(|m| (m.get(20), m.get(567)))
+                .filter(|(sf, sbf)| *sf != 0.0 && *sbf != 0.0)
+                .collect();
+            let prop_mass: f64 = resolved
+                .modules
+                .iter()
+                .filter(|m| m.get(20) != 0.0 && m.get(567) != 0.0)
+                .map(|m| m.get(796))
+                .sum();
+            let total_mass = mass + prop_mass;
+            navigation(
+                prop_velocity(s.get(37), total_mass, &props),
+                total_mass,
+                s.get(70),
+                s.get(552),
+            )
+        },
         targeting: targeting(
             s.get(192),
             s.get(76),
@@ -2088,6 +2112,30 @@ mod tests {
                     cap_depletion: 175.5,
                     vel: 456.25,
                     align: 3.195,
+                },
+            ),
+            (
+                // Afterburner: prop-mod velocity boost, the AB's cap drain
+                // (stable below 100%), and its mass on align.
+                "Rifter+AB",
+                fit(
+                    "Rifter",
+                    vec![
+                        module("200mm AutoCannon II", SlotKind::High, Some("Barrage S"), 0),
+                        module("200mm AutoCannon II", SlotKind::High, Some("Barrage S"), 1),
+                        module("200mm AutoCannon II", SlotKind::High, Some("Barrage S"), 2),
+                        module("1MN Afterburner II", SlotKind::Mid, None, 0),
+                        drone("Warrior II", 2),
+                    ],
+                ),
+                Golden {
+                    dps: 139.32,
+                    ehp: 2262.2,
+                    cap_stable: true,
+                    cap_pct: 95.51,
+                    cap_depletion: 0.0,
+                    vel: 1193.25,
+                    align: 4.692,
                 },
             ),
             (
