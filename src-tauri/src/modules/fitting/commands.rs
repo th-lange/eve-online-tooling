@@ -1957,6 +1957,8 @@ mod tests {
             cap_stable: bool,
             /// Stable capacitor level (%) when stable.
             cap_pct: f64,
+            /// Seconds to depletion when not stable (0 when stable).
+            cap_depletion: f64,
             vel: f64,
             align: f64,
         }
@@ -1977,6 +1979,7 @@ mod tests {
                     ehp: 2262.2,
                     cap_stable: true,
                     cap_pct: 100.0,
+                    cap_depletion: 0.0,
                     vel: 456.25,
                     align: 3.195,
                 },
@@ -2001,6 +2004,7 @@ mod tests {
                     ehp: 7765.2,
                     cap_stable: true,
                     cap_pct: 100.0,
+                    cap_depletion: 0.0,
                     vel: 287.5,
                     align: 5.238,
                 },
@@ -2013,6 +2017,7 @@ mod tests {
                     ehp: 9331.6,
                     cap_stable: true,
                     cap_pct: 100.0,
+                    cap_depletion: 0.0,
                     vel: 243.75,
                     align: 5.817,
                 },
@@ -2036,6 +2041,7 @@ mod tests {
                     ehp: 3373.3,
                     cap_stable: true,
                     cap_pct: 100.0,
+                    cap_depletion: 0.0,
                     vel: 456.25,
                     align: 3.498,
                 },
@@ -2056,6 +2062,25 @@ mod tests {
                     ehp: 2848.4,
                     cap_stable: true,
                     cap_pct: 100.0,
+                    cap_depletion: 0.0,
+                    vel: 456.25,
+                    align: 3.195,
+                },
+            ),
+            (
+                // Active armor repairer: drains more cap than the Rifter recharges,
+                // so it's cap-*unstable* — exercises the depletion-time path.
+                "Rifter+rep",
+                fit(
+                    "Rifter",
+                    vec![module("Small Armor Repairer II", SlotKind::Low, None, 0)],
+                ),
+                Golden {
+                    dps: 0.0,
+                    ehp: 2262.2,
+                    cap_stable: false,
+                    cap_pct: 0.0,
+                    cap_depletion: 175.5,
                     vel: 456.25,
                     align: 3.195,
                 },
@@ -2078,12 +2103,19 @@ mod tests {
                 d.capacitor.stable,
             );
             let cap_pct = d.capacitor.stable_pct.unwrap_or(0.0);
+            let depletion = d.capacitor.depletion_seconds.unwrap_or(0.0);
             let mut p = Vec::new();
             if !close(dps, g.dps, 0.005) { p.push(format!("dps {dps:.2}≠{:.2}", g.dps)); }
             if !close(ehp, g.ehp, 0.01) { p.push(format!("ehp {ehp:.1}≠{:.1}", g.ehp)); }
             if stable != g.cap_stable { p.push(format!("cap {stable}≠{}", g.cap_stable)); }
             if stable && !close(cap_pct, g.cap_pct, 0.01) {
                 p.push(format!("cap% {cap_pct:.2}≠{:.2}", g.cap_pct));
+            }
+            // Cap-stable detection is exact; the depletion *time* is a ballpark
+            // bound (our continuous-drain integration vs PYFA's discrete-activation
+            // capSim differ by a few %), so it's checked loosely.
+            if !stable && !close(depletion, g.cap_depletion, 0.15) {
+                p.push(format!("cap-depletion {depletion:.1}≉{:.1}", g.cap_depletion));
             }
             if !close(vel, g.vel, 0.005) { p.push(format!("vel {vel:.2}≠{:.2}", g.vel)); }
             if !close(align, g.align, 0.005) { p.push(format!("align {align:.3}≠{:.3}", g.align)); }
