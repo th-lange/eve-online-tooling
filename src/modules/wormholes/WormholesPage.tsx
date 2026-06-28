@@ -120,7 +120,7 @@ function Workbench() {
         <button
           onClick={() => add.mutate()}
           disabled={!source || !target || add.isPending}
-          className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
         >
           Add connection
         </button>
@@ -252,7 +252,7 @@ function Signatures({ connections }: { connections: ConnectionView[] }) {
         <button
           onClick={() => paste.mutate()}
           disabled={!system || text.trim() === "" || paste.isPending}
-          className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          className="rounded bg-indigo-600 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
         >
           Update signatures
         </button>
@@ -335,7 +335,7 @@ function Routing() {
         <button
           onClick={() => route.mutate()}
           disabled={!origin || !dest || route.isPending}
-          className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          className="rounded bg-indigo-600 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
         >
           Find route
         </button>

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { RefreshCw, X } from "lucide-react";
 import { DataAge } from "../../components/DataAge";
 import {
   marketRegions,
@@ -220,7 +221,41 @@ function Workbench() {
     );
   }
 
+  // The pricing/cost settings that actually drive a re-price (the client-side
+  // filters are excluded — they apply instantly). A change to any of these
+  // makes the current results table stale until the next Calculate.
+  const settings = {
+    regionId,
+    stationId,
+    runs,
+    me,
+    useOwnedMe,
+    useStock,
+    buildComponents,
+    te,
+    timeSkill,
+    structure,
+    rigMePct,
+    rigTePct,
+    rigCostPct,
+    costIndexPct,
+    facilityTaxPct,
+    materialBasis,
+    productBasis,
+    productBestHub,
+    blueprintCostPerRun,
+    inventionSkill,
+    decryptorTypeId,
+  };
+  // Snapshot of `settings` as of the last calculate, to detect staleness.
+  const [calcSettings, setCalcSettings] = useState(settings);
+  const dirtyCount = (Object.keys(settings) as (keyof typeof settings)[]).filter(
+    (k) => settings[k] !== calcSettings[k],
+  ).length;
+  const isStale = dirtyCount > 0 && rows.length > 0;
+
   function calculate() {
+    setCalcSettings(settings);
     profit.mutate({
       regionId,
       stationId,
@@ -246,6 +281,18 @@ function Workbench() {
       productBestHub,
     });
   }
+
+  // Optional debounced auto-recalc: when on, a settings change re-prices itself
+  // after a short pause instead of waiting for a manual Calculate.
+  const [autoRecalc, setAutoRecalc] = useState(false);
+  const calcRef = useRef(calculate);
+  calcRef.current = calculate;
+  useEffect(() => {
+    if (!autoRecalc || !isStale) return;
+    const t = setTimeout(() => calcRef.current(), 600);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRecalc, isStale, dirtyCount]);
 
   // Rank once on first load.
   useEffect(() => {
@@ -289,6 +336,33 @@ function Workbench() {
     [rows],
   );
 
+  // Every active client-side filter as a removable chip, so what's constraining
+  // the ranking is visible above the table rather than buried across four tabs.
+  const activeFilters: { key: string; label: string; clear: () => void }[] = [];
+  if (name.trim())
+    activeFilters.push({ key: "name", label: `“${name.trim()}”`, clear: () => setName("") });
+  for (const c of categories)
+    activeFilters.push({ key: `cat:${c}`, label: c, clear: () => setCategories(toggle(categories, c)) });
+  for (const m of metas)
+    activeFilters.push({ key: `meta:${m}`, label: m, clear: () => setMetas(toggle(metas, m)) });
+  if (ownedOnly)
+    activeFilters.push({ key: "owned", label: "Owned only", clear: () => setOwnedOnly(false) });
+  if (favoritesOnly)
+    activeFilters.push({ key: "fav", label: "Favorites only", clear: () => setFavoritesOnly(false) });
+  if (minRoiPct.trim())
+    activeFilters.push({ key: "roi", label: `ROI ≥ ${minRoiPct}%`, clear: () => setMinRoiPct("") });
+  if (minVolume.trim() && stationId !== null)
+    activeFilters.push({ key: "vol", label: `Volume ≥ ${minVolume}`, clear: () => setMinVolume("") });
+  function resetAllFilters() {
+    setName("");
+    setCategories(new Set());
+    setMetas(new Set());
+    setOwnedOnly(false);
+    setFavoritesOnly(false);
+    setMinRoiPct("");
+    setMinVolume("");
+  }
+
   return (
     <div className="p-6">
       <div className="flex items-start justify-between">
@@ -318,7 +392,7 @@ function Workbench() {
             <button
               onClick={calculate}
               disabled={profit.isPending}
-              className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+              className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
             >
               {profit.isPending ? "Calculating…" : "Calculate"}
             </button>
@@ -468,10 +542,6 @@ function Workbench() {
                 Build sub-components
               </label>
             </Field>
-            <div className="col-span-2 self-end text-xs text-zinc-500 md:col-span-4">
-              Changing market settings? Hit <strong>Calculate</strong> to
-              re-price.
-            </div>
           </div>
         )}
 
@@ -578,8 +648,7 @@ function Workbench() {
             </Field>
             <div className="col-span-2 self-end text-[11px] text-zinc-500 md:col-span-4">
               Rig % compose with the structure preset (you supply the
-              security-adjusted bonus). Changing these? Hit{" "}
-              <strong>Calculate</strong> to re-price.
+              security-adjusted bonus).
             </div>
           </div>
         )}
@@ -620,6 +689,10 @@ function Workbench() {
           library: (owned.data?.length ?? 0) + imported.length,
         }}
       />
+
+      {view === "opportunities" && activeFilters.length > 0 && (
+        <FilterChips filters={activeFilters} onReset={resetAllFilters} />
+      )}
 
       <div className="mt-3">
         {view === "opportunities" &&
@@ -669,6 +742,91 @@ function Workbench() {
           />
         )}
       </div>
+
+      {view === "opportunities" && isStale && (
+        <StaleBar
+          dirtyCount={dirtyCount}
+          pending={profit.isPending}
+          auto={autoRecalc}
+          onToggleAuto={() => setAutoRecalc((a) => !a)}
+          onRecalc={calculate}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Sticky dirty indicator pinned to the bottom of the results pane: pricing
+ * settings have changed since the table was last priced, so re-price in place
+ * instead of scrolling back up to Calculate (#222).
+ */
+function StaleBar({
+  dirtyCount,
+  pending,
+  auto,
+  onToggleAuto,
+  onRecalc,
+}: {
+  dirtyCount: number;
+  pending: boolean;
+  auto: boolean;
+  onToggleAuto: () => void;
+  onRecalc: () => void;
+}) {
+  return (
+    <div className="sticky bottom-0 z-20 -mx-6 mt-3 flex items-center justify-between border-t border-amber-500/30 bg-zinc-900/95 px-6 py-2 backdrop-blur">
+      <span className="flex items-center gap-2 text-xs text-amber-300">
+        <span className="inline-block h-2 w-2 rounded-full bg-amber-400" />
+        {dirtyCount} setting{dirtyCount === 1 ? "" : "s"} changed · prices are
+        stale
+      </span>
+      <div className="flex items-center gap-3">
+        <label className="flex items-center gap-1 text-xs text-zinc-400">
+          <input type="checkbox" checked={auto} onChange={onToggleAuto} />
+          Auto
+        </label>
+        <button
+          onClick={onRecalc}
+          disabled={pending}
+          className="flex items-center gap-1.5 rounded bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+        >
+          <RefreshCw size={13} className={pending ? "animate-spin" : ""} />
+          {pending ? "Pricing…" : "Re-price"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** A removable-chip bar showing every active client-side filter (#223). */
+function FilterChips({
+  filters,
+  onReset,
+}: {
+  filters: { key: string; label: string; clear: () => void }[];
+  onReset: () => void;
+}) {
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+      <span className="text-xs text-zinc-500">Filters:</span>
+      {filters.map((f) => (
+        <button
+          key={f.key}
+          onClick={f.clear}
+          title={`Remove filter: ${f.label}`}
+          className="flex items-center gap-1 rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-xs text-zinc-200 hover:border-zinc-600 hover:bg-zinc-700"
+        >
+          {f.label}
+          <X size={12} className="text-zinc-400" />
+        </button>
+      ))}
+      <button
+        onClick={onReset}
+        className="ml-1 rounded px-1.5 py-0.5 text-xs text-zinc-400 underline-offset-2 hover:text-zinc-200 hover:underline"
+      >
+        Reset all
+      </button>
     </div>
   );
 }
