@@ -16,6 +16,10 @@ import {
   type SellOrder,
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
+import {
+  subscribeMarketSearchItem,
+  takePendingMarketSearchItem,
+} from "../../lib/deepLink";
 import { AddToListButton } from "../../components/AddToListButton";
 import { formatInt, formatIsk } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
@@ -64,6 +68,18 @@ function Workbench() {
     setRegionId(current.data.regionId || FORGE);
     setOrigin({ id: current.data.systemId, name: current.data.systemName });
   }, [current.data]);
+
+  // Select an item handed in from elsewhere (e.g. the ⌘K command palette).
+  useEffect(() => {
+    const apply = (item: { id: number; name: string }) => {
+      setPicked({ id: item.id, name: item.name });
+      setQuery(item.name);
+      setTab("search");
+    };
+    const p = takePendingMarketSearchItem();
+    if (p) apply(p);
+    return subscribeMarketSearchItem(apply);
+  }, []);
 
   const results = useQuery({
     queryKey: ["search", query],

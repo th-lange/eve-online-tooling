@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { GripVertical, Star, X } from "lucide-react";
+import { GripVertical, Search, Star, X } from "lucide-react";
 import { modules, MODULE_GROUPS, type ModuleDef } from "../modules/registry";
 import { BridgeStatus } from "./BridgeStatus";
 import { Characters } from "./Characters";
+import { CommandPalette } from "./CommandPalette";
 
 const PINS_KEY = "sidebar.pins";
 const ORDER_KEY = "sidebar.order";
@@ -152,6 +153,17 @@ export function Layout() {
             EVE Online Tooling
           </div>
           <div className="text-xs text-zinc-500">production &amp; trading</div>
+          <button
+            onClick={() => window.dispatchEvent(new Event("palette:open"))}
+            title="Open command palette"
+            className="mt-3 flex w-full items-center gap-2 rounded border border-zinc-800 bg-zinc-950/50 px-2 py-1.5 text-xs text-zinc-500 hover:border-zinc-700 hover:text-zinc-300"
+          >
+            <Search size={13} />
+            <span className="flex-1 text-left">Search…</span>
+            <kbd className="rounded bg-zinc-800 px-1 text-[10px] text-zinc-400">
+              ⌘K
+            </kbd>
+          </button>
         </div>
         <nav className="flex-1 overflow-y-auto px-2 pb-2">
           {pinned.length > 0 && (
@@ -181,6 +193,7 @@ export function Layout() {
       <main className="flex-1 overflow-hidden">
         <ModuleHost />
       </main>
+      <CommandPalette />
     </div>
   );
 }
