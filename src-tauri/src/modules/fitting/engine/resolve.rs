@@ -40,6 +40,15 @@ const SKILL_BOOST_DAMAGE_MULT: &str = "skillBoostDamageMultiplierBonus";
 /// The four damage-type attributes (em / explosive / kinetic / thermal).
 const DAMAGE_ATTRS: [i64; 4] = [114, 116, 117, 118];
 
+/// `rapidFiringSkillBoostRofBonus` — the rate-of-fire analog of
+/// [`SKILL_BOOST_DAMAGE_MULT`]: launcher/turret specialization skills (Heavy
+/// Missile Specialization, …) self-scale `rofBonus` (293) but the Fuzzwork dump
+/// drops their application. When it appears with no explicit rof modifier the
+/// engine synthesizes +293% to rate of fire (51) on modules requiring the skill.
+const RAPID_FIRING_ROF_BONUS: &str = "rapidFiringSkillBoostRofBonus";
+const ROF_ATTR: i64 = 51;
+const ROF_BONUS_ATTR: i64 = 293;
+
 /// One entity in the fit tree, reduced to what resolution needs.
 #[derive(Debug, Clone, Default)]
 pub struct EntityInput {
@@ -149,6 +158,7 @@ pub fn resolve(
         let mut out = Vec::new();
         let mut has_dmg_skill_bonus = false;
         let mut has_skill_boost_dmg = false;
+        let mut has_rof_boost = false;
         for &eid in &e.effect_ids {
             if let Some(meta) = effects.get(&eid) {
                 // Overload (category 5) effects only apply when the module is
@@ -162,6 +172,9 @@ pub fn resolve(
                 }
                 if meta.name == SKILL_BOOST_DAMAGE_MULT {
                     has_skill_boost_dmg = true;
+                }
+                if meta.name == RAPID_FIRING_ROF_BONUS {
+                    has_rof_boost = true;
                 }
                 let (m, dropped) = modifiers_for(meta, is_stackable);
                 *unresolved += dropped;
@@ -197,6 +210,19 @@ pub fn resolve(
                     penalized: false,
                 });
             }
+        }
+        // Launcher/turret specialization rate-of-fire skill with no explicit rof
+        // application in the dump (MLO / Rapid Launch carry one) — synthesize
+        // +293% to rate of fire (51) on modules requiring the skill.
+        let targets_rof = out.iter().any(|m| m.tgt_attr == ROF_ATTR);
+        if has_rof_boost && !targets_rof && e.type_id != 0 {
+            out.push(ModifierDef {
+                src_attr: ROF_BONUS_ATTR,
+                op: Op::PostPercent,
+                tgt_attr: ROF_ATTR,
+                domain: Domain::SkillReqOnShip(e.type_id),
+                penalized: false,
+            });
         }
         out
     };
@@ -548,6 +574,36 @@ mod tests {
         let resolved = resolve(&input, &effects, &|_| true);
         let kin = resolved.charges[0].as_ref().unwrap().get(117);
         assert!((kin - 125.0).abs() < 1e-9, "charge kinetic = {kin}, want 125");
+    }
+
+    /// Rate-of-fire skill synthesis (#176): a specialization skill with
+    /// `rapidFiringSkillBoostRofBonus` and no explicit rof application boosts the
+    /// rate of fire (51) of modules requiring it. -2%/level × V = -10% → 1000→900.
+    #[test]
+    fn rof_skill_bonus_is_synthesized() {
+        let mut boost = effect(600, vec![mi("ItemModifier", "itemID", 0, 293, 280, None)]);
+        boost.name = "rapidFiringSkillBoostRofBonus".into();
+        let mut effects = HashMap::new();
+        effects.insert(600, boost);
+
+        let skill_id = 20211; // Heavy Missile Specialization
+        let input = FitInput {
+            skills: vec![EntityInput {
+                type_id: skill_id,
+                attrs: vec![(280, 5.0), (293, -2.0)], // V, -2%/level rof
+                effect_ids: vec![600],
+                ..Default::default()
+            }],
+            modules: vec![EntityInput {
+                attrs: vec![(51, 1000.0)], // 1000ms cycle
+                required_skills: vec![skill_id],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let resolved = resolve(&input, &effects, &|_| true);
+        let rof = resolved.modules[0].get(51);
+        assert!((rof - 900.0).abs() < 1e-9, "rof = {rof}, want 900");
     }
 
     /// Surgical Strike at level V: scales its own damageMultiplierBonus (292) by

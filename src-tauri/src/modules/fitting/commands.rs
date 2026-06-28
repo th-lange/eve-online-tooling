@@ -1985,10 +1985,8 @@ mod tests {
 
         let all5 = |_: i64| 5.0;
         let close = |a: f64, b: f64, pct: f64| (a - b).abs() <= b.abs() * pct + 1e-6;
-        // EHP, velocity, align time and cap-stability are at PYFA parity and are
-        // hard-asserted. Total DPS is still converging (remaining per-skill charge/
-        // drone damage coverage) and is reported as a tracked gap, not a failure
-        // (#176).
+        // Total DPS, EHP, velocity, align time and cap-stability are all at PYFA
+        // parity on these fits and hard-asserted (#176).
         let mut failures = Vec::new();
         for (label, f, g) in &cases {
             let layout = sde.ship_layout(f.ship_type_id).unwrap().expect("layout");
@@ -2000,16 +1998,8 @@ mod tests {
                 d.navigation.align_time,
                 d.capacitor.stable,
             );
-            eprintln!(
-                "{label}: TRACK dps {dps:.2} (want {:.2}, {:+.1}%) [t{:.1} m{:.1} d{:.1}] | \
-                 LOCK ehp {ehp:.1} vel {vel:.2} align {align:.3} cap_stable {stable}",
-                g.dps,
-                (dps - g.dps) / g.dps * 100.0,
-                d.dps.turret,
-                d.dps.missile,
-                d.dps.drone,
-            );
             let mut p = Vec::new();
+            if !close(dps, g.dps, 0.005) { p.push(format!("dps {dps:.2}≠{:.2}", g.dps)); }
             if !close(ehp, g.ehp, 0.01) { p.push(format!("ehp {ehp:.1}≠{:.1}", g.ehp)); }
             if stable != g.cap_stable { p.push(format!("cap {stable}≠{}", g.cap_stable)); }
             if !close(vel, g.vel, 0.005) { p.push(format!("vel {vel:.2}≠{:.2}", g.vel)); }
@@ -2020,7 +2010,7 @@ mod tests {
         }
         assert!(
             failures.is_empty(),
-            "golden tank/nav/cap mismatches vs PYFA:\n{}",
+            "golden mismatches vs PYFA:\n{}",
             failures.join("\n"),
         );
     }
