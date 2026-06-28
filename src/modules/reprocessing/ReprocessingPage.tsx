@@ -115,7 +115,7 @@ function Workbench() {
         <button
           onClick={() => run.mutate(params)}
           disabled={run.isPending}
-          className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
         >
           {run.isPending ? "Pricing…" : "Calculate"}
         </button>

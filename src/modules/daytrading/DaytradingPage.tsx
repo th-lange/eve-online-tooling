@@ -173,7 +173,7 @@ function Workbench() {
           <button
             onClick={calculate}
             disabled={run.isPending || selectedCount < 2 || categoryIds.size === 0}
-            className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
             title={
               selectedCount < 2
                 ? "Select at least two hubs"

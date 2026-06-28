@@ -36,7 +36,7 @@ export function SdeSetup({ onInstalled }: { onInstalled: () => void }) {
       <button
         onClick={() => download.mutate()}
         disabled={download.isPending}
-        className="mt-6 rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+        className="mt-6 rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
       >
         {download.isPending ? "Downloading…" : "Download SDE"}
       </button>
