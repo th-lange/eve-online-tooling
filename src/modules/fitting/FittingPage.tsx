@@ -1,6 +1,8 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus, X } from "lucide-react";
 import {
+  fittingAddItem,
   fittingDeleteLocal,
   fittingEsiList,
   fittingExportEft,
@@ -12,6 +14,7 @@ import {
   fittingShipLayout,
   fittingSimulate,
   marketRegions,
+  sdeSearch,
   sdeSearchShips,
   sdeStatus,
   sdeTypeInfos,
@@ -224,6 +227,14 @@ function Workbench() {
       f ? { ...f, items: f.items.filter((_, i) => i !== globalIndex) } : f,
     );
   }
+
+  // Add a module/drone the user picked: the backend classifies its slot and
+  // places it at the next free index, then we re-simulate off the new fit.
+  const addItem = useMutation({
+    mutationFn: (typeId: number) => fittingAddItem(fit!, typeId),
+    onSuccess: (f) => setFit(f),
+    onError: (e) => alert(`Couldn't add module: ${e}`),
+  });
 
   return (
     <div className="flex h-full flex-col gap-4 p-4">
@@ -458,6 +469,11 @@ function Workbench() {
             {layout.data && (
               <SlotGrid fit={fit} layout={layout.data} nameOf={nameOf} onRemove={removeItem} />
             )}
+
+            <ModuleBrowser
+              onAdd={(typeId) => addItem.mutate(typeId)}
+              pending={addItem.isPending}
+            />
           </section>
 
           {/* Right: stats */}
@@ -591,6 +607,58 @@ const SLOT_LABELS: [SlotKind, string][] = [
 ];
 
 /** Items grouped by slot (by name), with the hull's slot counts and a remove ✕. */
+/**
+ * Click-to-add module browser: search marketable types by name and add the pick
+ * to the fit. The backend classifies the slot, so any module lands in the right
+ * place (the slot grid above reflects it immediately) (#168).
+ */
+function ModuleBrowser({
+  onAdd,
+  pending,
+}: {
+  onAdd: (typeId: number) => void;
+  pending: boolean;
+}) {
+  const [q, setQ] = useState("");
+  const results = useQuery({
+    queryKey: ["fitting", "module-search", q],
+    queryFn: () => sdeSearch(q),
+    enabled: q.trim().length >= 2,
+  });
+  return (
+    <div className="mt-4 rounded border border-zinc-800 bg-zinc-900/40 p-3">
+      <div className="mb-2 text-xs uppercase tracking-wide text-zinc-500">
+        Add module
+      </div>
+      <input
+        value={q}
+        onChange={(e) => setQ(e.currentTarget.value)}
+        placeholder="search a module, charge or drone…"
+        className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+      />
+      {q.trim().length >= 2 && (
+        <ul className="mt-2 max-h-48 overflow-y-auto text-sm">
+          {(results.data ?? []).slice(0, 30).map((r) => (
+            <li key={r.id}>
+              <button
+                disabled={pending}
+                onClick={() => onAdd(r.id)}
+                className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+              >
+                <span className="truncate">{r.name}</span>
+                <Plus size={14} className="shrink-0 text-zinc-500" />
+              </button>
+            </li>
+          ))}
+          {results.isFetched && (results.data?.length ?? 0) === 0 && (
+            <li className="px-2 py-1 text-xs text-zinc-500">No matches.</li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function SlotGrid({
   fit,
   layout,
@@ -634,11 +702,11 @@ function SlotGrid({
                   >
                     <button
                       onClick={() => onRemove(i)}
-                      className="shrink-0 text-zinc-600 group-hover:text-red-400"
+                      className="flex shrink-0 items-center rounded p-0.5 text-zinc-500 group-hover:text-red-400"
                       title="Remove from slot"
                       aria-label={`Remove ${nameOf(it.typeId)}`}
                     >
-                      ✕
+                      <X size={14} />
                     </button>
                     <span className="truncate">
                       {nameOf(it.typeId)}

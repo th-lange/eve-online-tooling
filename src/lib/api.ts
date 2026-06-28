@@ -1512,6 +1512,18 @@ export function fittingImportEft(text: string): Promise<Fit> {
   return invoke<Fit>("fitting_import_eft", { text });
 }
 
+/**
+ * Add a module/drone to a fit. The backend classifies the type's slot from its
+ * dogma effects and places it at the next free index in that slot.
+ */
+export function fittingAddItem(
+  fit: Fit,
+  typeId: number,
+  chargeTypeId: number | null = null,
+): Promise<Fit> {
+  return invoke<Fit>("fitting_add_item", { fit, typeId, chargeTypeId });
+}
+
 /** Serialize a fit to an EFT clipboard string. */
 export function fittingExportEft(fit: Fit): Promise<string> {
   return invoke<string>("fitting_export_eft", { fit });

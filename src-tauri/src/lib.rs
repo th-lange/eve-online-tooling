@@ -106,6 +106,7 @@ pub fn run() {
             modules::shopping::commands::shopping_clear_list,
             modules::fitting::commands::fitting_ship_layout,
             modules::fitting::commands::fitting_import_eft,
+            modules::fitting::commands::fitting_add_item,
             modules::fitting::commands::fitting_export_eft,
             modules::fitting::commands::fitting_esi_list,
             modules::fitting::commands::fitting_simulate,
