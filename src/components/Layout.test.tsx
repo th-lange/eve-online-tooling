@@ -12,6 +12,13 @@ vi.mock("@tauri-apps/api/core", () => ({
 import { Layout } from "./Layout";
 import { modules } from "../modules/registry";
 
+// Two modules in the same section (Industry) and one in another (Trading),
+// used to exercise within-section reordering vs. the cross-section guard.
+const id = (title: string) => modules.find((m) => m.title === title)!.id;
+const PRODUCTION = "Production"; // industry
+const REPROCESSING = "Reprocessing"; // industry
+const TRADING = "Station Trading"; // trading
+
 function renderLayout() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -41,60 +48,78 @@ function rowFor(title: string): HTMLElement {
   return screen.getByRole("link", { name: title }).parentElement as HTMLElement;
 }
 
-describe("Layout sidebar reordering", () => {
+describe("Layout sidebar", () => {
   beforeEach(() => localStorage.clear());
 
-  it("renders modules in registry order by default", () => {
+  it("renders labelled group sections in order", () => {
     renderLayout();
-    expect(navOrder().slice(0, 3)).toEqual(
-      modules.slice(0, 3).map((m) => m.title),
-    );
+    const nav = screen.getByRole("navigation");
+    // (Labels chosen to not collide with any module's own title text.)
+    for (const label of ["Industry", "Trading", "Intel / Space"]) {
+      expect(within(nav).getByText(label)).toBeInTheDocument();
+    }
+    // Industry is the first section, so its members lead the list.
+    expect(navOrder().slice(0, 2)).toEqual([PRODUCTION, REPROCESSING]);
   });
 
-  it("drag-reorders a module before another and persists the order", () => {
+  it("drag-reorders within a section and persists the order", () => {
     renderLayout();
-    const [first, second, third] = modules.map((m) => m.title);
+    fireEvent.dragStart(handleFor(REPROCESSING));
+    fireEvent.drop(rowFor(PRODUCTION));
 
-    // Drag the third module onto the first → it lands before it.
-    fireEvent.dragStart(handleFor(third));
-    fireEvent.drop(rowFor(first));
-
-    expect(navOrder().slice(0, 3)).toEqual([third, first, second]);
-
+    expect(navOrder().slice(0, 2)).toEqual([REPROCESSING, PRODUCTION]);
     const saved = JSON.parse(localStorage.getItem("sidebar.order") ?? "[]");
-    expect(saved.slice(0, 3)).toEqual([
-      modules[2].id,
-      modules[0].id,
-      modules[1].id,
-    ]);
+    expect(saved.slice(0, 2)).toEqual([id(REPROCESSING), id(PRODUCTION)]);
   });
 
-  it("restores a saved order on mount", () => {
-    const custom = [modules[1].id, modules[0].id];
-    localStorage.setItem("sidebar.order", JSON.stringify(custom));
+  it("does not reorder across section boundaries", () => {
     renderLayout();
-    expect(navOrder().slice(0, 2)).toEqual([modules[1].title, modules[0].title]);
+    const before = navOrder();
+    // Station Trading lives in a different section than Production.
+    fireEvent.dragStart(handleFor(TRADING));
+    fireEvent.drop(rowFor(PRODUCTION));
+
+    expect(navOrder()).toEqual(before);
+    expect(localStorage.getItem("sidebar.order")).toBeNull();
+  });
+
+  it("restores a saved within-section order on mount", () => {
+    localStorage.setItem(
+      "sidebar.order",
+      JSON.stringify([id(REPROCESSING), id(PRODUCTION)]),
+    );
+    renderLayout();
+    expect(navOrder().slice(0, 2)).toEqual([REPROCESSING, PRODUCTION]);
+  });
+
+  it("pinning lifts a module into the Pinned section", () => {
+    localStorage.setItem("sidebar.pins", JSON.stringify([id(TRADING)]));
+    renderLayout();
+    const nav = screen.getByRole("navigation");
+    expect(within(nav).getByText("Pinned")).toBeInTheDocument();
+    // The pinned module now leads the whole nav.
+    expect(navOrder()[0]).toBe(TRADING);
   });
 
   it("assigns an accent colour and persists it; clearing removes it", () => {
     renderLayout();
-    const title = modules[0].title;
-    const row = rowFor(title);
+    const row = rowFor(PRODUCTION);
 
-    // Open the picker for the first module and choose Emerald.
-    fireEvent.click(within(row).getByRole("button", { name: `Set colour for ${title}` }));
+    fireEvent.click(
+      within(row).getByRole("button", { name: `Set colour for ${PRODUCTION}` }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Emerald" }));
 
     expect(JSON.parse(localStorage.getItem("sidebar.colors") ?? "{}")).toEqual({
-      [modules[0].id]: "emerald",
+      [id(PRODUCTION)]: "emerald",
     });
-    // The accent renders as an inset box-shadow on the link.
-    expect(screen.getByRole("link", { name: title })).toHaveStyle({
+    expect(screen.getByRole("link", { name: PRODUCTION })).toHaveStyle({
       boxShadow: "inset 3px 0 0 #34d399",
     });
 
-    // Clearing removes the entry from the saved map.
-    fireEvent.click(within(row).getByRole("button", { name: `Set colour for ${title}` }));
+    fireEvent.click(
+      within(row).getByRole("button", { name: `Set colour for ${PRODUCTION}` }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Clear colour" }));
     expect(JSON.parse(localStorage.getItem("sidebar.colors") ?? "{}")).toEqual({});
   });
@@ -102,24 +127,11 @@ describe("Layout sidebar reordering", () => {
   it("restores saved colours on mount", () => {
     localStorage.setItem(
       "sidebar.colors",
-      JSON.stringify({ [modules[1].id]: "sky" }),
+      JSON.stringify({ [id(TRADING)]: "sky" }),
     );
     renderLayout();
-    expect(screen.getByRole("link", { name: modules[1].title })).toHaveStyle({
+    expect(screen.getByRole("link", { name: TRADING })).toHaveStyle({
       boxShadow: "inset 3px 0 0 #38bdf8",
     });
-  });
-
-  it("does not reorder across the pinned / unpinned boundary", () => {
-    // Pin the first module; dragging an unpinned row onto it should be a no-op.
-    localStorage.setItem("sidebar.pins", JSON.stringify([modules[0].id]));
-    renderLayout();
-
-    const before = navOrder();
-    fireEvent.dragStart(handleFor(modules[2].title));
-    fireEvent.drop(rowFor(modules[0].title));
-
-    expect(navOrder()).toEqual(before);
-    expect(localStorage.getItem("sidebar.order")).toBeNull();
   });
 });

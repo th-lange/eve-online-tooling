@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { GripVertical, Star, X } from "lucide-react";
-import { modules, type ModuleDef } from "../modules/registry";
+import { modules, MODULE_GROUPS, type ModuleDef } from "../modules/registry";
 import { BridgeStatus } from "./BridgeStatus";
 import { Characters } from "./Characters";
 
@@ -104,12 +104,20 @@ export function Layout() {
       return next;
     });
 
-  // Drop `dragId` onto `targetId` — only reorders when both are in the same
-  // group (pinned vs. unpinned), so dragging never silently (un)pins an item.
+  const groupOf = (id: string) => modules.find((m) => m.id === id)?.group;
+
+  // Drop `dragId` onto `targetId` — only reorders within the same visible
+  // section: the Pinned group, or a shared module group. This keeps dragging
+  // from silently (un)pinning an item or hopping it between sections.
   const handleDrop = (targetId: string) => {
     if (dragId === null) return;
-    const sameGroup = pins.includes(dragId) === pins.includes(targetId);
-    if (sameGroup) {
+    const dPinned = pins.includes(dragId);
+    const tPinned = pins.includes(targetId);
+    const sameSection =
+      dPinned && tPinned
+        ? true
+        : !dPinned && !tPinned && groupOf(dragId) === groupOf(targetId);
+    if (sameSection) {
       setOrder((prev) => {
         const next = moveBefore(prev, dragId, targetId);
         localStorage.setItem(ORDER_KEY, JSON.stringify(next));
@@ -145,18 +153,25 @@ export function Layout() {
           </div>
           <div className="text-xs text-zinc-500">production &amp; trading</div>
         </div>
-        <nav className="flex-1 space-y-1 overflow-y-auto px-2">
+        <nav className="flex-1 overflow-y-auto px-2 pb-2">
           {pinned.length > 0 && (
-            <>
+            <NavSection label="Pinned">
               {pinned.map((m) => (
                 <NavRow key={m.id} {...rowProps(m)} />
               ))}
-              <div className="my-1 border-t border-zinc-800" />
-            </>
+            </NavSection>
           )}
-          {rest.map((m) => (
-            <NavRow key={m.id} {...rowProps(m)} />
-          ))}
+          {MODULE_GROUPS.map((g) => {
+            const items = rest.filter((m) => m.group === g.key);
+            if (items.length === 0) return null;
+            return (
+              <NavSection key={g.key} label={g.label}>
+                {items.map((m) => (
+                  <NavRow key={m.id} {...rowProps(m)} />
+                ))}
+              </NavSection>
+            );
+          })}
         </nav>
         <Characters />
         <div className="border-t border-zinc-800 px-4 py-3">
@@ -201,6 +216,24 @@ function ModuleHost() {
           </div>
         ))}
     </>
+  );
+}
+
+/** A labelled sidebar section: a small caption above its grouped nav rows. */
+function NavSection({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="mb-2">
+      <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+        {label}
+      </div>
+      <div className="space-y-0.5">{children}</div>
+    </div>
   );
 }
 
