@@ -271,6 +271,54 @@ pub fn fitting_export_eft(app: AppHandle, fit: Fit) -> Result<String, String> {
     }))
 }
 
+/// Save a fit to the active character's in-game fittings via ESI (#178). Needs
+/// the `esi-fittings.write_fittings.v1` scope; a missing scope surfaces as an
+/// actionable error. Implants/boosters are dropped (not part of an ESI fitting).
+/// Returns the new `fitting_id`; invalidates the cached list so it reappears.
+#[tauri::command]
+pub async fn fitting_esi_push(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+    fit: Fit,
+) -> Result<i64, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let character_id =
+        storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?;
+    let granted = storage::load_roster(&dir)
+        .iter()
+        .find(|c| c.character_id == character_id)
+        .map(|c| c.scopes.iter().any(|s| s == "esi-fittings.write_fittings.v1"))
+        .unwrap_or(false);
+    if !granted {
+        return Err(
+            "This character hasn't granted the fittings write scope. Add \
+             esi-fittings.write_fittings.v1 to your EVE application, then remove \
+             and re-add the character."
+                .to_string(),
+        );
+    }
+
+    let items = super::esi_fittings::fit_to_esi_items(&fit);
+    if items.is_empty() {
+        return Err("Nothing to save — the fit has no modules.".to_string());
+    }
+    let name = if fit.name.trim().is_empty() { "Fit" } else { fit.name.trim() };
+    let id = crate::esi::create_character_fitting(
+        &auth_state,
+        character_id,
+        name,
+        "Saved from EVE Online Tooling",
+        fit.ship_type_id,
+        &items,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // The new fitting should show up next open.
+    storage::cache_invalidate(&dir, &format!("fitting_esi_{character_id}"));
+    Ok(id)
+}
+
 /// Load the active character's (and corp's) in-game saved fittings from ESI as
 /// [`Fit`]s the editor can open (#178). Best-effort: needs the `esi-fittings`
 /// scope enabled on the app + a re-login; without it ESI returns 403 and this

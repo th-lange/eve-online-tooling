@@ -110,6 +110,7 @@ pub fn run() {
             modules::fitting::commands::fitting_classify_slots,
             modules::fitting::commands::fitting_export_eft,
             modules::fitting::commands::fitting_esi_list,
+            modules::fitting::commands::fitting_esi_push,
             modules::fitting::commands::fitting_simulate,
             modules::fitting::commands::fitting_optimize,
             modules::fitting::commands::fitting_price,

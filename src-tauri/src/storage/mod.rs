@@ -131,6 +131,11 @@ pub fn cache_get<T: DeserializeOwned>(app_data_dir: &Path, key: &str) -> Option<
     (env.expires >= now_epoch()).then_some(env.value)
 }
 
+/// Drop a cached value so the next read misses (e.g. after a write invalidates it).
+pub fn cache_invalidate(app_data_dir: &Path, key: &str) {
+    let _ = std::fs::remove_file(cache_path(app_data_dir, key));
+}
+
 /// Load a durable (non-expiring) JSON document by name, or `None` if absent.
 /// For accumulated history (wallet journal, transactions) that must survive
 /// restarts and grow beyond ESI's window.

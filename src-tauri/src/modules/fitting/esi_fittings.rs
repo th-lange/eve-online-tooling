@@ -37,6 +37,51 @@ pub fn flag_to_slot(flag: &str) -> Option<(SlotKind, i32)> {
     }
 }
 
+/// Map a `(slot, index)` back to an ESI fitting `flag` string — the inverse of
+/// [`flag_to_slot`]. Drones/cargo collapse to their bay regardless of index;
+/// implants/boosters aren't part of an ESI fitting (returns `None`).
+pub fn slot_to_flag(slot: SlotKind, index: i32) -> Option<String> {
+    Some(match slot {
+        SlotKind::High => format!("HiSlot{index}"),
+        SlotKind::Mid => format!("MedSlot{index}"),
+        SlotKind::Low => format!("LoSlot{index}"),
+        SlotKind::Rig => format!("RigSlot{index}"),
+        SlotKind::Subsystem => format!("SubSystemSlot{index}"),
+        SlotKind::Drone => "DroneBay".into(),
+        SlotKind::Cargo => "Cargo".into(),
+        SlotKind::Implant | SlotKind::Booster => return None,
+    })
+}
+
+/// One item in an ESI fitting POST body (`type_id`, slot `flag`, `quantity`).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct EsiFitItemOut {
+    pub flag: String,
+    pub quantity: i64,
+    pub type_id: i64,
+}
+
+/// Flatten a [`Fit`] into the ESI fitting item list for a create-fitting POST: a
+/// module per slot, plus its loaded charge as a separate item sharing the module's
+/// flag, plus drones/cargo in their bay. Implants/boosters are dropped.
+pub fn fit_to_esi_items(fit: &Fit) -> Vec<EsiFitItemOut> {
+    let mut out = Vec::new();
+    for it in &fit.items {
+        let Some(flag) = slot_to_flag(it.slot, it.index) else {
+            continue;
+        };
+        out.push(EsiFitItemOut {
+            flag: flag.clone(),
+            quantity: it.quantity.max(1) as i64,
+            type_id: it.type_id,
+        });
+        if let Some(charge) = it.charge_type_id {
+            out.push(EsiFitItemOut { flag, quantity: 1, type_id: charge });
+        }
+    }
+    out
+}
+
 /// Convert an ESI fitting to a [`Fit`]. `is_charge(type_id)` distinguishes a
 /// loaded charge (which rides on its module) from a module.
 pub fn esi_fitting_to_fit(esi: &EsiFitting, is_charge: &impl Fn(i64) -> bool) -> Fit {
@@ -137,6 +182,47 @@ mod tests {
         assert_eq!(flag_to_slot("Cargo"), Some((SlotKind::Cargo, 0)));
         assert_eq!(flag_to_slot("SubSystemSlot0"), Some((SlotKind::Subsystem, 0)));
         assert_eq!(flag_to_slot("FighterBay"), None);
+    }
+
+    #[test]
+    fn slot_to_flag_round_trips_and_drops_implants() {
+        for (slot, idx) in [
+            (SlotKind::High, 2),
+            (SlotKind::Mid, 0),
+            (SlotKind::Low, 3),
+            (SlotKind::Rig, 1),
+            (SlotKind::Subsystem, 4),
+        ] {
+            let flag = slot_to_flag(slot, idx).unwrap();
+            assert_eq!(flag_to_slot(&flag), Some((slot, idx)));
+        }
+        assert_eq!(slot_to_flag(SlotKind::Drone, 5).as_deref(), Some("DroneBay"));
+        assert_eq!(slot_to_flag(SlotKind::Cargo, 0).as_deref(), Some("Cargo"));
+        assert_eq!(slot_to_flag(SlotKind::Implant, 0), None);
+    }
+
+    #[test]
+    fn fit_to_esi_items_emits_modules_charges_and_drops_implants() {
+        let mut gun = module(10, SlotKind::High, 0, ModuleState::Active, 1);
+        gun.charge_type_id = Some(11);
+        let fit = Fit {
+            id: "x".into(),
+            name: "n".into(),
+            ship_type_id: 587,
+            items: vec![
+                gun,
+                module(20, SlotKind::Drone, 0, ModuleState::Active, 5),
+                module(30, SlotKind::Implant, 0, ModuleState::Online, 1),
+            ],
+            projected: Vec::new(),
+        };
+        let out = fit_to_esi_items(&fit);
+        // The high module + its charge (shared flag), then the drone stack; the
+        // implant is dropped.
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0], EsiFitItemOut { flag: "HiSlot0".into(), quantity: 1, type_id: 10 });
+        assert_eq!(out[1], EsiFitItemOut { flag: "HiSlot0".into(), quantity: 1, type_id: 11 });
+        assert_eq!(out[2], EsiFitItemOut { flag: "DroneBay".into(), quantity: 5, type_id: 20 });
     }
 
     #[test]

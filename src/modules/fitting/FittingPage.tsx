@@ -6,6 +6,7 @@ import {
   fittingClassifySlots,
   fittingDeleteLocal,
   fittingEsiList,
+  fittingEsiPush,
   fittingExportEft,
   fittingImportEft,
   fittingListLocal,
@@ -141,6 +142,12 @@ function Workbench() {
   const refreshEsi = useMutation({
     mutationFn: () => fittingEsiList(true),
     onSuccess: (fits) => qc.setQueryData(["fitting", "esi"], fits),
+  });
+  // Save the current fit to the active character's in-game fittings via ESI.
+  const pushEsi = useMutation({
+    mutationFn: () => fittingEsiPush(fit!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fitting", "esi"] }),
+    onError: (e) => alert(`Couldn't save to EVE: ${e}`),
   });
   const exportEft = useMutation({
     mutationFn: () => fittingExportEft(fit!),
@@ -397,6 +404,18 @@ function Workbench() {
                 className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
               >
                 Export EFT
+              </button>
+              <button
+                onClick={() => pushEsi.mutate()}
+                disabled={pushEsi.isPending}
+                title="Save this fit to your in-game fittings (ESI)"
+                className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+              >
+                {pushEsi.isPending
+                  ? "Saving…"
+                  : pushEsi.isSuccess
+                    ? "Saved to EVE ✓"
+                    : "Save to EVE"}
               </button>
               {saved.data?.some((s) => s.id === fit.id) && (
                 <button

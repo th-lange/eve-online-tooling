@@ -1624,6 +1624,12 @@ export function fittingEsiList(force = false): Promise<Fit[]> {
   return invoke<Fit[]>("fitting_esi_list", { force });
 }
 
+/** Save a fit to the active character's in-game fittings (needs the
+ * `esi-fittings.write_fittings.v1` scope). Returns the new fitting id. */
+export function fittingEsiPush(fit: Fit): Promise<number> {
+  return invoke<number>("fitting_esi_push", { fit });
+}
+
 /** A single locally saved fit by id, or `null`. */
 export function fittingLoadLocal(id: string): Promise<Fit | null> {
   return invoke<Fit | null>("fitting_load_local", { id });
