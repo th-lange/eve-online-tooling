@@ -25,6 +25,10 @@ use super::modifier::{Domain, ModifierDef, Op};
 /// the Fuzzwork dump, so the engine synthesizes it (#176).
 const DAMAGE_MULT_SKILL_BONUS: &str = "damageMultiplierSkillBonus";
 
+/// `dgmEffects.effectCategory` 5 = overload (overheat) effects — only active
+/// while the module is overheated, which the simulator doesn't model yet.
+const OVERLOAD_CATEGORY: i64 = 5;
+
 /// One entity in the fit tree, reduced to what resolution needs.
 #[derive(Debug, Clone, Default)]
 pub struct EntityInput {
@@ -135,6 +139,12 @@ pub fn resolve(
         let mut has_dmg_skill_bonus = false;
         for &eid in &e.effect_ids {
             if let Some(meta) = effects.get(&eid) {
+                // Overload (category 5) effects only apply when the module is
+                // overheated, which the simulator doesn't model — so skip them
+                // (otherwise e.g. a gun's overload damage bonus inflates DPS).
+                if meta.category == OVERLOAD_CATEGORY {
+                    continue;
+                }
                 if meta.name == DAMAGE_MULT_SKILL_BONUS {
                     has_dmg_skill_bonus = true;
                 }
@@ -354,6 +364,28 @@ mod tests {
             modifiers,
         }
     }
+    /// Overload (overheat) effects must not apply while the simulator runs the
+    /// module un-overheated (#176): a category-5 self damage bonus is dropped.
+    #[test]
+    fn overload_category_effects_are_skipped() {
+        let mut overload = effect(400, vec![mi("ItemModifier", "itemID", 6, 64, 1210, None)]);
+        overload.category = OVERLOAD_CATEGORY; // 5 = overload
+        let mut effects = HashMap::new();
+        effects.insert(400, overload);
+
+        let input = FitInput {
+            modules: vec![EntityInput {
+                attrs: vec![(64, 1.0), (1210, 15.0)], // +15% overload damage bonus
+                effect_ids: vec![400],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let resolved = resolve(&input, &effects, &|_| true);
+        // Un-overheated: the overload bonus is skipped, so it stays 1.0.
+        assert_eq!(resolved.modules[0].get(64), 1.0);
+    }
+
     fn mi(func: &str, dom: &str, op: i64, tgt: i64, src: i64, group: Option<i64>) -> ModifierInfo {
         ModifierInfo {
             domain: Some(dom.into()),
