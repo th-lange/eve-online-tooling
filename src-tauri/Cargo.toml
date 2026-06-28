@@ -1,6 +1,6 @@
 [package]
 name = "eve-online-tooling"
-version = "0.16.0"
+version = "0.17.0"
 description = "EVE Online tooling — production, trading and more"
 authors = ["Thomas Lange"]
 edition = "2021"
