@@ -5,6 +5,7 @@ import {
   dpsPlayback,
   dpsStart,
   dpsStop,
+  eveDefaultLogDir,
   onDpsTick,
   type DpsLogFile,
   type DpsTick,
@@ -54,6 +55,12 @@ export function DpsPage() {
   const [logs, setLogs] = useState<DpsLogFile[]>([]);
   const [file, setFile] = useState("");
   const [speed, setSpeed] = useState(4);
+
+  // Prefill the Gamelogs folder from the OS default when we have nothing yet.
+  useEffect(() => {
+    if (dir) return;
+    eveDefaultLogDir("gamelogs").then((d) => d && setDir(d));
+  }, [dir]);
 
   // Subscribe once; the page stays mounted (ModuleHost), so the feed survives
   // navigation. Ticks only arrive while a capture is running.

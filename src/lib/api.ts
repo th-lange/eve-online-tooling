@@ -9,6 +9,14 @@ export function ping(): Promise<string> {
   return invoke<string>("ping");
 }
 
+/** Best-guess default EVE log folder for prefilling the inputs, by OS. `kind` is
+ *  `"chatlogs"` or `"gamelogs"`. Returns `null` when none can be guessed. */
+export function eveDefaultLogDir(
+  kind: "chatlogs" | "gamelogs",
+): Promise<string | null> {
+  return invoke<string | null>("eve_default_log_dir", { kind });
+}
+
 // --- Auth (EVE SSO, multi-character) ---
 
 export interface Character {
