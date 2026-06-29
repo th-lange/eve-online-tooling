@@ -162,6 +162,17 @@ export function DpsPage() {
         ))}
       </div>
 
+      {/* Mining (only when there's yield — most fits never mine) */}
+      {latest && latest.miningM3 > 0 && (
+        <div className="mt-3 inline-flex items-center gap-2 rounded border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+          <span className="inline-block h-2.5 w-2.5 rounded-sm bg-amber-300" />
+          <span className="text-xs text-zinc-400">Mining</span>
+          <span className="tabular-nums text-xl text-amber-300">
+            {latest.miningM3.toFixed(1)} m³/s
+          </span>
+        </div>
+      )}
+
       {/* Graph */}
       <div className="mt-6">
         <DpsChart ticks={ticks} />

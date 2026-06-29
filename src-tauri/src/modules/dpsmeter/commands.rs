@@ -13,17 +13,19 @@
 //! again to end the current one. (This stop mechanism is the one piece with no
 //! prior precedent in the codebase.)
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 
 use super::aggregate::Window;
-use super::parser::parse_line;
+use super::parser::{parse_line, EventKind};
+use crate::sde::{Sde, SdePaths};
 
 /// How often the loop reads new bytes and emits a tick.
 const POLL: Duration = Duration::from_millis(500);
@@ -77,8 +79,13 @@ pub async fn dps_start(
     let generation = state.generation.clone();
     let my_gen = generation.fetch_add(1, Ordering::SeqCst) + 1;
 
+    // SDE path (for ore → m³); resolved once. Mining lines need a volume lookup.
+    let sde_db = app.path().app_data_dir().ok().map(|d| SdePaths::new(d).db);
+
     tauri::async_runtime::spawn(async move {
         let mut win = Window::new(settings.window_secs);
+        // Cache of ore name → m³ per unit, resolved lazily from the SDE.
+        let mut ore_vol: HashMap<String, f64> = HashMap::new();
         // Start at the *current* end of the active log: only new combat counts,
         // never a replay of the whole session as one burst.
         let mut current = newest_gamelog(&dir);
@@ -106,10 +113,19 @@ pub async fn dps_start(
             if let Some(path) = &current {
                 if let Some((text, next)) = read_appended(path, offset).await {
                     offset = next;
-                    for line in text.lines() {
-                        if let Some(ev) = parse_line(line) {
-                            win.push(ev);
+                    let mut batch: Vec<_> = text.lines().filter_map(parse_line).collect();
+                    resolve_ore_volumes(&batch, &mut ore_vol, sde_db.as_deref());
+                    for mut ev in batch.drain(..) {
+                        if ev.kind == EventKind::Mining {
+                            let per_unit = ev
+                                .ore
+                                .as_deref()
+                                .and_then(|o| ore_vol.get(o))
+                                .copied()
+                                .unwrap_or(0.0);
+                            ev.volume = ev.amount as f64 * per_unit;
                         }
+                        win.push(ev);
                     }
                 }
             }
@@ -196,6 +212,35 @@ async fn read_appended(path: &Path, offset: u64) -> Option<(String, u64)> {
     let consumed = last_nl + 1;
     let text = String::from_utf8_lossy(&buf[..consumed]).into_owned();
     Some((text, offset + consumed as u64))
+}
+
+/// Ensure every ore named in `batch` has its m³/unit cached, looking up any new
+/// names in the SDE (`type_by_name` returns the type's volume). Sync — opens and
+/// drops the connection here so it's never held across an `.await`. Unknown ores
+/// (or a missing SDE) resolve to 0.0 so the meter still runs.
+fn resolve_ore_volumes(
+    batch: &[super::parser::DpsEvent],
+    cache: &mut HashMap<String, f64>,
+    sde_db: Option<&Path>,
+) {
+    let unknown: Vec<String> = batch
+        .iter()
+        .filter(|e| e.kind == EventKind::Mining)
+        .filter_map(|e| e.ore.clone())
+        .filter(|o| !cache.contains_key(o))
+        .collect();
+    if unknown.is_empty() {
+        return;
+    }
+    let sde = sde_db.and_then(|p| Sde::open(p).ok());
+    for ore in unknown {
+        let vol = sde
+            .as_ref()
+            .and_then(|s| s.type_by_name(&ore).ok().flatten())
+            .and_then(|(_, v)| v)
+            .unwrap_or(0.0);
+        cache.insert(ore, vol);
+    }
 }
 
 fn epoch_now() -> i64 {
