@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { marketOrders, type OrderRow } from "../../lib/api";
+import { ExternalLink } from "lucide-react";
+import { marketOrders, openMarketWindow, type OrderRow } from "../../lib/api";
 import { formatInt, formatIsk } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
@@ -17,8 +18,8 @@ export function OrdersPage() {
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100">Market Orders</h1>
           <p className="mt-1 text-sm text-zinc-400">
-            Your open buy/sell orders, flagged when undercut at the region's
-            current best price.
+            Your open buy/sell orders, flagged when undercut at the order's own
+            station's current best price.
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
@@ -68,7 +69,7 @@ type OrderSortKey =
 const COLUMNS: SortColumn<OrderSortKey>[] = [
   { key: "name", label: "Item", numeric: false, description: "The item, with buy/sell side." },
   { key: "price", label: "Your price", numeric: true, description: "Your order price." },
-  { key: "bestPrice", label: "Best", numeric: true, description: "Region's best competing price (sell-min / buy-max)." },
+  { key: "bestPrice", label: "Best", numeric: true, description: "Best competing price at this order's station (sell-min / buy-max)." },
   { key: "volumeRemain", label: "Remain", numeric: true, description: "Units left / total on the order." },
   { key: "location", label: "Location", numeric: false, description: "Where the order sits." },
   { key: "issued", label: "Issued", numeric: false, description: "When the order was placed." },
@@ -115,6 +116,16 @@ function OrdersTable({ rows }: { rows: OrderRow[] }) {
             >
               <td className="px-3 py-1.5">
                 <span className="text-zinc-200">{r.name}</span>
+                <button
+                  onClick={() =>
+                    openMarketWindow(r.typeId).catch((e) => alert(String(e)))
+                  }
+                  title="Open this item's market window in the EVE client"
+                  aria-label={`Open ${r.name} in EVE`}
+                  className="ml-1.5 inline-flex align-middle text-zinc-600 hover:text-indigo-400"
+                >
+                  <ExternalLink size={13} />
+                </button>
                 <span className={`ml-2 text-xs ${r.isBuy ? "text-sky-400" : "text-emerald-400"}`}>
                   {r.isBuy ? "buy" : "sell"}
                 </span>
@@ -156,7 +167,7 @@ function OrdersTable({ rows }: { rows: OrderRow[] }) {
   );
 }
 
-/** One tick better than the region's best: undercut a sell, overbid a buy. */
+/** One tick better than the station's best: undercut a sell, overbid a buy. */
 function undercutPrice(r: OrderRow): number {
   const best = r.bestPrice ?? r.price;
   return r.isBuy ? best + 0.01 : best - 0.01;
