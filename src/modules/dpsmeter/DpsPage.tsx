@@ -5,6 +5,8 @@ import {
   dpsStop,
   onDpsTick,
   type DpsTick,
+  type PilotRate,
+  type WeaponRate,
 } from "../../lib/api";
 
 // How many ticks to keep on screen (~2 min at the 500 ms backend cadence).
@@ -165,11 +167,80 @@ export function DpsPage() {
         <DpsChart ticks={ticks} />
       </div>
 
+      {/* Breakdowns */}
+      {latest && (latest.byWeapon.length > 0 || latest.byPilot.length > 0) && (
+        <div className="mt-6 grid gap-4 md:grid-cols-2">
+          <WeaponTable rows={latest.byWeapon} />
+          <PilotTable rows={latest.byPilot} />
+        </div>
+      )}
+
       {!running && ticks.length === 0 && (
         <p className="mt-4 text-sm text-zinc-500">
           Point this at your <code>Gamelogs</code> folder and press Start. Only
           combat logged after you start is counted.
         </p>
+      )}
+    </div>
+  );
+}
+
+/** Top weapons by outgoing DPS. */
+function WeaponTable({ rows }: { rows: WeaponRate[] }) {
+  return (
+    <div className="rounded border border-zinc-800 bg-zinc-900/40 p-3">
+      <div className="mb-2 text-xs uppercase tracking-wide text-zinc-500">
+        Damage by weapon
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-xs text-zinc-500">No outgoing damage in the window.</p>
+      ) : (
+        <table className="w-full text-sm">
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.name} className="border-t border-zinc-800/60">
+                <td className="py-1 pr-2 text-zinc-200">{r.name}</td>
+                <td className="py-1 text-right tabular-nums text-emerald-400">
+                  {Math.round(r.dps).toLocaleString()}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+/** Top counterparties by engaged DPS (dealt vs taken). */
+function PilotTable({ rows }: { rows: PilotRate[] }) {
+  return (
+    <div className="rounded border border-zinc-800 bg-zinc-900/40 p-3">
+      <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-wide text-zinc-500">
+        <span>By pilot</span>
+        <span className="flex gap-3 normal-case">
+          <span className="text-emerald-400">dealt</span>
+          <span className="text-rose-400">taken</span>
+        </span>
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-xs text-zinc-500">No pilots engaged in the window.</p>
+      ) : (
+        <table className="w-full text-sm">
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.name} className="border-t border-zinc-800/60">
+                <td className="py-1 pr-2 text-zinc-200">{r.name}</td>
+                <td className="py-1 text-right tabular-nums text-emerald-400">
+                  {Math.round(r.dpsOut).toLocaleString()}
+                </td>
+                <td className="py-1 pl-3 text-right tabular-nums text-rose-400">
+                  {Math.round(r.dpsIn).toLocaleString()}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </div>
   );

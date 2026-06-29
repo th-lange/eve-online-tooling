@@ -65,14 +65,74 @@ pub fn parse_line(line: &str) -> Option<DpsEvent> {
     let ts = parse_ts(line)?;
     let kind = classify(line)?;
     let amount = first_bold_int(line)?.unsigned_abs() as i64;
+    // Pilot/ship/weapon are only meaningful (and only present) on damage lines;
+    // they drive the breakdown tables.
+    let (pilot, ship, weapon) = match kind {
+        EventKind::DamageOut | EventKind::DamageIn => extract_actor(line),
+        _ => (None, None, None),
+    };
     Some(DpsEvent {
         ts,
         kind,
         amount,
-        pilot: None,
-        ship: None,
-        weapon: None,
+        pilot,
+        ship,
+        weapon,
     })
+}
+
+/// Pull the counterparty pilot + ship and the weapon from a damage line. EVE
+/// renders the name in the **last** `<b>…</b>` block as `NAME[CORP](SHIP)`,
+/// followed by ` - WEAPON - quality`. (The first `<b>…</b>` is the damage
+/// number.) NPCs may omit the `[CORP]`/`(SHIP)` parts, so every field is
+/// optional.
+fn extract_actor(line: &str) -> (Option<String>, Option<String>, Option<String>) {
+    let mut pilot = None;
+    let mut ship = None;
+    let mut weapon = None;
+    if let Some(bpos) = line.rfind("<b>") {
+        let after = &line[bpos + 3..];
+        let (block, tail) = after.split_once("</b>").unwrap_or((after, ""));
+        let plain = strip_tags(block); // "NAME[CORP](SHIP)"
+        let name_end = plain.find(['[', '(']).unwrap_or(plain.len());
+        let name = plain[..name_end].trim();
+        if !name.is_empty() {
+            pilot = Some(name.to_string());
+        }
+        if let Some(open) = plain.find('(') {
+            if let Some(close) = plain[open + 1..].find(')') {
+                let s = plain[open + 1..open + 1 + close].trim();
+                if !s.is_empty() {
+                    ship = Some(s.to_string());
+                }
+            }
+        }
+        // Weapon: the first ` - `-separated field after the name block (the tail
+        // looks like ` - WEAPON - quality`; drop the leading separator first).
+        let tail_txt = strip_tags(tail);
+        weapon = tail_txt
+            .trim_start_matches(['-', ' '])
+            .split(" - ")
+            .map(str::trim)
+            .find(|s| !s.is_empty())
+            .map(str::to_string);
+    }
+    (pilot, ship, weapon)
+}
+
+/// Strip `<…>` markup from a fragment, returning the trimmed plain text.
+fn strip_tags(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out.trim().to_string()
 }
 
 /// Decide which series a combat line belongs to. Order matters — the specific
@@ -232,6 +292,35 @@ mod tests {
         let e = parse_line(nos_in).unwrap();
         assert_eq!(e.kind, EventKind::CapWarfareIn);
         assert_eq!(e.amount, 60); // sign stripped
+    }
+
+    #[test]
+    fn extracts_pilot_ship_and_weapon_from_damage() {
+        let line = "[ 2026.06.25 12:00:00 ] (combat) <color=0xff00ffff><b>342</b> <color=0x77ffffff><font size=10>to</font> <b><color=0xffffffff>Target Pilot[CORP](Cynabal)</b><color=0x77ffffff><font size=10> - 425mm AutoCannon II - Hits</font></color>";
+        let e = parse_line(line).unwrap();
+        assert_eq!(e.kind, EventKind::DamageOut);
+        assert_eq!(e.amount, 342);
+        assert_eq!(e.pilot.as_deref(), Some("Target Pilot"));
+        assert_eq!(e.ship.as_deref(), Some("Cynabal"));
+        assert_eq!(e.weapon.as_deref(), Some("425mm AutoCannon II"));
+    }
+
+    #[test]
+    fn extracts_npc_name_without_corp_or_ship() {
+        let line = "[ 2026.06.25 12:00:00 ] (combat) <color=0xffcc0000><b>88</b> <color=0x77ffffff><font size=10>from</font> <b><color=0xffffffff>Angel Cartel Outlaw</b><color=0x77ffffff><font size=10> - Hits</font></color>";
+        let e = parse_line(line).unwrap();
+        assert_eq!(e.kind, EventKind::DamageIn);
+        assert_eq!(e.pilot.as_deref(), Some("Angel Cartel Outlaw"));
+        assert_eq!(e.ship, None);
+        assert_eq!(e.weapon.as_deref(), Some("Hits"));
+    }
+
+    #[test]
+    fn non_damage_lines_carry_no_actor() {
+        let xfer = "[ 2026.06.25 12:00:00 ] (combat) <color=0xff..><b>40</b> remote capacitor transmitted to <color=0xff..>Mate</color>";
+        let e = parse_line(xfer).unwrap();
+        assert_eq!(e.pilot, None);
+        assert_eq!(e.weapon, None);
     }
 
     #[test]
