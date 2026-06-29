@@ -25,7 +25,8 @@ built as a set of feature **modules** over a shared service layer.
   scanned holes), and probe-scanner signature paste.
 - **Fitting** — build a ship fit (EFT import/export + local saves), validate slots / CPU / powergrid /
   calibration / drone bay, price the whole fit, and simulate PYFA-style stats — **DPS, EHP/tank,
-  capacitor stability, speed/align and targeting** — at all-V or your character's real skills.
+  capacitor stability (with a cap-over-time chart), speed/align and targeting** — at all-V or your
+  character's real skills. Add modules by text search or by **browsing the market-group tree**.
 - **Shopping Lists** — keep named lists of items to buy (a built-in *default* and *production* list,
   plus your own), fed by "add to list" buttons across Market Search, Production, Station Trading and
   Daytrading, with quantity editing and one-click in-game Multibuy export.
