@@ -1,13 +1,18 @@
 import { useEffect, useState } from "react";
 import { Play, Square } from "lucide-react";
 import {
+  dpsListLogs,
+  dpsPlayback,
   dpsStart,
   dpsStop,
   onDpsTick,
+  type DpsLogFile,
   type DpsTick,
   type PilotRate,
   type WeaponRate,
 } from "../../lib/api";
+
+type Mode = "live" | "playback";
 
 // How many ticks to keep on screen (~2 min at the 500 ms backend cadence).
 const BUFFER = 240;
@@ -45,6 +50,10 @@ export function DpsPage() {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ticks, setTicks] = useState<DpsTick[]>([]);
+  const [mode, setMode] = useState<Mode>("live");
+  const [logs, setLogs] = useState<DpsLogFile[]>([]);
+  const [file, setFile] = useState("");
+  const [speed, setSpeed] = useState(4);
 
   // Subscribe once; the page stays mounted (ModuleHost), so the feed survives
   // navigation. Ticks only arrive while a capture is running.
@@ -77,6 +86,34 @@ export function DpsPage() {
     setRunning(false);
   }
 
+  // Load the gamelog list when switching to playback (or when the folder is set).
+  async function refreshLogs() {
+    setError(null);
+    try {
+      const list = await dpsListLogs(dir);
+      setLogs(list);
+      if (list.length > 0 && !file) setFile(list[0].path);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function playback() {
+    setError(null);
+    setTicks([]);
+    try {
+      await dpsPlayback({ file, speed, windowSecs });
+      setRunning(true);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  function switchMode(m: Mode) {
+    setMode(m);
+    if (m === "playback") refreshLogs();
+  }
+
   const latest = ticks[ticks.length - 1];
 
   return (
@@ -88,8 +125,26 @@ export function DpsPage() {
         writes (EULA-safe).
       </p>
 
+      {/* Mode tabs */}
+      <div className="mt-5 flex gap-1 border-b border-zinc-800">
+        {(["live", "playback"] as Mode[]).map((m) => (
+          <button
+            key={m}
+            onClick={() => switchMode(m)}
+            disabled={running}
+            className={`px-3 py-1.5 text-sm capitalize disabled:opacity-50 ${
+              mode === m
+                ? "border-b-2 border-indigo-500 text-zinc-100"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            {m}
+          </button>
+        ))}
+      </div>
+
       {/* Controls */}
-      <div className="mt-5 flex flex-wrap items-end gap-3">
+      <div className="mt-4 flex flex-wrap items-end gap-3">
         <label className="flex-1 min-w-[20rem]">
           <span className="mb-1 block text-xs uppercase tracking-wide text-zinc-500">
             Gamelogs folder
@@ -97,6 +152,7 @@ export function DpsPage() {
           <input
             value={dir}
             onChange={(e) => setDir(e.currentTarget.value)}
+            onBlur={() => mode === "playback" && refreshLogs()}
             placeholder="…/EVE/logs/Gamelogs"
             className="w-full rounded bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
           />
@@ -114,6 +170,43 @@ export function DpsPage() {
             className="w-24 rounded bg-zinc-800 px-2 py-1.5 text-sm tabular-nums text-zinc-100 outline-none"
           />
         </label>
+
+        {mode === "playback" && (
+          <>
+            <label className="flex-1 min-w-[16rem]">
+              <span className="mb-1 block text-xs uppercase tracking-wide text-zinc-500">
+                Log file
+              </span>
+              <select
+                value={file}
+                onChange={(e) => setFile(e.currentTarget.value)}
+                className="w-full rounded bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100 outline-none"
+              >
+                {logs.length === 0 && <option value="">No logs found</option>}
+                {logs.map((l) => (
+                  <option key={l.path} value={l.path}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span className="mb-1 block text-xs uppercase tracking-wide text-zinc-500">
+                Speed ×
+              </span>
+              <input
+                type="number"
+                min={0.1}
+                max={100}
+                step={0.5}
+                value={speed}
+                onChange={(e) => setSpeed(Math.max(0.1, Number(e.currentTarget.value)))}
+                className="w-20 rounded bg-zinc-800 px-2 py-1.5 text-sm tabular-nums text-zinc-100 outline-none"
+              />
+            </label>
+          </>
+        )}
+
         {running ? (
           <button
             onClick={stop}
@@ -123,11 +216,11 @@ export function DpsPage() {
           </button>
         ) : (
           <button
-            onClick={start}
-            disabled={!dir.trim()}
+            onClick={mode === "live" ? start : playback}
+            disabled={mode === "live" ? !dir.trim() : !file}
             className="flex items-center gap-1.5 rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
           >
-            <Play size={14} /> Start
+            <Play size={14} /> {mode === "live" ? "Start" : "Play"}
           </button>
         )}
       </div>

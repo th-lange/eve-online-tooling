@@ -160,6 +160,7 @@ pub fn run() {
             modules::dpsmeter::commands::dps_start,
             modules::dpsmeter::commands::dps_stop,
             modules::dpsmeter::commands::dps_list_logs,
+            modules::dpsmeter::commands::dps_playback,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

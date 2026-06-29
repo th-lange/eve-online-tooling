@@ -1769,9 +1769,23 @@ export interface DpsLogFile {
   modified: number;
 }
 
+/** Settings for replaying a past gamelog. */
+export interface DpsPlaybackSettings {
+  /** Absolute path to the gamelog (from {@link dpsListLogs}). */
+  file: string;
+  /** Replay speed multiplier (1.0 = real time). */
+  speed: number;
+  windowSecs: number;
+}
+
 /** Start (or restart) tailing the newest gamelog. Ticks arrive via {@link onDpsTick}. */
 export function dpsStart(settings: DpsSettings): Promise<void> {
   return invoke<void>("dps_start", { settings });
+}
+
+/** Replay a past gamelog at `speed`×; ticks arrive via {@link onDpsTick}. */
+export function dpsPlayback(settings: DpsPlaybackSettings): Promise<void> {
+  return invoke<void>("dps_playback", { settings });
 }
 
 /** Stop the active capture. */
