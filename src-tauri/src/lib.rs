@@ -111,6 +111,7 @@ pub fn run() {
             modules::fitting::commands::fitting_import_eft,
             modules::fitting::commands::fitting_add_item,
             modules::fitting::commands::fitting_classify_slots,
+            modules::fitting::commands::fitting_module_info,
             modules::fitting::commands::fitting_export_eft,
             modules::fitting::commands::fitting_esi_list,
             modules::fitting::commands::fitting_esi_push,

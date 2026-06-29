@@ -1051,6 +1051,20 @@ export function sdeSearchShips(query: string): Promise<IdName[]> {
   return invoke<IdName[]>("sde_search_ships", { query });
 }
 
+/** Slot + fitting cost of a candidate module (for fit-aware ranking). */
+export interface ModuleInfo {
+  id: number;
+  slot: SlotKind;
+  cpu: number;
+  powergrid: number;
+  calibration: number;
+}
+
+/** Slot + CPU/PG/calibration cost for each type id. */
+export function fittingModuleInfo(typeIds: number[]): Promise<ModuleInfo[]> {
+  return invoke<ModuleInfo[]>("fitting_module_info", { typeIds });
+}
+
 /** A market-group node in the browse tree. */
 export interface MarketGroupNode {
   id: number;
