@@ -29,6 +29,9 @@ built as a set of feature **modules** over a shared service layer.
 - **Shopping Lists** — keep named lists of items to buy (a built-in *default* and *production* list,
   plus your own), fed by "add to list" buttons across Market Search, Production, Station Trading and
   Daytrading, with quantity editing and one-click in-game Multibuy export.
+- **DPS Meter** — a live combat readout from your gamelog (à la PyEveLiveDPS): damage in/out, remote
+  reps, cap warfare and mining as a moving-average graph, with per-pilot / per-weapon breakdowns and
+  N× log playback. EULA-safe — it only reads the logs the client already writes.
 - **Mission-running** and more — planned.
 
 Built with **Tauri 2** (Rust core) + **React / TypeScript** (Vite). Market and character data come
