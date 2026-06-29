@@ -41,6 +41,15 @@ pub fn capacitor(
     } else {
         None
     };
+    // Sampled cap-over-time curve for the UI: long enough to see a stable fit
+    // settle, or to watch an unstable one decline to empty.
+    let horizon = if stable {
+        (tau * 3.0).clamp(60.0, 600.0)
+    } else {
+        depletion_seconds.unwrap_or(0.0).clamp(1.0, 600.0)
+    };
+    let trajectory = cap_trajectory(capacity, recharge_ms, drain, horizon);
+
     CapStats {
         capacity,
         recharge_seconds: tau,
@@ -49,7 +58,35 @@ pub fn capacitor(
         stable,
         stable_pct,
         depletion_seconds,
+        trajectory,
     }
+}
+
+/// Sample the capacitor fill curve from full over `horizon_s`, returning
+/// `(seconds, percent)` points. Integrates EVE's recharge ODE
+/// `dx/dt = (10/τ)·(√x − x) − D/Cmax` (x = fill fraction) against a steady drain,
+/// so the curve settles at the stable level or declines to empty. Illustrative —
+/// the precise depletion time comes from the discrete sim above.
+fn cap_trajectory(capacity: f64, recharge_ms: f64, drain: f64, horizon_s: f64) -> Vec<(f64, f64)> {
+    let tau = recharge_ms / 1000.0;
+    if tau <= 0.0 || capacity <= 0.0 || horizon_s <= 0.0 {
+        return Vec::new();
+    }
+    const POINTS: usize = 120;
+    const SUBSTEPS: usize = 8; // per-point integration substeps for accuracy
+    let dt = horizon_s / POINTS as f64;
+    let h = dt / SUBSTEPS as f64;
+    let mut x = 1.0_f64;
+    let mut out = Vec::with_capacity(POINTS + 1);
+    out.push((0.0, 100.0));
+    for i in 1..=POINTS {
+        for _ in 0..SUBSTEPS {
+            let dx = (10.0 / tau) * (x.max(0.0).sqrt() - x) - drain / capacity;
+            x = (x + dx * h).clamp(0.0, 1.0);
+        }
+        out.push((i as f64 * dt, x * 100.0));
+    }
+    out
 }
 
 /// Seconds until the capacitor first goes negative, simulating discrete module
@@ -139,5 +176,22 @@ mod tests {
         let c = capacitor(1000.0, 200_000.0, 2.0, &[]);
         let pct = c.stable_pct.unwrap();
         assert!(pct > 90.0 && pct < 100.0, "stable% = {pct}");
+    }
+
+    #[test]
+    fn trajectory_starts_full_and_settles_at_stable_level() {
+        let c = capacitor(1000.0, 200_000.0, 2.0, &[]);
+        assert_eq!(c.trajectory.first().unwrap().1, 100.0); // starts full
+        let end = c.trajectory.last().unwrap().1;
+        let stable = c.stable_pct.unwrap();
+        // The curve converges toward the analytic stable level.
+        assert!((end - stable).abs() < 1.0, "end {end} vs stable {stable}");
+    }
+
+    #[test]
+    fn trajectory_declines_toward_empty_when_unstable() {
+        let c = capacitor(250.0, 125_000.0, 8.0, &[(8.0, 1000.0)]);
+        let end = c.trajectory.last().unwrap().1;
+        assert!(end < 20.0, "unstable cap should be near empty, got {end}%");
     }
 }

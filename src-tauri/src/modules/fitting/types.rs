@@ -120,6 +120,9 @@ pub struct CapStats {
     /// Seconds until the capacitor empties when **not** stable; `None` when stable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub depletion_seconds: Option<f64>,
+    /// Sampled cap level over time as `(seconds, percent)` from full — settles at
+    /// the stable level, or declines to empty when unstable. For the UI chart.
+    pub trajectory: Vec<(f64, f64)>,
 }
 
 /// Tank: HP, resists, EHP and local reps (#173). Resist arrays are

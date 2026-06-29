@@ -1460,6 +1460,8 @@ export interface CapStats {
   stablePct?: number | null;
   /** Seconds until empty when not stable; `null`/absent when stable. */
   depletionSeconds?: number | null;
+  /** Sampled cap level over time as `[seconds, percent]` from full (for the chart). */
+  trajectory: [number, number][];
 }
 
 /** Tank: HP, resists, EHP and local reps. Resist arrays are

@@ -1083,30 +1083,85 @@ function SlotGrid({
 
 /** Capacitor gauge: a 0–100% fill when stable, or the time-to-empty when not. */
 function CapGauge({ cap }: { cap: CapStats }) {
-  if (cap.stable) {
-    const pct = Math.max(0, Math.min(100, cap.stablePct ?? 100));
-    return (
-      <div>
-        <div className="flex justify-between text-xs">
-          <span className="text-zinc-400">Capacitor</span>
-          <span className="text-emerald-400">stable · {pct.toFixed(0)}%</span>
-        </div>
-        <div className="mt-0.5 h-2 w-full overflow-hidden rounded bg-zinc-800">
-          <div className="h-full bg-emerald-500" style={{ width: `${pct}%` }} />
-        </div>
-      </div>
-    );
-  }
+  const color = cap.stable ? "#10b981" : "#ef4444";
   return (
     <div>
       <div className="flex justify-between text-xs">
         <span className="text-zinc-400">Capacitor</span>
-        <span className="text-red-400">
-          empties in {formatDuration(cap.depletionSeconds ?? 0)}
-        </span>
+        {cap.stable ? (
+          <span className="text-emerald-400">
+            stable · {Math.max(0, Math.min(100, cap.stablePct ?? 100)).toFixed(0)}%
+          </span>
+        ) : (
+          <span className="text-red-400">
+            empties in {formatDuration(cap.depletionSeconds ?? 0)}
+          </span>
+        )}
       </div>
-      <div className="mt-0.5 h-2 w-full overflow-hidden rounded bg-zinc-800">
-        <div className="h-full bg-red-500" style={{ width: "100%" }} />
+      {cap.trajectory.length > 1 ? (
+        <CapChart trajectory={cap.trajectory} color={color} />
+      ) : (
+        <div className="mt-0.5 h-2 w-full overflow-hidden rounded bg-zinc-800">
+          <div
+            className="h-full"
+            style={{
+              width: cap.stable
+                ? `${Math.max(0, Math.min(100, cap.stablePct ?? 100))}%`
+                : "100%",
+              background: color,
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Cap-over-time curve (#265): inline SVG, full → settles or drains. The x-axis
+ *  spans the sampled horizon; y is 0–100%. */
+function CapChart({
+  trajectory,
+  color,
+}: {
+  trajectory: [number, number][];
+  color: string;
+}) {
+  const w = 240;
+  const h = 56;
+  const padY = 3;
+  const tMax = trajectory[trajectory.length - 1][0] || 1;
+  const x = (t: number) => (t / tMax) * w;
+  const y = (pct: number) => padY + (1 - pct / 100) * (h - 2 * padY);
+  const line = trajectory
+    .map(([t, pct]) => `${x(t).toFixed(1)},${y(pct).toFixed(1)}`)
+    .join(" ");
+  const area = `0,${h} ${line} ${w},${h}`;
+  const endSecs = trajectory[trajectory.length - 1][0];
+  return (
+    <div className="mt-1">
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        preserveAspectRatio="none"
+        className="w-full"
+        style={{ height: h }}
+      >
+        {[0.25, 0.5, 0.75].map((f) => (
+          <line
+            key={f}
+            x1={0}
+            x2={w}
+            y1={padY + f * (h - 2 * padY)}
+            y2={padY + f * (h - 2 * padY)}
+            stroke="#27272a"
+            strokeWidth="0.75"
+          />
+        ))}
+        <polygon points={area} fill={color} fillOpacity="0.12" stroke="none" />
+        <polyline points={line} fill="none" stroke={color} strokeWidth="1.5" />
+      </svg>
+      <div className="flex justify-between text-[10px] text-zinc-600">
+        <span>0s</span>
+        <span>{formatDuration(endSecs)}</span>
       </div>
     </div>
   );
