@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   isPermissionGranted,
@@ -6,6 +6,7 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import {
+  eveDefaultLogDir,
   localLogNames,
   localScan,
   localintelGetWatchlist,
@@ -78,6 +79,11 @@ export function LocalIntelPage() {
   // EVE logs folder (Chatlogs); persisted. Used to prefill names from the
   // newest Local log — only pilots who chatted (logs lack the member list).
   const [logsDir, setLogsDir] = useState(() => localStorage.getItem("eveLogsDir") ?? "");
+  // Prefill the Chatlogs folder from the OS default when we have nothing yet.
+  useEffect(() => {
+    if (logsDir) return;
+    eveDefaultLogDir("chatlogs").then((d) => d && setLogsDir(d));
+  }, [logsDir]);
   const loadLog = useMutation({
     mutationFn: () => localLogNames(logsDir),
     onSuccess: (r) => {

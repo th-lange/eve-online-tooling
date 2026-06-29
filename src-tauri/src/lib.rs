@@ -53,6 +53,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::ping,
+            commands::eve_default_log_dir,
             esi::commands::auth_login,
             esi::commands::auth_characters,
             esi::commands::auth_logout,
