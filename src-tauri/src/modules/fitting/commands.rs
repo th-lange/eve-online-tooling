@@ -185,6 +185,30 @@ pub fn fitting_classify_slots(
         .collect()
 }
 
+/// A charge that can be loaded into a weapon/module.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChargeOption {
+    pub id: i64,
+    pub name: String,
+}
+
+/// Charges usable in a weapon/module (right chargeGroup + size + capacity), so
+/// the slot grid can offer only loadable ammo. Empty when it takes no charge.
+#[tauri::command]
+pub fn fitting_compatible_charges(
+    app: AppHandle,
+    type_id: i64,
+) -> Result<Vec<ChargeOption>, String> {
+    let sde = open_sde(&app)?;
+    Ok(sde
+        .compatible_charges(type_id)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|(id, name)| ChargeOption { id, name })
+        .collect())
+}
+
 /// Slot + fitting cost of a candidate module, so the add-module browser can show
 /// (and rank by) whether it actually fits the current hull's free slots and
 /// remaining CPU/PG/calibration.

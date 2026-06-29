@@ -1595,6 +1595,12 @@ export function fittingAddItem(
   return invoke<Fit>("fitting_add_item", { fit, typeId, chargeTypeId });
 }
 
+/** Charges loadable into a weapon/module (right group + size + capacity). Empty
+ *  when it takes no charge — drives the per-weapon ammo picker. */
+export function fittingCompatibleCharges(typeId: number): Promise<IdName[]> {
+  return invoke<IdName[]>("fitting_compatible_charges", { typeId });
+}
+
 /** Classify each type id's slot (for the add-module browser's slot badges). */
 export function fittingClassifySlots(
   typeIds: number[],

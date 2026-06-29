@@ -424,6 +424,42 @@ impl Sde {
         Ok((groups, items))
     }
 
+    /// Charges usable in `weapon_type_id`: published types whose group is one of
+    /// the weapon's `chargeGroup1..5` (attrs 604–608), whose `chargeSize` (128)
+    /// matches when the weapon is sized, and that physically fit its ammo capacity
+    /// (charge volume ≤ module capacity). Ordered Tech I → II → Faction then name.
+    /// Empty when the module takes no charge. Drives the per-weapon ammo picker.
+    pub fn compatible_charges(&self, weapon_type_id: i64) -> Result<Vec<(i64, String)>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.typeID, t.typeName
+             FROM invTypes t
+             WHERE t.published = 1
+               AND t.groupID IN (
+                 SELECT CAST(valueFloat AS INTEGER) FROM dgmTypeAttributes
+                 WHERE typeID = ?1 AND attributeID IN (604, 605, 606, 607, 608)
+                   AND valueFloat IS NOT NULL
+               )
+               -- Fits the ammo capacity (skip when the module records none).
+               AND t.volume <= COALESCE(
+                 NULLIF((SELECT capacity FROM invTypes WHERE typeID = ?1), 0), 1e30)
+               -- Size must match when the weapon is sized (turrets/launchers);
+               -- script-takers (no chargeSize) accept any size in the group.
+               AND (
+                 (SELECT valueFloat FROM dgmTypeAttributes
+                  WHERE typeID = ?1 AND attributeID = 128) IS NULL
+                 OR (SELECT valueFloat FROM dgmTypeAttributes
+                     WHERE typeID = t.typeID AND attributeID = 128)
+                    = (SELECT valueFloat FROM dgmTypeAttributes
+                       WHERE typeID = ?1 AND attributeID = 128)
+               )
+             ORDER BY
+               COALESCE((SELECT metaGroupID FROM invMetaTypes WHERE typeID = t.typeID), 1),
+               t.typeName",
+        )?;
+        let rows = stmt.query_map(params![weapon_type_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// Search marketable types by name, capped. Each whitespace-separated term
     /// must appear (case-insensitive substring), in any order — so "shield hard"
     /// and "hard shield" both find "Large Shield Hardener". Shorter names rank
@@ -1337,6 +1373,43 @@ mod tests {
                 ("Gistii A-Type Hardener", "Faction"),
             ]
         );
+    }
+
+    #[test]
+    fn finds_only_loadable_charges() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE invTypes(typeID INT, typeName TEXT, groupID INT, published INT, volume REAL, capacity REAL);
+             CREATE TABLE dgmTypeAttributes(typeID INT, attributeID INT, valueFloat REAL);
+             CREATE TABLE invMetaTypes(typeID INT, parentTypeID INT, metaGroupID INT);
+
+             -- Weapon 100: chargeGroup1=83, chargeSize=2 (medium), capacity 1.5.
+             INSERT INTO invTypes VALUES (100,'220mm AutoCannon',55,1,5.0,1.5);
+             INSERT INTO dgmTypeAttributes VALUES (100,604,83.0),(100,128,2.0);
+
+             -- Charges: right group+size+fits; right group wrong size; wrong group;
+             -- right but too big; right but unpublished.
+             INSERT INTO invTypes VALUES
+               (1,'EMP M',83,1,0.0125,0),
+               (2,'Phased Plasma M T2',83,1,0.0125,0),
+               (3,'EMP S',83,1,0.0125,0),   -- wrong size (1)
+               (4,'Mining Crystal',600,1,0.0125,0), -- wrong group
+               (5,'Huge Charge',83,1,99.0,0),       -- too big for capacity
+               (6,'Unpublished M',83,0,0.0125,0);   -- unpublished
+             INSERT INTO dgmTypeAttributes VALUES
+               (1,128,2.0),(2,128,2.0),(3,128,1.0),(5,128,2.0),(6,128,2.0);
+             INSERT INTO invMetaTypes VALUES (2,1,2); -- T2 sorts after T1",
+        )
+        .unwrap();
+        let sde = Sde::from_connection(conn);
+
+        let charges = sde.compatible_charges(100).unwrap();
+        let names: Vec<_> = charges.iter().map(|(_, n)| n.as_str()).collect();
+        // Only the right-group, right-size, fitting, published charges — T1 then T2.
+        assert_eq!(names, vec!["EMP M", "Phased Plasma M T2"]);
+
+        // A module with no chargeGroup attrs takes no charge.
+        assert!(sde.compatible_charges(1).unwrap().is_empty());
     }
 
     #[test]
