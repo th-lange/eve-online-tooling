@@ -360,6 +360,70 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// One level of EVE's market-group tree under `parent` (or the top level when
+    /// `None`). Returns `(child groups, leaf items)`:
+    /// - groups: `(marketGroupID, name, has_types)`, sorted by name, with empty
+    ///   branches pruned (a group is kept only if it has child groups or at least
+    ///   one published type beneath it).
+    /// - items: `(typeID, name, metaGroupName)` published directly in `parent`,
+    ///   ordered by meta group then name (so T1 → T2 → Faction reads top-down).
+    ///
+    /// This drives the fitting browse-by-category picker (#266): each drill-down
+    /// step calls this with the chosen group id and lazy-loads the next level.
+    #[allow(clippy::type_complexity)]
+    pub fn market_group_children(
+        &self,
+        parent: Option<i64>,
+    ) -> Result<(Vec<(i64, String, bool)>, Vec<(i64, String, String)>), SdeError> {
+        // Child groups. The parent filter differs for the NULL (top-level) case,
+        // and we prune groups with neither children nor any published type.
+        let where_parent = match parent {
+            Some(_) => "g.parentGroupID = ?1",
+            None => "g.parentGroupID IS NULL",
+        };
+        let sql = format!(
+            "SELECT g.marketGroupID, g.marketGroupName, COALESCE(g.hasTypes, 0)
+             FROM invMarketGroups g
+             WHERE {where_parent}
+               AND (
+                 EXISTS (SELECT 1 FROM invMarketGroups c WHERE c.parentGroupID = g.marketGroupID)
+                 OR EXISTS (SELECT 1 FROM invTypes t
+                            WHERE t.marketGroupID = g.marketGroupID AND t.published = 1)
+               )
+             ORDER BY g.marketGroupName"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let map_group = |r: &rusqlite::Row| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)? != 0))
+        };
+        let groups: Vec<(i64, String, bool)> = match parent {
+            Some(id) => stmt.query_map(params![id], map_group)?.collect::<Result<_, _>>()?,
+            None => stmt.query_map([], map_group)?.collect::<Result<_, _>>()?,
+        };
+
+        // Leaf items live directly in a group (top level has none).
+        let items = match parent {
+            None => Vec::new(),
+            Some(id) => {
+                let mut s = self.conn.prepare(
+                    "SELECT t.typeID, t.typeName, COALESCE(mg.metaGroupName, 'Tech I')
+                     FROM invTypes t
+                     LEFT JOIN invMetaTypes mt ON mt.typeID = t.typeID
+                     LEFT JOIN invMetaGroups mg ON mg.metaGroupID = mt.metaGroupID
+                     WHERE t.marketGroupID = ?1 AND t.published = 1
+                     ORDER BY COALESCE(mt.metaGroupID, 1), t.typeName",
+                )?;
+                let rows: Vec<(i64, String, String)> = s
+                    .query_map(params![id], |r| {
+                        Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+                    })?
+                    .collect::<Result<_, _>>()?;
+                rows
+            }
+        };
+        Ok((groups, items))
+    }
+
     /// Search marketable types by name substring (case-insensitive), capped.
     /// For pickers (market history, etc.).
     pub fn search_types(&self, query: &str, limit: i64) -> Result<Vec<(i64, String)>, SdeError> {
@@ -1209,6 +1273,54 @@ mod tests {
         assert_eq!(decs[1].name, "Augmentation Decryptor");
         assert_eq!(decs[1].me_modifier, -2);
         assert_eq!(decs[1].run_modifier, 9);
+    }
+
+    #[test]
+    fn walks_market_group_tree() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE invMarketGroups(marketGroupID INT, parentGroupID INT, marketGroupName TEXT, hasTypes INT);
+             CREATE TABLE invTypes(typeID INT, typeName TEXT, marketGroupID INT, published INT);
+             CREATE TABLE invMetaGroups(metaGroupID INT, metaGroupName TEXT);
+             CREATE TABLE invMetaTypes(typeID INT, parentTypeID INT, metaGroupID INT);
+
+             INSERT INTO invMetaGroups VALUES (2, 'Tech II'), (4, 'Faction');
+             -- top-level 'Ship Equipment' → child 'Shield Hardeners' (hasTypes) +
+             -- 'Empty Branch' (no children, no published types → pruned).
+             INSERT INTO invMarketGroups VALUES
+               (9, NULL, 'Ship Equipment', 0),
+               (40, 9, 'Shield Hardeners', 1),
+               (41, 9, 'Empty Branch', 1);
+             INSERT INTO invTypes VALUES
+               (100, 'Multispectrum Shield Hardener I', 40, 1),
+               (101, 'Multispectrum Shield Hardener II', 40, 1),
+               (102, 'Gistii A-Type Hardener', 40, 1),
+               (103, 'Unpublished Hardener', 40, 0);
+             INSERT INTO invMetaTypes VALUES (101, 100, 2), (102, 100, 4);",
+        )
+        .unwrap();
+        let sde = Sde::from_connection(conn);
+
+        // Top level: only 'Ship Equipment' (it has a non-empty child).
+        let (groups, items) = sde.market_group_children(None).unwrap();
+        assert_eq!(groups, vec![(9, "Ship Equipment".to_string(), false)]);
+        assert!(items.is_empty());
+
+        // Under 'Ship Equipment': 'Shield Hardeners' kept, 'Empty Branch' pruned.
+        let (groups, _) = sde.market_group_children(Some(9)).unwrap();
+        assert_eq!(groups, vec![(40, "Shield Hardeners".to_string(), true)]);
+
+        // Leaf items: published only, ordered T1 → T2 → Faction.
+        let (_, items) = sde.market_group_children(Some(40)).unwrap();
+        let names: Vec<_> = items.iter().map(|(_, n, m)| (n.as_str(), m.as_str())).collect();
+        assert_eq!(
+            names,
+            vec![
+                ("Multispectrum Shield Hardener I", "Tech I"),
+                ("Multispectrum Shield Hardener II", "Tech II"),
+                ("Gistii A-Type Hardener", "Faction"),
+            ]
+        );
     }
 
     #[test]

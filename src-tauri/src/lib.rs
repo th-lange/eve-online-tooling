@@ -76,6 +76,7 @@ pub fn run() {
             sde::commands::sde_type_attributes,
             sde::commands::sde_search,
             sde::commands::sde_search_ships,
+            sde::commands::sde_market_group_children,
             sde::commands::sde_type_names,
             sde::commands::sde_type_infos,
             market::commands::market_regions,

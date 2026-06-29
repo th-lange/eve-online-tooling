@@ -1043,6 +1043,35 @@ export function sdeSearchShips(query: string): Promise<IdName[]> {
   return invoke<IdName[]>("sde_search_ships", { query });
 }
 
+/** A market-group node in the browse tree. */
+export interface MarketGroupNode {
+  id: number;
+  name: string;
+  /** True when this group holds items directly (a leaf level). */
+  hasTypes: boolean;
+}
+
+/** A leaf item with its meta-group label (Tech I/II, Faction…). */
+export interface MarketGroupItem {
+  id: number;
+  name: string;
+  metaGroup: string;
+}
+
+/** One level of the market-group tree: child groups + leaf items. */
+export interface MarketGroupChildren {
+  groups: MarketGroupNode[];
+  items: MarketGroupItem[];
+}
+
+/** Children of a market group (or the top level when `parentId` is null) — for
+ *  the fitting browse-by-category picker. Lazy-loaded per drill-down step. */
+export function sdeMarketGroupChildren(
+  parentId: number | null,
+): Promise<MarketGroupChildren> {
+  return invoke<MarketGroupChildren>("sde_market_group_children", { parentId });
+}
+
 /** Names for a set of type ids (bulk) — for showing item names instead of ids. */
 export function sdeTypeNames(typeIds: number[]): Promise<IdName[]> {
   return invoke<IdName[]>("sde_type_names", { typeIds });
