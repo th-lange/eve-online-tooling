@@ -7,11 +7,22 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));
 
+// Mock the event channel so we can assert subscriptions without a shell.
+const listenMock = vi.fn();
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: (...args: unknown[]) => listenMock(...args),
+}));
+
 import {
+  dpsListLogs,
+  dpsStart,
+  dpsStop,
   fittingImportEft,
   fittingPrice,
   fittingShipLayout,
+  onDpsTick,
   ping,
+  type DpsTick,
   type Fit,
 } from "./api";
 
@@ -53,5 +64,42 @@ describe("api.fitting", () => {
       regionId: 10000002,
       stationId: null,
     });
+  });
+});
+
+describe("api.dpsmeter", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    listenMock.mockReset();
+  });
+
+  it("wraps the start/stop/list commands", async () => {
+    invokeMock.mockResolvedValue(undefined);
+    await dpsStart({ gamelogsDir: "/logs/Gamelogs", windowSecs: 10 });
+    expect(invokeMock).toHaveBeenCalledWith("dps_start", {
+      settings: { gamelogsDir: "/logs/Gamelogs", windowSecs: 10 },
+    });
+
+    await dpsStop();
+    expect(invokeMock).toHaveBeenCalledWith("dps_stop");
+
+    invokeMock.mockResolvedValue([]);
+    await dpsListLogs("/logs/Gamelogs");
+    expect(invokeMock).toHaveBeenCalledWith("dps_list_logs", {
+      gamelogsDir: "/logs/Gamelogs",
+    });
+  });
+
+  it("subscribes onDpsTick to dps://tick and forwards the payload", async () => {
+    listenMock.mockResolvedValue(() => {});
+    const handler = vi.fn();
+    await onDpsTick(handler);
+    expect(listenMock).toHaveBeenCalledWith("dps://tick", expect.any(Function));
+
+    // The registered listener should hand the event's payload to our handler.
+    const cb = listenMock.mock.calls[0][1] as (e: { payload: DpsTick }) => void;
+    const tick = { dpsOut: 123 } as DpsTick;
+    cb({ payload: tick });
+    expect(handler).toHaveBeenCalledWith(tick);
   });
 });
