@@ -18,6 +18,7 @@ import { IndustryJobsPage } from "./industry/IndustryJobsPage";
 import { WormholesPage } from "./wormholes/WormholesPage";
 import { FittingPage } from "./fitting/FittingPage";
 import { ShoppingPage } from "./shopping/ShoppingPage";
+import { DpsPage } from "./dpsmeter/DpsPage";
 
 /** Sidebar section a module belongs to (the nav's information architecture). */
 export type ModuleGroup =
@@ -25,6 +26,7 @@ export type ModuleGroup =
   | "trading"
   | "market"
   | "character"
+  | "combat"
   | "intel";
 
 /** Section labels + display order, driving the grouped sidebar nav (#224). */
@@ -33,6 +35,7 @@ export const MODULE_GROUPS: { key: ModuleGroup; label: string }[] = [
   { key: "trading", label: "Trading" },
   { key: "market", label: "Market" },
   { key: "character", label: "Characters" },
+  { key: "combat", label: "Combat" },
   { key: "intel", label: "Intel / Space" },
 ];
 
@@ -185,5 +188,12 @@ export const modules: ModuleDef[] = [
     description: "Named lists of items to buy, fed from across the app.",
     group: "character",
     Component: ShoppingPage,
+  },
+  {
+    id: "dps",
+    title: "DPS Meter",
+    description: "Live combat meter from your gamelog — DPS, logi and cap, graphed.",
+    group: "combat",
+    Component: DpsPage,
   },
 ];

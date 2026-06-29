@@ -39,6 +39,7 @@ pub fn run() {
                 .expect("could not resolve the app data directory");
             app.manage(market::MarketService::with_cache(dir.clone()));
             app.manage(esi::AuthState::with_cache(dir));
+            app.manage(modules::dpsmeter::commands::DpsState::default());
 
             // Fetch key data early, in the background — never block launch. Keeps
             // the SDE current (daily, md5-gated) and primes the active
@@ -156,6 +157,9 @@ pub fn run() {
             modules::reprocessing::commands::reprocessing_efficiency,
             modules::reprocessing::commands::reprocessing_get_list,
             modules::reprocessing::commands::reprocessing_set_list,
+            modules::dpsmeter::commands::dps_start,
+            modules::dpsmeter::commands::dps_stop,
+            modules::dpsmeter::commands::dps_list_logs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

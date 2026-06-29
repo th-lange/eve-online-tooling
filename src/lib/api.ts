@@ -1715,3 +1715,57 @@ export function shoppingRemoveItem(id: string, typeId: number): Promise<void> {
 export function shoppingClearList(id: string): Promise<void> {
   return invoke<void>("shopping_clear_list", { id });
 }
+
+// --- DPS meter (live combat log) ---
+
+/** One live sample: per-second rates over the averaging window. */
+export interface DpsTick {
+  dpsOut: number;
+  dpsIn: number;
+  logiOut: number;
+  logiIn: number;
+  capTransferOut: number;
+  capTransferIn: number;
+  capWarfareOut: number;
+  capWarfareIn: number;
+  /** The averaging window, echoed for labelling. */
+  windowSecs: number;
+  /** Epoch seconds this tick was computed at. */
+  at: number;
+}
+
+/** Settings to start a capture. */
+export interface DpsSettings {
+  /** The EVE `Gamelogs` folder. */
+  gamelogsDir: string;
+  /** Moving-average window in seconds. */
+  windowSecs: number;
+}
+
+/** A gamelog file (for status / future playback). */
+export interface DpsLogFile {
+  name: string;
+  path: string;
+  /** Epoch seconds of last modification. */
+  modified: number;
+}
+
+/** Start (or restart) tailing the newest gamelog. Ticks arrive via {@link onDpsTick}. */
+export function dpsStart(settings: DpsSettings): Promise<void> {
+  return invoke<void>("dps_start", { settings });
+}
+
+/** Stop the active capture. */
+export function dpsStop(): Promise<void> {
+  return invoke<void>("dps_stop");
+}
+
+/** List gamelog files in a folder, newest first. */
+export function dpsListLogs(gamelogsDir: string): Promise<DpsLogFile[]> {
+  return invoke<DpsLogFile[]>("dps_list_logs", { gamelogsDir });
+}
+
+/** Subscribe to live DPS ticks. */
+export function onDpsTick(handler: (tick: DpsTick) => void): Promise<UnlistenFn> {
+  return listen<DpsTick>("dps://tick", (event) => handler(event.payload));
+}
