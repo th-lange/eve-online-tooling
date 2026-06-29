@@ -15,13 +15,14 @@ use tauri::{AppHandle, Manager};
 
 /// Best-guess default folder for an EVE log type, to prefill the log-folder
 /// inputs (Local Intel chatlogs, DPS-meter gamelogs). `kind` is `"chatlogs"` or
-/// `"gamelogs"`.
+/// `"gamelogs"`. Always returns a path to start from — an existing folder if we
+/// can find one, otherwise the most likely default for this OS (which the user
+/// can edit).
 ///
-/// Windows/macOS keep logs under `Documents/EVE/logs/<Sub>`, so we return that
-/// even if it doesn't exist yet (it's the canonical spot). On Linux the EVE
+/// Windows/macOS keep logs under `Documents/EVE/logs/<Sub>`. On Linux the EVE
 /// client runs under Wine/Proton, so the logs live deep inside a prefix that
-/// varies by installer — we probe the common Steam/Lutris/Wine prefixes and
-/// return the first that actually exists, or `None` if we can't find one.
+/// varies by installer — we probe the common Steam/Lutris/Wine prefixes, prefer
+/// any that exists, and fall back to the default Steam-Proton location.
 #[tauri::command]
 pub fn eve_default_log_dir(app: AppHandle, kind: String) -> Option<String> {
     let sub = if kind == "chatlogs" { "Chatlogs" } else { "Gamelogs" };
@@ -35,13 +36,14 @@ pub fn eve_default_log_dir(app: AppHandle, kind: String) -> Option<String> {
     let home = path.home_dir().ok();
     if let Some(home) = &home {
         candidates.push(home.join("Documents").join("EVE").join("logs").join(sub));
-        // Linux Wine/Proton prefixes (EVE's Steam app id is 8500).
+        // Linux Wine/Proton prefixes (EVE's Steam app id is 8500). The first is
+        // the default Steam-Proton location, used as the fallback below.
         #[cfg(target_os = "linux")]
         {
             let inner = format!("drive_c/users/steamuser/Documents/EVE/logs/{sub}");
             for prefix in [
-                ".steam/steam/steamapps/compatdata/8500/pfx",
                 ".local/share/Steam/steamapps/compatdata/8500/pfx",
+                ".steam/steam/steamapps/compatdata/8500/pfx",
                 ".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/compatdata/8500/pfx",
                 ".wine",
             ] {
@@ -53,13 +55,17 @@ pub fn eve_default_log_dir(app: AppHandle, kind: String) -> Option<String> {
     if let Some(existing) = candidates.iter().find(|p| p.is_dir()) {
         return Some(existing.to_string_lossy().into_owned());
     }
-    // No folder found. On Windows/macOS the Documents path is still the right
-    // hint; on Linux it's too installer-specific to guess, so prefill nothing.
-    if cfg!(target_os = "linux") {
-        None
-    } else {
-        candidates.first().map(|p| p.to_string_lossy().into_owned())
+    // Nothing detected — still hand back a sensible default to edit from. On
+    // Windows/macOS that's the Documents path; on Linux the default Steam-Proton
+    // location (the first Linux candidate appended above).
+    #[cfg(target_os = "linux")]
+    if let Some(home) = &home {
+        let def = home
+            .join(".local/share/Steam/steamapps/compatdata/8500/pfx/drive_c/users/steamuser/Documents/EVE/logs")
+            .join(sub);
+        return Some(def.to_string_lossy().into_owned());
     }
+    candidates.first().map(|p| p.to_string_lossy().into_owned())
 }
 
 #[cfg(test)]
