@@ -1464,6 +1464,18 @@ export interface CapStats {
   trajectory: [number, number][];
 }
 
+/** One category of EW projected onto the fit (presence only, no magnitude). */
+export interface EwTag {
+  /** `web` | `paint` | `damp` | `weaponDisruption` | `ecm` | `neut` | `nos`. */
+  category: string;
+  label: string;
+  count: number;
+  /** True for web/paint/damp — their magnitude is already in the stats. */
+  modeled: boolean;
+  /** True for ECM — shown as an opt-in "jammed" scenario. */
+  jam: boolean;
+}
+
 /** Tank: HP, resists, EHP and local reps. Resist arrays are
  * `[em, thermal, kinetic, explosive]` fractions (0–1). */
 export interface TankStats {
@@ -1515,6 +1527,8 @@ export interface FitStats {
   layout?: ShipLayout | null;
   targeting?: TargetStats | null;
   price?: number | null;
+  /** EW projected onto this fit, by category (presence only). */
+  projectedEw?: EwTag[];
 }
 
 /** One priced line of a whole-fit valuation. */

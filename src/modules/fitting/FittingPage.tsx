@@ -23,6 +23,7 @@ import {
   sdeTypeInfos,
   sdeTypeNames,
   type CapStats,
+  type EwTag,
   type Fit,
   type FitItem,
   type MarketGroupNode,
@@ -59,6 +60,9 @@ function Workbench() {
   const [objective, setObjective] = useState<OptimizeObjective>("tank");
   const [optimizeMode, setOptimizeMode] = useState<OptimizeMode>("all");
   const [capStable, setCapStable] = useState(false);
+  // ECM is a chance-to-jam, not a continuous effect — so it's an opt-in "what if
+  // the jam lands" view (targeting disabled), never a passive stat (#265).
+  const [jammed, setJammed] = useState(false);
   // ISK budget cap as a string (millions); empty = no budget.
   const [maxCostM, setMaxCostM] = useState("");
   const [optimizeNotice, setOptimizeNotice] = useState<string | null>(null);
@@ -119,6 +123,9 @@ function Workbench() {
     queryFn: () => fittingSimulate(fit!, skillSource),
     enabled: fit != null,
   });
+  // The jammed view only applies while ECM is actually projected onto the fit.
+  const jammedActive =
+    jammed && !!stats.data?.projectedEw?.some((t) => t.jam);
 
   const importEft = useMutation({
     mutationFn: () => fittingImportEft(eft),
@@ -595,15 +602,29 @@ function Workbench() {
             {stats.data?.dps && (
               <div className="space-y-1">
                 <h3 className="text-xs uppercase tracking-wide text-zinc-500">DPS ({skillLabel})</h3>
-                <div className="text-sm text-zinc-300">{stats.data.dps.total.toFixed(1)} dps</div>
-                {stats.data.dps.total > 0 && (
-                  <div className="text-xs text-zinc-500">
-                    {stats.data.dps.turret > 0 && `turret ${stats.data.dps.turret.toFixed(1)} `}
-                    {stats.data.dps.missile > 0 && `· missile ${stats.data.dps.missile.toFixed(1)} `}
-                    {stats.data.dps.drone > 0 && `· drone ${stats.data.dps.drone.toFixed(1)}`}
-                  </div>
+                {jammedActive ? (
+                  <div className="text-sm text-amber-400">Jammed — 0 applied (no lock)</div>
+                ) : (
+                  <>
+                    <div className="text-sm text-zinc-300">{stats.data.dps.total.toFixed(1)} dps</div>
+                    {stats.data.dps.total > 0 && (
+                      <div className="text-xs text-zinc-500">
+                        {stats.data.dps.turret > 0 && `turret ${stats.data.dps.turret.toFixed(1)} `}
+                        {stats.data.dps.missile > 0 && `· missile ${stats.data.dps.missile.toFixed(1)} `}
+                        {stats.data.dps.drone > 0 && `· drone ${stats.data.dps.drone.toFixed(1)}`}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
+            )}
+
+            {stats.data?.projectedEw && stats.data.projectedEw.length > 0 && (
+              <EwPanel
+                tags={stats.data.projectedEw}
+                jammed={jammed}
+                onJam={setJammed}
+              />
             )}
 
             {stats.data?.tank && (
@@ -1082,6 +1103,66 @@ function SlotGrid({
 }
 
 /** Capacitor gauge: a 0–100% fill when stable, or the time-to-empty when not. */
+/**
+ * EW projected onto the fit (#265): a presence badge per category — never a
+ * magnitude. Web/paint/damp (whose effect is already in the stats) read solid;
+ * unmodeled EW (tracking/guidance disruption, neut, nos) read muted. ECM is the
+ * special case: a chance-to-jam, so it offers an opt-in "show jammed" toggle that
+ * models the worst case (targeting disabled → 0 applied DPS) rather than a
+ * passive effect.
+ */
+function EwPanel({
+  tags,
+  jammed,
+  onJam,
+}: {
+  tags: EwTag[];
+  jammed: boolean;
+  onJam: (v: boolean) => void;
+}) {
+  const hasEcm = tags.some((t) => t.jam);
+  return (
+    <div className="space-y-1">
+      <h3 className="text-xs uppercase tracking-wide text-zinc-500">EW projected</h3>
+      <div className="flex flex-wrap gap-1.5">
+        {tags.map((t) => (
+          <span
+            key={t.category}
+            title={
+              t.modeled
+                ? "Effect is applied in the stats above"
+                : t.jam
+                  ? "Chance-based jam — toggle below to view the jammed case"
+                  : "Active — magnitude not modelled"
+            }
+            className={`rounded px-1.5 py-0.5 text-[11px] ${
+              t.jam
+                ? "border border-amber-500/50 text-amber-300"
+                : t.modeled
+                  ? "bg-zinc-700 text-zinc-100"
+                  : "border border-zinc-700 text-zinc-300"
+            }`}
+          >
+            {t.label}
+            {t.count > 1 ? ` ×${t.count}` : ""}
+          </span>
+        ))}
+      </div>
+      {hasEcm && (
+        <label className="flex items-center gap-2 pt-0.5 text-xs text-zinc-400">
+          <input
+            type="checkbox"
+            checked={jammed}
+            onChange={(e) => onJam(e.currentTarget.checked)}
+            className="accent-amber-500"
+          />
+          Show jammed (targeting disabled · 0 applied DPS)
+        </label>
+      )}
+    </div>
+  );
+}
+
 function CapGauge({ cap }: { cap: CapStats }) {
   const color = cap.stable ? "#10b981" : "#ef4444";
   return (
