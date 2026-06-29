@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, X } from "lucide-react";
+import { Crosshair, Plus, X } from "lucide-react";
 import {
   fittingAddItem,
+  fittingCompatibleCharges,
   fittingModuleInfo,
   fittingDeleteLocal,
   fittingEsiList,
@@ -273,6 +274,19 @@ function Workbench() {
   function removeItem(globalIndex: number) {
     setFit((f) =>
       f ? { ...f, items: f.items.filter((_, i) => i !== globalIndex) } : f,
+    );
+  }
+  // Load/clear a weapon's charge (re-simulates: fitKey is the serialized fit).
+  function setCharge(globalIndex: number, chargeTypeId: number | null) {
+    setFit((f) =>
+      f
+        ? {
+            ...f,
+            items: f.items.map((it, i) =>
+              i === globalIndex ? { ...it, chargeTypeId } : it,
+            ),
+          }
+        : f,
     );
   }
   // Projected modules (webs/paints/…) live in `fit.projected`; their slot/index
@@ -554,6 +568,7 @@ function Workbench() {
                 nameOf={nameOf}
                 onRemove={removeItem}
                 onAddToSlot={setSlotFilter}
+                onSetCharge={setCharge}
               />
             )}
 
@@ -1174,18 +1189,104 @@ function SlotBadge({ slot }: { slot?: SlotKind }) {
   );
 }
 
+/**
+ * Per-weapon ammo picker (a small crosshair on hover, amber when loaded). Opens
+ * a popover listing only charges that actually load into this module (right
+ * group + size + capacity), so you can't pick incompatible ammo. Selecting sets
+ * the charge; "Remove ammo" clears it.
+ */
+function ChargeControl({
+  typeId,
+  chargeTypeId,
+  onSetCharge,
+}: {
+  typeId: number;
+  chargeTypeId: number | null;
+  onSetCharge: (chargeTypeId: number | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const charges = useQuery({
+    queryKey: ["fitting", "charges", typeId],
+    queryFn: () => fittingCompatibleCharges(typeId),
+    enabled: open,
+  });
+  const list = charges.data ?? [];
+  return (
+    <span className="relative ml-auto shrink-0">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title="Load ammo / charge"
+        className={`flex items-center rounded p-0.5 hover:text-amber-300 ${
+          chargeTypeId
+            ? "text-amber-400"
+            : "text-zinc-600 opacity-0 group-hover:opacity-100"
+        }`}
+      >
+        <Crosshair size={13} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-20 mt-1 max-h-60 w-56 overflow-y-auto rounded border border-zinc-700 bg-zinc-900 p-1 shadow-lg">
+            {charges.isLoading ? (
+              <div className="px-2 py-1 text-xs text-zinc-500">Loading…</div>
+            ) : list.length === 0 ? (
+              <div className="px-2 py-1 text-xs text-zinc-500">
+                No compatible charges.
+              </div>
+            ) : (
+              <ul>
+                {chargeTypeId && (
+                  <li>
+                    <button
+                      onClick={() => {
+                        onSetCharge(null);
+                        setOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-zinc-400 hover:bg-zinc-800"
+                    >
+                      <X size={12} /> Remove ammo
+                    </button>
+                  </li>
+                )}
+                {list.map((c) => (
+                  <li key={c.id}>
+                    <button
+                      onClick={() => {
+                        onSetCharge(c.id);
+                        setOpen(false);
+                      }}
+                      className={`block w-full truncate rounded px-2 py-1 text-left hover:bg-zinc-800 ${
+                        c.id === chargeTypeId ? "text-amber-400" : "text-zinc-200"
+                      }`}
+                    >
+                      {c.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </>
+      )}
+    </span>
+  );
+}
+
 function SlotGrid({
   fit,
   layout,
   nameOf,
   onRemove,
   onAddToSlot,
+  onSetCharge,
 }: {
   fit: Fit;
   layout: { highSlots: number; midSlots: number; lowSlots: number; rigSlots: number };
   nameOf: (id: number) => string;
   onRemove: (globalIndex: number) => void;
   onAddToSlot: (slot: SlotKind) => void;
+  onSetCharge: (globalIndex: number, chargeTypeId: number | null) => void;
 }) {
   const counts: Partial<Record<SlotKind, number>> = {
     high: layout.highSlots,
@@ -1229,6 +1330,14 @@ function SlotGrid({
                       {it.chargeTypeId ? ` + ${nameOf(it.chargeTypeId)}` : ""}
                       {it.quantity > 1 ? ` x${it.quantity}` : ""}
                     </span>
+                    {/* Ammo picker for high/mid weapons & script-takers. */}
+                    {(slot === "high" || slot === "mid") && (
+                      <ChargeControl
+                        typeId={it.typeId}
+                        chargeTypeId={it.chargeTypeId ?? null}
+                        onSetCharge={(c) => onSetCharge(i, c)}
+                      />
+                    )}
                   </li>
                 ))}
               </ul>
