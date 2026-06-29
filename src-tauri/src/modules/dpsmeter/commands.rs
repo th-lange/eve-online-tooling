@@ -52,6 +52,23 @@ fn default_window() -> u32 {
     10
 }
 
+fn default_speed() -> f64 {
+    1.0
+}
+
+/// Settings for replaying a past gamelog through the same tick pipeline.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackSettings {
+    /// Absolute path to the gamelog file (from `dps_list_logs`).
+    pub file: String,
+    /// Replay speed multiplier (1.0 = real time).
+    #[serde(default = "default_speed")]
+    pub speed: f64,
+    #[serde(default = "default_window")]
+    pub window_secs: u32,
+}
+
 /// A gamelog file the UI can list (newest first) — used for status + playback.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -137,10 +154,84 @@ pub async fn dps_start(
     Ok(())
 }
 
-/// Stop the active capture (bump the generation so the loop exits next tick).
+/// Stop the active capture or playback (bump the generation so the loop exits).
 #[tauri::command]
 pub fn dps_stop(state: State<'_, DpsState>) {
     state.generation.fetch_add(1, Ordering::SeqCst);
+}
+
+/// Replay a past gamelog through the same tick pipeline at `speed`× real time.
+/// Emits `dps://tick` exactly like a live capture, so the UI is identical.
+#[tauri::command]
+pub async fn dps_playback(
+    app: AppHandle,
+    state: State<'_, DpsState>,
+    settings: PlaybackSettings,
+) -> Result<(), String> {
+    // Read + parse the whole log up front, in timestamp order.
+    let bytes = tokio::fs::read(&settings.file)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut events: Vec<_> = String::from_utf8_lossy(&bytes)
+        .lines()
+        .filter_map(parse_line)
+        .collect();
+    events.sort_by_key(|e| e.ts);
+    if events.is_empty() {
+        return Err("no combat lines in that log".into());
+    }
+
+    // Resolve mining volumes once (same path as the live loop).
+    let sde_db = app.path().app_data_dir().ok().map(|d| SdePaths::new(d).db);
+    let mut ore_vol: HashMap<String, f64> = HashMap::new();
+    resolve_ore_volumes(&events, &mut ore_vol, sde_db.as_deref());
+    for ev in &mut events {
+        if ev.kind == EventKind::Mining {
+            let per_unit = ev
+                .ore
+                .as_deref()
+                .and_then(|o| ore_vol.get(o))
+                .copied()
+                .unwrap_or(0.0);
+            ev.volume = ev.amount as f64 * per_unit;
+        }
+    }
+
+    let generation = state.generation.clone();
+    let my_gen = generation.fetch_add(1, Ordering::SeqCst) + 1;
+    let speed = settings.speed.max(0.1);
+    let window_secs = settings.window_secs;
+
+    tauri::async_runtime::spawn(async move {
+        let mut win = Window::new(window_secs);
+        let start = events.first().map(|e| e.ts).unwrap_or(0);
+        let end = events.last().map(|e| e.ts).unwrap_or(0);
+        // Virtual log clock; advances `step` log-seconds per real POLL tick.
+        let mut vt = start as f64;
+        let step = POLL.as_secs_f64() * speed;
+        let mut idx = 0usize;
+
+        let mut ticker = tokio::time::interval(POLL);
+        loop {
+            ticker.tick().await;
+            if generation.load(Ordering::SeqCst) != my_gen {
+                break; // stopped, or another start/playback superseded us.
+            }
+            vt += step;
+            let now = vt as i64;
+            while idx < events.len() && events[idx].ts <= now {
+                win.push(events[idx].clone());
+                idx += 1;
+            }
+            let _ = app.emit("dps://tick", &win.tick(now));
+            // Run one extra window past the last event so it decays to zero.
+            if now > end + window_secs as i64 {
+                break;
+            }
+        }
+    });
+
+    Ok(())
 }
 
 /// List gamelog `*.txt` files in `gamelogs_dir`, newest first.

@@ -15,6 +15,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 import {
   dpsListLogs,
+  dpsPlayback,
   dpsStart,
   dpsStop,
   fittingImportEft,
@@ -82,6 +83,11 @@ describe("api.dpsmeter", () => {
 
     await dpsStop();
     expect(invokeMock).toHaveBeenCalledWith("dps_stop");
+
+    await dpsPlayback({ file: "/logs/a.txt", speed: 4, windowSecs: 10 });
+    expect(invokeMock).toHaveBeenCalledWith("dps_playback", {
+      settings: { file: "/logs/a.txt", speed: 4, windowSecs: 10 },
+    });
 
     invokeMock.mockResolvedValue([]);
     await dpsListLogs("/logs/Gamelogs");
