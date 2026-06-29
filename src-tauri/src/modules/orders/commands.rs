@@ -1,5 +1,5 @@
 //! Market Orders — the logged-in character's open buy/sell orders, with
-//! undercut detection against the current best price at each order's region.
+//! undercut detection against the current best price at each order's station.
 //!
 //! Requires the `esi-markets.read_character_orders.v1` scope (must be enabled on
 //! the EVE app + a re-login before this returns data).
@@ -41,8 +41,9 @@ pub struct OrderRow {
     pub volume_total: i64,
     pub location: String,
     pub region_id: i64,
-    /// Current best competing price at the order's region (sell-min for a sell
-    /// order, buy-max for a buy order), or null if unpriced.
+    /// Current best competing price at the order's **station** (sell-min for a
+    /// sell order, buy-max for a buy order), or null if unpriced (e.g. a private
+    /// structure with no public market data).
     pub best_price: Option<f64>,
     /// True when someone is beating this order (cheaper sell / higher buy).
     pub undercut: bool,
@@ -50,7 +51,7 @@ pub struct OrderRow {
 }
 
 /// The first roster character's open market orders, each flagged as undercut or
-/// top-of-book against the region's current best price.
+/// top-of-book against the current best price **at the order's own station**.
 #[tauri::command]
 pub async fn market_orders(
     app: AppHandle,
@@ -72,19 +73,24 @@ pub async fn market_orders(
         return Ok(Vec::new());
     }
 
-    // Best price per (region, type): one Fuzzwork pull per region.
-    let mut by_region: HashMap<i64, Vec<i64>> = HashMap::new();
+    // Best price per (station, type): price each order against the *station* it
+    // sits in (not the whole region), so undercut reflects local competition.
+    // One Fuzzwork pull per station the character has orders in.
+    let mut by_station: HashMap<(i64, i64), Vec<i64>> = HashMap::new();
     for o in &orders {
-        by_region.entry(o.region_id).or_default().push(o.type_id);
+        by_station
+            .entry((o.region_id, o.location_id))
+            .or_default()
+            .push(o.type_id);
     }
     let mut best: HashMap<(i64, i64), PriceModel> = HashMap::new();
-    for (region_id, type_ids) in &by_region {
+    for ((region_id, location_id), type_ids) in &by_station {
         let models = market
-            .price_models_at(resolve_location(*region_id, None), type_ids)
+            .price_models_at(resolve_location(*region_id, Some(*location_id)), type_ids)
             .await
             .map_err(|e| e.to_string())?;
         for m in models {
-            best.insert((*region_id, m.type_id), m);
+            best.insert((*location_id, m.type_id), m);
         }
     }
 
@@ -97,7 +103,7 @@ pub async fn market_orders(
     let rows = orders
         .into_iter()
         .map(|o| {
-            let model = best.get(&(o.region_id, o.type_id));
+            let model = best.get(&(o.location_id, o.type_id));
             let best_price = if o.is_buy_order {
                 model.and_then(|m| m.buy_max)
             } else {
