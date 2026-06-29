@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
 use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule};
@@ -181,6 +182,43 @@ pub fn fitting_classify_slots(
     type_ids
         .into_iter()
         .map(|id| Ok((id, classify_slot(&sde, id)?)))
+        .collect()
+}
+
+/// Slot + fitting cost of a candidate module, so the add-module browser can show
+/// (and rank by) whether it actually fits the current hull's free slots and
+/// remaining CPU/PG/calibration.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModuleInfo {
+    pub id: i64,
+    pub slot: SlotKind,
+    pub cpu: f64,
+    pub powergrid: f64,
+    pub calibration: f64,
+}
+
+/// Slot + CPU/PG/calibration cost for each type id (for fit-aware ranking, #266).
+#[tauri::command]
+pub fn fitting_module_info(
+    app: AppHandle,
+    type_ids: Vec<i64>,
+) -> Result<Vec<ModuleInfo>, String> {
+    let sde = open_sde(&app)?;
+    let attrs = sde.types_attributes_raw(&type_ids).map_err(|e| e.to_string())?;
+    type_ids
+        .into_iter()
+        .map(|id| {
+            let a: HashMap<i64, f64> = attrs.get(&id).cloned().unwrap_or_default().into_iter().collect();
+            let get = |attr: i64| a.get(&attr).copied().unwrap_or(0.0);
+            Ok(ModuleInfo {
+                id,
+                slot: classify_slot(&sde, id)?,
+                cpu: get(50),           // cpu usage
+                powergrid: get(30),     // power usage
+                calibration: get(1153), // rig calibration cost
+            })
+        })
         .collect()
 }
 

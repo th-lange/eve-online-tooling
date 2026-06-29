@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
 import {
   fittingAddItem,
-  fittingClassifySlots,
+  fittingModuleInfo,
   fittingDeleteLocal,
   fittingEsiList,
   fittingEsiPush,
@@ -27,6 +27,7 @@ import {
   type Fit,
   type FitItem,
   type MarketGroupNode,
+  type ModuleInfo,
   type OptimizeMode,
   type OptimizeObjective,
   type SkillSource,
@@ -126,6 +127,32 @@ function Workbench() {
   // The jammed view only applies while ECM is actually projected onto the fit.
   const jammedActive =
     jammed && !!stats.data?.projectedEw?.some((t) => t.jam);
+
+  // What the hull has free right now — drives fit-aware ranking/filtering in the
+  // add-module browser. Prefer the resolved (skill-adjusted) layout/resources.
+  const fitContext = useMemo<FitContext | null>(() => {
+    if (!fit) return null;
+    const ship = stats.data?.layout ?? layout.data;
+    if (!ship) return null;
+    const used: Partial<Record<SlotKind, number>> = {};
+    for (const it of fit.items) used[it.slot] = (used[it.slot] ?? 0) + 1;
+    const free = (kind: SlotKind, total: number) =>
+      Math.max(0, total - (used[kind] ?? 0));
+    const res = stats.data?.resources;
+    return {
+      freeSlots: {
+        high: free("high", ship.highSlots),
+        mid: free("mid", ship.midSlots),
+        low: free("low", ship.lowSlots),
+        rig: free("rig", ship.rigSlots),
+        subsystem: free("subsystem", ship.subsystemSlots),
+      },
+      cpu: (res?.cpuOutput ?? ship.cpuOutput) - (res?.cpuUsed ?? 0),
+      pg: (res?.powergridOutput ?? ship.powergridOutput) - (res?.powergridUsed ?? 0),
+      calibration:
+        (res?.calibrationOutput ?? ship.calibration) - (res?.calibrationUsed ?? 0),
+    };
+  }, [fit, stats.data, layout.data]);
 
   const importEft = useMutation({
     mutationFn: () => fittingImportEft(eft),
@@ -535,6 +562,7 @@ function Workbench() {
               pending={addItem.isPending}
               slotFilter={slotFilter}
               onSlotFilter={setSlotFilter}
+              fitContext={fitContext}
             />
 
             <ProjectedPanel
@@ -701,11 +729,13 @@ function ModuleBrowser({
   pending,
   slotFilter,
   onSlotFilter,
+  fitContext,
 }: {
   onAdd: (typeId: number) => void;
   pending: boolean;
   slotFilter: SlotKind | null;
   onSlotFilter: (slot: SlotKind | null) => void;
+  fitContext: FitContext | null;
 }) {
   const [q, setQ] = useState("");
   const [mode, setMode] = useState<"search" | "browse">("search");
@@ -724,18 +754,37 @@ function ModuleBrowser({
     enabled: q.trim().length >= 2,
   });
   const matches = (results.data ?? []).slice(0, 40);
-  // Classify the visible results' slots so each row shows where it'll land.
+  // Slot + fitting cost of each result, to badge the slot and rank by what fits.
   const ids = useMemo(() => matches.map((r) => r.id), [matches]);
-  const slots = useQuery({
-    queryKey: ["fitting", "slot-classify", ids],
-    queryFn: () => fittingClassifySlots(ids),
+  const info = useQuery({
+    queryKey: ["fitting", "module-info", ids],
+    queryFn: () => fittingModuleInfo(ids),
     enabled: ids.length > 0,
   });
-  const slotOf = useMemo(() => new Map(slots.data ?? []), [slots.data]);
-  // With a slot filter active, keep only results that land in that slot.
-  const shown = (
-    slotFilter ? matches.filter((r) => slotOf.get(r.id) === slotFilter) : matches
-  ).slice(0, 30);
+  const infoOf = useMemo(
+    () => new Map((info.data ?? []).map((m) => [m.id, m])),
+    [info.data],
+  );
+  // Slot-filter (when a slot was clicked), then fuzzy-rank, then split into what
+  // fits the hull now vs what doesn't — fitting first, non-fitting shown muted.
+  const { fitRows, noFitRows } = useMemo(() => {
+    const ranked = (
+      slotFilter
+        ? matches.filter((r) => infoOf.get(r.id)?.slot === slotFilter)
+        : matches
+    )
+      .slice()
+      .sort(
+        (a, b) =>
+          fuzzyScore(a.name, q) - fuzzyScore(b.name, q) ||
+          a.name.length - b.name.length,
+      );
+    return {
+      fitRows: ranked.filter((r) => moduleFits(infoOf.get(r.id), fitContext)).slice(0, 30),
+      noFitRows: ranked.filter((r) => !moduleFits(infoOf.get(r.id), fitContext)).slice(0, 20),
+    };
+  }, [matches, infoOf, slotFilter, fitContext, q]);
+  const nothingShown = fitRows.length === 0 && noFitRows.length === 0;
   return (
     <div className="mt-4 rounded border border-zinc-800 bg-zinc-900/40 p-3">
       <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-zinc-500">
@@ -782,8 +831,8 @@ function ModuleBrowser({
             className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
           />
           {q.trim().length >= 2 && (
-            <ul className="mt-2 max-h-48 overflow-y-auto text-sm">
-              {shown.map((r) => (
+            <ul className="mt-2 max-h-56 overflow-y-auto text-sm">
+              {fitRows.map((r) => (
                 <li key={r.id}>
                   <button
                     disabled={pending}
@@ -791,12 +840,34 @@ function ModuleBrowser({
                     className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
                   >
                     <span className="flex-1 truncate">{r.name}</span>
-                    <SlotBadge slot={slotOf.get(r.id)} />
+                    <SlotBadge slot={infoOf.get(r.id)?.slot} />
                     <Plus size={14} className="shrink-0 text-zinc-500" />
                   </button>
                 </li>
               ))}
-              {results.isFetched && shown.length === 0 && (
+              {noFitRows.length > 0 && (
+                <li className="px-2 pb-0.5 pt-2 text-[10px] uppercase tracking-wide text-zinc-600">
+                  Won't fit
+                </li>
+              )}
+              {noFitRows.map((r) => (
+                <li key={r.id}>
+                  <button
+                    disabled={pending}
+                    onClick={() => onAdd(r.id)}
+                    title="Doesn't fit the hull right now — add anyway"
+                    className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-zinc-500 hover:bg-zinc-800 disabled:opacity-50"
+                  >
+                    <span className="flex-1 truncate">{r.name}</span>
+                    <span className="shrink-0 text-[10px] uppercase text-amber-500/70">
+                      {fitReason(infoOf.get(r.id), fitContext)}
+                    </span>
+                    <SlotBadge slot={infoOf.get(r.id)?.slot} />
+                    <Plus size={14} className="shrink-0 text-zinc-600" />
+                  </button>
+                </li>
+              ))}
+              {results.isFetched && nothingShown && (
                 <li className="px-2 py-1 text-xs text-zinc-500">
                   {slotFilter && matches.length > 0
                     ? `No ${SLOT_BADGE[slotFilter] ?? slotFilter} modules match.`
@@ -807,7 +878,12 @@ function ModuleBrowser({
           )}
         </>
       ) : (
-        <BrowseTree onAdd={onAdd} pending={pending} slotFilter={slotFilter} />
+        <BrowseTree
+          onAdd={onAdd}
+          pending={pending}
+          slotFilter={slotFilter}
+          fitContext={fitContext}
+        />
       )}
     </div>
   );
@@ -823,12 +899,15 @@ function BrowseTree({
   onAdd,
   pending,
   slotFilter,
+  fitContext,
 }: {
   onAdd: (typeId: number) => void;
   pending: boolean;
   slotFilter: SlotKind | null;
+  fitContext: FitContext | null;
 }) {
   const [path, setPath] = useState<MarketGroupNode[]>([]);
+  const [showAll, setShowAll] = useState(false);
   const parentId = path.length ? path[path.length - 1].id : null;
   const level = useQuery({
     queryKey: ["fitting", "mg-tree", parentId],
@@ -836,16 +915,24 @@ function BrowseTree({
   });
   const items = useMemo(() => level.data?.items ?? [], [level.data]);
   const ids = useMemo(() => items.map((i) => i.id), [items]);
-  const slots = useQuery({
-    queryKey: ["fitting", "slot-classify", ids],
-    queryFn: () => fittingClassifySlots(ids),
+  const info = useQuery({
+    queryKey: ["fitting", "module-info", ids],
+    queryFn: () => fittingModuleInfo(ids),
     enabled: ids.length > 0,
   });
-  const slotOf = useMemo(() => new Map(slots.data ?? []), [slots.data]);
-  // With a slot filter active, keep only leaves that land in that slot.
-  const shownItems = slotFilter
-    ? items.filter((i) => slotOf.get(i.id) === slotFilter)
+  const infoOf = useMemo(
+    () => new Map((info.data ?? []).map((m) => [m.id, m])),
+    [info.data],
+  );
+  // Slot-filter (when a slot was clicked), then — unless "show all" is on — keep
+  // only leaves that actually fit the hull's free slots + resources right now.
+  const slotItems = slotFilter
+    ? items.filter((i) => infoOf.get(i.id)?.slot === slotFilter)
     : items;
+  const shownItems = showAll
+    ? slotItems
+    : slotItems.filter((i) => moduleFits(infoOf.get(i.id), fitContext));
+  const hiddenCount = slotItems.length - shownItems.length;
   const groups = level.data?.groups ?? [];
 
   return (
@@ -905,18 +992,33 @@ function BrowseTree({
                   className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
                 >
                   <span className="flex-1 truncate">{it.name}</span>
-                  <SlotBadge slot={slotOf.get(it.id)} />
+                  <SlotBadge slot={infoOf.get(it.id)?.slot} />
                   <Plus size={14} className="shrink-0 text-zinc-500" />
                 </button>
               </div>
             );
           })}
 
-          {groups.length === 0 && shownItems.length === 0 && (
+          {/* Hidden = present in this group but won't fit the hull right now. */}
+          {hiddenCount > 0 && (
+            <button
+              onClick={() => setShowAll((v) => !v)}
+              className="mt-1 px-2 py-1 text-xs text-zinc-500 hover:text-zinc-300"
+            >
+              {showAll ? "Hide ones that won't fit" : `Show ${hiddenCount} that won't fit`}
+            </button>
+          )}
+
+          {groups.length === 0 && slotItems.length === 0 && (
             <p className="px-2 py-2 text-xs text-zinc-500">
               {slotFilter && items.length > 0
                 ? `No ${SLOT_BADGE[slotFilter] ?? slotFilter} items here.`
                 : "Nothing here."}
+            </p>
+          )}
+          {groups.length === 0 && slotItems.length > 0 && shownItems.length === 0 && !showAll && (
+            <p className="px-2 py-2 text-xs text-zinc-500">
+              Nothing here fits the hull right now.
             </p>
           )}
         </div>
@@ -1001,6 +1103,53 @@ function ProjectedPanel({
       )}
     </div>
   );
+}
+
+/** What the hull has free right now, for deciding whether a candidate fits. */
+interface FitContext {
+  /** Open slots per kind (kinds without a hard cap — drone/cargo/… — are absent). */
+  freeSlots: Partial<Record<SlotKind, number>>;
+  /** Remaining CPU / powergrid / rig-calibration. */
+  cpu: number;
+  pg: number;
+  calibration: number;
+}
+
+const FIT_EPS = 1e-6;
+
+/** Does this module fit the hull's free slots + remaining resources? Unknown
+ *  info or no context ⇒ treated as fitting (don't gray things out prematurely). */
+function moduleFits(info: ModuleInfo | undefined, ctx: FitContext | null): boolean {
+  return fitReason(info, ctx) === null;
+}
+
+/** Why a module won't fit (`"no slot"` / `"CPU"` / `"PG"` / `"calibration"`), or
+ *  null when it fits. */
+function fitReason(info: ModuleInfo | undefined, ctx: FitContext | null): string | null {
+  if (!info || !ctx) return null;
+  const free = ctx.freeSlots[info.slot];
+  if (free !== undefined && free <= 0) return "no slot";
+  if (info.cpu > ctx.cpu + FIT_EPS) return "CPU";
+  if (info.powergrid > ctx.pg + FIT_EPS) return "PG";
+  if (info.slot === "rig" && info.calibration > ctx.calibration + FIT_EPS) return "calibration";
+  return null;
+}
+
+/** Lower = better fuzzy match of `name` against the (already term-filtered)
+ *  query: prefix beats substring beats scattered terms; ties broken by length. */
+function fuzzyScore(name: string, q: string): number {
+  const n = name.toLowerCase();
+  const query = q.toLowerCase().trim();
+  if (!query) return 0;
+  if (n.startsWith(query)) return 0;
+  const idx = n.indexOf(query);
+  if (idx >= 0) return 1 + idx / 1000;
+  let s = 3;
+  for (const t of query.split(/\s+/)) {
+    const i = n.indexOf(t);
+    s += i >= 0 ? i / 1000 : 5;
+  }
+  return s;
 }
 
 const SLOT_BADGE: Partial<Record<SlotKind, string>> = {

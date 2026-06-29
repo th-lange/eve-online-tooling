@@ -424,16 +424,32 @@ impl Sde {
         Ok((groups, items))
     }
 
-    /// Search marketable types by name substring (case-insensitive), capped.
-    /// For pickers (market history, etc.).
+    /// Search marketable types by name, capped. Each whitespace-separated term
+    /// must appear (case-insensitive substring), in any order — so "shield hard"
+    /// and "hard shield" both find "Large Shield Hardener". Shorter names rank
+    /// first; callers can further fuzzy-rank the result. For pickers.
     pub fn search_types(&self, query: &str, limit: i64) -> Result<Vec<(i64, String)>, SdeError> {
-        let pattern = format!("%{}%", query.trim());
-        let mut stmt = self.conn.prepare(
+        use rusqlite::types::Value;
+        let terms: Vec<String> = query
+            .split_whitespace()
+            .map(|t| format!("%{t}%"))
+            .collect();
+        if terms.is_empty() {
+            return Ok(Vec::new());
+        }
+        let clause = vec!["typeName LIKE ?"; terms.len()].join(" AND ");
+        let sql = format!(
             "SELECT typeID, typeName FROM invTypes
-             WHERE published = 1 AND marketGroupID IS NOT NULL AND typeName LIKE ?1
-             ORDER BY LENGTH(typeName), typeName LIMIT ?2",
-        )?;
-        let rows = stmt.query_map(params![pattern, limit], |r| Ok((r.get(0)?, r.get(1)?)))?;
+             WHERE published = 1 AND marketGroupID IS NOT NULL AND {clause}
+             ORDER BY LENGTH(typeName), typeName LIMIT ?"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let mut binds: Vec<Value> = terms.into_iter().map(Value::Text).collect();
+        binds.push(Value::Integer(limit));
+        let rows = stmt
+            .query_map(rusqlite::params_from_iter(binds), |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
@@ -1321,6 +1337,31 @@ mod tests {
                 ("Gistii A-Type Hardener", "Faction"),
             ]
         );
+    }
+
+    #[test]
+    fn search_matches_terms_in_any_order() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE invTypes(typeID INT, typeName TEXT, marketGroupID INT, published INT);
+             INSERT INTO invTypes VALUES
+               (1, 'Large Shield Hardener', 10, 1),
+               (2, 'Small Shield Booster', 10, 1),
+               (3, 'Damage Control II', 10, 1),
+               (4, 'Unpublished Shield Hardener', 10, 0);",
+        )
+        .unwrap();
+        let sde = Sde::from_connection(conn);
+
+        // Both terms must match, order-independent; unpublished excluded.
+        let by_order = sde.search_types("shield hard", 10).unwrap();
+        let by_reverse = sde.search_types("hard shield", 10).unwrap();
+        assert_eq!(by_order, by_reverse);
+        assert_eq!(by_order, vec![(1, "Large Shield Hardener".to_string())]);
+
+        // A single term still works as a plain substring.
+        let one = sde.search_types("shield", 10).unwrap();
+        assert_eq!(one.len(), 2); // Hardener + Booster (published)
     }
 
     #[test]
