@@ -1,8 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus } from "lucide-react";
 
 import { SHOPPING_LISTS_KEY } from "../../components/AddToListButton";
+import { parseItems, parseLine } from "./parse";
 import {
+  sdeSearch,
+  shoppingAddItem,
   shoppingAddText,
   shoppingClearList,
   shoppingCreateList,
@@ -229,6 +233,7 @@ function ListDetail({
         </div>
       </div>
 
+      <SearchAddField listId={list.id} onAdded={onChange} />
       <AddItemField listId={list.id} onAdded={onChange} />
 
       {selected.size > 0 && (
@@ -345,6 +350,78 @@ function ListDetail({
   );
 }
 
+// --- Search-to-add field (find an item, pick a quantity, add) ---
+
+function SearchAddField({
+  listId,
+  onAdded,
+}: {
+  listId: string;
+  onAdded: () => Promise<unknown>;
+}) {
+  const [q, setQ] = useState("");
+  const [qty, setQty] = useState("1");
+  const [busy, setBusy] = useState(false);
+
+  const results = useQuery({
+    queryKey: ["shopping", "search", q],
+    queryFn: () => sdeSearch(q),
+    enabled: q.trim().length >= 2,
+  });
+  const matches = (results.data ?? []).slice(0, 12);
+
+  async function add(typeId: number) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await shoppingAddItem(listId, typeId, Math.max(1, Number(qty) || 1));
+      await onAdded();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-4">
+      <div className="flex items-center gap-2">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.currentTarget.value)}
+          placeholder="search an item to add…"
+          className="w-full max-w-md rounded bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+        />
+        <input
+          type="number"
+          min={1}
+          value={qty}
+          onChange={(e) => setQty(e.currentTarget.value)}
+          aria-label="quantity"
+          className="w-20 rounded bg-zinc-800 px-2 py-1.5 text-right text-sm tabular-nums text-zinc-100 outline-none"
+        />
+      </div>
+      {q.trim().length >= 2 && (
+        <ul className="mt-1 max-h-56 w-full max-w-md overflow-y-auto rounded border border-zinc-800 bg-zinc-900/40 text-sm">
+          {matches.map((r) => (
+            <li key={r.id}>
+              <button
+                disabled={busy}
+                onClick={() => add(r.id)}
+                className="flex w-full items-center gap-2 px-2 py-1 text-left text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+              >
+                <span className="flex-1 truncate">{r.name}</span>
+                <Plus size={14} className="shrink-0 text-zinc-500" />
+              </button>
+            </li>
+          ))}
+          {results.isFetched && matches.length === 0 && (
+            <li className="px-2 py-1 text-xs text-zinc-500">No matches.</li>
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // --- Bulk add field (Multibuy-style paste; only adds known items) ---
 
 function AddItemField({
@@ -361,14 +438,25 @@ function AddItemField({
   const parsed = useMemo(() => parseItems(text), [text]);
 
   async function add() {
-    if (parsed.length === 0 || busy) return;
+    const lines = text.split("\n").map((raw) => ({ raw, parsed: parseLine(raw) }));
+    const toAdd = lines.flatMap((l) => (l.parsed ? [l.parsed] : []));
+    if (toAdd.length === 0 || busy) return;
     setBusy(true);
     try {
-      const missed = await shoppingAddText(listId, parsed);
+      const missed = await shoppingAddText(listId, toAdd);
+      const missedSet = new Set(missed.map((m) => m.toLowerCase()));
+      // Leave the rest: keep the original text of every line we didn't add —
+      // unparseable lines, and parsed-but-unknown names (with their quantities).
+      // Drop blanks and everything that landed.
+      const remaining = lines
+        .filter((l) => {
+          if (!l.raw.trim()) return false;
+          if (!l.parsed) return true;
+          return missedSet.has(l.parsed.name.toLowerCase());
+        })
+        .map((l) => l.raw);
       setUnresolved(missed);
-      // Keep only the lines we couldn't resolve so they can be fixed; clear the
-      // field entirely when everything landed.
-      setText(missed.join("\n"));
+      setText(remaining.join("\n"));
       await onAdded();
     } finally {
       setBusy(false);
@@ -403,7 +491,8 @@ function AddItemField({
           Add {parsed.length > 0 ? `${parsed.length} line(s)` : "items"}
         </button>
         <span className="text-xs text-zinc-500">
-          Paste names or <code>name⇥qty</code> per line · Ctrl/⌘+Enter to add
+          Paste Multibuy or inventory (<code>name … qty</code>, extra columns
+          ignored) · unmatched lines stay · Ctrl/⌘+Enter to add
         </span>
       </div>
       {unresolved && unresolved.length > 0 && (
@@ -416,24 +505,3 @@ function AddItemField({
   );
 }
 
-/** Parse Multibuy-style paste: one item per line, optional trailing quantity
- * after a tab or 2+ spaces (mirrors the appraisal tool). */
-function parseItems(text: string): { name: string; quantity: number }[] {
-  const out: { name: string; quantity: number }[] = [];
-  for (const raw of text.split("\n")) {
-    const line = raw.trim();
-    if (!line) continue;
-    let name = line;
-    let qty = 1;
-    const parts = line.split(/\t| {2,}/).filter(Boolean);
-    if (parts.length >= 2) {
-      const last = parts[parts.length - 1].replace(/[.,\s]/g, "");
-      if (/^\d+$/.test(last)) {
-        qty = Number(last);
-        name = parts.slice(0, -1).join(" ").trim();
-      }
-    }
-    if (name) out.push({ name, quantity: qty });
-  }
-  return out;
-}
