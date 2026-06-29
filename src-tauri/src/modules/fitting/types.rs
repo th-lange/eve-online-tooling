@@ -203,6 +203,30 @@ pub struct FitStats {
     /// Whole-fit market value (#163); `None` until priced.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub price: Option<f64>,
+    /// Electronic-warfare projected **onto** this fit, by category (#265). A
+    /// presence indicator only — no magnitude — for EW types we don't model
+    /// numerically (and a label for the ones we do).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub projected_ew: Vec<EwTag>,
+}
+
+/// One category of electronic warfare projected onto the fit (presence only).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EwTag {
+    /// Stable category key: `web`, `paint`, `damp`, `weaponDisruption`, `ecm`,
+    /// `neut`, `nos`.
+    pub category: String,
+    /// Human label for the badge.
+    pub label: String,
+    /// How many projected modules of this category are present.
+    pub count: i64,
+    /// True for the categories whose magnitude the engine actually models
+    /// (web/paint/damp) — their numeric effect is already in the stats.
+    pub modeled: bool,
+    /// True for ECM — shown as an opt-in "jammed" scenario, never as a passive
+    /// continuous effect.
+    pub jam: bool,
 }
 
 /// Whole-fit market valuation (#163): hull + modules + charges + drones/cargo.

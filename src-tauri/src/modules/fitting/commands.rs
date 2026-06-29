@@ -21,7 +21,7 @@ use super::engine::attr::AttrStore;
 use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
 use super::engine::tank::{tank, DamageProfile, Layer};
 use super::types::{
-    CapStats, DpsBreakdown, Fit, FitItem, FitPrice, FitPriceLine, FitProblem, FitStats,
+    CapStats, DpsBreakdown, EwTag, Fit, FitItem, FitPrice, FitPriceLine, FitProblem, FitStats,
     ModuleState, NavStats, ResourceUsage, Severity, SlotKind, TankStats, TargetStats,
 };
 use crate::esi::{authed_get, corporation_id, AuthState};
@@ -474,6 +474,9 @@ pub async fn fitting_simulate(
     // skill-adjusted resources/validation). Best-effort.
     let dogma = run_dogma(&sde, &fit, &ship, &skill_level_for).ok();
 
+    // Classify any EW projected onto the fit (#265) — presence only.
+    let projected_ew = classify_projected_ew(&sde, &fit);
+
     Ok(FitStats {
         resources: dogma.as_ref().map(|d| d.resources.clone()).unwrap_or(base_resources),
         validation: dogma
@@ -487,7 +490,75 @@ pub async fn fitting_simulate(
         layout: dogma.as_ref().map(|d| d.layout.clone()),
         targeting: dogma.map(|d| d.targeting),
         price: None,
+        projected_ew,
     })
+}
+
+/// Classify the modules projected **onto** a fit into EW categories by their
+/// inventory group (#265). Presence only — counts, not magnitudes. Web/paint/damp
+/// are flagged `modeled` (their numbers are already in the stats); ECM is flagged
+/// `jam` so the UI shows it as an opt-in jammed scenario, never a passive effect.
+fn classify_projected_ew(sde: &Sde, fit: &Fit) -> Vec<EwTag> {
+    if fit.projected.is_empty() {
+        return Vec::new();
+    }
+    let ids: Vec<i64> = fit.projected.iter().map(|i| i.type_id).collect();
+    let Ok(groups) = sde.types_groups(&ids) else {
+        return Vec::new();
+    };
+    // Tally projected modules per category, preserving a stable display order.
+    let order = ["web", "paint", "damp", "weaponDisruption", "ecm", "neut", "nos"];
+    let mut counts: HashMap<&'static str, i64> = HashMap::new();
+    for item in &fit.projected {
+        if let Some(cat) = groups.get(&item.type_id).and_then(|g| ew_category(*g)) {
+            *counts.entry(cat).or_default() += item.quantity.max(1) as i64;
+        }
+    }
+    order
+        .iter()
+        .filter_map(|&cat| {
+            let count = *counts.get(cat)?;
+            if count == 0 {
+                return None;
+            }
+            Some(EwTag {
+                category: cat.to_string(),
+                label: ew_label(cat).to_string(),
+                count,
+                modeled: matches!(cat, "web" | "paint" | "damp"),
+                jam: cat == "ecm",
+            })
+        })
+        .collect()
+}
+
+/// Map an inventory group id to an EW category key, or `None` if it isn't EW we
+/// surface. Group ids are stable SDE identifiers (verified against the SDE).
+fn ew_category(group_id: i64) -> Option<&'static str> {
+    match group_id {
+        65 | 1672 => Some("web"),         // Stasis Web / Stasis Grappler
+        379 => Some("paint"),             // Target Painter
+        208 => Some("damp"),              // Sensor Dampener
+        291 => Some("weaponDisruption"),  // Weapon Disruptor (tracking/guidance)
+        201 | 80 => Some("ecm"),          // ECM / Burst Jammer
+        71 => Some("neut"),               // Energy Neutralizer
+        68 => Some("nos"),                // Energy Nosferatu
+        _ => None,
+    }
+}
+
+/// Human label for an EW category badge.
+fn ew_label(cat: &str) -> &'static str {
+    match cat {
+        "web" => "Web",
+        "paint" => "Target Painter",
+        "damp" => "Sensor Damp",
+        "weaponDisruption" => "Tracking/Guidance Disruption",
+        "ecm" => "ECM",
+        "neut" => "Energy Neut",
+        "nos" => "Nosferatu",
+        _ => "EW",
+    }
 }
 
 /// Dogma-engine stats derived from one resolution pass.
@@ -2510,6 +2581,22 @@ mod tests {
         };
         assert!((constraint_score(&e, &both) - 100.0 * CONSTRAINT_PENALTY * CONSTRAINT_PENALTY).abs() < 1e-9);
         assert!(!meets(&e, &both));
+    }
+
+    #[test]
+    fn classifies_ew_groups_and_flags() {
+        // Modeled vs unmodeled vs jam.
+        assert_eq!(ew_category(65), Some("web")); // Stasis Web
+        assert_eq!(ew_category(1672), Some("web")); // Stasis Grappler
+        assert_eq!(ew_category(208), Some("damp")); // Sensor Dampener
+        assert_eq!(ew_category(291), Some("weaponDisruption"));
+        assert_eq!(ew_category(201), Some("ecm"));
+        assert_eq!(ew_category(80), Some("ecm")); // Burst Jammer
+        assert_eq!(ew_category(68), Some("nos"));
+        assert_eq!(ew_category(587), None); // a Rifter hull, not EW
+        // ECM is the jam category; web/paint/damp are the modeled ones.
+        assert_eq!(ew_label("ecm"), "ECM");
+        assert_eq!(ew_label("weaponDisruption"), "Tracking/Guidance Disruption");
     }
 }
 
