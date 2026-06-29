@@ -44,6 +44,8 @@ pub struct DpsTick {
     pub cap_transfer_in: f64,
     pub cap_warfare_out: f64,
     pub cap_warfare_in: f64,
+    /// Mined volume per second (m³/s) over the window.
+    pub mining_m3: f64,
     /// Top weapons by outgoing DPS over the window.
     pub by_weapon: Vec<WeaponRate>,
     /// Top counterparties by total engaged DPS (out + in) over the window.
@@ -99,6 +101,7 @@ impl Window {
                 EventKind::CapTransferIn => t.cap_transfer_in += v,
                 EventKind::CapWarfareOut => t.cap_warfare_out += v,
                 EventKind::CapWarfareIn => t.cap_warfare_in += v,
+                EventKind::Mining => t.mining_m3 += ev.volume,
             }
             // Damage events carry the counterparty + weapon for the breakdowns.
             if ev.kind == EventKind::DamageOut {
@@ -124,6 +127,7 @@ impl Window {
         t.cap_transfer_in /= w;
         t.cap_warfare_out /= w;
         t.cap_warfare_in /= w;
+        t.mining_m3 /= w;
 
         // Rank weapons by DPS and pilots by total engaged DPS; keep the top N.
         t.by_weapon = top_n(
@@ -167,6 +171,8 @@ mod tests {
             pilot: None,
             ship: None,
             weapon: None,
+            ore: None,
+            volume: 0.0,
         }
     }
 
@@ -178,7 +184,23 @@ mod tests {
             pilot: Some(pilot.to_string()),
             ship: None,
             weapon: Some(weapon.to_string()),
+            ore: None,
+            volume: 0.0,
         }
+    }
+
+    #[test]
+    fn sums_mining_volume_per_second() {
+        let mut w = Window::new(10);
+        let mut m = ev(1, EventKind::Mining, 100); // units
+        m.volume = 50.0; // m³ (set by the loop)
+        w.push(m);
+        let mut m2 = ev(2, EventKind::Mining, 100);
+        m2.volume = 50.0;
+        w.push(m2);
+        let t = w.tick(5);
+        assert_eq!(t.mining_m3, 10.0); // 100 m³ / 10 s
+        assert_eq!(t.dps_out, 0.0);
     }
 
     #[test]

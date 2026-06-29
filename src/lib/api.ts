@@ -1741,6 +1741,8 @@ export interface DpsTick {
   capTransferIn: number;
   capWarfareOut: number;
   capWarfareIn: number;
+  /** Mined volume per second (m³/s). */
+  miningM3: number;
   /** Top weapons by outgoing DPS. */
   byWeapon: WeaponRate[];
   /** Top counterparties by engaged DPS. */

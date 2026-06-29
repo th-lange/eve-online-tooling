@@ -38,6 +38,9 @@ pub enum EventKind {
     CapWarfareOut,
     /// Your capacitor removed/stolen by an enemy.
     CapWarfareIn,
+    /// Ore mined (the amount is in *units*; `volume` carries the m³ once the tail
+    /// loop resolves the ore's volume from the SDE).
+    Mining,
 }
 
 /// One parsed combat event. `pilot`/`ship`/`weapon` are populated for damage
@@ -48,17 +51,23 @@ pub struct DpsEvent {
     /// Seconds since the unix epoch, parsed from the `[ … ]` timestamp (UTC).
     pub ts: i64,
     pub kind: EventKind,
-    /// The damage / repair / capacitor amount (always positive).
+    /// The damage / repair / capacitor amount, or mined **units** (always positive).
     pub amount: i64,
     pub pilot: Option<String>,
     pub ship: Option<String>,
     pub weapon: Option<String>,
+    /// Mined ore type name (mining lines only) — used to resolve its volume.
+    pub ore: Option<String>,
+    /// Mined volume in m³ (mining only; filled by the tail loop from the SDE).
+    pub volume: f64,
 }
 
 /// Parse one gamelog line into a [`DpsEvent`], or `None` if it isn't a combat
 /// line we track (chat, system messages, mining, malformed lines, …).
 pub fn parse_line(line: &str) -> Option<DpsEvent> {
-    // Only `(combat)` lines in this slice; mining arrives in a later slice.
+    if line.contains("(mining)") {
+        return parse_mining(line);
+    }
     if !line.contains("(combat)") {
         return None;
     }
@@ -78,7 +87,64 @@ pub fn parse_line(line: &str) -> Option<DpsEvent> {
         pilot,
         ship,
         weapon,
+        ore: None,
+        volume: 0.0,
     })
+}
+
+/// Parse a `(mining)` line: `… <b>34</b> units of <…>Veldspar<…>`. The amount is
+/// the last integer before `units of`; the ore name is the first tagged text
+/// after it. `volume` is left 0.0 — the tail loop fills m³ from the SDE.
+fn parse_mining(line: &str) -> Option<DpsEvent> {
+    let ts = parse_ts(line)?;
+    let idx = line.find(" units of ")?;
+    let amount = last_int(&line[..idx])?;
+    let ore = first_inner_text(&line[idx + " units of ".len()..]);
+    Some(DpsEvent {
+        ts,
+        kind: EventKind::Mining,
+        amount,
+        pilot: None,
+        ship: None,
+        weapon: None,
+        ore,
+        volume: 0.0,
+    })
+}
+
+/// The last integer in `s` after markup is stripped (mining amount sits just
+/// before `units of`; the only earlier digits are the timestamp).
+fn last_int(s: &str) -> Option<i64> {
+    let plain = strip_tags(s);
+    let bytes = plain.as_bytes();
+    let mut end = bytes.len();
+    while end > 0 && !bytes[end - 1].is_ascii_digit() {
+        end -= 1;
+    }
+    if end == 0 {
+        return None;
+    }
+    let mut start = end;
+    while start > 0 && bytes[start - 1].is_ascii_digit() {
+        start -= 1;
+    }
+    plain.get(start..end)?.parse().ok()
+}
+
+/// First non-empty text between a `>` and the next `<` (the ore name lives in
+/// `>Veldspar<` after the colour/bold tags).
+fn first_inner_text(s: &str) -> Option<String> {
+    let mut rest = s;
+    while let Some(gt) = rest.find('>') {
+        let tail = &rest[gt + 1..];
+        let lt = tail.find('<').unwrap_or(tail.len());
+        let t = tail[..lt].trim();
+        if !t.is_empty() {
+            return Some(t.to_string());
+        }
+        rest = &tail[lt..];
+    }
+    None
 }
 
 /// Pull the counterparty pilot + ship and the weapon from a damage line. EVE
@@ -324,9 +390,19 @@ mod tests {
     }
 
     #[test]
+    fn parses_mining_amount_and_ore() {
+        let line = "[ 2026.06.25 12:00:00 ] (mining) <color=0xffffffff><b>34</b> units of <color=0xffe6b800><b>Dense Veldspar</b></color>";
+        let e = parse_line(line).unwrap();
+        assert_eq!(e.kind, EventKind::Mining);
+        assert_eq!(e.amount, 34);
+        assert_eq!(e.ore.as_deref(), Some("Dense Veldspar"));
+        assert_eq!(e.volume, 0.0); // filled later by the tail loop
+        assert_eq!(e.ts, ts());
+    }
+
+    #[test]
     fn ignores_non_combat_lines() {
         assert!(parse_line("[ 2026.06.25 12:00:00 ] (none) Some other line").is_none());
-        assert!(parse_line("[ 2026.06.25 12:00:00 ] (mining) <b>34</b> units of Veldspar").is_none());
         assert!(parse_line("garbage").is_none());
     }
 }
