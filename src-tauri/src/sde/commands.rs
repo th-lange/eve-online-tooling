@@ -280,6 +280,55 @@ pub fn sde_search_ships(app: AppHandle, query: String) -> Result<Vec<IdName>, St
         .map_err(|e| e.to_string())
 }
 
+/// A market-group node in the browse tree.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketGroupNode {
+    pub id: i64,
+    pub name: String,
+    /// True when this group holds items directly (a leaf level).
+    pub has_types: bool,
+}
+
+/// A leaf item with its meta-group label (Tech I/II, Faction, …).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketGroupItem {
+    pub id: i64,
+    pub name: String,
+    pub meta_group: String,
+}
+
+/// One level of the market-group tree: child groups + leaf items.
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketGroupChildren {
+    pub groups: Vec<MarketGroupNode>,
+    pub items: Vec<MarketGroupItem>,
+}
+
+/// Children of a market group (or the top level when `parent_id` is null), for
+/// the fitting browse-by-category picker (#266). Lazy-loaded per drill-down step.
+#[tauri::command]
+pub fn sde_market_group_children(
+    app: AppHandle,
+    parent_id: Option<i64>,
+) -> Result<MarketGroupChildren, String> {
+    let (groups, items) = open(&app)?
+        .market_group_children(parent_id)
+        .map_err(|e| e.to_string())?;
+    Ok(MarketGroupChildren {
+        groups: groups
+            .into_iter()
+            .map(|(id, name, has_types)| MarketGroupNode { id, name, has_types })
+            .collect(),
+        items: items
+            .into_iter()
+            .map(|(id, name, meta_group)| MarketGroupItem { id, name, meta_group })
+            .collect(),
+    })
+}
+
 /// Names for a set of type ids (bulk) — for showing fitted-item names.
 #[tauri::command]
 pub fn sde_type_names(app: AppHandle, type_ids: Vec<i64>) -> Result<Vec<IdName>, String> {
