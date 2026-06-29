@@ -1718,6 +1718,19 @@ export function shoppingClearList(id: string): Promise<void> {
 
 // --- DPS meter (live combat log) ---
 
+/** Per-weapon outgoing DPS row. */
+export interface WeaponRate {
+  name: string;
+  dps: number;
+}
+
+/** Per-pilot engagement row (damage dealt to / taken from). */
+export interface PilotRate {
+  name: string;
+  dpsOut: number;
+  dpsIn: number;
+}
+
 /** One live sample: per-second rates over the averaging window. */
 export interface DpsTick {
   dpsOut: number;
@@ -1728,6 +1741,10 @@ export interface DpsTick {
   capTransferIn: number;
   capWarfareOut: number;
   capWarfareIn: number;
+  /** Top weapons by outgoing DPS. */
+  byWeapon: WeaponRate[];
+  /** Top counterparties by engaged DPS. */
+  byPilot: PilotRate[];
   /** The averaging window, echoed for labelling. */
   windowSecs: number;
   /** Epoch seconds this tick was computed at. */

@@ -6,11 +6,31 @@
 //! shows. Pure and unit-tested; the tail loop owns one [`Window`] and calls
 //! [`Window::tick`] on a timer.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use serde::Serialize;
 
 use super::parser::{DpsEvent, EventKind};
+
+/// How many rows each breakdown table reports (top-N by rate).
+const TOP_N: usize = 10;
+
+/// Per-weapon outgoing damage rate (your weapons).
+#[derive(Debug, Clone, PartialEq, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WeaponRate {
+    pub name: String,
+    pub dps: f64,
+}
+
+/// Per-pilot engagement: damage you dealt to / took from this counterparty.
+#[derive(Debug, Clone, PartialEq, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PilotRate {
+    pub name: String,
+    pub dps_out: f64,
+    pub dps_in: f64,
+}
 
 /// A single emitted sample: per-second rates over the current window.
 #[derive(Debug, Clone, PartialEq, Serialize, Default)]
@@ -24,6 +44,10 @@ pub struct DpsTick {
     pub cap_transfer_in: f64,
     pub cap_warfare_out: f64,
     pub cap_warfare_in: f64,
+    /// Top weapons by outgoing DPS over the window.
+    pub by_weapon: Vec<WeaponRate>,
+    /// Top counterparties by total engaged DPS (out + in) over the window.
+    pub by_pilot: Vec<PilotRate>,
     /// The averaging window in seconds (echoed so the UI can label the graph).
     pub window_secs: u32,
     /// Epoch seconds this tick was computed at (the graph's x value).
@@ -61,6 +85,9 @@ impl Window {
             at: now,
             ..Default::default()
         };
+        // Breakdown accumulators: weapon → out-damage; pilot → (out, in).
+        let mut weapons: HashMap<&str, f64> = HashMap::new();
+        let mut pilots: HashMap<&str, (f64, f64)> = HashMap::new();
         for ev in &self.events {
             let v = ev.amount as f64;
             match ev.kind {
@@ -73,6 +100,20 @@ impl Window {
                 EventKind::CapWarfareOut => t.cap_warfare_out += v,
                 EventKind::CapWarfareIn => t.cap_warfare_in += v,
             }
+            // Damage events carry the counterparty + weapon for the breakdowns.
+            if ev.kind == EventKind::DamageOut {
+                if let Some(w) = ev.weapon.as_deref() {
+                    *weapons.entry(w).or_default() += v;
+                }
+            }
+            if let Some(p) = ev.pilot.as_deref() {
+                let slot = pilots.entry(p).or_default();
+                match ev.kind {
+                    EventKind::DamageOut => slot.0 += v,
+                    EventKind::DamageIn => slot.1 += v,
+                    _ => {}
+                }
+            }
         }
         let w = self.secs as f64;
         t.dps_out /= w;
@@ -83,8 +124,35 @@ impl Window {
         t.cap_transfer_in /= w;
         t.cap_warfare_out /= w;
         t.cap_warfare_in /= w;
+
+        // Rank weapons by DPS and pilots by total engaged DPS; keep the top N.
+        t.by_weapon = top_n(
+            weapons
+                .into_iter()
+                .map(|(name, dmg)| WeaponRate {
+                    name: name.to_string(),
+                    dps: dmg / w,
+                }),
+            |r| r.dps,
+        );
+        t.by_pilot = top_n(
+            pilots.into_iter().map(|(name, (out, inc))| PilotRate {
+                name: name.to_string(),
+                dps_out: out / w,
+                dps_in: inc / w,
+            }),
+            |r| r.dps_out + r.dps_in,
+        );
         t
     }
+}
+
+/// Collect an iterator into the top-[`TOP_N`] rows by `key`, descending.
+fn top_n<T>(rows: impl Iterator<Item = T>, key: impl Fn(&T) -> f64) -> Vec<T> {
+    let mut v: Vec<T> = rows.collect();
+    v.sort_by(|a, b| key(b).partial_cmp(&key(a)).unwrap_or(std::cmp::Ordering::Equal));
+    v.truncate(TOP_N);
+    v
 }
 
 #[cfg(test)]
@@ -100,6 +168,42 @@ mod tests {
             ship: None,
             weapon: None,
         }
+    }
+
+    fn dmg(ts: i64, kind: EventKind, amount: i64, pilot: &str, weapon: &str) -> DpsEvent {
+        DpsEvent {
+            ts,
+            kind,
+            amount,
+            pilot: Some(pilot.to_string()),
+            ship: None,
+            weapon: Some(weapon.to_string()),
+        }
+    }
+
+    #[test]
+    fn ranks_weapon_and_pilot_breakdowns() {
+        let mut w = Window::new(10);
+        w.push(dmg(1, EventKind::DamageOut, 600, "Alice", "Autocannon"));
+        w.push(dmg(2, EventKind::DamageOut, 400, "Bob", "Autocannon"));
+        w.push(dmg(3, EventKind::DamageOut, 200, "Alice", "Drone"));
+        w.push(dmg(4, EventKind::DamageIn, 300, "Bob", "Hits"));
+        let t = w.tick(5);
+
+        // Weapons ranked by outgoing DPS: Autocannon 1000/10, Drone 200/10.
+        assert_eq!(t.by_weapon.len(), 2);
+        assert_eq!(t.by_weapon[0].name, "Autocannon");
+        assert_eq!(t.by_weapon[0].dps, 100.0);
+        assert_eq!(t.by_weapon[1].name, "Drone");
+
+        // Pilots ranked by total engaged DPS: Bob 700/10 > Alice 800/10? Alice
+        // dealt 800 out, Bob 400 out + 300 in = 700 → Alice first.
+        assert_eq!(t.by_pilot[0].name, "Alice");
+        assert_eq!(t.by_pilot[0].dps_out, 80.0);
+        assert_eq!(t.by_pilot[0].dps_in, 0.0);
+        let bob = t.by_pilot.iter().find(|p| p.name == "Bob").unwrap();
+        assert_eq!(bob.dps_out, 40.0);
+        assert_eq!(bob.dps_in, 30.0);
     }
 
     #[test]
