@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Crosshair, Plus, X } from "lucide-react";
+import { Crosshair, Plus, Power, X } from "lucide-react";
 import {
   fittingAddItem,
   fittingCompatibleCharges,
@@ -29,6 +29,7 @@ import {
   type FitItem,
   type MarketGroupNode,
   type ModuleInfo,
+  type ModuleState,
   type OptimizeMode,
   type OptimizeObjective,
   type SkillSource,
@@ -294,6 +295,19 @@ function Workbench() {
             ...f,
             items: f.items.map((it, i) =>
               i === globalIndex ? { ...it, chargeTypeId } : it,
+            ),
+          }
+        : f,
+    );
+  }
+  // Toggle a module's state (active ↔ offline) — re-simulates off the new fit.
+  function setModuleState(globalIndex: number, state: ModuleState) {
+    setFit((f) =>
+      f
+        ? {
+            ...f,
+            items: f.items.map((it, i) =>
+              i === globalIndex ? { ...it, state } : it,
             ),
           }
         : f,
@@ -593,6 +607,7 @@ function Workbench() {
                 onAddToSlot={setSlotFilter}
                 onSetCharge={setCharge}
                 onSetChargeForType={setChargeForType}
+                onSetState={setModuleState}
                 rangeOf={rangeOf}
               />
             )}
@@ -1435,6 +1450,7 @@ function SlotGrid({
   onAddToSlot,
   onSetCharge,
   onSetChargeForType,
+  onSetState,
   rangeOf,
 }: {
   fit: Fit;
@@ -1444,6 +1460,7 @@ function SlotGrid({
   onAddToSlot: (slot: SlotKind) => void;
   onSetCharge: (globalIndex: number, chargeTypeId: number | null) => void;
   onSetChargeForType: (weaponTypeId: number, chargeTypeId: number | null) => void;
+  onSetState: (globalIndex: number, state: ModuleState) => void;
   rangeOf: Map<string, WeaponRange>;
 }) {
   const counts: Partial<Record<SlotKind, number>> = {
@@ -1472,10 +1489,17 @@ function SlotGrid({
               <ul className="text-sm text-zinc-300">
                 {items.map(({ it, i }) => {
                   const range = rangeOf.get(`${it.typeId}:${it.chargeTypeId ?? 0}`);
+                  const offline = it.state === "offline";
+                  // Only active modules (high/mid/low) can be toggled offline;
+                  // rigs/subsystems are permanent.
+                  const canToggle =
+                    slot === "high" || slot === "mid" || slot === "low";
                   return (
                     <li
                       key={i}
-                      className="group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-zinc-800/70"
+                      className={`group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-zinc-800/70 ${
+                        offline ? "opacity-50" : ""
+                      }`}
                     >
                       <button
                         onClick={() => onRemove(i)}
@@ -1485,10 +1509,31 @@ function SlotGrid({
                       >
                         <X size={14} />
                       </button>
+                      {canToggle && (
+                        <button
+                          onClick={() =>
+                            onSetState(i, offline ? "active" : "offline")
+                          }
+                          title={offline ? "Enable module" : "Disable (offline)"}
+                          aria-label={offline ? "Enable module" : "Disable module"}
+                          className={`flex shrink-0 items-center rounded p-0.5 ${
+                            offline
+                              ? "text-zinc-500 hover:text-emerald-400"
+                              : "text-zinc-600 group-hover:text-zinc-300"
+                          }`}
+                        >
+                          <Power size={13} />
+                        </button>
+                      )}
                       <span className="min-w-0 flex-1 truncate">
                         {nameOf(it.typeId)}
                         {it.chargeTypeId ? ` + ${nameOf(it.chargeTypeId)}` : ""}
                         {it.quantity > 1 ? ` x${it.quantity}` : ""}
+                        {offline && (
+                          <span className="ml-1 text-[10px] uppercase text-zinc-500">
+                            offline
+                          </span>
+                        )}
                       </span>
                       {range && (
                         <span
