@@ -1572,6 +1572,8 @@ export interface FitStats {
   price?: number | null;
   /** Per-weapon engagement ranges (turrets/missiles/mining). */
   weaponRanges?: WeaponRange[];
+  /** Type ids of fitted modules that can be activated (rest are passive). */
+  activatableTypes?: number[];
   /** EW projected onto this fit, by category (presence only). */
   projectedEw?: EwTag[];
 }
