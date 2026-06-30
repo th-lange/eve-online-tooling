@@ -1083,17 +1083,30 @@ fn resolved_damage(store: &AttrStore) -> f64 {
 fn dps_of(resolved: &ResolvedFit, drone_items: &[&FitItem]) -> DpsBreakdown {
     let mut turrets = Vec::new();
     let mut missiles = Vec::new();
+    // Range of the primary (first) turret / missile, from the resolved stores.
+    let mut turret_range: Option<(f64, f64)> = None;
+    let mut missile_range = 0.0;
     for (i, store) in resolved.modules.iter().enumerate() {
+        let mult = store.get(64);
+        let rof_seconds = store.get(51) / 1000.0;
+        // Turret optimal(54)/falloff(158) exist on the gun itself — show them even
+        // before ammo is loaded.
+        if mult > 0.0 && turret_range.is_none() {
+            turret_range = Some((store.get(54), store.get(158)));
+        }
         let Some(Some(charge)) = resolved.charges.get(i) else {
             continue;
         };
         let damage_per_shot = resolved_damage(charge);
-        let rof_seconds = store.get(51) / 1000.0;
-        let mult = store.get(64);
         if mult > 0.0 {
             turrets.push(Weapon { damage_mult: mult, damage_per_shot, rof_seconds, count: 1 });
         } else if rof_seconds > 0.0 {
             missiles.push(Weapon { damage_mult: 1.0, damage_per_shot, rof_seconds, count: 1 });
+            // Missile flight range = velocity(37) × flight time(281, ms) from the
+            // loaded missile (both skill-adjusted).
+            if missile_range == 0.0 {
+                missile_range = charge.get(37) * charge.get(281) / 1000.0;
+            }
         }
     }
 
@@ -1108,7 +1121,13 @@ fn dps_of(resolved: &ResolvedFit, drone_items: &[&FitItem]) -> DpsBreakdown {
         })
         .collect();
 
-    damage(&turrets, &missiles, &drones)
+    let mut breakdown = damage(&turrets, &missiles, &drones);
+    if let Some((optimal, falloff)) = turret_range {
+        breakdown.optimal = optimal;
+        breakdown.falloff = falloff;
+    }
+    breakdown.missile_range = missile_range;
+    breakdown
 }
 
 /// Damage-objective score for the optimizer. Like DPS, but a turret with **no

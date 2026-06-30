@@ -289,6 +289,19 @@ function Workbench() {
         : f,
     );
   }
+  // Load/clear a charge on *every* fitted weapon of the given type at once.
+  function setChargeForType(weaponTypeId: number, chargeTypeId: number | null) {
+    setFit((f) =>
+      f
+        ? {
+            ...f,
+            items: f.items.map((it) =>
+              it.typeId === weaponTypeId ? { ...it, chargeTypeId } : it,
+            ),
+          }
+        : f,
+    );
+  }
   // Projected modules (webs/paints/…) live in `fit.projected`; their slot/index
   // are irrelevant to projection, so they're added/removed client-side.
   function addProjected(typeId: number) {
@@ -569,6 +582,7 @@ function Workbench() {
                 onRemove={removeItem}
                 onAddToSlot={setSlotFilter}
                 onSetCharge={setCharge}
+                onSetChargeForType={setChargeForType}
               />
             )}
 
@@ -657,6 +671,25 @@ function Workbench() {
                         {stats.data.dps.turret > 0 && `turret ${stats.data.dps.turret.toFixed(1)} `}
                         {stats.data.dps.missile > 0 && `· missile ${stats.data.dps.missile.toFixed(1)} `}
                         {stats.data.dps.drone > 0 && `· drone ${stats.data.dps.drone.toFixed(1)}`}
+                      </div>
+                    )}
+                    {(stats.data.dps.optimal > 0 || stats.data.dps.missileRange > 0) && (
+                      <div className="text-xs text-zinc-400">
+                        {stats.data.dps.optimal > 0 && (
+                          <>
+                            <span className="text-zinc-500">range</span>{" "}
+                            {km(stats.data.dps.optimal)}
+                            {stats.data.dps.falloff > 0 && (
+                              <span className="text-zinc-500"> +{km(stats.data.dps.falloff)} falloff</span>
+                            )}
+                          </>
+                        )}
+                        {stats.data.dps.missileRange > 0 && (
+                          <>
+                            {stats.data.dps.optimal > 0 && " · "}
+                            <span className="text-zinc-500">missile</span> {km(stats.data.dps.missileRange)}
+                          </>
+                        )}
                       </div>
                     )}
                   </>
@@ -1179,6 +1212,12 @@ function fuzzyScore(name: string, q: string): number {
   return s;
 }
 
+/** Metres → a compact "X.X km" label. */
+function km(metres: number): string {
+  const v = metres / 1000;
+  return `${v >= 100 ? Math.round(v) : v.toFixed(1)} km`;
+}
+
 const SLOT_BADGE: Partial<Record<SlotKind, string>> = {
   high: "High",
   mid: "Mid",
@@ -1210,19 +1249,30 @@ function SlotBadge({ slot }: { slot?: SlotKind }) {
 function ChargeControl({
   typeId,
   chargeTypeId,
+  sameTypeCount,
   onSetCharge,
+  onSetChargeAll,
 }: {
   typeId: number;
   chargeTypeId: number | null;
+  /** How many fitted weapons share this type (for the "apply to all" option). */
+  sameTypeCount: number;
   onSetCharge: (chargeTypeId: number | null) => void;
+  onSetChargeAll: (chargeTypeId: number | null) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [all, setAll] = useState(false);
   const charges = useQuery({
     queryKey: ["fitting", "charges", typeId],
     queryFn: () => fittingCompatibleCharges(typeId),
     enabled: open,
   });
   const list = charges.data ?? [];
+  // Pick on one weapon or all of this type, depending on the toggle.
+  const apply = (c: number | null) => {
+    (all ? onSetChargeAll : onSetCharge)(c);
+    setOpen(false);
+  };
   return (
     <span className="relative ml-auto shrink-0">
       <button
@@ -1240,7 +1290,18 @@ function ChargeControl({
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-1 max-h-60 w-56 overflow-y-auto rounded border border-zinc-700 bg-zinc-900 p-1 shadow-lg">
+          <div className="absolute right-0 z-20 mt-1 max-h-72 w-56 overflow-y-auto rounded border border-zinc-700 bg-zinc-900 p-1 shadow-lg">
+            {sameTypeCount > 1 && (
+              <label className="flex items-center gap-2 border-b border-zinc-800 px-2 py-1 text-xs text-zinc-400">
+                <input
+                  type="checkbox"
+                  checked={all}
+                  onChange={(e) => setAll(e.currentTarget.checked)}
+                  className="accent-amber-500"
+                />
+                Apply to all {sameTypeCount}
+              </label>
+            )}
             {charges.isLoading ? (
               <div className="px-2 py-1 text-xs text-zinc-500">Loading…</div>
             ) : list.length === 0 ? (
@@ -1252,10 +1313,7 @@ function ChargeControl({
                 {chargeTypeId && (
                   <li>
                     <button
-                      onClick={() => {
-                        onSetCharge(null);
-                        setOpen(false);
-                      }}
+                      onClick={() => apply(null)}
                       className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-zinc-400 hover:bg-zinc-800"
                     >
                       <X size={12} /> Remove ammo
@@ -1265,10 +1323,7 @@ function ChargeControl({
                 {list.map((c) => (
                   <li key={c.id}>
                     <button
-                      onClick={() => {
-                        onSetCharge(c.id);
-                        setOpen(false);
-                      }}
+                      onClick={() => apply(c.id)}
                       className={`block w-full truncate rounded px-2 py-1 text-left hover:bg-zinc-800 ${
                         c.id === chargeTypeId ? "text-amber-400" : "text-zinc-200"
                       }`}
@@ -1293,6 +1348,7 @@ function SlotGrid({
   onRemove,
   onAddToSlot,
   onSetCharge,
+  onSetChargeForType,
 }: {
   fit: Fit;
   layout: { highSlots: number; midSlots: number; lowSlots: number; rigSlots: number };
@@ -1300,6 +1356,7 @@ function SlotGrid({
   onRemove: (globalIndex: number) => void;
   onAddToSlot: (slot: SlotKind) => void;
   onSetCharge: (globalIndex: number, chargeTypeId: number | null) => void;
+  onSetChargeForType: (weaponTypeId: number, chargeTypeId: number | null) => void;
 }) {
   const counts: Partial<Record<SlotKind, number>> = {
     high: layout.highSlots,
@@ -1348,7 +1405,11 @@ function SlotGrid({
                       <ChargeControl
                         typeId={it.typeId}
                         chargeTypeId={it.chargeTypeId ?? null}
+                        sameTypeCount={
+                          fit.items.filter((x) => x.typeId === it.typeId).length
+                        }
                         onSetCharge={(c) => onSetCharge(i, c)}
+                        onSetChargeAll={(c) => onSetChargeForType(it.typeId, c)}
                       />
                     )}
                   </li>
