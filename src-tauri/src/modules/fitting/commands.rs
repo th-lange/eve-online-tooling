@@ -222,28 +222,121 @@ pub struct ModuleInfo {
     pub calibration: f64,
 }
 
-/// Slot + CPU/PG/calibration cost for each type id (for fit-aware ranking, #266).
+/// Slot + **skill-adjusted** CPU/PG/calibration for each candidate type, on the
+/// given hull at the chosen skills — the *same* resolution fitted modules get, so
+/// the add-module fit check matches reality (e.g. Weapon Upgrades cutting turret
+/// CPU at all-V, or a hull's role bonus to a module's fitting). #266.
 #[tauri::command]
-pub fn fitting_module_info(
+pub async fn fitting_module_info(
     app: AppHandle,
+    auth_state: State<'_, AuthState>,
+    ship_type_id: i64,
+    skill_source: Option<String>,
     type_ids: Vec<i64>,
 ) -> Result<Vec<ModuleInfo>, String> {
+    // Skills first (async) — the SDE connection below isn't Send across awaits.
+    let levels: Option<HashMap<i64, i64>> = if skill_source.as_deref() == Some("character") {
+        character_skill_levels(&app, &auth_state).await.ok()
+    } else {
+        None
+    };
+    let skill_level_for = |sid: i64| -> f64 {
+        match &levels {
+            Some(map) => map.get(&sid).copied().unwrap_or(0) as f64,
+            None => 5.0, // all-V
+        }
+    };
+
     let sde = open_sde(&app)?;
-    let attrs = sde.types_attributes_raw(&type_ids).map_err(|e| e.to_string())?;
+    let costs = resolve_module_costs(&sde, ship_type_id, &skill_level_for, &type_ids)?;
     type_ids
         .into_iter()
         .map(|id| {
-            let a: HashMap<i64, f64> = attrs.get(&id).cloned().unwrap_or_default().into_iter().collect();
-            let get = |attr: i64| a.get(&attr).copied().unwrap_or(0.0);
+            let (cpu, powergrid, calibration) = costs.get(&id).copied().unwrap_or((0.0, 0.0, 0.0));
             Ok(ModuleInfo {
                 id,
                 slot: classify_slot(&sde, id)?,
-                cpu: get(50),           // cpu usage
-                powergrid: get(30),     // power usage
-                calibration: get(1153), // rig calibration cost
+                cpu,
+                powergrid,
+                calibration,
             })
         })
         .collect()
+}
+
+/// Finalized CPU(50)/PG(30)/calibration(1153) for each candidate module, resolved
+/// on `ship_type_id` with the active skills via the dogma engine — identical to
+/// how fitted modules are computed. Resolving the candidates together is safe:
+/// skill/role fitting reductions apply per module, not across them.
+fn resolve_module_costs(
+    sde: &Sde,
+    ship_type_id: i64,
+    skill_level_for: &dyn Fn(i64) -> f64,
+    type_ids: &[i64],
+) -> Result<HashMap<i64, (f64, f64, f64)>, String> {
+    let skill_ids = sde.skill_type_ids().map_err(|e| e.to_string())?;
+    let mut all_ids = Vec::with_capacity(1 + type_ids.len() + skill_ids.len());
+    all_ids.push(ship_type_id);
+    all_ids.extend_from_slice(type_ids);
+    all_ids.extend(&skill_ids);
+
+    let attrs = sde.types_attributes_raw(&all_ids).map_err(|e| e.to_string())?;
+    let effects_by_type = sde.types_effects(&all_ids).map_err(|e| e.to_string())?;
+    let effect_meta = sde.effect_meta().map_err(|e| e.to_string())?;
+    let defaults = sde.attribute_defaults().map_err(|e| e.to_string())?;
+    let is_stackable = |attr: i64| defaults.get(&attr).map(|m| m.stackable).unwrap_or(true);
+
+    let entity = |type_id: i64, required_skills: Vec<i64>| -> Result<EntityInput, String> {
+        let group_id = sde
+            .type_info(type_id)
+            .map_err(|e| e.to_string())?
+            .map(|t| t.group_id)
+            .unwrap_or(0);
+        Ok(EntityInput {
+            type_id,
+            attrs: attrs.get(&type_id).cloned().unwrap_or_default(),
+            effect_ids: effects_by_type.get(&type_id).cloned().unwrap_or_default(),
+            group_id,
+            required_skills,
+        })
+    };
+
+    let ship = entity(ship_type_id, Vec::new())?;
+    let mut modules = Vec::with_capacity(type_ids.len());
+    for id in type_ids {
+        modules.push(entity(*id, required_skills_of(&attrs, *id))?);
+    }
+    let mut skills = Vec::with_capacity(skill_ids.len());
+    for sid in &skill_ids {
+        let level = skill_level_for(*sid);
+        if level <= 0.0 {
+            continue;
+        }
+        let mut a = attrs.get(sid).cloned().unwrap_or_default();
+        match a.iter_mut().find(|(k, _)| *k == 280) {
+            Some(p) => p.1 = level,
+            None => a.push((280, level)),
+        }
+        skills.push(EntityInput {
+            type_id: *sid,
+            attrs: a,
+            effect_ids: effects_by_type.get(sid).cloned().unwrap_or_default(),
+            group_id: 0,
+            required_skills: Vec::new(),
+        });
+    }
+
+    let charges = vec![None; modules.len()];
+    let resolved = resolve(
+        &FitInput { ship, modules, skills, drones: Vec::new(), charges },
+        &effect_meta,
+        &is_stackable,
+    );
+    let mut out = HashMap::new();
+    for (id, store) in type_ids.iter().zip(&resolved.modules) {
+        out.insert(*id, (store.get(50), store.get(30), store.get(1153)));
+    }
+    Ok(out)
 }
 
 /// Add a module/drone/charge-bearing item to a fit, classifying its slot from

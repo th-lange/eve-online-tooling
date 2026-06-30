@@ -1060,9 +1060,18 @@ export interface ModuleInfo {
   calibration: number;
 }
 
-/** Slot + CPU/PG/calibration cost for each type id. */
-export function fittingModuleInfo(typeIds: number[]): Promise<ModuleInfo[]> {
-  return invoke<ModuleInfo[]>("fitting_module_info", { typeIds });
+/** Slot + skill-adjusted CPU/PG/calibration for each candidate type, resolved on
+ *  a hull at the chosen skills (the same resolution fitted modules get). */
+export function fittingModuleInfo(
+  shipTypeId: number,
+  skillSource: SkillSource,
+  typeIds: number[],
+): Promise<ModuleInfo[]> {
+  return invoke<ModuleInfo[]>("fitting_module_info", {
+    shipTypeId,
+    skillSource,
+    typeIds,
+  });
 }
 
 /** A market-group node in the browse tree. */
