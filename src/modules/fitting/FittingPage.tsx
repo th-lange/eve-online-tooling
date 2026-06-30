@@ -33,6 +33,8 @@ import {
   type OptimizeObjective,
   type SkillSource,
   type SlotKind,
+  type TankStats,
+  type WeaponRange,
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
 import { formatDuration, formatIsk } from "../../lib/format";
@@ -128,6 +130,14 @@ function Workbench() {
   // The jammed view only applies while ECM is actually projected onto the fit.
   const jammedActive =
     jammed && !!stats.data?.projectedEw?.some((t) => t.jam);
+
+  // Per-weapon ranges keyed by (typeId, chargeTypeId), for the slot grid.
+  const rangeOf = useMemo(() => {
+    const m = new Map<string, WeaponRange>();
+    for (const r of stats.data?.weaponRanges ?? [])
+      m.set(`${r.typeId}:${r.chargeTypeId ?? 0}`, r);
+    return m;
+  }, [stats.data?.weaponRanges]);
 
   // What the hull has free right now — drives fit-aware ranking/filtering in the
   // add-module browser. Prefer the resolved (skill-adjusted) layout/resources.
@@ -583,6 +593,7 @@ function Workbench() {
                 onAddToSlot={setSlotFilter}
                 onSetCharge={setCharge}
                 onSetChargeForType={setChargeForType}
+                rangeOf={rangeOf}
               />
             )}
 
@@ -673,25 +684,6 @@ function Workbench() {
                         {stats.data.dps.drone > 0 && `· drone ${stats.data.dps.drone.toFixed(1)}`}
                       </div>
                     )}
-                    {(stats.data.dps.optimal > 0 || stats.data.dps.missileRange > 0) && (
-                      <div className="text-xs text-zinc-400">
-                        {stats.data.dps.optimal > 0 && (
-                          <>
-                            <span className="text-zinc-500">range</span>{" "}
-                            {km(stats.data.dps.optimal)}
-                            {stats.data.dps.falloff > 0 && (
-                              <span className="text-zinc-500"> +{km(stats.data.dps.falloff)} falloff</span>
-                            )}
-                          </>
-                        )}
-                        {stats.data.dps.missileRange > 0 && (
-                          <>
-                            {stats.data.dps.optimal > 0 && " · "}
-                            <span className="text-zinc-500">missile</span> {km(stats.data.dps.missileRange)}
-                          </>
-                        )}
-                      </div>
-                    )}
                   </>
                 )}
               </div>
@@ -710,14 +702,13 @@ function Workbench() {
                 <h3 className="text-xs uppercase tracking-wide text-zinc-500">Tank ({skillLabel})</h3>
                 <div className="text-sm text-zinc-300">
                   {Math.round(stats.data.tank.ehp).toLocaleString()} EHP
-                </div>
-                <div className="text-xs text-zinc-500">
-                  S {Math.round(stats.data.tank.shieldHp)} · A {Math.round(stats.data.tank.armorHp)} ·
-                  H {Math.round(stats.data.tank.hullHp)}
                   {(stats.data.tank.shieldRepS > 0 || stats.data.tank.armorRepS > 0) && (
-                    <> · reps {(stats.data.tank.shieldRepS + stats.data.tank.armorRepS).toFixed(1)}/s</>
+                    <span className="ml-2 text-xs text-zinc-500">
+                      reps {(stats.data.tank.shieldRepS + stats.data.tank.armorRepS).toFixed(1)}/s
+                    </span>
                   )}
                 </div>
+                <TankResists tank={stats.data.tank} />
               </div>
             )}
 
@@ -1218,6 +1209,55 @@ function km(metres: number): string {
   return `${v >= 100 ? Math.round(v) : v.toFixed(1)} km`;
 }
 
+const DAMAGE_TYPES = ["EM", "Th", "Kin", "Exp"] as const;
+
+/** A resist % cell, tinted greener the higher the resistance (spot tank holes). */
+function resistClass(v: number): string {
+  if (v >= 0.5) return "text-emerald-400";
+  if (v >= 0.3) return "text-emerald-500/80";
+  if (v > 0) return "text-zinc-300";
+  return "text-zinc-600";
+}
+
+/** Per-layer HP + EM/Th/Kin/Exp resistances for shield, armor and hull. */
+function TankResists({ tank }: { tank: TankStats }) {
+  const layers = [
+    { name: "Shield", hp: tank.shieldHp, r: tank.shieldResists },
+    { name: "Armor", hp: tank.armorHp, r: tank.armorResists },
+    { name: "Hull", hp: tank.hullHp, r: tank.hullResists },
+  ];
+  return (
+    <table className="w-full text-[11px] tabular-nums">
+      <thead>
+        <tr className="text-zinc-600">
+          <th className="text-left font-normal" />
+          <th className="pr-1 text-right font-normal">HP</th>
+          {DAMAGE_TYPES.map((d) => (
+            <th key={d} className="pl-1 text-right font-normal">
+              {d}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {layers.map((l) => (
+          <tr key={l.name}>
+            <td className="text-zinc-300">{l.name}</td>
+            <td className="pr-1 text-right text-zinc-400">
+              {Math.round(l.hp).toLocaleString()}
+            </td>
+            {l.r.map((v, i) => (
+              <td key={i} className={`pl-1 text-right ${resistClass(v)}`}>
+                {Math.round(v * 100)}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 const SLOT_BADGE: Partial<Record<SlotKind, string>> = {
   high: "High",
   mid: "Mid",
@@ -1370,6 +1410,7 @@ function SlotGrid({
   onAddToSlot,
   onSetCharge,
   onSetChargeForType,
+  rangeOf,
 }: {
   fit: Fit;
   layout: { highSlots: number; midSlots: number; lowSlots: number; rigSlots: number };
@@ -1378,6 +1419,7 @@ function SlotGrid({
   onAddToSlot: (slot: SlotKind) => void;
   onSetCharge: (globalIndex: number, chargeTypeId: number | null) => void;
   onSetChargeForType: (weaponTypeId: number, chargeTypeId: number | null) => void;
+  rangeOf: Map<string, WeaponRange>;
 }) {
   const counts: Partial<Record<SlotKind, number>> = {
     high: layout.highSlots,
@@ -1403,38 +1445,50 @@ function SlotGrid({
             </div>
             {items.length > 0 && (
               <ul className="text-sm text-zinc-300">
-                {items.map(({ it, i }) => (
-                  <li
-                    key={i}
-                    className="group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-zinc-800/70"
-                  >
-                    <button
-                      onClick={() => onRemove(i)}
-                      className="flex shrink-0 items-center rounded p-0.5 text-zinc-500 group-hover:text-red-400"
-                      title="Remove from slot"
-                      aria-label={`Remove ${nameOf(it.typeId)}`}
+                {items.map(({ it, i }) => {
+                  const range = rangeOf.get(`${it.typeId}:${it.chargeTypeId ?? 0}`);
+                  return (
+                    <li
+                      key={i}
+                      className="group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-zinc-800/70"
                     >
-                      <X size={14} />
-                    </button>
-                    <span className="truncate">
-                      {nameOf(it.typeId)}
-                      {it.chargeTypeId ? ` + ${nameOf(it.chargeTypeId)}` : ""}
-                      {it.quantity > 1 ? ` x${it.quantity}` : ""}
-                    </span>
-                    {/* Ammo picker for high/mid weapons & script-takers. */}
-                    {(slot === "high" || slot === "mid") && (
-                      <ChargeControl
-                        typeId={it.typeId}
-                        chargeTypeId={it.chargeTypeId ?? null}
-                        sameTypeCount={
-                          fit.items.filter((x) => x.typeId === it.typeId).length
-                        }
-                        onSetCharge={(c) => onSetCharge(i, c)}
-                        onSetChargeAll={(c) => onSetChargeForType(it.typeId, c)}
-                      />
-                    )}
-                  </li>
-                ))}
+                      <button
+                        onClick={() => onRemove(i)}
+                        className="flex shrink-0 items-center rounded p-0.5 text-zinc-500 group-hover:text-red-400"
+                        title="Remove from slot"
+                        aria-label={`Remove ${nameOf(it.typeId)}`}
+                      >
+                        <X size={14} />
+                      </button>
+                      <span className="truncate">
+                        {nameOf(it.typeId)}
+                        {it.chargeTypeId ? ` + ${nameOf(it.chargeTypeId)}` : ""}
+                        {it.quantity > 1 ? ` x${it.quantity}` : ""}
+                      </span>
+                      {range && (
+                        <span
+                          className="shrink-0 tabular-nums text-[11px] text-zinc-500"
+                          title="optimal range + falloff"
+                        >
+                          {km(range.optimal)}
+                          {range.falloff > 0 ? ` +${km(range.falloff)}` : ""}
+                        </span>
+                      )}
+                      {/* Ammo picker for high/mid weapons & script-takers. */}
+                      {(slot === "high" || slot === "mid") && (
+                        <ChargeControl
+                          typeId={it.typeId}
+                          chargeTypeId={it.chargeTypeId ?? null}
+                          sameTypeCount={
+                            fit.items.filter((x) => x.typeId === it.typeId).length
+                          }
+                          onSetCharge={(c) => onSetCharge(i, c)}
+                          onSetChargeAll={(c) => onSetChargeForType(it.typeId, c)}
+                        />
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             )}
             {/* Click a free slot to add a module to it (filters the browser). */}

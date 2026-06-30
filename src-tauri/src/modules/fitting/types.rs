@@ -150,13 +150,19 @@ pub struct DpsBreakdown {
     pub missile: f64,
     pub drone: f64,
     pub total: f64,
-    /// Turret optimal range (m) and falloff (m) of the primary turret, after
-    /// skills/ship bonuses and the loaded ammo. 0 when the fit has no turret.
+}
+
+/// Engagement range of one fitted weapon/mining module, after skills + ammo.
+/// Keyed by `(type_id, charge_type_id)` since identical loadouts share a range.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WeaponRange {
+    pub type_id: i64,
+    pub charge_type_id: Option<i64>,
+    /// Optimal range (m). For missiles this is the flight range (falloff 0); for
+    /// mining lasers it's their reach.
     pub optimal: f64,
     pub falloff: f64,
-    /// Missile flight range (m) of the loaded missile (velocity × flight time).
-    /// 0 when the fit has no loaded missile.
-    pub missile_range: f64,
 }
 
 /// Navigation: speed, agility, align and signature (#175).
@@ -210,6 +216,9 @@ pub struct FitStats {
     /// Whole-fit market value (#163); `None` until priced.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub price: Option<f64>,
+    /// Per-weapon engagement ranges (turrets/missiles/mining), after skills/ammo.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub weapon_ranges: Vec<WeaponRange>,
     /// Electronic-warfare projected **onto** this fit, by category (#265). A
     /// presence indicator only — no magnitude — for EW types we don't model
     /// numerically (and a label for the ones we do).
