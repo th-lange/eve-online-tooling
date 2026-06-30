@@ -116,16 +116,6 @@ function OrdersTable({ rows }: { rows: OrderRow[] }) {
             >
               <td className="px-3 py-1.5">
                 <span className="text-zinc-200">{r.name}</span>
-                <button
-                  onClick={() =>
-                    openMarketWindow(r.typeId).catch((e) => alert(String(e)))
-                  }
-                  title="Open this item's market window in the EVE client"
-                  aria-label={`Open ${r.name} in EVE`}
-                  className="ml-1.5 inline-flex align-middle text-zinc-600 hover:text-indigo-400"
-                >
-                  <ExternalLink size={13} />
-                </button>
                 <span className={`ml-2 text-xs ${r.isBuy ? "text-sky-400" : "text-emerald-400"}`}>
                   {r.isBuy ? "buy" : "sell"}
                 </span>
@@ -139,18 +129,30 @@ function OrdersTable({ rows }: { rows: OrderRow[] }) {
               </td>
               <td className="px-3 py-1.5 text-zinc-400">{r.location}</td>
               <td className="px-3 py-1.5 text-xs text-zinc-500">{r.issued.slice(0, 10)}</td>
-              <td className="px-3 py-1.5 text-right">
-                {r.undercut && r.bestPrice != null ? (
+              <td className="px-3 py-1.5">
+                <div className="flex items-center justify-end gap-2">
+                  {r.undercut && r.bestPrice != null ? (
+                    <button
+                      onClick={() => copyUndercut(r)}
+                      title="Copy a price one tick better than the current best"
+                      className="rounded border border-rose-700 px-1.5 py-0.5 text-xs text-rose-300 hover:bg-rose-900/40"
+                    >
+                      copy {formatIsk(undercutPrice(r))}
+                    </button>
+                  ) : (
+                    <span className="text-xs text-emerald-500">top</span>
+                  )}
                   <button
-                    onClick={() => copyUndercut(r)}
-                    title="Copy a price one tick better than the current best"
-                    className="rounded border border-rose-700 px-1.5 py-0.5 text-xs text-rose-300 hover:bg-rose-900/40"
+                    onClick={() =>
+                      openMarketWindow(r.typeId).catch((e) => alert(String(e)))
+                    }
+                    title="Open this item's market window in the EVE client"
+                    aria-label={`Open ${r.name} in EVE`}
+                    className="inline-flex text-zinc-600 hover:text-indigo-400"
                   >
-                    copy {formatIsk(undercutPrice(r))}
+                    <ExternalLink size={13} />
                   </button>
-                ) : (
-                  <span className="text-xs text-emerald-500">top</span>
-                )}
+                </div>
               </td>
             </tr>
           ))}
