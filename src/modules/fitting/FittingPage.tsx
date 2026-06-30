@@ -578,6 +578,8 @@ function Workbench() {
               slotFilter={slotFilter}
               onSlotFilter={setSlotFilter}
               fitContext={fitContext}
+              shipTypeId={fit.shipTypeId}
+              skillSource={skillSource}
             />
 
             <ProjectedPanel
@@ -745,12 +747,16 @@ function ModuleBrowser({
   slotFilter,
   onSlotFilter,
   fitContext,
+  shipTypeId,
+  skillSource,
 }: {
   onAdd: (typeId: number) => void;
   pending: boolean;
   slotFilter: SlotKind | null;
   onSlotFilter: (slot: SlotKind | null) => void;
   fitContext: FitContext | null;
+  shipTypeId: number;
+  skillSource: SkillSource;
 }) {
   const [q, setQ] = useState("");
   const [mode, setMode] = useState<"search" | "browse">("search");
@@ -772,8 +778,8 @@ function ModuleBrowser({
   // Slot + fitting cost of each result, to badge the slot and rank by what fits.
   const ids = useMemo(() => matches.map((r) => r.id), [matches]);
   const info = useQuery({
-    queryKey: ["fitting", "module-info", ids],
-    queryFn: () => fittingModuleInfo(ids),
+    queryKey: ["fitting", "module-info", shipTypeId, skillSource, ids],
+    queryFn: () => fittingModuleInfo(shipTypeId, skillSource, ids),
     enabled: ids.length > 0,
   });
   const infoOf = useMemo(
@@ -898,6 +904,8 @@ function ModuleBrowser({
           pending={pending}
           slotFilter={slotFilter}
           fitContext={fitContext}
+          shipTypeId={shipTypeId}
+          skillSource={skillSource}
         />
       )}
     </div>
@@ -915,11 +923,15 @@ function BrowseTree({
   pending,
   slotFilter,
   fitContext,
+  shipTypeId,
+  skillSource,
 }: {
   onAdd: (typeId: number) => void;
   pending: boolean;
   slotFilter: SlotKind | null;
   fitContext: FitContext | null;
+  shipTypeId: number;
+  skillSource: SkillSource;
 }) {
   const [path, setPath] = useState<MarketGroupNode[]>([]);
   const [showAll, setShowAll] = useState(false);
@@ -931,8 +943,8 @@ function BrowseTree({
   const items = useMemo(() => level.data?.items ?? [], [level.data]);
   const ids = useMemo(() => items.map((i) => i.id), [items]);
   const info = useQuery({
-    queryKey: ["fitting", "module-info", ids],
-    queryFn: () => fittingModuleInfo(ids),
+    queryKey: ["fitting", "module-info", shipTypeId, skillSource, ids],
+    queryFn: () => fittingModuleInfo(shipTypeId, skillSource, ids),
     enabled: ids.length > 0,
   });
   const infoOf = useMemo(
@@ -1215,14 +1227,15 @@ function ChargeControl({
     <span className="relative ml-auto shrink-0">
       <button
         onClick={() => setOpen((o) => !o)}
-        title="Load ammo / charge"
-        className={`flex items-center rounded p-0.5 hover:text-amber-300 ${
+        title={chargeTypeId ? "Change ammo / charge" : "Add ammo / charge"}
+        className={`flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] ${
           chargeTypeId
-            ? "text-amber-400"
-            : "text-zinc-600 opacity-0 group-hover:opacity-100"
+            ? "border-amber-700/60 text-amber-400 hover:bg-amber-900/20"
+            : "border-zinc-700 text-zinc-400 hover:border-zinc-600 hover:text-amber-300"
         }`}
       >
-        <Crosshair size={13} />
+        <Crosshair size={11} />
+        {chargeTypeId ? "ammo" : "add ammo"}
       </button>
       {open && (
         <>
