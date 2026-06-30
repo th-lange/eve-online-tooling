@@ -1499,22 +1499,17 @@ function SlotGrid({
                       : it.state === "online"
                         ? "offline"
                         : "active";
-                  const stateTag =
-                    it.state === "online"
-                      ? "inactive"
+                  const stateTag = !canToggle
+                    ? null
+                    : it.state === "online"
+                      ? { label: "inactive", cls: "text-red-400" }
                       : it.state === "offline"
-                        ? "offline"
-                        : null;
+                        ? { label: "offline", cls: "text-zinc-400" }
+                        : { label: "active", cls: "text-emerald-400" };
                   return (
                     <li
                       key={i}
-                      className={`group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-zinc-800/70 ${
-                        it.state === "offline"
-                          ? "opacity-50"
-                          : it.state === "online"
-                            ? "opacity-75"
-                            : ""
-                      }`}
+                      className="group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-zinc-800/70"
                     >
                       <button
                         onClick={() => onRemove(i)}
@@ -1546,13 +1541,23 @@ function SlotGrid({
                           <Power size={13} />
                         </button>
                       )}
-                      <span className="min-w-0 flex-1 truncate">
+                      <span
+                        className={`min-w-0 flex-1 truncate ${
+                          it.state === "offline"
+                            ? "text-zinc-500"
+                            : it.state === "online"
+                              ? "text-zinc-400"
+                              : ""
+                        }`}
+                      >
                         {nameOf(it.typeId)}
                         {it.chargeTypeId ? ` + ${nameOf(it.chargeTypeId)}` : ""}
                         {it.quantity > 1 ? ` x${it.quantity}` : ""}
                         {stateTag && (
-                          <span className="ml-1 text-[10px] uppercase text-zinc-500">
-                            {stateTag}
+                          <span
+                            className={`ml-1.5 rounded bg-zinc-800/80 px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide ${stateTag.cls}`}
+                          >
+                            {stateTag.label}
                           </span>
                         )}
                       </span>
