@@ -2687,6 +2687,41 @@ mod tests {
         );
     }
 
+    /// A T2 turret should report both optimal *and* falloff (gated on the SDE).
+    #[test]
+    fn t2_turret_reports_optimal_and_falloff() {
+        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+            eprintln!("t2_turret_reports_optimal_and_falloff: EVE_SDE_PATH unset — skipping");
+            return;
+        };
+        let path = std::path::PathBuf::from(&path);
+        if !path.exists() {
+            return;
+        }
+        let sde = Sde::open(&path).unwrap();
+        let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
+        let fit = Fit {
+            id: "t".into(),
+            name: "t".into(),
+            ship_type_id: tid("Rifter"),
+            items: vec![FitItem {
+                type_id: tid("200mm AutoCannon II"),
+                slot: SlotKind::High,
+                index: 0,
+                state: ModuleState::Active,
+                charge_type_id: Some(tid("Republic Fleet EMP S")),
+                quantity: 1,
+            }],
+            projected: Vec::new(),
+        };
+        let layout = sde.ship_layout(fit.ship_type_id).unwrap().unwrap();
+        let d = run_dogma(&sde, &fit, &layout, &|_| 5.0).unwrap();
+        let r = d.weapon_ranges.first().expect("a weapon range");
+        // A turret has both an optimal and a (larger, for autocannons) falloff.
+        assert!(r.optimal > 0.0, "optimal should be set: {r:?}");
+        assert!(r.falloff > 0.0, "falloff should be set: {r:?}");
+    }
+
     /// `next_slot_index` fills from 0 and appends one past the highest in-slot.
     #[test]
     fn next_slot_index_appends_per_slot() {

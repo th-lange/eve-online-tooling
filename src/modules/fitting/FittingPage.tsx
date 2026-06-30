@@ -1460,14 +1460,14 @@ function SlotGrid({
                       >
                         <X size={14} />
                       </button>
-                      <span className="truncate">
+                      <span className="min-w-0 flex-1 truncate">
                         {nameOf(it.typeId)}
                         {it.chargeTypeId ? ` + ${nameOf(it.chargeTypeId)}` : ""}
                         {it.quantity > 1 ? ` x${it.quantity}` : ""}
                       </span>
                       {range && (
                         <span
-                          className="shrink-0 tabular-nums text-[11px] text-zinc-500"
+                          className="shrink-0 whitespace-nowrap tabular-nums text-[11px] text-zinc-500"
                           title="optimal range + falloff"
                         >
                           {km(range.optimal)}
