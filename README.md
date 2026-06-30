@@ -24,11 +24,13 @@ built as a set of feature **modules** over a shared service layer.
 - **Wormholes** — map your chain by hand with mass/EOL tracking, cross-chain routing (stargates ∪ your
   scanned holes), and probe-scanner signature paste.
 - **Fitting** — build a ship fit (EFT import/export + local saves), validate slots / CPU / powergrid /
-  calibration / drone bay, price the whole fit, and simulate PYFA-style stats — **DPS, EHP/tank,
+  calibration / drone bay, price the whole fit, and simulate PYFA-style stats — **DPS, per-weapon
+  range (optimal/falloff, missiles, mining), EHP/tank with resist breakdown + active/passive reps,
   capacitor stability (with a cap-over-time chart), speed/align and targeting** — at all-V or your
-  character's real skills. Add modules by **fuzzy search or by browsing the market-group tree** —
-  results rank by what actually fits the hull's free slots / CPU / powergrid — and see which **EW is
-  projected onto the fit** (with an opt-in ECM "jammed" view).
+  character's real skills. Add modules by **fuzzy search or by browsing the market-group tree**
+  (ranked by what actually fits), load **compatible charges** per weapon, toggle each module
+  **active / inactive / offline**, and see which **EW is projected onto the fit** (with an opt-in
+  ECM "jammed" view).
 - **Shopping Lists** — keep named lists of items to buy (a built-in *default* and *production* list,
   plus your own), fed by "add to list" buttons across Market Search, Production, Station Trading and
   Daytrading, with quantity editing and one-click in-game Multibuy export.
