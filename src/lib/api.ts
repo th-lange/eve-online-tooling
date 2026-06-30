@@ -1527,11 +1527,15 @@ export interface DpsBreakdown {
   missile: number;
   drone: number;
   total: number;
-  /** Primary turret optimal range (m) and falloff (m), after skills/ammo. */
+}
+
+/** Engagement range of one fitted weapon/mining module, after skills + ammo. */
+export interface WeaponRange {
+  typeId: number;
+  chargeTypeId?: number | null;
+  /** Optimal (m); for missiles this is the flight range, for mining its reach. */
   optimal: number;
   falloff: number;
-  /** Loaded missile's flight range (m). */
-  missileRange: number;
 }
 
 /** Navigation: speed, agility, align and signature. */
@@ -1563,6 +1567,8 @@ export interface FitStats {
   layout?: ShipLayout | null;
   targeting?: TargetStats | null;
   price?: number | null;
+  /** Per-weapon engagement ranges (turrets/missiles/mining). */
+  weaponRanges?: WeaponRange[];
   /** EW projected onto this fit, by category (presence only). */
   projectedEw?: EwTag[];
 }

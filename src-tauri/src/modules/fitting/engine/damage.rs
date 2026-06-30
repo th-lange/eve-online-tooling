@@ -44,8 +44,6 @@ pub fn damage(turrets: &[Weapon], missiles: &[Weapon], drones: &[Weapon]) -> Dps
         missile,
         drone,
         total: turret + missile + drone,
-        // Range fields are filled by the caller from the resolved weapon stores.
-        ..Default::default()
     }
 }
 

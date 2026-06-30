@@ -23,7 +23,7 @@ use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
 use super::engine::tank::{tank, DamageProfile, Layer};
 use super::types::{
     CapStats, DpsBreakdown, EwTag, Fit, FitItem, FitPrice, FitPriceLine, FitProblem, FitStats,
-    ModuleState, NavStats, ResourceUsage, Severity, SlotKind, TankStats, TargetStats,
+    ModuleState, NavStats, ResourceUsage, Severity, SlotKind, TankStats, TargetStats, WeaponRange,
 };
 use crate::esi::{authed_get, corporation_id, AuthState};
 use crate::market::{resolve_location, MarketService, PriceModel};
@@ -643,6 +643,7 @@ pub async fn fitting_simulate(
         dps: dogma.as_ref().map(|d| d.dps.clone()),
         navigation: dogma.as_ref().map(|d| d.navigation.clone()),
         layout: dogma.as_ref().map(|d| d.layout.clone()),
+        weapon_ranges: dogma.as_ref().map(|d| d.weapon_ranges.clone()).unwrap_or_default(),
         targeting: dogma.map(|d| d.targeting),
         price: None,
         projected_ew,
@@ -727,6 +728,7 @@ struct DogmaStats {
     capacitor: CapStats,
     tank: TankStats,
     dps: DpsBreakdown,
+    weapon_ranges: Vec<WeaponRange>,
     navigation: NavStats,
     targeting: TargetStats,
 }
@@ -919,6 +921,7 @@ fn run_dogma(
         capacitor: capacitor_of(&resolved),
         tank: tank_of(&resolved),
         dps: dps_of(&resolved, &drone_items),
+        weapon_ranges: weapon_ranges_of(&resolved, &module_items),
         navigation: {
             // Prop modules (AB/MWD) are identified by speedFactor (20) +
             // speedBoostFactor (567). Their mass penalty (massAddition 796) and
@@ -1083,30 +1086,17 @@ fn resolved_damage(store: &AttrStore) -> f64 {
 fn dps_of(resolved: &ResolvedFit, drone_items: &[&FitItem]) -> DpsBreakdown {
     let mut turrets = Vec::new();
     let mut missiles = Vec::new();
-    // Range of the primary (first) turret / missile, from the resolved stores.
-    let mut turret_range: Option<(f64, f64)> = None;
-    let mut missile_range = 0.0;
     for (i, store) in resolved.modules.iter().enumerate() {
-        let mult = store.get(64);
-        let rof_seconds = store.get(51) / 1000.0;
-        // Turret optimal(54)/falloff(158) exist on the gun itself — show them even
-        // before ammo is loaded.
-        if mult > 0.0 && turret_range.is_none() {
-            turret_range = Some((store.get(54), store.get(158)));
-        }
         let Some(Some(charge)) = resolved.charges.get(i) else {
             continue;
         };
         let damage_per_shot = resolved_damage(charge);
+        let rof_seconds = store.get(51) / 1000.0;
+        let mult = store.get(64);
         if mult > 0.0 {
             turrets.push(Weapon { damage_mult: mult, damage_per_shot, rof_seconds, count: 1 });
         } else if rof_seconds > 0.0 {
             missiles.push(Weapon { damage_mult: 1.0, damage_per_shot, rof_seconds, count: 1 });
-            // Missile flight range = velocity(37) × flight time(281, ms) from the
-            // loaded missile (both skill-adjusted).
-            if missile_range == 0.0 {
-                missile_range = charge.get(37) * charge.get(281) / 1000.0;
-            }
         }
     }
 
@@ -1121,13 +1111,40 @@ fn dps_of(resolved: &ResolvedFit, drone_items: &[&FitItem]) -> DpsBreakdown {
         })
         .collect();
 
-    let mut breakdown = damage(&turrets, &missiles, &drones);
-    if let Some((optimal, falloff)) = turret_range {
-        breakdown.optimal = optimal;
-        breakdown.falloff = falloff;
+    damage(&turrets, &missiles, &drones)
+}
+
+/// Per-weapon engagement ranges from the resolved fit: turret optimal(54)/
+/// falloff(158), mining-laser reach (also `maxRange`), and missile flight range
+/// (velocity × flight time) from the loaded missile. Deduped by (type, charge),
+/// since identical loadouts share a range. `module_items` is parallel to
+/// `resolved.modules`/`resolved.charges`.
+fn weapon_ranges_of(resolved: &ResolvedFit, module_items: &[&FitItem]) -> Vec<WeaponRange> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for (i, store) in resolved.modules.iter().enumerate() {
+        let Some(item) = module_items.get(i) else { continue };
+        let mut optimal = store.get(54); // maxRange: turrets + mining lasers
+        let falloff = store.get(158);
+        // Missile launchers have no maxRange — use the loaded missile's flight range.
+        if optimal == 0.0 {
+            if let Some(Some(charge)) = resolved.charges.get(i) {
+                let flight = charge.get(37) * charge.get(281) / 1000.0;
+                if flight > 0.0 {
+                    optimal = flight;
+                }
+            }
+        }
+        if optimal > 0.0 && seen.insert((item.type_id, item.charge_type_id)) {
+            out.push(WeaponRange {
+                type_id: item.type_id,
+                charge_type_id: item.charge_type_id,
+                optimal,
+                falloff,
+            });
+        }
     }
-    breakdown.missile_range = missile_range;
-    breakdown
+    out
 }
 
 /// Damage-objective score for the optimizer. Like DPS, but a turret with **no
