@@ -121,6 +121,7 @@ pub fn resolve(
     input: &FitInput,
     effects: &HashMap<i64, EffectMeta>,
     is_stackable: &impl Fn(i64) -> bool,
+    default_of: &impl Fn(i64) -> f64,
 ) -> ResolvedFit {
     let mut ship = seed(&input.ship);
     let mut modules: Vec<AttrStore> = input.modules.iter().map(seed).collect();
@@ -284,7 +285,10 @@ pub fn resolve(
         let AuxDest::Charge(host) = a.dest else { continue };
         for m in ms {
             if m.domain == Domain::Other {
-                let value = a.store.get(m.src_attr);
+                // A charge that lacks the source attribute uses its dogma default
+                // (e.g. a crystal without `fallofMultiplier` → 1.0), so the
+                // multiplier is a no-op instead of ×0 zeroing the host's falloff.
+                let value = a.store.get_or(m.src_attr, default_of(m.src_attr));
                 modules[host].apply(m.tgt_attr, m.op, value, m.penalized);
             }
         }
@@ -455,7 +459,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let resolved = resolve(&input, &effects, &|_| true);
+        let resolved = resolve(&input, &effects, &|_| true, &|_| 0.0);
         // Un-overheated: the overload bonus is skipped, so it stays 1.0.
         assert_eq!(resolved.modules[0].get(64), 1.0);
     }
@@ -524,7 +528,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let resolved = resolve(&input, &effects, &|_| true);
+        let resolved = resolve(&input, &effects, &|_| true, &|_| 0.0);
         let dmg = resolved.drones[0].get(64);
         assert!((dmg - 1.5).abs() < 1e-9, "drone damageMultiplier = {dmg}, want 1.5");
     }
@@ -555,7 +559,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let resolved = resolve(&input, &effects, &|_| true);
+        let resolved = resolve(&input, &effects, &|_| true, &|_| 0.0);
         let dmg = resolved.drones[0].get(64);
         assert!((dmg - 1.25).abs() < 1e-9, "drone damageMultiplier = {dmg}, want 1.25");
     }
@@ -586,7 +590,7 @@ mod tests {
             })],
             ..Default::default()
         };
-        let resolved = resolve(&input, &effects, &|_| true);
+        let resolved = resolve(&input, &effects, &|_| true, &|_| 0.0);
         let kin = resolved.charges[0].as_ref().unwrap().get(117);
         assert!((kin - 125.0).abs() < 1e-9, "charge kinetic = {kin}, want 125");
     }
@@ -616,7 +620,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let resolved = resolve(&input, &effects, &|_| true);
+        let resolved = resolve(&input, &effects, &|_| true, &|_| 0.0);
         let rof = resolved.modules[0].get(51);
         assert!((rof - 900.0).abs() < 1e-9, "rof = {rof}, want 900");
     }
@@ -642,7 +646,7 @@ mod tests {
             })],
             ..Default::default()
         };
-        let resolved = resolve(&input, &effects, &|_| true);
+        let resolved = resolve(&input, &effects, &|_| true, &|_| 0.0);
         let cap_need = resolved.modules[0].get(6);
         assert!((cap_need - 15.0).abs() < 1e-9, "host capNeed = {cap_need}, want 15");
     }
@@ -680,7 +684,7 @@ mod tests {
         };
 
         // damageMultiplier (64) is non-stackable, but a single bonus isn't reduced.
-        let resolved = resolve(&input, &effects, &|attr| attr != 64);
+        let resolved = resolve(&input, &effects, &|attr| attr != 64, &|_| 0.0);
         let dmg = resolved.modules[0].get(64);
         assert!((dmg - 1.15).abs() < 1e-9, "turret damage = {dmg}, want 1.15");
         assert_eq!(resolved.unresolved, 0);
@@ -712,7 +716,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let resolved = resolve(&input, &effects, &|_| true);
+        let resolved = resolve(&input, &effects, &|_| true, &|_| 0.0);
         assert_eq!(resolved.modules[0].get(64), 1.0);
     }
 }
