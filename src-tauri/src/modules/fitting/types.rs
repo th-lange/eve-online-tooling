@@ -138,8 +138,11 @@ pub struct TankStats {
     pub shield_resists: [f64; 4],
     pub armor_resists: [f64; 4],
     pub hull_resists: [f64; 4],
+    /// Active local reps per second (shield boosters / armor repairers).
     pub shield_rep_s: f64,
     pub armor_rep_s: f64,
+    /// Peak passive shield regeneration (GJ/s ≈ HP/s): 2.5 × shield HP ÷ recharge.
+    pub passive_shield_s: f64,
 }
 
 /// Full-application DPS by weapon kind (#174).

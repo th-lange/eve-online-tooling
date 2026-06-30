@@ -1517,8 +1517,11 @@ export interface TankStats {
   shieldResists: [number, number, number, number];
   armorResists: [number, number, number, number];
   hullResists: [number, number, number, number];
+  /** Active local reps/s (shield boosters / armor repairers). */
   shieldRepS: number;
   armorRepS: number;
+  /** Peak passive shield regen (HP/s). */
+  passiveShieldS: number;
 }
 
 /** Full-application DPS by weapon kind. */

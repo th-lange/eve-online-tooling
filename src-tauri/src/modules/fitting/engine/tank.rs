@@ -69,6 +69,8 @@ pub fn tank(
         hull_resists: hull.resists(),
         shield_rep_s,
         armor_rep_s,
+        // Filled by the caller from the resolved hull (needs recharge time).
+        passive_shield_s: 0.0,
     }
 }
 

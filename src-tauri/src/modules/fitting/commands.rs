@@ -1260,14 +1260,25 @@ fn tank_of(resolved: &ResolvedFit) -> TankStats {
         }
     }
 
-    tank(
+    // Peak passive shield regen: 2.5 × max shield ÷ recharge time (479, ms) — the
+    // same peak-recharge form as the capacitor (a stationary shield-tank's tank).
+    let recharge_ms = s.get(479);
+    let passive_shield_s = if recharge_ms > 0.0 {
+        2.5 * s.get(263) / (recharge_ms / 1000.0)
+    } else {
+        0.0
+    };
+
+    let mut t = tank(
         shield,
         armor,
         hull,
         &DamageProfile::default(),
         shield_rep_s,
         armor_rep_s,
-    )
+    );
+    t.passive_shield_s = passive_shield_s;
+    t
 }
 
 /// Price a whole fit (hull + modules + charges + drones/cargo) at a market
