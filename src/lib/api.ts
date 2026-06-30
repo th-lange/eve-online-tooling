@@ -1527,6 +1527,11 @@ export interface DpsBreakdown {
   missile: number;
   drone: number;
   total: number;
+  /** Primary turret optimal range (m) and falloff (m), after skills/ammo. */
+  optimal: number;
+  falloff: number;
+  /** Loaded missile's flight range (m). */
+  missileRange: number;
 }
 
 /** Navigation: speed, agility, align and signature. */

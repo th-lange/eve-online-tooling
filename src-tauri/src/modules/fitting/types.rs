@@ -150,6 +150,13 @@ pub struct DpsBreakdown {
     pub missile: f64,
     pub drone: f64,
     pub total: f64,
+    /// Turret optimal range (m) and falloff (m) of the primary turret, after
+    /// skills/ship bonuses and the loaded ammo. 0 when the fit has no turret.
+    pub optimal: f64,
+    pub falloff: f64,
+    /// Missile flight range (m) of the loaded missile (velocity × flight time).
+    /// 0 when the fit has no loaded missile.
+    pub missile_range: f64,
 }
 
 /// Navigation: speed, agility, align and signature (#175).
