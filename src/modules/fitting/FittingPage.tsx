@@ -702,12 +702,37 @@ function Workbench() {
                 <h3 className="text-xs uppercase tracking-wide text-zinc-500">Tank ({skillLabel})</h3>
                 <div className="text-sm text-zinc-300">
                   {Math.round(stats.data.tank.ehp).toLocaleString()} EHP
-                  {(stats.data.tank.shieldRepS > 0 || stats.data.tank.armorRepS > 0) && (
-                    <span className="ml-2 text-xs text-zinc-500">
-                      reps {(stats.data.tank.shieldRepS + stats.data.tank.armorRepS).toFixed(1)}/s
-                    </span>
-                  )}
                 </div>
+                {(stats.data.tank.shieldRepS > 0 ||
+                  stats.data.tank.armorRepS > 0 ||
+                  stats.data.tank.passiveShieldS > 0) && (
+                  <div className="flex flex-wrap gap-x-3 text-xs text-zinc-500">
+                    {stats.data.tank.shieldRepS > 0 && (
+                      <span>
+                        shield boost{" "}
+                        <span className="tabular-nums text-sky-400">
+                          {stats.data.tank.shieldRepS.toFixed(1)}/s
+                        </span>
+                      </span>
+                    )}
+                    {stats.data.tank.armorRepS > 0 && (
+                      <span>
+                        armor rep{" "}
+                        <span className="tabular-nums text-amber-400">
+                          {stats.data.tank.armorRepS.toFixed(1)}/s
+                        </span>
+                      </span>
+                    )}
+                    {stats.data.tank.passiveShieldS > 0 && (
+                      <span>
+                        passive shield{" "}
+                        <span className="tabular-nums text-sky-300">
+                          {stats.data.tank.passiveShieldS.toFixed(1)}/s
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                )}
                 <TankResists tank={stats.data.tank} />
               </div>
             )}
