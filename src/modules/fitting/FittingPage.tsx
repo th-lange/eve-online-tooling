@@ -1262,12 +1262,22 @@ function ChargeControl({
 }) {
   const [open, setOpen] = useState(false);
   const [all, setAll] = useState(false);
+  const [q, setQ] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  // Focus the filter when the popover opens; clear it when it closes.
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+    else setQ("");
+  }, [open]);
   const charges = useQuery({
     queryKey: ["fitting", "charges", typeId],
     queryFn: () => fittingCompatibleCharges(typeId),
     enabled: open,
   });
-  const list = charges.data ?? [];
+  const allCharges = charges.data ?? [];
+  const list = q.trim()
+    ? allCharges.filter((c) => c.name.toLowerCase().includes(q.toLowerCase().trim()))
+    : allCharges;
   // Pick on one weapon or all of this type, depending on the toggle.
   const apply = (c: number | null) => {
     (all ? onSetChargeAll : onSetCharge)(c);
@@ -1302,12 +1312,23 @@ function ChargeControl({
                 Apply to all {sameTypeCount}
               </label>
             )}
+            {allCharges.length > 0 && (
+              <input
+                ref={inputRef}
+                value={q}
+                onChange={(e) => setQ(e.currentTarget.value)}
+                placeholder="filter ammo…"
+                className="mb-1 w-full rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-100 outline-none placeholder:text-zinc-500"
+              />
+            )}
             {charges.isLoading ? (
               <div className="px-2 py-1 text-xs text-zinc-500">Loading…</div>
-            ) : list.length === 0 ? (
+            ) : allCharges.length === 0 ? (
               <div className="px-2 py-1 text-xs text-zinc-500">
                 No compatible charges.
               </div>
+            ) : list.length === 0 ? (
+              <div className="px-2 py-1 text-xs text-zinc-500">No matches.</div>
             ) : (
               <ul>
                 {chargeTypeId && (
