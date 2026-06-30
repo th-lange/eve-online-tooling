@@ -139,6 +139,11 @@ function Workbench() {
       m.set(`${r.typeId}:${r.chargeTypeId ?? 0}`, r);
     return m;
   }, [stats.data?.weaponRanges]);
+  // Module type ids that can be activated (others are passive — no active state).
+  const activatable = useMemo(
+    () => new Set(stats.data?.activatableTypes ?? []),
+    [stats.data?.activatableTypes],
+  );
 
   // What the hull has free right now — drives fit-aware ranking/filtering in the
   // add-module browser. Prefer the resolved (skill-adjusted) layout/resources.
@@ -609,6 +614,7 @@ function Workbench() {
                 onSetChargeForType={setChargeForType}
                 onSetState={setModuleState}
                 rangeOf={rangeOf}
+                activatable={activatable}
               />
             )}
 
@@ -1452,6 +1458,7 @@ function SlotGrid({
   onSetChargeForType,
   onSetState,
   rangeOf,
+  activatable,
 }: {
   fit: Fit;
   layout: { highSlots: number; midSlots: number; lowSlots: number; rigSlots: number };
@@ -1462,6 +1469,7 @@ function SlotGrid({
   onSetChargeForType: (weaponTypeId: number, chargeTypeId: number | null) => void;
   onSetState: (globalIndex: number, state: ModuleState) => void;
   rangeOf: Map<string, WeaponRange>;
+  activatable: Set<number>;
 }) {
   const counts: Partial<Record<SlotKind, number>> = {
     high: layout.highSlots,
@@ -1489,23 +1497,54 @@ function SlotGrid({
               <ul className="text-sm text-zinc-300">
                 {items.map(({ it, i }) => {
                   const range = rangeOf.get(`${it.typeId}:${it.chargeTypeId ?? 0}`);
-                  // Cycle active → online (deactivated) → offline → active. Only
-                  // high/mid/low modules toggle; rigs/subsystems are permanent.
+                  // Only high/mid/low modules toggle (rigs/subsystems are permanent).
+                  // Activatable modules cycle active → inactive → offline; passive
+                  // ones only toggle online ↔ offline and never read "active".
                   const canToggle =
                     slot === "high" || slot === "mid" || slot === "low";
-                  const next: ModuleState =
-                    it.state === "active"
-                      ? "online"
-                      : it.state === "online"
-                        ? "offline"
-                        : "active";
-                  const stateTag = !canToggle
-                    ? null
-                    : it.state === "online"
-                      ? { label: "inactive", cls: "text-red-400" }
-                      : it.state === "offline"
-                        ? { label: "offline", cls: "text-zinc-400" }
-                        : { label: "active", cls: "text-emerald-400" };
+                  const canActivate = activatable.has(it.typeId);
+                  const offline = it.state === "offline";
+                  let next: ModuleState;
+                  let stateTag: { label: string; cls: string } | null = null;
+                  let toggleTitle: string;
+                  let toggleCls: string;
+                  if (canActivate) {
+                    next =
+                      it.state === "active"
+                        ? "online"
+                        : it.state === "online"
+                          ? "offline"
+                          : "active";
+                    stateTag =
+                      it.state === "active"
+                        ? { label: "active", cls: "text-emerald-400" }
+                        : it.state === "online"
+                          ? { label: "inactive", cls: "text-red-400" }
+                          : { label: "offline", cls: "text-zinc-400" };
+                    toggleTitle =
+                      it.state === "active"
+                        ? "Deactivate (online)"
+                        : it.state === "online"
+                          ? "Disable (offline)"
+                          : "Activate";
+                    toggleCls =
+                      it.state === "active"
+                        ? "text-zinc-600 group-hover:text-zinc-300"
+                        : it.state === "online"
+                          ? "text-amber-500 hover:text-amber-400"
+                          : "text-zinc-500 hover:text-emerald-400";
+                  } else {
+                    next = offline ? "online" : "offline";
+                    stateTag = offline
+                      ? { label: "offline", cls: "text-zinc-400" }
+                      : null;
+                    toggleTitle = offline ? "Enable" : "Disable (offline)";
+                    toggleCls = offline
+                      ? "text-zinc-500 hover:text-emerald-400"
+                      : "text-zinc-600 group-hover:text-zinc-300";
+                  }
+                  // Dim the name when the module isn't contributing.
+                  const dimmed = offline || (canActivate && it.state === "online");
                   return (
                     <li
                       key={i}
@@ -1522,32 +1561,16 @@ function SlotGrid({
                       {canToggle && (
                         <button
                           onClick={() => onSetState(i, next)}
-                          title={
-                            it.state === "active"
-                              ? "Deactivate (online)"
-                              : it.state === "online"
-                                ? "Disable (offline)"
-                                : "Activate"
-                          }
+                          title={toggleTitle}
                           aria-label="Cycle module state"
-                          className={`flex shrink-0 items-center rounded p-0.5 ${
-                            it.state === "active"
-                              ? "text-zinc-600 group-hover:text-zinc-300"
-                              : it.state === "online"
-                                ? "text-amber-500 hover:text-amber-400"
-                                : "text-zinc-500 hover:text-emerald-400"
-                          }`}
+                          className={`flex shrink-0 items-center rounded p-0.5 ${toggleCls}`}
                         >
                           <Power size={13} />
                         </button>
                       )}
                       <span
                         className={`min-w-0 flex-1 truncate ${
-                          it.state === "offline"
-                            ? "text-zinc-500"
-                            : it.state === "online"
-                              ? "text-zinc-400"
-                              : ""
+                          offline ? "text-zinc-500" : dimmed ? "text-zinc-400" : ""
                         }`}
                       >
                         {nameOf(it.typeId)}

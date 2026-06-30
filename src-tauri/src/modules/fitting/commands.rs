@@ -645,6 +645,7 @@ pub async fn fitting_simulate(
         navigation: dogma.as_ref().map(|d| d.navigation.clone()),
         layout: dogma.as_ref().map(|d| d.layout.clone()),
         weapon_ranges: dogma.as_ref().map(|d| d.weapon_ranges.clone()).unwrap_or_default(),
+        activatable_types: dogma.as_ref().map(|d| d.activatable_types.clone()).unwrap_or_default(),
         targeting: dogma.map(|d| d.targeting),
         price: None,
         projected_ew,
@@ -726,6 +727,8 @@ struct DogmaStats {
     validation: Vec<FitProblem>,
     /// Resolved slot layout (T3 subsystems grant slots), for the editor.
     layout: ShipLayout,
+    /// Type ids of fitted modules that can be activated (have a duration effect).
+    activatable_types: Vec<i64>,
     capacitor: CapStats,
     tank: TankStats,
     dps: DpsBreakdown,
@@ -931,11 +934,29 @@ fn run_dogma(
         },
     );
 
+    // Type ids of fitted modules that can actually be *activated* — i.e. carry an
+    // effect with a duration. Passive modules (plates, passive hardeners, DCUs)
+    // have none, so the UI shows them no active/inactive state.
+    let activatable_types: Vec<i64> = module_items
+        .iter()
+        .map(|it| it.type_id)
+        .filter(|tid| {
+            effects_by_type.get(tid).is_some_and(|eids| {
+                eids.iter().any(|eid| {
+                    effect_meta.get(eid).is_some_and(|m| m.duration_attribute_id.is_some())
+                })
+            })
+        })
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
     Ok(DogmaStats {
         resources,
         validation,
         layout,
-        capacitor: capacitor_of(&resolved),
+        activatable_types,
+        capacitor: capacitor_of(&resolved, &module_items),
         tank: tank_of(&resolved, &module_items),
         dps: dps_of(&resolved, &module_items, &drone_items),
         weapon_ranges: weapon_ranges_of(&resolved, &module_items),
@@ -1236,10 +1257,13 @@ fn damage_score(
 /// Capacitor stability from a resolved fit (#172). Steady drain assumes every
 /// cap-using module runs (capacitorNeed 6 / duration 73 ms); per-module on/off
 /// toggling is a UI follow-up.
-fn capacitor_of(resolved: &ResolvedFit) -> CapStats {
+fn capacitor_of(resolved: &ResolvedFit, module_items: &[&FitItem]) -> CapStats {
     let mut drain = 0.0;
     let mut module_drains: Vec<(f64, f64)> = Vec::new();
-    for store in &resolved.modules {
+    for (i, store) in resolved.modules.iter().enumerate() {
+        if module_items.get(i).is_some_and(|it| it.state != ModuleState::Active) {
+            continue; // only active modules draw capacitor
+        }
         let need = store.get(6);
         // Cap-using modules cycle on `duration` (73); weapons (lasers, hybrids)
         // cycle on rate of fire (`speed`, 51) instead, so fall back to it.
@@ -1692,7 +1716,7 @@ fn evaluate(
     };
     Some(Eval {
         objective,
-        cap_stable: capacitor_of(&resolved).stable,
+        cap_stable: capacitor_of(&resolved, &module_items).stable,
         cost: fit_cost(fit, prices),
     })
 }
@@ -2844,6 +2868,44 @@ mod tests {
             (online.resources.cpu_used - active.resources.cpu_used).abs() < 0.01,
             "online gun still consumes CPU"
         );
+    }
+
+    /// Deactivated/offline modules draw no capacitor (gated on the SDE).
+    #[test]
+    fn inactive_and_offline_modules_draw_no_cap() {
+        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+            return;
+        };
+        let path = std::path::PathBuf::from(&path);
+        if !path.exists() {
+            return;
+        }
+        let sde = Sde::open(&path).unwrap();
+        let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
+        // An afterburner is an active, cap-using module on a Rifter.
+        let ab = |state: ModuleState| Fit {
+            id: "t".into(),
+            name: "t".into(),
+            ship_type_id: tid("Rifter"),
+            items: vec![FitItem {
+                type_id: tid("1MN Afterburner II"),
+                slot: SlotKind::Mid,
+                index: 0,
+                state,
+                charge_type_id: None,
+                quantity: 1,
+            }],
+            projected: Vec::new(),
+        };
+        let layout = sde.ship_layout(tid("Rifter")).unwrap().unwrap();
+        let active = run_dogma(&sde, &ab(ModuleState::Active), &layout, &|_| 5.0).unwrap();
+        let online = run_dogma(&sde, &ab(ModuleState::Online), &layout, &|_| 5.0).unwrap();
+        let offline = run_dogma(&sde, &ab(ModuleState::Offline), &layout, &|_| 5.0).unwrap();
+        assert!(active.capacitor.drain > 0.0, "active AB draws cap");
+        assert_eq!(online.capacitor.drain, 0.0, "deactivated AB draws no cap");
+        assert_eq!(offline.capacitor.drain, 0.0, "offline AB draws no cap");
+        // The AB itself is activatable; a plate would not be.
+        assert!(active.activatable_types.contains(&tid("1MN Afterburner II")));
     }
 
     /// Deactivating (online) an *active* shield hardener drops its resist, so EHP

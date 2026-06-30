@@ -222,6 +222,10 @@ pub struct FitStats {
     /// Per-weapon engagement ranges (turrets/missiles/mining), after skills/ammo.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub weapon_ranges: Vec<WeaponRange>,
+    /// Type ids of fitted modules that can be activated (everything else is
+    /// passive, so the UI shows it no active/inactive state).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub activatable_types: Vec<i64>,
     /// Electronic-warfare projected **onto** this fit, by category (#265). A
     /// presence indicator only — no magnitude — for EW types we don't model
     /// numerically (and a label for the ones we do).
