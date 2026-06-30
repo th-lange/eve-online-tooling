@@ -814,7 +814,15 @@ fn run_dogma(
     let mut modules = Vec::with_capacity(module_items.len());
     for it in &module_items {
         // All required skills (182/183/184) drive *RequiredSkillModifier targeting.
-        modules.push(entity(it.type_id, required_skills_of(&attrs, it.type_id))?);
+        let mut e = entity(it.type_id, required_skills_of(&attrs, it.type_id))?;
+        // An offline module applies (and receives) no effects: drop its effect
+        // ids so it doesn't modify the ship (resists, slot grants, …). It stays in
+        // place so `resolved.modules` keeps lined up with the fit's modules; the
+        // stat/feasibility passes skip it and zero its fitting use.
+        if it.state == ModuleState::Offline {
+            e.effect_ids.clear();
+        }
+        modules.push(e);
     }
 
     // Pass-4 aux entities. Charges are parallel to `modules`; drones to
@@ -923,8 +931,8 @@ fn run_dogma(
         validation,
         layout,
         capacitor: capacitor_of(&resolved),
-        tank: tank_of(&resolved),
-        dps: dps_of(&resolved, &drone_items),
+        tank: tank_of(&resolved, &module_items),
+        dps: dps_of(&resolved, &module_items, &drone_items),
         weapon_ranges: weapon_ranges_of(&resolved, &module_items),
         navigation: {
             // Prop modules (AB/MWD) are identified by speedFactor (20) +
@@ -1000,11 +1008,14 @@ fn resolved_feasibility(
             let eff = effects_by_type.get(&item.type_id);
             let is_turret = item.slot == SlotKind::High && eff.is_some_and(|e| e.contains(&42));
             let is_launcher = item.slot == SlotKind::High && eff.is_some_and(|e| e.contains(&40));
+            // Offline modules consume no CPU/PG/calibration but still hold their
+            // slot (and hardpoint), so only the fitting use is zeroed.
+            let offline = item.state == ModuleState::Offline;
             val_items.push(ValItem {
                 slot: item.slot,
-                cpu: store.get(50),
-                powergrid: store.get(30),
-                calibration: store.get(1153),
+                cpu: if offline { 0.0 } else { store.get(50) },
+                powergrid: if offline { 0.0 } else { store.get(30) },
+                calibration: if offline { 0.0 } else { store.get(1153) },
                 is_turret,
                 is_launcher,
                 drone_volume: 0.0,
@@ -1087,10 +1098,17 @@ fn resolved_damage(store: &AttrStore) -> f64 {
 /// to the charge in pass 4) count; **drones** read their resolved store, so drone
 /// skills + drone-damage bonuses count. `drone_items` is parallel to
 /// `resolved.drones`; `resolved.charges` is parallel to `resolved.modules`.
-fn dps_of(resolved: &ResolvedFit, drone_items: &[&FitItem]) -> DpsBreakdown {
+fn dps_of(
+    resolved: &ResolvedFit,
+    module_items: &[&FitItem],
+    drone_items: &[&FitItem],
+) -> DpsBreakdown {
     let mut turrets = Vec::new();
     let mut missiles = Vec::new();
     for (i, store) in resolved.modules.iter().enumerate() {
+        if module_items.get(i).is_some_and(|it| it.state == ModuleState::Offline) {
+            continue; // disabled weapon: no DPS
+        }
         let Some(Some(charge)) = resolved.charges.get(i) else {
             continue;
         };
@@ -1128,6 +1146,9 @@ fn weapon_ranges_of(resolved: &ResolvedFit, module_items: &[&FitItem]) -> Vec<We
     let mut out = Vec::new();
     for (i, store) in resolved.modules.iter().enumerate() {
         let Some(item) = module_items.get(i) else { continue };
+        if item.state == ModuleState::Offline {
+            continue; // disabled weapon: no range readout
+        }
         let mut optimal = store.get(54); // maxRange: turrets + mining lasers
         let falloff = store.get(158);
         // Missile launchers have no maxRange — use the loaded missile's flight range.
@@ -1228,7 +1249,7 @@ fn capacitor_of(resolved: &ResolvedFit) -> CapStats {
 /// Tank from a resolved fit (#173): HP + resonances from the ship, local rep/s
 /// from shield boosters (shieldBonus 68) and armor repairers (armorDamageAmount
 /// 84). Even 25/25/25/25 damage profile.
-fn tank_of(resolved: &ResolvedFit) -> TankStats {
+fn tank_of(resolved: &ResolvedFit, module_items: &[&FitItem]) -> TankStats {
     let s = &resolved.ship;
     // Resonance attribute ids verified vs the SDE: [em, thermal, kinetic, explosive].
     let shield = Layer {
@@ -1245,7 +1266,10 @@ fn tank_of(resolved: &ResolvedFit) -> TankStats {
     };
 
     let (mut shield_rep_s, mut armor_rep_s) = (0.0, 0.0);
-    for store in &resolved.modules {
+    for (i, store) in resolved.modules.iter().enumerate() {
+        if module_items.get(i).is_some_and(|it| it.state == ModuleState::Offline) {
+            continue; // disabled rep: no local reps
+        }
         let dur = store.get(73);
         if dur <= 0.0 {
             continue;
@@ -1644,9 +1668,9 @@ fn evaluate(
     }
 
     let objective = match obj {
-        Objective::Tank => tank_of(&resolved).ehp,
+        Objective::Tank => tank_of(&resolved, &module_items).ehp,
         Objective::Repair => {
-            let t = tank_of(&resolved);
+            let t = tank_of(&resolved, &module_items);
             t.shield_rep_s + t.armor_rep_s
         }
         Objective::Damage => damage_score(&resolved, &module_items, &drone_items, attrs),
@@ -2760,6 +2784,45 @@ mod tests {
         let d = run_dogma(&sde, &scorch, &layout, &|_| 5.0).unwrap();
         let r = d.weapon_ranges.first().expect("a laser range");
         assert!(r.falloff > 0.0, "Scorch should keep falloff: {r:?}");
+    }
+
+    /// An offline module contributes nothing: a disabled gun does 0 DPS, costs no
+    /// CPU/PG, and reports no range (gated on the SDE).
+    #[test]
+    fn offline_module_drops_its_contribution() {
+        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+            return;
+        };
+        let path = std::path::PathBuf::from(&path);
+        if !path.exists() {
+            return;
+        }
+        let sde = Sde::open(&path).unwrap();
+        let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
+        let gun = |state: ModuleState| Fit {
+            id: "t".into(),
+            name: "t".into(),
+            ship_type_id: tid("Rifter"),
+            items: vec![FitItem {
+                type_id: tid("200mm AutoCannon II"),
+                slot: SlotKind::High,
+                index: 0,
+                state,
+                charge_type_id: Some(tid("Republic Fleet EMP S")),
+                quantity: 1,
+            }],
+            projected: Vec::new(),
+        };
+        let layout = sde.ship_layout(tid("Rifter")).unwrap().unwrap();
+        let active = run_dogma(&sde, &gun(ModuleState::Active), &layout, &|_| 5.0).unwrap();
+        let offline = run_dogma(&sde, &gun(ModuleState::Offline), &layout, &|_| 5.0).unwrap();
+        assert!(active.dps.total > 0.0);
+        assert_eq!(offline.dps.total, 0.0, "offline gun should do no DPS");
+        assert!(offline.weapon_ranges.is_empty(), "offline gun shows no range");
+        assert!(
+            offline.resources.cpu_used < active.resources.cpu_used,
+            "offline gun should free CPU"
+        );
     }
 
     /// `next_slot_index` fills from 0 and appends one past the highest in-slot.
