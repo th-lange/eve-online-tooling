@@ -109,7 +109,7 @@ pub fn fitting_import_eft(app: AppHandle, text: String) -> Result<Fit, String> {
             type_id,
             slot,
             index: take_index(slot, &mut next_index),
-            state: ModuleState::Online,
+            state: ModuleState::Active,
             charge_type_id,
             quantity: 1,
         });
@@ -354,10 +354,9 @@ pub fn fitting_add_item(
 ) -> Result<Fit, String> {
     let sde = open_sde(&app)?;
     let slot = classify_slot(&sde, type_id)?;
-    let state = match slot {
-        SlotKind::Drone | SlotKind::Cargo => ModuleState::Active,
-        _ => ModuleState::Online,
-    };
+    // Modules are added active by default; the user can deactivate (online) or
+    // disable (offline) them in the slot grid.
+    let state = ModuleState::Active;
     fit.items.push(FitItem {
         type_id,
         slot,
@@ -815,12 +814,18 @@ fn run_dogma(
     for it in &module_items {
         // All required skills (182/183/184) drive *RequiredSkillModifier targeting.
         let mut e = entity(it.type_id, required_skills_of(&attrs, it.type_id))?;
-        // An offline module applies (and receives) no effects: drop its effect
-        // ids so it doesn't modify the ship (resists, slot grants, …). It stays in
-        // place so `resolved.modules` keeps lined up with the fit's modules; the
-        // stat/feasibility passes skip it and zero its fitting use.
-        if it.state == ModuleState::Offline {
-            e.effect_ids.clear();
+        // State gates which effects run. Offline: none (no ship modifiers, no
+        // fitting use). Online (not active): only passive effects — drop the
+        // activatable ones (those with a duration), so e.g. an *active* hardener
+        // stops adding resist while a passive one keeps it. Active: everything.
+        // Modules stay in place so `resolved.modules` lines up with the fit; the
+        // active-stat passes (DPS/reps/prop) additionally skip non-active modules.
+        match it.state {
+            ModuleState::Offline => e.effect_ids.clear(),
+            ModuleState::Online => e.effect_ids.retain(|eid| {
+                effect_meta.get(eid).is_none_or(|m| m.duration_attribute_id.is_none())
+            }),
+            _ => {}
         }
         modules.push(e);
     }
@@ -938,15 +943,24 @@ fn run_dogma(
             // Prop modules (AB/MWD) are identified by speedFactor (20) +
             // speedBoostFactor (567). Their mass penalty (massAddition 796) and
             // velocity boost are both procedural (not in modifierInfo), so add the
-            // mass here and feed the bumped mass into align time + the boost.
-            let props: Vec<(f64, f64)> = resolved
+            // mass here and feed the bumped mass into align time + the boost. Only
+            // an *active* prop boosts speed (its mass penalty also only applies
+            // while running) — an online/offline AB does neither.
+            let active_props: Vec<_> = resolved
                 .modules
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| {
+                    module_items.get(*i).is_none_or(|it| it.state == ModuleState::Active)
+                })
+                .map(|(_, m)| m)
+                .collect();
+            let props: Vec<(f64, f64)> = active_props
                 .iter()
                 .map(|m| (m.get(20), m.get(567)))
                 .filter(|(sf, sbf)| *sf != 0.0 && *sbf != 0.0)
                 .collect();
-            let prop_mass: f64 = resolved
-                .modules
+            let prop_mass: f64 = active_props
                 .iter()
                 .filter(|m| m.get(20) != 0.0 && m.get(567) != 0.0)
                 .map(|m| m.get(796))
@@ -1106,8 +1120,8 @@ fn dps_of(
     let mut turrets = Vec::new();
     let mut missiles = Vec::new();
     for (i, store) in resolved.modules.iter().enumerate() {
-        if module_items.get(i).is_some_and(|it| it.state == ModuleState::Offline) {
-            continue; // disabled weapon: no DPS
+        if module_items.get(i).is_some_and(|it| it.state != ModuleState::Active) {
+            continue; // only active weapons fire (offline/online = no DPS)
         }
         let Some(Some(charge)) = resolved.charges.get(i) else {
             continue;
@@ -1267,8 +1281,8 @@ fn tank_of(resolved: &ResolvedFit, module_items: &[&FitItem]) -> TankStats {
 
     let (mut shield_rep_s, mut armor_rep_s) = (0.0, 0.0);
     for (i, store) in resolved.modules.iter().enumerate() {
-        if module_items.get(i).is_some_and(|it| it.state == ModuleState::Offline) {
-            continue; // disabled rep: no local reps
+        if module_items.get(i).is_some_and(|it| it.state != ModuleState::Active) {
+            continue; // only active reps cycle (offline/online = no local reps)
         }
         let dur = store.get(73);
         if dur <= 0.0 {
@@ -2815,6 +2829,7 @@ mod tests {
         };
         let layout = sde.ship_layout(tid("Rifter")).unwrap().unwrap();
         let active = run_dogma(&sde, &gun(ModuleState::Active), &layout, &|_| 5.0).unwrap();
+        let online = run_dogma(&sde, &gun(ModuleState::Online), &layout, &|_| 5.0).unwrap();
         let offline = run_dogma(&sde, &gun(ModuleState::Offline), &layout, &|_| 5.0).unwrap();
         assert!(active.dps.total > 0.0);
         assert_eq!(offline.dps.total, 0.0, "offline gun should do no DPS");
@@ -2822,6 +2837,50 @@ mod tests {
         assert!(
             offline.resources.cpu_used < active.resources.cpu_used,
             "offline gun should free CPU"
+        );
+        // Online (deactivated): no DPS, but still online and using CPU/PG.
+        assert_eq!(online.dps.total, 0.0, "deactivated gun should do no DPS");
+        assert!(
+            (online.resources.cpu_used - active.resources.cpu_used).abs() < 0.01,
+            "online gun still consumes CPU"
+        );
+    }
+
+    /// Deactivating (online) an *active* shield hardener drops its resist, so EHP
+    /// falls — but a passive module would be unchanged (gated on the SDE).
+    #[test]
+    fn deactivated_active_hardener_loses_resist() {
+        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+            return;
+        };
+        let path = std::path::PathBuf::from(&path);
+        if !path.exists() {
+            return;
+        }
+        let sde = Sde::open(&path).unwrap();
+        let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
+        let hardener = |state: ModuleState| Fit {
+            id: "t".into(),
+            name: "t".into(),
+            ship_type_id: tid("Caracal"),
+            items: vec![FitItem {
+                type_id: tid("Multispectrum Shield Hardener II"),
+                slot: SlotKind::Mid,
+                index: 0,
+                state,
+                charge_type_id: None,
+                quantity: 1,
+            }],
+            projected: Vec::new(),
+        };
+        let layout = sde.ship_layout(tid("Caracal")).unwrap().unwrap();
+        let active = run_dogma(&sde, &hardener(ModuleState::Active), &layout, &|_| 5.0).unwrap();
+        let online = run_dogma(&sde, &hardener(ModuleState::Online), &layout, &|_| 5.0).unwrap();
+        assert!(
+            active.tank.ehp > online.tank.ehp,
+            "active hardener should raise EHP vs deactivated: {} vs {}",
+            active.tank.ehp,
+            online.tank.ehp
         );
     }
 

@@ -105,7 +105,7 @@ pub fn esi_fitting_to_fit(esi: &EsiFitting, is_charge: &impl Fn(i64) -> bool) ->
                 cargo_index += 1;
             }
             _ if is_charge(it.type_id) => {} // attached in pass 2
-            _ => items.push(module(it.type_id, slot, index, ModuleState::Online, 1)),
+            _ => items.push(module(it.type_id, slot, index, ModuleState::Active, 1)),
         }
     }
 

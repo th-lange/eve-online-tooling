@@ -1489,16 +1489,31 @@ function SlotGrid({
               <ul className="text-sm text-zinc-300">
                 {items.map(({ it, i }) => {
                   const range = rangeOf.get(`${it.typeId}:${it.chargeTypeId ?? 0}`);
-                  const offline = it.state === "offline";
-                  // Only active modules (high/mid/low) can be toggled offline;
-                  // rigs/subsystems are permanent.
+                  // Cycle active → online (deactivated) → offline → active. Only
+                  // high/mid/low modules toggle; rigs/subsystems are permanent.
                   const canToggle =
                     slot === "high" || slot === "mid" || slot === "low";
+                  const next: ModuleState =
+                    it.state === "active"
+                      ? "online"
+                      : it.state === "online"
+                        ? "offline"
+                        : "active";
+                  const stateTag =
+                    it.state === "online"
+                      ? "inactive"
+                      : it.state === "offline"
+                        ? "offline"
+                        : null;
                   return (
                     <li
                       key={i}
                       className={`group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-zinc-800/70 ${
-                        offline ? "opacity-50" : ""
+                        it.state === "offline"
+                          ? "opacity-50"
+                          : it.state === "online"
+                            ? "opacity-75"
+                            : ""
                       }`}
                     >
                       <button
@@ -1511,15 +1526,21 @@ function SlotGrid({
                       </button>
                       {canToggle && (
                         <button
-                          onClick={() =>
-                            onSetState(i, offline ? "active" : "offline")
+                          onClick={() => onSetState(i, next)}
+                          title={
+                            it.state === "active"
+                              ? "Deactivate (online)"
+                              : it.state === "online"
+                                ? "Disable (offline)"
+                                : "Activate"
                           }
-                          title={offline ? "Enable module" : "Disable (offline)"}
-                          aria-label={offline ? "Enable module" : "Disable module"}
+                          aria-label="Cycle module state"
                           className={`flex shrink-0 items-center rounded p-0.5 ${
-                            offline
-                              ? "text-zinc-500 hover:text-emerald-400"
-                              : "text-zinc-600 group-hover:text-zinc-300"
+                            it.state === "active"
+                              ? "text-zinc-600 group-hover:text-zinc-300"
+                              : it.state === "online"
+                                ? "text-amber-500 hover:text-amber-400"
+                                : "text-zinc-500 hover:text-emerald-400"
                           }`}
                         >
                           <Power size={13} />
@@ -1529,9 +1550,9 @@ function SlotGrid({
                         {nameOf(it.typeId)}
                         {it.chargeTypeId ? ` + ${nameOf(it.chargeTypeId)}` : ""}
                         {it.quantity > 1 ? ` x${it.quantity}` : ""}
-                        {offline && (
+                        {stateTag && (
                           <span className="ml-1 text-[10px] uppercase text-zinc-500">
-                            offline
+                            {stateTag}
                           </span>
                         )}
                       </span>
