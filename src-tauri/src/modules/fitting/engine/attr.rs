@@ -145,6 +145,14 @@ impl AttrStore {
         self.values.get(&attr).map(Value::finalize).unwrap_or(0.0)
     }
 
+    /// The finalized value, or `default` when the attribute isn't present at all.
+    /// Dogma uses an attribute's `defaultValue` for entities that don't carry it
+    /// (e.g. a laser crystal without `fallofMultiplier`, whose default is 1.0, so
+    /// the charge→host falloff multiplier is a no-op rather than ×0).
+    pub fn get_or(&self, attr: i64, default: f64) -> f64 {
+        self.values.get(&attr).map(Value::finalize).unwrap_or(default)
+    }
+
     /// The unmodified base value (0.0 if unknown).
     #[allow(dead_code)] // calculators that need pre-modifier values (#173+)
     pub fn base(&self, attr: i64) -> f64 {

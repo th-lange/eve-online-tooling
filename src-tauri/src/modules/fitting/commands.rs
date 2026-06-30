@@ -285,6 +285,7 @@ fn resolve_module_costs(
     let effect_meta = sde.effect_meta().map_err(|e| e.to_string())?;
     let defaults = sde.attribute_defaults().map_err(|e| e.to_string())?;
     let is_stackable = |attr: i64| defaults.get(&attr).map(|m| m.stackable).unwrap_or(true);
+    let default_of = |attr: i64| defaults.get(&attr).map(|m| m.default_value).unwrap_or(0.0);
 
     let entity = |type_id: i64, required_skills: Vec<i64>| -> Result<EntityInput, String> {
         let group_id = sde
@@ -331,6 +332,7 @@ fn resolve_module_costs(
         &FitInput { ship, modules, skills, drones: Vec::new(), charges },
         &effect_meta,
         &is_stackable,
+        &default_of,
     );
     let mut out = HashMap::new();
     for (id, store) in type_ids.iter().zip(&resolved.modules) {
@@ -777,6 +779,7 @@ fn run_dogma(
     let effect_meta = sde.effect_meta().map_err(|e| e.to_string())?;
     let defaults = sde.attribute_defaults().map_err(|e| e.to_string())?;
     let is_stackable = |attr: i64| defaults.get(&attr).map(|m| m.stackable).unwrap_or(true);
+    let default_of = |attr: i64| defaults.get(&attr).map(|m| m.default_value).unwrap_or(0.0);
 
     let entity = |type_id: i64, required_skills: Vec<i64>| -> Result<EntityInput, String> {
         let group_id = sde
@@ -860,6 +863,7 @@ fn run_dogma(
         &FitInput { ship, modules, skills, drones, charges },
         &effect_meta,
         &is_stackable,
+        &default_of,
     );
 
     // Projected effects (#178): webs/paints/… modify this ship's attributes.
@@ -1596,6 +1600,7 @@ fn evaluate(
     skills: &[EntityInput],
     effect_meta: &HashMap<i64, crate::sde::EffectMeta>,
     is_stackable: &impl Fn(i64) -> bool,
+    default_of: &impl Fn(i64) -> f64,
     prices: &HashMap<i64, f64>,
 ) -> Option<Eval> {
     let module_items: Vec<&FitItem> = fit.items.iter().filter(|i| is_ship_module(i.slot)).collect();
@@ -1617,6 +1622,7 @@ fn evaluate(
         },
         effect_meta,
         is_stackable,
+        default_of,
     );
 
     // Dogma-aware feasibility gate: reject fits that don't fit. The optimizer never
@@ -1802,6 +1808,7 @@ fn optimize_fit(
     let effect_meta = sde.effect_meta().map_err(|e| e.to_string())?;
     let defaults = sde.attribute_defaults().map_err(|e| e.to_string())?;
     let is_stackable = |attr: i64| defaults.get(&attr).map(|m| m.stackable).unwrap_or(true);
+    let default_of = |attr: i64| defaults.get(&attr).map(|m| m.default_value).unwrap_or(0.0);
 
     // Steer the damage optimizer to the hull's *bonused* weapons. Without this it
     // maximizes raw paper-DPS and fits, say, hybrid blasters on an Amarr laser
@@ -1854,7 +1861,7 @@ fn optimize_fit(
     let eval = |f: &Fit| {
         evaluate(
             obj, f, &layout, &attrs, &effects, &groups, &skills, &effect_meta, &is_stackable,
-            prices,
+            &default_of, prices,
         )
     };
     let has_soft = constraints.cap_stable || constraints.max_cost.is_some();
@@ -2720,6 +2727,28 @@ mod tests {
         // A turret has both an optimal and a (larger, for autocannons) falloff.
         assert!(r.optimal > 0.0, "optimal should be set: {r:?}");
         assert!(r.falloff > 0.0, "falloff should be set: {r:?}");
+
+        // A laser crystal with a range multiplier (Scorch) must keep its falloff:
+        // the crystal lacks `fallofMultiplier` (default 1.0), so the charge→host
+        // falloff multiplier must be a no-op, not ×0 (regression).
+        let scorch = Fit {
+            id: "t".into(),
+            name: "t".into(),
+            ship_type_id: tid("Punisher"),
+            items: vec![FitItem {
+                type_id: tid("Dual Light Pulse Laser II"),
+                slot: SlotKind::High,
+                index: 0,
+                state: ModuleState::Active,
+                charge_type_id: Some(tid("Scorch S")),
+                quantity: 1,
+            }],
+            projected: Vec::new(),
+        };
+        let layout = sde.ship_layout(scorch.ship_type_id).unwrap().unwrap();
+        let d = run_dogma(&sde, &scorch, &layout, &|_| 5.0).unwrap();
+        let r = d.weapon_ranges.first().expect("a laser range");
+        assert!(r.falloff > 0.0, "Scorch should keep falloff: {r:?}");
     }
 
     /// `next_slot_index` fills from 0 and appends one past the highest in-slot.
