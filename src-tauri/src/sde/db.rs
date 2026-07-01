@@ -7,7 +7,7 @@ use std::path::Path;
 use super::types::{
     activity, AttrMeta, BlueprintMaterial, BlueprintProduct, Decryptor, EffectMeta, InventionData,
     ManufacturableBlueprint, MarketItem, ModifierInfo, Recipe, ReprocessRecipe, ShipLayout,
-    TypeDetail, TypeInfo,
+    TypeDetail, TypeInfo, WormholeType,
 };
 use super::SdeError;
 
@@ -1062,6 +1062,73 @@ impl Sde {
         }
     }
 
+    /// Every wormhole type (`invTypes` group 988) with its physics, read from the
+    /// five `dgmTypeAttributes` rows (same correlated-subquery style as
+    /// [`decryptors`](Self::decryptors)). Fully offline — no external data.
+    ///
+    /// Attribute ids (chruker/whtype.info): 1381 target system class, 1382 max
+    /// stable time (min), 1383 max stable mass (kg), 1384 mass regen (kg), 1385
+    /// max jump mass (kg). K162 has no fixed target class (attr 0/absent) → it's
+    /// labelled the generic "exit (variable)" rather than a bogus destination.
+    #[allow(dead_code)] // consumed by the jump planner (#303) + reference commands (#306)
+    pub fn wormhole_types(&self) -> Result<Vec<WormholeType>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.typeID, t.typeName,
+               (SELECT valueFloat FROM dgmTypeAttributes WHERE typeID = t.typeID AND attributeID = 1381),
+               (SELECT valueFloat FROM dgmTypeAttributes WHERE typeID = t.typeID AND attributeID = 1382),
+               (SELECT valueFloat FROM dgmTypeAttributes WHERE typeID = t.typeID AND attributeID = 1383),
+               (SELECT valueFloat FROM dgmTypeAttributes WHERE typeID = t.typeID AND attributeID = 1384),
+               (SELECT valueFloat FROM dgmTypeAttributes WHERE typeID = t.typeID AND attributeID = 1385)
+             FROM invTypes t
+             WHERE t.groupID = 988
+             ORDER BY t.typeName",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let raw_class: Option<f64> = row.get(2)?;
+            // K162 (and any exit) has class 0/absent → variable destination.
+            let dest_class_id = raw_class.map(|c| c as i64).filter(|&c| c != 0).unwrap_or(0);
+            Ok(WormholeType {
+                type_id: row.get(0)?,
+                code: row.get(1)?,
+                dest_class_id,
+                dest_class_label: if dest_class_id == 0 {
+                    "exit (variable)".to_string()
+                } else {
+                    wormhole_class_label(dest_class_id)
+                },
+                max_stable_time_min: row.get(3)?,
+                max_stable_mass: row.get(4)?,
+                mass_regen: row.get(5)?,
+                max_jump_mass: row.get(6)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// A J-system's wormhole class, offline. Reads `mapLocationWormholeClasses`
+    /// by system id, falling back to the system's region (k-space classes are
+    /// keyed at the region level). Lets us cross-check the Anoik.is snapshot (#305).
+    #[allow(dead_code)] // consumed by the Anoik.is snapshot cross-check (#305)
+    pub fn wormhole_system_class(&self, system_id: i64) -> Result<Option<i64>, SdeError> {
+        let by_location = |loc: i64| -> Result<Option<i64>, SdeError> {
+            let mut stmt = self.conn.prepare(
+                "SELECT wormholeClassID FROM mapLocationWormholeClasses WHERE locationID = ?1",
+            )?;
+            let mut rows = stmt.query(params![loc])?;
+            match rows.next()? {
+                Some(r) => Ok(Some(r.get(0)?)),
+                None => Ok(None),
+            }
+        };
+        if let Some(class) = by_location(system_id)? {
+            return Ok(Some(class));
+        }
+        match self.system_region(system_id)? {
+            Some(region) => by_location(region),
+            None => Ok(None),
+        }
+    }
+
     /// Stargate edges `(from, to)` whose source is one of `ids` — for building a
     /// system neighbourhood by BFS. K-space only (wormhole systems have no
     /// stargates). One query; the caller walks levels.
@@ -1216,6 +1283,24 @@ fn packaged_volume(group_id: i64, assembled: Option<f64>) -> Option<f64> {
     packaged.or(assembled)
 }
 
+/// Label a wormhole destination class id (`wormholeClassID` / target-class attr).
+/// C1–C6 are the wormhole space classes; 7/8/9 are k-space security bands; the
+/// rest are special spaces. Unknown ids pass through as `class {id}`.
+#[allow(dead_code)] // consumed by the reference commands/UI (#306/#307)
+pub fn wormhole_class_label(id: i64) -> String {
+    match id {
+        1..=6 => format!("C{id}"),
+        7 => "HS".to_string(),
+        8 => "LS".to_string(),
+        9 => "NS".to_string(),
+        12 => "Thera".to_string(),
+        13 => "C13".to_string(),
+        14..=18 => "Drifter".to_string(),
+        25 => "Pochven".to_string(),
+        _ => format!("class {id}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1325,6 +1410,77 @@ mod tests {
         assert_eq!(decs[1].name, "Augmentation Decryptor");
         assert_eq!(decs[1].me_modifier, -2);
         assert_eq!(decs[1].run_modifier, 9);
+    }
+
+    #[test]
+    fn wormhole_types_read_physics_and_handle_k162() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE invTypes(typeID INT, groupID INT, typeName TEXT, volume REAL);
+             CREATE TABLE dgmTypeAttributes(typeID INT, attributeID INT, valueFloat REAL);
+             INSERT INTO invTypes VALUES
+               (30832, 988, 'N766', 0.0),   -- C2-static (to C2)
+               (30371, 988, 'K162', 0.0),   -- generic exit (no target class)
+               (99, 55, 'Not A Wormhole', 0.0);
+             -- 1381 target class, 1382 stable time, 1383 stable mass, 1384 regen, 1385 jump mass.
+             INSERT INTO dgmTypeAttributes VALUES
+               (30832, 1381, 2.0), (30832, 1382, 1440.0), (30832, 1383, 2000000000.0),
+               (30832, 1384, 0.0), (30832, 1385, 300000000.0),
+               (30371, 1382, 1440.0), (30371, 1383, 3000000000.0), (30371, 1385, 1000000000.0);",
+        )
+        .unwrap();
+        let sde = Sde::from_connection(conn);
+
+        let whs = sde.wormhole_types().unwrap();
+        // Only group-988 rows, ordered by code (K162 before N766).
+        assert_eq!(whs.len(), 2);
+        assert_eq!(whs[0].code, "K162");
+        assert_eq!(whs[1].code, "N766");
+
+        let n766 = &whs[1];
+        assert_eq!(n766.dest_class_id, 2);
+        assert_eq!(n766.dest_class_label, "C2");
+        assert_eq!(n766.max_jump_mass, Some(300_000_000.0));
+        assert_eq!(n766.max_stable_mass, Some(2_000_000_000.0));
+        assert_eq!(n766.max_stable_time_min, Some(1440.0));
+
+        // K162: no target class → variable exit, not a bogus destination.
+        let k162 = &whs[0];
+        assert_eq!(k162.dest_class_id, 0);
+        assert_eq!(k162.dest_class_label, "exit (variable)");
+        assert_eq!(k162.max_jump_mass, Some(1_000_000_000.0));
+    }
+
+    #[test]
+    fn wormhole_class_labels() {
+        assert_eq!(wormhole_class_label(1), "C1");
+        assert_eq!(wormhole_class_label(6), "C6");
+        assert_eq!(wormhole_class_label(7), "HS");
+        assert_eq!(wormhole_class_label(8), "LS");
+        assert_eq!(wormhole_class_label(9), "NS");
+        assert_eq!(wormhole_class_label(12), "Thera");
+        assert_eq!(wormhole_class_label(25), "Pochven");
+        assert_eq!(wormhole_class_label(99), "class 99");
+    }
+
+    #[test]
+    fn wormhole_system_class_falls_back_to_region() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE mapSolarSystems(solarSystemID INT, regionID INT);
+             CREATE TABLE mapLocationWormholeClasses(locationID INT, wormholeClassID INT);
+             INSERT INTO mapSolarSystems VALUES (31000005, 11000031), (30000142, 10000002);
+             -- J-system keyed directly; k-space keyed at the region.
+             INSERT INTO mapLocationWormholeClasses VALUES (31000005, 12), (10000002, 7);",
+        )
+        .unwrap();
+        let sde = Sde::from_connection(conn);
+        // Thera by direct system id.
+        assert_eq!(sde.wormhole_system_class(31000005).unwrap(), Some(12));
+        // Jita resolves via its region (The Forge → HS class 7).
+        assert_eq!(sde.wormhole_system_class(30000142).unwrap(), Some(7));
+        // Unknown system → None.
+        assert_eq!(sde.wormhole_system_class(30009999).unwrap(), None);
     }
 
     #[test]
