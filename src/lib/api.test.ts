@@ -27,6 +27,8 @@ import {
   whImportEvescout,
   whJumpPlan,
   whSystemReference,
+  whTripwireConnect,
+  whTripwireImport,
   whTypeReference,
   type DpsTick,
   type Fit,
@@ -107,6 +109,21 @@ describe("api.wormholes", () => {
     invokeMock.mockResolvedValue({ found: true, systemId: 31000005, statics: [] });
     await whSystemReference(31000005);
     expect(invokeMock).toHaveBeenCalledWith("wh_system_reference", { systemId: 31000005 });
+  });
+
+  it("forwards Tripwire connect args and imports", async () => {
+    invokeMock.mockResolvedValue({ configured: true, baseUrl: "https://tripwire.eve-apps.com", username: "u", mask: null });
+    await whTripwireConnect("https://tripwire.eve-apps.com", "u", "pw", null);
+    expect(invokeMock).toHaveBeenCalledWith("wh_tripwire_connect", {
+      baseUrl: "https://tripwire.eve-apps.com",
+      username: "u",
+      password: "pw",
+      mask: null,
+    });
+
+    invokeMock.mockResolvedValue([{ id: 1, source: "tripwire" }]);
+    await whTripwireImport();
+    expect(invokeMock).toHaveBeenCalledWith("wh_tripwire_import");
   });
 });
 

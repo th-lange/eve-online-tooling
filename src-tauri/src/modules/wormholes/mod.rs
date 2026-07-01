@@ -2,3 +2,4 @@
 
 pub mod commands;
 pub mod reference;
+pub mod tripwire;

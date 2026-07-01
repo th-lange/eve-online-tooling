@@ -848,6 +848,37 @@ export function whImportEvescout(): Promise<ConnectionView[]> {
   return invoke<ConnectionView[]>("wh_import_evescout");
 }
 
+// --- Tripwire (opt-in) ---
+
+export interface TripwireStatus {
+  configured: boolean;
+  baseUrl: string;
+  username: string;
+  mask: string | null;
+}
+
+/** Current Tripwire opt-in status (never returns the stored password). */
+export function whTripwireStatus(): Promise<TripwireStatus> {
+  return invoke<TripwireStatus>("wh_tripwire_status");
+}
+/** Opt in: store base URL + username (+ optional mask) and the password (keychain). */
+export function whTripwireConnect(
+  baseUrl: string,
+  username: string,
+  password: string,
+  mask: string | null,
+): Promise<TripwireStatus> {
+  return invoke<TripwireStatus>("wh_tripwire_connect", { baseUrl, username, password, mask });
+}
+/** Opt out: clear the stored Tripwire config + keychain password. */
+export function whTripwireDisconnect(): Promise<TripwireStatus> {
+  return invoke<TripwireStatus>("wh_tripwire_disconnect");
+}
+/** Import the configured Tripwire chain, merged into the map. */
+export function whTripwireImport(): Promise<ConnectionView[]> {
+  return invoke<ConnectionView[]>("wh_tripwire_import");
+}
+
 export interface JumpPlan {
   found: boolean;
   /** Hint when the ship or wormhole type couldn't be resolved. */

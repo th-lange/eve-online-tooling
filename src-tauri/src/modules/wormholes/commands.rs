@@ -12,6 +12,8 @@ use tauri::{AppHandle, Manager};
 use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
+use super::tripwire;
+
 const STORE_KEY: &str = "wh_connections";
 /// J-space (wormhole) solar systems start at this id.
 const WSPACE_MIN_SYSTEM_ID: i64 = 31_000_000;
@@ -474,13 +476,13 @@ fn imported_connection(sig: &crate::evescout::TheraSignature, now: u64) -> Optio
     })
 }
 
-/// Merge freshly-imported EVE-Scout connections into the stored set: keep every
-/// manual row untouched, drop all previous EVE-Scout rows (the feed is the source
-/// of truth, so vanished holes disappear), and add the imported ones — skipping
-/// any that collide with a manual row or each other. New ids continue past the
-/// highest existing id. Pure (testable).
-fn merge_evescout(existing: Vec<Connection>, imported: Vec<Connection>) -> Vec<Connection> {
-    let mut out: Vec<Connection> = existing.into_iter().filter(|c| c.source != "evescout").collect();
+/// Merge freshly-imported connections from one auto source into the stored set:
+/// keep every row from other sources untouched (manual + any other import), drop
+/// all previous rows of `source_tag` (the feed is the source of truth, so vanished
+/// holes disappear), and add the imported ones — skipping any that collide with a
+/// kept row or each other. New ids continue past the highest existing id. Pure.
+fn merge_by_source(existing: Vec<Connection>, imported: Vec<Connection>, source_tag: &str) -> Vec<Connection> {
+    let mut out: Vec<Connection> = existing.into_iter().filter(|c| c.source != source_tag).collect();
     let mut keys: HashSet<(i64, i64, Option<String>)> = out.iter().map(dedupe_key).collect();
     let mut next_id = out.iter().map(|c| c.id).max().unwrap_or(0) + 1;
     for mut c in imported {
@@ -502,7 +504,7 @@ pub async fn wh_import_evescout(app: AppHandle) -> Result<Vec<ConnectionView>, S
     let sigs = crate::evescout::fetch_signatures(&dir).await?;
     let now = now_secs();
     let imported: Vec<Connection> = sigs.iter().filter_map(|s| imported_connection(s, now)).collect();
-    let merged = merge_evescout(existing, imported);
+    let merged = merge_by_source(existing, imported, "evescout");
     save_and_view(&dir, &merged)
 }
 
@@ -670,9 +672,196 @@ pub fn wh_system_reference(
     super::reference::system_reference(&sde, system_id)
 }
 
+// --- Tripwire import (#302, opt-in) ---
+
+/// Turn a Tripwire chain (signatures + wormholes) into our connections: each
+/// wormhole links two signatures, whose systems become the endpoints. Jump-mass
+/// class comes from the WH type via the SDE (`jump_mass_by_code`); rows whose
+/// endpoints don't resolve to a system are skipped. Pure (testable).
+fn tripwire_connections(
+    sigs: &[tripwire::RawSignature],
+    whs: &[tripwire::RawWormhole],
+    jump_mass_by_code: &HashMap<String, String>,
+    now: u64,
+) -> Vec<Connection> {
+    let mut sig_map: HashMap<i64, (i64, Option<String>)> = HashMap::new();
+    for s in sigs {
+        if let Some(sys) = s.system_id.filter(|&v| v != 0) {
+            let sig = s.signature_id.clone().filter(|x| !x.is_empty());
+            sig_map.insert(s.id, (sys, sig));
+        }
+    }
+    whs.iter()
+        .filter_map(|w| {
+            let (src_sys, src_sig) = sig_map.get(&w.initial_id)?.clone();
+            let (tgt_sys, tgt_sig) = sig_map.get(&w.secondary_id)?.clone();
+            let code = w.wh_type.clone().unwrap_or_default();
+            let jump_mass = jump_mass_by_code
+                .get(&code.to_ascii_uppercase())
+                .cloned()
+                .unwrap_or_else(|| "xl".to_string());
+            let eol = w.life.as_deref() == Some("critical");
+            Some(Connection {
+                id: 0,
+                source_system_id: src_sys,
+                target_system_id: tgt_sys,
+                scope: "wormhole".to_string(),
+                mass_status: tripwire::mass_status(w.mass.as_deref()),
+                jump_mass,
+                eol,
+                source_sig: src_sig,
+                target_sig: tgt_sig,
+                source: "tripwire".to_string(),
+                created_at: now,
+                eol_updated_at: eol.then_some(now),
+            })
+        })
+        .collect()
+}
+
+/// Opt-in Tripwire connection status for the frontend (never returns the password).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TripwireStatus {
+    pub configured: bool,
+    pub base_url: String,
+    pub username: String,
+    pub mask: Option<String>,
+}
+
+fn tripwire_status_from(dir: &std::path::Path) -> TripwireStatus {
+    let cfg: tripwire::TripwireConfig =
+        storage::load_data(dir, tripwire::CONFIG_KEY).unwrap_or_default();
+    let has_secret = storage::load_secret(tripwire::SECRET_KEY).ok().flatten().is_some();
+    TripwireStatus {
+        configured: !cfg.username.is_empty() && has_secret,
+        base_url: if cfg.base_url.is_empty() {
+            tripwire::DEFAULT_BASE_URL.to_string()
+        } else {
+            cfg.base_url
+        },
+        username: cfg.username,
+        mask: cfg.mask,
+    }
+}
+
+/// Current Tripwire opt-in status (configured? base URL, username, mask).
+#[tauri::command]
+pub fn wh_tripwire_status(app: AppHandle) -> Result<TripwireStatus, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(tripwire_status_from(&dir))
+}
+
+/// Opt in: store the Tripwire base URL + username (+ optional mask) and the
+/// password (in the OS keychain).
+#[tauri::command]
+pub fn wh_tripwire_connect(
+    app: AppHandle,
+    base_url: String,
+    username: String,
+    password: String,
+    mask: Option<String>,
+) -> Result<TripwireStatus, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let base = base_url.trim();
+    let mask = mask
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty());
+    let cfg = tripwire::TripwireConfig {
+        base_url: if base.is_empty() { tripwire::DEFAULT_BASE_URL.to_string() } else { base.to_string() },
+        username: username.trim().to_string(),
+        mask,
+    };
+    storage::save_data(&dir, tripwire::CONFIG_KEY, &cfg)?;
+    storage::store_secret(tripwire::SECRET_KEY, &password)?;
+    Ok(tripwire_status_from(&dir))
+}
+
+/// Opt out: clear the stored Tripwire config + keychain password.
+#[tauri::command]
+pub fn wh_tripwire_disconnect(app: AppHandle) -> Result<TripwireStatus, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    storage::save_data(&dir, tripwire::CONFIG_KEY, &tripwire::TripwireConfig::default())?;
+    storage::delete_secret(tripwire::SECRET_KEY)?;
+    Ok(tripwire_status_from(&dir))
+}
+
+/// Import the configured Tripwire chain, merged into the map (manual + other
+/// imports untouched; previous Tripwire rows refreshed). Mask defaults to the
+/// active character's personal chain (`<id>.1`) when not overridden.
+#[tauri::command]
+pub async fn wh_tripwire_import(app: AppHandle) -> Result<Vec<ConnectionView>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let cfg: tripwire::TripwireConfig =
+        storage::load_data(&dir, tripwire::CONFIG_KEY).unwrap_or_default();
+    if cfg.username.is_empty() {
+        return Err("Connect Tripwire first".to_string());
+    }
+    let password = storage::load_secret(tripwire::SECRET_KEY)?
+        .ok_or_else(|| "Connect Tripwire first".to_string())?;
+    let mask = cfg
+        .mask
+        .clone()
+        .or_else(|| storage::active_character(&dir).map(|id| format!("{id}.1")))
+        .ok_or_else(|| "No Tripwire mask set and no active character to derive one".to_string())?;
+
+    let (sigs, whs) = tripwire::fetch(&cfg, &password, &mask).await?;
+
+    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    let jump_mass_by_code: HashMap<String, String> = sde
+        .wormhole_types()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|w| (w.code.to_ascii_uppercase(), tripwire::jump_mass_class(w.max_jump_mass)))
+        .collect();
+
+    let (_dir, existing) = load(&app)?;
+    let imported = tripwire_connections(&sigs, &whs, &jump_mass_by_code, now_secs());
+    let merged = merge_by_source(existing, imported, "tripwire");
+    save_and_view(&dir, &merged)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tripwire_maps_wormholes_to_connections() {
+        let sigs = vec![
+            tripwire::RawSignature { id: 5, signature_id: Some("ABC".into()), system_id: Some(31000005) },
+            tripwire::RawSignature { id: 6, signature_id: Some("DEF".into()), system_id: Some(30000142) },
+            tripwire::RawSignature { id: 7, signature_id: None, system_id: None }, // unresolved endpoint
+        ];
+        let whs = vec![
+            tripwire::RawWormhole {
+                initial_id: 5,
+                secondary_id: 6,
+                wh_type: Some("N766".into()),
+                life: Some("critical".into()),
+                mass: Some("destab".into()),
+            },
+            tripwire::RawWormhole {
+                initial_id: 5,
+                secondary_id: 7, // sig 7 has no system → skipped
+                wh_type: Some("K162".into()),
+                life: Some("stable".into()),
+                mass: Some("stable".into()),
+            },
+        ];
+        let mut jm = HashMap::new();
+        jm.insert("N766".to_string(), "l".to_string());
+
+        let conns = tripwire_connections(&sigs, &whs, &jm, 100);
+        assert_eq!(conns.len(), 1);
+        let c = &conns[0];
+        assert_eq!(c.source_system_id, 31000005);
+        assert_eq!(c.target_system_id, 30000142);
+        assert_eq!(c.source_sig.as_deref(), Some("ABC"));
+        assert_eq!(c.jump_mass, "l");
+        assert_eq!(c.mass_status, "reduced");
+        assert!(c.eol);
+        assert_eq!(c.source, "tripwire");
+    }
 
     fn evescout_sig(out: i64, in_: i64, sig: &str, size: &str) -> crate::evescout::TheraSignature {
         crate::evescout::TheraSignature {
@@ -726,7 +915,7 @@ mod tests {
             imported_connection(&evescout_sig(31000005, 30002086, "ABC", "large"), now).unwrap(),
         ];
 
-        let merged = merge_evescout(existing, imported);
+        let merged = merge_by_source(existing, imported, "evescout");
         // Manual kept, stale import gone, one fresh import added with a new id.
         assert_eq!(merged.len(), 2);
         assert!(merged.iter().any(|c| c.id == 1 && c.source == "manual"));
@@ -748,7 +937,7 @@ mod tests {
             ..wh(7, 1, false, 0, 1_000_000)
         };
         let imported = vec![imported_connection(&evescout_sig(31000005, 30002086, "ABC", "large"), 1_000_000).unwrap()];
-        let merged = merge_evescout(vec![manual], imported);
+        let merged = merge_by_source(vec![manual], imported, "evescout");
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].source, "manual");
     }
