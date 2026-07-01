@@ -147,6 +147,20 @@ pub struct WormholeType {
     pub mass_regen: Option<f64>,
 }
 
+/// A planetary-interaction factory schematic: its cycle time and the P-level
+/// inputs it consumes / outputs it produces (from `planetSchematics*`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlanetSchematic {
+    pub schematic_id: i64,
+    pub name: String,
+    /// Production cycle length in seconds.
+    pub cycle_time: i64,
+    /// `(type_id, quantity)` consumed per cycle.
+    pub inputs: Vec<(i64, i64)>,
+    /// `(type_id, quantity)` produced per cycle.
+    pub outputs: Vec<(i64, i64)>,
+}
+
 // --- Fitting / dogma (#159, #160) ---
 
 /// One parsed entry of a `dgmEffects.modifierInfo` JSON array — the SDE's

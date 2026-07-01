@@ -1,0 +1,275 @@
+import { useEffect, useState, type ReactNode } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  piLockedGet,
+  piLockedSet,
+  piOverview,
+  sdeStatus,
+  type BalanceRow,
+  type ColonyView,
+  type ExtractorView,
+  type StorageView,
+} from "../../lib/api";
+import { SdeSetup } from "../production/SdeSetup";
+import { formatInt } from "../../lib/format";
+
+export function PIPage() {
+  const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
+  if (status.isLoading) return <Centered>Checking static data…</Centered>;
+  if (!status.data?.installed) return <SdeSetup onInstalled={() => status.refetch()} />;
+  return <Workbench />;
+}
+
+function Workbench() {
+  const qc = useQueryClient();
+  const colonies = useQuery({ queryKey: ["pi", "overview"], queryFn: piOverview });
+  const locked = useQuery({ queryKey: ["pi", "locked"], queryFn: piLockedGet });
+  const lockedSet = new Set(locked.data ?? []);
+
+  const setLock = useMutation({
+    mutationFn: (ids: number[]) => piLockedSet(ids),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["pi", "locked"] }),
+  });
+  const toggleLock = (typeId: number) => {
+    const next = new Set(lockedSet);
+    next.has(typeId) ? next.delete(typeId) : next.add(typeId);
+    setLock.mutate([...next]);
+  };
+
+  // Tick so extractor restart countdowns stay live (minute granularity is plenty).
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const rows = colonies.data ?? [];
+
+  return (
+    <div className="p-6">
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-zinc-100">Planetary Interaction</h1>
+          <p className="mt-1 text-sm text-zinc-400">
+            Your colonies — what's extracting/producing, when extractors need a
+            restart, storage usage, and where inputs fall short.
+          </p>
+        </div>
+        <button
+          onClick={() => colonies.refetch()}
+          disabled={colonies.isFetching}
+          className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+        >
+          {colonies.isFetching ? "Loading…" : "Refresh"}
+        </button>
+      </div>
+
+      {colonies.isError && (
+        <div className="mt-4 text-sm text-rose-400">
+          {String(colonies.error)}
+          <span className="ml-1 text-zinc-500">
+            (needs <code>esi-planets.manage_planets.v1</code> — re-login if just enabled)
+          </span>
+        </div>
+      )}
+
+      {!colonies.isError && rows.length === 0 && !colonies.isFetching && (
+        <Centered>No colonies found for this character.</Centered>
+      )}
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        {rows.map((c) => (
+          <Colony
+            key={c.planetId}
+            colony={c}
+            now={now}
+            lockedSet={lockedSet}
+            onToggleLock={toggleLock}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Colony({
+  colony,
+  now,
+  lockedSet,
+  onToggleLock,
+}: {
+  colony: ColonyView;
+  now: number;
+  lockedSet: Set<number>;
+  onToggleLock: (typeId: number) => void;
+}) {
+  return (
+    <div
+      className={`rounded border bg-zinc-900/40 p-3 ${
+        colony.needsAttention ? "border-amber-800" : "border-zinc-800"
+      }`}
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-semibold text-zinc-100">{colony.systemName}</span>
+        <span className="rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[11px] capitalize text-zinc-300">
+          {colony.planetType}
+        </span>
+        <span className="text-[11px] text-zinc-500">
+          L{colony.upgradeLevel} · {colony.pinCount} pins
+        </span>
+        {colony.needsAttention && (
+          <span className="rounded border border-amber-700 bg-amber-950/30 px-1.5 py-0.5 text-[10px] text-amber-300">
+            needs attention
+          </span>
+        )}
+      </div>
+
+      {colony.extractors.length > 0 && (
+        <Section title="Extractors">
+          <div className="flex flex-col gap-1">
+            {colony.extractors.map((e, i) => (
+              <Extractor key={`${e.productTypeId}-${i}`} ex={e} now={now} />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {colony.storage.length > 0 && (
+        <Section title="Storage">
+          <div className="flex flex-col gap-1.5">
+            {colony.storage.map((s, i) => (
+              <Storage key={i} s={s} />
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {colony.balance.length > 0 && (
+        <Section title="Required vs available (per hour)">
+          <Balance rows={colony.balance} />
+        </Section>
+      )}
+
+      {colony.produced.length > 0 && (
+        <Section title="Produces">
+          <div className="flex flex-wrap gap-1.5">
+            {colony.produced.map((p) => {
+              const on = lockedSet.has(p.typeId);
+              return (
+                <button
+                  key={p.typeId}
+                  onClick={() => onToggleLock(p.typeId)}
+                  title={on ? "Locked in — click to unlock" : "Click to lock in as produced"}
+                  className={`rounded border px-2 py-0.5 text-xs ${
+                    on
+                      ? "border-emerald-600 bg-emerald-950/30 text-emerald-300"
+                      : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
+                  }`}
+                >
+                  {on ? "🔒 " : ""}
+                  {p.name}
+                </button>
+              );
+            })}
+          </div>
+        </Section>
+      )}
+    </div>
+  );
+}
+
+function Extractor({ ex, now }: { ex: ExtractorView; now: number }) {
+  const { label, tone } = countdown(ex.expiryTime, now);
+  return (
+    <div className="flex items-center justify-between text-xs">
+      <span className="text-zinc-300">{ex.product}</span>
+      <span className="flex items-center gap-2">
+        <span className="tabular-nums text-zinc-500">
+          {formatInt(ex.qtyPerCycle)}/cycle
+        </span>
+        <span className={`tabular-nums ${tone}`}>{label}</span>
+      </span>
+    </div>
+  );
+}
+
+function Storage({ s }: { s: StorageView }) {
+  const pct = s.capacity > 0 ? Math.min(100, (s.usedVolume / s.capacity) * 100) : 0;
+  const tone = pct >= 90 ? "bg-rose-600" : pct >= 70 ? "bg-amber-600" : "bg-emerald-600";
+  return (
+    <div>
+      <div className="flex items-center justify-between text-[11px] text-zinc-400">
+        <span>{s.name}</span>
+        <span className="tabular-nums">
+          {Math.round(s.usedVolume).toLocaleString()} / {Math.round(s.capacity).toLocaleString()} m³
+        </span>
+      </div>
+      <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded bg-zinc-800">
+        <div className={tone} style={{ width: `${pct}%`, height: "100%" }} />
+      </div>
+    </div>
+  );
+}
+
+function Balance({ rows }: { rows: BalanceRow[] }) {
+  return (
+    <table className="w-full text-xs">
+      <thead className="text-zinc-500">
+        <tr>
+          <th className="py-0.5 text-left font-medium">Commodity</th>
+          <th className="py-0.5 text-right font-medium">Made</th>
+          <th className="py-0.5 text-right font-medium">Used</th>
+          <th className="py-0.5 text-right font-medium">Net</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.typeId} className="border-t border-zinc-800/60">
+            <td className="py-0.5 text-zinc-300">{r.name}</td>
+            <td className="py-0.5 text-right tabular-nums text-zinc-400">{fmt(r.producedPerHour)}</td>
+            <td className="py-0.5 text-right tabular-nums text-zinc-400">{fmt(r.consumedPerHour)}</td>
+            <td
+              className={`py-0.5 text-right tabular-nums ${
+                r.net < -0.0001 ? "text-rose-400" : r.net > 0.0001 ? "text-emerald-400" : "text-zinc-500"
+              }`}
+            >
+              {r.net > 0 ? "+" : ""}
+              {fmt(r.net)}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/** Round a per-hour rate for display (keeps one decimal for small rates). */
+function fmt(n: number): string {
+  if (n === 0) return "0";
+  return Math.abs(n) >= 10 ? Math.round(n).toLocaleString() : n.toFixed(1);
+}
+
+/** Remaining time to an ISO expiry, as a label + colour tone. */
+function countdown(expiry: string | null, now: number): { label: string; tone: string } {
+  if (!expiry) return { label: "no program", tone: "text-zinc-500" };
+  const ms = Date.parse(expiry) - now;
+  if (Number.isNaN(ms)) return { label: "—", tone: "text-zinc-500" };
+  if (ms <= 0) return { label: "restart now", tone: "text-rose-400" };
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  const label = h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+  return { label: `in ${label}`, tone: ms < 3_600_000 ? "text-amber-300" : "text-zinc-300" };
+}
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="mt-3">
+      <div className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">{title}</div>
+      {children}
+    </div>
+  );
+}
+
+function Centered({ children }: { children: ReactNode }) {
+  return <div className="p-10 text-center text-sm text-zinc-500">{children}</div>;
+}

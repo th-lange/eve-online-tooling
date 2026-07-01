@@ -22,6 +22,8 @@ import {
   fittingPrice,
   fittingShipLayout,
   onDpsTick,
+  piLockedSet,
+  piOverview,
   ping,
   routeNearestWormhole,
   whImportEvescout,
@@ -124,6 +126,20 @@ describe("api.wormholes", () => {
     invokeMock.mockResolvedValue([{ id: 1, source: "tripwire" }]);
     await whTripwireImport();
     expect(invokeMock).toHaveBeenCalledWith("wh_tripwire_import");
+  });
+});
+
+describe("api.pi", () => {
+  beforeEach(() => invokeMock.mockReset());
+
+  it("invokes pi_overview and pi_locked_set", async () => {
+    invokeMock.mockResolvedValue([{ planetId: 1, extractors: [], balance: [] }]);
+    await piOverview();
+    expect(invokeMock).toHaveBeenCalledWith("pi_overview");
+
+    invokeMock.mockResolvedValue(undefined);
+    await piLockedSet([2389, 2390]);
+    expect(invokeMock).toHaveBeenCalledWith("pi_locked_set", { typeIds: [2389, 2390] });
   });
 });
 

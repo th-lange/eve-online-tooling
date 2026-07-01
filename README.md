@@ -23,6 +23,9 @@ built as a set of feature **modules** over a shared service layer.
 - **Market Orders** — your open buy/sell orders with undercut detection and a one-tick re-list helper.
 - **Industry Jobs** — personal + corp jobs ("what's cooking") with finish countdowns, status/location
   filters, and production/science/reaction slot usage.
+- **Planetary Interaction** — your colonies at a glance: what each extracts/produces, extractor
+  restart timers, storage usage, and the per-commodity required-vs-available balance (what's in
+  deficit / should be extracted), plus locking in the products you make.
 - **Wormholes** — map your chain by hand (or auto-import live Thera/Turnur holes from EVE-Scout, or
   your collaborative chain from **Tripwire** — opt-in) with mass/EOL tracking, an interactive chain
   graph, cross-chain routing (stargates ∪ your scanned holes), probe-scanner signature paste, a
