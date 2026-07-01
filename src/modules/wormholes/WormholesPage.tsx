@@ -560,12 +560,13 @@ function ChainGraph({
       <div className="mb-1 flex items-center gap-3 text-[11px] uppercase tracking-wide text-zinc-500">
         <span>Chain map</span>
         <span className="normal-case tracking-normal text-zinc-600">
-          click a system for its signatures · dashed = EOL · purple = wormhole
+          click a system for its signatures · drag to rearrange (saved) · dashed = EOL · purple = wormhole
         </span>
       </div>
       <SystemGraph
         nodes={nodes}
         edges={edges}
+        storageKey="wh-chain"
         onNodeClick={(id) => {
           const n = nodeMap.get(Number(id));
           if (n) onSelectSystem(Number(id), n.label);
