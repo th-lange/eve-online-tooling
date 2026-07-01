@@ -1070,7 +1070,6 @@ impl Sde {
     /// stable time (min), 1383 max stable mass (kg), 1384 mass regen (kg), 1385
     /// max jump mass (kg). K162 has no fixed target class (attr 0/absent) → it's
     /// labelled the generic "exit (variable)" rather than a bogus destination.
-    #[allow(dead_code)] // consumed by the jump planner (#303) + reference commands (#306)
     pub fn wormhole_types(&self) -> Result<Vec<WormholeType>, SdeError> {
         let mut stmt = self.conn.prepare(
             "SELECT t.typeID, t.typeName,
@@ -1103,6 +1102,20 @@ impl Sde {
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// A hull's `(name, base mass in kg)` from `invTypes` — the input the jump
+    /// planner (#303) weighs against a wormhole's max jump mass. Base hull mass;
+    /// prop-mod effects on mass are out of scope for the planner.
+    pub fn ship_mass(&self, type_id: i64) -> Result<Option<(String, f64)>, SdeError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT typeName, mass FROM invTypes WHERE typeID = ?1")?;
+        let mut rows = stmt.query(params![type_id])?;
+        match rows.next()? {
+            Some(r) => Ok(Some((r.get(0)?, r.get::<_, Option<f64>>(1)?.unwrap_or(0.0)))),
+            None => Ok(None),
+        }
     }
 
     /// A J-system's wormhole class, offline. Reads `mapLocationWormholeClasses`

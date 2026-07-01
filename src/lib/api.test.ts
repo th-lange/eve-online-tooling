@@ -25,6 +25,7 @@ import {
   ping,
   routeNearestWormhole,
   whImportEvescout,
+  whJumpPlan,
   type DpsTick,
   type Fit,
 } from "./api";
@@ -84,6 +85,16 @@ describe("api.wormholes", () => {
     const r = await routeNearestWormhole();
     expect(r.jumps).toBe(3);
     expect(invokeMock).toHaveBeenCalledWith("route_nearest_wormhole");
+  });
+
+  it("forwards ship + wh code + mass status to wh_jump_plan", async () => {
+    invokeMock.mockResolvedValue({ found: true, passes: true, remainingCrossings: 12 });
+    await whJumpPlan(17738, "N766", "reduced");
+    expect(invokeMock).toHaveBeenCalledWith("wh_jump_plan", {
+      shipTypeId: 17738,
+      whTypeCode: "N766",
+      massStatus: "reduced",
+    });
   });
 });
 
