@@ -15,6 +15,7 @@ import { RoutePage } from "./route/RoutePage";
 import { LocalIntelPage } from "./localintel/LocalIntelPage";
 import { OrdersPage } from "./orders/OrdersPage";
 import { IndustryJobsPage } from "./industry/IndustryJobsPage";
+import { PIPage } from "./pi/PIPage";
 import { WormholesPage } from "./wormholes/WormholesPage";
 import { FittingPage } from "./fitting/FittingPage";
 import { ShoppingPage } from "./shopping/ShoppingPage";
@@ -167,6 +168,13 @@ export const modules: ModuleDef[] = [
     description: "Running and delivered industry jobs — what's cooking.",
     group: "industry",
     Component: IndustryJobsPage,
+  },
+  {
+    id: "pi",
+    title: "Planetary Interaction",
+    description: "Colonies, extractor timers, storage, and input balance.",
+    group: "industry",
+    Component: PIPage,
   },
   {
     id: "wormholes",

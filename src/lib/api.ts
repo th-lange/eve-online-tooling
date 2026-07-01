@@ -879,6 +879,71 @@ export function whTripwireImport(): Promise<ConnectionView[]> {
   return invoke<ConnectionView[]>("wh_tripwire_import");
 }
 
+// --- Planetary Interaction ---
+
+export interface ExtractorView {
+  productTypeId: number;
+  product: string;
+  qtyPerCycle: number;
+  cycleTime: number;
+  /** ISO time the current extraction program ends (the restart timer). */
+  expiryTime: string | null;
+}
+export interface ContentRow {
+  typeId: number;
+  name: string;
+  amount: number;
+  volume: number;
+}
+export interface StorageView {
+  name: string;
+  usedVolume: number;
+  capacity: number;
+  contents: ContentRow[];
+}
+export interface BalanceRow {
+  typeId: number;
+  name: string;
+  producedPerHour: number;
+  consumedPerHour: number;
+  /** produced − consumed; negative = deficit. */
+  net: number;
+}
+export interface ProducedItem {
+  typeId: number;
+  name: string;
+  locked: boolean;
+}
+export interface ColonyView {
+  planetId: number;
+  systemName: string;
+  planetType: string;
+  upgradeLevel: number;
+  pinCount: number;
+  extractors: ExtractorView[];
+  storage: StorageView[];
+  balance: BalanceRow[];
+  produced: ProducedItem[];
+  needsAttention: boolean;
+}
+
+/**
+ * The character's planetary colonies: extraction/production, extractor restart
+ * timers, storage usage, and the required-vs-available balance. Requires
+ * `esi-planets.manage_planets.v1` (re-login if just enabled).
+ */
+export function piOverview(): Promise<ColonyView[]> {
+  return invoke<ColonyView[]>("pi_overview");
+}
+/** Type ids locked in as "produced by PI". */
+export function piLockedGet(): Promise<number[]> {
+  return invoke<number[]>("pi_locked_get");
+}
+/** Replace the locked-in produced type ids. */
+export function piLockedSet(typeIds: number[]): Promise<void> {
+  return invoke<void>("pi_locked_set", { typeIds });
+}
+
 export interface JumpPlan {
   found: boolean;
   /** Hint when the ship or wormhole type couldn't be resolved. */

@@ -13,6 +13,7 @@ pub mod industry;
 pub mod localintel;
 pub mod lpstore;
 pub mod orders;
+pub mod pi;
 pub mod production;
 pub mod reprocessing;
 pub mod route;
