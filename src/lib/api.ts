@@ -918,6 +918,7 @@ export interface ProducedItem {
 }
 export interface ColonyView {
   planetId: number;
+  systemId: number;
   systemName: string;
   planetType: string;
   upgradeLevel: number;
@@ -936,6 +937,14 @@ export interface ColonyView {
  */
 export function piOverview(): Promise<ColonyView[]> {
   return invoke<ColonyView[]>("pi_overview");
+}
+/**
+ * Open the colony in-game (Show Info): the planet if the client accepts it, else
+ * its system. ESI has no "open PI window" endpoint, so this is the nearest link.
+ * Requires `esi-ui.open_window.v1`.
+ */
+export function piShowInGame(planetId: number, systemId: number): Promise<void> {
+  return invoke<void>("pi_show_in_game", { planetId, systemId });
 }
 /** Type ids locked in as "produced by PI". */
 export function piLockedGet(): Promise<number[]> {
