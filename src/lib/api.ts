@@ -886,6 +886,8 @@ export interface ExtractorView {
   product: string;
   qtyPerCycle: number;
   cycleTime: number;
+  /** ISO time the current extraction program started (bar total = expiry − start). */
+  installTime: string | null;
   /** ISO time the current extraction program ends (the restart timer). */
   expiryTime: string | null;
 }

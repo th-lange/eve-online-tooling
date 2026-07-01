@@ -43,6 +43,10 @@ struct EsiPin {
     type_id: i64,
     #[serde(default)]
     schematic_id: Option<i64>,
+    /// When an extractor's current program started — with `expiry_time` this
+    /// gives the program's total length (for the elapsed/remaining bar).
+    #[serde(default)]
+    install_time: Option<String>,
     /// When an extractor's current program ends (needs restart). Present on
     /// extractor pins.
     #[serde(default)]
@@ -78,6 +82,8 @@ pub struct ExtractorView {
     pub product: String,
     pub qty_per_cycle: i64,
     pub cycle_time: i64,
+    /// ISO time the current extraction program started (bar total = expiry − start).
+    pub install_time: Option<String>,
     /// ISO time the current extraction program ends (the restart timer).
     pub expiry_time: Option<String>,
 }
@@ -310,6 +316,7 @@ fn build_colony(
                 product: name_of(product),
                 qty_per_cycle: e.qty_per_cycle.unwrap_or(0),
                 cycle_time: e.cycle_time.unwrap_or(0),
+                install_time: p.install_time.clone(),
                 expiry_time: p.expiry_time.clone(),
             })
         })
