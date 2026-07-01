@@ -370,10 +370,13 @@ fn build_colony(
         .map(|t| ProducedItem { type_id: t, name: name_of(t), locked: locked.contains(&t) })
         .collect();
 
+    // "Needs attention" = an extractor program has ended and wants a restart.
+    // A running colony normally shows negative balance rows (intermediates are
+    // consumed as fast as they're made; import-fed inputs read as deficits), so
+    // net<0 is NOT an alarm — it's shown in the balance table for information only.
     let needs_attention = extractors
         .iter()
-        .any(|e| e.expiry_time.as_deref().map(now_rfc3339_cmp).unwrap_or(false))
-        || balance.iter().any(|b| b.net < -0.0001);
+        .any(|e| e.expiry_time.as_deref().map(now_rfc3339_cmp).unwrap_or(false));
 
     let system_name = systems
         .get(&colony.solar_system_id)
