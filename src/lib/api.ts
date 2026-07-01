@@ -884,6 +884,49 @@ export function whJumpPlan(
   return invoke<JumpPlan>("wh_jump_plan", { shipTypeId, whTypeCode, massStatus });
 }
 
+export interface WormholeType {
+  typeId: number;
+  code: string;
+  /** Destination class id (0 = K162 / variable exit). */
+  destClassId: number;
+  destClassLabel: string;
+  maxStableMass: number | null;
+  maxJumpMass: number | null;
+  maxStableTimeMin: number | null;
+  massRegen: number | null;
+}
+
+/** The wormhole-type reference table (code → destination class + physics), offline. */
+export function whTypeReference(): Promise<WormholeType[]> {
+  return invoke<WormholeType[]>("wh_type_reference");
+}
+
+export interface StaticRef {
+  code: string;
+  destClassId: number;
+  destClassLabel: string;
+  maxStableMass: number | null;
+  maxJumpMass: number | null;
+  lifetimeMin: number | null;
+}
+
+export interface SystemReference {
+  /** Whether the system was present in the Anoik.is snapshot (else class only). */
+  found: boolean;
+  systemId: number;
+  name: string;
+  class: number | null;
+  classLabel: string | null;
+  effect: string | null;
+  statics: StaticRef[];
+  wanderers: string[];
+}
+
+/** A system's class / effect / statics (Anoik.is snapshot merged with SDE physics). */
+export function whSystemReference(systemId: number): Promise<SystemReference> {
+  return invoke<SystemReference>("wh_system_reference", { systemId });
+}
+
 export interface Signature {
   id: string;
   group: string;

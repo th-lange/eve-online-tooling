@@ -26,6 +26,8 @@ import {
   routeNearestWormhole,
   whImportEvescout,
   whJumpPlan,
+  whSystemReference,
+  whTypeReference,
   type DpsTick,
   type Fit,
 } from "./api";
@@ -95,6 +97,16 @@ describe("api.wormholes", () => {
       whTypeCode: "N766",
       massStatus: "reduced",
     });
+  });
+
+  it("invokes wh_type_reference and wh_system_reference", async () => {
+    invokeMock.mockResolvedValue([{ code: "N766" }]);
+    await whTypeReference();
+    expect(invokeMock).toHaveBeenCalledWith("wh_type_reference");
+
+    invokeMock.mockResolvedValue({ found: true, systemId: 31000005, statics: [] });
+    await whSystemReference(31000005);
+    expect(invokeMock).toHaveBeenCalledWith("wh_system_reference", { systemId: 31000005 });
   });
 });
 

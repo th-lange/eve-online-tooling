@@ -647,6 +647,29 @@ pub fn wh_jump_plan(
     })
 }
 
+// --- Wormhole reference exposure (#306) ---
+
+/// The wormhole-type reference table (code → destination class + physics), from
+/// the bundled SDE (#304). Feeds the sig-code auto-fill + type table (#307).
+#[tauri::command]
+pub fn wh_type_reference(app: AppHandle) -> Result<Vec<crate::sde::WormholeType>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+    sde.wormhole_types().map_err(|e| e.to_string())
+}
+
+/// A system's reference view: class / effect / statics (Anoik.is snapshot, #305)
+/// with each static resolved to its physics from the SDE type table.
+#[tauri::command]
+pub fn wh_system_reference(
+    app: AppHandle,
+    system_id: i64,
+) -> Result<super::reference::SystemReference, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+    super::reference::system_reference(&sde, system_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

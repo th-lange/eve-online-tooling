@@ -17,15 +17,13 @@ mod download;
 mod error;
 mod types;
 
-pub use db::Sde;
+pub use db::{wormhole_class_label, Sde};
 pub use download::download_sde;
 pub use error::SdeError;
 pub use types::{
     BlueprintMaterial, BlueprintProduct, Decryptor, EffectMeta, ModifierInfo, Recipe,
-    ReprocessRecipe, ShipLayout,
+    ReprocessRecipe, ShipLayout, WormholeType,
 };
-// `WormholeType` / `wormhole_class_label` land with the SDE query; re-exported
-// when the reference commands/UI (#306/#307) name them by path.
 // `AttrMeta` is reached through `attribute_defaults`'s return type today; it'll
 // be re-exported when the stat calculators name it (#172).
 
