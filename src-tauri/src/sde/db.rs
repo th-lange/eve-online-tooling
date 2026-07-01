@@ -1104,6 +1104,43 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// A wormhole system's environment **effect** (Pulsar/WR/…), derived offline
+    /// from its star type. Fuzzwork's classic schema carries `sunTypeID` on
+    /// `mapSolarSystems`; newer conversions instead expose the star as a celestial
+    /// in `mapDenormalize` (groupID 6 = Sun). We try both so we work across SDE
+    /// variants — a missing column/table just falls through to "no effect", never
+    /// a wrong one. Only the six effect-star types map to an effect (#314).
+    pub fn system_effect(&self, system_id: i64) -> Result<Option<String>, SdeError> {
+        let sun = self
+            .sun_type_from_mss(system_id)
+            .ok()
+            .flatten()
+            .or_else(|| self.sun_type_from_denorm(system_id).ok().flatten());
+        Ok(sun.and_then(wormhole_effect_name))
+    }
+
+    fn sun_type_from_mss(&self, system_id: i64) -> rusqlite::Result<Option<i64>> {
+        self.conn
+            .query_row(
+                "SELECT sunTypeID FROM mapSolarSystems WHERE solarSystemID = ?1",
+                params![system_id],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .optional()
+            .map(Option::flatten)
+    }
+
+    fn sun_type_from_denorm(&self, system_id: i64) -> rusqlite::Result<Option<i64>> {
+        self.conn
+            .query_row(
+                "SELECT typeID FROM mapDenormalize WHERE solarSystemID = ?1 AND groupID = 6 LIMIT 1",
+                params![system_id],
+                |r| r.get::<_, Option<i64>>(0),
+            )
+            .optional()
+            .map(Option::flatten)
+    }
+
     /// A hull's `(name, base mass in kg)` from `invTypes` — the input the jump
     /// planner (#303) weighs against a wormhole's max jump mass. Base hull mass;
     /// prop-mod effects on mass are out of scope for the planner.
@@ -1312,6 +1349,24 @@ pub fn wormhole_class_label(id: i64) -> String {
     }
 }
 
+/// Map a wormhole system's star (sun) type id to its environment effect. Only the
+/// six effect-star types match; k-space spectral suns (incl. the *spectral* "Red
+/// Giant" sun, id 8) and effect-less holes return `None`. Pure.
+pub fn wormhole_effect_name(sun_type_id: i64) -> Option<String> {
+    Some(
+        match sun_type_id {
+            30574 => "Magnetar",
+            30575 => "Black Hole",
+            30576 => "Red Giant",
+            30577 => "Pulsar",
+            30669 => "Wolf-Rayet",
+            30670 => "Cataclysmic Variable",
+            _ => return None,
+        }
+        .to_string(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1472,6 +1527,33 @@ mod tests {
         assert_eq!(wormhole_class_label(12), "Thera");
         assert_eq!(wormhole_class_label(25), "Pochven");
         assert_eq!(wormhole_class_label(99), "class 99");
+    }
+
+    #[test]
+    fn wormhole_effect_maps_only_effect_star_types() {
+        assert_eq!(wormhole_effect_name(30577).as_deref(), Some("Pulsar"));
+        assert_eq!(wormhole_effect_name(30574).as_deref(), Some("Magnetar"));
+        assert_eq!(wormhole_effect_name(30670).as_deref(), Some("Cataclysmic Variable"));
+        // The spectral k-space "Sun K5 (Red Giant)" (id 8) is NOT an effect.
+        assert_eq!(wormhole_effect_name(8), None);
+        assert_eq!(wormhole_effect_name(0), None);
+    }
+
+    #[test]
+    fn system_effect_reads_sun_type() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE mapSolarSystems(solarSystemID INT, sunTypeID INT);
+             INSERT INTO mapSolarSystems VALUES (31000100, 30577), (31000200, 8), (31000300, NULL);",
+        )
+        .unwrap();
+        let sde = Sde::from_connection(conn);
+        assert_eq!(sde.system_effect(31000100).unwrap().as_deref(), Some("Pulsar"));
+        // Spectral red-giant sun → no wormhole effect.
+        assert_eq!(sde.system_effect(31000200).unwrap(), None);
+        // No sun / unknown system → None, no error.
+        assert_eq!(sde.system_effect(31000300).unwrap(), None);
+        assert_eq!(sde.system_effect(39999999).unwrap(), None);
     }
 
     #[test]

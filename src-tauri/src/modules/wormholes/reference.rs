@@ -138,15 +138,24 @@ pub fn system_reference(sde: &Sde, system_id: i64) -> Result<SystemReference, St
         .map(|w| (w.type_id, w))
         .collect();
     let sde_class = sde.wormhole_system_class(system_id).map_err(|e| e.to_string())?;
+    // Effect isn't in the statics snapshot; derive it from the star type (#314).
+    // Swallow any SDE-variant error so a missing column never breaks the call.
+    let sde_effect = sde.system_effect(system_id).ok().flatten();
 
     match snapshot().get(&system_id) {
-        Some(entry) => Ok(resolve(system_id, entry, &types, sde_class)),
+        Some(entry) => {
+            let mut r = resolve(system_id, entry, &types, sde_class);
+            if r.effect.is_none() {
+                r.effect = sde_effect;
+            }
+            Ok(r)
+        }
         None => Ok(SystemReference {
             found: false,
             system_id,
             class: sde_class,
             class_label: sde_class.map(wormhole_class_label),
-            effect: None,
+            effect: sde_effect,
             statics: Vec::new(),
             wanderers: Vec::new(),
         }),
