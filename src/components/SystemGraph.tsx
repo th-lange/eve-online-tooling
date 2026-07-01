@@ -1,10 +1,12 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import {
   ReactFlow,
   Background,
   Controls,
+  Panel,
   Handle,
   Position,
+  useNodesState,
   type Edge,
   type Node,
   type NodeProps,
@@ -137,36 +139,76 @@ export function computeLayout(
   return pos;
 }
 
+/** Load saved node positions for a graph (keyed by `storageKey`), if any. */
+function loadPositions(key?: string): Record<string, { x: number; y: number }> {
+  if (!key || typeof localStorage === "undefined") return {};
+  try {
+    return JSON.parse(localStorage.getItem(`sysgraph.${key}`) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+
+function savePositions(key: string, nodes: { id: string; position: { x: number; y: number } }[]) {
+  if (typeof localStorage === "undefined") return;
+  const map: Record<string, { x: number; y: number }> = {};
+  for (const n of nodes) map[n.id] = n.position;
+  try {
+    localStorage.setItem(`sysgraph.${key}`, JSON.stringify(map));
+  } catch {
+    /* ignore quota / unavailable */
+  }
+}
+
 /**
  * A pan/zoom graph of solar systems and their connections, shared by the
- * wormhole chain map and the travel trail. Callers pass plain node/edge sets;
- * layout, styling and interactivity are handled here.
+ * wormhole chain map and the travel trail. Nodes are **draggable** and
+ * multi-selectable; when `storageKey` is set, hand-placed positions persist
+ * across refreshes (with a Reset layout control). Callers pass plain node/edge
+ * sets; layout, styling and interactivity are handled here.
  */
 export function SystemGraph({
-  nodes,
+  nodes: inputNodes,
   edges,
   rootId,
   onNodeClick,
   height = 360,
+  storageKey,
 }: {
   nodes: SystemGraphNode[];
   edges: SystemGraphEdge[];
   rootId?: string;
   onNodeClick?: (id: string) => void;
   height?: number;
+  /** Persist hand-dragged positions under this key (localStorage). */
+  storageKey?: string;
 }) {
-  const layout = useMemo(() => computeLayout(nodes, edges, rootId), [nodes, edges, rootId]);
+  const layout = useMemo(() => computeLayout(inputNodes, edges, rootId), [inputNodes, edges, rootId]);
 
-  const rfNodes: Node<SystemNodeData>[] = useMemo(
-    () =>
-      nodes.map((n) => ({
-        id: n.id,
-        type: "system",
-        position: layout.get(n.id) ?? { x: 0, y: 0 },
-        data: { label: n.label, kind: n.kind, sub: n.sub, current: n.current },
-      })),
-    [nodes, layout],
+  const toRfNode = useCallback(
+    (n: SystemGraphNode, pos: { x: number; y: number }): Node<SystemNodeData> => ({
+      id: n.id,
+      type: "system",
+      position: pos,
+      data: { label: n.label, kind: n.kind, sub: n.sub, current: n.current },
+    }),
+    [],
   );
+
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<Node<SystemNodeData>>([]);
+
+  // Sync nodes when the inputs change, but keep positions the user has already
+  // dragged (or previously saved) — only new nodes get a fresh computed spot.
+  useEffect(() => {
+    const saved = loadPositions(storageKey);
+    setRfNodes((cur) => {
+      const curPos = new Map(cur.map((n) => [n.id, n.position]));
+      return inputNodes.map((n) =>
+        toRfNode(n, curPos.get(n.id) ?? saved[n.id] ?? layout.get(n.id) ?? { x: 0, y: 0 }),
+      );
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputNodes, layout, storageKey]);
 
   const rfEdges: Edge[] = useMemo(
     () =>
@@ -195,19 +237,53 @@ export function SystemGraph({
     [onNodeClick],
   );
 
+  // Persist positions after a drag settles (no-op state set just to read current).
+  const persist = useCallback(() => {
+    if (!storageKey) return;
+    setRfNodes((cur) => {
+      savePositions(storageKey, cur);
+      return cur;
+    });
+  }, [storageKey, setRfNodes]);
+
+  const resetLayout = useCallback(() => {
+    const fresh = computeLayout(inputNodes, edges, rootId);
+    setRfNodes(inputNodes.map((n) => toRfNode(n, fresh.get(n.id) ?? { x: 0, y: 0 })));
+    if (storageKey && typeof localStorage !== "undefined") {
+      try {
+        localStorage.removeItem(`sysgraph.${storageKey}`);
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [inputNodes, edges, rootId, storageKey, toRfNode, setRfNodes]);
+
   return (
     <div style={{ height }} className="rounded border border-zinc-800 bg-zinc-950/40">
       <ReactFlow
         nodes={rfNodes}
         edges={rfEdges}
         nodeTypes={nodeTypes}
+        onNodesChange={onNodesChange}
         onNodeClick={handleNodeClick}
+        onNodeDragStop={persist}
         fitView
         proOptions={{ hideAttribution: true }}
         minZoom={0.2}
       >
         <Background color="#27272a" gap={20} />
         <Controls showInteractive={false} className="!bg-zinc-900 !border-zinc-700" />
+        {storageKey && (
+          <Panel position="top-right">
+            <button
+              onClick={resetLayout}
+              className="rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
+              title="Re-run the automatic layout and clear saved positions"
+            >
+              Reset layout
+            </button>
+          </Panel>
+        )}
       </ReactFlow>
     </div>
   );
