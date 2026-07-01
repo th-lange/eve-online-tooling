@@ -5,7 +5,7 @@
 //! These feed the route map / neighbour view (#99/#101); on their own they are a
 //! sortable "where's the action / where's the danger" system table.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -330,9 +330,212 @@ pub fn route_clear_breadcrumb(app: AppHandle) -> Result<(), String> {
     storage::save_data(&dir, &key, &Vec::<BreadcrumbEntry>::new())
 }
 
+// --- Nearest wormhole (#298) ---
+
+/// Nearest target from `origin` over an unweighted adjacency (BFS): returns the
+/// first target system reached and its distance in jumps, or `None` if none is
+/// reachable. Pure (testable).
+fn nearest_of(
+    adj: &HashMap<i64, Vec<i64>>,
+    origin: i64,
+    targets: &HashSet<i64>,
+) -> Option<(i64, i64)> {
+    if targets.contains(&origin) {
+        return Some((origin, 0));
+    }
+    let mut visited: HashSet<i64> = HashSet::from([origin]);
+    let mut queue: VecDeque<(i64, i64)> = VecDeque::from([(origin, 0)]);
+    while let Some((cur, dist)) = queue.pop_front() {
+        for &next in adj.get(&cur).into_iter().flatten() {
+            if visited.insert(next) {
+                if targets.contains(&next) {
+                    return Some((next, dist + 1));
+                }
+                queue.push_back((next, dist + 1));
+            }
+        }
+    }
+    None
+}
+
+/// The nearest public wormhole entrance, or (in w-space) the nearest scanned exit.
+///
+/// Honest about the constraint: ESI cannot reveal an *un-scanned* signature's
+/// location, so from k-space we point at the nearest *known* public (EVE-Scout
+/// Thera/Turnur) entrance rather than "the next wormhole in this system".
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NearestWormhole {
+    pub found: bool,
+    /// Constraint note / hint shown when nothing usable was found.
+    pub message: Option<String>,
+    /// True when the character is in w-space (uses the mapped-chain fallback).
+    pub in_wspace: bool,
+    pub current_system_id: i64,
+    pub current_name: String,
+    /// System to travel to: the WH entrance (k-space) or the chain exit (w-space).
+    pub entrance_system_id: i64,
+    pub entrance_name: String,
+    pub jumps: i64,
+    pub wh_type: Option<String>,
+    pub max_ship_size: Option<String>,
+    /// System the hole leads into (Thera/Turnur for a public entrance).
+    pub into_system_id: Option<i64>,
+    pub into_name: Option<String>,
+    pub expires_in_hours: Option<f64>,
+}
+
+fn nearest_none(current_system_id: i64, current_name: String, in_wspace: bool, message: &str) -> NearestWormhole {
+    NearestWormhole {
+        found: false,
+        message: Some(message.to_string()),
+        in_wspace,
+        current_system_id,
+        current_name,
+        entrance_system_id: 0,
+        entrance_name: String::new(),
+        jumps: 0,
+        wh_type: None,
+        max_ship_size: None,
+        into_system_id: None,
+        into_name: None,
+        expires_in_hours: None,
+    }
+}
+
+/// From the character's last-recorded system, find the nearest known public
+/// wormhole entrance (EVE-Scout) reachable by stargate. In w-space, fall back to
+/// the nearest scanned exit to k-space over the mapped chain. Reads the travel
+/// breadcrumb for "where am I" (populate it via "My location"); no ESI auth here.
+#[tauri::command]
+pub async fn route_nearest_wormhole(app: AppHandle) -> Result<NearestWormhole, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let (_dir, _id, key) = breadcrumb_key(&app)?;
+    let trail: Vec<BreadcrumbEntry> = storage::load_data(&dir, &key).unwrap_or_default();
+    let current = match trail.last() {
+        Some(e) => e.clone(),
+        None => {
+            return Ok(nearest_none(
+                0,
+                String::new(),
+                false,
+                "Use “My location” first so we know where you are.",
+            ))
+        }
+    };
+
+    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    let info = sde.solar_system_info().map_err(|e| e.to_string())?;
+    let name_of = |id: i64| info.get(&id).map(|(n, _, _)| n.clone()).unwrap_or_else(|| format!("J{id}"));
+
+    if current.wspace {
+        // w-space: no public feed applies; point at the nearest scanned k-space
+        // exit over the hand-mapped chain.
+        let edges = crate::modules::wormholes::commands::connection_edges(&app)?;
+        let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
+        for (a, b, _eol) in &edges {
+            adj.entry(*a).or_default().push(*b);
+            adj.entry(*b).or_default().push(*a);
+        }
+        let exits: HashSet<i64> = adj.keys().copied().filter(|id| *id < WSPACE_MIN_SYSTEM_ID).collect();
+        return Ok(match nearest_of(&adj, current.system_id, &exits) {
+            Some((exit, jumps)) => NearestWormhole {
+                found: true,
+                message: Some("Nearest scanned exit to k-space in your chain.".into()),
+                in_wspace: true,
+                current_system_id: current.system_id,
+                current_name: current.name.clone(),
+                entrance_system_id: exit,
+                entrance_name: name_of(exit),
+                jumps,
+                wh_type: None,
+                max_ship_size: None,
+                into_system_id: None,
+                into_name: None,
+                expires_in_hours: None,
+            },
+            None => nearest_none(
+                current.system_id,
+                current.name.clone(),
+                true,
+                "No mapped exit to k-space — scan and add your chain first.",
+            ),
+        });
+    }
+
+    // k-space: nearest public Thera/Turnur entrance over stargates.
+    let sigs = crate::evescout::fetch_signatures(&dir).await?;
+    let mut cand: HashMap<i64, crate::evescout::TheraSignature> = HashMap::new();
+    for s in sigs.into_iter().filter(|s| s.is_wormhole()) {
+        // The k-space end (`in_system`) is where a traveller finds the hole.
+        if s.in_system_id != 0 && s.in_system_id < WSPACE_MIN_SYSTEM_ID {
+            cand.entry(s.in_system_id).or_insert(s);
+        }
+    }
+    if cand.is_empty() {
+        return Ok(nearest_none(
+            current.system_id,
+            current.name.clone(),
+            false,
+            "No public Thera/Turnur connections available right now.",
+        ));
+    }
+
+    let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
+    for (a, b) in sde.all_stargate_edges().map_err(|e| e.to_string())? {
+        adj.entry(a).or_default().push(b);
+        adj.entry(b).or_default().push(a);
+    }
+    let targets: HashSet<i64> = cand.keys().copied().collect();
+    Ok(match nearest_of(&adj, current.system_id, &targets) {
+        Some((entrance, jumps)) => {
+            let s = &cand[&entrance];
+            NearestWormhole {
+                found: true,
+                message: None,
+                in_wspace: false,
+                current_system_id: current.system_id,
+                current_name: current.name.clone(),
+                entrance_system_id: entrance,
+                entrance_name: name_of(entrance),
+                jumps,
+                wh_type: s.wh_type.clone(),
+                max_ship_size: s.max_ship_size.clone(),
+                into_system_id: Some(s.out_system_id),
+                into_name: Some(s.out_system_name.clone()),
+                expires_in_hours: s.remaining_hours,
+            }
+        }
+        None => nearest_none(
+            current.system_id,
+            current.name.clone(),
+            false,
+            "No stargate route to a public wormhole from here.",
+        ),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nearest_of_finds_closest_target() {
+        // 1-2-3-4 chain; 1-5 branch. Targets {4,5} → 5 is nearer (1 jump).
+        let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
+        adj.insert(1, vec![2, 5]);
+        adj.insert(2, vec![1, 3]);
+        adj.insert(3, vec![2, 4]);
+        adj.insert(4, vec![3]);
+        adj.insert(5, vec![1]);
+        let targets: HashSet<i64> = HashSet::from([4, 5]);
+        assert_eq!(nearest_of(&adj, 1, &targets), Some((5, 1)));
+
+        // Origin already a target → zero jumps.
+        assert_eq!(nearest_of(&adj, 4, &targets), Some((4, 0)));
+        // No target reachable.
+        assert_eq!(nearest_of(&adj, 1, &HashSet::from([99])), None);
+    }
 
     #[test]
     fn merges_jumps_and_kills_by_system() {

@@ -16,6 +16,7 @@
 
 mod commands;
 mod esi;
+mod evescout;
 mod lists;
 mod market;
 mod model;
@@ -136,6 +137,7 @@ pub fn run() {
             modules::route::commands::route_location,
             modules::route::commands::route_breadcrumb,
             modules::route::commands::route_clear_breadcrumb,
+            modules::route::commands::route_nearest_wormhole,
             modules::orders::commands::market_orders,
             modules::industry::commands::industry_jobs,
             modules::wormholes::commands::wh_connections,
@@ -143,6 +145,7 @@ pub fn run() {
             modules::wormholes::commands::wh_update_connection,
             modules::wormholes::commands::wh_delete_connection,
             modules::wormholes::commands::wh_route,
+            modules::wormholes::commands::wh_import_evescout,
             modules::wormholes::commands::wh_paste_signatures,
             modules::wormholes::commands::wh_signatures,
             modules::localintel::commands::local_scan,
