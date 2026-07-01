@@ -25,7 +25,9 @@ built as a set of feature **modules** over a shared service layer.
   filters, and production/science/reaction slot usage.
 - **Wormholes** — map your chain by hand (or auto-import live Thera/Turnur holes from EVE-Scout) with
   mass/EOL tracking, an interactive chain graph, cross-chain routing (stargates ∪ your scanned holes),
-  and probe-scanner signature paste.
+  probe-scanner signature paste, a ship-mass **jump planner** (can this hull pass, and how many
+  crossings until critical?), and an offline **wormhole reference** (per-type mass/lifetime table +
+  per-system class/effect/statics).
 - **Fitting** — build a ship fit (EFT import/export + local saves), validate slots / CPU / powergrid /
   calibration / drone bay, price the whole fit, and simulate PYFA-style stats — **DPS, per-weapon
   range (optimal/falloff, missiles, mining), EHP/tank with resist breakdown + active/passive reps,
