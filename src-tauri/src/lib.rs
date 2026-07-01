@@ -146,6 +146,7 @@ pub fn run() {
             modules::wormholes::commands::wh_delete_connection,
             modules::wormholes::commands::wh_route,
             modules::wormholes::commands::wh_import_evescout,
+            modules::wormholes::commands::wh_jump_plan,
             modules::wormholes::commands::wh_paste_signatures,
             modules::wormholes::commands::wh_signatures,
             modules::localintel::commands::local_scan,

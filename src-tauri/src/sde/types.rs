@@ -127,7 +127,6 @@ pub struct ManufacturableBlueprint {
 /// One wormhole type (`invTypes` group 988) with its physics, read from the SDE
 /// dogma attributes — the offline "whtype.info" view. `dest_class_id` is 0 for
 /// K162 (the generic exit signature, whose target class isn't fixed).
-#[allow(dead_code)] // consumed by the jump planner (#303) + reference commands (#306)
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct WormholeType {

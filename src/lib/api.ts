@@ -848,6 +848,42 @@ export function whImportEvescout(): Promise<ConnectionView[]> {
   return invoke<ConnectionView[]>("wh_import_evescout");
 }
 
+export interface JumpPlan {
+  found: boolean;
+  /** Hint when the ship or wormhole type couldn't be resolved. */
+  message: string | null;
+  shipTypeId: number;
+  shipName: string;
+  /** Hull base mass (kg). */
+  shipMass: number;
+  whCode: string;
+  destClassLabel: string;
+  maxJumpMass: number;
+  maxStableMass: number;
+  massStatus: string;
+  /** Hull is within the hole's max jump mass. */
+  passes: boolean;
+  /** Full crossings before the estimated remaining mass is exhausted. */
+  remainingCrossings: number;
+  /** Crossings before the hole would drop into the critical (<10%) band. */
+  crossingsUntilCritical: number;
+  /** The next crossing would tip it into/past critical. */
+  critRisk: boolean;
+}
+
+/**
+ * Weigh a hull against a wormhole type: does it fit, and how many crossings
+ * remain before exhaustion/criticality at the given mass status. Physics come
+ * from the bundled SDE (offline). WH code is matched case-insensitively.
+ */
+export function whJumpPlan(
+  shipTypeId: number,
+  whTypeCode: string,
+  massStatus: string,
+): Promise<JumpPlan> {
+  return invoke<JumpPlan>("wh_jump_plan", { shipTypeId, whTypeCode, massStatus });
+}
+
 export interface Signature {
   id: string;
   group: string;

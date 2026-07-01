@@ -517,6 +517,136 @@ pub(crate) fn connection_edges(app: &AppHandle) -> Result<Vec<(i64, i64, bool)>,
         .collect())
 }
 
+// --- Ship-mass jump planner (#303) ---
+
+/// Fraction of a hole's *total* stable mass still available at each mass status.
+/// EVE's bands are fresh (>50%), reduced (10–50%), critical (<10%); we take a
+/// representative point in each so the budget is a sensible estimate, not a lie
+/// of precision (the exact remaining mass isn't observable in-game).
+fn status_remaining_fraction(mass_status: &str) -> f64 {
+    match mass_status {
+        "critical" => 0.10,
+        "reduced" => 0.50,
+        _ => 1.00, // fresh / unknown
+    }
+}
+
+/// The mass verdict for pushing one hull through one hole. Pure (testable).
+#[derive(Debug, PartialEq)]
+struct MassBudget {
+    /// The hull is within the hole's max jump mass (can pass at all).
+    passes: bool,
+    /// Full crossings before the estimated remaining mass is exhausted.
+    remaining_crossings: i64,
+    /// Crossings before the hole would drop into the critical (<10%) band.
+    crossings_until_critical: i64,
+    /// The very next crossing would tip it into (or past) critical.
+    crit_risk: bool,
+}
+
+/// Weigh a hull against a hole: does it fit, and how many crossings remain before
+/// exhaustion / criticality, given the current mass status. Pure.
+fn mass_budget(ship_mass: f64, max_jump_mass: f64, max_stable_mass: f64, mass_status: &str) -> MassBudget {
+    let passes = max_jump_mass > 0.0 && ship_mass > 0.0 && ship_mass <= max_jump_mass;
+    if !passes {
+        return MassBudget { passes: false, remaining_crossings: 0, crossings_until_critical: 0, crit_risk: false };
+    }
+    let remaining = max_stable_mass * status_remaining_fraction(mass_status);
+    let crit_threshold = max_stable_mass * 0.10;
+    let remaining_crossings = (remaining / ship_mass).floor() as i64;
+    let crossings_until_critical = ((remaining - crit_threshold).max(0.0) / ship_mass).floor() as i64;
+    let crit_risk = remaining - ship_mass <= crit_threshold;
+    MassBudget { passes, remaining_crossings, crossings_until_critical, crit_risk }
+}
+
+/// The jump-planner result for the frontend.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JumpPlan {
+    pub found: bool,
+    /// Hint when the ship or wormhole type couldn't be resolved.
+    pub message: Option<String>,
+    pub ship_type_id: i64,
+    pub ship_name: String,
+    pub ship_mass: f64,
+    pub wh_code: String,
+    pub dest_class_label: String,
+    pub max_jump_mass: f64,
+    pub max_stable_mass: f64,
+    pub mass_status: String,
+    pub passes: bool,
+    pub remaining_crossings: i64,
+    pub crossings_until_critical: i64,
+    pub crit_risk: bool,
+}
+
+fn jump_plan_none(message: &str) -> JumpPlan {
+    JumpPlan {
+        found: false,
+        message: Some(message.to_string()),
+        ship_type_id: 0,
+        ship_name: String::new(),
+        ship_mass: 0.0,
+        wh_code: String::new(),
+        dest_class_label: String::new(),
+        max_jump_mass: 0.0,
+        max_stable_mass: 0.0,
+        mass_status: String::new(),
+        passes: false,
+        remaining_crossings: 0,
+        crossings_until_critical: 0,
+        crit_risk: false,
+    }
+}
+
+/// Plan a hull's crossing of a wormhole type: resolve the hull's mass and the
+/// hole's physics from the SDE (#304), then compute the mass budget. `mass_status`
+/// is the observed band ("fresh"/"reduced"/"critical"); the WH code is matched
+/// case-insensitively (e.g. "N766", "K162").
+#[tauri::command]
+pub fn wh_jump_plan(
+    app: AppHandle,
+    ship_type_id: i64,
+    wh_type_code: String,
+    mass_status: String,
+) -> Result<JumpPlan, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+
+    let Some((ship_name, ship_mass)) = sde.ship_mass(ship_type_id).map_err(|e| e.to_string())? else {
+        return Ok(jump_plan_none("Unknown ship."));
+    };
+    let code = wh_type_code.trim();
+    let wh = sde
+        .wormhole_types()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .find(|w| w.code.eq_ignore_ascii_case(code));
+    let Some(wh) = wh else {
+        return Ok(jump_plan_none(&format!("Unknown wormhole type \"{code}\".")));
+    };
+
+    let max_jump = wh.max_jump_mass.unwrap_or(0.0);
+    let max_stable = wh.max_stable_mass.unwrap_or(0.0);
+    let b = mass_budget(ship_mass, max_jump, max_stable, &mass_status);
+    Ok(JumpPlan {
+        found: true,
+        message: None,
+        ship_type_id,
+        ship_name,
+        ship_mass,
+        wh_code: wh.code,
+        dest_class_label: wh.dest_class_label,
+        max_jump_mass: max_jump,
+        max_stable_mass: max_stable,
+        mass_status,
+        passes: b.passes,
+        remaining_crossings: b.remaining_crossings,
+        crossings_until_critical: b.crossings_until_critical,
+        crit_risk: b.crit_risk,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -598,6 +728,32 @@ mod tests {
         let merged = merge_evescout(vec![manual], imported);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].source, "manual");
+    }
+
+    #[test]
+    fn mass_budget_verdicts() {
+        // C2 static N766: 300 Mkg jump, 2 Bkg total. A 13 Mkg cruiser passes.
+        let cruiser = mass_budget(13_000_000.0, 300_000_000.0, 2_000_000_000.0, "fresh");
+        assert!(cruiser.passes);
+        // 2 Bkg / 13 Mkg ≈ 153 full crossings.
+        assert_eq!(cruiser.remaining_crossings, 153);
+        // Critical band is <10% (200 Mkg): (2000-200)/13 ≈ 138.
+        assert_eq!(cruiser.crossings_until_critical, 138);
+        assert!(!cruiser.crit_risk);
+
+        // A 1.3 Bkg freighter exceeds the 300 Mkg jump limit → blocked.
+        let freighter = mass_budget(1_300_000_000.0, 300_000_000.0, 2_000_000_000.0, "fresh");
+        assert!(!freighter.passes);
+        assert_eq!(freighter.remaining_crossings, 0);
+
+        // Reduced hole (~50% left) roughly halves the crossings.
+        let reduced = mass_budget(13_000_000.0, 300_000_000.0, 2_000_000_000.0, "reduced");
+        assert_eq!(reduced.remaining_crossings, 76);
+
+        // Critical hole: one more big-but-legal jump tips it over.
+        let crit = mass_budget(150_000_000.0, 300_000_000.0, 2_000_000_000.0, "critical");
+        assert!(crit.passes);
+        assert!(crit.crit_risk);
     }
 
     #[test]

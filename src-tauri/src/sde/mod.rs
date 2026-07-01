@@ -24,8 +24,8 @@ pub use types::{
     BlueprintMaterial, BlueprintProduct, Decryptor, EffectMeta, ModifierInfo, Recipe,
     ReprocessRecipe, ShipLayout,
 };
-// `WormholeType` / `wormhole_class_label` land here with the SDE query; they're
-// re-exported when the jump planner (#303) and reference commands (#306) name them.
+// `WormholeType` / `wormhole_class_label` land with the SDE query; re-exported
+// when the reference commands/UI (#306/#307) name them by path.
 // `AttrMeta` is reached through `attribute_defaults`'s return type today; it'll
 // be re-exported when the stat calculators name it (#172).
 
