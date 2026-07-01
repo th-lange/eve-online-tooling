@@ -23,6 +23,8 @@ import {
   fittingShipLayout,
   onDpsTick,
   ping,
+  routeNearestWormhole,
+  whImportEvescout,
   type DpsTick,
   type Fit,
 } from "./api";
@@ -65,6 +67,23 @@ describe("api.fitting", () => {
       regionId: 10000002,
       stationId: null,
     });
+  });
+});
+
+describe("api.wormholes", () => {
+  beforeEach(() => invokeMock.mockReset());
+
+  it("invokes wh_import_evescout and returns the merged connections", async () => {
+    invokeMock.mockResolvedValue([{ id: 1, source: "evescout" }]);
+    await expect(whImportEvescout()).resolves.toEqual([{ id: 1, source: "evescout" }]);
+    expect(invokeMock).toHaveBeenCalledWith("wh_import_evescout");
+  });
+
+  it("invokes route_nearest_wormhole", async () => {
+    invokeMock.mockResolvedValue({ found: true, jumps: 3, entranceName: "Rancer" });
+    const r = await routeNearestWormhole();
+    expect(r.jumps).toBe(3);
+    expect(invokeMock).toHaveBeenCalledWith("route_nearest_wormhole");
   });
 });
 

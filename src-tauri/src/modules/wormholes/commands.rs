@@ -38,8 +38,17 @@ struct Connection {
     /// Endpoint signature codes (e.g. "K162" ↔ a specific WH code).
     source_sig: Option<String>,
     target_sig: Option<String>,
+    /// Where this row came from: "manual" (hand-entered) or "evescout"
+    /// (auto-imported from the EVE-Scout Thera/Turnur feed). Defaulted so
+    /// connections stored before this field existed still load.
+    #[serde(default = "default_source")]
+    source: String,
     created_at: u64,
     eol_updated_at: Option<u64>,
+}
+
+fn default_source() -> String {
+    "manual".to_string()
 }
 
 /// What the frontend sends to create a connection.
@@ -76,6 +85,8 @@ pub struct ConnectionView {
     pub eol: bool,
     pub source_sig: Option<String>,
     pub target_sig: Option<String>,
+    /// "manual" | "evescout" — lets the UI badge auto-imported rows.
+    pub source: String,
     pub created_at: u64,
 }
 
@@ -135,6 +146,7 @@ fn views(dir: &std::path::Path, conns: &[Connection]) -> Result<Vec<ConnectionVi
             eol: c.eol,
             source_sig: c.source_sig.clone(),
             target_sig: c.target_sig.clone(),
+            source: c.source.clone(),
             created_at: c.created_at,
         })
         .collect())
@@ -170,6 +182,7 @@ pub fn wh_add_connection(
         eol: false,
         source_sig: connection.source_sig,
         target_sig: connection.target_sig,
+        source: "manual".to_string(),
         created_at: now_secs(),
         eol_updated_at: None,
     });
@@ -310,7 +323,7 @@ pub fn wh_signatures(app: AppHandle, system_id: i64) -> Result<Vec<Signature>, S
 // --- Cross-chain routing (#103) ---
 
 /// How a hop is reached.
-type Via = &'static str; // "origin" | "stargate" | "wormhole"
+pub(crate) type Via = &'static str; // "origin" | "stargate" | "wormhole"
 
 /// One hop on a route.
 #[derive(Debug, Clone, Serialize)]
@@ -336,7 +349,7 @@ pub struct RouteResult {
 /// BFS shortest path over a unioned adjacency map. Each neighbour carries how
 /// it's reached (`stargate`/`wormhole`); returns `(system, via)` from origin to
 /// destination, or `None` if unreachable. Pure (testable).
-fn shortest_path(
+pub(crate) fn shortest_path(
     adj: &HashMap<i64, Vec<(i64, Via)>>,
     origin: i64,
     dest: i64,
@@ -425,9 +438,167 @@ pub fn wh_route(
     }
 }
 
+// --- EVE-Scout auto-import (#298) ---
+
+/// Dedupe key for a connection: unordered endpoints + the hub-side sig. Endpoints
+/// are sorted so a manual A↔B hole matches an imported B↔A one.
+fn dedupe_key(c: &Connection) -> (i64, i64, Option<String>) {
+    let (a, b) = if c.source_system_id <= c.target_system_id {
+        (c.source_system_id, c.target_system_id)
+    } else {
+        (c.target_system_id, c.source_system_id)
+    };
+    (a, b, c.source_sig.clone())
+}
+
+/// Map one EVE-Scout signature to a connection (id assigned later on merge).
+/// Hub side (Thera/Turnur) is the source; the far k-space end is the target.
+/// Non-wormhole signatures and rows missing an endpoint are skipped. Pure.
+fn imported_connection(sig: &crate::evescout::TheraSignature, now: u64) -> Option<Connection> {
+    if !sig.is_wormhole() || sig.out_system_id == 0 || sig.in_system_id == 0 {
+        return None;
+    }
+    Some(Connection {
+        id: 0,
+        source_system_id: sig.out_system_id,
+        target_system_id: sig.in_system_id,
+        scope: "wormhole".to_string(),
+        mass_status: "fresh".to_string(),
+        jump_mass: crate::evescout::jump_mass_from_ship_size(sig.max_ship_size.as_deref()),
+        eol: false,
+        source_sig: sig.out_signature.clone(),
+        target_sig: sig.in_signature.clone(),
+        source: "evescout".to_string(),
+        created_at: now,
+        eol_updated_at: None,
+    })
+}
+
+/// Merge freshly-imported EVE-Scout connections into the stored set: keep every
+/// manual row untouched, drop all previous EVE-Scout rows (the feed is the source
+/// of truth, so vanished holes disappear), and add the imported ones — skipping
+/// any that collide with a manual row or each other. New ids continue past the
+/// highest existing id. Pure (testable).
+fn merge_evescout(existing: Vec<Connection>, imported: Vec<Connection>) -> Vec<Connection> {
+    let mut out: Vec<Connection> = existing.into_iter().filter(|c| c.source != "evescout").collect();
+    let mut keys: HashSet<(i64, i64, Option<String>)> = out.iter().map(dedupe_key).collect();
+    let mut next_id = out.iter().map(|c| c.id).max().unwrap_or(0) + 1;
+    for mut c in imported {
+        if keys.insert(dedupe_key(&c)) {
+            c.id = next_id;
+            next_id += 1;
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Import live Thera/Turnur connections from EVE-Scout into the map. Manual holes
+/// are preserved; previously-imported holes are refreshed from the feed. Returns
+/// the merged, name-enriched connection set (same shape as `wh_connections`).
+#[tauri::command]
+pub async fn wh_import_evescout(app: AppHandle) -> Result<Vec<ConnectionView>, String> {
+    let (dir, existing) = load(&app)?;
+    let sigs = crate::evescout::fetch_signatures(&dir).await?;
+    let now = now_secs();
+    let imported: Vec<Connection> = sigs.iter().filter_map(|s| imported_connection(s, now)).collect();
+    let merged = merge_evescout(existing, imported);
+    save_and_view(&dir, &merged)
+}
+
+/// Undirected wormhole/stargate edges from the stored map, for cross-module
+/// routing (the Route module's "nearest wormhole"). Returns `(a, b, eol)` per
+/// mapped connection, already auto-pruned of dead holes.
+pub(crate) fn connection_edges(app: &AppHandle) -> Result<Vec<(i64, i64, bool)>, String> {
+    let (_dir, conns) = load(app)?;
+    Ok(conns
+        .iter()
+        .map(|c| (c.source_system_id, c.target_system_id, c.eol))
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn evescout_sig(out: i64, in_: i64, sig: &str, size: &str) -> crate::evescout::TheraSignature {
+        crate::evescout::TheraSignature {
+            signature_type: "wormhole".into(),
+            out_system_id: out,
+            out_system_name: "Thera".into(),
+            out_signature: Some(sig.into()),
+            in_system_id: in_,
+            in_system_name: "Far".into(),
+            in_region_name: None,
+            in_signature: Some("K162".into()),
+            wh_type: Some("K162".into()),
+            max_ship_size: Some(size.into()),
+            remaining_hours: Some(3.0),
+        }
+    }
+
+    #[test]
+    fn imports_only_wormholes_and_maps_fields() {
+        let s = evescout_sig(31000005, 30002086, "ABC", "large");
+        let c = imported_connection(&s, 100).unwrap();
+        assert_eq!(c.source_system_id, 31000005);
+        assert_eq!(c.target_system_id, 30002086);
+        assert_eq!(c.jump_mass, "l");
+        assert_eq!(c.source, "evescout");
+        assert_eq!(c.source_sig.as_deref(), Some("ABC"));
+
+        // Non-wormhole / incomplete rows are skipped.
+        let mut data = evescout_sig(31000005, 30000142, "X", "frigate");
+        data.signature_type = "data".into();
+        assert!(imported_connection(&data, 100).is_none());
+    }
+
+    #[test]
+    fn merge_preserves_manual_and_refreshes_imports() {
+        let now = 1_000_000;
+        let manual = Connection { source: "manual".into(), ..wh(1, 1, false, 0, now) };
+        // An older imported row that should be dropped and replaced by the feed.
+        let stale = Connection {
+            id: 2,
+            source: "evescout".into(),
+            source_system_id: 31000005,
+            target_system_id: 39999999,
+            ..wh(2, 1, false, 0, now)
+        };
+        let existing = vec![manual.clone(), stale];
+
+        let imported = vec![
+            imported_connection(&evescout_sig(31000005, 30002086, "ABC", "large"), now).unwrap(),
+            // Duplicate of the imported one → skipped.
+            imported_connection(&evescout_sig(31000005, 30002086, "ABC", "large"), now).unwrap(),
+        ];
+
+        let merged = merge_evescout(existing, imported);
+        // Manual kept, stale import gone, one fresh import added with a new id.
+        assert_eq!(merged.len(), 2);
+        assert!(merged.iter().any(|c| c.id == 1 && c.source == "manual"));
+        let imp: Vec<&Connection> = merged.iter().filter(|c| c.source == "evescout").collect();
+        assert_eq!(imp.len(), 1);
+        assert_eq!(imp[0].target_system_id, 30002086);
+        assert!(imp[0].id > 1);
+    }
+
+    #[test]
+    fn merge_skips_import_colliding_with_manual() {
+        // Manual A↔B; feed reports B↔A with the same hub sig → not duplicated.
+        let manual = Connection {
+            id: 7,
+            source: "manual".into(),
+            source_system_id: 30002086,
+            target_system_id: 31000005,
+            source_sig: Some("ABC".into()),
+            ..wh(7, 1, false, 0, 1_000_000)
+        };
+        let imported = vec![imported_connection(&evescout_sig(31000005, 30002086, "ABC", "large"), 1_000_000).unwrap()];
+        let merged = merge_evescout(vec![manual], imported);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].source, "manual");
+    }
 
     #[test]
     fn parses_scanner_paste_and_filters_noise() {
@@ -477,6 +648,7 @@ mod tests {
             eol,
             source_sig: None,
             target_sig: None,
+            source: "manual".into(),
             created_at: now - age_h * 3600,
             eol_updated_at: eol.then(|| now - eol_age_h * 3600),
         }

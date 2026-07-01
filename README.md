@@ -15,14 +15,17 @@ built as a set of feature **modules** over a shared service layer.
 - **Universe**, **Assets**, **Character** (skills/standings/research/mining/fleet),
   **Accounting** (wallet + FIFO profit), **Public Contracts**, and **LP Store** tools.
 - **Route** — per-system jumps & ship/pod/NPC kills (last hour) across known space, a stargate
-  neighbourhood "fog-of-war" map, and a live travel breadcrumb spanning known space and wormholes.
+  neighbourhood "fog-of-war" map, a live travel breadcrumb (rendered as an interactive graph) spanning
+  known space and wormholes, and a "nearest wormhole" finder that routes you to the closest known public
+  Thera/Turnur entrance (EVE-Scout).
 - **Local Intel** — paste the in-game Local member list to classify pilots blue/neutral/red by standing,
   corp and alliance, with a corp/alliance watchlist + alerts and zKillboard danger enrichment.
 - **Market Orders** — your open buy/sell orders with undercut detection and a one-tick re-list helper.
 - **Industry Jobs** — personal + corp jobs ("what's cooking") with finish countdowns, status/location
   filters, and production/science/reaction slot usage.
-- **Wormholes** — map your chain by hand with mass/EOL tracking, cross-chain routing (stargates ∪ your
-  scanned holes), and probe-scanner signature paste.
+- **Wormholes** — map your chain by hand (or auto-import live Thera/Turnur holes from EVE-Scout) with
+  mass/EOL tracking, an interactive chain graph, cross-chain routing (stargates ∪ your scanned holes),
+  and probe-scanner signature paste.
 - **Fitting** — build a ship fit (EFT import/export + local saves), validate slots / CPU / powergrid /
   calibration / drone bay, price the whole fit, and simulate PYFA-style stats — **DPS, per-weapon
   range (optimal/falloff, missiles, mining), EHP/tank with resist breakdown + active/passive reps,

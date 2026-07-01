@@ -6,6 +6,7 @@ import {
   whAddConnection,
   whConnections,
   whDeleteConnection,
+  whImportEvescout,
   whPasteSignatures,
   whRoute,
   whUpdateConnection,
@@ -16,6 +17,11 @@ import {
   type SystemMatch,
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
+import {
+  SystemGraph,
+  type SystemGraphEdge,
+  type SystemGraphNode,
+} from "../../components/SystemGraph";
 
 const MASS = ["fresh", "reduced", "critical"];
 const JUMP = ["s", "m", "l", "xl"];
@@ -35,6 +41,8 @@ function Workbench() {
 
   const [source, setSource] = useState<SystemMatch | null>(null);
   const [target, setTarget] = useState<SystemMatch | null>(null);
+  // Selected system for the signature panel — a chain-graph node click sets it.
+  const [sigSystem, setSigSystem] = useState<SystemMatch | null>(null);
   const [scope, setScope] = useState("wormhole");
   const [srcSig, setSrcSig] = useState("");
   const [tgtSig, setTgtSig] = useState("");
@@ -68,17 +76,40 @@ function Workbench() {
     onSuccess: set,
   });
   const del = useMutation({ mutationFn: (id: number) => whDeleteConnection(id), onSuccess: set });
+  const importEvescout = useMutation({ mutationFn: whImportEvescout, onSuccess: set });
 
   const rows = conns.data ?? [];
+  const importedCount = rows.filter((c) => c.source === "evescout").length;
 
   return (
     <div className="p-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-zinc-100">Wormholes</h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          Map your chain by hand — wormhole connections aren't in any API. Dead
-          holes (past life / EOL) are pruned automatically.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-zinc-100">Wormholes</h1>
+          <p className="mt-1 text-sm text-zinc-400">
+            Map your chain by hand, or import live Thera/Turnur holes from
+            EVE-Scout. Dead holes (past life / EOL) are pruned automatically.
+          </p>
+        </div>
+        <div className="flex flex-col items-end gap-1">
+          <button
+            onClick={() => importEvescout.mutate()}
+            disabled={importEvescout.isPending}
+            title="Fetch the live public Thera & Turnur connections from EVE-Scout"
+            className="whitespace-nowrap rounded bg-teal-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-600 disabled:opacity-50"
+          >
+            {importEvescout.isPending ? "Importing…" : "Import Thera/Turnur"}
+          </button>
+          {importEvescout.isError ? (
+            <span className="max-w-56 text-right text-[11px] text-rose-400">
+              {String(importEvescout.error)}
+            </span>
+          ) : (
+            <span className="text-[11px] text-zinc-500">
+              {importedCount > 0 ? `${importedCount} imported hole(s)` : "EVE-Scout · free, no login"}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="mt-4 flex flex-wrap items-end gap-3 rounded border border-zinc-800 bg-zinc-900 p-3">
@@ -126,9 +157,14 @@ function Workbench() {
         </button>
       </div>
 
+      <ChainGraph
+        rows={rows}
+        onSelectSystem={(id, name) => setSigSystem({ id, name })}
+      />
+
       <Routing />
 
-      <Signatures connections={rows} />
+      <Signatures connections={rows} system={sigSystem} setSystem={setSigSystem} />
 
       <div className="mt-4 overflow-auto rounded border border-zinc-800">
         <table className="w-full border-collapse text-sm">
@@ -152,6 +188,14 @@ function Workbench() {
                   <SystemTag name={c.sourceName} wspace={c.sourceWspace} sig={c.sourceSig} />
                   <span className="mx-1 text-zinc-600">↔</span>
                   <SystemTag name={c.targetName} wspace={c.targetWspace} sig={c.targetSig} />
+                  {c.source === "evescout" && (
+                    <span
+                      className="ml-2 rounded border border-teal-700 bg-teal-950/40 px-1.5 py-0.5 text-[10px] text-teal-300"
+                      title="Auto-imported from the EVE-Scout Thera/Turnur feed"
+                    >
+                      EVE-Scout
+                    </span>
+                  )}
                 </td>
                 <td className="px-3 py-1.5 text-zinc-400">{c.scope}</td>
                 <td className="px-3 py-1.5">
@@ -228,8 +272,15 @@ function Workbench() {
 /** Paste a probe-scanner result for a system → signature list with the
  * added/removed diff; wormhole sigs already referenced by a connection's
  * endpoint sig are marked "linked". */
-function Signatures({ connections }: { connections: ConnectionView[] }) {
-  const [system, setSystem] = useState<SystemMatch | null>(null);
+function Signatures({
+  connections,
+  system,
+  setSystem,
+}: {
+  connections: ConnectionView[];
+  system: SystemMatch | null;
+  setSystem: (m: SystemMatch | null) => void;
+}) {
   const [text, setText] = useState("");
   const paste = useMutation({
     mutationFn: () => whPasteSignatures(system!.id, text),
@@ -305,6 +356,64 @@ function SigChip({ sig, fresh, linked }: { sig: Signature; fresh: boolean; linke
       )}
       {isWh && linked && <span className="ml-1 text-emerald-400" title="Linked to a connection">🔗</span>}
     </span>
+  );
+}
+
+/** Wormhole edge colour by mass status (fresh → reduced → critical). */
+function massEdgeColor(mass: string): string {
+  if (mass === "critical") return "#f43f5e";
+  if (mass === "reduced") return "#f59e0b";
+  return "#a855f7";
+}
+
+/** Interactive node-edge view of the mapped chain. Click a node to load its
+ * signatures below. Complements the flat table (kept as the edit pane). */
+function ChainGraph({
+  rows,
+  onSelectSystem,
+}: {
+  rows: ConnectionView[];
+  onSelectSystem: (id: number, name: string) => void;
+}) {
+  const nodeMap = new Map<number, SystemGraphNode>();
+  const addNode = (id: number, name: string, wspace: boolean) => {
+    if (!nodeMap.has(id)) {
+      nodeMap.set(id, { id: String(id), label: name, kind: wspace ? "wspace" : "unknown" });
+    }
+  };
+  rows.forEach((c) => {
+    addNode(c.sourceSystemId, c.sourceName, c.sourceWspace);
+    addNode(c.targetSystemId, c.targetName, c.targetWspace);
+  });
+  const edges: SystemGraphEdge[] = rows.map((c) => ({
+    source: String(c.sourceSystemId),
+    target: String(c.targetSystemId),
+    variant: c.scope === "wormhole" ? "wormhole" : "stargate",
+    dashed: c.eol,
+    color: c.scope === "wormhole" ? massEdgeColor(c.massStatus) : undefined,
+    label: c.scope === "wormhole" && c.massStatus !== "fresh" ? c.massStatus : undefined,
+  }));
+  const nodes = [...nodeMap.values()];
+
+  if (nodes.length === 0) return null;
+
+  return (
+    <div className="mt-4">
+      <div className="mb-1 flex items-center gap-3 text-[11px] uppercase tracking-wide text-zinc-500">
+        <span>Chain map</span>
+        <span className="normal-case tracking-normal text-zinc-600">
+          click a system for its signatures · dashed = EOL · purple = wormhole
+        </span>
+      </div>
+      <SystemGraph
+        nodes={nodes}
+        edges={edges}
+        onNodeClick={(id) => {
+          const n = nodeMap.get(Number(id));
+          if (n) onSelectSystem(Number(id), n.label);
+        }}
+      />
+    </div>
   );
 }
 

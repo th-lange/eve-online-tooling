@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   routeBreadcrumb,
   routeClearBreadcrumb,
   routeLocation,
+  routeNearestWormhole,
   sdeStatus,
   systemActivity,
   systemNeighbourhood,
   systemSearch,
   type BreadcrumbEntry,
+  type NearestWormhole,
   type SystemActivity,
   type SystemMatch,
 } from "../../lib/api";
@@ -18,6 +20,12 @@ import { usePersistentSort } from "../../lib/usePersistentSort";
 import { usePersistentState } from "../../lib/usePersistentState";
 import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
 import { DataAge } from "../../components/DataAge";
+import {
+  SystemGraph,
+  kindFromSecurity,
+  type SystemGraphEdge,
+  type SystemGraphNode,
+} from "../../components/SystemGraph";
 
 export function RoutePage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
@@ -251,6 +259,10 @@ function Workbench() {
             </div>
           </div>
         )}
+
+        {entries.length > 1 && <TravelGraph entries={entries} />}
+
+        <NearestWormholeCard onFocus={focusSystem} />
       </div>
 
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
@@ -293,6 +305,116 @@ function Workbench() {
       ) : (
         <ActivityTable rows={filtered} />
       )}
+    </div>
+  );
+}
+
+/** On-demand "where's the nearest wormhole" helper. From k-space it points at
+ * the nearest known *public* (EVE-Scout Thera/Turnur) entrance — ESI can't
+ * reveal un-scanned signatures, so it's honest about that. In w-space it falls
+ * back to the nearest scanned exit over your mapped chain. */
+function NearestWormholeCard({ onFocus }: { onFocus: (m: SystemMatch) => void }) {
+  const find = useMutation({ mutationFn: routeNearestWormhole });
+  const r: NearestWormhole | undefined = find.data;
+
+  return (
+    <div className="mt-3 rounded border border-zinc-800 bg-zinc-900/40 p-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-sm font-semibold text-zinc-300">Nearest wormhole</span>
+        <button
+          onClick={() => find.mutate()}
+          disabled={find.isPending}
+          className="rounded bg-indigo-600 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+        >
+          {find.isPending ? "Finding…" : "Find nearest"}
+        </button>
+        <span className="text-[11px] text-zinc-500">
+          Known public holes only — ESI can't locate un-scanned signatures.
+        </span>
+      </div>
+
+      {find.isError && <div className="mt-2 text-xs text-rose-400">{String(find.error)}</div>}
+
+      {r && !r.found && (
+        <div className="mt-2 text-sm text-zinc-400">{r.message ?? "Nothing found."}</div>
+      )}
+
+      {r && r.found && (
+        <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+          <span className="text-zinc-400">
+            {r.inWspace ? "Nearest exit:" : "Nearest public WH:"}
+          </span>
+          <span className="font-semibold text-emerald-300">
+            {r.jumps} jump{r.jumps === 1 ? "" : "s"}
+          </span>
+          <span className="text-zinc-500">→</span>
+          <span className="rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-zinc-200">
+            {r.entranceName}
+          </span>
+          {!r.inWspace && (
+            <span className="text-xs text-zinc-500">
+              {r.intoName ? `${r.intoName} connection` : "wormhole"}
+              {r.whType ? ` · ${r.whType}` : ""}
+              {r.maxShipSize ? ` · ${r.maxShipSize}` : ""}
+              {r.expiresInHours != null ? ` · EOL in ~${r.expiresInHours.toFixed(0)}h` : ""}
+            </span>
+          )}
+          <button
+            onClick={() => onFocus({ id: r.entranceSystemId, name: r.entranceName })}
+            className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
+          >
+            Show around
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The travel trail as a node-edge path: current system highlighted, and
+ * k-space↔w-space transitions (likely wormholes) drawn in purple. */
+function TravelGraph({ entries }: { entries: BreadcrumbEntry[] }) {
+  const nodeMap = new Map<number, SystemGraphNode>();
+  entries.forEach((e, i) => {
+    const node: SystemGraphNode = {
+      id: String(e.systemId),
+      label: e.name,
+      kind: e.wspace ? "wspace" : kindFromSecurity(e.security),
+      sub: e.wspace ? e.region || "wormhole" : e.security.toFixed(1),
+      current: i === entries.length - 1,
+    };
+    // Keep the latest occurrence so "current" wins on a revisit.
+    nodeMap.set(e.systemId, node);
+  });
+
+  const seen = new Set<string>();
+  const edges: SystemGraphEdge[] = [];
+  for (let i = 1; i < entries.length; i++) {
+    const a = entries[i - 1];
+    const b = entries[i];
+    if (a.systemId === b.systemId) continue;
+    const key = `${a.systemId}-${b.systemId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    edges.push({
+      source: String(a.systemId),
+      target: String(b.systemId),
+      // A k-space↔w-space change can only be a wormhole; highlight it.
+      variant: a.wspace !== b.wspace ? "wormhole" : "stargate",
+    });
+  }
+
+  return (
+    <div className="mt-3">
+      <div className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">
+        Travel graph <span className="normal-case tracking-normal text-zinc-600">· purple = w-space transition</span>
+      </div>
+      <SystemGraph
+        nodes={[...nodeMap.values()]}
+        edges={edges}
+        rootId={String(entries[0].systemId)}
+        height={260}
+      />
     </div>
   );
 }

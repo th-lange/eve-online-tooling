@@ -800,6 +800,8 @@ export interface ConnectionView {
   eol: boolean;
   sourceSig: string | null;
   targetSig: string | null;
+  /** "manual" (hand-entered) | "evescout" (auto-imported from Thera/Turnur feed). */
+  source: string;
   createdAt: number;
 }
 
@@ -837,6 +839,13 @@ export function whUpdateConnection(
 }
 export function whDeleteConnection(id: number): Promise<ConnectionView[]> {
   return invoke<ConnectionView[]>("wh_delete_connection", { id });
+}
+/**
+ * Import live Thera/Turnur connections from EVE-Scout, merged into the map.
+ * Hand-entered holes are preserved; imported holes are refreshed from the feed.
+ */
+export function whImportEvescout(): Promise<ConnectionView[]> {
+  return invoke<ConnectionView[]>("wh_import_evescout");
 }
 
 export interface Signature {
@@ -908,6 +917,36 @@ export function routeBreadcrumb(): Promise<BreadcrumbEntry[]> {
 /** Clear the travel trail. */
 export function routeClearBreadcrumb(): Promise<void> {
   return invoke<void>("route_clear_breadcrumb");
+}
+
+export interface NearestWormhole {
+  found: boolean;
+  /** Constraint note / hint when nothing usable was found. */
+  message: string | null;
+  /** True when you're in w-space (uses the mapped-chain fallback). */
+  inWspace: boolean;
+  currentSystemId: number;
+  currentName: string;
+  /** System to travel to — the WH entrance (k-space) or chain exit (w-space). */
+  entranceSystemId: number;
+  entranceName: string;
+  jumps: number;
+  whType: string | null;
+  maxShipSize: string | null;
+  /** System the hole leads into (Thera/Turnur for a public entrance). */
+  intoSystemId: number | null;
+  intoName: string | null;
+  expiresInHours: number | null;
+}
+
+/**
+ * Nearest known public wormhole entrance (EVE-Scout Thera/Turnur) reachable by
+ * stargate from your last-recorded system; in w-space, the nearest scanned exit
+ * over your mapped chain. Reads the travel breadcrumb — call "My location" first.
+ * ESI can't reveal un-scanned signatures, so this points at *known* holes only.
+ */
+export function routeNearestWormhole(): Promise<NearestWormhole> {
+  return invoke<NearestWormhole>("route_nearest_wormhole");
 }
 
 /** Stargate neighbourhood around a system out to `depth` jumps, with jumps/kills heat. */
