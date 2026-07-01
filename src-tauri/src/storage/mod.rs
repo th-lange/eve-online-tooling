@@ -38,6 +38,38 @@ pub fn delete_refresh_token(character_id: i64) -> Result<(), String> {
     }
 }
 
+// --- Named secrets (non-character) ---
+//
+// A generic keychain slot for secrets that aren't a character refresh token —
+// e.g. a third-party service password (Tripwire, #302). Keyed by a string name
+// under the same service; names won't collide with the numeric character ids.
+
+fn secret_entry(name: &str) -> Result<Entry, String> {
+    Entry::new(KEYCHAIN_SERVICE, name).map_err(|e| e.to_string())
+}
+
+/// Store a named secret in the OS keychain.
+pub fn store_secret(name: &str, value: &str) -> Result<(), String> {
+    secret_entry(name)?.set_password(value).map_err(|e| e.to_string())
+}
+
+/// Load a named secret, if present.
+pub fn load_secret(name: &str) -> Result<Option<String>, String> {
+    match secret_entry(name)?.get_password() {
+        Ok(v) => Ok(Some(v)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Delete a named secret (no-op if absent).
+pub fn delete_secret(name: &str) -> Result<(), String> {
+    match secret_entry(name)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 fn roster_path(app_data_dir: &Path) -> std::path::PathBuf {
     app_data_dir.join("characters.json")
 }
