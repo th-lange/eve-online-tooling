@@ -180,17 +180,35 @@ function Colony({
 
 function Extractor({ ex, now }: { ex: ExtractorView; now: number }) {
   const { label, tone } = countdown(ex.expiryTime, now);
+  const remainingPct = programRemainingPct(ex.installTime, ex.expiryTime, now);
   return (
-    <div className="flex items-center justify-between text-xs">
-      <span className="text-zinc-300">{ex.product}</span>
-      <span className="flex items-center gap-2">
-        <span className="tabular-nums text-zinc-500">
-          {formatInt(ex.qtyPerCycle)}/cycle
+    <div className="text-xs">
+      <div className="flex items-center justify-between">
+        <span className="text-zinc-300">{ex.product}</span>
+        <span className="flex items-center gap-2">
+          <span className="tabular-nums text-zinc-500">{formatInt(ex.qtyPerCycle)}/cycle</span>
+          <span className={`tabular-nums ${tone}`}>{label}</span>
         </span>
-        <span className={`tabular-nums ${tone}`}>{label}</span>
-      </span>
+      </div>
+      {remainingPct !== null && (
+        // Green = time remaining, red = elapsed (a live countdown bar).
+        <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded bg-rose-900/60">
+          <div className="h-full bg-emerald-600" style={{ width: `${remainingPct}%` }} />
+        </div>
+      )}
     </div>
   );
+}
+
+/** Fraction of an extraction program still remaining (0–100), or null if the
+ * start/end aren't both known. Drives the green-remaining / red-elapsed bar. */
+function programRemainingPct(install: string | null, expiry: string | null, now: number): number | null {
+  if (!install || !expiry) return null;
+  const start = Date.parse(install);
+  const end = Date.parse(expiry);
+  if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return null;
+  const pct = ((end - now) / (end - start)) * 100;
+  return Math.max(0, Math.min(100, pct));
 }
 
 function Storage({ s }: { s: StorageView }) {
