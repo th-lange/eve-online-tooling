@@ -162,6 +162,25 @@ pub async fn open_market_window(
     Ok(())
 }
 
+/// Open the in-game Show Info window for an entity (ESI UI write). ESI has no
+/// "open PI window" endpoint; this is the closest hook (systems are always
+/// supported; some celestials may not be, so callers can fall back).
+pub async fn open_information_window(
+    auth: &AuthState,
+    character_id: i64,
+    target_id: i64,
+) -> Result<(), AuthError> {
+    let token = auth.access_token_for(character_id).await?;
+    auth.http()
+        .post(format!("{ESI_BASE}/latest/ui/openwindow/information/"))
+        .query(&[("target_id", target_id.to_string())])
+        .bearer_auth(&token)
+        .send()
+        .await?
+        .error_for_status()?;
+    Ok(())
+}
+
 pub async fn fetch_blueprints(
     auth: &AuthState,
     character_id: i64,

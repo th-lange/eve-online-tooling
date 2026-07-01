@@ -129,6 +129,7 @@ pub struct ProducedItem {
 #[serde(rename_all = "camelCase")]
 pub struct ColonyView {
     pub planet_id: i64,
+    pub system_id: i64,
     pub system_name: String,
     pub planet_type: String,
     pub upgrade_level: i64,
@@ -381,6 +382,7 @@ fn build_colony(
 
     Ok(ColonyView {
         planet_id: colony.planet_id,
+        system_id: colony.solar_system_id,
         system_name,
         planet_type: colony.planet_type.clone(),
         upgrade_level: colony.upgrade_level,
@@ -391,6 +393,31 @@ fn build_colony(
         produced,
         needs_attention,
     })
+}
+
+/// Open the colony in-game via Show Info: the planet if ESI accepts it, else the
+/// system (always supported). ESI has no "open the PI window" endpoint, so this
+/// is the nearest per-colony link. Requires `esi-ui.open_window.v1`.
+#[tauri::command]
+pub async fn pi_show_in_game(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+    planet_id: i64,
+    system_id: i64,
+) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let character_id =
+        storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?;
+    // Prefer the planet; fall back to the system if the client rejects the id.
+    if crate::esi::open_information_window(&auth_state, character_id, planet_id)
+        .await
+        .is_ok()
+    {
+        return Ok(());
+    }
+    crate::esi::open_information_window(&auth_state, character_id, system_id)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// The type ids the user has locked in as "produced by PI".

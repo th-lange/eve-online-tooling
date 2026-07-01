@@ -141,6 +141,7 @@ pub fn run() {
             modules::orders::commands::market_orders,
             modules::industry::commands::industry_jobs,
             modules::pi::commands::pi_overview,
+            modules::pi::commands::pi_show_in_game,
             modules::pi::commands::pi_locked_get,
             modules::pi::commands::pi_locked_set,
             modules::wormholes::commands::wh_connections,

@@ -4,6 +4,7 @@ import {
   piLockedGet,
   piLockedSet,
   piOverview,
+  piShowInGame,
   sdeStatus,
   type BalanceRow,
   type ColonyView,
@@ -122,6 +123,13 @@ function Colony({
             needs attention
           </span>
         )}
+        <button
+          onClick={() => piShowInGame(colony.planetId, colony.systemId).catch(() => {})}
+          title="Show this colony in-game (planet, or its system) — ESI can't open the PI window directly"
+          className="ml-auto rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
+        >
+          Show in-game ↗
+        </button>
       </div>
 
       {colony.extractors.length > 0 && (
