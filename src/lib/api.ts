@@ -902,6 +902,7 @@ export function whTypeReference(): Promise<WormholeType[]> {
 }
 
 export interface StaticRef {
+  typeId: number;
   code: string;
   destClassId: number;
   destClassLabel: string;
@@ -911,15 +912,14 @@ export interface StaticRef {
 }
 
 export interface SystemReference {
-  /** Whether the system was present in the Anoik.is snapshot (else class only). */
+  /** Whether the system was present in the statics snapshot (else class only). */
   found: boolean;
   systemId: number;
-  name: string;
   class: number | null;
   classLabel: string | null;
   effect: string | null;
   statics: StaticRef[];
-  wanderers: string[];
+  wanderers: StaticRef[];
 }
 
 /** A system's class / effect / statics (Anoik.is snapshot merged with SDE physics). */
