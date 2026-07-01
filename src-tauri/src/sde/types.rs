@@ -124,6 +124,30 @@ pub struct ManufacturableBlueprint {
     pub product_quantity: i64,
 }
 
+/// One wormhole type (`invTypes` group 988) with its physics, read from the SDE
+/// dogma attributes — the offline "whtype.info" view. `dest_class_id` is 0 for
+/// K162 (the generic exit signature, whose target class isn't fixed).
+#[allow(dead_code)] // consumed by the jump planner (#303) + reference commands (#306)
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WormholeType {
+    pub type_id: i64,
+    /// Signature code, e.g. "K162", "N766".
+    pub code: String,
+    /// Destination wormhole class id (0 = K162 / variable exit).
+    pub dest_class_id: i64,
+    /// Human label for the destination class (e.g. "C4", "HS", "exit (variable)").
+    pub dest_class_label: String,
+    /// Total mass the hole can carry before collapse (kg).
+    pub max_stable_mass: Option<f64>,
+    /// Largest single ship that can jump it (kg).
+    pub max_jump_mass: Option<f64>,
+    /// Natural lifetime in minutes.
+    pub max_stable_time_min: Option<f64>,
+    /// Mass regenerated per cycle (kg).
+    pub mass_regen: Option<f64>,
+}
+
 // --- Fitting / dogma (#159, #160) ---
 
 /// One parsed entry of a `dgmEffects.modifierInfo` JSON array — the SDE's
