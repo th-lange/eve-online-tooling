@@ -1121,7 +1121,6 @@ impl Sde {
     /// A J-system's wormhole class, offline. Reads `mapLocationWormholeClasses`
     /// by system id, falling back to the system's region (k-space classes are
     /// keyed at the region level). Lets us cross-check the Anoik.is snapshot (#305).
-    #[allow(dead_code)] // consumed by the Anoik.is snapshot cross-check (#305)
     pub fn wormhole_system_class(&self, system_id: i64) -> Result<Option<i64>, SdeError> {
         let by_location = |loc: i64| -> Result<Option<i64>, SdeError> {
             let mut stmt = self.conn.prepare(
@@ -1299,7 +1298,6 @@ fn packaged_volume(group_id: i64, assembled: Option<f64>) -> Option<f64> {
 /// Label a wormhole destination class id (`wormholeClassID` / target-class attr).
 /// C1–C6 are the wormhole space classes; 7/8/9 are k-space security bands; the
 /// rest are special spaces. Unknown ids pass through as `class {id}`.
-#[allow(dead_code)] // consumed by the reference commands/UI (#306/#307)
 pub fn wormhole_class_label(id: i64) -> String {
     match id {
         1..=6 => format!("C{id}"),
