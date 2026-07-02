@@ -149,10 +149,8 @@ pub async fn contracts_scan(
             // Net the resale: you pay sales tax + broker fee to sell the items
             // you receive, so the realistic proceeds are below raw Jita sell.
             let fee_factor = (1.0 - params.sales_tax - params.broker_fee).max(0.0);
-            let proceeds = contents_value * fee_factor;
             let cost = c.price + requested;
-            let profit = proceeds - cost;
-            let roi = if cost > 0.0 { profit / cost } else { 0.0 };
+            let (profit, roi) = flip_return(contents_value, fee_factor, cost);
             if roi < params.min_roi {
                 return None;
             }
@@ -174,4 +172,41 @@ pub async fn contracts_scan(
         .collect();
     rows.sort_by(|a, b| b.roi.partial_cmp(&a.roi).unwrap_or(std::cmp::Ordering::Equal));
     Ok(rows)
+}
+
+/// Resale return on a contract flip. Proceeds are the contents' market value
+/// after sell-side fees (`fee_factor` = 1 − sales_tax − broker_fee); `cost` is
+/// the contract price plus any requested (turn-in) items. Returns
+/// `(profit, roi)`, with roi = 0 when there's no cost basis.
+fn flip_return(contents_value: f64, fee_factor: f64, cost: f64) -> (f64, f64) {
+    let profit = contents_value * fee_factor - cost;
+    let roi = if cost > 0.0 { profit / cost } else { 0.0 };
+    (profit, roi)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::flip_return;
+
+    #[test]
+    fn profit_is_fee_adjusted_contents_minus_cost() {
+        // 1000 contents at a 5% total fee → 950 proceeds; cost 800 → profit 150.
+        let (profit, roi) = flip_return(1000.0, 0.95, 800.0);
+        assert!((profit - 150.0).abs() < 1e-6);
+        assert!((roi - 150.0 / 800.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn zero_cost_yields_zero_roi_not_infinity() {
+        let (profit, roi) = flip_return(500.0, 1.0, 0.0);
+        assert!((profit - 500.0).abs() < 1e-6);
+        assert_eq!(roi, 0.0);
+    }
+
+    #[test]
+    fn fees_can_turn_a_thin_flip_negative() {
+        // Contents barely above cost, but fees eat the margin.
+        let (profit, _) = flip_return(1000.0, 0.90, 950.0);
+        assert!(profit < 0.0);
+    }
 }

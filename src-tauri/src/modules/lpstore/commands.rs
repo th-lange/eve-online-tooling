@@ -197,14 +197,19 @@ pub async fn lp_offers(
         .into_iter()
         .filter(|o| o.lp_cost > 0)
         .map(|o| {
-            let sell_value = o.quantity as f64 * sell(o.type_id) * 0.95; // ~5% sales overhead
             let required_cost: f64 = o
                 .required_items
                 .iter()
                 .map(|r| r.quantity as f64 * sell(r.type_id))
                 .sum();
-            let cost = o.lp_cost as f64 * params.isk_per_lp + o.isk_cost as f64 + required_cost;
-            let profit = sell_value - cost;
+            let v = value_offer(
+                o.quantity,
+                sell(o.type_id),
+                o.lp_cost,
+                o.isk_cost,
+                required_cost,
+                params.isk_per_lp,
+            );
             OfferRow {
                 name: sde
                     .type_info(o.type_id)
@@ -215,10 +220,10 @@ pub async fn lp_offers(
                 quantity: o.quantity,
                 lp_cost: o.lp_cost,
                 isk_cost: o.isk_cost,
-                sell_value,
-                cost,
-                profit,
-                isk_per_lp: profit / o.lp_cost as f64,
+                sell_value: v.sell_value,
+                cost: v.cost,
+                profit: v.profit,
+                isk_per_lp: v.isk_per_lp,
             }
         })
         .collect();
@@ -228,4 +233,60 @@ pub async fn lp_offers(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     Ok(OffersResult { fetched_at, rows })
+}
+
+/// Valued components of one LP-store offer.
+struct OfferValue {
+    sell_value: f64,
+    cost: f64,
+    profit: f64,
+    /// Profit per LP spent — the ranking key.
+    isk_per_lp: f64,
+}
+
+/// Value an LP-store offer: what its output sells for (less ~5% sales overhead)
+/// minus its total cost — LP valued at `isk_per_lp`, plus the ISK cost and the
+/// market cost of any required turn-in items. Caller guarantees `lp_cost > 0`.
+fn value_offer(
+    quantity: i64,
+    unit_sell: f64,
+    lp_cost: i64,
+    isk_cost: i64,
+    required_cost: f64,
+    isk_per_lp: f64,
+) -> OfferValue {
+    let sell_value = quantity as f64 * unit_sell * 0.95;
+    let cost = lp_cost as f64 * isk_per_lp + isk_cost as f64 + required_cost;
+    let profit = sell_value - cost;
+    OfferValue {
+        sell_value,
+        cost,
+        profit,
+        isk_per_lp: profit / lp_cost as f64,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::value_offer;
+
+    #[test]
+    fn profit_nets_sell_value_against_lp_isk_and_item_costs() {
+        // 10 units sell at 100 → 1000 × 0.95 = 950 gross.
+        // cost = 500 LP × 1.0 + 200 ISK + 50 items = 750. profit = 200.
+        let v = value_offer(10, 100.0, 500, 200, 50.0, 1.0);
+        assert!((v.sell_value - 950.0).abs() < 1e-6);
+        assert!((v.cost - 750.0).abs() < 1e-6);
+        assert!((v.profit - 200.0).abs() < 1e-6);
+        // isk_per_lp = profit / lp_cost = 200 / 500 = 0.4.
+        assert!((v.isk_per_lp - 0.4).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_higher_lp_valuation_lowers_profit() {
+        // Raising the ISK/LP assumption raises the cost basis, shrinking profit.
+        let cheap = value_offer(10, 100.0, 500, 0, 0.0, 0.0);
+        let dear = value_offer(10, 100.0, 500, 0, 0.0, 1.0);
+        assert!(dear.profit < cheap.profit);
+    }
 }
