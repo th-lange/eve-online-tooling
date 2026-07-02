@@ -140,9 +140,7 @@ pub async fn station_trading(
 #[tauri::command]
 pub fn trading_get_list(app: AppHandle, list: String) -> Result<Vec<ListItem>, String> {
     let key = list_key(&list)?;
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
-    Ok(lists::get(&sde, &dir, key))
+    lists::get_from_app(&app, key)
 }
 
 /// Add or remove a type from a saved list.
@@ -154,6 +152,5 @@ pub fn trading_set_list(
     add: bool,
 ) -> Result<(), String> {
     let key = list_key(&list)?;
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    lists::set(&dir, key, type_id, add)
+    lists::set_from_app(&app, key, type_id, add)
 }

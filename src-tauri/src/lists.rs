@@ -9,8 +9,9 @@
 use std::path::Path;
 
 use serde::Serialize;
+use tauri::{AppHandle, Manager};
 
-use crate::sde::Sde;
+use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
 /// An item on a saved list, resolved to its display name.
@@ -47,4 +48,21 @@ pub fn set(dir: &Path, key: &str, type_id: i64, add: bool) -> Result<(), String>
         ids.push(type_id);
     }
     storage::save_id_list(dir, key, &ids)
+}
+
+/// [`get`] from an app handle: resolves the app data dir + SDE, then looks up
+/// names. Feature modules validate the caller-supplied list name to a `key`
+/// first (each module owns its valid names) and delegate here — the dir/SDE
+/// plumbing was otherwise copy-pasted identically across every list module.
+pub fn get_from_app(app: &AppHandle, key: &str) -> Result<Vec<ListItem>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    Ok(get(&sde, &dir, key))
+}
+
+/// [`set`] from an app handle: resolves the app data dir and adds/removes the
+/// type (no SDE needed). Companion to [`get_from_app`].
+pub fn set_from_app(app: &AppHandle, key: &str, type_id: i64, add: bool) -> Result<(), String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    set(&dir, key, type_id, add)
 }
