@@ -195,9 +195,11 @@ To cut a release:
    `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json` and regenerates both lockfiles). Review the diff.
 2. Commit, then tag and push: `git commit -am "chore(release): v0.25.0" && git tag v0.25.0 && git push origin main --tags`.
 
-The workflow builds Linux / macOS / Windows installers on their respective runners and attaches them
-to the GitHub Release for that tag (it can also be run manually from the **Actions** tab against an
-existing tag). Builds are currently **unsigned** — code signing (Apple notarization, Windows
+The workflow currently builds **Windows** installers only (the Linux and macOS matrix entries are
+commented out to conserve Actions minutes — uncomment them in `release.yml` to restore the full
+Linux / macOS / Windows build). It attaches the installers to the GitHub Release for that tag (it can
+also be run manually from the **Actions** tab against an existing tag). Builds are currently
+**unsigned** — code signing (Apple notarization, Windows
 Authenticode) and in-app auto-update can be layered into the same workflow later.
 
 ## Status & tracking

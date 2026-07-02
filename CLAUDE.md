@@ -57,16 +57,20 @@ so the UI wires itself up.
 ### Rust core (`src-tauri/src/`)
 
 - `lib.rs` — Tauri builder: registers plugins and the `invoke_handler`. Module map lives here.
-- `commands.rs` — thin command layer bridging the frontend `invoke()` to services (currently `ping`).
-- Shared services (stubs today, each filled by its tracking issue):
-  - `esi/` — EVE SSO auth + rate-limit-aware ESI HTTP client + endpoint wrappers (#3/#4/#5)
-  - `sde/` — Static Data Export: bootstrap + query the Fuzzwork SQLite (#2)
+- `commands.rs` — thin command layer bridging the frontend `invoke()` to services.
+- Shared services (all implemented; reused by every feature module):
+  - `esi/` — EVE SSO (PKCE) auth + rate-limit/error-budget-aware ESI HTTP client with ETag
+    conditional caching + endpoint wrappers
+  - `sde/` — Static Data Export: bootstrap (md5-gated daily refresh) + query the Fuzzwork SQLite
   - `market/` — pricing: Fuzzwork market **aggregates** (`fuzzwork.rs`) for bulk per region/station
     prices + volume, ESI `/markets/prices` for the adjusted/EIV basis, plus a per-item ESI
-    orders/history path; regions/hubs + `Location` in `markets.rs`; TTL cache (#5)
+    orders/history path; regions/hubs + `Location` in `markets.rs`; TTL cache
   - `model/` — shared domain types
-  - `storage/` — OS keychain (refresh tokens) + on-disk cache (#2/#3/#5)
-- `modules/production/` — the profit engine (#6); future modules sit beside it.
+  - `storage/` — OS keychain (refresh tokens + Tripwire password) + on-disk cache
+  - `lists.rs` — shared persisted type-id lists (blacklist/favorites) reused across modules
+  - `evescout` — EVE-Scout public Thera/Turnur wormhole connections
+- `modules/` — the feature modules (21 today: production, trading, fitting, wormholes, PI, the DPS
+  meter, …), each exposing its own commands. See `src/modules/registry.ts` for the full list.
 
 ### Frontend (`src/`)
 
