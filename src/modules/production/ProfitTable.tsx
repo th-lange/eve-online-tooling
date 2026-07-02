@@ -19,6 +19,7 @@ import {
   type SortKey,
 } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
+import { useCopyToClipboard } from "../../lib/useCopyToClipboard";
 import {
   SortHeaderCell,
   type SortColumn,
@@ -374,12 +375,7 @@ export function TableSkeleton({ rows = 12 }: { rows?: number }) {
 }
 
 function BreakdownRow({ row }: { row: ProfitBreakdown }) {
-  const [copied, setCopied] = useState<"md" | "mb" | null>(null);
-  function copy(text: string, tag: "md" | "mb") {
-    void navigator.clipboard?.writeText(text);
-    setCopied(tag);
-    setTimeout(() => setCopied((c) => (c === tag ? null : c)), 1200);
-  }
+  const { copied, copy } = useCopyToClipboard();
   return (
     <tr className="border-t border-zinc-800 bg-zinc-900/40">
       <td />

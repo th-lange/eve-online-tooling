@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 
 import { SHOPPING_LISTS_KEY } from "../../components/AddToListButton";
+import { useCopyToClipboard } from "../../lib/useCopyToClipboard";
 import { parseItems, parseLine } from "./parse";
 import {
   sdeSearch,
@@ -153,7 +154,7 @@ function ListDetail({
     () => list.items.map((i) => `${i.name}\t${i.quantity}`).join("\n"),
     [list.items],
   );
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyToClipboard(1500);
 
   // Row selection + bulk quantity ops (multiply / add / set).
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -204,11 +205,6 @@ function ListDetail({
     await shoppingClearList(list.id);
     await onChange();
   }
-  function copy() {
-    void navigator.clipboard?.writeText(multibuy);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
-  }
 
   return (
     <div>
@@ -216,7 +212,7 @@ function ListDetail({
         <h2 className="text-lg font-semibold text-zinc-100">{list.name}</h2>
         <div className="flex items-center gap-2">
           <button
-            onClick={copy}
+            onClick={() => copy(multibuy)}
             disabled={list.items.length === 0}
             title="Copy the items for the in-game Multibuy window"
             className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import { marketOrders, openMarketWindow, type OrderRow } from "../../lib/api";
+import { copyToClipboard } from "../../lib/useCopyToClipboard";
 import { formatInt, formatIsk } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
@@ -176,6 +177,5 @@ function undercutPrice(r: OrderRow): number {
 }
 
 function copyUndercut(r: OrderRow) {
-  const price = undercutPrice(r).toFixed(2);
-  void navigator.clipboard?.writeText(price);
+  copyToClipboard(undercutPrice(r).toFixed(2));
 }
