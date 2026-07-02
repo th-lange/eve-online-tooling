@@ -13,4 +13,6 @@ pub mod commands;
 pub mod eft;
 pub mod engine;
 pub mod esi_fittings;
+pub mod optimizer;
+mod stats;
 pub mod types;
