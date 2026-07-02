@@ -261,9 +261,7 @@ pub async fn daytrading_scan(
 #[tauri::command]
 pub fn daytrading_get_list(app: AppHandle, list: String) -> Result<Vec<ListItem>, String> {
     let key = list_key(&list)?;
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
-    Ok(lists::get(&sde, &dir, key))
+    lists::get_from_app(&app, key)
 }
 
 /// Add or remove a type from a daytrading saved list.
@@ -275,6 +273,5 @@ pub fn daytrading_set_list(
     add: bool,
 ) -> Result<(), String> {
     let key = list_key(&list)?;
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    lists::set(&dir, key, type_id, add)
+    lists::set_from_app(&app, key, type_id, add)
 }
