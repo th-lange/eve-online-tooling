@@ -1,0 +1,64 @@
+name: CI
+
+# Test gate for pull requests (and pushes to main). The release workflow only
+# runs on tags, so without this nothing verified a change before it merged —
+# a PR could land with broken tests and only surface at release time.
+#
+# Kept Linux-only to conserve Actions minutes; the compiled crate is
+# platform-independent for test purposes. Lint gates (clippy -D warnings,
+# rustfmt --check) are added once the codebase is clean — see #327.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+# A newer push to the same branch/PR cancels the in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend (test + typecheck + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm run test
+
+      # `npm run build` is `tsc && vite build` — this is also the type-check gate.
+      - name: Type-check + build
+        run: npm run build
+
+  rust:
+    name: Rust (cargo test)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+            pkg-config patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Test
+        run: cargo test --manifest-path src-tauri/Cargo.toml
