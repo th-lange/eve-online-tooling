@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { createContext, useEffect, useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { ChevronDown, ChevronRight, GripVertical, Search, Star, X } from "lucide-react";
 import { modules, MODULE_GROUPS, type ModuleDef } from "../modules/registry";
@@ -235,6 +235,16 @@ export function Layout() {
  * scroll position are all preserved, and its data revalidates in the background.
  * Pages are mounted lazily (only once visited), so nothing fetches up front.
  */
+/**
+ * Whether the module reading this context is the one currently on screen.
+ * `ModuleHost` keeps every visited page mounted (hidden with `display:none`),
+ * so a page with a live subscription (e.g. the DPS meter's tick feed) would
+ * otherwise keep re-rendering while invisible. Pages can read this to pause
+ * work while backgrounded. Defaults to `true` so a page rendered on its own
+ * (tests, or any non-`ModuleHost` mount) always behaves as active.
+ */
+export const ModuleActiveContext = createContext(true);
+
 function ModuleHost() {
   const location = useLocation();
   const seg = location.pathname.split("/").filter(Boolean)[0];
@@ -255,7 +265,9 @@ function ModuleHost() {
             className="h-full overflow-auto"
             style={{ display: m.id === activeId ? "block" : "none" }}
           >
-            <m.Component />
+            <ModuleActiveContext.Provider value={m.id === activeId}>
+              <m.Component />
+            </ModuleActiveContext.Provider>
           </div>
         ))}
     </>

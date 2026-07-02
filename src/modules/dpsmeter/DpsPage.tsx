@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { memo, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Play, Square } from "lucide-react";
+import { ModuleActiveContext } from "../../components/Layout";
 import {
   dpsListLogs,
   dpsPlayback,
@@ -41,6 +42,13 @@ function suggestGamelogs(): string {
   return chat ? chat.replace(/Chatlogs\/?$/i, "Gamelogs") : "";
 }
 
+/** Append a tick to the rolling buffer, dropping the oldest past `BUFFER`. */
+function appendTick(prev: DpsTick[], t: DpsTick): DpsTick[] {
+  const next = prev.length >= BUFFER ? prev.slice(1) : prev.slice();
+  next.push(t);
+  return next;
+}
+
 export function DpsPage() {
   const [dir, setDir] = useState(
     () => localStorage.getItem("eveGamelogsDir") || suggestGamelogs(),
@@ -62,19 +70,42 @@ export function DpsPage() {
     eveDefaultLogDir("gamelogs").then((d) => d && setDir(d));
   }, [dir]);
 
-  // Subscribe once; the page stays mounted (ModuleHost), so the feed survives
-  // navigation. Ticks only arrive while a capture is running.
+  // The page stays mounted while backgrounded (ModuleHost), so without this it
+  // would keep re-rendering ~2×/s off the tick feed while invisible. Track the
+  // active flag in a ref so the single subscription reads the latest value
+  // without resubscribing, and buffer ticks that arrive while hidden.
+  const active = useContext(ModuleActiveContext);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const bufferedRef = useRef<DpsTick[]>([]);
+
+  // Subscribe once; the feed survives navigation. Ticks only arrive while a
+  // capture is running.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
-    onDpsTick((t) =>
-      setTicks((prev) => {
-        const next = prev.length >= BUFFER ? prev.slice(1) : prev.slice();
-        next.push(t);
-        return next;
-      }),
-    ).then((u) => (unlisten = u));
+    onDpsTick((t) => {
+      if (!activeRef.current) {
+        // Hidden: accumulate without triggering a render; flushed on re-show.
+        const buf = bufferedRef.current;
+        buf.push(t);
+        if (buf.length > BUFFER) buf.splice(0, buf.length - BUFFER);
+        return;
+      }
+      setTicks((prev) => appendTick(prev, t));
+    }).then((u) => (unlisten = u));
     return () => unlisten?.();
   }, []);
+
+  // On becoming visible again, flush whatever arrived while hidden in one update.
+  useEffect(() => {
+    if (!active || bufferedRef.current.length === 0) return;
+    const buffered = bufferedRef.current;
+    bufferedRef.current = [];
+    setTicks((prev) => {
+      const merged = prev.concat(buffered);
+      return merged.length > BUFFER ? merged.slice(merged.length - BUFFER) : merged;
+    });
+  }, [active]);
 
   async function start() {
     setError(null);
@@ -296,8 +327,9 @@ export function DpsPage() {
   );
 }
 
-/** Top weapons by outgoing DPS. */
-function WeaponTable({ rows }: { rows: WeaponRate[] }) {
+/** Top weapons by outgoing DPS. Memoized: skips re-render when `rows` is
+ *  unchanged (e.g. the page re-renders for an unrelated control change). */
+const WeaponTable = memo(function WeaponTable({ rows }: { rows: WeaponRate[] }) {
   return (
     <div className="rounded border border-zinc-800 bg-zinc-900/40 p-3">
       <div className="mb-2 text-xs uppercase tracking-wide text-zinc-500">
@@ -321,10 +353,11 @@ function WeaponTable({ rows }: { rows: WeaponRate[] }) {
       )}
     </div>
   );
-}
+});
 
-/** Top counterparties by engaged DPS (dealt vs taken). */
-function PilotTable({ rows }: { rows: PilotRate[] }) {
+/** Top counterparties by engaged DPS (dealt vs taken). Memoized like
+ *  {@link WeaponTable}. */
+const PilotTable = memo(function PilotTable({ rows }: { rows: PilotRate[] }) {
   return (
     <div className="rounded border border-zinc-800 bg-zinc-900/40 p-3">
       <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-wide text-zinc-500">
@@ -355,28 +388,35 @@ function PilotTable({ rows }: { rows: PilotRate[] }) {
       )}
     </div>
   );
-}
+});
 
 /** Multi-line rolling chart, inline SVG (no chart dependency — same approach as
- *  the market history chart). All series share one y-scale so out/in compare. */
-function DpsChart({ ticks }: { ticks: DpsTick[] }) {
+ *  the market history chart). All series share one y-scale so out/in compare.
+ *  Memoized + path math in a `useMemo` so unrelated re-renders (typing in a
+ *  control) don't rebuild all eight polylines; only a new `ticks` array does. */
+const DpsChart = memo(function DpsChart({ ticks }: { ticks: DpsTick[] }) {
   const w = 960;
   const h = 280;
   const padX = 8;
   const padY = 10;
 
-  const n = ticks.length;
-  const max = Math.max(
-    1,
-    ...ticks.flatMap((t) => SERIES.map((s) => t[s.key] as number)),
-  );
-  const x = (i: number) => padX + (i / Math.max(n - 1, 1)) * (w - 2 * padX);
-  const y = (v: number) => padY + (1 - v / max) * (h - 2 * padY);
-  const line = (key: keyof DpsTick) =>
-    ticks
-      .map((t, i) => `${x(i).toFixed(1)},${y(t[key] as number).toFixed(1)}`)
-      .join(" ");
-  const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => padY + f * (h - 2 * padY));
+  const { max, lines, grid, n } = useMemo(() => {
+    const n = ticks.length;
+    const max = Math.max(
+      1,
+      ...ticks.flatMap((t) => SERIES.map((s) => t[s.key] as number)),
+    );
+    const x = (i: number) => padX + (i / Math.max(n - 1, 1)) * (w - 2 * padX);
+    const y = (v: number) => padY + (1 - v / max) * (h - 2 * padY);
+    const lines = SERIES.map((s) => ({
+      key: s.key,
+      points: ticks
+        .map((t, i) => `${x(i).toFixed(1)},${y(t[s.key] as number).toFixed(1)}`)
+        .join(" "),
+    }));
+    const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => padY + f * (h - 2 * padY));
+    return { max, lines, grid, n };
+  }, [ticks]);
 
   return (
     <div className="rounded border border-zinc-800 bg-zinc-900 p-2">
@@ -402,10 +442,10 @@ function DpsChart({ ticks }: { ticks: DpsTick[] }) {
           />
         ))}
         {n > 1 &&
-          SERIES.map((s) => (
+          SERIES.map((s, i) => (
             <polyline
               key={s.key}
-              points={line(s.key)}
+              points={lines[i].points}
               fill="none"
               stroke={s.color}
               strokeWidth={s.primary ? 1.75 : 1}
@@ -415,4 +455,4 @@ function DpsChart({ ticks }: { ticks: DpsTick[] }) {
       </svg>
     </div>
   );
-}
+});
