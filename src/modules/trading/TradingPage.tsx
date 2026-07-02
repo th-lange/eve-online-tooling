@@ -12,6 +12,7 @@ import {
   type TradeParams,
   type TradeRow,
 } from "../../lib/api";
+import { copyToClipboard } from "../../lib/useCopyToClipboard";
 import { SdeSetup } from "../production/SdeSetup";
 import { formatInt, formatIsk, formatPercent } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
@@ -506,7 +507,7 @@ function UndercutPrice({
   const adjusted = Math.max(value + tick, 0);
   return (
     <button
-      onClick={() => navigator.clipboard?.writeText(adjusted.toFixed(2))}
+      onClick={() => copyToClipboard(adjusted.toFixed(2))}
       title={`Copy ${label}: ${adjusted.toFixed(2)}`}
       className="hover:text-zinc-100"
     >

@@ -39,6 +39,7 @@ import {
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
 import { formatDuration, formatIsk } from "../../lib/format";
+import { copyToClipboard } from "../../lib/useCopyToClipboard";
 
 const FORGE = 10000002;
 
@@ -205,7 +206,7 @@ function Workbench() {
   const exportEft = useMutation({
     mutationFn: () => fittingExportEft(fit!),
     onSuccess: (text) => {
-      navigator.clipboard?.writeText(text).catch(() => {});
+      copyToClipboard(text);
       setEft(text);
     },
   });
