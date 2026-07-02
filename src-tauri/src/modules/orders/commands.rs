@@ -109,13 +109,7 @@ pub async fn market_orders(
             } else {
                 model.and_then(|m| m.sell_min)
             };
-            // Undercut: a cheaper sell (best < mine) or a higher buy (best > mine)
-            // exists. When you hold the best, best == your price → not undercut.
-            let undercut = match best_price {
-                Some(b) if o.is_buy_order => b > o.price,
-                Some(b) => b < o.price,
-                None => false,
-            };
+            let undercut = is_undercut(best_price, o.price, o.is_buy_order);
             let name = sde
                 .type_info(o.type_id)
                 .ok()
@@ -142,4 +136,41 @@ pub async fn market_orders(
         })
         .collect();
     Ok(rows)
+}
+
+/// Whether someone is beating this order: a cheaper competing sell (`best < mine`)
+/// or a higher competing buy (`best > mine`). Holding the best price yourself
+/// means `best == mine` → not undercut. No competing price ⇒ not undercut.
+fn is_undercut(best_price: Option<f64>, price: f64, is_buy: bool) -> bool {
+    match best_price {
+        Some(b) if is_buy => b > price,
+        Some(b) => b < price,
+        None => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_undercut;
+
+    #[test]
+    fn sell_order_is_undercut_only_by_a_cheaper_sell() {
+        // A cheaper competing sell undercuts; equal (you hold best) or dearer does not.
+        assert!(is_undercut(Some(99.0), 100.0, false));
+        assert!(!is_undercut(Some(100.0), 100.0, false));
+        assert!(!is_undercut(Some(101.0), 100.0, false));
+    }
+
+    #[test]
+    fn buy_order_is_undercut_only_by_a_higher_buy() {
+        assert!(is_undercut(Some(101.0), 100.0, true));
+        assert!(!is_undercut(Some(100.0), 100.0, true));
+        assert!(!is_undercut(Some(99.0), 100.0, true));
+    }
+
+    #[test]
+    fn no_competing_price_is_never_undercut() {
+        assert!(!is_undercut(None, 100.0, false));
+        assert!(!is_undercut(None, 100.0, true));
+    }
 }
