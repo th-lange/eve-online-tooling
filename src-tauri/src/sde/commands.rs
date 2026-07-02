@@ -4,6 +4,8 @@
 //! see the latest data after an update. Progress during an update is emitted on
 //! the `sde://progress` event.
 
+use std::sync::OnceLock;
+
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -66,22 +68,32 @@ fn md5_path(paths: &SdePaths) -> std::path::PathBuf {
 }
 
 /// The md5 of the SDE we last downloaded (sidecar file), if any.
-fn read_local_md5(paths: &SdePaths) -> Option<String> {
-    std::fs::read_to_string(md5_path(paths))
+async fn read_local_md5(paths: &SdePaths) -> Option<String> {
+    tokio::fs::read_to_string(md5_path(paths))
+        .await
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
+}
+
+/// Shared HTTP client for the small SDE metadata request (the md5 sidecar).
+/// Built once and reused so repeated freshness checks (startup auto-refresh and
+/// every manual update) don't each spin up a fresh connection pool.
+fn metadata_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent(crate::esi::USER_AGENT)
+            .build()
+            .expect("failed to build SDE metadata HTTP client")
+    })
 }
 
 /// Fetch Fuzzwork's published md5 for the current SDE (small request). `None`
 /// if it can't be fetched/parsed.
 async fn fetch_remote_md5() -> Option<String> {
     let url = format!("{}.md5sum", super::SDE_URL);
-    let client = reqwest::Client::builder()
-        .user_agent(crate::esi::USER_AGENT)
-        .build()
-        .ok()?;
-    let text = client
+    let text = metadata_client()
         .get(url)
         .send()
         .await
@@ -116,7 +128,7 @@ pub async fn sde_update(app: AppHandle, force: bool) -> Result<SdeStatus, String
     let paths = paths(&app).map_err(|e| e.to_string())?;
 
     if paths.is_installed() && !force {
-        let changed = match (read_local_md5(&paths), fetch_remote_md5().await) {
+        let changed = match (read_local_md5(&paths).await, fetch_remote_md5().await) {
             (Some(local), Some(remote)) => local != remote,
             // Can't determine (no stored md5 or fetch failed): don't surprise
             // the user with a multi-hundred-MB re-download.
@@ -136,7 +148,7 @@ pub async fn sde_update(app: AppHandle, force: bool) -> Result<SdeStatus, String
 
     // Record the md5 we just installed so future checks can short-circuit.
     if let Some(remote) = fetch_remote_md5().await {
-        let _ = std::fs::write(md5_path(&paths), remote);
+        let _ = tokio::fs::write(md5_path(&paths), remote).await;
     }
     Ok(status_of(&paths, true))
 }
