@@ -191,8 +191,9 @@ See [`CLAUDE.md`](./CLAUDE.md) for architecture and EVE domain notes.
 Installers are produced by the **Release** GitHub Actions workflow (`.github/workflows/release.yml`).
 To cut a release:
 
-1. Bump the version in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`.
-2. Commit, then tag and push: `git tag v0.6.0 && git push origin v0.6.0`.
+1. Bump the version everywhere at once: `scripts/bump-version.sh 0.25.0` (edits `package.json`,
+   `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json` and regenerates both lockfiles). Review the diff.
+2. Commit, then tag and push: `git commit -am "chore(release): v0.25.0" && git tag v0.25.0 && git push origin main --tags`.
 
 The workflow builds Linux / macOS / Windows installers on their respective runners and attaches them
 to the GitHub Release for that tag (it can also be run manually from the **Actions** tab against an
