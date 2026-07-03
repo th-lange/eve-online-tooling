@@ -222,10 +222,10 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 pub async fn pi_overview(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
-) -> Result<Vec<ColonyView>, String> {
+) -> Result<Vec<ColonyView>, crate::model::AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let character_id =
-        storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?;
+        storage::active_character(&dir).ok_or_else(crate::model::AppError::auth_required)?;
 
     let colonies: Vec<EsiColony> = authed_get(
         &auth_state,

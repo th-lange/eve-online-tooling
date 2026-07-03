@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  errorMessage,
+  isAuthRequired,
   piLockedGet,
   piLockedSet,
   piOverview,
@@ -71,15 +73,20 @@ function Workbench() {
         </button>
       </div>
 
-      {colonies.isError && (
-        <div className="mt-4 text-sm text-rose-400">
-          {String(colonies.error)}
-          <span className="ml-1 text-zinc-500">
-            (needs <code>esi-planets.manage_planets.v1</code> — re-login if just
-            enabled)
-          </span>
-        </div>
-      )}
+      {colonies.isError &&
+        (isAuthRequired(colonies.error) ? (
+          <div className="mt-4 text-sm text-zinc-400">
+            Log in a character first to view your colonies.
+          </div>
+        ) : (
+          <div className="mt-4 text-sm text-rose-400">
+            {errorMessage(colonies.error)}
+            <span className="ml-1 text-zinc-500">
+              (needs <code>esi-planets.manage_planets.v1</code> — re-login if
+              just enabled)
+            </span>
+          </div>
+        ))}
 
       {!colonies.isError && rows.length === 0 && !colonies.isFetching && (
         <Centered>No colonies found for this character.</Centered>
