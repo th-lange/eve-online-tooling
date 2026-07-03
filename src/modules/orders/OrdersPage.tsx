@@ -1,7 +1,13 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
-import { marketOrders, openMarketWindow, type OrderRow } from "../../lib/api";
+import {
+  errorMessage,
+  isAuthRequired,
+  marketOrders,
+  openMarketWindow,
+  type OrderRow,
+} from "../../lib/api";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
 import { formatInt, formatIsk } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
@@ -46,15 +52,20 @@ export function OrdersPage() {
         </div>
       </div>
 
-      {orders.isError && (
-        <div className="mt-3 text-sm text-rose-400">
-          Failed: {String(orders.error)}
-          <div className="mt-1 text-xs text-zinc-500">
-            Needs the <code>esi-markets.read_character_orders.v1</code> scope —
-            re-login after it's enabled on the EVE app.
+      {orders.isError &&
+        (isAuthRequired(orders.error) ? (
+          <div className="mt-3 text-sm text-zinc-400">
+            Log in a character first to view your market orders.
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="mt-3 text-sm text-rose-400">
+            Failed: {errorMessage(orders.error)}
+            <div className="mt-1 text-xs text-zinc-500">
+              Needs the <code>esi-markets.read_character_orders.v1</code> scope
+              — re-login after it's enabled on the EVE app.
+            </div>
+          </div>
+        ))}
 
       {rows.length > 0 && (
         <div className="mt-3 text-sm text-zinc-400">

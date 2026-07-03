@@ -435,10 +435,10 @@ pub async fn fitting_esi_push(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
     fit: Fit,
-) -> Result<i64, String> {
+) -> Result<i64, crate::model::AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let character_id =
-        storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?;
+        storage::active_character(&dir).ok_or_else(crate::model::AppError::auth_required)?;
     let granted = storage::load_roster(&dir)
         .iter()
         .find(|c| c.character_id == character_id)
@@ -449,17 +449,18 @@ pub async fn fitting_esi_push(
         })
         .unwrap_or(false);
     if !granted {
-        return Err(
+        return Err(crate::model::AppError::from(
             "This character hasn't granted the fittings write scope. Add \
              esi-fittings.write_fittings.v1 to your EVE application, then remove \
-             and re-add the character."
-                .to_string(),
-        );
+             and re-add the character.",
+        ));
     }
 
     let items = super::esi_fittings::fit_to_esi_items(&fit);
     if items.is_empty() {
-        return Err("Nothing to save — the fit has no modules.".to_string());
+        return Err(crate::model::AppError::from(
+            "Nothing to save — the fit has no modules.",
+        ));
     }
     let name = if fit.name.trim().is_empty() {
         "Fit"
@@ -491,10 +492,10 @@ pub async fn fitting_esi_list(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
     force: Option<bool>,
-) -> Result<Vec<Fit>, String> {
+) -> Result<Vec<Fit>, crate::model::AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let character_id =
-        storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?;
+        storage::active_character(&dir).ok_or_else(crate::model::AppError::auth_required)?;
 
     // Up-front, actionable error when the active character never granted the
     // fittings scope (the common reason nothing loads).
@@ -508,10 +509,11 @@ pub async fn fitting_esi_list(
         })
         .unwrap_or(false);
     if !granted {
-        return Err("This character hasn't granted the fittings scope. Add \
+        return Err(crate::model::AppError::from(
+            "This character hasn't granted the fittings scope. Add \
              esi-fittings.read_fittings.v1 to your EVE application, then remove \
-             and re-add the character."
-            .to_string());
+             and re-add the character.",
+        ));
     }
 
     // Cached per character (30 min) so the picker doesn't re-hit ESI each open;

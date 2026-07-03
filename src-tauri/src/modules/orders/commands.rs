@@ -11,6 +11,7 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::esi::{authed_get, resolve_names, AuthState};
 use crate::market::{resolve_location, MarketService, PriceModel};
+use crate::model::AppError;
 use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
@@ -57,10 +58,9 @@ pub async fn market_orders(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
     market: State<'_, MarketService>,
-) -> Result<Vec<OrderRow>, String> {
+) -> Result<Vec<OrderRow>, AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let character_id =
-        storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?;
+    let character_id = storage::active_character(&dir).ok_or_else(AppError::auth_required)?;
 
     let orders: Vec<EsiOrder> = authed_get(
         &auth_state,

@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Crosshair, Plus, Power, X } from "lucide-react";
 import {
+  errorMessage,
   fittingCompatibleCharges,
   fittingModuleInfo,
+  isAuthRequired,
   sdeMarketGroupChildren,
   sdeSearch,
   type CapStats,
@@ -1085,8 +1087,14 @@ export function EsiFitStatus({
   const err = refresh.error ?? esi.error;
   if (err) {
     return (
-      <span className="mt-0.5 block w-72 text-[11px] text-rose-400">
-        {String(err)}
+      <span
+        className={`mt-0.5 block w-72 text-[11px] ${
+          isAuthRequired(err) ? "text-zinc-500" : "text-rose-400"
+        }`}
+      >
+        {isAuthRequired(err)
+          ? "Log in a character first to load in-game fittings."
+          : errorMessage(err)}
       </span>
     );
   }
