@@ -99,8 +99,11 @@ Fuzzwork's SQLite build) into your app data dir; that's a one-off.
 ### 4. (Later) EVE SSO
 
 Reading character assets/blueprints needs a developer application from
-[developers.eveonline.com](https://developers.eveonline.com) — a **Client ID** and a loopback
-callback URL. Not required for the market/production calculations, which use public data.
+[developers.eveonline.com](https://developers.eveonline.com) — a **Client ID** and loopback
+callback URLs. Register **`http://localhost:8765/callback`** plus the fallbacks
+`http://localhost:8766/callback` … `8769/callback`: login binds the first free port in that range,
+so it still works when 8765 is taken by another app (only registered ports are accepted by SSO).
+Not required for the market/production calculations, which use public data.
 
 ## Common commands
 
