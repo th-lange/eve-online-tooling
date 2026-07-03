@@ -43,9 +43,11 @@ pure-frontend commands (`vite`, `vitest`) do not.
     libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev pkg-config
   ```
 - **EVE developer application** (needed once SSO lands, issue #3): register at
-  https://developers.eveonline.com for a **Client ID**, set the callback to the app's loopback
-  (e.g. `http://localhost:8765/callback`), scopes `publicData`, `esi-assets.read_assets.v1`,
-  `esi-characters.read_blueprints.v1`. Native PKCE flow — no client secret.
+  https://developers.eveonline.com for a **Client ID**, and register the loopback callbacks
+  `http://localhost:8765/callback` … `8769/callback` (login binds the first free port in that
+  range, so it survives 8765 being busy — SSO only accepts registered ports). Scopes `publicData`,
+  `esi-assets.read_assets.v1`, `esi-characters.read_blueprints.v1`. Native PKCE flow — no client
+  secret.
 
 ## Architecture
 
