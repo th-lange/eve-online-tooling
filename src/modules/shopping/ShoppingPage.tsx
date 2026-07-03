@@ -17,6 +17,7 @@ import {
   shoppingSetQuantity,
   type ShoppingList,
 } from "../../lib/api";
+import { formatInt } from "../../lib/format";
 
 /**
  * Shopping Lists — a group of named lists you fill while browsing other modules.
@@ -350,7 +351,7 @@ function ListDetail({
             <tr className="text-xs text-zinc-500">
               <td />
               <td className="py-1">{list.items.length} items</td>
-              <td className="py-1 text-right">{totalQty.toLocaleString()}</td>
+              <td className="py-1 text-right">{formatInt(totalQty)}</td>
               <td />
             </tr>
           </tfoot>

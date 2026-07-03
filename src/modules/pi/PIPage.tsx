@@ -260,8 +260,8 @@ function Storage({ s }: { s: StorageView }) {
       <div className="flex items-center justify-between text-[11px] text-zinc-400">
         <span>{s.name}</span>
         <span className="tabular-nums">
-          {Math.round(s.usedVolume).toLocaleString()} /{" "}
-          {Math.round(s.capacity).toLocaleString()} m³
+          {formatInt(Math.round(s.usedVolume))} /{" "}
+          {formatInt(Math.round(s.capacity))} m³
         </span>
       </div>
       <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded bg-zinc-800">
@@ -314,7 +314,7 @@ function Balance({ rows }: { rows: BalanceRow[] }) {
 /** Round a per-hour rate for display (keeps one decimal for small rates). */
 function fmt(n: number): string {
   if (n === 0) return "0";
-  return Math.abs(n) >= 10 ? Math.round(n).toLocaleString() : n.toFixed(1);
+  return Math.abs(n) >= 10 ? formatInt(Math.round(n)) : n.toFixed(1);
 }
 
 /** Remaining time to an ISO expiry, as a label + colour tone. */

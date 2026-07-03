@@ -13,6 +13,7 @@ import {
   type PilotRate,
   type WeaponRate,
 } from "../../lib/api";
+import { formatInt } from "../../lib/format";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 
 type Mode = "live" | "playback";
@@ -315,7 +316,7 @@ export function DpsPage() {
               }`}
               style={{ color: s.color }}
             >
-              {latest ? Math.round(latest[s.key]).toLocaleString() : "—"}
+              {latest ? formatInt(Math.round(latest[s.key])) : "—"}
             </div>
           </div>
         ))}
@@ -378,7 +379,7 @@ const WeaponTable = memo(function WeaponTable({
               <tr key={r.name} className="border-t border-zinc-800/60">
                 <td className="py-1 pr-2 text-zinc-200">{r.name}</td>
                 <td className="py-1 text-right tabular-nums text-emerald-400">
-                  {Math.round(r.dps).toLocaleString()}
+                  {formatInt(Math.round(r.dps))}
                 </td>
               </tr>
             ))}
@@ -412,10 +413,10 @@ const PilotTable = memo(function PilotTable({ rows }: { rows: PilotRate[] }) {
               <tr key={r.name} className="border-t border-zinc-800/60">
                 <td className="py-1 pr-2 text-zinc-200">{r.name}</td>
                 <td className="py-1 text-right tabular-nums text-emerald-400">
-                  {Math.round(r.dpsOut).toLocaleString()}
+                  {formatInt(Math.round(r.dpsOut))}
                 </td>
                 <td className="py-1 pl-3 text-right tabular-nums text-rose-400">
-                  {Math.round(r.dpsIn).toLocaleString()}
+                  {formatInt(Math.round(r.dpsIn))}
                 </td>
               </tr>
             ))}
@@ -459,7 +460,7 @@ const DpsChart = memo(function DpsChart({ ticks }: { ticks: DpsTick[] }) {
       <div className="mb-1 flex items-center justify-between text-xs text-zinc-400">
         <span>Rolling rate (per second)</span>
         <span className="tabular-nums text-zinc-300">
-          peak {Math.round(max).toLocaleString()}
+          peak {formatInt(Math.round(max))}
         </span>
       </div>
       <svg
