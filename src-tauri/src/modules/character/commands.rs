@@ -90,7 +90,11 @@ pub async fn character_skills(
     Ok(SkillsView {
         total_sp: skills.total_sp,
         unallocated_sp: skills.unallocated_sp,
-        trained_count: skills.skills.iter().filter(|s| s.active_skill_level > 0).count() as i64,
+        trained_count: skills
+            .skills
+            .iter()
+            .filter(|s| s.active_skill_level > 0)
+            .count() as i64,
         queue: queue
             .into_iter()
             .map(|q| QueueRow {
@@ -178,7 +182,10 @@ pub async fn character_standings(
             };
             let modifier = (10.0 - s.standing) * 0.04 * lvl as f64;
             StandingRow {
-                name: names.get(&s.from_id).cloned().unwrap_or_else(|| format!("#{}", s.from_id)),
+                name: names
+                    .get(&s.from_id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("#{}", s.from_id)),
                 from_type: s.from_type,
                 base: s.standing,
                 effective: s.standing + modifier,
@@ -247,7 +254,10 @@ pub async fn character_research(
             total_points += current;
             points_per_day += a.points_per_day;
             ResearchRow {
-                agent: names.get(&a.agent_id).cloned().unwrap_or_else(|| format!("#{}", a.agent_id)),
+                agent: names
+                    .get(&a.agent_id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("#{}", a.agent_id)),
                 skill: sde
                     .type_info(a.skill_type_id)
                     .ok()
@@ -379,7 +389,11 @@ pub async fn character_mining(
             value: quantity as f64 * prices.get(&type_id).copied().unwrap_or(0.0),
         })
         .collect();
-    rows.sort_by(|a, b| b.value.partial_cmp(&a.value).unwrap_or(std::cmp::Ordering::Equal));
+    rows.sort_by(|a, b| {
+        b.value
+            .partial_cmp(&a.value)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     Ok(MiningView {
         units24h: u24,
@@ -466,7 +480,10 @@ pub async fn character_fleet(
     let rows = members
         .into_iter()
         .map(|m| FleetMemberRow {
-            name: names.get(&m.character_id).cloned().unwrap_or_else(|| format!("#{}", m.character_id)),
+            name: names
+                .get(&m.character_id)
+                .cloned()
+                .unwrap_or_else(|| format!("#{}", m.character_id)),
             ship: sde
                 .type_info(m.ship_type_id)
                 .ok()

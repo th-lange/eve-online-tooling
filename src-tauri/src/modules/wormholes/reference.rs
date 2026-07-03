@@ -46,7 +46,9 @@ fn snapshot() -> &'static HashMap<i64, RawSystem> {
 /// map. Pure over its bytes (testable); a bad/empty asset yields an empty map.
 fn parse_snapshot(gz: &[u8]) -> Option<HashMap<i64, RawSystem>> {
     let mut buf = String::new();
-    flate2::read::GzDecoder::new(gz).read_to_string(&mut buf).ok()?;
+    flate2::read::GzDecoder::new(gz)
+        .read_to_string(&mut buf)
+        .ok()?;
     let raw: HashMap<String, RawSystem> = serde_json::from_str(&buf).ok()?;
     Some(
         raw.into_iter()
@@ -122,8 +124,16 @@ fn resolve(
         class,
         class_label: class.map(wormhole_class_label),
         effect: entry.effect.clone(),
-        statics: entry.statics.iter().map(|&t| resolve_type(t, types)).collect(),
-        wanderers: entry.wanderers.iter().map(|&t| resolve_type(t, types)).collect(),
+        statics: entry
+            .statics
+            .iter()
+            .map(|&t| resolve_type(t, types))
+            .collect(),
+        wanderers: entry
+            .wanderers
+            .iter()
+            .map(|&t| resolve_type(t, types))
+            .collect(),
     }
 }
 
@@ -137,7 +147,9 @@ pub fn system_reference(sde: &Sde, system_id: i64) -> Result<SystemReference, St
         .into_iter()
         .map(|w| (w.type_id, w))
         .collect();
-    let sde_class = sde.wormhole_system_class(system_id).map_err(|e| e.to_string())?;
+    let sde_class = sde
+        .wormhole_system_class(system_id)
+        .map_err(|e| e.to_string())?;
     // Effect isn't in the statics snapshot; derive it from the star type (#314).
     // Swallow any SDE-variant error so a missing column never breaks the call.
     let sde_effect = sde.system_effect(system_id).ok().flatten();
@@ -217,7 +229,11 @@ mod tests {
 
     #[test]
     fn class_falls_back_to_sde_when_snapshot_omits_it() {
-        let entry = RawSystem { class: None, statics: vec![34140], ..Default::default() };
+        let entry = RawSystem {
+            class: None,
+            statics: vec![34140],
+            ..Default::default()
+        };
         let r = resolve(31002604, &entry, &type_map(), Some(3));
         assert_eq!(r.class, Some(3));
         assert_eq!(r.class_label.as_deref(), Some("C3"));

@@ -131,12 +131,10 @@ impl Window {
 
         // Rank weapons by DPS and pilots by total engaged DPS; keep the top N.
         t.by_weapon = top_n(
-            weapons
-                .into_iter()
-                .map(|(name, dmg)| WeaponRate {
-                    name: name.to_string(),
-                    dps: dmg / w,
-                }),
+            weapons.into_iter().map(|(name, dmg)| WeaponRate {
+                name: name.to_string(),
+                dps: dmg / w,
+            }),
             |r| r.dps,
         );
         t.by_pilot = top_n(
@@ -154,7 +152,11 @@ impl Window {
 /// Collect an iterator into the top-[`TOP_N`] rows by `key`, descending.
 fn top_n<T>(rows: impl Iterator<Item = T>, key: impl Fn(&T) -> f64) -> Vec<T> {
     let mut v: Vec<T> = rows.collect();
-    v.sort_by(|a, b| key(b).partial_cmp(&key(a)).unwrap_or(std::cmp::Ordering::Equal));
+    v.sort_by(|a, b| {
+        key(b)
+            .partial_cmp(&key(a))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     v.truncate(TOP_N);
     v
 }

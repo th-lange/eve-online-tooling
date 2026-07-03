@@ -95,7 +95,7 @@ fn cap_trajectory(capacity: f64, recharge_ms: f64, drain: f64, horizon_s: f64) -
 /// (the same stop condition PYFA's capSim uses). `drains` = `(capNeed, cycle_ms)`.
 fn time_to_empty(capacity: f64, recharge_ms: f64, drains: &[(f64, f64)]) -> f64 {
     let tau = recharge_ms / 5.0; // PYFA: recharge / 5, in ms
-    // Per-module next-activation time (ms), starting at 0.
+                                 // Per-module next-activation time (ms), starting at 0.
     let mut events: Vec<(f64, f64, f64)> = drains
         .iter()
         .filter(|(need, cyc)| *need > 0.0 && *cyc > 0.0)
@@ -141,7 +141,7 @@ mod tests {
         let c = capacitor(250.0, 125_000.0, 0.0, &[]);
         assert!(c.stable);
         assert_eq!(c.stable_pct, Some(100.0)); // k=0 → x=1
-        // Rifter peak: 2.5 * 250 / 125 = 5 GJ/s.
+                                               // Rifter peak: 2.5 * 250 / 125 = 5 GJ/s.
         assert!((c.peak_recharge - 5.0).abs() < 1e-9);
     }
 
@@ -157,7 +157,9 @@ mod tests {
         // 8 GJ/s drain via a 1 s, 8 GJ module — well above the 5 peak.
         let c = capacitor(250.0, 125_000.0, 8.0, &[(8.0, 1000.0)]);
         assert!(!c.stable);
-        let t = c.depletion_seconds.expect("unstable cap should report a time");
+        let t = c
+            .depletion_seconds
+            .expect("unstable cap should report a time");
         assert!(t > 0.0 && t < 36_000.0, "depletion = {t}");
     }
 

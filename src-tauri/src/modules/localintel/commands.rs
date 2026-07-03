@@ -212,7 +212,12 @@ pub async fn local_scan(
     let mut seen = HashSet::new();
     let characters: Vec<IdName> = names
         .iter()
-        .filter_map(|n| id_cache.get(&lower(n)).map(|&id| IdName { id, name: n.clone() }))
+        .filter_map(|n| {
+            id_cache.get(&lower(n)).map(|&id| IdName {
+                id,
+                name: n.clone(),
+            })
+        })
         .filter(|c| seen.insert(c.id))
         .collect();
     let unresolved: Vec<String> = names
@@ -350,7 +355,10 @@ pub async fn local_scan(
         }
         pilots.push(LocalPilot {
             character_id: c.id,
-            name: org_names.get(&c.id).cloned().unwrap_or_else(|| c.name.clone()),
+            name: org_names
+                .get(&c.id)
+                .cloned()
+                .unwrap_or_else(|| c.name.clone()),
             corporation_id: aff.map(|a| a.corporation_id).unwrap_or(0),
             corporation,
             alliance_id: aff.and_then(|a| a.alliance_id),
@@ -385,9 +393,11 @@ fn threat_rank(threat: &str) -> u8 {
 
 /// The active character's standings toward **players** as an entity-id →
 /// standing map, used to classify Local. Layered, **most-specific winning**:
+///
 ///   1. **Alliance** contacts — set by your alliance leadership.
 ///   2. **Corp** contacts — set by your corp leadership.
 ///   3. Your **personal** contacts — the blue/red you set yourself (highest).
+///
 /// Each layer overwrites the previous for the same entity. NPC faction/agent
 /// standings are intentionally excluded — they describe NPCs, not players, and
 /// applying them flagged faction-warfare pilots as false −10 reds. Returns empty
@@ -521,10 +531,8 @@ pub async fn localintel_zkill(
             let client = client.clone();
             async move {
                 let url = format!("https://zkillboard.com/api/stats/characterID/{id}/");
-                let raw: Option<ZkillRaw> = async {
-                    client.get(&url).send().await.ok()?.json().await.ok()
-                }
-                .await;
+                let raw: Option<ZkillRaw> =
+                    async { client.get(&url).send().await.ok()?.json().await.ok() }.await;
                 raw.map(|r| ZkillStats {
                     character_id: id,
                     danger_ratio: r.danger_ratio,
@@ -542,7 +550,12 @@ pub async fn localintel_zkill(
         .await;
 
     for s in &fetched {
-        let _ = storage::cache_put(&dir, &format!("zkill_{}", s.character_id), s, ZKILL_TTL_SECS);
+        let _ = storage::cache_put(
+            &dir,
+            &format!("zkill_{}", s.character_id),
+            s,
+            ZKILL_TTL_SECS,
+        );
     }
     out.extend(fetched);
     Ok(out)
@@ -570,8 +583,12 @@ fn parse_chat_senders(content: &str) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for line in content.lines() {
-        let Some((_, after)) = line.split_once("] ") else { continue };
-        let Some((sender, _msg)) = after.split_once(" > ") else { continue };
+        let Some((_, after)) = line.split_once("] ") else {
+            continue;
+        };
+        let Some((sender, _msg)) = after.split_once(" > ") else {
+            continue;
+        };
         let s = sender.trim();
         if s.is_empty() || s == "EVE System" {
             continue;
@@ -616,12 +633,18 @@ pub fn local_log_names(logs_dir: String) -> Result<LocalLogResult, String> {
         .max_by_key(|(_, m)| *m);
 
     let Some((path, _)) = newest else {
-        return Ok(LocalLogResult { senders: Vec::new(), file: String::new() });
+        return Ok(LocalLogResult {
+            senders: Vec::new(),
+            file: String::new(),
+        });
     };
     let content = read_chatlog(&path).unwrap_or_default();
     Ok(LocalLogResult {
         senders: parse_chat_senders(&content),
-        file: path.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default(),
+        file: path
+            .file_name()
+            .map(|f| f.to_string_lossy().into_owned())
+            .unwrap_or_default(),
     })
 }
 

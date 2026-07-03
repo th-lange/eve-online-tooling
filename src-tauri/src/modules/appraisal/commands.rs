@@ -76,7 +76,9 @@ pub async fn appraisal(
     }
     let mut resolved = Vec::with_capacity(params.items.len());
     for item in &params.items {
-        let lookup = sde.type_by_name(item.name.trim()).map_err(|e| e.to_string())?;
+        let lookup = sde
+            .type_by_name(item.name.trim())
+            .map_err(|e| e.to_string())?;
         resolved.push(Resolved {
             name: item.name.clone(),
             quantity: item.quantity.max(0),
@@ -95,7 +97,10 @@ pub async fn appraisal(
         .map(|m| (m.type_id, m))
         .collect();
     let best = if params.best_hub {
-        market.best_sell_hubs(&ids).await.map_err(|e| e.to_string())?
+        market
+            .best_sell_hubs(&ids)
+            .await
+            .map_err(|e| e.to_string())?
     } else {
         HashMap::new()
     };
@@ -211,7 +216,9 @@ pub async fn appraisal_reprocess(
     }
     let mut resolved = Vec::with_capacity(params.items.len());
     for item in &params.items {
-        let lookup = sde.type_by_name(item.name.trim()).map_err(|e| e.to_string())?;
+        let lookup = sde
+            .type_by_name(item.name.trim())
+            .map_err(|e| e.to_string())?;
         let recipe = match lookup {
             Some((id, _)) => sde.reprocess_recipe(id).map_err(|e| e.to_string())?,
             None => None,
@@ -235,7 +242,9 @@ pub async fn appraisal_reprocess(
                 let q = (out.quantity as f64 * cycles as f64 * eff).round() as i64;
                 if q > 0 {
                     *line_min.entry(out.material_type_id).or_default() += q;
-                    let slot = mineral_qty.entry(out.material_type_id).or_insert((out.name.clone(), 0));
+                    let slot = mineral_qty
+                        .entry(out.material_type_id)
+                        .or_insert((out.name.clone(), 0));
                     slot.1 += q;
                 }
             }
@@ -258,7 +267,12 @@ pub async fn appraisal_reprocess(
         .into_iter()
         .map(|m| (m.type_id, m))
         .collect();
-    let sell = |id: i64| prices.get(&id).and_then(|m| m.sell_percentile).unwrap_or(0.0);
+    let sell = |id: i64| {
+        prices
+            .get(&id)
+            .and_then(|m| m.sell_percentile)
+            .unwrap_or(0.0)
+    };
 
     let mut minerals: Vec<MineralLine> = mineral_qty
         .into_iter()
@@ -273,7 +287,11 @@ pub async fn appraisal_reprocess(
             }
         })
         .collect();
-    minerals.sort_by(|a, b| b.value.partial_cmp(&a.value).unwrap_or(std::cmp::Ordering::Equal));
+    minerals.sort_by(|a, b| {
+        b.value
+            .partial_cmp(&a.value)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mineral_total: f64 = minerals.iter().map(|m| m.value).sum();
 
     let mut input_sell_total = 0.0;
@@ -281,12 +299,11 @@ pub async fn appraisal_reprocess(
         .iter()
         .zip(per_line_minerals)
         .map(|(r, line_min)| {
-            input_sell_total +=
-                r.type_id.map(|id| r.quantity as f64 * sell(id)).unwrap_or(0.0);
-            let yield_value: f64 = line_min
-                .iter()
-                .map(|(id, q)| *q as f64 * sell(*id))
-                .sum();
+            input_sell_total += r
+                .type_id
+                .map(|id| r.quantity as f64 * sell(id))
+                .unwrap_or(0.0);
+            let yield_value: f64 = line_min.iter().map(|(id, q)| *q as f64 * sell(*id)).sum();
             let reprocessed = r
                 .recipe
                 .as_ref()

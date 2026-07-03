@@ -394,10 +394,16 @@ impl Sde {
         );
         let mut stmt = self.conn.prepare(&sql)?;
         let map_group = |r: &rusqlite::Row| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)? != 0))
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)? != 0,
+            ))
         };
         let groups: Vec<(i64, String, bool)> = match parent {
-            Some(id) => stmt.query_map(params![id], map_group)?.collect::<Result<_, _>>()?,
+            Some(id) => stmt
+                .query_map(params![id], map_group)?
+                .collect::<Result<_, _>>()?,
             None => stmt.query_map([], map_group)?.collect::<Result<_, _>>()?,
         };
 
@@ -415,7 +421,11 @@ impl Sde {
                 )?;
                 let rows: Vec<(i64, String, String)> = s
                     .query_map(params![id], |r| {
-                        Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+                        Ok((
+                            r.get::<_, i64>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, String>(2)?,
+                        ))
                     })?
                     .collect::<Result<_, _>>()?;
                 rows
@@ -466,10 +476,7 @@ impl Sde {
     /// first; callers can further fuzzy-rank the result. For pickers.
     pub fn search_types(&self, query: &str, limit: i64) -> Result<Vec<(i64, String)>, SdeError> {
         use rusqlite::types::Value;
-        let terms: Vec<String> = query
-            .split_whitespace()
-            .map(|t| format!("%{t}%"))
-            .collect();
+        let terms: Vec<String> = query.split_whitespace().map(|t| format!("%{t}%")).collect();
         if terms.is_empty() {
             return Ok(Vec::new());
         }
@@ -482,10 +489,9 @@ impl Sde {
         let mut stmt = self.conn.prepare(&sql)?;
         let mut binds: Vec<Value> = terms.into_iter().map(Value::Text).collect();
         binds.push(Value::Integer(limit));
-        let rows = stmt
-            .query_map(rusqlite::params_from_iter(binds), |r| {
-                Ok((r.get(0)?, r.get(1)?))
-            })?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(binds), |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
@@ -510,8 +516,7 @@ impl Sde {
             return Ok(Vec::new());
         }
         let placeholders = vec!["?"; type_ids.len()].join(", ");
-        let sql =
-            format!("SELECT typeID, typeName FROM invTypes WHERE typeID IN ({placeholders})");
+        let sql = format!("SELECT typeID, typeName FROM invTypes WHERE typeID IN ({placeholders})");
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt.query_map(rusqlite::params_from_iter(type_ids.iter()), |r| {
             Ok((r.get(0)?, r.get(1)?))
@@ -668,7 +673,8 @@ impl Sde {
         let rows = stmt.query_map(params![activity_id], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
         })?;
-        rows.collect::<Result<HashMap<_, _>, _>>().map_err(Into::into)
+        rows.collect::<Result<HashMap<_, _>, _>>()
+            .map_err(Into::into)
     }
 
     /// All item categories (id, name) — the root of the universe browser tree.
@@ -753,7 +759,10 @@ impl Sde {
              ORDER BY a.attributeName",
         )?;
         let rows = stmt.query_map(params![type_id], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, Option<f64>>(1)?.unwrap_or(0.0)))
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<f64>>(1)?.unwrap_or(0.0),
+            ))
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
@@ -767,7 +776,10 @@ impl Sde {
              FROM dgmTypeAttributes WHERE typeID = ?1",
         )?;
         let rows = stmt.query_map(params![type_id], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, Option<f64>>(1)?.unwrap_or(0.0)))
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, Option<f64>>(1)?.unwrap_or(0.0),
+            ))
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
@@ -810,9 +822,9 @@ impl Sde {
     /// effect (e.g. the charge a launcher fires). Also used by the EFT importer
     /// to classify a module into its slot (#162).
     pub fn type_effects(&self, type_id: i64) -> Result<Vec<(i64, bool)>, SdeError> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT effectID, COALESCE(isDefault, 0) FROM dgmTypeEffects WHERE typeID = ?1")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT effectID, COALESCE(isDefault, 0) FROM dgmTypeEffects WHERE typeID = ?1",
+        )?;
         let rows = stmt.query_map(params![type_id], |r| {
             Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)? != 0))
         })?;
@@ -840,7 +852,11 @@ impl Sde {
                AND COALESCE(mt.metaGroupID, 1) IN ({mph})",
         );
         let mut stmt = self.conn.prepare(&sql)?;
-        let params: Vec<i64> = group_ids.iter().chain(allowed_meta.iter()).copied().collect();
+        let params: Vec<i64> = group_ids
+            .iter()
+            .chain(allowed_meta.iter())
+            .copied()
+            .collect();
         let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |r| {
             Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
         })?;
@@ -858,7 +874,8 @@ impl Sde {
         let rows = stmt.query_map(rusqlite::params_from_iter(type_ids.iter()), |r| {
             Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
         })?;
-        rows.collect::<Result<HashMap<_, _>, _>>().map_err(Into::into)
+        rows.collect::<Result<HashMap<_, _>, _>>()
+            .map_err(Into::into)
     }
 
     /// Published Skill (category 16) type ids — the "all V" skill set the
@@ -930,7 +947,10 @@ impl Sde {
                 match serde_json::from_str::<Vec<ModifierInfo>>(&json) {
                     Ok(mods) => meta.modifiers = mods,
                     Err(e) => {
-                        eprintln!("effect {} has unparseable modifierInfo: {e}", meta.effect_id)
+                        eprintln!(
+                            "effect {} has unparseable modifierInfo: {e}",
+                            meta.effect_id
+                        )
                     }
                 }
             }
@@ -984,18 +1004,18 @@ impl Sde {
         Ok(Some(ShipLayout {
             type_id,
             name,
-            high_slots: a(14) as i64,         // hiSlots
-            mid_slots: a(13) as i64,          // medSlots
-            low_slots: a(12) as i64,          // lowSlots
-            rig_slots: a(1137) as i64,        // rigSlots
-            subsystem_slots: a(1367) as i64,  // maxSubSystems
-            turret_hardpoints: a(102) as i64, // turretSlotsLeft
+            high_slots: a(14) as i64,           // hiSlots
+            mid_slots: a(13) as i64,            // medSlots
+            low_slots: a(12) as i64,            // lowSlots
+            rig_slots: a(1137) as i64,          // rigSlots
+            subsystem_slots: a(1367) as i64,    // maxSubSystems
+            turret_hardpoints: a(102) as i64,   // turretSlotsLeft
             launcher_hardpoints: a(101) as i64, // launcherSlotsLeft
-            cpu_output: a(48),                // cpuOutput
-            powergrid_output: a(11),          // powerOutput
-            calibration: a(1132),             // upgradeCapacity
-            drone_bay: a(283),                // droneCapacity
-            drone_bandwidth: a(1271),         // droneBandwidth
+            cpu_output: a(48),                  // cpuOutput
+            powergrid_output: a(11),            // powerOutput
+            calibration: a(1132),               // upgradeCapacity
+            drone_bay: a(283),                  // droneCapacity
+            drone_bandwidth: a(1271),           // droneBandwidth
         }))
     }
 
@@ -1040,9 +1060,9 @@ impl Sde {
 
     /// The `(solar_system_id, region_id)` an NPC station sits in, if known.
     pub fn station_location(&self, station_id: i64) -> Result<Option<(i64, i64)>, SdeError> {
-        let mut stmt = self.conn.prepare(
-            "SELECT solarSystemID, regionID FROM staStations WHERE stationID = ?1",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT solarSystemID, regionID FROM staStations WHERE stationID = ?1")?;
         let mut rows = stmt.query(params![station_id])?;
         match rows.next()? {
             Some(r) => Ok(Some((r.get(0)?, r.get(1)?))),
@@ -1151,13 +1171,23 @@ impl Sde {
             .conn
             .prepare("SELECT schematicID, schematicName, cycleTime FROM planetSchematics")?;
         let rows = base.query_map([], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
         })?;
         for row in rows {
             let (id, name, cycle_time) = row?;
             map.insert(
                 id,
-                PlanetSchematic { schematic_id: id, name, cycle_time, inputs: Vec::new(), outputs: Vec::new() },
+                PlanetSchematic {
+                    schematic_id: id,
+                    name,
+                    cycle_time,
+                    inputs: Vec::new(),
+                    outputs: Vec::new(),
+                },
             );
         }
 
@@ -1165,7 +1195,12 @@ impl Sde {
             "SELECT schematicID, typeID, quantity, isInput FROM planetSchematicsTypeMap",
         )?;
         let rows = tm.query_map([], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?, r.get::<_, i64>(3)?))
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
         })?;
         for row in rows {
             let (sid, tid, qty, is_input) = row?;
@@ -1217,7 +1252,10 @@ impl Sde {
             .prepare("SELECT typeName, mass FROM invTypes WHERE typeID = ?1")?;
         let mut rows = stmt.query(params![type_id])?;
         match rows.next()? {
-            Some(r) => Ok(Some((r.get(0)?, r.get::<_, Option<f64>>(1)?.unwrap_or(0.0)))),
+            Some(r) => Ok(Some((
+                r.get(0)?,
+                r.get::<_, Option<f64>>(1)?.unwrap_or(0.0),
+            ))),
             None => Ok(None),
         }
     }
@@ -1330,7 +1368,8 @@ impl Sde {
             .conn
             .prepare("SELECT solarSystemID, solarSystemName FROM mapSolarSystems")?;
         let rows = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?;
-        rows.collect::<Result<HashMap<_, _>, _>>().map_err(Into::into)
+        rows.collect::<Result<HashMap<_, _>, _>>()
+            .map_err(Into::into)
     }
 
     /// Map of typeID -> group name (Frigate, Cruiser, Hybrid Weapon, …).
@@ -1443,9 +1482,10 @@ mod tests {
         // Assault Frigate (324) packages to 2,500 regardless of assembled volume.
         assert_eq!(packaged_volume(324, Some(16_500.0)), Some(2_500.0));
         assert_eq!(packaged_volume(27, Some(486_000.0)), Some(50_000.0)); // Battleship
-        // Non-ship / unmapped groups keep their own volume.
+                                                                          // Non-ship / unmapped groups keep their own volume.
         assert_eq!(packaged_volume(18, Some(0.01)), Some(0.01)); // Mineral
-        assert_eq!(packaged_volume(513, Some(16_250_000.0)), Some(16_250_000.0)); // Freighter (fallback)
+        assert_eq!(packaged_volume(513, Some(16_250_000.0)), Some(16_250_000.0));
+        // Freighter (fallback)
     }
 
     /// A tiny in-memory SDE: blueprint 999 builds 1x Widget (100) from
@@ -1620,7 +1660,10 @@ mod tests {
     fn wormhole_effect_maps_only_effect_star_types() {
         assert_eq!(wormhole_effect_name(30577).as_deref(), Some("Pulsar"));
         assert_eq!(wormhole_effect_name(30574).as_deref(), Some("Magnetar"));
-        assert_eq!(wormhole_effect_name(30670).as_deref(), Some("Cataclysmic Variable"));
+        assert_eq!(
+            wormhole_effect_name(30670).as_deref(),
+            Some("Cataclysmic Variable")
+        );
         // The spectral k-space "Sun K5 (Red Giant)" (id 8) is NOT an effect.
         assert_eq!(wormhole_effect_name(8), None);
         assert_eq!(wormhole_effect_name(0), None);
@@ -1635,7 +1678,10 @@ mod tests {
         )
         .unwrap();
         let sde = Sde::from_connection(conn);
-        assert_eq!(sde.system_effect(31000100).unwrap().as_deref(), Some("Pulsar"));
+        assert_eq!(
+            sde.system_effect(31000100).unwrap().as_deref(),
+            Some("Pulsar")
+        );
         // Spectral red-giant sun → no wormhole effect.
         assert_eq!(sde.system_effect(31000200).unwrap(), None);
         // No sun / unknown system → None, no error.
@@ -1700,7 +1746,10 @@ mod tests {
 
         // Leaf items: published only, ordered T1 → T2 → Faction.
         let (_, items) = sde.market_group_children(Some(40)).unwrap();
-        let names: Vec<_> = items.iter().map(|(_, n, m)| (n.as_str(), m.as_str())).collect();
+        let names: Vec<_> = items
+            .iter()
+            .map(|(_, n, m)| (n.as_str(), m.as_str()))
+            .collect();
         assert_eq!(
             names,
             vec![
@@ -1938,13 +1987,16 @@ mod tests {
         let items = sde.market_items_in_categories(&[6, 7, 8]).unwrap();
         let ids: Vec<i64> = items.iter().map(|i| i.type_id).collect();
         assert_eq!(ids, vec![200, 400, 587]); // ordered by type id
-        // Ship volume override (Frigate group 25 → 2,500 packaged).
+                                              // Ship volume override (Frigate group 25 → 2,500 packaged).
         let rifter = items.iter().find(|i| i.type_id == 587).unwrap();
         assert_eq!(rifter.volume, Some(2_500.0));
 
         // Just one category.
         let charges = sde.market_items_in_categories(&[8]).unwrap();
-        assert_eq!(charges.iter().map(|i| i.type_id).collect::<Vec<_>>(), vec![200]);
+        assert_eq!(
+            charges.iter().map(|i| i.type_id).collect::<Vec<_>>(),
+            vec![200]
+        );
     }
 
     #[test]
@@ -2017,14 +2069,15 @@ mod tests {
     #[test]
     fn raw_attributes_by_id_single_and_batch() {
         let sde = dogma_fixture();
-        let single: HashMap<i64, f64> =
-            sde.type_attributes_raw(587).unwrap().into_iter().collect();
+        let single: HashMap<i64, f64> = sde.type_attributes_raw(587).unwrap().into_iter().collect();
         assert_eq!(single.get(&14), Some(&3.0));
         assert_eq!(single.get(&48), Some(&130.0));
 
         let batch = sde.types_attributes_raw(&[587, 519]).unwrap();
         assert_eq!(batch.len(), 2);
-        assert!(batch[&519].iter().any(|&(id, v)| id == 64 && (v - 1.1).abs() < 1e-9));
+        assert!(batch[&519]
+            .iter()
+            .any(|&(id, v)| id == 64 && (v - 1.1).abs() < 1e-9));
         assert!(sde.types_attributes_raw(&[]).unwrap().is_empty());
     }
 

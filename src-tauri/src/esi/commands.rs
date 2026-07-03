@@ -187,7 +187,9 @@ pub async fn roster_stock(
     auth_state: State<'_, AuthState>,
 ) -> Result<std::collections::HashMap<i64, i64>, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    if let Some(cached) = storage::cache_get::<std::collections::HashMap<i64, i64>>(&dir, "roster_stock") {
+    if let Some(cached) =
+        storage::cache_get::<std::collections::HashMap<i64, i64>>(&dir, "roster_stock")
+    {
         return Ok(cached);
     }
     let mut stock: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();

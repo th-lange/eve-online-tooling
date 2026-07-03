@@ -13,7 +13,7 @@ const SPEED_FACTOR: i64 = 20; // stasis web: % to target maxVelocity
 const SIG_RADIUS_BONUS: i64 = 554; // target painter: % to target signatureRadius
 const MAX_TARGET_RANGE_BONUS: i64 = 309; // sensor damp: % to target lock range
 const SCAN_RESOLUTION_BONUS: i64 = 566; // sensor damp: % to target scan resolution
-// Target ship attributes the effects write.
+                                        // Target ship attributes the effects write.
 const SIGNATURE_RADIUS: i64 = 552;
 const MAX_TARGET_RANGE: i64 = 76;
 const SCAN_RESOLUTION: i64 = 564;
@@ -42,10 +42,20 @@ pub fn apply_projection(ship: &mut AttrStore, projected: &[ProjectedInput]) {
             ship.apply(SIGNATURE_RADIUS, Op::PostPercent, p.sig_radius_bonus, true);
         }
         if p.max_target_range_bonus != 0.0 {
-            ship.apply(MAX_TARGET_RANGE, Op::PostPercent, p.max_target_range_bonus, true);
+            ship.apply(
+                MAX_TARGET_RANGE,
+                Op::PostPercent,
+                p.max_target_range_bonus,
+                true,
+            );
         }
         if p.scan_resolution_bonus != 0.0 {
-            ship.apply(SCAN_RESOLUTION, Op::PostPercent, p.scan_resolution_bonus, true);
+            ship.apply(
+                SCAN_RESOLUTION,
+                Op::PostPercent,
+                p.scan_resolution_bonus,
+                true,
+            );
         }
     }
 }
@@ -92,8 +102,14 @@ mod tests {
         apply_projection(
             &mut ship,
             &[
-                ProjectedInput { speed_factor: -60.0, ..Default::default() },
-                ProjectedInput { sig_radius_bonus: 30.0, ..Default::default() },
+                ProjectedInput {
+                    speed_factor: -60.0,
+                    ..Default::default()
+                },
+                ProjectedInput {
+                    sig_radius_bonus: 30.0,
+                    ..Default::default()
+                },
             ],
         );
         // -60% velocity, +30% sig.

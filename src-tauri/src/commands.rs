@@ -25,7 +25,11 @@ use tauri::{AppHandle, Manager};
 /// any that exists, and fall back to the default Steam-Proton location.
 #[tauri::command]
 pub fn eve_default_log_dir(app: AppHandle, kind: String) -> Option<String> {
-    let sub = if kind == "chatlogs" { "Chatlogs" } else { "Gamelogs" };
+    let sub = if kind == "chatlogs" {
+        "Chatlogs"
+    } else {
+        "Gamelogs"
+    };
     let path = app.path();
 
     // Probe order: existing dirs win. Documents-based first (native Win/macOS).

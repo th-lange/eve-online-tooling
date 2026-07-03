@@ -134,11 +134,7 @@ impl MarketService {
 
     /// Raw daily market history for a type in a region (ascending by date),
     /// cached. Feeds the market history explorer.
-    pub async fn history(
-        &self,
-        region_id: i64,
-        type_id: i64,
-    ) -> Result<Vec<HistoryDay>, EsiError> {
+    pub async fn history(&self, region_id: i64, type_id: i64) -> Result<Vec<HistoryDay>, EsiError> {
         self.history_for(region_id, type_id).await
     }
 

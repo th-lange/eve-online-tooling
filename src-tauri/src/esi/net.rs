@@ -72,7 +72,7 @@ impl ErrorBudget {
     fn wait_needed(&self, now: u64) -> Option<Duration> {
         let remain = self.remain.load(Ordering::Relaxed);
         let reset_at = self.reset_at.load(Ordering::Relaxed);
-        if remain >= 0 && remain < LOW_BUDGET && reset_at > now {
+        if (0..LOW_BUDGET).contains(&remain) && reset_at > now {
             // +1s cushion so we resume just after the window flips.
             Some(Duration::from_secs(reset_at - now + 1))
         } else {
@@ -91,7 +91,7 @@ impl ErrorBudget {
 fn should_retry_status(status: StatusCode) -> bool {
     status == StatusCode::TOO_MANY_REQUESTS  // 429
         || status.as_u16() == 420            // ESI "error limited"
-        || status.is_server_error()          // 5xx (incl. 503/504)
+        || status.is_server_error() // 5xx (incl. 503/504)
 }
 
 /// Base backoff (no jitter) for the Nth attempt (1-based): 0.5s, 1s, 2s, …
@@ -106,7 +106,10 @@ fn backoff(attempt: u32) -> Duration {
 }
 
 fn header_i64(headers: &HeaderMap, name: &str) -> Option<i64> {
-    headers.get(name).and_then(|v| v.to_str().ok()).and_then(|s| s.trim().parse().ok())
+    headers
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.trim().parse().ok())
 }
 
 /// `Retry-After` as a delay (delta-seconds form only; HTTP-date form ignored).

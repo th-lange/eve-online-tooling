@@ -1,0 +1,3 @@
+# Use rustfmt defaults (stable options only). Pinned here so `cargo fmt` is
+# reproducible and CI can enforce `cargo fmt --check`.
+edition = "2021"

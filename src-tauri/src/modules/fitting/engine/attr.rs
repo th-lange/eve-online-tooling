@@ -16,6 +16,7 @@ use super::stacking::combine_penalized;
 /// Centralised so the stat calculators (#173–#175) read `attr::CPU_OUTPUT`, not
 /// magic numbers.
 #[allow(dead_code)] // ids land here as the tank/damage/nav calculators consume them
+#[allow(clippy::module_inception)] // `attr::attr` — a named constant bag, kept nested on purpose
 pub mod attr {
     pub const MASS: i64 = 4;
     pub const POWER_OUTPUT: i64 = 11;
@@ -150,7 +151,10 @@ impl AttrStore {
     /// (e.g. a laser crystal without `fallofMultiplier`, whose default is 1.0, so
     /// the charge→host falloff multiplier is a no-op rather than ×0).
     pub fn get_or(&self, attr: i64, default: f64) -> f64 {
-        self.values.get(&attr).map(Value::finalize).unwrap_or(default)
+        self.values
+            .get(&attr)
+            .map(Value::finalize)
+            .unwrap_or(default)
     }
 
     /// The unmodified base value (0.0 if unknown).

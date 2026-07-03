@@ -11,18 +11,15 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
 use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule};
-use super::engine::validate::{validate, ValItem};
 use super::engine::resolve::{resolve, EntityInput, FitInput};
-use super::types::{
-    EwTag, Fit, FitItem, FitPrice, FitPriceLine, FitStats,
-    ModuleState, SlotKind,
-};
+use super::engine::validate::{validate, ValItem};
+use super::types::{EwTag, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind};
 use crate::esi::{corporation_id, AuthState};
 use crate::market::{resolve_location, MarketService, PriceModel};
 use crate::sde::{Sde, SdePaths, ShipLayout};
 use crate::storage;
 
-use super::stats::{run_dogma, character_skill_levels, required_skills_of};
+use super::stats::{character_skill_levels, required_skills_of, run_dogma};
 
 /// Storage key for the local saved-fits document (a `Vec<Fit>`).
 const FITS_KEY: &str = "fitting_fits";
@@ -274,7 +271,9 @@ fn resolve_module_costs(
     all_ids.extend_from_slice(type_ids);
     all_ids.extend(&skill_ids);
 
-    let attrs = sde.types_attributes_raw(&all_ids).map_err(|e| e.to_string())?;
+    let attrs = sde
+        .types_attributes_raw(&all_ids)
+        .map_err(|e| e.to_string())?;
     let effects_by_type = sde.types_effects(&all_ids).map_err(|e| e.to_string())?;
     let effect_meta = sde.effect_meta().map_err(|e| e.to_string())?;
     let defaults = sde.attribute_defaults().map_err(|e| e.to_string())?;
@@ -323,7 +322,13 @@ fn resolve_module_costs(
 
     let charges = vec![None; modules.len()];
     let resolved = resolve(
-        &FitInput { ship, modules, skills, drones: Vec::new(), charges },
+        &FitInput {
+            ship,
+            modules,
+            skills,
+            drones: Vec::new(),
+            charges,
+        },
         &effect_meta,
         &is_stackable,
         &default_of,
@@ -437,7 +442,11 @@ pub async fn fitting_esi_push(
     let granted = storage::load_roster(&dir)
         .iter()
         .find(|c| c.character_id == character_id)
-        .map(|c| c.scopes.iter().any(|s| s == "esi-fittings.write_fittings.v1"))
+        .map(|c| {
+            c.scopes
+                .iter()
+                .any(|s| s == "esi-fittings.write_fittings.v1")
+        })
         .unwrap_or(false);
     if !granted {
         return Err(
@@ -452,7 +461,11 @@ pub async fn fitting_esi_push(
     if items.is_empty() {
         return Err("Nothing to save — the fit has no modules.".to_string());
     }
-    let name = if fit.name.trim().is_empty() { "Fit" } else { fit.name.trim() };
+    let name = if fit.name.trim().is_empty() {
+        "Fit"
+    } else {
+        fit.name.trim()
+    };
     let id = crate::esi::create_character_fitting(
         &auth_state,
         character_id,
@@ -495,12 +508,10 @@ pub async fn fitting_esi_list(
         })
         .unwrap_or(false);
     if !granted {
-        return Err(
-            "This character hasn't granted the fittings scope. Add \
+        return Err("This character hasn't granted the fittings scope. Add \
              esi-fittings.read_fittings.v1 to your EVE application, then remove \
              and re-add the character."
-                .to_string(),
-        );
+            .to_string());
     }
 
     // Cached per character (30 min) so the picker doesn't re-hit ESI each open;
@@ -529,9 +540,9 @@ pub async fn fitting_esi_list(
     let mut charge: HashMap<i64, bool> = HashMap::new();
     for f in &esi {
         for it in &f.items {
-            charge.entry(it.type_id).or_insert_with(|| {
-                sde.type_category(it.type_id).ok().flatten() == Some(8)
-            });
+            charge
+                .entry(it.type_id)
+                .or_insert_with(|| sde.type_category(it.type_id).ok().flatten() == Some(8));
         }
     }
     let is_charge = |tid: i64| charge.get(&tid).copied().unwrap_or(false);
@@ -569,7 +580,10 @@ pub async fn fitting_simulate(
     };
 
     let sde = open_sde(&app)?;
-    let Some(ship) = sde.ship_layout(fit.ship_type_id).map_err(|e| e.to_string())? else {
+    let Some(ship) = sde
+        .ship_layout(fit.ship_type_id)
+        .map_err(|e| e.to_string())?
+    else {
         return Err(format!("unknown ship: {}", fit.ship_type_id));
     };
 
@@ -606,8 +620,8 @@ pub async fn fitting_simulate(
         };
         val_items.push(ValItem {
             slot: item.slot,
-            cpu: get(50),          // cpu usage
-            powergrid: get(30),    // power usage
+            cpu: get(50),           // cpu usage
+            powergrid: get(30),     // power usage
             calibration: get(1153), // rig calibration cost
             is_turret,
             is_launcher,
@@ -628,7 +642,10 @@ pub async fn fitting_simulate(
     let projected_ew = classify_projected_ew(&sde, &fit);
 
     Ok(FitStats {
-        resources: dogma.as_ref().map(|d| d.resources.clone()).unwrap_or(base_resources),
+        resources: dogma
+            .as_ref()
+            .map(|d| d.resources.clone())
+            .unwrap_or(base_resources),
         validation: dogma
             .as_ref()
             .map(|d| d.validation.clone())
@@ -638,8 +655,14 @@ pub async fn fitting_simulate(
         dps: dogma.as_ref().map(|d| d.dps.clone()),
         navigation: dogma.as_ref().map(|d| d.navigation.clone()),
         layout: dogma.as_ref().map(|d| d.layout.clone()),
-        weapon_ranges: dogma.as_ref().map(|d| d.weapon_ranges.clone()).unwrap_or_default(),
-        activatable_types: dogma.as_ref().map(|d| d.activatable_types.clone()).unwrap_or_default(),
+        weapon_ranges: dogma
+            .as_ref()
+            .map(|d| d.weapon_ranges.clone())
+            .unwrap_or_default(),
+        activatable_types: dogma
+            .as_ref()
+            .map(|d| d.activatable_types.clone())
+            .unwrap_or_default(),
         targeting: dogma.map(|d| d.targeting),
         price: None,
         projected_ew,
@@ -659,7 +682,15 @@ fn classify_projected_ew(sde: &Sde, fit: &Fit) -> Vec<EwTag> {
         return Vec::new();
     };
     // Tally projected modules per category, preserving a stable display order.
-    let order = ["web", "paint", "damp", "weaponDisruption", "ecm", "neut", "nos"];
+    let order = [
+        "web",
+        "paint",
+        "damp",
+        "weaponDisruption",
+        "ecm",
+        "neut",
+        "nos",
+    ];
     let mut counts: HashMap<&'static str, i64> = HashMap::new();
     for item in &fit.projected {
         if let Some(cat) = groups.get(&item.type_id).and_then(|g| ew_category(*g)) {
@@ -688,13 +719,13 @@ fn classify_projected_ew(sde: &Sde, fit: &Fit) -> Vec<EwTag> {
 /// surface. Group ids are stable SDE identifiers (verified against the SDE).
 fn ew_category(group_id: i64) -> Option<&'static str> {
     match group_id {
-        65 | 1672 => Some("web"),         // Stasis Web / Stasis Grappler
-        379 => Some("paint"),             // Target Painter
-        208 => Some("damp"),              // Sensor Dampener
-        291 => Some("weaponDisruption"),  // Weapon Disruptor (tracking/guidance)
-        201 | 80 => Some("ecm"),          // ECM / Burst Jammer
-        71 => Some("neut"),               // Energy Neutralizer
-        68 => Some("nos"),                // Energy Nosferatu
+        65 | 1672 => Some("web"),        // Stasis Web / Stasis Grappler
+        379 => Some("paint"),            // Target Painter
+        208 => Some("damp"),             // Sensor Dampener
+        291 => Some("weaponDisruption"), // Weapon Disruptor (tracking/guidance)
+        201 | 80 => Some("ecm"),         // ECM / Burst Jammer
+        71 => Some("neut"),              // Energy Neutralizer
+        68 => Some("nos"),               // Energy Nosferatu
         _ => None,
     }
 }
@@ -829,7 +860,6 @@ pub fn fitting_delete_local(app: AppHandle, id: String) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::modules::fitting::optimizer::*;
-    use crate::modules::fitting::stats::*;
 
     fn item(type_id: i64, slot: SlotKind, charge: Option<i64>, qty: i32) -> FitItem {
         FitItem {
@@ -1004,8 +1034,18 @@ mod tests {
                 fit(
                     "Rifter",
                     vec![
-                        module("Multispectrum Energized Membrane II", SlotKind::Low, None, 0),
-                        module("Multispectrum Energized Membrane II", SlotKind::Low, None, 1),
+                        module(
+                            "Multispectrum Energized Membrane II",
+                            SlotKind::Low,
+                            None,
+                            0,
+                        ),
+                        module(
+                            "Multispectrum Energized Membrane II",
+                            SlotKind::Low,
+                            None,
+                            1,
+                        ),
                     ],
                 ),
                 Golden {
@@ -1191,17 +1231,30 @@ mod tests {
             let cap_pct = d.capacitor.stable_pct.unwrap_or(0.0);
             let depletion = d.capacitor.depletion_seconds.unwrap_or(0.0);
             let mut p = Vec::new();
-            if !close(dps, g.dps, 0.005) { p.push(format!("dps {dps:.2}≠{:.2}", g.dps)); }
-            if !close(ehp, g.ehp, 0.01) { p.push(format!("ehp {ehp:.1}≠{:.1}", g.ehp)); }
-            if stable != g.cap_stable { p.push(format!("cap {stable}≠{}", g.cap_stable)); }
+            if !close(dps, g.dps, 0.005) {
+                p.push(format!("dps {dps:.2}≠{:.2}", g.dps));
+            }
+            if !close(ehp, g.ehp, 0.01) {
+                p.push(format!("ehp {ehp:.1}≠{:.1}", g.ehp));
+            }
+            if stable != g.cap_stable {
+                p.push(format!("cap {stable}≠{}", g.cap_stable));
+            }
             if stable && !close(cap_pct, g.cap_pct, 0.01) {
                 p.push(format!("cap% {cap_pct:.2}≠{:.2}", g.cap_pct));
             }
             if !stable && !close(depletion, g.cap_depletion, 0.02) {
-                p.push(format!("cap-depletion {depletion:.1}≠{:.1}", g.cap_depletion));
+                p.push(format!(
+                    "cap-depletion {depletion:.1}≠{:.1}",
+                    g.cap_depletion
+                ));
             }
-            if !close(vel, g.vel, 0.005) { p.push(format!("vel {vel:.2}≠{:.2}", g.vel)); }
-            if !close(align, g.align, 0.005) { p.push(format!("align {align:.3}≠{:.3}", g.align)); }
+            if !close(vel, g.vel, 0.005) {
+                p.push(format!("vel {vel:.2}≠{:.2}", g.vel));
+            }
+            if !close(align, g.align, 0.005) {
+                p.push(format!("align {align:.3}≠{:.3}", g.align));
+            }
             if g.lock_range > 0.0 {
                 let lr = d.targeting.lock_range;
                 if !close(lr, g.lock_range, 0.005) {
@@ -1309,7 +1362,10 @@ mod tests {
         let offline = run_dogma(&sde, &gun(ModuleState::Offline), &layout, &|_| 5.0).unwrap();
         assert!(active.dps.total > 0.0);
         assert_eq!(offline.dps.total, 0.0, "offline gun should do no DPS");
-        assert!(offline.weapon_ranges.is_empty(), "offline gun shows no range");
+        assert!(
+            offline.weapon_ranges.is_empty(),
+            "offline gun shows no range"
+        );
         assert!(
             offline.resources.cpu_used < active.resources.cpu_used,
             "offline gun should free CPU"
@@ -1357,7 +1413,9 @@ mod tests {
         assert_eq!(online.capacitor.drain, 0.0, "deactivated AB draws no cap");
         assert_eq!(offline.capacitor.drain, 0.0, "offline AB draws no cap");
         // The AB itself is activatable; a plate would not be.
-        assert!(active.activatable_types.contains(&tid("1MN Afterburner II")));
+        assert!(active
+            .activatable_types
+            .contains(&tid("1MN Afterburner II")));
     }
 
     /// Deactivating (online) an *active* shield hardener drops its resist, so EHP
@@ -1401,13 +1459,19 @@ mod tests {
     /// `next_slot_index` fills from 0 and appends one past the highest in-slot.
     #[test]
     fn next_slot_index_appends_per_slot() {
-        let mut items = vec![item(10, SlotKind::Low, None, 1), item(20, SlotKind::High, None, 1)];
+        let mut items = vec![
+            item(10, SlotKind::Low, None, 1),
+            item(20, SlotKind::High, None, 1),
+        ];
         items[0].index = 0;
         items[1].index = 0;
         // Empty slot starts at 0; occupied slots continue past their max.
         assert_eq!(next_slot_index(&items, SlotKind::Mid), 0);
         assert_eq!(next_slot_index(&items, SlotKind::Low), 1);
-        items.push(FitItem { index: 1, ..item(11, SlotKind::Low, None, 1) });
+        items.push(FitItem {
+            index: 1,
+            ..item(11, SlotKind::Low, None, 1)
+        });
         assert_eq!(next_slot_index(&items, SlotKind::Low), 2);
     }
 
@@ -1425,7 +1489,13 @@ mod tests {
             ],
             projected: Vec::new(),
         };
-        let prices = HashMap::from([(100, 1000.0), (10, 50.0), (20, 200.0), (30, 5.0), (40, 10.0)]);
+        let prices = HashMap::from([
+            (100, 1000.0),
+            (10, 50.0),
+            (20, 200.0),
+            (30, 5.0),
+            (40, 10.0),
+        ]);
         // 1000 hull + 50 + 200 + 5 charge + 10×5 drones = 1305.
         assert_eq!(fit_cost(&fit, &prices), 1305.0);
         // No prices ⇒ everything counts as free, never blocking.
@@ -1481,7 +1551,10 @@ mod tests {
             cap_stable: true,
             max_cost: Some(400.0),
         };
-        assert!((constraint_score(&e, &both) - 100.0 * CONSTRAINT_PENALTY * CONSTRAINT_PENALTY).abs() < 1e-9);
+        assert!(
+            (constraint_score(&e, &both) - 100.0 * CONSTRAINT_PENALTY * CONSTRAINT_PENALTY).abs()
+                < 1e-9
+        );
         assert!(!meets(&e, &both));
     }
 
@@ -1496,7 +1569,7 @@ mod tests {
         assert_eq!(ew_category(80), Some("ecm")); // Burst Jammer
         assert_eq!(ew_category(68), Some("nos"));
         assert_eq!(ew_category(587), None); // a Rifter hull, not EW
-        // ECM is the jam category; web/paint/damp are the modeled ones.
+                                            // ECM is the jam category; web/paint/damp are the modeled ones.
         assert_eq!(ew_label("ecm"), "ECM");
         assert_eq!(ew_label("weaponDisruption"), "Tracking/Guidance Disruption");
     }

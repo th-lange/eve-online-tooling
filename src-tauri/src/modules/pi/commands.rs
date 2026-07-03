@@ -238,7 +238,9 @@ pub async fn pi_overview(
     let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
     let schematics = sde.planet_schematics().map_err(|e| e.to_string())?;
     let systems = sde.solar_system_info().map_err(|e| e.to_string())?;
-    let locked: HashSet<i64> = storage::load_id_list(&dir, LOCKED_LIST).into_iter().collect();
+    let locked: HashSet<i64> = storage::load_id_list(&dir, LOCKED_LIST)
+        .into_iter()
+        .collect();
 
     let mut views = Vec::with_capacity(colonies.len());
     for c in &colonies {
@@ -250,7 +252,14 @@ pub async fn pi_overview(
         .await
         .map_err(|e| e.to_string())?;
 
-        views.push(build_colony(c, &planet, &schematics, &systems, &sde, &locked)?);
+        views.push(build_colony(
+            c,
+            &planet,
+            &schematics,
+            &systems,
+            &sde,
+            &locked,
+        )?);
     }
     Ok(views)
 }
@@ -276,7 +285,13 @@ fn build_colony(
         .pins
         .iter()
         .filter_map(|p| p.extractor_details.as_ref())
-        .filter_map(|e| Some((e.product_type_id?, e.qty_per_cycle.unwrap_or(0), e.cycle_time.unwrap_or(0))))
+        .filter_map(|e| {
+            Some((
+                e.product_type_id?,
+                e.qty_per_cycle.unwrap_or(0),
+                e.cycle_time.unwrap_or(0),
+            ))
+        })
         .collect();
 
     let balance_raw = per_hour_balance(&factories, &extractor_tuples);
@@ -302,7 +317,12 @@ fn build_colony(
         .into_iter()
         .collect();
     let dims = sde.types_dims(&ids).map_err(|e| e.to_string())?;
-    let name_of = |id: i64| names.get(&id).cloned().unwrap_or_else(|| format!("Type {id}"));
+    let name_of = |id: i64| {
+        names
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| format!("Type {id}"))
+    };
     let volume_of = |id: i64| dims.get(&id).map(|(v, _)| *v).unwrap_or(0.0);
 
     // Extractors (with restart timers).
@@ -341,7 +361,12 @@ fn build_colony(
                 })
                 .collect();
             let used_volume = contents.iter().map(|c| c.volume).sum();
-            StorageView { name: name_of(p.type_id), used_volume, capacity, contents }
+            StorageView {
+                name: name_of(p.type_id),
+                used_volume,
+                capacity,
+                contents,
+            }
         })
         .collect();
 
@@ -356,7 +381,11 @@ fn build_colony(
             net: prod - cons,
         })
         .collect();
-    balance.sort_by(|a, b| a.net.partial_cmp(&b.net).unwrap_or(std::cmp::Ordering::Equal));
+    balance.sort_by(|a, b| {
+        a.net
+            .partial_cmp(&b.net)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Produced items = factory outputs (what this colony makes), with lock state.
     let mut produced_ids: Vec<i64> = factories
@@ -367,16 +396,23 @@ fn build_colony(
     produced_ids.dedup();
     let produced: Vec<ProducedItem> = produced_ids
         .into_iter()
-        .map(|t| ProducedItem { type_id: t, name: name_of(t), locked: locked.contains(&t) })
+        .map(|t| ProducedItem {
+            type_id: t,
+            name: name_of(t),
+            locked: locked.contains(&t),
+        })
         .collect();
 
     // "Needs attention" = an extractor program has ended and wants a restart.
     // A running colony normally shows negative balance rows (intermediates are
     // consumed as fast as they're made; import-fed inputs read as deficits), so
     // net<0 is NOT an alarm — it's shown in the balance table for information only.
-    let needs_attention = extractors
-        .iter()
-        .any(|e| e.expiry_time.as_deref().map(now_rfc3339_cmp).unwrap_or(false));
+    let needs_attention = extractors.iter().any(|e| {
+        e.expiry_time
+            .as_deref()
+            .map(now_rfc3339_cmp)
+            .unwrap_or(false)
+    });
 
     let system_name = systems
         .get(&colony.solar_system_id)
@@ -441,8 +477,19 @@ pub fn pi_locked_set(app: AppHandle, type_ids: Vec<i64>) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    fn schem(id: i64, cycle: i64, inputs: Vec<(i64, i64)>, outputs: Vec<(i64, i64)>) -> PlanetSchematic {
-        PlanetSchematic { schematic_id: id, name: format!("S{id}"), cycle_time: cycle, inputs, outputs }
+    fn schem(
+        id: i64,
+        cycle: i64,
+        inputs: Vec<(i64, i64)>,
+        outputs: Vec<(i64, i64)>,
+    ) -> PlanetSchematic {
+        PlanetSchematic {
+            schematic_id: id,
+            name: format!("S{id}"),
+            cycle_time: cycle,
+            inputs,
+            outputs,
+        }
     }
 
     #[test]

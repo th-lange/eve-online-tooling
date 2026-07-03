@@ -234,10 +234,12 @@ fn run_fifo(mut events: Vec<FifoEvent>) -> (HashMap<i64, ProfitRow>, f64) {
 
     for e in &events {
         if e.acquire {
-            lots.entry(e.type_id).or_default().push_back((e.qty, e.unit_value));
+            lots.entry(e.type_id)
+                .or_default()
+                .push_back((e.qty, e.unit_value));
             continue;
         }
-        let row = agg.entry(e.type_id).or_insert_with(ProfitRow::default);
+        let row = agg.entry(e.type_id).or_default();
         let revenue = e.unit_value * e.qty as f64;
         row.units_sold += e.qty;
         row.revenue += revenue;
@@ -332,7 +334,12 @@ pub async fn profit_fifo(
             .map(|m| (m.type_id, m))
             .collect()
     };
-    let mat_price = |id: i64| prices.get(&id).and_then(|m| m.sell_percentile).unwrap_or(0.0);
+    let mat_price = |id: i64| {
+        prices
+            .get(&id)
+            .and_then(|m| m.sell_percentile)
+            .unwrap_or(0.0)
+    };
 
     // Build the unified event stream.
     let mut events: Vec<FifoEvent> = Vec::new();
@@ -353,7 +360,9 @@ pub async fn profit_fifo(
         if output_units <= 0 {
             continue;
         }
-        let materials = sde.blueprint_materials(j.blueprint_type_id).unwrap_or_default();
+        let materials = sde
+            .blueprint_materials(j.blueprint_type_id)
+            .unwrap_or_default();
         // Materials at base quantity × runs (ME not applied — documented estimate).
         let material_cost: f64 = materials
             .iter()
@@ -383,7 +392,11 @@ pub async fn profit_fifo(
             row
         })
         .collect();
-    rows.sort_by(|a, b| b.profit.partial_cmp(&a.profit).unwrap_or(std::cmp::Ordering::Equal));
+    rows.sort_by(|a, b| {
+        b.profit
+            .partial_cmp(&a.profit)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     Ok(ProfitView { rows, total_profit })
 }
@@ -393,7 +406,13 @@ mod tests {
     use super::*;
 
     fn ev(date: &str, type_id: i64, qty: i64, value: f64, acquire: bool) -> FifoEvent {
-        FifoEvent { date: date.into(), type_id, qty, unit_value: value, acquire }
+        FifoEvent {
+            date: date.into(),
+            type_id,
+            qty,
+            unit_value: value,
+            acquire,
+        }
     }
 
     #[test]

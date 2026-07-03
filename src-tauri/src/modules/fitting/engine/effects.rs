@@ -102,7 +102,14 @@ mod tests {
     #[test]
     fn translates_group_modifier_and_marks_penalized() {
         // Gyrostabilizer: postPercent (6) to damageMultiplier (64) on group 55.
-        let e = meta(vec![mi("LocationGroupModifier", "shipID", 6, 64, 64, Some(55))]);
+        let e = meta(vec![mi(
+            "LocationGroupModifier",
+            "shipID",
+            6,
+            64,
+            64,
+            Some(55),
+        )]);
         let (mods, dropped) = modifiers_for(&e, &|attr| attr != 64); // 64 non-stackable
         assert_eq!(dropped, 0);
         assert_eq!(mods.len(), 1);

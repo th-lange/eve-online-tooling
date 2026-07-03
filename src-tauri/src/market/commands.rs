@@ -22,7 +22,10 @@ pub struct IdName {
 }
 
 fn id_names(pairs: Vec<(i64, String)>) -> Vec<IdName> {
-    pairs.into_iter().map(|(id, name)| IdName { id, name }).collect()
+    pairs
+        .into_iter()
+        .map(|(id, name)| IdName { id, name })
+        .collect()
 }
 
 /// Open the installed SDE, mapping any error to a string for the command layer.
@@ -286,8 +289,8 @@ pub async fn market_sell_orders(
     let mut sells: Vec<Order> = fetched
         .into_iter()
         .filter(|o| !o.is_buy_order)
-        .filter(|o| station_filter.map_or(true, |s| o.location_id == s))
-        .filter(|o| system_filter.map_or(true, |s| o.system_id == s))
+        .filter(|o| station_filter.is_none_or(|s| o.location_id == s))
+        .filter(|o| system_filter.is_none_or(|s| o.system_id == s))
         .collect();
     sells.sort_by(|a, b| a.price.total_cmp(&b.price));
     sells.truncate(MAX_ORDERS);

@@ -125,7 +125,12 @@ pub async fn contracts_scan(
         .into_iter()
         .map(|m| (m.type_id, m))
         .collect();
-    let sell = |type_id: i64| prices.get(&type_id).and_then(|m| m.sell_percentile).unwrap_or(0.0);
+    let sell = |type_id: i64| {
+        prices
+            .get(&type_id)
+            .and_then(|m| m.sell_percentile)
+            .unwrap_or(0.0)
+    };
 
     let mut rows: Vec<ContractRow> = candidates
         .into_iter()
@@ -170,7 +175,11 @@ pub async fn contracts_scan(
             })
         })
         .collect();
-    rows.sort_by(|a, b| b.roi.partial_cmp(&a.roi).unwrap_or(std::cmp::Ordering::Equal));
+    rows.sort_by(|a, b| {
+        b.roi
+            .partial_cmp(&a.roi)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     Ok(rows)
 }
 

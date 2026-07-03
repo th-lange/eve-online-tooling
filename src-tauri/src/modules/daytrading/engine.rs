@@ -159,7 +159,15 @@ mod tests {
     fn picks_cheapest_buy_and_dearest_sell_after_fees() {
         // Cheapest at region 2 (90), dearest at region 3 (140); 5% tax, 2% broker, 2 m³.
         let quotes = [quote(1, 100.0), quote(2, 90.0), quote(3, 140.0)];
-        let r = evaluate(1, "Widget", Some(2.0), &quotes, &config(0.05, 0.02, 0.0), false).unwrap();
+        let r = evaluate(
+            1,
+            "Widget",
+            Some(2.0),
+            &quotes,
+            &config(0.05, 0.02, 0.0),
+            false,
+        )
+        .unwrap();
         assert_eq!(r.buy_region_id, 2);
         assert_eq!(r.sell_region_id, 3);
         // revenue = 140 × (1 − 0.07) = 130.2; profit = 130.2 − 90 = 40.2.
@@ -171,7 +179,15 @@ mod tests {
     fn shipping_is_netted_per_unit() {
         // Same as above but 5 ISK/m³ × 2 m³ = 10 shipping/unit → profit 30.2.
         let quotes = [quote(2, 90.0), quote(3, 140.0)];
-        let r = evaluate(1, "Widget", Some(2.0), &quotes, &config(0.05, 0.02, 5.0), false).unwrap();
+        let r = evaluate(
+            1,
+            "Widget",
+            Some(2.0),
+            &quotes,
+            &config(0.05, 0.02, 5.0),
+            false,
+        )
+        .unwrap();
         assert!((r.shipping_per_unit - 10.0).abs() < 1e-6);
         assert!((r.profit_per_unit - 30.2).abs() < 1e-6);
         assert!((r.isk_per_m3 - 15.1).abs() < 1e-6);
@@ -187,7 +203,15 @@ mod tests {
 
     #[test]
     fn none_without_two_hubs() {
-        assert!(evaluate(1, "x", Some(1.0), &[quote(1, 100.0)], &config(0.0, 0.0, 0.0), false).is_none());
+        assert!(evaluate(
+            1,
+            "x",
+            Some(1.0),
+            &[quote(1, 100.0)],
+            &config(0.0, 0.0, 0.0),
+            false
+        )
+        .is_none());
     }
 
     #[test]

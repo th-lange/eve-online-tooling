@@ -85,9 +85,8 @@ pub async fn reprocessing_scan(
         .into_iter()
         .map(|m| (m.type_id, m))
         .collect();
-    let sell = |type_id: i64| -> Option<f64> {
-        prices.get(&type_id).and_then(|m| m.sell_percentile)
-    };
+    let sell =
+        |type_id: i64| -> Option<f64> { prices.get(&type_id).and_then(|m| m.sell_percentile) };
 
     let efficiency = ore_efficiency(&EfficiencyConfig {
         reprocessing: params.reprocessing,
@@ -115,7 +114,7 @@ pub async fn reprocessing_scan(
                 r,
                 efficiency,
                 sell(r.type_id),
-                &sell,
+                sell,
                 favorites.contains(&r.type_id),
             )?;
             // Only ores that are actually priced (have a sell or a refine value).
