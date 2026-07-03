@@ -330,7 +330,12 @@ pub async fn create_character_fitting<T: serde::Serialize>(
         .http()
         .post(&url)
         .bearer_auth(&token)
-        .json(&Body { name, description, ship_type_id, items })
+        .json(&Body {
+            name,
+            description,
+            ship_type_id,
+            items,
+        })
         .send()
         .await?
         .error_for_status()?

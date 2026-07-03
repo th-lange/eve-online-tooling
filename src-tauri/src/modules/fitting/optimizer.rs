@@ -6,18 +6,15 @@ use std::collections::HashMap;
 
 use tauri::{AppHandle, State};
 
-use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
-use super::types::{
-    Fit, FitItem,
-    ModuleState, Severity, SlotKind,
-};
-use crate::market::{resolve_location, MarketService};
-use crate::sde::{Sde, ShipLayout};
 use super::commands::open_sde;
+use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
 use super::stats::{
     base_damage, capacitor_of, is_ship_module, required_skills_of, resolved_feasibility, tank_of,
     AttrMap, EffectMap, GroupMap,
 };
+use super::types::{Fit, FitItem, ModuleState, Severity, SlotKind};
+use crate::market::{resolve_location, MarketService};
+use crate::sde::{Sde, ShipLayout};
 
 /// Damage-objective score for the optimizer. Like DPS, but a turret with **no
 /// charge loaded** still contributes `mult / RoF` (a unit shot), so optimizing
@@ -139,7 +136,6 @@ pub(super) fn slot_capacity(layout: &ShipLayout, slot: SlotKind) -> i64 {
     }
 }
 
-
 /// A freshly-added optimizer module (active, no charge).
 pub(super) fn new_module(type_id: i64, slot: SlotKind, index: i32) -> FitItem {
     FitItem {
@@ -155,9 +151,14 @@ pub(super) fn new_module(type_id: i64, slot: SlotKind, index: i32) -> FitItem {
 /// Append `count` copies of weapon type `tid` to the fit's high slots (active, no
 /// charge), indexed after any existing high-slot modules — a uniform rack.
 pub(super) fn add_weapons(fit: &mut Fit, tid: i64, count: i64) {
-    let start = fit.items.iter().filter(|i| i.slot == SlotKind::High).count() as i32;
+    let start = fit
+        .items
+        .iter()
+        .filter(|i| i.slot == SlotKind::High)
+        .count() as i32;
     for k in 0..count {
-        fit.items.push(new_module(tid, SlotKind::High, start + k as i32));
+        fit.items
+            .push(new_module(tid, SlotKind::High, start + k as i32));
     }
 }
 
@@ -178,13 +179,18 @@ pub(super) fn ship_weapon_bonus(
     let mut groups = Vec::new();
     let mut skills = Vec::new();
     for eid in effects.get(&ship_type_id).into_iter().flatten() {
-        let Some(meta) = effect_meta.get(eid) else { continue };
+        let Some(meta) = effect_meta.get(eid) else {
+            continue;
+        };
         for m in &meta.modifiers {
             // Only the ship bonusing its own fitted weapons (skip drone/owner bonuses).
             if m.domain.as_deref() != Some("shipID") {
                 continue;
             }
-            if !m.modified_attribute_id.is_some_and(|a| WEAPON_ATTRS.contains(&a)) {
+            if !m
+                .modified_attribute_id
+                .is_some_and(|a| WEAPON_ATTRS.contains(&a))
+            {
                 continue;
             }
             if let Some(g) = m.group_id {
@@ -304,9 +310,16 @@ pub(super) fn evaluate(
     default_of: &impl Fn(i64) -> f64,
     prices: &HashMap<i64, f64>,
 ) -> Option<Eval> {
-    let module_items: Vec<&FitItem> = fit.items.iter().filter(|i| is_ship_module(i.slot)).collect();
-    let drone_items: Vec<&FitItem> =
-        fit.items.iter().filter(|i| i.slot == SlotKind::Drone).collect();
+    let module_items: Vec<&FitItem> = fit
+        .items
+        .iter()
+        .filter(|i| is_ship_module(i.slot))
+        .collect();
+    let drone_items: Vec<&FitItem> = fit
+        .items
+        .iter()
+        .filter(|i| i.slot == SlotKind::Drone)
+        .collect();
 
     let ship = entity_from_maps(fit.ship_type_id, attrs, effects, groups);
     let modules: Vec<EntityInput> = module_items
@@ -401,12 +414,18 @@ pub async fn fitting_optimize(
             ids.extend(fit.items.iter().map(|i| i.type_id));
             ids.extend(fit.items.iter().filter_map(|i| i.charge_type_id));
             for (_, groups) in opt_config(obj) {
-                for (t, _) in sde.modules_in_groups(&groups, &meta).map_err(|e| e.to_string())? {
+                for (t, _) in sde
+                    .modules_in_groups(&groups, &meta)
+                    .map_err(|e| e.to_string())?
+                {
                     ids.push(t);
                 }
             }
             if obj == Objective::Damage {
-                for (t, _) in sde.modules_in_groups(&[100], &meta).map_err(|e| e.to_string())? {
+                for (t, _) in sde
+                    .modules_in_groups(&[100], &meta)
+                    .map_err(|e| e.to_string())?
+                {
                     ids.push(t); // combat drones
                 }
                 for (t, _) in sde
@@ -460,7 +479,10 @@ pub(super) fn optimize_fit(
     constraints: Constraints,
 ) -> Result<OptimizeResult, String> {
     let obj = parse_objective(objective)?;
-    let Some(layout) = sde.ship_layout(fit.ship_type_id).map_err(|e| e.to_string())? else {
+    let Some(layout) = sde
+        .ship_layout(fit.ship_type_id)
+        .map_err(|e| e.to_string())?
+    else {
         return Err(format!("unknown ship: {}", fit.ship_type_id));
     };
     let meta = if meta_groups.is_empty() {
@@ -482,7 +504,10 @@ pub(super) fn optimize_fit(
     // huge damage comes with disabled resistances, a drawback the engine doesn't
     // model — so a damage objective would always pick them. Exclude by name.
     {
-        let ids: Vec<i64> = slot_candidates.iter().flat_map(|(_, c)| c.clone()).collect();
+        let ids: Vec<i64> = slot_candidates
+            .iter()
+            .flat_map(|(_, c)| c.clone())
+            .collect();
         let names: HashMap<i64, String> = sde
             .type_names(&ids)
             .map_err(|e| e.to_string())?
@@ -503,7 +528,9 @@ pub(super) fn optimize_fit(
     }
     all_ids.extend(&skill_ids);
 
-    let attrs = sde.types_attributes_raw(&all_ids).map_err(|e| e.to_string())?;
+    let attrs = sde
+        .types_attributes_raw(&all_ids)
+        .map_err(|e| e.to_string())?;
     let effects = sde.types_effects(&all_ids).map_err(|e| e.to_string())?;
     let groups = sde.types_groups(&all_ids).map_err(|e| e.to_string())?;
     let effect_meta = sde.effect_meta().map_err(|e| e.to_string())?;
@@ -561,8 +588,17 @@ pub(super) fn optimize_fit(
 
     let eval = |f: &Fit| {
         evaluate(
-            obj, f, &layout, &attrs, &effects, &groups, &skills, &effect_meta, &is_stackable,
-            &default_of, prices,
+            obj,
+            f,
+            &layout,
+            &attrs,
+            &effects,
+            &groups,
+            &skills,
+            &effect_meta,
+            &is_stackable,
+            &default_of,
+            prices,
         )
     };
     let has_soft = constraints.cap_stable || constraints.max_cost.is_some();
@@ -577,8 +613,10 @@ pub(super) fn optimize_fit(
     // slot kinds (keeping everything else — high slots, drones, cargo) and
     // rebuild them for the best overall result.
     let relevant_kinds: Vec<SlotKind> = slot_candidates.iter().map(|(s, _)| *s).collect();
-    let cands_for: HashMap<SlotKind, Vec<i64>> =
-        slot_candidates.iter().map(|(s, c)| (*s, c.clone())).collect();
+    let cands_for: HashMap<SlotKind, Vec<i64>> = slot_candidates
+        .iter()
+        .map(|(s, c)| (*s, c.clone()))
+        .collect();
     // "all" reworks every relevant slot (clear + rebuild); "empty" fills only the
     // objective's empty slots, leaving your existing modules untouched.
     if mode != "empty" {
@@ -626,11 +664,16 @@ pub(super) fn optimize_fit(
     if obj == Objective::Damage {
         if let Some(high_cands) = cands_for.get(&SlotKind::High).cloned() {
             let mut remaining = (layout.high_slots
-                - fit.items.iter().filter(|i| i.slot == SlotKind::High).count() as i64)
+                - fit
+                    .items
+                    .iter()
+                    .filter(|i| i.slot == SlotKind::High)
+                    .count() as i64)
                 .max(0);
-            for &(effect_id, hardpoints) in
-                &[(42i64, layout.turret_hardpoints), (40, layout.launcher_hardpoints)]
-            {
+            for &(effect_id, hardpoints) in &[
+                (42i64, layout.turret_hardpoints),
+                (40, layout.launcher_hardpoints),
+            ] {
                 if remaining <= 0 {
                     break;
                 }
@@ -645,7 +688,9 @@ pub(super) fn optimize_fit(
                         .iter()
                         .find(|i| {
                             i.slot == SlotKind::High
-                                && effects.get(&i.type_id).is_some_and(|e| e.contains(&effect_id))
+                                && effects
+                                    .get(&i.type_id)
+                                    .is_some_and(|e| e.contains(&effect_id))
                         })
                         .map(|i| i.type_id)
                 } else {
@@ -841,9 +886,13 @@ pub(super) fn optimize_fit(
                 .and_then(|a| a.iter().find(|(k, _)| *k == 1271).map(|(_, v)| *v))
                 .unwrap_or(0.0);
             if bandwidth > 0.0 {
-                let drone_cands = sde.modules_in_groups(&[100], &meta).map_err(|e| e.to_string())?;
+                let drone_cands = sde
+                    .modules_in_groups(&[100], &meta)
+                    .map_err(|e| e.to_string())?;
                 let drone_ids: Vec<i64> = drone_cands.iter().map(|(t, _)| *t).collect();
-                let drone_attrs = sde.types_attributes_raw(&drone_ids).map_err(|e| e.to_string())?;
+                let drone_attrs = sde
+                    .types_attributes_raw(&drone_ids)
+                    .map_err(|e| e.to_string())?;
                 // (type id, flight size, total flight damage proxy).
                 let mut best: Option<(i64, i64, f64)> = None;
                 for tid in &drone_ids {
@@ -897,7 +946,11 @@ pub(super) fn optimize_fit(
             .items
             .iter()
             .filter(|i| i.slot == SlotKind::High && i.charge_type_id.is_none())
-            .flat_map(|i| [604, 605, 606, 609, 610].iter().filter_map(|g| attr_of(i.type_id, *g)))
+            .flat_map(|i| {
+                [604, 605, 606, 609, 610]
+                    .iter()
+                    .filter_map(|g| attr_of(i.type_id, *g))
+            })
             .map(|v| v as i64)
             .collect();
         all_charge_groups.sort_unstable();
@@ -907,7 +960,9 @@ pub(super) fn optimize_fit(
                 .modules_in_groups(&all_charge_groups, &meta)
                 .map_err(|e| e.to_string())?;
             let charge_ids: Vec<i64> = charge_cands.iter().map(|(t, _)| *t).collect();
-            let charge_attrs = sde.types_attributes_raw(&charge_ids).map_err(|e| e.to_string())?;
+            let charge_attrs = sde
+                .types_attributes_raw(&charge_ids)
+                .map_err(|e| e.to_string())?;
             let charge_size_of = |tid: i64| -> Option<f64> {
                 charge_attrs
                     .get(&tid)

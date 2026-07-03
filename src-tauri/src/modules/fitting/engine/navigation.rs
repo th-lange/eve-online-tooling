@@ -91,7 +91,11 @@ mod tests {
     fn align_time_uses_mass_and_agility() {
         // t = 1.38629 * 1_000_000 * 3.0 / 1e6 = 4.159 s.
         let n = navigation(300.0, 1_000_000.0, 3.0, 35.0);
-        assert!((n.align_time - 4.1589).abs() < 1e-3, "align = {}", n.align_time);
+        assert!(
+            (n.align_time - 4.1589).abs() < 1e-3,
+            "align = {}",
+            n.align_time
+        );
         assert_eq!(n.max_velocity, 300.0);
     }
 

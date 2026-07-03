@@ -118,9 +118,9 @@ struct EsiSkill {
 /// Which slot pool an activity draws from: manufacturing / science / reactions.
 fn slot_pool(activity_id: i64) -> Option<&'static str> {
     match activity_id {
-        1 => Some("m"),              // manufacturing
-        3 | 4 | 5 | 8 => Some("s"),  // TE/ME research, copy, invention
-        9 => Some("r"),              // reactions
+        1 => Some("m"),             // manufacturing
+        3 | 4 | 5 | 8 => Some("s"), // TE/ME research, copy, invention
+        9 => Some("r"),             // reactions
         _ => None,
     }
 }
@@ -153,7 +153,9 @@ pub async fn industry_jobs(
         // Only honour an id that's actually in the roster (else fall through).
         Some(id) if roster.iter().any(|c| c.character_id == id) => id,
         // Default to the bookmarked active character (else the first).
-        _ => storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?,
+        _ => {
+            storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?
+        }
     };
 
     // include_completed so delivered jobs (the cost-basis source) come through.
@@ -220,9 +222,18 @@ pub async fn industry_jobs(
         }
     }
     let slots = Slots {
-        manufacturing: Slot { used: used_m, total: total_m },
-        science: Slot { used: used_s, total: total_s },
-        reactions: Slot { used: used_r, total: total_r },
+        manufacturing: Slot {
+            used: used_m,
+            total: total_m,
+        },
+        science: Slot {
+            used: used_s,
+            total: total_s,
+        },
+        reactions: Slot {
+            used: used_r,
+            total: total_r,
+        },
     };
 
     // Corp jobs (display-only; needs the corp scope + a corp role — else none).

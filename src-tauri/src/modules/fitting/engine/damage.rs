@@ -93,7 +93,12 @@ mod tests {
 
     #[test]
     fn zero_rof_or_count_is_zero() {
-        let bad = Weapon { damage_mult: 5.0, damage_per_shot: 10.0, rof_seconds: 0.0, count: 1 };
+        let bad = Weapon {
+            damage_mult: 5.0,
+            damage_per_shot: 10.0,
+            rof_seconds: 0.0,
+            count: 1,
+        };
         assert_eq!(damage(&[bad], &[], &[]).total, 0.0);
     }
 }

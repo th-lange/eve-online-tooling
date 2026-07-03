@@ -205,7 +205,11 @@ pub async fn daytrading_scan(
     });
     out.truncate(RESULT_CAP);
     let present: HashSet<i64> = out.iter().map(|r| r.type_id).collect();
-    out.extend(by_profit.into_iter().filter(|r| !present.contains(&r.type_id)));
+    out.extend(
+        by_profit
+            .into_iter()
+            .filter(|r| !present.contains(&r.type_id)),
+    );
 
     // Enrich the displayed set with daily-traded volume at each row's sell hub
     // (how much you can realistically offload). Group by sell region so each

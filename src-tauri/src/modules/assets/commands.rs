@@ -96,7 +96,10 @@ pub async fn assets_value(
         .map(|m| (m.type_id, m))
         .collect();
     let best = if params.best_hub {
-        market.best_sell_hubs(&ids).await.map_err(|e| e.to_string())?
+        market
+            .best_sell_hubs(&ids)
+            .await
+            .map_err(|e| e.to_string())?
     } else {
         HashMap::new()
     };
@@ -211,10 +214,14 @@ fn build_asset_tree(assets: &[FlatAsset]) -> Vec<TreeNode> {
                 type_id: Some(a.type_id),
                 quantity: a.quantity,
                 is_location: false,
-                children: if a.item_id != 0 { build(a.item_id, children_of) } else { Vec::new() },
+                children: if a.item_id != 0 {
+                    build(a.item_id, children_of)
+                } else {
+                    Vec::new()
+                },
             })
             .collect();
-        nodes.sort_by(|a, b| a.id.cmp(&b.id));
+        nodes.sort_by_key(|a| a.id);
         nodes
     }
 
@@ -282,12 +289,24 @@ pub async fn assets_tree(
         }
     }
     if assets.is_empty() {
-        return Ok(AssetsTreeResult { roots: Vec::new(), sell_total: 0.0, volume_total: 0.0 });
+        return Ok(AssetsTreeResult {
+            roots: Vec::new(),
+            sell_total: 0.0,
+            volume_total: 0.0,
+        });
     }
 
     // Price every type at its best hub; names + packaged volume from the SDE.
-    let type_ids: Vec<i64> = assets.iter().map(|a| a.type_id).collect::<HashSet<_>>().into_iter().collect();
-    let best = market.best_sell_hubs(&type_ids).await.map_err(|e| e.to_string())?;
+    let type_ids: Vec<i64> = assets
+        .iter()
+        .map(|a| a.type_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let best = market
+        .best_sell_hubs(&type_ids)
+        .await
+        .map_err(|e| e.to_string())?;
     let name_vol: HashMap<i64, (String, f64)> = sde
         .market_items()
         .map_err(|e| e.to_string())?
@@ -325,12 +344,18 @@ pub async fn assets_tree(
 
     // Flatten best-hub to (hub name, price) so the valuation layer needn't name
     // the market's internal type.
-    let best_simple: HashMap<i64, (String, f64)> =
-        best.into_iter().map(|(id, b)| (id, (b.hub, b.price))).collect();
+    let best_simple: HashMap<i64, (String, f64)> = best
+        .into_iter()
+        .map(|(id, b)| (id, (b.hub, b.price)))
+        .collect();
 
     let bare = build_asset_tree(&assets);
     let (roots, sell_total, volume_total) = value_nodes(bare, &best_simple, &name_vol, &loc_name);
-    Ok(AssetsTreeResult { roots, sell_total, volume_total })
+    Ok(AssetsTreeResult {
+        roots,
+        sell_total,
+        volume_total,
+    })
 }
 
 /// Recursively name + value bare nodes, rolling value/volume up to each parent.
@@ -344,7 +369,8 @@ fn value_nodes(
     let mut out = Vec::with_capacity(nodes.len());
     let (mut total_value, mut total_volume) = (0.0, 0.0);
     for n in nodes {
-        let (children, child_value, child_volume) = value_nodes(n.children, best, name_vol, loc_name);
+        let (children, child_value, child_volume) =
+            value_nodes(n.children, best, name_vol, loc_name);
         let (name, mut value, mut volume, best_hub) = if n.is_location {
             (loc_name(n.id), 0.0, 0.0, None)
         } else {
@@ -379,7 +405,11 @@ fn value_nodes(
         });
     }
     // Heaviest value first within each level.
-    out.sort_by(|a, b| b.sell_value.partial_cmp(&a.sell_value).unwrap_or(std::cmp::Ordering::Equal));
+    out.sort_by(|a, b| {
+        b.sell_value
+            .partial_cmp(&a.sell_value)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     (out, total_value, total_volume)
 }
 
@@ -392,9 +422,24 @@ mod tests {
         // Station 60000 holds a ship (item 1); the ship holds a module (item 2).
         // A second stack (item 3) sits directly in the station.
         let assets = vec![
-            FlatAsset { item_id: 1, location_id: 60000, type_id: 600, quantity: 1 },
-            FlatAsset { item_id: 2, location_id: 1, type_id: 700, quantity: 5 },
-            FlatAsset { item_id: 3, location_id: 60000, type_id: 34, quantity: 1000 },
+            FlatAsset {
+                item_id: 1,
+                location_id: 60000,
+                type_id: 600,
+                quantity: 1,
+            },
+            FlatAsset {
+                item_id: 2,
+                location_id: 1,
+                type_id: 700,
+                quantity: 5,
+            },
+            FlatAsset {
+                item_id: 3,
+                location_id: 60000,
+                type_id: 34,
+                quantity: 1000,
+            },
         ];
         let roots = build_asset_tree(&assets);
         assert_eq!(roots.len(), 1);

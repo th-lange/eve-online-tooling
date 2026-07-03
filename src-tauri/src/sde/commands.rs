@@ -23,7 +23,10 @@ pub struct IdName {
 }
 
 fn id_names(pairs: Vec<(i64, String)>) -> Vec<IdName> {
-    pairs.into_iter().map(|(id, name)| IdName { id, name }).collect()
+    pairs
+        .into_iter()
+        .map(|(id, name)| IdName { id, name })
+        .collect()
 }
 
 /// A named dogma attribute value.
@@ -248,7 +251,11 @@ pub fn sde_market_categories(app: AppHandle) -> Result<Vec<IdName>, String> {
 }
 
 #[tauri::command]
-pub fn sde_groups(app: AppHandle, category_id: i64, published_only: bool) -> Result<Vec<IdName>, String> {
+pub fn sde_groups(
+    app: AppHandle,
+    category_id: i64,
+    published_only: bool,
+) -> Result<Vec<IdName>, String> {
     open(&app)?
         .universe_groups(category_id, published_only)
         .map(id_names)
@@ -256,7 +263,11 @@ pub fn sde_groups(app: AppHandle, category_id: i64, published_only: bool) -> Res
 }
 
 #[tauri::command]
-pub fn sde_types(app: AppHandle, group_id: i64, published_only: bool) -> Result<Vec<IdName>, String> {
+pub fn sde_types(
+    app: AppHandle,
+    group_id: i64,
+    published_only: bool,
+) -> Result<Vec<IdName>, String> {
     open(&app)?
         .universe_types(group_id, published_only)
         .map(id_names)
@@ -332,11 +343,19 @@ pub fn sde_market_group_children(
     Ok(MarketGroupChildren {
         groups: groups
             .into_iter()
-            .map(|(id, name, has_types)| MarketGroupNode { id, name, has_types })
+            .map(|(id, name, has_types)| MarketGroupNode {
+                id,
+                name,
+                has_types,
+            })
             .collect(),
         items: items
             .into_iter()
-            .map(|(id, name, meta_group)| MarketGroupItem { id, name, meta_group })
+            .map(|(id, name, meta_group)| MarketGroupItem {
+                id,
+                name,
+                meta_group,
+            })
             .collect(),
     })
 }

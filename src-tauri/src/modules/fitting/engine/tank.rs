@@ -86,8 +86,14 @@ mod tests {
         };
         let t = tank(
             layer,
-            Layer { hp: 0.0, resonance: [1.0; 4] },
-            Layer { hp: 0.0, resonance: [1.0; 4] },
+            Layer {
+                hp: 0.0,
+                resonance: [1.0; 4],
+            },
+            Layer {
+                hp: 0.0,
+                resonance: [1.0; 4],
+            },
             &DamageProfile::default(),
             0.0,
             0.0,
@@ -104,8 +110,14 @@ mod tests {
         };
         let t = tank(
             layer,
-            Layer { hp: 0.0, resonance: [1.0; 4] },
-            Layer { hp: 0.0, resonance: [1.0; 4] },
+            Layer {
+                hp: 0.0,
+                resonance: [1.0; 4],
+            },
+            Layer {
+                hp: 0.0,
+                resonance: [1.0; 4],
+            },
             &DamageProfile::default(),
             0.0,
             0.0,
@@ -124,8 +136,14 @@ mod tests {
         let em_only = DamageProfile([1.0, 0.0, 0.0, 0.0]);
         let t = tank(
             layer,
-            Layer { hp: 0.0, resonance: [1.0; 4] },
-            Layer { hp: 0.0, resonance: [1.0; 4] },
+            Layer {
+                hp: 0.0,
+                resonance: [1.0; 4],
+            },
+            Layer {
+                hp: 0.0,
+                resonance: [1.0; 4],
+            },
             &em_only,
             0.0,
             0.0,
@@ -136,9 +154,18 @@ mod tests {
     #[test]
     fn layers_and_reps_sum() {
         let t = tank(
-            Layer { hp: 500.0, resonance: [1.0; 4] },
-            Layer { hp: 450.0, resonance: [1.0; 4] },
-            Layer { hp: 350.0, resonance: [1.0; 4] },
+            Layer {
+                hp: 500.0,
+                resonance: [1.0; 4],
+            },
+            Layer {
+                hp: 450.0,
+                resonance: [1.0; 4],
+            },
+            Layer {
+                hp: 350.0,
+                resonance: [1.0; 4],
+            },
             &DamageProfile::default(),
             12.0,
             0.0,

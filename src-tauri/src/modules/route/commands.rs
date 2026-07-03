@@ -117,14 +117,11 @@ async fn activity_map(dir: &Path, refresh: bool) -> Result<HashMap<i64, SystemAc
 /// Per-system jumps + kills over the last hour, enriched with SDE names. Cached
 /// (~30 min) to match CCP's hourly refresh; `refresh = true` bypasses the cache.
 #[tauri::command]
-pub async fn system_activity(
-    app: AppHandle,
-    refresh: bool,
-) -> Result<Vec<SystemActivity>, String> {
+pub async fn system_activity(app: AppHandle, refresh: bool) -> Result<Vec<SystemActivity>, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let mut rows: Vec<SystemActivity> = activity_map(&dir, refresh).await?.into_values().collect();
     // Default ordering: busiest first (the UI re-sorts).
-    rows.sort_by(|a, b| b.jumps.cmp(&a.jumps));
+    rows.sort_by_key(|r| std::cmp::Reverse(r.jumps));
     Ok(rows)
 }
 
@@ -190,10 +187,13 @@ pub async fn system_neighbourhood(
     let mut edges: HashSet<(i64, i64)> = HashSet::new();
     for level in 1..=depth {
         let mut next = Vec::new();
-        for (a, b) in sde.stargate_edges_from(&frontier).map_err(|e| e.to_string())? {
+        for (a, b) in sde
+            .stargate_edges_from(&frontier)
+            .map_err(|e| e.to_string())?
+        {
             edges.insert(if a <= b { (a, b) } else { (b, a) });
-            if !distance.contains_key(&b) {
-                distance.insert(b, level);
+            if let std::collections::hash_map::Entry::Vacant(e) = distance.entry(b) {
+                e.insert(level);
                 next.push(b);
             }
         }
@@ -218,7 +218,10 @@ pub async fn system_neighbourhood(
                     act.region = region.clone();
                 }
             }
-            NeighbourNode { distance: dist, activity: act }
+            NeighbourNode {
+                distance: dist,
+                activity: act,
+            }
         })
         .collect();
     // Centre first, then by distance, then busiest.
@@ -385,7 +388,12 @@ pub struct NearestWormhole {
     pub expires_in_hours: Option<f64>,
 }
 
-fn nearest_none(current_system_id: i64, current_name: String, in_wspace: bool, message: &str) -> NearestWormhole {
+fn nearest_none(
+    current_system_id: i64,
+    current_name: String,
+    in_wspace: bool,
+    message: &str,
+) -> NearestWormhole {
     NearestWormhole {
         found: false,
         message: Some(message.to_string()),
@@ -426,7 +434,11 @@ pub async fn route_nearest_wormhole(app: AppHandle) -> Result<NearestWormhole, S
 
     let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
     let info = sde.solar_system_info().map_err(|e| e.to_string())?;
-    let name_of = |id: i64| info.get(&id).map(|(n, _, _)| n.clone()).unwrap_or_else(|| format!("J{id}"));
+    let name_of = |id: i64| {
+        info.get(&id)
+            .map(|(n, _, _)| n.clone())
+            .unwrap_or_else(|| format!("J{id}"))
+    };
 
     if current.wspace {
         // w-space: no public feed applies; point at the nearest scanned k-space
@@ -437,7 +449,11 @@ pub async fn route_nearest_wormhole(app: AppHandle) -> Result<NearestWormhole, S
             adj.entry(*a).or_default().push(*b);
             adj.entry(*b).or_default().push(*a);
         }
-        let exits: HashSet<i64> = adj.keys().copied().filter(|id| *id < WSPACE_MIN_SYSTEM_ID).collect();
+        let exits: HashSet<i64> = adj
+            .keys()
+            .copied()
+            .filter(|id| *id < WSPACE_MIN_SYSTEM_ID)
+            .collect();
         return Ok(match nearest_of(&adj, current.system_id, &exits) {
             Some((exit, jumps)) => NearestWormhole {
                 found: true,
@@ -540,12 +556,28 @@ mod tests {
     #[test]
     fn merges_jumps_and_kills_by_system() {
         let jumps = [
-            EsiJumps { system_id: 30000142, ship_jumps: 120 },
-            EsiJumps { system_id: 30002187, ship_jumps: 5 },
+            EsiJumps {
+                system_id: 30000142,
+                ship_jumps: 120,
+            },
+            EsiJumps {
+                system_id: 30002187,
+                ship_jumps: 5,
+            },
         ];
         let kills = [
-            EsiKills { system_id: 30000142, ship_kills: 3, pod_kills: 1, npc_kills: 50 },
-            EsiKills { system_id: 30009999, ship_kills: 2, pod_kills: 0, npc_kills: 0 },
+            EsiKills {
+                system_id: 30000142,
+                ship_kills: 3,
+                pod_kills: 1,
+                npc_kills: 50,
+            },
+            EsiKills {
+                system_id: 30009999,
+                ship_kills: 2,
+                pod_kills: 0,
+                npc_kills: 0,
+            },
         ];
         let map = merge_activity(&jumps, &kills);
 

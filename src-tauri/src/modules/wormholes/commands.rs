@@ -131,7 +131,11 @@ fn load(app: &AppHandle) -> Result<(std::path::PathBuf, Vec<Connection>), String
 fn views(dir: &std::path::Path, conns: &[Connection]) -> Result<Vec<ConnectionView>, String> {
     let sde = Sde::open(&SdePaths::new(dir.to_path_buf()).db).map_err(|e| e.to_string())?;
     let info = sde.solar_system_info().map_err(|e| e.to_string())?;
-    let name = |id: i64| info.get(&id).map(|(n, _, _)| n.clone()).unwrap_or_else(|| format!("J{id}"));
+    let name = |id: i64| {
+        info.get(&id)
+            .map(|(n, _, _)| n.clone())
+            .unwrap_or_else(|| format!("J{id}"))
+    };
     Ok(conns
         .iter()
         .map(|c| ConnectionView {
@@ -154,7 +158,10 @@ fn views(dir: &std::path::Path, conns: &[Connection]) -> Result<Vec<ConnectionVi
         .collect())
 }
 
-fn save_and_view(dir: &std::path::Path, conns: &[Connection]) -> Result<Vec<ConnectionView>, String> {
+fn save_and_view(
+    dir: &std::path::Path,
+    conns: &[Connection],
+) -> Result<Vec<ConnectionView>, String> {
     storage::save_data(dir, STORE_KEY, &conns.to_vec())?;
     views(dir, conns)
 }
@@ -312,7 +319,11 @@ pub fn wh_paste_signatures(
         .collect();
 
     storage::save_data(&dir, &key, &incoming)?;
-    Ok(SignatureScan { signatures: incoming, added, removed })
+    Ok(SignatureScan {
+        signatures: incoming,
+        added,
+        removed,
+    })
 }
 
 /// Stored signatures for a system.
@@ -408,9 +419,17 @@ pub fn wh_route(
         if avoid_eol && c.eol {
             continue;
         }
-        let via: Via = if c.scope == "stargate" { "stargate" } else { "wormhole" };
-        adj.entry(c.source_system_id).or_default().push((c.target_system_id, via));
-        adj.entry(c.target_system_id).or_default().push((c.source_system_id, via));
+        let via: Via = if c.scope == "stargate" {
+            "stargate"
+        } else {
+            "wormhole"
+        };
+        adj.entry(c.source_system_id)
+            .or_default()
+            .push((c.target_system_id, via));
+        adj.entry(c.target_system_id)
+            .or_default()
+            .push((c.source_system_id, via));
     }
 
     let path = shortest_path(&adj, origin_system_id, destination_system_id);
@@ -434,9 +453,17 @@ pub fn wh_route(
                 })
                 .collect();
             let jumps = hops.len() as i64 - 1;
-            Ok(RouteResult { hops, reachable: true, jumps })
+            Ok(RouteResult {
+                hops,
+                reachable: true,
+                jumps,
+            })
         }
-        None => Ok(RouteResult { hops: Vec::new(), reachable: false, jumps: 0 }),
+        None => Ok(RouteResult {
+            hops: Vec::new(),
+            reachable: false,
+            jumps: 0,
+        }),
     }
 }
 
@@ -481,8 +508,15 @@ fn imported_connection(sig: &crate::evescout::TheraSignature, now: u64) -> Optio
 /// all previous rows of `source_tag` (the feed is the source of truth, so vanished
 /// holes disappear), and add the imported ones — skipping any that collide with a
 /// kept row or each other. New ids continue past the highest existing id. Pure.
-fn merge_by_source(existing: Vec<Connection>, imported: Vec<Connection>, source_tag: &str) -> Vec<Connection> {
-    let mut out: Vec<Connection> = existing.into_iter().filter(|c| c.source != source_tag).collect();
+fn merge_by_source(
+    existing: Vec<Connection>,
+    imported: Vec<Connection>,
+    source_tag: &str,
+) -> Vec<Connection> {
+    let mut out: Vec<Connection> = existing
+        .into_iter()
+        .filter(|c| c.source != source_tag)
+        .collect();
     let mut keys: HashSet<(i64, i64, Option<String>)> = out.iter().map(dedupe_key).collect();
     let mut next_id = out.iter().map(|c| c.id).max().unwrap_or(0) + 1;
     for mut c in imported {
@@ -503,7 +537,10 @@ pub async fn wh_import_evescout(app: AppHandle) -> Result<Vec<ConnectionView>, S
     let (dir, existing) = load(&app)?;
     let sigs = crate::evescout::fetch_signatures(&dir).await?;
     let now = now_secs();
-    let imported: Vec<Connection> = sigs.iter().filter_map(|s| imported_connection(s, now)).collect();
+    let imported: Vec<Connection> = sigs
+        .iter()
+        .filter_map(|s| imported_connection(s, now))
+        .collect();
     let merged = merge_by_source(existing, imported, "evescout");
     save_and_view(&dir, &merged)
 }
@@ -548,17 +585,33 @@ struct MassBudget {
 
 /// Weigh a hull against a hole: does it fit, and how many crossings remain before
 /// exhaustion / criticality, given the current mass status. Pure.
-fn mass_budget(ship_mass: f64, max_jump_mass: f64, max_stable_mass: f64, mass_status: &str) -> MassBudget {
+fn mass_budget(
+    ship_mass: f64,
+    max_jump_mass: f64,
+    max_stable_mass: f64,
+    mass_status: &str,
+) -> MassBudget {
     let passes = max_jump_mass > 0.0 && ship_mass > 0.0 && ship_mass <= max_jump_mass;
     if !passes {
-        return MassBudget { passes: false, remaining_crossings: 0, crossings_until_critical: 0, crit_risk: false };
+        return MassBudget {
+            passes: false,
+            remaining_crossings: 0,
+            crossings_until_critical: 0,
+            crit_risk: false,
+        };
     }
     let remaining = max_stable_mass * status_remaining_fraction(mass_status);
     let crit_threshold = max_stable_mass * 0.10;
     let remaining_crossings = (remaining / ship_mass).floor() as i64;
-    let crossings_until_critical = ((remaining - crit_threshold).max(0.0) / ship_mass).floor() as i64;
+    let crossings_until_critical =
+        ((remaining - crit_threshold).max(0.0) / ship_mass).floor() as i64;
     let crit_risk = remaining - ship_mass <= crit_threshold;
-    MassBudget { passes, remaining_crossings, crossings_until_critical, crit_risk }
+    MassBudget {
+        passes,
+        remaining_crossings,
+        crossings_until_critical,
+        crit_risk,
+    }
 }
 
 /// The jump-planner result for the frontend.
@@ -615,7 +668,8 @@ pub fn wh_jump_plan(
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
 
-    let Some((ship_name, ship_mass)) = sde.ship_mass(ship_type_id).map_err(|e| e.to_string())? else {
+    let Some((ship_name, ship_mass)) = sde.ship_mass(ship_type_id).map_err(|e| e.to_string())?
+    else {
         return Ok(jump_plan_none("Unknown ship."));
     };
     let code = wh_type_code.trim();
@@ -625,7 +679,9 @@ pub fn wh_jump_plan(
         .into_iter()
         .find(|w| w.code.eq_ignore_ascii_case(code));
     let Some(wh) = wh else {
-        return Ok(jump_plan_none(&format!("Unknown wormhole type \"{code}\".")));
+        return Ok(jump_plan_none(&format!(
+            "Unknown wormhole type \"{code}\"."
+        )));
     };
 
     let max_jump = wh.max_jump_mass.unwrap_or(0.0);
@@ -732,7 +788,10 @@ pub struct TripwireStatus {
 fn tripwire_status_from(dir: &std::path::Path) -> TripwireStatus {
     let cfg: tripwire::TripwireConfig =
         storage::load_data(dir, tripwire::CONFIG_KEY).unwrap_or_default();
-    let has_secret = storage::load_secret(tripwire::SECRET_KEY).ok().flatten().is_some();
+    let has_secret = storage::load_secret(tripwire::SECRET_KEY)
+        .ok()
+        .flatten()
+        .is_some();
     TripwireStatus {
         configured: !cfg.username.is_empty() && has_secret,
         base_url: if cfg.base_url.is_empty() {
@@ -764,11 +823,13 @@ pub fn wh_tripwire_connect(
 ) -> Result<TripwireStatus, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let base = base_url.trim();
-    let mask = mask
-        .map(|m| m.trim().to_string())
-        .filter(|m| !m.is_empty());
+    let mask = mask.map(|m| m.trim().to_string()).filter(|m| !m.is_empty());
     let cfg = tripwire::TripwireConfig {
-        base_url: if base.is_empty() { tripwire::DEFAULT_BASE_URL.to_string() } else { base.to_string() },
+        base_url: if base.is_empty() {
+            tripwire::DEFAULT_BASE_URL.to_string()
+        } else {
+            base.to_string()
+        },
         username: username.trim().to_string(),
         mask,
     };
@@ -781,7 +842,11 @@ pub fn wh_tripwire_connect(
 #[tauri::command]
 pub fn wh_tripwire_disconnect(app: AppHandle) -> Result<TripwireStatus, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    storage::save_data(&dir, tripwire::CONFIG_KEY, &tripwire::TripwireConfig::default())?;
+    storage::save_data(
+        &dir,
+        tripwire::CONFIG_KEY,
+        &tripwire::TripwireConfig::default(),
+    )?;
     storage::delete_secret(tripwire::SECRET_KEY)?;
     Ok(tripwire_status_from(&dir))
 }
@@ -812,7 +877,12 @@ pub async fn wh_tripwire_import(app: AppHandle) -> Result<Vec<ConnectionView>, S
         .wormhole_types()
         .map_err(|e| e.to_string())?
         .into_iter()
-        .map(|w| (w.code.to_ascii_uppercase(), tripwire::jump_mass_class(w.max_jump_mass)))
+        .map(|w| {
+            (
+                w.code.to_ascii_uppercase(),
+                tripwire::jump_mass_class(w.max_jump_mass),
+            )
+        })
         .collect();
 
     let (_dir, existing) = load(&app)?;
@@ -828,9 +898,21 @@ mod tests {
     #[test]
     fn tripwire_maps_wormholes_to_connections() {
         let sigs = vec![
-            tripwire::RawSignature { id: 5, signature_id: Some("ABC".into()), system_id: Some(31000005) },
-            tripwire::RawSignature { id: 6, signature_id: Some("DEF".into()), system_id: Some(30000142) },
-            tripwire::RawSignature { id: 7, signature_id: None, system_id: None }, // unresolved endpoint
+            tripwire::RawSignature {
+                id: 5,
+                signature_id: Some("ABC".into()),
+                system_id: Some(31000005),
+            },
+            tripwire::RawSignature {
+                id: 6,
+                signature_id: Some("DEF".into()),
+                system_id: Some(30000142),
+            },
+            tripwire::RawSignature {
+                id: 7,
+                signature_id: None,
+                system_id: None,
+            }, // unresolved endpoint
         ];
         let whs = vec![
             tripwire::RawWormhole {
@@ -898,7 +980,10 @@ mod tests {
     #[test]
     fn merge_preserves_manual_and_refreshes_imports() {
         let now = 1_000_000;
-        let manual = Connection { source: "manual".into(), ..wh(1, 1, false, 0, now) };
+        let manual = Connection {
+            source: "manual".into(),
+            ..wh(1, 1, false, 0, now)
+        };
         // An older imported row that should be dropped and replaced by the feed.
         let stale = Connection {
             id: 2,
@@ -936,7 +1021,11 @@ mod tests {
             source_sig: Some("ABC".into()),
             ..wh(7, 1, false, 0, 1_000_000)
         };
-        let imported = vec![imported_connection(&evescout_sig(31000005, 30002086, "ABC", "large"), 1_000_000).unwrap()];
+        let imported =
+            vec![
+                imported_connection(&evescout_sig(31000005, 30002086, "ABC", "large"), 1_000_000)
+                    .unwrap(),
+            ];
         let merged = merge_by_source(vec![manual], imported, "evescout");
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].source, "manual");
@@ -1030,7 +1119,11 @@ mod tests {
             wh(2, 60, false, 0, now), // 60h old → drop (past max age)
             wh(3, 2, true, 5, now),   // EOL 5h ago → drop (past grace)
             wh(4, 2, true, 1, now),   // EOL 1h ago → keep (within grace)
-            Connection { scope: "stargate".into(), created_at: now - 100 * 3600, ..wh(5, 0, false, 0, now) }, // permanent → keep
+            Connection {
+                scope: "stargate".into(),
+                created_at: now - 100 * 3600,
+                ..wh(5, 0, false, 0, now)
+            }, // permanent → keep
         ];
         let kept: Vec<i64> = prune(conns, now).into_iter().map(|c| c.id).collect();
         assert_eq!(kept, vec![1, 4, 5]);

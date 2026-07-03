@@ -59,7 +59,7 @@ pub async fn lp_balances(
             points: p.loyalty_points,
         })
         .collect();
-    out.sort_by(|a, b| b.points.cmp(&a.points));
+    out.sort_by_key(|o| std::cmp::Reverse(o.points));
     Ok(out)
 }
 
@@ -191,7 +191,12 @@ pub async fn lp_offers(
         .into_iter()
         .map(|m| (m.type_id, m))
         .collect();
-    let sell = |id: i64| prices.get(&id).and_then(|m| m.sell_percentile).unwrap_or(0.0);
+    let sell = |id: i64| {
+        prices
+            .get(&id)
+            .and_then(|m| m.sell_percentile)
+            .unwrap_or(0.0)
+    };
 
     let mut rows: Vec<OfferRow> = offers
         .into_iter()

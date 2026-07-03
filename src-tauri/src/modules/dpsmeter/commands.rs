@@ -265,7 +265,7 @@ pub fn dps_list_logs(gamelogs_dir: String) -> Result<Vec<LogFile>, String> {
             })
         })
         .collect();
-    files.sort_by(|a, b| b.modified.cmp(&a.modified));
+    files.sort_by_key(|f| std::cmp::Reverse(f.modified));
     Ok(files)
 }
 

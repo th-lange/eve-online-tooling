@@ -78,7 +78,9 @@ pub fn evaluate(
         });
     }
     let delta = reprocess_value - item_price.unwrap_or(0.0);
-    let uplift = item_price.filter(|p| *p > 0.0).map(|p| reprocess_value / p - 1.0);
+    let uplift = item_price
+        .filter(|p| *p > 0.0)
+        .map(|p| reprocess_value / p - 1.0);
     Some(ReprocessRow {
         type_id: recipe.type_id,
         name: recipe.name.clone(),

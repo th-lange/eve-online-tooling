@@ -252,8 +252,14 @@ Barrage S x500\n";
         assert_eq!(
             fit.extras,
             vec![
-                ParsedExtra { name: "Hobgoblin II".into(), quantity: 5 },
-                ParsedExtra { name: "Barrage S".into(), quantity: 500 },
+                ParsedExtra {
+                    name: "Hobgoblin II".into(),
+                    quantity: 5
+                },
+                ParsedExtra {
+                    name: "Barrage S".into(),
+                    quantity: 500
+                },
             ]
         );
     }

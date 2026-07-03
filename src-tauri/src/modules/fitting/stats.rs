@@ -7,19 +7,19 @@ use std::collections::HashMap;
 
 use tauri::{AppHandle, Manager};
 
-use super::engine::validate::{validate, ValItem};
+use super::engine::attr::AttrStore;
 use super::engine::capacitor::capacitor;
 use super::engine::damage::{damage, Weapon};
 use super::engine::navigation::{navigation, prop_velocity, targeting};
 use super::engine::projection::{
     apply_projection, apply_subsystem_slots, projected_from_attrs, ProjectedInput,
 };
-use super::engine::attr::AttrStore;
 use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
 use super::engine::tank::{tank, DamageProfile, Layer};
+use super::engine::validate::{validate, ValItem};
 use super::types::{
-    CapStats, DpsBreakdown, Fit, FitItem, FitProblem,
-    ModuleState, NavStats, ResourceUsage, SlotKind, TankStats, TargetStats, WeaponRange,
+    CapStats, DpsBreakdown, Fit, FitItem, FitProblem, ModuleState, NavStats, ResourceUsage,
+    SlotKind, TankStats, TargetStats, WeaponRange,
 };
 use crate::esi::{authed_get, AuthState};
 use crate::sde::{Sde, ShipLayout};
@@ -59,18 +59,28 @@ pub(super) fn run_dogma(
         .filter(|i| {
             matches!(
                 i.slot,
-                SlotKind::High | SlotKind::Mid | SlotKind::Low | SlotKind::Rig | SlotKind::Subsystem
+                SlotKind::High
+                    | SlotKind::Mid
+                    | SlotKind::Low
+                    | SlotKind::Rig
+                    | SlotKind::Subsystem
             )
         })
         .collect();
 
     // Drones (DPS) and charges (weapon damage) need their base attributes too.
-    let drone_items: Vec<&FitItem> =
-        fit.items.iter().filter(|i| i.slot == SlotKind::Drone).collect();
+    let drone_items: Vec<&FitItem> = fit
+        .items
+        .iter()
+        .filter(|i| i.slot == SlotKind::Drone)
+        .collect();
     // Implants modify ship attributes via shipID effects, like skills (stacking-
     // exempt), so they resolve as skill-like entities.
-    let implant_items: Vec<&FitItem> =
-        fit.items.iter().filter(|i| i.slot == SlotKind::Implant).collect();
+    let implant_items: Vec<&FitItem> = fit
+        .items
+        .iter()
+        .filter(|i| i.slot == SlotKind::Implant)
+        .collect();
 
     let skill_ids = sde.skill_type_ids().map_err(|e| e.to_string())?;
     let mut all_ids = Vec::with_capacity(1 + module_items.len() + skill_ids.len());
@@ -82,7 +92,9 @@ pub(super) fn run_dogma(
     all_ids.extend(fit.projected.iter().map(|i| i.type_id));
     all_ids.extend(&skill_ids);
 
-    let attrs = sde.types_attributes_raw(&all_ids).map_err(|e| e.to_string())?;
+    let attrs = sde
+        .types_attributes_raw(&all_ids)
+        .map_err(|e| e.to_string())?;
     let effects_by_type = sde.types_effects(&all_ids).map_err(|e| e.to_string())?;
     let effect_meta = sde.effect_meta().map_err(|e| e.to_string())?;
     let defaults = sde.attribute_defaults().map_err(|e| e.to_string())?;
@@ -132,7 +144,9 @@ pub(super) fn run_dogma(
         match it.state {
             ModuleState::Offline => e.effect_ids.clear(),
             ModuleState::Online => e.effect_ids.retain(|eid| {
-                effect_meta.get(eid).is_none_or(|m| m.duration_attribute_id.is_none())
+                effect_meta
+                    .get(eid)
+                    .is_none_or(|m| m.duration_attribute_id.is_none())
             }),
             _ => {}
         }
@@ -182,7 +196,13 @@ pub(super) fn run_dogma(
     }
 
     let mut resolved = resolve(
-        &FitInput { ship, modules, skills, drones, charges },
+        &FitInput {
+            ship,
+            modules,
+            skills,
+            drones,
+            charges,
+        },
         &effect_meta,
         &is_stackable,
         &default_of,
@@ -193,8 +213,12 @@ pub(super) fn run_dogma(
         .projected
         .iter()
         .map(|p| {
-            let a: HashMap<i64, f64> =
-                attrs.get(&p.type_id).cloned().unwrap_or_default().into_iter().collect();
+            let a: HashMap<i64, f64> = attrs
+                .get(&p.type_id)
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .collect();
             projected_from_attrs(|id| a.get(&id).copied().unwrap_or(0.0))
         })
         .collect();
@@ -226,19 +250,14 @@ pub(super) fn run_dogma(
     // Finalized fitting resources + validation from the *resolved* ship + modules
     // (skills/rigs/modules reflected, not base attributes) — shared with the
     // optimizer's feasibility gate. Drone-bay volume comes from the SDE.
-    let (resources, validation, layout) = resolved_feasibility(
-        &resolved,
-        base_layout,
-        &effects_by_type,
-        fit,
-        &|tid| {
+    let (resources, validation, layout) =
+        resolved_feasibility(&resolved, base_layout, &effects_by_type, fit, &|tid| {
             sde.type_info(tid)
                 .ok()
                 .flatten()
                 .and_then(|t| t.volume)
                 .unwrap_or(0.0)
-        },
-    );
+        });
 
     // Type ids of fitted modules that can actually be *activated* — i.e. carry an
     // effect with a duration. Passive modules (plates, passive hardeners, DCUs)
@@ -249,7 +268,9 @@ pub(super) fn run_dogma(
         .filter(|tid| {
             effects_by_type.get(tid).is_some_and(|eids| {
                 eids.iter().any(|eid| {
-                    effect_meta.get(eid).is_some_and(|m| m.duration_attribute_id.is_some())
+                    effect_meta
+                        .get(eid)
+                        .is_some_and(|m| m.duration_attribute_id.is_some())
                 })
             })
         })
@@ -278,7 +299,9 @@ pub(super) fn run_dogma(
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| {
-                    module_items.get(*i).is_none_or(|it| it.state == ModuleState::Active)
+                    module_items
+                        .get(*i)
+                        .is_none_or(|it| it.state == ModuleState::Active)
                 })
                 .map(|(_, m)| m)
                 .collect();
@@ -447,7 +470,10 @@ pub(super) fn dps_of(
     let mut turrets = Vec::new();
     let mut missiles = Vec::new();
     for (i, store) in resolved.modules.iter().enumerate() {
-        if module_items.get(i).is_some_and(|it| it.state != ModuleState::Active) {
+        if module_items
+            .get(i)
+            .is_some_and(|it| it.state != ModuleState::Active)
+        {
             continue; // only active weapons fire (offline/online = no DPS)
         }
         let Some(Some(charge)) = resolved.charges.get(i) else {
@@ -457,9 +483,19 @@ pub(super) fn dps_of(
         let rof_seconds = store.get(51) / 1000.0;
         let mult = store.get(64);
         if mult > 0.0 {
-            turrets.push(Weapon { damage_mult: mult, damage_per_shot, rof_seconds, count: 1 });
+            turrets.push(Weapon {
+                damage_mult: mult,
+                damage_per_shot,
+                rof_seconds,
+                count: 1,
+            });
         } else if rof_seconds > 0.0 {
-            missiles.push(Weapon { damage_mult: 1.0, damage_per_shot, rof_seconds, count: 1 });
+            missiles.push(Weapon {
+                damage_mult: 1.0,
+                damage_per_shot,
+                rof_seconds,
+                count: 1,
+            });
         }
     }
 
@@ -482,11 +518,16 @@ pub(super) fn dps_of(
 /// (velocity × flight time) from the loaded missile. Deduped by (type, charge),
 /// since identical loadouts share a range. `module_items` is parallel to
 /// `resolved.modules`/`resolved.charges`.
-pub(super) fn weapon_ranges_of(resolved: &ResolvedFit, module_items: &[&FitItem]) -> Vec<WeaponRange> {
+pub(super) fn weapon_ranges_of(
+    resolved: &ResolvedFit,
+    module_items: &[&FitItem],
+) -> Vec<WeaponRange> {
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
     for (i, store) in resolved.modules.iter().enumerate() {
-        let Some(item) = module_items.get(i) else { continue };
+        let Some(item) = module_items.get(i) else {
+            continue;
+        };
         if item.state == ModuleState::Offline {
             continue; // disabled weapon: no range readout
         }
@@ -520,7 +561,10 @@ pub(super) fn capacitor_of(resolved: &ResolvedFit, module_items: &[&FitItem]) ->
     let mut drain = 0.0;
     let mut module_drains: Vec<(f64, f64)> = Vec::new();
     for (i, store) in resolved.modules.iter().enumerate() {
-        if module_items.get(i).is_some_and(|it| it.state != ModuleState::Active) {
+        if module_items
+            .get(i)
+            .is_some_and(|it| it.state != ModuleState::Active)
+        {
             continue; // only active modules draw capacitor
         }
         let need = store.get(6);
@@ -528,7 +572,11 @@ pub(super) fn capacitor_of(resolved: &ResolvedFit, module_items: &[&FitItem]) ->
         // cycle on rate of fire (`speed`, 51) instead, so fall back to it.
         let dur = {
             let d = store.get(73);
-            if d > 0.0 { d } else { store.get(51) }
+            if d > 0.0 {
+                d
+            } else {
+                store.get(51)
+            }
         };
         if need > 0.0 && dur > 0.0 {
             drain += need / (dur / 1000.0);
@@ -564,7 +612,10 @@ pub(super) fn tank_of(resolved: &ResolvedFit, module_items: &[&FitItem]) -> Tank
 
     let (mut shield_rep_s, mut armor_rep_s) = (0.0, 0.0);
     for (i, store) in resolved.modules.iter().enumerate() {
-        if module_items.get(i).is_some_and(|it| it.state != ModuleState::Active) {
+        if module_items
+            .get(i)
+            .is_some_and(|it| it.state != ModuleState::Active)
+        {
             continue; // only active reps cycle (offline/online = no local reps)
         }
         let dur = store.get(73);
@@ -624,7 +675,7 @@ pub(super) fn required_skills_of(attrs: &AttrMap, type_id: i64) -> Vec<i64> {
         .get(&type_id)
         .map(|a| {
             a.iter()
-                .filter(|(k, _)| matches!(k, 182 | 183 | 184))
+                .filter(|(k, _)| matches!(k, 182..=184))
                 .map(|(_, v)| *v as i64)
                 .filter(|s| *s > 0)
                 .collect()

@@ -156,7 +156,11 @@ pub fn shopping_create_list(app: AppHandle, name: String) -> Result<ShoppingList
         .map(|c| if c.is_alphanumeric() { c } else { '-' })
         .collect();
     let base = base.trim_matches('-').to_string();
-    let base = if base.is_empty() { "list".to_string() } else { base };
+    let base = if base.is_empty() {
+        "list".to_string()
+    } else {
+        base
+    };
     let mut id = base.clone();
     let mut n = 2;
     while store.lists.iter().any(|l| l.id == id) {
@@ -215,7 +219,10 @@ pub fn shopping_add_item(
     let list = list_mut(&mut store, &id)?;
     match list.items.iter_mut().find(|e| e.type_id == type_id) {
         Some(entry) => entry.quantity += qty,
-        None => list.items.push(StoredEntry { type_id, quantity: qty }),
+        None => list.items.push(StoredEntry {
+            type_id,
+            quantity: qty,
+        }),
     }
     save(&dir, &store)
 }
@@ -257,7 +264,10 @@ pub fn shopping_add_text(
             match sde.type_by_name(name).map_err(|e| e.to_string())? {
                 Some((type_id, _)) => match list.items.iter_mut().find(|e| e.type_id == type_id) {
                     Some(entry) => entry.quantity += qty,
-                    None => list.items.push(StoredEntry { type_id, quantity: qty }),
+                    None => list.items.push(StoredEntry {
+                        type_id,
+                        quantity: qty,
+                    }),
                 },
                 None => unresolved.push(item.name.clone()),
             }
@@ -293,7 +303,9 @@ pub fn shopping_set_quantity(
 pub fn shopping_remove_item(app: AppHandle, id: String, type_id: i64) -> Result<(), String> {
     let (dir, _sde) = dir_and_sde(&app)?;
     let mut store = load(&dir);
-    list_mut(&mut store, &id)?.items.retain(|e| e.type_id != type_id);
+    list_mut(&mut store, &id)?
+        .items
+        .retain(|e| e.type_id != type_id);
     save(&dir, &store)
 }
 

@@ -14,7 +14,10 @@ use super::types::{Fit, FitItem, ModuleState, SlotKind};
 /// ESI uses names like `HiSlot0`–`HiSlot7`, `MedSlot0`–7, `LoSlot0`–7,
 /// `RigSlot0`–2, `SubSystemSlot0`–4, `DroneBay`, `Cargo`.
 pub fn flag_to_slot(flag: &str) -> Option<(SlotKind, i32)> {
-    let index_of = |prefix: &str| flag.strip_prefix(prefix).and_then(|n| n.parse::<i32>().ok());
+    let index_of = |prefix: &str| {
+        flag.strip_prefix(prefix)
+            .and_then(|n| n.parse::<i32>().ok())
+    };
     if let Some(i) = index_of("HiSlot") {
         return Some((SlotKind::High, i));
     }
@@ -76,7 +79,11 @@ pub fn fit_to_esi_items(fit: &Fit) -> Vec<EsiFitItemOut> {
             type_id: it.type_id,
         });
         if let Some(charge) = it.charge_type_id {
-            out.push(EsiFitItemOut { flag, quantity: 1, type_id: charge });
+            out.push(EsiFitItemOut {
+                flag,
+                quantity: 1,
+                type_id: charge,
+            });
         }
     }
     out
@@ -97,11 +104,23 @@ pub fn esi_fitting_to_fit(esi: &EsiFitting, is_charge: &impl Fn(i64) -> bool) ->
         let qty = it.quantity.max(1) as i32;
         match slot {
             SlotKind::Drone => {
-                items.push(module(it.type_id, slot, drone_index, ModuleState::Active, qty));
+                items.push(module(
+                    it.type_id,
+                    slot,
+                    drone_index,
+                    ModuleState::Active,
+                    qty,
+                ));
                 drone_index += 1;
             }
             SlotKind::Cargo => {
-                items.push(module(it.type_id, slot, cargo_index, ModuleState::Active, qty));
+                items.push(module(
+                    it.type_id,
+                    slot,
+                    cargo_index,
+                    ModuleState::Active,
+                    qty,
+                ));
                 cargo_index += 1;
             }
             _ if is_charge(it.type_id) => {} // attached in pass 2
@@ -121,7 +140,10 @@ pub fn esi_fitting_to_fit(esi: &EsiFitting, is_charge: &impl Fn(i64) -> bool) ->
         if matches!(slot, SlotKind::Drone | SlotKind::Cargo) {
             continue; // already added in pass 1
         }
-        match items.iter_mut().find(|m| m.slot == slot && m.index == index) {
+        match items
+            .iter_mut()
+            .find(|m| m.slot == slot && m.index == index)
+        {
             Some(host) => host.charge_type_id = Some(it.type_id),
             None => {
                 items.push(module(
@@ -180,7 +202,10 @@ mod tests {
         assert_eq!(flag_to_slot("RigSlot0"), Some((SlotKind::Rig, 0)));
         assert_eq!(flag_to_slot("DroneBay"), Some((SlotKind::Drone, 0)));
         assert_eq!(flag_to_slot("Cargo"), Some((SlotKind::Cargo, 0)));
-        assert_eq!(flag_to_slot("SubSystemSlot0"), Some((SlotKind::Subsystem, 0)));
+        assert_eq!(
+            flag_to_slot("SubSystemSlot0"),
+            Some((SlotKind::Subsystem, 0))
+        );
         assert_eq!(flag_to_slot("FighterBay"), None);
     }
 
@@ -196,7 +221,10 @@ mod tests {
             let flag = slot_to_flag(slot, idx).unwrap();
             assert_eq!(flag_to_slot(&flag), Some((slot, idx)));
         }
-        assert_eq!(slot_to_flag(SlotKind::Drone, 5).as_deref(), Some("DroneBay"));
+        assert_eq!(
+            slot_to_flag(SlotKind::Drone, 5).as_deref(),
+            Some("DroneBay")
+        );
         assert_eq!(slot_to_flag(SlotKind::Cargo, 0).as_deref(), Some("Cargo"));
         assert_eq!(slot_to_flag(SlotKind::Implant, 0), None);
     }
@@ -220,9 +248,30 @@ mod tests {
         // The high module + its charge (shared flag), then the drone stack; the
         // implant is dropped.
         assert_eq!(out.len(), 3);
-        assert_eq!(out[0], EsiFitItemOut { flag: "HiSlot0".into(), quantity: 1, type_id: 10 });
-        assert_eq!(out[1], EsiFitItemOut { flag: "HiSlot0".into(), quantity: 1, type_id: 11 });
-        assert_eq!(out[2], EsiFitItemOut { flag: "DroneBay".into(), quantity: 5, type_id: 20 });
+        assert_eq!(
+            out[0],
+            EsiFitItemOut {
+                flag: "HiSlot0".into(),
+                quantity: 1,
+                type_id: 10
+            }
+        );
+        assert_eq!(
+            out[1],
+            EsiFitItemOut {
+                flag: "HiSlot0".into(),
+                quantity: 1,
+                type_id: 11
+            }
+        );
+        assert_eq!(
+            out[2],
+            EsiFitItemOut {
+                flag: "DroneBay".into(),
+                quantity: 5,
+                type_id: 20
+            }
+        );
     }
 
     #[test]
@@ -246,7 +295,11 @@ mod tests {
         assert_eq!(gun.slot, SlotKind::High);
         assert_eq!(gun.charge_type_id, Some(200));
 
-        let drone = fit.items.iter().find(|i| i.slot == SlotKind::Drone).unwrap();
+        let drone = fit
+            .items
+            .iter()
+            .find(|i| i.slot == SlotKind::Drone)
+            .unwrap();
         assert_eq!(drone.type_id, 300);
         assert_eq!(drone.quantity, 5);
 

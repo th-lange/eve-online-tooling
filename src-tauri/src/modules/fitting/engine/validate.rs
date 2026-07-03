@@ -170,10 +170,17 @@ mod tests {
     #[test]
     fn flags_too_many_turrets_and_high_slots() {
         // 4 turrets in high slots: over both 3 high slots and 3 turret hardpoints.
-        let items = vec![turret(1.0, 1.0), turret(1.0, 1.0), turret(1.0, 1.0), turret(1.0, 1.0)];
+        let items = vec![
+            turret(1.0, 1.0),
+            turret(1.0, 1.0),
+            turret(1.0, 1.0),
+            turret(1.0, 1.0),
+        ];
         let (_usage, problems) = validate(&rifter(), &items);
         assert!(problems.iter().any(|p| p.message.contains("high slots")));
-        assert!(problems.iter().any(|p| p.message.contains("turret hardpoints")));
+        assert!(problems
+            .iter()
+            .any(|p| p.message.contains("turret hardpoints")));
     }
 
     #[test]
@@ -191,7 +198,9 @@ mod tests {
         });
         let (_usage, problems) = validate(&rifter(), &items);
         assert!(problems.iter().any(|p| p.message.starts_with("CPU over")));
-        assert!(problems.iter().any(|p| p.message.starts_with("Calibration over")));
+        assert!(problems
+            .iter()
+            .any(|p| p.message.starts_with("Calibration over")));
     }
 
     #[test]
@@ -207,6 +216,8 @@ mod tests {
             quantity: 5, // 25 m³ > 10 m³ bay
         }];
         let (_usage, problems) = validate(&rifter(), &items);
-        assert!(problems.iter().any(|p| p.message.contains("Drone bay over")));
+        assert!(problems
+            .iter()
+            .any(|p| p.message.contains("Drone bay over")));
     }
 }

@@ -198,9 +198,9 @@ pub fn resolve(
         // damage-attr application in the dump (turret skills carry an attr-64 one;
         // Warhead Upgrades carries 114–118 ones) — synthesize +292% to each damage
         // attr on charges requiring the skill.
-        let targets_damage = out.iter().any(|m| {
-            m.tgt_attr == 64 || DAMAGE_ATTRS.contains(&m.tgt_attr)
-        });
+        let targets_damage = out
+            .iter()
+            .any(|m| m.tgt_attr == 64 || DAMAGE_ATTRS.contains(&m.tgt_attr));
         if has_skill_boost_dmg && !targets_damage && e.type_id != 0 {
             for tgt in DAMAGE_ATTRS {
                 out.push(ModifierDef {
@@ -227,11 +227,17 @@ pub fn resolve(
         }
         out
     };
-    let skill_mods: Vec<Vec<ModifierDef>> =
-        input.skills.iter().map(|e| mods(e, &mut unresolved)).collect();
+    let skill_mods: Vec<Vec<ModifierDef>> = input
+        .skills
+        .iter()
+        .map(|e| mods(e, &mut unresolved))
+        .collect();
     let ship_mods = mods(&input.ship, &mut unresolved);
-    let module_mods: Vec<Vec<ModifierDef>> =
-        input.modules.iter().map(|e| mods(e, &mut unresolved)).collect();
+    let module_mods: Vec<Vec<ModifierDef>> = input
+        .modules
+        .iter()
+        .map(|e| mods(e, &mut unresolved))
+        .collect();
     let aux_mods: Vec<Vec<ModifierDef>> = aux
         .iter()
         .map(|a| match &a.dest {
@@ -257,10 +263,25 @@ pub fn resolve(
     // penalty (EVE penalizes only module/drone-sourced bonuses), so those passes
     // force `penalized = false`; the module pass keeps each modifier's own flag.
     for (s, ms) in skills.iter().zip(&skill_mods) {
-        apply_outward(s, ms, false, &mut ship, &mut modules, &group_ids, &req_skills, &mut aux);
+        apply_outward(
+            s,
+            ms,
+            false,
+            &mut ship,
+            &mut modules,
+            &group_ids,
+            &req_skills,
+            &mut aux,
+        );
     }
     apply_outward_from_ship(
-        &ship_mods, false, &mut ship, &mut modules, &group_ids, &req_skills, &mut aux,
+        &ship_mods,
+        false,
+        &mut ship,
+        &mut modules,
+        &group_ids,
+        &req_skills,
+        &mut aux,
     );
     for i in 0..modules.len() {
         // Read source from module i, apply to ship / other modules / aux.
@@ -273,7 +294,14 @@ pub fn resolve(
         for (k, value) in src_vals {
             let m = &ms[k];
             apply_to_targets(
-                m, value, m.penalized, &mut ship, &mut modules, &group_ids, &req_skills, &mut aux,
+                m,
+                value,
+                m.penalized,
+                &mut ship,
+                &mut modules,
+                &group_ids,
+                &req_skills,
+                &mut aux,
             );
         }
     }
@@ -282,7 +310,9 @@ pub fn resolve(
     // apply to its host module (ammo/crystal cap, range, tracking penalties).
     // Runs after the module pass so the host's base/skill attrs are resolved.
     for (a, ms) in aux.iter().zip(&aux_mods) {
-        let AuxDest::Charge(host) = a.dest else { continue };
+        let AuxDest::Charge(host) = a.dest else {
+            continue;
+        };
         for m in ms {
             if m.domain == Domain::Other {
                 // A charge that lacks the source attribute uses its dogma default
@@ -330,6 +360,7 @@ fn apply_self(store: &mut AttrStore, mods: &[ModifierDef]) {
 }
 
 /// Apply an affecting store's outward modifiers (source read from `affecting`).
+#[allow(clippy::too_many_arguments)]
 fn apply_outward(
     affecting: &AttrStore,
     mods: &[ModifierDef],
@@ -345,7 +376,9 @@ fn apply_outward(
             continue;
         }
         let value = affecting.get(m.src_attr);
-        apply_to_targets(m, value, penalized, ship, modules, group_ids, req_skills, aux);
+        apply_to_targets(
+            m, value, penalized, ship, modules, group_ids, req_skills, aux,
+        );
     }
 }
 
@@ -365,7 +398,9 @@ fn apply_outward_from_ship(
         if m.domain == Domain::Item {
             continue;
         }
-        apply_to_targets(m, value, penalized, ship, modules, group_ids, req_skills, aux);
+        apply_to_targets(
+            m, value, penalized, ship, modules, group_ids, req_skills, aux,
+        );
     }
 }
 
@@ -374,6 +409,7 @@ fn apply_outward_from_ship(
 /// bonuses are stacking-exempt — while the module pass keeps the modifier's own
 /// flag). Drones/charges (`aux`) only receive the group/skill-keyed domains —
 /// never the blanket `Location`/`Ship` domains, which don't reach them.
+#[allow(clippy::too_many_arguments)]
 fn apply_to_targets(
     m: &ModifierDef,
     value: f64,
@@ -499,10 +535,23 @@ mod tests {
         // items requiring skill 3436 (Drones).
         effects.insert(
             200,
-            effect(200, vec![mi_skill("OwnerRequiredSkillModifier", "charID", 6, 64, 658, 3436)]),
+            effect(
+                200,
+                vec![mi_skill(
+                    "OwnerRequiredSkillModifier",
+                    "charID",
+                    6,
+                    64,
+                    658,
+                    3436,
+                )],
+            ),
         );
         // Gallente Cruiser skill effect: preMul the ship's 658 by skillLevel (280).
-        effects.insert(201, effect(201, vec![mi("ItemModifier", "shipID", 0, 658, 280, None)]));
+        effects.insert(
+            201,
+            effect(201, vec![mi("ItemModifier", "shipID", 0, 658, 280, None)]),
+        );
 
         let input = FitInput {
             ship: EntityInput {
@@ -530,7 +579,10 @@ mod tests {
         };
         let resolved = resolve(&input, &effects, &|_| true, &|_| 0.0);
         let dmg = resolved.drones[0].get(64);
-        assert!((dmg - 1.5).abs() < 1e-9, "drone damageMultiplier = {dmg}, want 1.5");
+        assert!(
+            (dmg - 1.5).abs() < 1e-9,
+            "drone damageMultiplier = {dmg}, want 1.5"
+        );
     }
 
     /// `damageMultiplierSkillBonus` synthesis (#176): a drone operation/spec
@@ -561,7 +613,10 @@ mod tests {
         };
         let resolved = resolve(&input, &effects, &|_| true, &|_| 0.0);
         let dmg = resolved.drones[0].get(64);
-        assert!((dmg - 1.25).abs() < 1e-9, "drone damageMultiplier = {dmg}, want 1.25");
+        assert!(
+            (dmg - 1.25).abs() < 1e-9,
+            "drone damageMultiplier = {dmg}, want 1.25"
+        );
     }
 
     /// Missile damage skill synthesis (#176): a skill with
@@ -592,7 +647,10 @@ mod tests {
         };
         let resolved = resolve(&input, &effects, &|_| true, &|_| 0.0);
         let kin = resolved.charges[0].as_ref().unwrap().get(117);
-        assert!((kin - 125.0).abs() < 1e-9, "charge kinetic = {kin}, want 125");
+        assert!(
+            (kin - 125.0).abs() < 1e-9,
+            "charge kinetic = {kin}, want 125"
+        );
     }
 
     /// Rate-of-fire skill synthesis (#176): a specialization skill with
@@ -632,7 +690,10 @@ mod tests {
     fn charge_modifies_its_host_module() {
         // Effect 700: otherID ItemModifier, postPercent capNeed (6) by attr 317.
         let mut effects = HashMap::new();
-        effects.insert(700, effect(700, vec![mi("ItemModifier", "otherID", 6, 6, 317, None)]));
+        effects.insert(
+            700,
+            effect(700, vec![mi("ItemModifier", "otherID", 6, 6, 317, None)]),
+        );
 
         let input = FitInput {
             modules: vec![EntityInput {
@@ -648,7 +709,10 @@ mod tests {
         };
         let resolved = resolve(&input, &effects, &|_| true, &|_| 0.0);
         let cap_need = resolved.modules[0].get(6);
-        assert!((cap_need - 15.0).abs() < 1e-9, "host capNeed = {cap_need}, want 15");
+        assert!(
+            (cap_need - 15.0).abs() < 1e-9,
+            "host capNeed = {cap_need}, want 15"
+        );
     }
 
     /// Surgical Strike at level V: scales its own damageMultiplierBonus (292) by
@@ -658,10 +722,16 @@ mod tests {
     fn skill_scales_per_level_then_boosts_turret_group() {
         // Effect 100: self preMul 292 by 280. Effect 101: group-55 postPercent 64 by 292.
         let mut effects = HashMap::new();
-        effects.insert(100, effect(100, vec![mi("ItemModifier", "itemID", 0, 292, 280, None)]));
+        effects.insert(
+            100,
+            effect(100, vec![mi("ItemModifier", "itemID", 0, 292, 280, None)]),
+        );
         effects.insert(
             101,
-            effect(101, vec![mi("LocationGroupModifier", "shipID", 6, 64, 292, Some(55))]),
+            effect(
+                101,
+                vec![mi("LocationGroupModifier", "shipID", 6, 64, 292, Some(55))],
+            ),
         );
 
         let input = FitInput {
@@ -686,7 +756,10 @@ mod tests {
         // damageMultiplier (64) is non-stackable, but a single bonus isn't reduced.
         let resolved = resolve(&input, &effects, &|attr| attr != 64, &|_| 0.0);
         let dmg = resolved.modules[0].get(64);
-        assert!((dmg - 1.15).abs() < 1e-9, "turret damage = {dmg}, want 1.15");
+        assert!(
+            (dmg - 1.15).abs() < 1e-9,
+            "turret damage = {dmg}, want 1.15"
+        );
         assert_eq!(resolved.unresolved, 0);
     }
 
@@ -696,7 +769,10 @@ mod tests {
         let mut effects = HashMap::new();
         effects.insert(
             101,
-            effect(101, vec![mi("LocationGroupModifier", "shipID", 6, 64, 292, Some(74))]),
+            effect(
+                101,
+                vec![mi("LocationGroupModifier", "shipID", 6, 64, 292, Some(74))],
+            ),
         );
         let input = FitInput {
             ship: EntityInput::default(),

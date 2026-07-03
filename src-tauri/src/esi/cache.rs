@@ -61,7 +61,13 @@ fn now() -> u64 {
 
 fn sanitize(key: &str) -> String {
     key.chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -76,7 +82,11 @@ fn x_pages(headers: &reqwest::header::HeaderMap) -> u32 {
 
 /// Freshness TTL (secs) from cache headers: `Cache-Control: max-age` wins, else
 /// `Expires` − `Date`. Pure over the header strings so it can be unit-tested.
-fn compute_ttl(cache_control: Option<&str>, expires: Option<&str>, date: Option<&str>) -> Option<u64> {
+fn compute_ttl(
+    cache_control: Option<&str>,
+    expires: Option<&str>,
+    date: Option<&str>,
+) -> Option<u64> {
     if let Some(cc) = cache_control {
         for part in cc.split(',') {
             if let Some(n) = part.trim().strip_prefix("max-age=") {
@@ -138,7 +148,10 @@ impl ConditionalCache {
         }
         let bytes = std::fs::read(self.path(key)?).ok()?;
         let entry: CachedResponse = serde_json::from_slice(&bytes).ok()?;
-        self.mem.lock().unwrap().insert(key.to_string(), entry.clone());
+        self.mem
+            .lock()
+            .unwrap()
+            .insert(key.to_string(), entry.clone());
         Some(entry)
     }
 
@@ -372,7 +385,10 @@ mod tests {
     fn key_includes_query() {
         assert_eq!(cache_key("u", &[]), "u");
         assert_eq!(
-            cache_key("u", &[("type_id", "34".into()), ("order_type", "all".into())]),
+            cache_key(
+                "u",
+                &[("type_id", "34".into()), ("order_type", "all".into())]
+            ),
             "u?type_id=34&order_type=all"
         );
     }

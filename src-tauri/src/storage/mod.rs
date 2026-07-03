@@ -50,7 +50,9 @@ fn secret_entry(name: &str) -> Result<Entry, String> {
 
 /// Store a named secret in the OS keychain.
 pub fn store_secret(name: &str, value: &str) -> Result<(), String> {
-    secret_entry(name)?.set_password(value).map_err(|e| e.to_string())
+    secret_entry(name)?
+        .set_password(value)
+        .map_err(|e| e.to_string())
 }
 
 /// Load a named secret, if present.
@@ -151,7 +153,13 @@ fn cache_path(app_data_dir: &Path, key: &str) -> std::path::PathBuf {
     // Keys are caller-controlled identifiers; sanitize to a safe filename.
     let safe: String = key
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     app_data_dir.join("cache").join(format!("{safe}.json"))
 }
@@ -179,7 +187,9 @@ pub fn load_data<T: DeserializeOwned>(app_data_dir: &Path, name: &str) -> Option
 
 /// Persist a durable JSON document by name.
 pub fn save_data<T: Serialize>(app_data_dir: &Path, name: &str, value: &T) -> Result<(), String> {
-    let path = app_data_dir.join("data").join(format!("{}.json", sanitize(name)));
+    let path = app_data_dir
+        .join("data")
+        .join(format!("{}.json", sanitize(name)));
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -189,7 +199,13 @@ pub fn save_data<T: Serialize>(app_data_dir: &Path, name: &str, value: &T) -> Re
 
 fn sanitize(key: &str) -> String {
     key.chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
