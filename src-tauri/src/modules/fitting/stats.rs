@@ -407,10 +407,10 @@ pub(super) fn resolved_feasibility(
 pub(super) async fn character_skill_levels(
     app: &AppHandle,
     auth_state: &AuthState,
-) -> Result<HashMap<i64, i64>, String> {
+) -> Result<HashMap<i64, i64>, crate::model::AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let character_id =
-        storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?;
+        storage::active_character(&dir).ok_or_else(crate::model::AppError::auth_required)?;
 
     #[derive(serde::Deserialize)]
     struct Skills {

@@ -8,12 +8,13 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::esi::{authed_get_paged_pub, AuthState};
 use crate::market::{resolve_location, MarketService, PriceModel};
+use crate::model::AppError;
 use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
-fn first_character(app: &AppHandle) -> Result<i64, String> {
+fn first_character(app: &AppHandle) -> Result<i64, AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())
+    storage::active_character(&dir).ok_or_else(AppError::auth_required)
 }
 
 // --- Stored shapes (durable, accumulated) ---
@@ -96,7 +97,7 @@ pub struct WalletView {
 pub async fn wallet_sync(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
-) -> Result<WalletView, String> {
+) -> Result<WalletView, AppError> {
     let character_id = first_character(&app)?;
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let jkey = format!("journal_{character_id}");
@@ -297,7 +298,7 @@ struct StoredJobLite {
 pub async fn profit_fifo(
     app: AppHandle,
     market: State<'_, MarketService>,
-) -> Result<ProfitView, String> {
+) -> Result<ProfitView, AppError> {
     let character_id = first_character(&app)?;
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;

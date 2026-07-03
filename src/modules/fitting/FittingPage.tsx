@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  errorMessage,
   fittingAddItem,
   fittingDeleteLocal,
   fittingEsiList,
@@ -212,7 +213,7 @@ function Workbench() {
   const pushEsi = useMutation({
     mutationFn: () => fittingEsiPush(fit!),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["fitting", "esi"] }),
-    onError: (e) => alert(`Couldn't save to EVE: ${e}`),
+    onError: (e) => alert(`Couldn't save to EVE: ${errorMessage(e)}`),
   });
   const exportEft = useMutation({
     mutationFn: () => fittingExportEft(fit!),

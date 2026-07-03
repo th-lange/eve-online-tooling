@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  errorMessage,
+  isAuthRequired,
   routeBreadcrumb,
   routeClearBreadcrumb,
   routeLocation,
@@ -102,7 +104,11 @@ function Workbench() {
         setDepth(d);
       }
     } catch (e) {
-      setLocError(String(e));
+      setLocError(
+        isAuthRequired(e)
+          ? "Log in a character first to track your location."
+          : errorMessage(e),
+      );
     }
   }
   function changeDepth(d: number) {
@@ -376,7 +382,11 @@ function NearestWormholeCard({
       </div>
 
       {find.isError && (
-        <div className="mt-2 text-xs text-rose-400">{String(find.error)}</div>
+        <div className="mt-2 text-xs text-rose-400">
+          {isAuthRequired(find.error)
+            ? "Log in a character first to find the nearest wormhole."
+            : errorMessage(find.error)}
+        </div>
       )}
 
       {r && !r.found && (

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
+  errorMessage,
+  isAuthRequired,
   profitFifo,
   walletSync,
   type ProfitView,
@@ -391,10 +393,16 @@ function Hint({ children }: { children: React.ReactNode }) {
   );
 }
 function Err({ e }: { e: unknown }) {
+  if (isAuthRequired(e)) {
+    return (
+      <div className="p-6 text-sm text-zinc-400">
+        Log in a character first to view your wallet.
+      </div>
+    );
+  }
   return (
     <div className="p-6 text-sm text-rose-400">
-      {String(e)} — log in a character and enable the wallet scope on your EVE
-      app.
+      {errorMessage(e)} — check the wallet scope is enabled on your EVE app.
     </div>
   );
 }

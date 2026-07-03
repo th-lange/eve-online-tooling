@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
 use crate::esi::{authed_get, AuthState, EsiClient};
+use crate::model::AppError;
 use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
@@ -266,10 +267,9 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-fn breadcrumb_key(app: &AppHandle) -> Result<(std::path::PathBuf, i64, String), String> {
+fn breadcrumb_key(app: &AppHandle) -> Result<(std::path::PathBuf, i64, String), AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let character_id =
-        storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?;
+    let character_id = storage::active_character(&dir).ok_or_else(AppError::auth_required)?;
     let key = format!("route_breadcrumb_{character_id}");
     Ok((dir, character_id, key))
 }
@@ -283,7 +283,7 @@ fn breadcrumb_key(app: &AppHandle) -> Result<(std::path::PathBuf, i64, String), 
 pub async fn route_location(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
-) -> Result<Vec<BreadcrumbEntry>, String> {
+) -> Result<Vec<BreadcrumbEntry>, AppError> {
     let (dir, character_id, key) = breadcrumb_key(&app)?;
     let loc: EsiLocation = authed_get(
         &auth_state,
@@ -321,16 +321,16 @@ pub async fn route_location(
 
 /// The stored travel trail without polling ESI.
 #[tauri::command]
-pub fn route_breadcrumb(app: AppHandle) -> Result<Vec<BreadcrumbEntry>, String> {
+pub fn route_breadcrumb(app: AppHandle) -> Result<Vec<BreadcrumbEntry>, AppError> {
     let (dir, _id, key) = breadcrumb_key(&app)?;
     Ok(storage::load_data(&dir, &key).unwrap_or_default())
 }
 
 /// Clear the travel trail.
 #[tauri::command]
-pub fn route_clear_breadcrumb(app: AppHandle) -> Result<(), String> {
+pub fn route_clear_breadcrumb(app: AppHandle) -> Result<(), AppError> {
     let (dir, _id, key) = breadcrumb_key(&app)?;
-    storage::save_data(&dir, &key, &Vec::<BreadcrumbEntry>::new())
+    storage::save_data(&dir, &key, &Vec::<BreadcrumbEntry>::new()).map_err(AppError::from)
 }
 
 // --- Nearest wormhole (#298) ---
@@ -416,7 +416,7 @@ fn nearest_none(
 /// the nearest scanned exit to k-space over the mapped chain. Reads the travel
 /// breadcrumb for "where am I" (populate it via "My location"); no ESI auth here.
 #[tauri::command]
-pub async fn route_nearest_wormhole(app: AppHandle) -> Result<NearestWormhole, String> {
+pub async fn route_nearest_wormhole(app: AppHandle) -> Result<NearestWormhole, AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let (_dir, _id, key) = breadcrumb_key(&app)?;
     let trail: Vec<BreadcrumbEntry> = storage::load_data(&dir, &key).unwrap_or_default();
