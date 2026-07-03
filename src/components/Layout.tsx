@@ -12,12 +12,13 @@ import { modules, MODULE_GROUPS, type ModuleDef } from "../modules/registry";
 import { BridgeStatus } from "./BridgeStatus";
 import { Characters } from "./Characters";
 import { CommandPalette } from "./CommandPalette";
+import { STORAGE_KEYS } from "../lib/storageKeys";
 import appIcon from "../assets/app-icon.png";
 
-const PINS_KEY = "sidebar.pins";
-const ORDER_KEY = "sidebar.order";
-const COLORS_KEY = "sidebar.colors";
-const COLLAPSED_KEY = "sidebar.collapsed";
+const PINS_KEY = STORAGE_KEYS.sidebarPins;
+const ORDER_KEY = STORAGE_KEYS.sidebarOrder;
+const COLORS_KEY = STORAGE_KEYS.sidebarColors;
+const COLLAPSED_KEY = STORAGE_KEYS.sidebarCollapsed;
 
 // Accent palette for tagging sidebar entries. Tailwind 400-level hues, spread
 // around the wheel so they stay distinct as small accents on the dark sidebar.

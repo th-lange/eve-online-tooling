@@ -20,6 +20,7 @@ import {
   type ZkillStats,
 } from "../../lib/api";
 import { formatInt } from "../../lib/format";
+import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { usePersistentState } from "../../lib/usePersistentState";
 
 /** Best-effort desktop notification — requests permission, never throws. */
@@ -73,10 +74,10 @@ export function LocalIntelPage() {
   const [text, setText] = useState("");
   const [alertAnyRed, setAlertAnyRed] = useState(true);
   const [alertNeutrals, setAlertNeutrals] = useState(
-    () => localStorage.getItem("localintel.alertNeutrals") === "on",
+    () => localStorage.getItem(STORAGE_KEYS.localintelAlertNeutrals) === "on",
   );
   const [soundOn, setSoundOn] = useState(
-    () => localStorage.getItem("localintel.sound") !== "off",
+    () => localStorage.getItem(STORAGE_KEYS.localintelSound) !== "off",
   );
   // Pilot ids from the previous scan, so we can alert only when a *new* threat
   // enters Local (re-pasting the same list doesn't re-alarm), and flag arrivals.
@@ -85,7 +86,7 @@ export function LocalIntelPage() {
   // EVE logs folder (Chatlogs); persisted. Used to prefill names from the
   // newest Local log — only pilots who chatted (logs lack the member list).
   const [logsDir, setLogsDir] = useState(
-    () => localStorage.getItem("eveLogsDir") ?? "",
+    () => localStorage.getItem(STORAGE_KEYS.eveChatlogsDir) ?? "",
   );
   // Prefill the Chatlogs folder from the OS default when we have nothing yet.
   useEffect(() => {
@@ -95,7 +96,7 @@ export function LocalIntelPage() {
   const loadLog = useMutation({
     mutationFn: () => localLogNames(logsDir),
     onSuccess: (r) => {
-      localStorage.setItem("eveLogsDir", logsDir);
+      localStorage.setItem(STORAGE_KEYS.eveChatlogsDir, logsDir);
       if (r.senders.length > 0) setText(r.senders.join("\n"));
     },
   });
@@ -315,7 +316,7 @@ export function LocalIntelPage() {
               onChange={(e) => {
                 setAlertNeutrals(e.currentTarget.checked);
                 localStorage.setItem(
-                  "localintel.alertNeutrals",
+                  STORAGE_KEYS.localintelAlertNeutrals,
                   e.currentTarget.checked ? "on" : "off",
                 );
               }}
@@ -329,7 +330,7 @@ export function LocalIntelPage() {
               onChange={(e) => {
                 setSoundOn(e.currentTarget.checked);
                 localStorage.setItem(
-                  "localintel.sound",
+                  STORAGE_KEYS.localintelSound,
                   e.currentTarget.checked ? "on" : "off",
                 );
                 if (e.currentTarget.checked) playAlarm(); // confirm it's audible
