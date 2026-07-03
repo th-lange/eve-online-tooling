@@ -22,12 +22,11 @@ use crate::model::Character;
 /// Public Client ID of the registered EVE developer application (PKCE — not a
 /// secret).
 const CLIENT_ID: &str = "eb8ccb39b8ed4115a3d2175ab9feda8d";
-/// Candidate loopback ports for the SSO redirect, tried in order. Each must be
-/// registered as a callback (`http://localhost:<port>/callback`) on the EVE
-/// developer application, or SSO rejects that redirect — so login still works
-/// when 8765 is taken by another app, provided the fallback ports are
-/// registered too.
-const REDIRECT_PORTS: &[u16] = &[8765, 8766, 8767, 8768, 8769];
+/// Loopback port for the SSO redirect. Must be registered as a callback
+/// (`http://localhost:8765/callback`) on the EVE developer application. Fixed
+/// (not a fallback range): EVE only accepts registered redirect URIs, so binding
+/// any other port would just yield a confusing "redirect not configured" error.
+const REDIRECT_PORT: u16 = 8765;
 const AUTHORIZE_URL: &str = "https://login.eveonline.com/v2/oauth/authorize/";
 const TOKEN_URL: &str = "https://login.eveonline.com/v2/oauth/token";
 const SCOPES: &[&str] = &[
@@ -204,13 +203,12 @@ pub fn random_state() -> String {
     random_b64(16)
 }
 
-/// The EVE SSO authorize URL to open in the browser. `port` is the loopback
-/// port [`bind_loopback`] actually bound, so the `redirect_uri` matches where
-/// we're listening (and the callback registered on the EVE app).
-pub fn authorize_url(challenge: &str, state: &str, port: u16) -> String {
+/// The EVE SSO authorize URL to open in the browser. The `redirect_uri` is the
+/// fixed loopback callback registered on the EVE app.
+pub fn authorize_url(challenge: &str, state: &str) -> String {
     let scope = SCOPES.join("%20");
-    // URL-encoded `http://localhost:<port>/callback`.
-    let redirect_uri = format!("http%3A%2F%2Flocalhost%3A{port}%2Fcallback");
+    // URL-encoded `http://localhost:8765/callback`.
+    let redirect_uri = format!("http%3A%2F%2Flocalhost%3A{REDIRECT_PORT}%2Fcallback");
     format!(
         "{AUTHORIZE_URL}?response_type=code&redirect_uri={redirect_uri}\
          &client_id={CLIENT_ID}&scope={scope}&state={state}\
@@ -318,22 +316,18 @@ fn character_id_from_sub(sub: &str) -> Option<i64> {
     sub.rsplit(':').next()?.parse().ok()
 }
 
-/// Bind the loopback redirect server on the first free [`REDIRECT_PORTS`] port,
-/// returning the server and the port it bound. Done before opening the browser
-/// (so the redirect can't arrive before we're listening) and before building the
-/// authorize URL (so its `redirect_uri` matches the bound port). Errors only if
-/// every candidate port is in use.
-pub fn bind_loopback() -> Result<(tiny_http::Server, u16), AuthError> {
-    for &port in REDIRECT_PORTS {
-        if let Ok(server) = tiny_http::Server::http(("127.0.0.1", port)) {
-            return Ok((server, port));
-        }
-    }
-    Err(AuthError::Server(format!(
-        "all SSO loopback ports ({}–{}) are in use — free one and retry",
-        REDIRECT_PORTS[0],
-        REDIRECT_PORTS[REDIRECT_PORTS.len() - 1],
-    )))
+/// Bind the loopback redirect server on the fixed [`REDIRECT_PORT`]. Done before
+/// opening the browser so the redirect can't arrive before we're listening. A
+/// busy port is almost always a login that's still open (its server holds 8765
+/// until it completes or times out), so the error says so rather than failing
+/// obscurely.
+pub fn bind_loopback() -> Result<tiny_http::Server, AuthError> {
+    tiny_http::Server::http(("127.0.0.1", REDIRECT_PORT)).map_err(|_| {
+        AuthError::Server(format!(
+            "port {REDIRECT_PORT} is in use — a previous login may still be open; \
+             quit and relaunch the app, then try again"
+        ))
+    })
 }
 
 /// Block until the SSO redirect arrives (or we time out), returning the code.
@@ -401,10 +395,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn authorize_url_embeds_the_bound_port_in_the_redirect_uri() {
-        let url = authorize_url("chal", "st", 8767);
-        // redirect_uri must match the port we bound (and the registered callback).
-        assert!(url.contains("redirect_uri=http%3A%2F%2Flocalhost%3A8767%2Fcallback"));
+    fn authorize_url_uses_the_registered_redirect_uri() {
+        let url = authorize_url("chal", "st");
+        assert!(url.contains("redirect_uri=http%3A%2F%2Flocalhost%3A8765%2Fcallback"));
         assert!(url.contains("code_challenge=chal"));
         assert!(url.contains("state=st"));
         assert!(url.contains("code_challenge_method=S256"));

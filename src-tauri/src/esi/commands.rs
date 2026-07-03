@@ -20,9 +20,9 @@ pub async fn auth_login(
     let csrf = auth::random_state();
 
     // Bind the loopback server before opening the browser so the redirect can't
-    // arrive before we're listening; use whichever port it bound for the URL.
-    let (server, port) = auth::bind_loopback().map_err(|e| e.to_string())?;
-    let url = auth::authorize_url(&pkce.challenge, &csrf, port);
+    // arrive before we're listening.
+    let server = auth::bind_loopback().map_err(|e| e.to_string())?;
+    let url = auth::authorize_url(&pkce.challenge, &csrf);
     app.opener()
         .open_url(url, None::<&str>)
         .map_err(|e| e.to_string())?;
