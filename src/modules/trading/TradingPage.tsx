@@ -13,6 +13,10 @@ import {
   type TradeRow,
 } from "../../lib/api";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
+import {
+  RegionSelect,
+  StationSelect,
+} from "../../components/RegionStationPicker";
 import { SdeSetup } from "../production/SdeSetup";
 import { formatInt, formatIsk, formatPercent } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
@@ -155,40 +159,21 @@ function Workbench() {
 
       <div className="mt-4 grid grid-cols-2 gap-3 rounded border border-zinc-800 bg-zinc-900 p-3 md:grid-cols-5">
         <Field label="Region">
-          <select
+          <RegionSelect
+            regions={regions.data}
             value={regionId}
-            onChange={(e) => {
-              setRegionId(Number(e.currentTarget.value));
+            onChange={(id) => {
+              setRegionId(id);
               setStationId(null);
             }}
-            className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
-          >
-            {regions.data?.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
+          />
         </Field>
         <Field label="Market">
-          <select
-            value={stationId ?? ""}
-            onChange={(e) =>
-              setStationId(
-                e.currentTarget.value === ""
-                  ? null
-                  : Number(e.currentTarget.value),
-              )
-            }
-            className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
-          >
-            <option value="">Region average</option>
-            {stations.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+          <StationSelect
+            stations={stations}
+            value={stationId}
+            onChange={setStationId}
+          />
         </Field>
         <NumField
           label="Broker fee %"
