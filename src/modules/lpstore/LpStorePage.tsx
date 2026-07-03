@@ -10,16 +10,50 @@ import {
 import { SdeSetup } from "../production/SdeSetup";
 import { formatInt, formatIsk, sortRows } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
-import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
+import {
+  SortHeaderCell,
+  type SortColumn,
+} from "../../components/SortHeaderCell";
 
-type OfferSortKey = "name" | "lpCost" | "iskCost" | "sellValue" | "profit" | "iskPerLp";
+type OfferSortKey =
+  "name" | "lpCost" | "iskCost" | "sellValue" | "profit" | "iskPerLp";
 const OFFER_COLUMNS: SortColumn<OfferSortKey>[] = [
-  { key: "name", label: "Offer", numeric: false, description: "The item you receive." },
-  { key: "lpCost", label: "LP", numeric: true, description: "Loyalty points required." },
-  { key: "iskCost", label: "ISK cost", numeric: true, description: "ISK the offer also costs." },
-  { key: "sellValue", label: "Sell value", numeric: true, description: "Jita sell value of the item(s), less ~5%." },
-  { key: "profit", label: "Profit", numeric: true, description: "Sell value − cost (LP×rate + ISK + handed-in items)." },
-  { key: "iskPerLp", label: "ISK/LP", numeric: true, description: "Net ISK per loyalty point." },
+  {
+    key: "name",
+    label: "Offer",
+    numeric: false,
+    description: "The item you receive.",
+  },
+  {
+    key: "lpCost",
+    label: "LP",
+    numeric: true,
+    description: "Loyalty points required.",
+  },
+  {
+    key: "iskCost",
+    label: "ISK cost",
+    numeric: true,
+    description: "ISK the offer also costs.",
+  },
+  {
+    key: "sellValue",
+    label: "Sell value",
+    numeric: true,
+    description: "Jita sell value of the item(s), less ~5%.",
+  },
+  {
+    key: "profit",
+    label: "Profit",
+    numeric: true,
+    description: "Sell value − cost (LP×rate + ISK + handed-in items).",
+  },
+  {
+    key: "iskPerLp",
+    label: "ISK/LP",
+    numeric: true,
+    description: "Net ISK per loyalty point.",
+  },
 ];
 const OFFER_KEYS = OFFER_COLUMNS.map((c) => c.key);
 
@@ -38,7 +72,10 @@ function Workbench() {
   const [rows, setRows] = useState<OfferRow[]>([]);
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
 
-  const balances = useQuery({ queryKey: ["lp", "balances"], queryFn: lpBalances });
+  const balances = useQuery({
+    queryKey: ["lp", "balances"],
+    queryFn: lpBalances,
+  });
   const run = useMutation({
     mutationFn: (p: LpParams) => lpOffers(p),
     onSuccess: (r) => {
@@ -64,10 +101,14 @@ function Workbench() {
         </div>
         <div className="flex items-center gap-2">
           {fetchedAt != null && (
-            <span className="text-xs text-zinc-500">Offers pulled {ago(fetchedAt)}</span>
+            <span className="text-xs text-zinc-500">
+              Offers pulled {ago(fetchedAt)}
+            </span>
           )}
           <button
-            onClick={() => corpId != null && run.mutate({ corporationId: corpId, iskPerLp })}
+            onClick={() =>
+              corpId != null && run.mutate({ corporationId: corpId, iskPerLp })
+            }
             disabled={run.isPending || corpId == null}
             className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
           >
@@ -75,7 +116,8 @@ function Workbench() {
           </button>
           <button
             onClick={() =>
-              corpId != null && run.mutate({ corporationId: corpId, iskPerLp, refresh: true })
+              corpId != null &&
+              run.mutate({ corporationId: corpId, iskPerLp, refresh: true })
             }
             disabled={run.isPending || corpId == null}
             title="Re-pull the offers from ESI (ignore the local cache)"
@@ -88,7 +130,8 @@ function Workbench() {
 
       {balances.isError && (
         <div className="mt-3 text-sm text-rose-400">
-          {String(balances.error)} — log in a character and enable the loyalty scope.
+          {String(balances.error)} — log in a character and enable the loyalty
+          scope.
         </div>
       )}
 
@@ -116,7 +159,11 @@ function Workbench() {
         </Field>
       </div>
 
-      {run.isError && <div className="mt-3 text-sm text-rose-400">Failed: {String(run.error)}</div>}
+      {run.isError && (
+        <div className="mt-3 text-sm text-rose-400">
+          Failed: {String(run.error)}
+        </div>
+      )}
 
       <OfferTable rows={rows} />
     </div>
@@ -156,9 +203,15 @@ function OfferTable({ rows }: { rows: OfferRow[] }) {
                   {r.quantity > 1 ? `${formatInt(r.quantity)}× ` : ""}
                   {r.name}
                 </td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">{formatInt(r.lpCost)}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">{formatIsk(r.iskCost)}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">{formatIsk(r.sellValue)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                  {formatInt(r.lpCost)}
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                  {formatIsk(r.iskCost)}
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+                  {formatIsk(r.sellValue)}
+                </td>
                 <td
                   className={`px-3 py-1.5 text-right tabular-nums ${
                     r.profit >= 0 ? "text-emerald-400" : "text-rose-400"
@@ -186,7 +239,8 @@ function OfferTable({ rows }: { rows: OfferRow[] }) {
         </table>
       </div>
       <div className="mt-1 text-xs text-zinc-500">
-        Blueprint offers value the BPC item itself (not the built product) — a known under-valuation.
+        Blueprint offers value the BPC item itself (not the built product) — a
+        known under-valuation.
       </div>
     </>
   );
@@ -211,5 +265,7 @@ function ago(epochSecs: number): string {
 }
 
 function Centered({ children }: { children: ReactNode }) {
-  return <div className="p-10 text-center text-sm text-zinc-500">{children}</div>;
+  return (
+    <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
+  );
 }

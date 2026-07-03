@@ -17,7 +17,10 @@ import {
 import { SdeSetup } from "../production/SdeSetup";
 import { formatInt, formatIsk, formatPercent } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
-import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
+import {
+  SortHeaderCell,
+  type SortColumn,
+} from "../../components/SortHeaderCell";
 
 type Tab = "opportunities" | "favorites" | "blacklist";
 
@@ -57,7 +60,10 @@ function Workbench() {
   const [hideMetas, setHideMetas] = useState<Set<string>>(new Set());
   const [rows, setRows] = useState<DayTradeRow[]>([]);
 
-  const regions = useQuery({ queryKey: ["market", "regions"], queryFn: marketRegions });
+  const regions = useQuery({
+    queryKey: ["market", "regions"],
+    queryFn: marketRegions,
+  });
   const categories = useQuery({
     queryKey: ["sde", "marketCategories"],
     queryFn: sdeMarketCategories,
@@ -116,7 +122,8 @@ function Workbench() {
   }
 
   const allRegions = regions.data ?? [];
-  const selectedCount = regionIds.size === 0 ? allRegions.length : regionIds.size;
+  const selectedCount =
+    regionIds.size === 0 ? allRegions.length : regionIds.size;
   const allCategories = categories.data ?? [];
   const rowsByType = useMemo(
     () => new Map(rows.map((r) => [r.typeId, r])),
@@ -172,7 +179,9 @@ function Workbench() {
         <div className="flex flex-col items-end gap-1">
           <button
             onClick={calculate}
-            disabled={run.isPending || selectedCount < 2 || categoryIds.size === 0}
+            disabled={
+              run.isPending || selectedCount < 2 || categoryIds.size === 0
+            }
             className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
             title={
               selectedCount < 2
@@ -200,7 +209,9 @@ function Workbench() {
                 <label
                   key={r.id}
                   className={`flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 text-xs ${
-                    on ? "bg-zinc-700 text-zinc-100" : "bg-zinc-800 text-zinc-400"
+                    on
+                      ? "bg-zinc-700 text-zinc-100"
+                      : "bg-zinc-800 text-zinc-400"
                   }`}
                 >
                   <input
@@ -225,7 +236,9 @@ function Workbench() {
                 <label
                   key={c.id}
                   className={`flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 text-xs ${
-                    on ? "bg-zinc-700 text-zinc-100" : "bg-zinc-800 text-zinc-400"
+                    on
+                      ? "bg-zinc-700 text-zinc-100"
+                      : "bg-zinc-800 text-zinc-400"
                   }`}
                 >
                   <input
@@ -248,7 +261,9 @@ function Workbench() {
             </button>
             <button
               type="button"
-              onClick={() => setCategoryIds(new Set(allCategories.map((c) => c.id)))}
+              onClick={() =>
+                setCategoryIds(new Set(allCategories.map((c) => c.id)))
+              }
               className="rounded border border-zinc-700 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800"
             >
               Select all
@@ -266,10 +281,22 @@ function Workbench() {
           </div>
         </Field>
         <div className="grid grid-cols-3 gap-3">
-          <NumField label="Broker fee %" value={brokerPct} onChange={setBrokerPct} />
+          <NumField
+            label="Broker fee %"
+            value={brokerPct}
+            onChange={setBrokerPct}
+          />
           <NumField label="Sales tax %" value={taxPct} onChange={setTaxPct} />
-          <NumField label="Shipping ISK/m³" value={shippingRate} onChange={setShippingRate} />
-          <NumField label="Stock days" value={purchaseDays} onChange={setPurchaseDays} />
+          <NumField
+            label="Shipping ISK/m³"
+            value={shippingRate}
+            onChange={setShippingRate}
+          />
+          <NumField
+            label="Stock days"
+            value={purchaseDays}
+            onChange={setPurchaseDays}
+          />
           <Field label="Min profit/unit">
             <input
               type="number"
@@ -313,11 +340,14 @@ function Workbench() {
       <div className="mt-3">
         {tab === "opportunities" &&
           (run.isError ? (
-            <div className="text-sm text-rose-400">Failed: {String(run.error)}</div>
+            <div className="text-sm text-rose-400">
+              Failed: {String(run.error)}
+            </div>
           ) : run.isPending ? (
             <Centered>
               Pricing {categoryIds.size} categor
-              {categoryIds.size === 1 ? "y" : "ies"} across {selectedCount} hubs…
+              {categoryIds.size === 1 ? "y" : "ies"} across {selectedCount}{" "}
+              hubs…
             </Centered>
           ) : (
             <div>
@@ -392,18 +422,25 @@ type DaySortKey =
   | "daysOfSupply";
 
 const DAY_COLUMNS: SortColumn<DaySortKey>[] = [
-  { key: "name", label: "Item", numeric: false, description: "The item, with its best buy→sell route below." },
+  {
+    key: "name",
+    label: "Item",
+    numeric: false,
+    description: "The item, with its best buy→sell route below.",
+  },
   {
     key: "buyPrice",
     label: "Buy",
     numeric: true,
-    description: "Acquisition price at the cheapest hub (realistic sell price you buy off).",
+    description:
+      "Acquisition price at the cheapest hub (realistic sell price you buy off).",
   },
   {
     key: "sellPrice",
     label: "Sell",
     numeric: true,
-    description: "Sale price at the dearest hub (realistic sell price you relist at).",
+    description:
+      "Sale price at the dearest hub (realistic sell price you relist at).",
   },
   {
     key: "profitPerUnit",
@@ -421,13 +458,15 @@ const DAY_COLUMNS: SortColumn<DaySortKey>[] = [
     key: "iskPerM3",
     label: "ISK/m³",
     numeric: true,
-    description: "Profit per m³ of cargo — the metric a hauler optimizes (cargo-bound).",
+    description:
+      "Profit per m³ of cargo — the metric a hauler optimizes (cargo-bound).",
   },
   {
     key: "totalProfit",
     label: "Total",
     numeric: true,
-    description: "Profit at the suggested quantity (profit/unit × suggested qty).",
+    description:
+      "Profit at the suggested quantity (profit/unit × suggested qty).",
   },
   {
     key: "suggestedQty",
@@ -445,13 +484,15 @@ const DAY_COLUMNS: SortColumn<DaySortKey>[] = [
     key: "destVolume",
     label: "Sell vol",
     numeric: true,
-    description: "Average units traded per day at the sell hub — how much you can offload.",
+    description:
+      "Average units traded per day at the sell hub — how much you can offload.",
   },
   {
     key: "daysOfSupply",
     label: "Supply",
     numeric: true,
-    description: "Sell-hub order-book supply ÷ daily-traded — lower clears faster.",
+    description:
+      "Sell-hub order-book supply ÷ daily-traded — lower clears faster.",
   },
 ];
 
@@ -501,12 +542,19 @@ function DayTradeTable({
         </thead>
         <tbody>
           {sorted.map((r) => (
-            <tr key={r.typeId} className="border-t border-zinc-800 hover:bg-zinc-800/40">
+            <tr
+              key={r.typeId}
+              className="border-t border-zinc-800 hover:bg-zinc-800/40"
+            >
               <td className="px-2">
                 <button
                   onClick={() => onFavorite(r)}
                   title="Favorite"
-                  className={r.favorite ? "text-amber-400" : "text-zinc-600 hover:text-amber-400"}
+                  className={
+                    r.favorite
+                      ? "text-amber-400"
+                      : "text-zinc-600 hover:text-amber-400"
+                  }
                 >
                   ★
                 </button>
@@ -557,13 +605,17 @@ function DayTradeTable({
                 {formatInt(r.suggestedQty)}
               </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {r.volumeM3.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                {r.volumeM3.toLocaleString(undefined, {
+                  maximumFractionDigits: 2,
+                })}
               </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                 {formatInt(r.destVolume)}
               </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {r.daysOfSupply.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                {r.daysOfSupply.toLocaleString(undefined, {
+                  maximumFractionDigits: 1,
+                })}
               </td>
             </tr>
           ))}

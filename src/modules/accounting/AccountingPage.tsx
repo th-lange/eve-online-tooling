@@ -8,7 +8,10 @@ import {
 } from "../../lib/api";
 import { formatInt, formatIsk, sortRows } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
-import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
+import {
+  SortHeaderCell,
+  type SortColumn,
+} from "../../components/SortHeaderCell";
 
 type Tab = "wallet" | "profit";
 
@@ -42,7 +45,9 @@ export function AccountingPage() {
             key={t}
             onClick={() => setTab(t)}
             className={`rounded px-3 py-1.5 text-sm ${
-              tab === t ? "bg-zinc-700 text-zinc-100" : "text-zinc-400 hover:text-zinc-200"
+              tab === t
+                ? "bg-zinc-700 text-zinc-100"
+                : "text-zinc-400 hover:text-zinc-200"
             }`}
           >
             {t === "wallet" ? "Wallet" : "Profit (FIFO)"}
@@ -64,7 +69,10 @@ export function AccountingPage() {
         ) : profit.data ? (
           <Profit d={profit.data} />
         ) : (
-          <Hint>Hit Sync (on the Wallet tab first) to compute realized profit from your transactions.</Hint>
+          <Hint>
+            Hit Sync (on the Wallet tab first) to compute realized profit from
+            your transactions.
+          </Hint>
         )}
       </div>
     </div>
@@ -73,25 +81,72 @@ export function AccountingPage() {
 
 type PivotSortKey = "refType" | "income" | "expense" | "net";
 const PIVOT_COLUMNS: SortColumn<PivotSortKey>[] = [
-  { key: "refType", label: "Type", numeric: false, description: "Transaction category." },
-  { key: "income", label: "Income", numeric: true, description: "Total credited." },
-  { key: "expense", label: "Expense", numeric: true, description: "Total debited." },
+  {
+    key: "refType",
+    label: "Type",
+    numeric: false,
+    description: "Transaction category.",
+  },
+  {
+    key: "income",
+    label: "Income",
+    numeric: true,
+    description: "Total credited.",
+  },
+  {
+    key: "expense",
+    label: "Expense",
+    numeric: true,
+    description: "Total debited.",
+  },
   { key: "net", label: "Net", numeric: true, description: "Income − expense." },
 ];
 const PIVOT_KEYS = PIVOT_COLUMNS.map((c) => c.key);
 
 type RecentSortKey = "date" | "refType" | "amount" | "balance";
 const RECENT_COLUMNS: SortColumn<RecentSortKey>[] = [
-  { key: "date", label: "Date / time", numeric: false, description: "When the entry posted (UTC)." },
-  { key: "refType", label: "Type", numeric: false, description: "Transaction category." },
-  { key: "amount", label: "Amount", numeric: true, description: "Signed ISK movement." },
-  { key: "balance", label: "Balance", numeric: true, description: "Wallet balance after the entry." },
+  {
+    key: "date",
+    label: "Date / time",
+    numeric: false,
+    description: "When the entry posted (UTC).",
+  },
+  {
+    key: "refType",
+    label: "Type",
+    numeric: false,
+    description: "Transaction category.",
+  },
+  {
+    key: "amount",
+    label: "Amount",
+    numeric: true,
+    description: "Signed ISK movement.",
+  },
+  {
+    key: "balance",
+    label: "Balance",
+    numeric: true,
+    description: "Wallet balance after the entry.",
+  },
 ];
 const RECENT_KEYS = RECENT_COLUMNS.map((c) => c.key);
 
 function Wallet({ d }: { d: WalletView }) {
-  const pivotSort = usePersistentSort<PivotSortKey>("sort.wallet.pivot", PIVOT_KEYS, "net", "desc", ["refType"]);
-  const recentSort = usePersistentSort<RecentSortKey>("sort.wallet.recent", RECENT_KEYS, "date", "desc", ["date", "refType"]);
+  const pivotSort = usePersistentSort<PivotSortKey>(
+    "sort.wallet.pivot",
+    PIVOT_KEYS,
+    "net",
+    "desc",
+    ["refType"],
+  );
+  const recentSort = usePersistentSort<RecentSortKey>(
+    "sort.wallet.recent",
+    RECENT_KEYS,
+    "date",
+    "desc",
+    ["date", "refType"],
+  );
   const pivots = sortRows(
     d.pivots.map((p) => ({ ...p, net: p.income - p.expense })),
     pivotSort.sortKey,
@@ -102,7 +157,11 @@ function Wallet({ d }: { d: WalletView }) {
     <div>
       <div className="mb-3 flex flex-wrap gap-6 text-sm">
         <Stat label="Balance" value={formatIsk(d.balance)} />
-        <Stat label="Income (all time)" value={formatIsk(d.incomeTotal)} accent />
+        <Stat
+          label="Income (all time)"
+          value={formatIsk(d.incomeTotal)}
+          accent
+        />
         <Stat label="Expense (all time)" value={formatIsk(d.expenseTotal)} />
         <Stat label="Journal entries" value={formatInt(d.entryCount)} />
         <Stat label="Transactions" value={formatInt(d.transactionCount)} />
@@ -121,7 +180,9 @@ function Wallet({ d }: { d: WalletView }) {
                 <td className="px-3 py-1.5 text-right tabular-nums text-rose-400">
                   {p.expense > 0 ? formatIsk(p.expense) : "—"}
                 </td>
-                <td className="px-3 py-1.5 text-right tabular-nums">{formatIsk(p.net)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">
+                  {formatIsk(p.net)}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -134,7 +195,9 @@ function Wallet({ d }: { d: WalletView }) {
           <tbody>
             {recent.map((e, i) => (
               <tr key={i} className="border-t border-zinc-800 text-zinc-300">
-                <td className="px-3 py-1 whitespace-nowrap text-zinc-400">{fmtDate(e.date)}</td>
+                <td className="px-3 py-1 whitespace-nowrap text-zinc-400">
+                  {fmtDate(e.date)}
+                </td>
                 <td className="px-3 py-1">{e.refType.replace(/_/g, " ")}</td>
                 <td
                   className={`px-3 py-1 text-right tabular-nums ${
@@ -143,7 +206,9 @@ function Wallet({ d }: { d: WalletView }) {
                 >
                   {formatIsk(e.amount)}
                 </td>
-                <td className="px-3 py-1 text-right tabular-nums text-zinc-400">{formatIsk(e.balance)}</td>
+                <td className="px-3 py-1 text-right tabular-nums text-zinc-400">
+                  {formatIsk(e.balance)}
+                </td>
               </tr>
             ))}
             {recent.length === 0 && (
@@ -160,24 +225,60 @@ function Wallet({ d }: { d: WalletView }) {
   );
 }
 
-type ProfitSortKey = "name" | "unitsSold" | "revenue" | "cost" | "profit" | "lastSold";
+type ProfitSortKey =
+  "name" | "unitsSold" | "revenue" | "cost" | "profit" | "lastSold";
 const PROFIT_COLUMNS: SortColumn<ProfitSortKey>[] = [
   { key: "name", label: "Item", numeric: false, description: "The item sold." },
-  { key: "unitsSold", label: "Sold", numeric: true, description: "Units sold." },
-  { key: "revenue", label: "Revenue", numeric: true, description: "Total sale proceeds." },
-  { key: "cost", label: "Cost (FIFO)", numeric: true, description: "FIFO cost of the sold units." },
-  { key: "profit", label: "Profit", numeric: true, description: "Revenue − cost." },
-  { key: "lastSold", label: "Last sold", numeric: false, description: "Date of the most recent sale." },
+  {
+    key: "unitsSold",
+    label: "Sold",
+    numeric: true,
+    description: "Units sold.",
+  },
+  {
+    key: "revenue",
+    label: "Revenue",
+    numeric: true,
+    description: "Total sale proceeds.",
+  },
+  {
+    key: "cost",
+    label: "Cost (FIFO)",
+    numeric: true,
+    description: "FIFO cost of the sold units.",
+  },
+  {
+    key: "profit",
+    label: "Profit",
+    numeric: true,
+    description: "Revenue − cost.",
+  },
+  {
+    key: "lastSold",
+    label: "Last sold",
+    numeric: false,
+    description: "Date of the most recent sale.",
+  },
 ];
 const PROFIT_KEYS = PROFIT_COLUMNS.map((c) => c.key);
 
 function Profit({ d }: { d: ProfitView }) {
-  const sort = usePersistentSort<ProfitSortKey>("sort.profit", PROFIT_KEYS, "profit", "desc", ["name", "lastSold"]);
+  const sort = usePersistentSort<ProfitSortKey>(
+    "sort.profit",
+    PROFIT_KEYS,
+    "profit",
+    "desc",
+    ["name", "lastSold"],
+  );
   const rows = sortRows(d.rows, sort.sortKey, sort.sortDir);
   return (
     <div>
       <div className="mb-3">
-        <Stat label="Total realized profit" value={formatIsk(d.totalProfit)} accent />
+        <Stat
+          label="Total realized profit"
+          value={formatIsk(d.totalProfit)}
+          accent
+        />
       </div>
       <div className="overflow-auto rounded border border-zinc-800">
         <table className="w-full text-sm">
@@ -196,9 +297,15 @@ function Profit({ d }: { d: ProfitView }) {
                     </span>
                   )}
                 </td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">{formatInt(r.unitsSold)}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">{formatIsk(r.revenue)}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">{formatIsk(r.cost)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                  {formatInt(r.unitsSold)}
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                  {formatIsk(r.revenue)}
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                  {formatIsk(r.cost)}
+                </td>
                 <td
                   className={`px-3 py-1.5 text-right tabular-nums ${
                     r.profit >= 0 ? "text-emerald-400" : "text-rose-400"
@@ -206,7 +313,9 @@ function Profit({ d }: { d: ProfitView }) {
                 >
                   {formatIsk(r.profit)}
                 </td>
-                <td className="px-3 py-1.5 text-zinc-500">{fmtDate(r.lastSold)}</td>
+                <td className="px-3 py-1.5 text-zinc-500">
+                  {fmtDate(r.lastSold)}
+                </td>
               </tr>
             ))}
             {d.rows.length === 0 && (
@@ -256,21 +365,36 @@ function fmtDate(iso: string): string {
   return d.toISOString().slice(0, 16).replace("T", " ");
 }
 
-function Stat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+function Stat({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent?: boolean;
+}) {
   return (
     <div>
       <div className="text-xs text-zinc-500">{label}</div>
-      <div className={`tabular-nums ${accent ? "text-emerald-400" : "text-zinc-200"}`}>{value}</div>
+      <div
+        className={`tabular-nums ${accent ? "text-emerald-400" : "text-zinc-200"}`}
+      >
+        {value}
+      </div>
     </div>
   );
 }
 function Hint({ children }: { children: React.ReactNode }) {
-  return <div className="p-8 text-center text-sm text-zinc-500">{children}</div>;
+  return (
+    <div className="p-8 text-center text-sm text-zinc-500">{children}</div>
+  );
 }
 function Err({ e }: { e: unknown }) {
   return (
     <div className="p-6 text-sm text-rose-400">
-      {String(e)} — log in a character and enable the wallet scope on your EVE app.
+      {String(e)} — log in a character and enable the wallet scope on your EVE
+      app.
     </div>
   );
 }

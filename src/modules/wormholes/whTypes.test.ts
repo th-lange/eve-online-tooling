@@ -28,7 +28,9 @@ const TYPES: WormholeType[] = [
 describe("whTypeByCode", () => {
   it("matches case-insensitively and trims", () => {
     expect(whTypeByCode("n766", TYPES)?.code).toBe("N766");
-    expect(whTypeByCode("  K162 ", TYPES)?.destClassLabel).toBe("exit (variable)");
+    expect(whTypeByCode("  K162 ", TYPES)?.destClassLabel).toBe(
+      "exit (variable)",
+    );
   });
   it("returns undefined for empty or unknown codes", () => {
     expect(whTypeByCode("", TYPES)).toBeUndefined();

@@ -18,7 +18,10 @@ import { SdeSetup } from "../production/SdeSetup";
 import { formatInt } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { usePersistentState } from "../../lib/usePersistentState";
-import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
+import {
+  SortHeaderCell,
+  type SortColumn,
+} from "../../components/SortHeaderCell";
 import { DataAge } from "../../components/DataAge";
 import {
   SystemGraph,
@@ -47,7 +50,10 @@ function Workbench() {
   const [mode, setMode] = usePersistentState<Mode>("route.mode", "all");
   const [depth, setDepth] = usePersistentState("route.depth", 2);
   // Neighbourhood centre: a typed system, or the live "my location".
-  const [centre, setCentre] = usePersistentState<SystemMatch | null>("route.centre", null);
+  const [centre, setCentre] = usePersistentState<SystemMatch | null>(
+    "route.centre",
+    null,
+  );
   const [fromMe, setFromMe] = usePersistentState("route.fromMe", false);
   const [auto, setAuto] = usePersistentState("route.auto", false);
   const [query, setQuery] = useState("");
@@ -57,7 +63,10 @@ function Workbench() {
     queryKey: ["route", "systemActivity"],
     queryFn: () => systemActivity(false),
   });
-  const trail = useQuery({ queryKey: ["route", "breadcrumb"], queryFn: routeBreadcrumb });
+  const trail = useQuery({
+    queryKey: ["route", "breadcrumb"],
+    queryFn: routeBreadcrumb,
+  });
   const matches = useQuery({
     queryKey: ["route", "systemSearch", query],
     queryFn: () => systemSearch(query),
@@ -122,14 +131,17 @@ function Workbench() {
   }, [auto, fromMe, centre, depth]);
 
   const source: SystemActivity[] =
-    mode === "neighbouring" ? hood.data?.nodes ?? [] : activity.data ?? [];
+    mode === "neighbouring" ? (hood.data?.nodes ?? []) : (activity.data ?? []);
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return source;
-    return source.filter((r) => `${r.name} ${r.region}`.toLowerCase().includes(q));
+    return source.filter((r) =>
+      `${r.name} ${r.region}`.toLowerCase().includes(q),
+    );
   }, [source, search]);
 
-  const showResults = query.trim().length >= 2 && (matches.data?.length ?? 0) > 0;
+  const showResults =
+    query.trim().length >= 2 && (matches.data?.length ?? 0) > 0;
   const entries = trail.data ?? [];
 
   return (
@@ -150,12 +162,17 @@ function Workbench() {
           >
             {activity.isFetching ? "Loading…" : "Refresh"}
           </button>
-          <DataAge updatedAt={activity.dataUpdatedAt} fetching={activity.isFetching} />
+          <DataAge
+            updatedAt={activity.dataUpdatedAt}
+            fetching={activity.isFetching}
+          />
         </div>
       </div>
 
       {activity.isError && (
-        <div className="mt-3 text-sm text-rose-400">Failed: {String(activity.error)}</div>
+        <div className="mt-3 text-sm text-rose-400">
+          Failed: {String(activity.error)}
+        </div>
       )}
 
       {/* Merged focus: type a system OR use your live location; depth + update. */}
@@ -186,7 +203,9 @@ function Workbench() {
           <button
             onClick={() => void focusMyLocation()}
             className={`rounded border px-2 py-1 text-xs ${
-              fromMe ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+              fromMe
+                ? "border-emerald-600 text-emerald-300"
+                : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
             }`}
             title="Centre on your current system (records the travel trail)"
           >
@@ -199,7 +218,9 @@ function Workbench() {
                 key={d}
                 onClick={() => changeDepth(d)}
                 className={`rounded px-2 py-0.5 ${
-                  depth === d ? "bg-zinc-700 text-zinc-100" : "bg-zinc-800 text-zinc-400"
+                  depth === d
+                    ? "bg-zinc-700 text-zinc-100"
+                    : "bg-zinc-800 text-zinc-400"
                 }`}
               >
                 {d}
@@ -213,13 +234,18 @@ function Workbench() {
             Update
           </button>
           <label className="flex cursor-pointer items-center gap-1.5 text-xs text-zinc-400">
-            <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.currentTarget.checked)} />
+            <input
+              type="checkbox"
+              checked={auto}
+              onChange={(e) => setAuto(e.currentTarget.checked)}
+            />
             Auto 30s
           </label>
           {centre && (
             <span className="text-xs text-zinc-500">
               Centre: <span className="text-zinc-300">{centre.name}</span>
-              {fromMe ? " (you)" : ""} · {hood.isFetching ? "loading…" : "shown below"}
+              {fromMe ? " (you)" : ""} ·{" "}
+              {hood.isFetching ? "loading…" : "shown below"}
             </span>
           )}
           {entries.length > 0 && (
@@ -240,7 +266,8 @@ function Workbench() {
             {locError ?? String(hood.error)}
             {locError && (
               <span className="ml-1 text-zinc-500">
-                (needs <code>esi-location.read_location.v1</code> — re-login if just enabled)
+                (needs <code>esi-location.read_location.v1</code> — re-login if
+                just enabled)
               </span>
             )}
           </div>
@@ -248,10 +275,15 @@ function Workbench() {
 
         {entries.length > 0 && (
           <div className="mt-3">
-            <div className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">Travel trail</div>
+            <div className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">
+              Travel trail
+            </div>
             <div className="flex flex-wrap items-center gap-1">
               {entries.map((e, i) => (
-                <span key={`${e.systemId}-${e.enteredAt}`} className="flex items-center gap-1">
+                <span
+                  key={`${e.systemId}-${e.enteredAt}`}
+                  className="flex items-center gap-1"
+                >
                   {i > 0 && <span className="text-zinc-600">→</span>}
                   <SystemHop entry={e} current={i === entries.length - 1} />
                 </span>
@@ -270,7 +302,9 @@ function Workbench() {
           <button
             onClick={() => setMode("all")}
             className={`rounded px-3 py-1 ${
-              mode === "all" ? "bg-zinc-700 text-zinc-100" : "text-zinc-400 hover:text-zinc-200"
+              mode === "all"
+                ? "bg-zinc-700 text-zinc-100"
+                : "text-zinc-400 hover:text-zinc-200"
             }`}
           >
             All systems
@@ -280,7 +314,9 @@ function Workbench() {
             disabled={!centre}
             title={centre ? undefined : "Set a Focus above first"}
             className={`rounded px-3 py-1 disabled:opacity-40 ${
-              mode === "neighbouring" ? "bg-zinc-700 text-zinc-100" : "text-zinc-400 hover:text-zinc-200"
+              mode === "neighbouring"
+                ? "bg-zinc-700 text-zinc-100"
+                : "text-zinc-400 hover:text-zinc-200"
             }`}
           >
             Around{centre ? ` · ${centre.name}` : ""}
@@ -313,14 +349,20 @@ function Workbench() {
  * the nearest known *public* (EVE-Scout Thera/Turnur) entrance — ESI can't
  * reveal un-scanned signatures, so it's honest about that. In w-space it falls
  * back to the nearest scanned exit over your mapped chain. */
-function NearestWormholeCard({ onFocus }: { onFocus: (m: SystemMatch) => void }) {
+function NearestWormholeCard({
+  onFocus,
+}: {
+  onFocus: (m: SystemMatch) => void;
+}) {
   const find = useMutation({ mutationFn: routeNearestWormhole });
   const r: NearestWormhole | undefined = find.data;
 
   return (
     <div className="mt-3 rounded border border-zinc-800 bg-zinc-900/40 p-3">
       <div className="flex flex-wrap items-center gap-3">
-        <span className="text-sm font-semibold text-zinc-300">Nearest wormhole</span>
+        <span className="text-sm font-semibold text-zinc-300">
+          Nearest wormhole
+        </span>
         <button
           onClick={() => find.mutate()}
           disabled={find.isPending}
@@ -333,10 +375,14 @@ function NearestWormholeCard({ onFocus }: { onFocus: (m: SystemMatch) => void })
         </span>
       </div>
 
-      {find.isError && <div className="mt-2 text-xs text-rose-400">{String(find.error)}</div>}
+      {find.isError && (
+        <div className="mt-2 text-xs text-rose-400">{String(find.error)}</div>
+      )}
 
       {r && !r.found && (
-        <div className="mt-2 text-sm text-zinc-400">{r.message ?? "Nothing found."}</div>
+        <div className="mt-2 text-sm text-zinc-400">
+          {r.message ?? "Nothing found."}
+        </div>
       )}
 
       {r && r.found && (
@@ -356,11 +402,15 @@ function NearestWormholeCard({ onFocus }: { onFocus: (m: SystemMatch) => void })
               {r.intoName ? `${r.intoName} connection` : "wormhole"}
               {r.whType ? ` · ${r.whType}` : ""}
               {r.maxShipSize ? ` · ${r.maxShipSize}` : ""}
-              {r.expiresInHours != null ? ` · EOL in ~${r.expiresInHours.toFixed(0)}h` : ""}
+              {r.expiresInHours != null
+                ? ` · EOL in ~${r.expiresInHours.toFixed(0)}h`
+                : ""}
             </span>
           )}
           <button
-            onClick={() => onFocus({ id: r.entranceSystemId, name: r.entranceName })}
+            onClick={() =>
+              onFocus({ id: r.entranceSystemId, name: r.entranceName })
+            }
             className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
           >
             Show around
@@ -407,7 +457,10 @@ function TravelGraph({ entries }: { entries: BreadcrumbEntry[] }) {
   return (
     <div className="mt-3">
       <div className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">
-        Travel graph <span className="normal-case tracking-normal text-zinc-600">· purple = w-space transition</span>
+        Travel graph{" "}
+        <span className="normal-case tracking-normal text-zinc-600">
+          · purple = w-space transition
+        </span>
       </div>
       <SystemGraph
         nodes={[...nodeMap.values()]}
@@ -419,7 +472,13 @@ function TravelGraph({ entries }: { entries: BreadcrumbEntry[] }) {
   );
 }
 
-function SystemHop({ entry, current }: { entry: BreadcrumbEntry; current: boolean }) {
+function SystemHop({
+  entry,
+  current,
+}: {
+  entry: BreadcrumbEntry;
+  current: boolean;
+}) {
   return (
     <span
       className={`rounded border px-2 py-0.5 text-xs ${
@@ -431,7 +490,9 @@ function SystemHop({ entry, current }: { entry: BreadcrumbEntry; current: boolea
         <span className="text-purple-300">{entry.name}</span>
       ) : (
         <>
-          <span className={secColor(entry.security)}>{entry.security.toFixed(1)}</span>{" "}
+          <span className={secColor(entry.security)}>
+            {entry.security.toFixed(1)}
+          </span>{" "}
           <span className="text-zinc-200">{entry.name}</span>
         </>
       )}
@@ -449,13 +510,48 @@ type ActSortKey =
   | "npcKills";
 
 const COLUMNS: SortColumn<ActSortKey>[] = [
-  { key: "name", label: "System", numeric: false, description: "Solar system." },
-  { key: "region", label: "Region", numeric: false, description: "Region the system is in." },
-  { key: "security", label: "Sec", numeric: true, description: "Security status (−1.0 … 1.0)." },
-  { key: "jumps", label: "Jumps", numeric: true, description: "Ship jumps into the system in the last hour." },
-  { key: "shipKills", label: "Ships", numeric: true, description: "Ship kills in the last hour." },
-  { key: "podKills", label: "Pods", numeric: true, description: "Pod kills in the last hour — the PvP/gank signal." },
-  { key: "npcKills", label: "NPCs", numeric: true, description: "NPC kills in the last hour — ratting/activity." },
+  {
+    key: "name",
+    label: "System",
+    numeric: false,
+    description: "Solar system.",
+  },
+  {
+    key: "region",
+    label: "Region",
+    numeric: false,
+    description: "Region the system is in.",
+  },
+  {
+    key: "security",
+    label: "Sec",
+    numeric: true,
+    description: "Security status (−1.0 … 1.0).",
+  },
+  {
+    key: "jumps",
+    label: "Jumps",
+    numeric: true,
+    description: "Ship jumps into the system in the last hour.",
+  },
+  {
+    key: "shipKills",
+    label: "Ships",
+    numeric: true,
+    description: "Ship kills in the last hour.",
+  },
+  {
+    key: "podKills",
+    label: "Pods",
+    numeric: true,
+    description: "Pod kills in the last hour — the PvP/gank signal.",
+  },
+  {
+    key: "npcKills",
+    label: "NPCs",
+    numeric: true,
+    description: "NPC kills in the last hour — ratting/activity.",
+  },
 ];
 const KEYS = COLUMNS.map((c) => c.key);
 
@@ -495,25 +591,41 @@ function ActivityTable({ rows }: { rows: SystemActivity[] }) {
         </thead>
         <tbody>
           {sorted.map((r) => (
-            <tr key={r.systemId} className="border-t border-zinc-800 text-zinc-300 hover:bg-zinc-800/40">
+            <tr
+              key={r.systemId}
+              className="border-t border-zinc-800 text-zinc-300 hover:bg-zinc-800/40"
+            >
               <td className="px-3 py-1.5 text-zinc-200">{r.name}</td>
               <td className="px-3 py-1.5 text-zinc-400">{r.region}</td>
-              <td className={`px-3 py-1.5 text-right tabular-nums ${secColor(r.security)}`}>
+              <td
+                className={`px-3 py-1.5 text-right tabular-nums ${secColor(r.security)}`}
+              >
                 {r.security.toFixed(1)}
               </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">{formatInt(r.jumps)}</td>
-              <td className={`px-3 py-1.5 text-right tabular-nums ${r.shipKills > 0 ? "text-rose-400" : "text-zinc-500"}`}>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+                {formatInt(r.jumps)}
+              </td>
+              <td
+                className={`px-3 py-1.5 text-right tabular-nums ${r.shipKills > 0 ? "text-rose-400" : "text-zinc-500"}`}
+              >
                 {formatInt(r.shipKills)}
               </td>
-              <td className={`px-3 py-1.5 text-right tabular-nums ${r.podKills > 0 ? "text-rose-300" : "text-zinc-500"}`}>
+              <td
+                className={`px-3 py-1.5 text-right tabular-nums ${r.podKills > 0 ? "text-rose-300" : "text-zinc-500"}`}
+              >
                 {formatInt(r.podKills)}
               </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">{formatInt(r.npcKills)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                {formatInt(r.npcKills)}
+              </td>
             </tr>
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={KEYS.length} className="px-3 py-6 text-center text-zinc-500">
+              <td
+                colSpan={KEYS.length}
+                className="px-3 py-6 text-center text-zinc-500"
+              >
                 No system activity (load may be in progress).
               </td>
             </tr>
@@ -532,5 +644,7 @@ function secColor(sec: number): string {
 }
 
 function Centered({ children }: { children: ReactNode }) {
-  return <div className="p-10 text-center text-sm text-zinc-500">{children}</div>;
+  return (
+    <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
+  );
 }

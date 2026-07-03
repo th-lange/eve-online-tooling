@@ -49,8 +49,14 @@ function playAlarm() {
       osc.type = "square";
       osc.frequency.value = freq;
       gain.gain.setValueAtTime(0.0001, ctx.currentTime + start);
-      gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + start + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + 0.18);
+      gain.gain.exponentialRampToValueAtTime(
+        0.25,
+        ctx.currentTime + start + 0.02,
+      );
+      gain.gain.exponentialRampToValueAtTime(
+        0.0001,
+        ctx.currentTime + start + 0.18,
+      );
       osc.start(ctx.currentTime + start);
       osc.stop(ctx.currentTime + start + 0.2);
     };
@@ -78,7 +84,9 @@ export function LocalIntelPage() {
   const [newIds, setNewIds] = useState<Set<number>>(new Set());
   // EVE logs folder (Chatlogs); persisted. Used to prefill names from the
   // newest Local log — only pilots who chatted (logs lack the member list).
-  const [logsDir, setLogsDir] = useState(() => localStorage.getItem("eveLogsDir") ?? "");
+  const [logsDir, setLogsDir] = useState(
+    () => localStorage.getItem("eveLogsDir") ?? "",
+  );
   // Prefill the Chatlogs folder from the OS default when we have nothing yet.
   useEffect(() => {
     if (logsDir) return;
@@ -105,7 +113,8 @@ export function LocalIntelPage() {
 
   const zkillRun = useMutation({
     mutationFn: (ids: number[]) => localintelZkill(ids),
-    onSuccess: (stats) => setZkill(new Map(stats.map((s) => [s.characterId, s]))),
+    onSuccess: (stats) =>
+      setZkill(new Map(stats.map((s) => [s.characterId, s]))),
   });
 
   const scan = useMutation({
@@ -118,11 +127,14 @@ export function LocalIntelPage() {
       // Pilots new since the last scan (first scan: everyone is "new").
       const prev = prevIdsRef.current;
       const fresh = new Set(
-        res.pilots.filter((p) => !prev.has(p.characterId)).map((p) => p.characterId),
+        res.pilots
+          .filter((p) => !prev.has(p.characterId))
+          .map((p) => p.characterId),
       );
       setNewIds(fresh);
       const isWatch = (p: LocalPilot) =>
-        watchIds.has(p.corporationId) || (p.allianceId != null && watchIds.has(p.allianceId));
+        watchIds.has(p.corporationId) ||
+        (p.allianceId != null && watchIds.has(p.allianceId));
       const arrivals = res.pilots.filter((p) => fresh.has(p.characterId));
       const newWatched = arrivals.filter(isWatch);
       const newReds = arrivals.filter((p) => p.threat === "red");
@@ -133,12 +145,18 @@ export function LocalIntelPage() {
       if (newWatched.length > 0) {
         notify(
           "⚠️ Watchlisted pilots entered local",
-          `${newWatched.length}: ${newWatched.slice(0, 5).map((p) => p.name).join(", ")}`,
+          `${newWatched.length}: ${newWatched
+            .slice(0, 5)
+            .map((p) => p.name)
+            .join(", ")}`,
         );
       } else if (alertAnyRed && newReds.length > 0) {
         notify("⚠️ Reds entered local", `${newReds.length} hostile pilot(s)`);
       } else if (alertNeutrals && newNeutrals.length > 0) {
-        notify("⚠️ Neutrals entered local", `${newNeutrals.length} unknown pilot(s)`);
+        notify(
+          "⚠️ Neutrals entered local",
+          `${newNeutrals.length} unknown pilot(s)`,
+        );
       }
       const alarm =
         newWatched.length > 0 ||
@@ -153,21 +171,30 @@ export function LocalIntelPage() {
   const setWatch = useMutation({
     mutationFn: (v: { id: number; name: string; add: boolean }) =>
       localintelSetWatchlist(v.id, v.name, v.add),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["localintel", "watchlist"] }),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["localintel", "watchlist"] }),
   });
 
   const result = scan.data;
   const isWatched = (p: LocalPilot) =>
-    watchIds.has(p.corporationId) || (p.allianceId != null && watchIds.has(p.allianceId));
+    watchIds.has(p.corporationId) ||
+    (p.allianceId != null && watchIds.has(p.allianceId));
 
   // Right-rail danger list: player corporations in local you've set a negative
   // (red) standing toward. Player corp ids start at 98,000,000 (NPC corps are
   // far lower), so this skips the empire NPC corps everyone in highsec belongs
   // to. Pilots with no standing set (neutrals/unknowns) aren't flagged here.
   const hostileCorps = useMemo(() => {
-    const map = new Map<number, { id: number; name: string; standing: number; count: number }>();
+    const map = new Map<
+      number,
+      { id: number; name: string; standing: number; count: number }
+    >();
     for (const p of result?.pilots ?? []) {
-      if (p.corporationId >= 98_000_000 && p.standing != null && p.standing < HOSTILE_STANDING) {
+      if (
+        p.corporationId >= 98_000_000 &&
+        p.standing != null &&
+        p.standing < HOSTILE_STANDING
+      ) {
         const ex = map.get(p.corporationId);
         if (ex) {
           ex.count += 1;
@@ -182,12 +209,17 @@ export function LocalIntelPage() {
         }
       }
     }
-    return [...map.values()].sort((a, b) => a.standing - b.standing || b.count - a.count);
+    return [...map.values()].sort(
+      (a, b) => a.standing - b.standing || b.count - a.count,
+    );
   }, [result]);
 
   // Neighbourhood intel: recent kills/jumps in systems around the active
   // character's current location (CCP hourly aggregates, k-space only).
-  const [hoodDepth, setHoodDepth] = usePersistentState("localintel.hoodDepth", 2);
+  const [hoodDepth, setHoodDepth] = usePersistentState(
+    "localintel.hoodDepth",
+    2,
+  );
   const location = useQuery({
     queryKey: ["localintel", "location"],
     queryFn: routeLocation,
@@ -206,138 +238,147 @@ export function LocalIntelPage() {
   return (
     <div className="flex h-full">
       <div className="min-w-0 flex-1 overflow-auto p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Local Intel</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Select-all in the in-game Local member list, copy, and paste it here
-            to classify every pilot by corp/alliance against your character's
-            contacts (blue/red) and standings.
-          </p>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold text-zinc-100">
+              Local Intel
+            </h1>
+            <p className="mt-1 text-sm text-zinc-400">
+              Select-all in the in-game Local member list, copy, and paste it
+              here to classify every pilot by corp/alliance against your
+              character's contacts (blue/red) and standings.
+            </p>
+          </div>
+          <button
+            onClick={() => scan.mutate(text)}
+            disabled={scan.isPending || text.trim() === ""}
+            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+          >
+            {scan.isPending ? "Scanning…" : "Scan local"}
+          </button>
         </div>
-        <button
-          onClick={() => scan.mutate(text)}
-          disabled={scan.isPending || text.trim() === ""}
-          className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-        >
-          {scan.isPending ? "Scanning…" : "Scan local"}
-        </button>
-      </div>
 
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.currentTarget.value)}
-        placeholder="Paste the Local member list (one pilot name per line)…"
-        rows={5}
-        className="mt-4 w-full rounded border border-zinc-800 bg-zinc-900 px-3 py-2 font-mono text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
-      />
-
-      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-400">
-        <input
-          value={logsDir}
-          onChange={(e) => setLogsDir(e.currentTarget.value)}
-          placeholder="EVE Chatlogs folder…"
-          className="w-72 rounded bg-zinc-800 px-2 py-1 text-zinc-100 outline-none placeholder:text-zinc-600"
-          title="e.g. …/ProtonPrefix/drive_c/users/steamuser/Documents/EVE/logs/Chatlogs"
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.currentTarget.value)}
+          placeholder="Paste the Local member list (one pilot name per line)…"
+          rows={5}
+          className="mt-4 w-full rounded border border-zinc-800 bg-zinc-900 px-3 py-2 font-mono text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
         />
-        <button
-          onClick={() => loadLog.mutate()}
-          disabled={logsDir.trim() === "" || loadLog.isPending}
-          className="rounded border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-        >
-          Load from latest Local log
-        </button>
-        {loadLog.isError && <span className="text-rose-400">{String(loadLog.error)}</span>}
-        {loadLog.data && (
-          <span className="text-zinc-500">
-            {loadLog.data.senders.length > 0
-              ? `${loadLog.data.senders.length} speaker(s) from ${loadLog.data.file}`
-              : "no chat found (only pilots who spoke are logged)"}
-          </span>
-        )}
-      </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-zinc-400">
-        <label
-          className="flex cursor-pointer items-center gap-2"
-          title="Alarm when a red enters Local"
-        >
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-400">
           <input
-            type="checkbox"
-            checked={alertAnyRed}
-            onChange={(e) => setAlertAnyRed(e.currentTarget.checked)}
+            value={logsDir}
+            onChange={(e) => setLogsDir(e.currentTarget.value)}
+            placeholder="EVE Chatlogs folder…"
+            className="w-72 rounded bg-zinc-800 px-2 py-1 text-zinc-100 outline-none placeholder:text-zinc-600"
+            title="e.g. …/ProtonPrefix/drive_c/users/steamuser/Documents/EVE/logs/Chatlogs"
           />
-          Alert on any red
-        </label>
-        <label
-          className="flex cursor-pointer items-center gap-2"
-          title="Also alarm when any neutral/unknown pilot enters Local"
-        >
-          <input
-            type="checkbox"
-            checked={alertNeutrals}
-            onChange={(e) => {
-              setAlertNeutrals(e.currentTarget.checked);
-              localStorage.setItem(
-                "localintel.alertNeutrals",
-                e.currentTarget.checked ? "on" : "off",
-              );
-            }}
-          />
-          Alert on neutrals
-        </label>
-        <label className="flex cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            checked={soundOn}
-            onChange={(e) => {
-              setSoundOn(e.currentTarget.checked);
-              localStorage.setItem(
-                "localintel.sound",
-                e.currentTarget.checked ? "on" : "off",
-              );
-              if (e.currentTarget.checked) playAlarm(); // confirm it's audible
-            }}
-          />
-          Sound alarm
-        </label>
-        {(watchlist.data ?? []).length > 0 && (
-          <span>
-            Watching:{" "}
-            {(watchlist.data ?? []).map((w) => (
-              <button
-                key={w.id}
-                onClick={() => setWatch.mutate({ id: w.id, name: w.name, add: false })}
-                title="Remove from watchlist"
-                className="mr-1 rounded bg-amber-900/40 px-1.5 py-0.5 text-amber-300 hover:bg-amber-900/70"
-              >
-                {w.name} ✕
-              </button>
-            ))}
-          </span>
-        )}
-      </div>
-
-      {scan.isError && (
-        <div className="mt-3 text-sm text-rose-400">Failed: {String(scan.error)}</div>
-      )}
-
-      {result && <Summary result={result} />}
-      {result && (
-        <PilotTable
-          pilots={result.pilots}
-          zkill={zkill}
-          zkillLoading={zkillRun.isPending}
-          isWatched={isWatched}
-          newIds={newIds}
-          onWatch={(id, name) => setWatch.mutate({ id, name, add: true })}
-        />
-      )}
-      {result && result.unresolved.length > 0 && (
-        <div className="mt-2 text-xs text-zinc-500">
-          Unresolved ({result.unresolved.length}): {result.unresolved.join(", ")}
+          <button
+            onClick={() => loadLog.mutate()}
+            disabled={logsDir.trim() === "" || loadLog.isPending}
+            className="rounded border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+          >
+            Load from latest Local log
+          </button>
+          {loadLog.isError && (
+            <span className="text-rose-400">{String(loadLog.error)}</span>
+          )}
+          {loadLog.data && (
+            <span className="text-zinc-500">
+              {loadLog.data.senders.length > 0
+                ? `${loadLog.data.senders.length} speaker(s) from ${loadLog.data.file}`
+                : "no chat found (only pilots who spoke are logged)"}
+            </span>
+          )}
         </div>
-      )}
+
+        <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-zinc-400">
+          <label
+            className="flex cursor-pointer items-center gap-2"
+            title="Alarm when a red enters Local"
+          >
+            <input
+              type="checkbox"
+              checked={alertAnyRed}
+              onChange={(e) => setAlertAnyRed(e.currentTarget.checked)}
+            />
+            Alert on any red
+          </label>
+          <label
+            className="flex cursor-pointer items-center gap-2"
+            title="Also alarm when any neutral/unknown pilot enters Local"
+          >
+            <input
+              type="checkbox"
+              checked={alertNeutrals}
+              onChange={(e) => {
+                setAlertNeutrals(e.currentTarget.checked);
+                localStorage.setItem(
+                  "localintel.alertNeutrals",
+                  e.currentTarget.checked ? "on" : "off",
+                );
+              }}
+            />
+            Alert on neutrals
+          </label>
+          <label className="flex cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={soundOn}
+              onChange={(e) => {
+                setSoundOn(e.currentTarget.checked);
+                localStorage.setItem(
+                  "localintel.sound",
+                  e.currentTarget.checked ? "on" : "off",
+                );
+                if (e.currentTarget.checked) playAlarm(); // confirm it's audible
+              }}
+            />
+            Sound alarm
+          </label>
+          {(watchlist.data ?? []).length > 0 && (
+            <span>
+              Watching:{" "}
+              {(watchlist.data ?? []).map((w) => (
+                <button
+                  key={w.id}
+                  onClick={() =>
+                    setWatch.mutate({ id: w.id, name: w.name, add: false })
+                  }
+                  title="Remove from watchlist"
+                  className="mr-1 rounded bg-amber-900/40 px-1.5 py-0.5 text-amber-300 hover:bg-amber-900/70"
+                >
+                  {w.name} ✕
+                </button>
+              ))}
+            </span>
+          )}
+        </div>
+
+        {scan.isError && (
+          <div className="mt-3 text-sm text-rose-400">
+            Failed: {String(scan.error)}
+          </div>
+        )}
+
+        {result && <Summary result={result} />}
+        {result && (
+          <PilotTable
+            pilots={result.pilots}
+            zkill={zkill}
+            zkillLoading={zkillRun.isPending}
+            isWatched={isWatched}
+            newIds={newIds}
+            onWatch={(id, name) => setWatch.mutate({ id, name, add: true })}
+          />
+        )}
+        {result && result.unresolved.length > 0 && (
+          <div className="mt-2 text-xs text-zinc-500">
+            Unresolved ({result.unresolved.length}):{" "}
+            {result.unresolved.join(", ")}
+          </div>
+        )}
       </div>
       <aside className="flex w-64 shrink-0 flex-col overflow-auto border-l border-zinc-800 bg-zinc-900/40">
         <HostileCorpsPanel
@@ -385,9 +426,13 @@ function HostileCorpsPanel({
       <div className="text-xs font-semibold uppercase tracking-wide text-rose-400">
         Hostile corps
       </div>
-      <div className="mb-2 text-[11px] text-zinc-500">player corps · red (standing &lt; 0)</div>
+      <div className="mb-2 text-[11px] text-zinc-500">
+        player corps · red (standing &lt; 0)
+      </div>
       {corps.length === 0 ? (
-        <div className="text-xs text-zinc-600">{scanned ? "None in local." : "Scan to populate."}</div>
+        <div className="text-xs text-zinc-600">
+          {scanned ? "None in local." : "Scan to populate."}
+        </div>
       ) : (
         <ul className="space-y-1">
           {corps.map((c) => (
@@ -492,7 +537,9 @@ function NeighbourhoodPanel({
             key={d}
             onClick={() => onDepth(d)}
             className={`rounded px-1 ${
-              depth === d ? "bg-zinc-700 text-zinc-100" : "bg-zinc-800 text-zinc-400"
+              depth === d
+                ? "bg-zinc-700 text-zinc-100"
+                : "bg-zinc-800 text-zinc-400"
             }`}
           >
             {d}
@@ -503,8 +550,9 @@ function NeighbourhoodPanel({
 
       {locError || !here ? (
         <div className="text-xs text-zinc-600">
-          Needs your in-game location (the <code>esi-location.read_location.v1</code>{" "}
-          scope) — set an active character and re-login if just enabled.
+          Needs your in-game location (the{" "}
+          <code>esi-location.read_location.v1</code> scope) — set an active
+          character and re-login if just enabled.
         </div>
       ) : (
         <>
@@ -557,9 +605,13 @@ function NeighbourhoodPanel({
 function Summary({ result }: { result: LocalScanResult }) {
   return (
     <div className="mt-4 flex items-center gap-4 text-sm">
-      <span className="text-zinc-300">{formatInt(result.pilots.length)} pilots</span>
+      <span className="text-zinc-300">
+        {formatInt(result.pilots.length)} pilots
+      </span>
       <span className="text-rose-400">{formatInt(result.reds)} red</span>
-      <span className="text-zinc-400">{formatInt(result.neutrals)} neutral</span>
+      <span className="text-zinc-400">
+        {formatInt(result.neutrals)} neutral
+      </span>
       <span className="text-sky-400">{formatInt(result.blues)} blue</span>
     </div>
   );
@@ -599,59 +651,78 @@ function PilotTable({
           {pilots.map((p) => {
             const z = zkill.get(p.characterId);
             return (
-            <tr
-              key={p.characterId}
-              className={`border-t border-zinc-800 hover:bg-zinc-800/40 ${
-                isWatched(p) ? "bg-amber-950/30" : ""
-              }`}
-            >
-              <td className="px-3 py-1.5">
-                <span className={dot(p.threat)}>●</span>{" "}
-                <span className="text-zinc-200">{p.name}</span>
-                {newIds.has(p.characterId) && (
-                  <span
-                    className="ml-2 rounded bg-amber-500/20 px-1 text-[10px] font-medium text-amber-300"
-                    title="Entered Local since your last scan"
-                  >
-                    NEW
-                  </span>
-                )}
-              </td>
-              <td className="px-3 py-1.5 text-zinc-400">{p.corporation || "—"}</td>
-              <td className="px-3 py-1.5 text-zinc-400">{p.alliance ?? "—"}</td>
-              <td className={`px-3 py-1.5 text-right tabular-nums ${standingColor(p.threat)}`}>
-                {p.standing == null ? "—" : p.standing.toFixed(1)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums">
-                {z ? (
-                  <span className={dangerColor(z.dangerRatio)} title={`${z.shipsDestroyed} kills / ${z.shipsLost} losses${z.active ? " · recently active" : ""}`}>
-                    {z.dangerRatio}%{z.active ? " ⚡" : ""}
-                  </span>
-                ) : (
-                  <span className="text-zinc-600">—</span>
-                )}
-              </td>
-              <td className="px-3 py-1.5 text-right text-xs">
-                {p.allianceId != null && (
-                  <button
-                    onClick={() => onWatch(p.allianceId!, p.alliance ?? `Alliance ${p.allianceId}`)}
-                    className="mr-1 rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-300 hover:bg-zinc-800"
-                    title="Watch this alliance"
-                  >
-                    +alliance
-                  </button>
-                )}
-                {p.corporationId !== 0 && (
-                  <button
-                    onClick={() => onWatch(p.corporationId, p.corporation || `Corp ${p.corporationId}`)}
-                    className="rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-300 hover:bg-zinc-800"
-                    title="Watch this corporation"
-                  >
-                    +corp
-                  </button>
-                )}
-              </td>
-            </tr>
+              <tr
+                key={p.characterId}
+                className={`border-t border-zinc-800 hover:bg-zinc-800/40 ${
+                  isWatched(p) ? "bg-amber-950/30" : ""
+                }`}
+              >
+                <td className="px-3 py-1.5">
+                  <span className={dot(p.threat)}>●</span>{" "}
+                  <span className="text-zinc-200">{p.name}</span>
+                  {newIds.has(p.characterId) && (
+                    <span
+                      className="ml-2 rounded bg-amber-500/20 px-1 text-[10px] font-medium text-amber-300"
+                      title="Entered Local since your last scan"
+                    >
+                      NEW
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-1.5 text-zinc-400">
+                  {p.corporation || "—"}
+                </td>
+                <td className="px-3 py-1.5 text-zinc-400">
+                  {p.alliance ?? "—"}
+                </td>
+                <td
+                  className={`px-3 py-1.5 text-right tabular-nums ${standingColor(p.threat)}`}
+                >
+                  {p.standing == null ? "—" : p.standing.toFixed(1)}
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums">
+                  {z ? (
+                    <span
+                      className={dangerColor(z.dangerRatio)}
+                      title={`${z.shipsDestroyed} kills / ${z.shipsLost} losses${z.active ? " · recently active" : ""}`}
+                    >
+                      {z.dangerRatio}%{z.active ? " ⚡" : ""}
+                    </span>
+                  ) : (
+                    <span className="text-zinc-600">—</span>
+                  )}
+                </td>
+                <td className="px-3 py-1.5 text-right text-xs">
+                  {p.allianceId != null && (
+                    <button
+                      onClick={() =>
+                        onWatch(
+                          p.allianceId!,
+                          p.alliance ?? `Alliance ${p.allianceId}`,
+                        )
+                      }
+                      className="mr-1 rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-300 hover:bg-zinc-800"
+                      title="Watch this alliance"
+                    >
+                      +alliance
+                    </button>
+                  )}
+                  {p.corporationId !== 0 && (
+                    <button
+                      onClick={() =>
+                        onWatch(
+                          p.corporationId,
+                          p.corporation || `Corp ${p.corporationId}`,
+                        )
+                      }
+                      className="rounded border border-zinc-700 px-1.5 py-0.5 text-zinc-300 hover:bg-zinc-800"
+                      title="Watch this corporation"
+                    >
+                      +corp
+                    </button>
+                  )}
+                </td>
+              </tr>
             );
           })}
           {pilots.length === 0 && (

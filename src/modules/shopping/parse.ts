@@ -16,7 +16,9 @@ export function isNumberToken(t: string): boolean {
  * inventory/copy pastes with trailing columns (`Tritanium⇥1,000⇥Mineral⇥…`).
  * No number ⇒ quantity 1. A quantity-first / number-only line ⇒ `null` (left).
  */
-export function parseLine(raw: string): { name: string; quantity: number } | null {
+export function parseLine(
+  raw: string,
+): { name: string; quantity: number } | null {
   const line = raw.trim();
   if (!line) return null;
   const tokens = line.split(/[\t ]+/).filter(Boolean);

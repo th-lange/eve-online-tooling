@@ -8,9 +8,17 @@ import {
   type ContractRow,
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
-import { formatInt, formatIsk, formatPercent, sortRows } from "../../lib/format";
+import {
+  formatInt,
+  formatIsk,
+  formatPercent,
+  sortRows,
+} from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
-import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
+import {
+  SortHeaderCell,
+  type SortColumn,
+} from "../../components/SortHeaderCell";
 
 const FORGE = 10000002;
 
@@ -32,7 +40,10 @@ function Workbench() {
 
   const num = (s: string) => (s.trim() === "" ? 0 : Number(s));
 
-  const regions = useQuery({ queryKey: ["market", "regions"], queryFn: marketRegions });
+  const regions = useQuery({
+    queryKey: ["market", "regions"],
+    queryFn: marketRegions,
+  });
   const run = useMutation({
     mutationFn: (p: ContractParams) => contractsScan(p),
     onSuccess: setRows,
@@ -42,7 +53,9 @@ function Workbench() {
     <div className="p-6">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Public contracts</h1>
+          <h1 className="text-2xl font-semibold text-zinc-100">
+            Public contracts
+          </h1>
           <p className="mt-1 text-sm text-zinc-400">
             Item-exchange contracts whose contents are worth more at Jita than
             the asking price.
@@ -109,12 +122,16 @@ function Workbench() {
       </div>
 
       {run.isError && (
-        <div className="mt-3 text-sm text-rose-400">Failed: {String(run.error)}</div>
+        <div className="mt-3 text-sm text-rose-400">
+          Failed: {String(run.error)}
+        </div>
       )}
 
       <ContractTable rows={rows} />
       {rows.length > 0 && (
-        <div className="mt-1 text-xs text-zinc-500">{formatInt(rows.length)} profitable contract(s)</div>
+        <div className="mt-1 text-xs text-zinc-500">
+          {formatInt(rows.length)} profitable contract(s)
+        </div>
       )}
     </div>
   );
@@ -122,10 +139,31 @@ function Workbench() {
 
 type ContractSortKey = "title" | "price" | "contentsValue" | "profit" | "roi";
 const CONTRACT_COLUMNS: SortColumn<ContractSortKey>[] = [
-  { key: "title", label: "Contract", numeric: false, description: "Contract title + item count." },
-  { key: "price", label: "Price", numeric: true, description: "The asking price." },
-  { key: "contentsValue", label: "Contents (Jita sell)", numeric: true, description: "Jita sell value of the included items." },
-  { key: "profit", label: "Profit", numeric: true, description: "Contents value net of sales tax + broker fee, − price (and any items you must provide)." },
+  {
+    key: "title",
+    label: "Contract",
+    numeric: false,
+    description: "Contract title + item count.",
+  },
+  {
+    key: "price",
+    label: "Price",
+    numeric: true,
+    description: "The asking price.",
+  },
+  {
+    key: "contentsValue",
+    label: "Contents (Jita sell)",
+    numeric: true,
+    description: "Jita sell value of the included items.",
+  },
+  {
+    key: "profit",
+    label: "Profit",
+    numeric: true,
+    description:
+      "Contents value net of sales tax + broker fee, − price (and any items you must provide).",
+  },
   { key: "roi", label: "ROI", numeric: true, description: "Profit ÷ cost." },
 ];
 const CONTRACT_KEYS = CONTRACT_COLUMNS.map((c) => c.key);
@@ -141,63 +179,71 @@ function ContractTable({ rows }: { rows: ContractRow[] }) {
   const sorted = sortRows(rows, sortKey, sortDir);
   return (
     <div className="mt-4 overflow-auto rounded border border-zinc-800">
-        <table className="w-full border-collapse text-sm">
-          <thead className="bg-zinc-900 text-zinc-400">
-            <tr>
-              {CONTRACT_COLUMNS.map((c) => (
-                <SortHeaderCell
-                  key={c.key}
-                  column={c}
-                  active={sortKey === c.key}
-                  dir={sortDir}
-                  onClick={toggleSort}
-                />
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((r) => (
-              <tr key={r.contractId} className="border-t border-zinc-800 text-zinc-300">
-                <td className="px-3 py-1.5">
-                  {r.title}
-                  <span className="ml-1 text-xs text-zinc-500">· {r.itemCount} item(s)</span>
-                  {r.hasBpc && (
-                    <span className="ml-1 text-amber-400" title="Contains a BPC — value understated">
-                      ⚠
-                    </span>
-                  )}
-                </td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                  {formatIsk(r.price)}
-                </td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
-                  {formatIsk(r.contentsValue)}
-                </td>
-                <td
-                  className={`px-3 py-1.5 text-right tabular-nums ${
-                    r.profit >= 0 ? "text-emerald-400" : "text-rose-400"
-                  }`}
-                >
-                  {formatIsk(r.profit)}
-                </td>
-                <td
-                  className={`px-3 py-1.5 text-right tabular-nums ${
-                    r.roi >= 0 ? "text-emerald-400" : "text-rose-400"
-                  }`}
-                >
-                  {formatPercent(r.roi)}
-                </td>
-              </tr>
+      <table className="w-full border-collapse text-sm">
+        <thead className="bg-zinc-900 text-zinc-400">
+          <tr>
+            {CONTRACT_COLUMNS.map((c) => (
+              <SortHeaderCell
+                key={c.key}
+                column={c}
+                active={sortKey === c.key}
+                dir={sortDir}
+                onClick={toggleSort}
+              />
             ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-3 py-6 text-center text-zinc-500">
-                  Scan a region for profitable contracts.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((r) => (
+            <tr
+              key={r.contractId}
+              className="border-t border-zinc-800 text-zinc-300"
+            >
+              <td className="px-3 py-1.5">
+                {r.title}
+                <span className="ml-1 text-xs text-zinc-500">
+                  · {r.itemCount} item(s)
+                </span>
+                {r.hasBpc && (
+                  <span
+                    className="ml-1 text-amber-400"
+                    title="Contains a BPC — value understated"
+                  >
+                    ⚠
+                  </span>
+                )}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                {formatIsk(r.price)}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+                {formatIsk(r.contentsValue)}
+              </td>
+              <td
+                className={`px-3 py-1.5 text-right tabular-nums ${
+                  r.profit >= 0 ? "text-emerald-400" : "text-rose-400"
+                }`}
+              >
+                {formatIsk(r.profit)}
+              </td>
+              <td
+                className={`px-3 py-1.5 text-right tabular-nums ${
+                  r.roi >= 0 ? "text-emerald-400" : "text-rose-400"
+                }`}
+              >
+                {formatPercent(r.roi)}
+              </td>
+            </tr>
+          ))}
+          {rows.length === 0 && (
+            <tr>
+              <td colSpan={5} className="px-3 py-6 text-center text-zinc-500">
+                Scan a region for profitable contracts.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -212,5 +258,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function Centered({ children }: { children: ReactNode }) {
-  return <div className="p-10 text-center text-sm text-zinc-500">{children}</div>;
+  return (
+    <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
+  );
 }

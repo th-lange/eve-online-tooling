@@ -17,13 +17,17 @@ import { formatInt } from "../../lib/format";
 export function PIPage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
   if (status.isLoading) return <Centered>Checking static data…</Centered>;
-  if (!status.data?.installed) return <SdeSetup onInstalled={() => status.refetch()} />;
+  if (!status.data?.installed)
+    return <SdeSetup onInstalled={() => status.refetch()} />;
   return <Workbench />;
 }
 
 function Workbench() {
   const qc = useQueryClient();
-  const colonies = useQuery({ queryKey: ["pi", "overview"], queryFn: piOverview });
+  const colonies = useQuery({
+    queryKey: ["pi", "overview"],
+    queryFn: piOverview,
+  });
   const locked = useQuery({ queryKey: ["pi", "locked"], queryFn: piLockedGet });
   const lockedSet = new Set(locked.data ?? []);
 
@@ -50,7 +54,9 @@ function Workbench() {
     <div className="p-6">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Planetary Interaction</h1>
+          <h1 className="text-2xl font-semibold text-zinc-100">
+            Planetary Interaction
+          </h1>
           <p className="mt-1 text-sm text-zinc-400">
             Your colonies — what's extracting/producing, when extractors need a
             restart, storage usage, and where inputs fall short.
@@ -69,7 +75,8 @@ function Workbench() {
         <div className="mt-4 text-sm text-rose-400">
           {String(colonies.error)}
           <span className="ml-1 text-zinc-500">
-            (needs <code>esi-planets.manage_planets.v1</code> — re-login if just enabled)
+            (needs <code>esi-planets.manage_planets.v1</code> — re-login if just
+            enabled)
           </span>
         </div>
       )}
@@ -111,7 +118,9 @@ function Colony({
       }`}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-semibold text-zinc-100">{colony.systemName}</span>
+        <span className="text-sm font-semibold text-zinc-100">
+          {colony.systemName}
+        </span>
         <span className="rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[11px] capitalize text-zinc-300">
           {colony.planetType}
         </span>
@@ -124,7 +133,9 @@ function Colony({
           </span>
         )}
         <button
-          onClick={() => piShowInGame(colony.planetId, colony.systemId).catch(() => {})}
+          onClick={() =>
+            piShowInGame(colony.planetId, colony.systemId).catch(() => {})
+          }
           title="Show this colony in-game (planet, or its system) — ESI can't open the PI window directly"
           className="ml-auto rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
         >
@@ -167,7 +178,11 @@ function Colony({
                 <button
                   key={p.typeId}
                   onClick={() => onToggleLock(p.typeId)}
-                  title={on ? "Locked in — click to unlock" : "Click to lock in as produced"}
+                  title={
+                    on
+                      ? "Locked in — click to unlock"
+                      : "Click to lock in as produced"
+                  }
                   className={`rounded border px-2 py-0.5 text-xs ${
                     on
                       ? "border-emerald-600 bg-emerald-950/30 text-emerald-300"
@@ -194,14 +209,19 @@ function Extractor({ ex, now }: { ex: ExtractorView; now: number }) {
       <div className="flex items-center justify-between">
         <span className="text-zinc-300">{ex.product}</span>
         <span className="flex items-center gap-2">
-          <span className="tabular-nums text-zinc-500">{formatInt(ex.qtyPerCycle)}/cycle</span>
+          <span className="tabular-nums text-zinc-500">
+            {formatInt(ex.qtyPerCycle)}/cycle
+          </span>
           <span className={`tabular-nums ${tone}`}>{label}</span>
         </span>
       </div>
       {remainingPct !== null && (
         // Green = time remaining, red = elapsed (a live countdown bar).
         <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded bg-rose-900/60">
-          <div className="h-full bg-emerald-600" style={{ width: `${remainingPct}%` }} />
+          <div
+            className="h-full bg-emerald-600"
+            style={{ width: `${remainingPct}%` }}
+          />
         </div>
       )}
     </div>
@@ -210,7 +230,11 @@ function Extractor({ ex, now }: { ex: ExtractorView; now: number }) {
 
 /** Fraction of an extraction program still remaining (0–100), or null if the
  * start/end aren't both known. Drives the green-remaining / red-elapsed bar. */
-function programRemainingPct(install: string | null, expiry: string | null, now: number): number | null {
+function programRemainingPct(
+  install: string | null,
+  expiry: string | null,
+  now: number,
+): number | null {
   if (!install || !expiry) return null;
   const start = Date.parse(install);
   const end = Date.parse(expiry);
@@ -220,14 +244,17 @@ function programRemainingPct(install: string | null, expiry: string | null, now:
 }
 
 function Storage({ s }: { s: StorageView }) {
-  const pct = s.capacity > 0 ? Math.min(100, (s.usedVolume / s.capacity) * 100) : 0;
-  const tone = pct >= 90 ? "bg-rose-600" : pct >= 70 ? "bg-amber-600" : "bg-emerald-600";
+  const pct =
+    s.capacity > 0 ? Math.min(100, (s.usedVolume / s.capacity) * 100) : 0;
+  const tone =
+    pct >= 90 ? "bg-rose-600" : pct >= 70 ? "bg-amber-600" : "bg-emerald-600";
   return (
     <div>
       <div className="flex items-center justify-between text-[11px] text-zinc-400">
         <span>{s.name}</span>
         <span className="tabular-nums">
-          {Math.round(s.usedVolume).toLocaleString()} / {Math.round(s.capacity).toLocaleString()} m³
+          {Math.round(s.usedVolume).toLocaleString()} /{" "}
+          {Math.round(s.capacity).toLocaleString()} m³
         </span>
       </div>
       <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded bg-zinc-800">
@@ -252,11 +279,19 @@ function Balance({ rows }: { rows: BalanceRow[] }) {
         {rows.map((r) => (
           <tr key={r.typeId} className="border-t border-zinc-800/60">
             <td className="py-0.5 text-zinc-300">{r.name}</td>
-            <td className="py-0.5 text-right tabular-nums text-zinc-400">{fmt(r.producedPerHour)}</td>
-            <td className="py-0.5 text-right tabular-nums text-zinc-400">{fmt(r.consumedPerHour)}</td>
+            <td className="py-0.5 text-right tabular-nums text-zinc-400">
+              {fmt(r.producedPerHour)}
+            </td>
+            <td className="py-0.5 text-right tabular-nums text-zinc-400">
+              {fmt(r.consumedPerHour)}
+            </td>
             <td
               className={`py-0.5 text-right tabular-nums ${
-                r.net < -0.0001 ? "text-rose-400" : r.net > 0.0001 ? "text-emerald-400" : "text-zinc-500"
+                r.net < -0.0001
+                  ? "text-rose-400"
+                  : r.net > 0.0001
+                    ? "text-emerald-400"
+                    : "text-zinc-500"
               }`}
             >
               {r.net > 0 ? "+" : ""}
@@ -276,26 +311,41 @@ function fmt(n: number): string {
 }
 
 /** Remaining time to an ISO expiry, as a label + colour tone. */
-function countdown(expiry: string | null, now: number): { label: string; tone: string } {
+function countdown(
+  expiry: string | null,
+  now: number,
+): { label: string; tone: string } {
   if (!expiry) return { label: "no program", tone: "text-zinc-500" };
   const ms = Date.parse(expiry) - now;
   if (Number.isNaN(ms)) return { label: "—", tone: "text-zinc-500" };
   if (ms <= 0) return { label: "restart now", tone: "text-rose-400" };
   const h = Math.floor(ms / 3_600_000);
   const m = Math.floor((ms % 3_600_000) / 60_000);
-  const label = h >= 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
-  return { label: `in ${label}`, tone: ms < 3_600_000 ? "text-amber-300" : "text-zinc-300" };
+  const label =
+    h >= 24
+      ? `${Math.floor(h / 24)}d ${h % 24}h`
+      : h > 0
+        ? `${h}h ${m}m`
+        : `${m}m`;
+  return {
+    label: `in ${label}`,
+    tone: ms < 3_600_000 ? "text-amber-300" : "text-zinc-300",
+  };
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="mt-3">
-      <div className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">{title}</div>
+      <div className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">
+        {title}
+      </div>
       {children}
     </div>
   );
 }
 
 function Centered({ children }: { children: ReactNode }) {
-  return <div className="p-10 text-center text-sm text-zinc-500">{children}</div>;
+  return (
+    <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
+  );
 }

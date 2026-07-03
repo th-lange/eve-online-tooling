@@ -35,7 +35,10 @@ const MAX_ROWS = 500;
  */
 function multibuyText(row: ProfitBreakdown): string {
   return row.materials
-    .map((m) => ({ name: m.name, qty: Math.max(0, m.requiredQuantity - m.have) }))
+    .map((m) => ({
+      name: m.name,
+      qty: Math.max(0, m.requiredQuantity - m.have),
+    }))
     .filter((m) => m.qty > 0)
     .map((m) => `${m.name}\t${m.qty}`)
     .join("\n");
@@ -43,7 +46,7 @@ function multibuyText(row: ProfitBreakdown): string {
 
 /** A Markdown cost overview for one build — totals plus the material list. */
 function costMarkdown(row: ProfitBreakdown): string {
-  const where = row.sellHub ? `sell @ ${row.sellHub}` : row.market ?? "";
+  const where = row.sellHub ? `sell @ ${row.sellHub}` : (row.market ?? "");
   const out: string[] = [
     `## ${row.productName} ×${formatInt(row.unitsProduced)}${where ? ` (${where})` : ""}`,
     "",
@@ -53,8 +56,10 @@ function costMarkdown(row: ProfitBreakdown): string {
     `| Materials | ${formatIsk(row.materialCost)} |`,
     `| Job fee | ${formatIsk(row.jobFee)} |`,
   ];
-  if (row.blueprintCost > 0) out.push(`| Blueprint | ${formatIsk(row.blueprintCost)} |`);
-  if (row.inventionCost > 0) out.push(`| Invention | ${formatIsk(row.inventionCost)} |`);
+  if (row.blueprintCost > 0)
+    out.push(`| Blueprint | ${formatIsk(row.blueprintCost)} |`);
+  if (row.inventionCost > 0)
+    out.push(`| Invention | ${formatIsk(row.inventionCost)} |`);
   out.push(
     `| Cost/unit | ${formatIsk(unitCost(row))} |`,
     `| **Profit** | **${formatIsk(row.profit)}** |`,
@@ -86,7 +91,8 @@ const COLUMNS: SortColumn<SortKey>[] = [
     key: "productPrice",
     label: "Sell",
     numeric: true,
-    description: "Product sell price per unit at the chosen market and price basis.",
+    description:
+      "Product sell price per unit at the chosen market and price basis.",
   },
   {
     key: "unitCost",
@@ -344,7 +350,11 @@ export function EmptyState({ title, hint }: { title: string; hint?: string }) {
   return (
     <div className="rounded border border-dashed border-zinc-800 p-10 text-center">
       <div className="text-sm font-medium text-zinc-300">{title}</div>
-      {hint && <div className="mx-auto mt-1 max-w-md text-xs text-zinc-500">{hint}</div>}
+      {hint && (
+        <div className="mx-auto mt-1 max-w-md text-xs text-zinc-500">
+          {hint}
+        </div>
+      )}
     </div>
   );
 }
@@ -382,7 +392,8 @@ function BreakdownRow({ row }: { row: ProfitBreakdown }) {
       <td colSpan={9} className="px-3 py-3">
         <div className="mb-2 flex items-start justify-between gap-3">
           <div className="text-xs text-zinc-400">
-            {row.runs} run(s) · ME {row.me} · {formatInt(row.unitsProduced)} unit(s)
+            {row.runs} run(s) · ME {row.me} · {formatInt(row.unitsProduced)}{" "}
+            unit(s)
             {row.jobTimeSeconds > 0
               ? ` · build ${formatDuration(row.jobTimeSeconds)}`
               : ""}
@@ -498,8 +509,8 @@ function BreakdownRow({ row }: { row: ProfitBreakdown }) {
         {row.invention && (
           <div className="mt-3">
             <div className="mb-1 text-xs font-medium text-zinc-400">
-              Invention — {(row.invention.probability * 100).toFixed(1)}% chance ×{" "}
-              {row.invention.runsPerSuccess} runs/success ={" "}
+              Invention — {(row.invention.probability * 100).toFixed(1)}% chance
+              × {row.invention.runsPerSuccess} runs/success ={" "}
               {formatIsk(row.invention.perUnit)}/unit
             </div>
             <table className="w-full text-xs">

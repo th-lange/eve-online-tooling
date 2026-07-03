@@ -14,7 +14,10 @@ import {
 import { SdeSetup } from "../production/SdeSetup";
 import { formatInt, formatIsk, sortRows } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
-import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
+import {
+  SortHeaderCell,
+  type SortColumn,
+} from "../../components/SortHeaderCell";
 
 const FORGE = 10000002;
 const JITA = 60003760;
@@ -38,7 +41,10 @@ function Workbench() {
   const [result, setResult] = useState<AppraisalResult | null>(null);
   const [repro, setRepro] = useState<ReprocessAppraisalResult | null>(null);
 
-  const regions = useQuery({ queryKey: ["market", "regions"], queryFn: marketRegions });
+  const regions = useQuery({
+    queryKey: ["market", "regions"],
+    queryFn: marketRegions,
+  });
   const run = useMutation({
     mutationFn: (p: AppraisalParams) => appraisal(p),
     onSuccess: setResult,
@@ -110,7 +116,11 @@ function Workbench() {
             <select
               value={stationId ?? ""}
               onChange={(e) =>
-                setStationId(e.currentTarget.value === "" ? null : Number(e.currentTarget.value))
+                setStationId(
+                  e.currentTarget.value === ""
+                    ? null
+                    : Number(e.currentTarget.value),
+                )
               }
               className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
             >
@@ -155,11 +165,15 @@ function Workbench() {
             <div className="col-span-2 rounded border border-zinc-800 bg-zinc-900 p-3 text-sm">
               <div className="flex justify-between">
                 <span className="text-zinc-400">Buy value</span>
-                <span className="tabular-nums text-zinc-200">{formatIsk(result.buyTotal)}</span>
+                <span className="tabular-nums text-zinc-200">
+                  {formatIsk(result.buyTotal)}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-zinc-400">Sell value</span>
-                <span className="tabular-nums text-emerald-400">{formatIsk(result.sellTotal)}</span>
+                <span className="tabular-nums text-emerald-400">
+                  {formatIsk(result.sellTotal)}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-zinc-400">Volume</span>
@@ -193,12 +207,37 @@ type LineSortKey =
   | "sellValue"
   | "volume";
 const LINE_COLUMNS: SortColumn<LineSortKey>[] = [
-  { key: "name", label: "Item", numeric: false, description: "Pasted item name." },
+  {
+    key: "name",
+    label: "Item",
+    numeric: false,
+    description: "Pasted item name.",
+  },
   { key: "quantity", label: "Qty", numeric: true, description: "Quantity." },
-  { key: "buyPrice", label: "Buy", numeric: true, description: "Per-unit buy price." },
-  { key: "sellPrice", label: "Sell", numeric: true, description: "Per-unit sell price." },
-  { key: "buyValue", label: "Buy value", numeric: true, description: "Qty × buy." },
-  { key: "sellValue", label: "Sell value", numeric: true, description: "Qty × sell." },
+  {
+    key: "buyPrice",
+    label: "Buy",
+    numeric: true,
+    description: "Per-unit buy price.",
+  },
+  {
+    key: "sellPrice",
+    label: "Sell",
+    numeric: true,
+    description: "Per-unit sell price.",
+  },
+  {
+    key: "buyValue",
+    label: "Buy value",
+    numeric: true,
+    description: "Qty × buy.",
+  },
+  {
+    key: "sellValue",
+    label: "Sell value",
+    numeric: true,
+    description: "Qty × sell.",
+  },
   { key: "volume", label: "m³", numeric: true, description: "Total volume." },
 ];
 const LINE_KEYS = LINE_COLUMNS.map((c) => c.key);
@@ -214,57 +253,62 @@ function LineTable({ lines }: { lines: AppraisalLine[] }) {
   const sorted = sortRows(lines, sortKey, sortDir);
   return (
     <div className="mt-4 overflow-auto rounded border border-zinc-800">
-          <table className="w-full border-collapse text-sm">
-            <thead className="bg-zinc-900 text-zinc-400">
-              <tr>
-                {LINE_COLUMNS.map((c) => (
-                  <SortHeaderCell
-                    key={c.key}
-                    column={c}
-                    active={sortKey === c.key}
-                    dir={sortDir}
-                    onClick={toggleSort}
-                  />
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((l, i) => (
-                <tr key={i} className="border-t border-zinc-800">
-                  <td className="px-3 py-1.5 text-zinc-200">
-                    {l.name}
-                    {!l.resolved && (
-                      <span className="ml-1 text-amber-400" title="Unknown item name">
-                        ⚠
-                      </span>
-                    )}
-                    {l.sellHub && (
-                      <span className="ml-1 text-[10px] text-emerald-400">↗ {l.sellHub}</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                    {formatInt(l.quantity)}
-                  </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                    {formatIsk(l.buyPrice)}
-                  </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                    {formatIsk(l.sellPrice)}
-                  </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
-                    {formatIsk(l.buyValue)}
-                  </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
-                    {formatIsk(l.sellValue)}
-                  </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums text-zinc-500">
-                    {formatInt(Math.round(l.volume))}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <table className="w-full border-collapse text-sm">
+        <thead className="bg-zinc-900 text-zinc-400">
+          <tr>
+            {LINE_COLUMNS.map((c) => (
+              <SortHeaderCell
+                key={c.key}
+                column={c}
+                active={sortKey === c.key}
+                dir={sortDir}
+                onClick={toggleSort}
+              />
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((l, i) => (
+            <tr key={i} className="border-t border-zinc-800">
+              <td className="px-3 py-1.5 text-zinc-200">
+                {l.name}
+                {!l.resolved && (
+                  <span
+                    className="ml-1 text-amber-400"
+                    title="Unknown item name"
+                  >
+                    ⚠
+                  </span>
+                )}
+                {l.sellHub && (
+                  <span className="ml-1 text-[10px] text-emerald-400">
+                    ↗ {l.sellHub}
+                  </span>
+                )}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                {formatInt(l.quantity)}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                {formatIsk(l.buyPrice)}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                {formatIsk(l.sellPrice)}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+                {formatIsk(l.buyValue)}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
+                {formatIsk(l.sellValue)}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-500">
+                {formatInt(Math.round(l.volume))}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -275,15 +319,21 @@ function ReproResult({ d }: { d: ReprocessAppraisalResult }) {
       <div className="mb-3 flex flex-wrap gap-6 text-sm">
         <div>
           <div className="text-xs text-zinc-500">Mineral yield value</div>
-          <div className="tabular-nums text-emerald-400">{formatIsk(d.mineralTotal)}</div>
+          <div className="tabular-nums text-emerald-400">
+            {formatIsk(d.mineralTotal)}
+          </div>
         </div>
         <div>
           <div className="text-xs text-zinc-500">Sell inputs as-is</div>
-          <div className="tabular-nums text-zinc-200">{formatIsk(d.inputSellTotal)}</div>
+          <div className="tabular-nums text-zinc-200">
+            {formatIsk(d.inputSellTotal)}
+          </div>
         </div>
         <div>
           <div className="text-xs text-zinc-500">Efficiency</div>
-          <div className="tabular-nums text-zinc-300">{(d.efficiency * 100).toFixed(0)}%</div>
+          <div className="tabular-nums text-zinc-300">
+            {(d.efficiency * 100).toFixed(0)}%
+          </div>
         </div>
         <div>
           <div className="text-xs text-zinc-500">Better to</div>
@@ -294,7 +344,9 @@ function ReproResult({ d }: { d: ReprocessAppraisalResult }) {
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         <div>
-          <h3 className="mb-1 text-sm font-medium text-zinc-300">Mineral yield</h3>
+          <h3 className="mb-1 text-sm font-medium text-zinc-300">
+            Mineral yield
+          </h3>
           <div className="overflow-auto rounded border border-zinc-800">
             <table className="w-full text-sm">
               <thead className="bg-zinc-900 text-zinc-400">
@@ -306,7 +358,10 @@ function ReproResult({ d }: { d: ReprocessAppraisalResult }) {
               </thead>
               <tbody>
                 {d.minerals.map((m) => (
-                  <tr key={m.typeId} className="border-t border-zinc-800 text-zinc-300">
+                  <tr
+                    key={m.typeId}
+                    className="border-t border-zinc-800 text-zinc-300"
+                  >
                     <td className="px-3 py-1.5">{m.name}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                       {formatInt(m.quantity)}
@@ -318,7 +373,10 @@ function ReproResult({ d }: { d: ReprocessAppraisalResult }) {
                 ))}
                 {d.minerals.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="px-3 py-4 text-center text-zinc-500">
+                    <td
+                      colSpan={3}
+                      className="px-3 py-4 text-center text-zinc-500"
+                    >
                       Nothing reprocessable in the paste.
                     </td>
                   </tr>
@@ -335,16 +393,24 @@ function ReproResult({ d }: { d: ReprocessAppraisalResult }) {
                 <tr>
                   <th className="px-3 py-2 text-left font-medium">Item</th>
                   <th className="px-3 py-2 text-right font-medium">Qty</th>
-                  <th className="px-3 py-2 text-right font-medium">Yield value</th>
+                  <th className="px-3 py-2 text-right font-medium">
+                    Yield value
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {d.inputs.map((l, i) => (
-                  <tr key={i} className="border-t border-zinc-800 text-zinc-300">
+                  <tr
+                    key={i}
+                    className="border-t border-zinc-800 text-zinc-300"
+                  >
                     <td className="px-3 py-1.5">
                       {l.name}
                       {!l.resolved && (
-                        <span className="ml-1 text-amber-400" title="Not reprocessable / unknown">
+                        <span
+                          className="ml-1 text-amber-400"
+                          title="Not reprocessable / unknown"
+                        >
                           ⚠
                         </span>
                       )}
@@ -403,5 +469,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function Centered({ children }: { children: ReactNode }) {
-  return <div className="p-10 text-center text-sm text-zinc-500">{children}</div>;
+  return (
+    <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
+  );
 }

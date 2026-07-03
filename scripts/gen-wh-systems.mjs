@@ -45,7 +45,9 @@ function parseStatics(csv) {
   const sysIdx = cols.indexOf("systemid");
   const typeIdx = cols.indexOf("typeid");
   if (sysIdx < 0 || typeIdx < 0) {
-    throw new Error(`unexpected header "${header}" — expected systemId + typeId columns`);
+    throw new Error(
+      `unexpected header "${header}" — expected systemId + typeId columns`,
+    );
   }
   const bySystem = new Map();
   for (const line of lines) {
@@ -73,12 +75,15 @@ async function main() {
   const out = parseStatics(csv);
   const systems = Object.keys(out).length;
   const statics = Object.values(out).reduce((n, s) => n + s.statics.length, 0);
-  if (systems === 0) throw new Error("parsed 0 systems — check the source schema");
+  if (systems === 0)
+    throw new Error("parsed 0 systems — check the source schema");
 
   writeFileSync(OUT, gzipSync(Buffer.from(JSON.stringify(out)), { level: 9 }));
   console.error(`Wrote ${systems} systems / ${statics} statics → ${OUT}`);
   console.error(`Source: ${SOURCE}`);
-  console.error(`Pulled: ${new Date().toISOString().slice(0, 10)} — update data/README.md provenance.`);
+  console.error(
+    `Pulled: ${new Date().toISOString().slice(0, 10)} — update data/README.md provenance.`,
+  );
 }
 
 main().catch((e) => {

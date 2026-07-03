@@ -34,7 +34,8 @@ import {
   uniqueSorted,
 } from "./components";
 
-export type ResultsView = "opportunities" | "favorites" | "blacklist" | "library";
+export type ResultsView =
+  "opportunities" | "favorites" | "blacklist" | "library";
 
 // Manufacturing structure presets → material/cost/time bonuses (role bonuses).
 type StructureKey = "npc" | "raitaru" | "azbel" | "sotiyo";
@@ -116,7 +117,8 @@ function Workbench() {
   const [facilityTaxPct, setFacilityTaxPct] = useState(0);
   const [materialBasis, setMaterialBasis] =
     useState<PriceBasis>("sellPercentile");
-  const [productBasis, setProductBasis] = useState<PriceBasis>("sellPercentile");
+  const [productBasis, setProductBasis] =
+    useState<PriceBasis>("sellPercentile");
   const [productBestHub, setProductBestHub] = useState(false);
   const [blueprintCostPerRun, setBlueprintCostPerRun] = useState(0);
   const [inventionSkill, setInventionSkill] = useState(5);
@@ -170,7 +172,8 @@ function Workbench() {
     for (const b of owned.data ?? []) {
       map[b.typeId] = Math.max(map[b.typeId] ?? 0, b.materialEfficiency);
     }
-    for (const b of imported) map[b.typeId] = Math.max(map[b.typeId] ?? 0, b.me);
+    for (const b of imported)
+      map[b.typeId] = Math.max(map[b.typeId] ?? 0, b.me);
     return map;
   }, [owned.data, imported]);
   const ownedTe = useMemo(() => {
@@ -178,7 +181,8 @@ function Workbench() {
     for (const b of owned.data ?? []) {
       map[b.typeId] = Math.max(map[b.typeId] ?? 0, b.timeEfficiency);
     }
-    for (const b of imported) map[b.typeId] = Math.max(map[b.typeId] ?? 0, b.te);
+    for (const b of imported)
+      map[b.typeId] = Math.max(map[b.typeId] ?? 0, b.te);
     return map;
   }, [owned.data, imported]);
   const update = useMutation({ mutationFn: () => sdeUpdate(false) });
@@ -252,9 +256,9 @@ function Workbench() {
   };
   // Snapshot of `settings` as of the last calculate, to detect staleness.
   const [calcSettings, setCalcSettings] = useState(settings);
-  const dirtyCount = (Object.keys(settings) as (keyof typeof settings)[]).filter(
-    (k) => settings[k] !== calcSettings[k],
-  ).length;
+  const dirtyCount = (
+    Object.keys(settings) as (keyof typeof settings)[]
+  ).filter((k) => settings[k] !== calcSettings[k]).length;
   const isStale = dirtyCount > 0 && rows.length > 0;
 
   function calculate() {
@@ -271,7 +275,8 @@ function Workbench() {
       // Compose structure preset with rig bonuses (material/cost multiplicative).
       structureTePct: STRUCTURES[structure].tePct + rigTePct,
       meBonus: STRUCTURES[structure].meBonus * (1 - rigMePct / 100),
-      costBonus: 1 - (1 - STRUCTURES[structure].costBonus) * (1 - rigCostPct / 100),
+      costBonus:
+        1 - (1 - STRUCTURES[structure].costBonus) * (1 - rigCostPct / 100),
       stock: useStock ? (stock.data ?? {}) : {},
       buildComponents,
       systemCostIndex: costIndexPct / 100,
@@ -294,7 +299,6 @@ function Workbench() {
     if (!autoRecalc || !isStale) return;
     const t = setTimeout(() => calcRef.current(), 600);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRecalc, isStale, dirtyCount]);
 
   // Rank once on first load.
@@ -303,8 +307,14 @@ function Workbench() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const categoryOptions = useMemo(() => uniqueSorted(rows, (r) => r.category), [rows]);
-  const metaOptions = useMemo(() => uniqueSorted(rows, (r) => r.metaGroup), [rows]);
+  const categoryOptions = useMemo(
+    () => uniqueSorted(rows, (r) => r.category),
+    [rows],
+  );
+  const metaOptions = useMemo(
+    () => uniqueSorted(rows, (r) => r.metaGroup),
+    [rows],
+  );
 
   const filtered = useMemo(() => {
     const needle = name.trim().toLowerCase();
@@ -331,7 +341,18 @@ function Workbench() {
       if (minVol !== null && (r.productVolume ?? 0) < minVol) return false;
       return true;
     });
-  }, [rows, name, categories, metas, ownedOnly, favoritesOnly, ownedSet, minRoiPct, minVolume, stationId]);
+  }, [
+    rows,
+    name,
+    categories,
+    metas,
+    ownedOnly,
+    favoritesOnly,
+    ownedSet,
+    minRoiPct,
+    minVolume,
+    stationId,
+  ]);
 
   const stations = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
   const rowsByType = useMemo(
@@ -343,19 +364,47 @@ function Workbench() {
   // the ranking is visible above the table rather than buried across four tabs.
   const activeFilters: { key: string; label: string; clear: () => void }[] = [];
   if (name.trim())
-    activeFilters.push({ key: "name", label: `“${name.trim()}”`, clear: () => setName("") });
+    activeFilters.push({
+      key: "name",
+      label: `“${name.trim()}”`,
+      clear: () => setName(""),
+    });
   for (const c of categories)
-    activeFilters.push({ key: `cat:${c}`, label: c, clear: () => setCategories(toggle(categories, c)) });
+    activeFilters.push({
+      key: `cat:${c}`,
+      label: c,
+      clear: () => setCategories(toggle(categories, c)),
+    });
   for (const m of metas)
-    activeFilters.push({ key: `meta:${m}`, label: m, clear: () => setMetas(toggle(metas, m)) });
+    activeFilters.push({
+      key: `meta:${m}`,
+      label: m,
+      clear: () => setMetas(toggle(metas, m)),
+    });
   if (ownedOnly)
-    activeFilters.push({ key: "owned", label: "Owned only", clear: () => setOwnedOnly(false) });
+    activeFilters.push({
+      key: "owned",
+      label: "Owned only",
+      clear: () => setOwnedOnly(false),
+    });
   if (favoritesOnly)
-    activeFilters.push({ key: "fav", label: "Favorites only", clear: () => setFavoritesOnly(false) });
+    activeFilters.push({
+      key: "fav",
+      label: "Favorites only",
+      clear: () => setFavoritesOnly(false),
+    });
   if (minRoiPct.trim())
-    activeFilters.push({ key: "roi", label: `ROI ≥ ${minRoiPct}%`, clear: () => setMinRoiPct("") });
+    activeFilters.push({
+      key: "roi",
+      label: `ROI ≥ ${minRoiPct}%`,
+      clear: () => setMinRoiPct(""),
+    });
   if (minVolume.trim() && stationId !== null)
-    activeFilters.push({ key: "vol", label: `Volume ≥ ${minVolume}`, clear: () => setMinVolume("") });
+    activeFilters.push({
+      key: "vol",
+      label: `Volume ≥ ${minVolume}`,
+      clear: () => setMinVolume(""),
+    });
   function resetAllFilters() {
     setName("");
     setCategories(new Set());
@@ -579,12 +628,26 @@ function Workbench() {
                 Use owned blueprint ME{ownedCount > 0 ? ` (${ownedCount})` : ""}
               </label>
             </Field>
-            <Num label="TE (default for un-owned)" value={te} onChange={setTe} min={0} max={20} />
-            <Num label="Time skills (0-5)" value={timeSkill} onChange={setTimeSkill} min={0} max={5} />
+            <Num
+              label="TE (default for un-owned)"
+              value={te}
+              onChange={setTe}
+              min={0}
+              max={20}
+            />
+            <Num
+              label="Time skills (0-5)"
+              value={timeSkill}
+              onChange={setTimeSkill}
+              min={0}
+              max={5}
+            />
             <Field label="Structure">
               <select
                 value={structure}
-                onChange={(e) => setStructure(e.currentTarget.value as StructureKey)}
+                onChange={(e) =>
+                  setStructure(e.currentTarget.value as StructureKey)
+                }
                 className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
                 title="Engineering complex role bonuses: material, cost, and time. SCC 4% surcharge is applied automatically."
               >
@@ -595,9 +658,27 @@ function Workbench() {
                 ))}
               </select>
             </Field>
-            <Num label="Rig ME %" value={rigMePct} onChange={setRigMePct} min={0} max={10} />
-            <Num label="Rig TE %" value={rigTePct} onChange={setRigTePct} min={0} max={50} />
-            <Num label="Rig cost %" value={rigCostPct} onChange={setRigCostPct} min={0} max={10} />
+            <Num
+              label="Rig ME %"
+              value={rigMePct}
+              onChange={setRigMePct}
+              min={0}
+              max={10}
+            />
+            <Num
+              label="Rig TE %"
+              value={rigTePct}
+              onChange={setRigTePct}
+              min={0}
+              max={50}
+            />
+            <Num
+              label="Rig cost %"
+              value={rigCostPct}
+              onChange={setRigCostPct}
+              min={0}
+              max={10}
+            />
             <Num
               label="Cost index %"
               value={costIndexPct}

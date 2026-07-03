@@ -84,6 +84,8 @@ export function dpsListLogs(gamelogsDir: string): Promise<DpsLogFile[]> {
 }
 
 /** Subscribe to live DPS ticks. */
-export function onDpsTick(handler: (tick: DpsTick) => void): Promise<UnlistenFn> {
+export function onDpsTick(
+  handler: (tick: DpsTick) => void,
+): Promise<UnlistenFn> {
   return listen<DpsTick>("dps://tick", (event) => handler(event.payload));
 }

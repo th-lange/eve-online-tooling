@@ -80,10 +80,20 @@ function SystemNode({ data }: NodeProps<Node<SystemNodeData>>) {
       }`}
     >
       {/* Hidden connection points so edges attach cleanly left↔right. */}
-      <Handle type="target" position={Position.Left} className="!bg-transparent !border-0" />
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="!bg-transparent !border-0"
+      />
       <div className="font-medium leading-tight">{data.label}</div>
-      {data.sub && <div className="text-[10px] opacity-70 leading-tight">{data.sub}</div>}
-      <Handle type="source" position={Position.Right} className="!bg-transparent !border-0" />
+      {data.sub && (
+        <div className="text-[10px] opacity-70 leading-tight">{data.sub}</div>
+      )}
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="!bg-transparent !border-0"
+      />
     </div>
   );
 }
@@ -149,7 +159,10 @@ function loadPositions(key?: string): Record<string, { x: number; y: number }> {
   }
 }
 
-function savePositions(key: string, nodes: { id: string; position: { x: number; y: number } }[]) {
+function savePositions(
+  key: string,
+  nodes: { id: string; position: { x: number; y: number } }[],
+) {
   if (typeof localStorage === "undefined") return;
   const map: Record<string, { x: number; y: number }> = {};
   for (const n of nodes) map[n.id] = n.position;
@@ -183,10 +196,16 @@ export function SystemGraph({
   /** Persist hand-dragged positions under this key (localStorage). */
   storageKey?: string;
 }) {
-  const layout = useMemo(() => computeLayout(inputNodes, edges, rootId), [inputNodes, edges, rootId]);
+  const layout = useMemo(
+    () => computeLayout(inputNodes, edges, rootId),
+    [inputNodes, edges, rootId],
+  );
 
   const toRfNode = useCallback(
-    (n: SystemGraphNode, pos: { x: number; y: number }): Node<SystemNodeData> => ({
+    (
+      n: SystemGraphNode,
+      pos: { x: number; y: number },
+    ): Node<SystemNodeData> => ({
       id: n.id,
       type: "system",
       position: pos,
@@ -195,7 +214,9 @@ export function SystemGraph({
     [],
   );
 
-  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<Node<SystemNodeData>>([]);
+  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<
+    Node<SystemNodeData>
+  >([]);
 
   // Sync nodes when the inputs change, but keep positions the user has already
   // dragged (or previously saved) — only new nodes get a fresh computed spot.
@@ -204,7 +225,10 @@ export function SystemGraph({
     setRfNodes((cur) => {
       const curPos = new Map(cur.map((n) => [n.id, n.position]));
       return inputNodes.map((n) =>
-        toRfNode(n, curPos.get(n.id) ?? saved[n.id] ?? layout.get(n.id) ?? { x: 0, y: 0 }),
+        toRfNode(
+          n,
+          curPos.get(n.id) ?? saved[n.id] ?? layout.get(n.id) ?? { x: 0, y: 0 },
+        ),
       );
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -213,7 +237,8 @@ export function SystemGraph({
   const rfEdges: Edge[] = useMemo(
     () =>
       edges.map((e, i) => {
-        const color = e.color ?? (e.variant === "wormhole" ? "#a855f7" : "#52525b");
+        const color =
+          e.color ?? (e.variant === "wormhole" ? "#a855f7" : "#52525b");
         return {
           id: `${e.source}-${e.target}-${i}`,
           source: e.source,
@@ -248,7 +273,9 @@ export function SystemGraph({
 
   const resetLayout = useCallback(() => {
     const fresh = computeLayout(inputNodes, edges, rootId);
-    setRfNodes(inputNodes.map((n) => toRfNode(n, fresh.get(n.id) ?? { x: 0, y: 0 })));
+    setRfNodes(
+      inputNodes.map((n) => toRfNode(n, fresh.get(n.id) ?? { x: 0, y: 0 })),
+    );
     if (storageKey && typeof localStorage !== "undefined") {
       try {
         localStorage.removeItem(`sysgraph.${storageKey}`);
@@ -259,7 +286,10 @@ export function SystemGraph({
   }, [inputNodes, edges, rootId, storageKey, toRfNode, setRfNodes]);
 
   return (
-    <div style={{ height }} className="rounded border border-zinc-800 bg-zinc-950/40">
+    <div
+      style={{ height }}
+      className="rounded border border-zinc-800 bg-zinc-950/40"
+    >
       <ReactFlow
         nodes={rfNodes}
         edges={rfEdges}
@@ -272,7 +302,10 @@ export function SystemGraph({
         minZoom={0.2}
       >
         <Background color="#27272a" gap={20} />
-        <Controls showInteractive={false} className="!bg-zinc-900 !border-zinc-700" />
+        <Controls
+          showInteractive={false}
+          className="!bg-zinc-900 !border-zinc-700"
+        />
         {storageKey && (
           <Panel position="top-right">
             <button

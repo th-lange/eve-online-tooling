@@ -40,12 +40,16 @@ export interface ReprocessParams {
 }
 
 /** Rank ores by reprocess-vs-sell at a market. */
-export function reprocessingScan(params: ReprocessParams): Promise<ReprocessRow[]> {
+export function reprocessingScan(
+  params: ReprocessParams,
+): Promise<ReprocessRow[]> {
   return invoke<ReprocessRow[]>("reprocessing_scan", { params });
 }
 
 /** The reprocessing efficiency (0..1) for the given skill/structure inputs. */
-export function reprocessingEfficiency(params: ReprocessParams): Promise<number> {
+export function reprocessingEfficiency(
+  params: ReprocessParams,
+): Promise<number> {
   return invoke<number>("reprocessing_efficiency", { params });
 }
 

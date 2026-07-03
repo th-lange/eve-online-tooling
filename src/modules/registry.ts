@@ -23,12 +23,7 @@ import { DpsPage } from "./dpsmeter/DpsPage";
 
 /** Sidebar section a module belongs to (the nav's information architecture). */
 export type ModuleGroup =
-  | "industry"
-  | "trading"
-  | "market"
-  | "character"
-  | "combat"
-  | "intel";
+  "industry" | "trading" | "market" | "character" | "combat" | "intel";
 
 /** Section labels + display order, driving the grouped sidebar nav (#224). */
 export const MODULE_GROUPS: { key: ModuleGroup; label: string }[] = [
@@ -102,7 +97,8 @@ export const modules: ModuleDef[] = [
   {
     id: "market-search",
     title: "Market Search",
-    description: "Find an item's sell orders across the market, plus price & volume history.",
+    description:
+      "Find an item's sell orders across the market, plus price & volume history.",
     group: "market",
     Component: MarketSearchPage,
   },
@@ -151,7 +147,8 @@ export const modules: ModuleDef[] = [
   {
     id: "local-intel",
     title: "Local Intel",
-    description: "Paste Local → classify pilots by standing, corp and alliance.",
+    description:
+      "Paste Local → classify pilots by standing, corp and alliance.",
     group: "intel",
     Component: LocalIntelPage,
   },
@@ -200,7 +197,8 @@ export const modules: ModuleDef[] = [
   {
     id: "dps",
     title: "DPS Meter",
-    description: "Live combat meter from your gamelog — DPS, logi and cap, graphed.",
+    description:
+      "Live combat meter from your gamelog — DPS, logi and cap, graphed.",
     group: "combat",
     Component: DpsPage,
   },
