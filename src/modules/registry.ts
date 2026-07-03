@@ -17,6 +17,7 @@ import { OrdersPage } from "./orders/OrdersPage";
 import { IndustryJobsPage } from "./industry/IndustryJobsPage";
 import { PIPage } from "./pi/PIPage";
 import { WormholesPage } from "./wormholes/WormholesPage";
+import { ExplorationPage } from "./exploration/ExplorationPage";
 import { FittingPage } from "./fitting/FittingPage";
 import { ShoppingPage } from "./shopping/ShoppingPage";
 import { DpsPage } from "./dpsmeter/DpsPage";
@@ -179,6 +180,14 @@ export const modules: ModuleDef[] = [
     description: "Map your wormhole chain with mass/EOL tracking.",
     group: "intel",
     Component: WormholesPage,
+  },
+  {
+    id: "exploration",
+    title: "Exploration",
+    description:
+      "Reference: combat anomalies and relic/data/DED sites — where, danger, escalations.",
+    group: "intel",
+    Component: ExplorationPage,
   },
   {
     id: "fitting",
