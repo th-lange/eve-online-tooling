@@ -11,7 +11,10 @@ export interface HistoryPoint {
 }
 
 /** Daily market history for a type in a region (ascending by date). */
-export function marketHistory(regionId: number, typeId: number): Promise<HistoryPoint[]> {
+export function marketHistory(
+  regionId: number,
+  typeId: number,
+): Promise<HistoryPoint[]> {
   return invoke<HistoryPoint[]>("market_history", { regionId, typeId });
 }
 
@@ -114,6 +117,8 @@ export interface SellOrder {
 }
 
 /** Sell orders for a type across the chosen scope, cheapest first. */
-export function marketSellOrders(params: SellOrdersParams): Promise<SellOrder[]> {
+export function marketSellOrders(
+  params: SellOrdersParams,
+): Promise<SellOrder[]> {
   return invoke<SellOrder[]>("market_sell_orders", { params });
 }

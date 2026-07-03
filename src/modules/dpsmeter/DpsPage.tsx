@@ -25,10 +25,30 @@ const SERIES = [
   { key: "dpsIn", label: "DPS in", color: "#f87171", primary: true },
   { key: "logiOut", label: "Logi out", color: "#38bdf8", primary: false },
   { key: "logiIn", label: "Logi in", color: "#a78bfa", primary: false },
-  { key: "capWarfareOut", label: "Cap warfare out", color: "#fbbf24", primary: false },
-  { key: "capWarfareIn", label: "Cap warfare in", color: "#fb923c", primary: false },
-  { key: "capTransferOut", label: "Cap xfer out", color: "#2dd4bf", primary: false },
-  { key: "capTransferIn", label: "Cap xfer in", color: "#c084fc", primary: false },
+  {
+    key: "capWarfareOut",
+    label: "Cap warfare out",
+    color: "#fbbf24",
+    primary: false,
+  },
+  {
+    key: "capWarfareIn",
+    label: "Cap warfare in",
+    color: "#fb923c",
+    primary: false,
+  },
+  {
+    key: "capTransferOut",
+    label: "Cap xfer out",
+    color: "#2dd4bf",
+    primary: false,
+  },
+  {
+    key: "capTransferIn",
+    label: "Cap xfer in",
+    color: "#c084fc",
+    primary: false,
+  },
 ] as const satisfies readonly {
   key: keyof DpsTick;
   label: string;
@@ -103,7 +123,9 @@ export function DpsPage() {
     bufferedRef.current = [];
     setTicks((prev) => {
       const merged = prev.concat(buffered);
-      return merged.length > BUFFER ? merged.slice(merged.length - BUFFER) : merged;
+      return merged.length > BUFFER
+        ? merged.slice(merged.length - BUFFER)
+        : merged;
     });
   }, [active]);
 
@@ -204,7 +226,9 @@ export function DpsPage() {
             min={1}
             max={600}
             value={windowSecs}
-            onChange={(e) => setWindowSecs(Math.max(1, Number(e.currentTarget.value)))}
+            onChange={(e) =>
+              setWindowSecs(Math.max(1, Number(e.currentTarget.value)))
+            }
             className="w-24 rounded bg-zinc-800 px-2 py-1.5 text-sm tabular-nums text-zinc-100 outline-none"
           />
         </label>
@@ -238,7 +262,9 @@ export function DpsPage() {
                 max={100}
                 step={0.5}
                 value={speed}
-                onChange={(e) => setSpeed(Math.max(0.1, Number(e.currentTarget.value)))}
+                onChange={(e) =>
+                  setSpeed(Math.max(0.1, Number(e.currentTarget.value)))
+                }
                 className="w-20 rounded bg-zinc-800 px-2 py-1.5 text-sm tabular-nums text-zinc-100 outline-none"
               />
             </label>
@@ -329,14 +355,20 @@ export function DpsPage() {
 
 /** Top weapons by outgoing DPS. Memoized: skips re-render when `rows` is
  *  unchanged (e.g. the page re-renders for an unrelated control change). */
-const WeaponTable = memo(function WeaponTable({ rows }: { rows: WeaponRate[] }) {
+const WeaponTable = memo(function WeaponTable({
+  rows,
+}: {
+  rows: WeaponRate[];
+}) {
   return (
     <div className="rounded border border-zinc-800 bg-zinc-900/40 p-3">
       <div className="mb-2 text-xs uppercase tracking-wide text-zinc-500">
         Damage by weapon
       </div>
       {rows.length === 0 ? (
-        <p className="text-xs text-zinc-500">No outgoing damage in the window.</p>
+        <p className="text-xs text-zinc-500">
+          No outgoing damage in the window.
+        </p>
       ) : (
         <table className="w-full text-sm">
           <tbody>
@@ -368,7 +400,9 @@ const PilotTable = memo(function PilotTable({ rows }: { rows: PilotRate[] }) {
         </span>
       </div>
       {rows.length === 0 ? (
-        <p className="text-xs text-zinc-500">No pilots engaged in the window.</p>
+        <p className="text-xs text-zinc-500">
+          No pilots engaged in the window.
+        </p>
       ) : (
         <table className="w-full text-sm">
           <tbody>
@@ -422,7 +456,9 @@ const DpsChart = memo(function DpsChart({ ticks }: { ticks: DpsTick[] }) {
     <div className="rounded border border-zinc-800 bg-zinc-900 p-2">
       <div className="mb-1 flex items-center justify-between text-xs text-zinc-400">
         <span>Rolling rate (per second)</span>
-        <span className="tabular-nums text-zinc-300">peak {Math.round(max).toLocaleString()}</span>
+        <span className="tabular-nums text-zinc-300">
+          peak {Math.round(max).toLocaleString()}
+        </span>
       </div>
       <svg
         viewBox={`0 0 ${w} ${h}`}

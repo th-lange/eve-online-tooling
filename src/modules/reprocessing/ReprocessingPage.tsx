@@ -14,7 +14,10 @@ import {
 import { SdeSetup } from "../production/SdeSetup";
 import { formatIsk, formatPercent } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
-import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
+import {
+  SortHeaderCell,
+  type SortColumn,
+} from "../../components/SortHeaderCell";
 
 const FORGE = 10000002;
 const JITA = 60003760;
@@ -56,9 +59,22 @@ function Workbench() {
     securityMult,
   };
 
-  const regions = useQuery({ queryKey: ["market", "regions"], queryFn: marketRegions });
+  const regions = useQuery({
+    queryKey: ["market", "regions"],
+    queryFn: marketRegions,
+  });
   const eff = useQuery({
-    queryKey: ["reprocessing", "eff", reproc, reprocEff, oreProc, implantPct, rigBonusPct, structureMult, securityMult],
+    queryKey: [
+      "reprocessing",
+      "eff",
+      reproc,
+      reprocEff,
+      oreProc,
+      implantPct,
+      rigBonusPct,
+      structureMult,
+      securityMult,
+    ],
     queryFn: () => reprocessingEfficiency(params),
   });
   const favorites = useQuery({
@@ -84,7 +100,9 @@ function Workbench() {
   function toggleFavorite(r: ReprocessRow) {
     setList.mutate({ list: "favorites", typeId: r.typeId, add: !r.favorite });
     setRows((prev) =>
-      prev.map((x) => (x.typeId === r.typeId ? { ...x, favorite: !x.favorite } : x)),
+      prev.map((x) =>
+        x.typeId === r.typeId ? { ...x, favorite: !x.favorite } : x,
+      ),
     );
   }
   function blacklistRow(r: ReprocessRow) {
@@ -93,7 +111,10 @@ function Workbench() {
   }
 
   const stations = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
-  const rowsByType = useMemo(() => new Map(rows.map((r) => [r.typeId, r])), [rows]);
+  const rowsByType = useMemo(
+    () => new Map(rows.map((r) => [r.typeId, r])),
+    [rows],
+  );
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return rows;
@@ -108,8 +129,8 @@ function Workbench() {
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100">Reprocessing</h1>
           <p className="mt-1 text-sm text-zinc-400">
-            Ores ranked by reprocess-vs-sell — refine value per unit vs the ore's
-            own market price.
+            Ores ranked by reprocess-vs-sell — refine value per unit vs the
+            ore's own market price.
           </p>
         </div>
         <button
@@ -142,7 +163,11 @@ function Workbench() {
           <select
             value={stationId ?? ""}
             onChange={(e) =>
-              setStationId(e.currentTarget.value === "" ? null : Number(e.currentTarget.value))
+              setStationId(
+                e.currentTarget.value === ""
+                  ? null
+                  : Number(e.currentTarget.value),
+              )
             }
             className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
           >
@@ -154,10 +179,34 @@ function Workbench() {
             ))}
           </select>
         </Field>
-        <Num label="Reprocessing" value={reproc} onChange={setReproc} min={0} max={5} />
-        <Num label="Reproc. Efficiency" value={reprocEff} onChange={setReprocEff} min={0} max={5} />
-        <Num label="Ore Processing" value={oreProc} onChange={setOreProc} min={0} max={5} />
-        <Num label="Implant %" value={implantPct} onChange={setImplantPct} min={0} max={4} />
+        <Num
+          label="Reprocessing"
+          value={reproc}
+          onChange={setReproc}
+          min={0}
+          max={5}
+        />
+        <Num
+          label="Reproc. Efficiency"
+          value={reprocEff}
+          onChange={setReprocEff}
+          min={0}
+          max={5}
+        />
+        <Num
+          label="Ore Processing"
+          value={oreProc}
+          onChange={setOreProc}
+          min={0}
+          max={5}
+        />
+        <Num
+          label="Implant %"
+          value={implantPct}
+          onChange={setImplantPct}
+          min={0}
+          max={4}
+        />
         <Field label="Structure">
           <select
             value={structureMult}
@@ -212,7 +261,9 @@ function Workbench() {
       <div className="mt-3">
         {tab === "opportunities" &&
           (run.isError ? (
-            <div className="text-sm text-rose-400">Failed: {String(run.error)}</div>
+            <div className="text-sm text-rose-400">
+              Failed: {String(run.error)}
+            </div>
           ) : run.isPending ? (
             <Centered>Pricing ores and their refine outputs…</Centered>
           ) : (
@@ -238,7 +289,9 @@ function Workbench() {
             items={favorites.data ?? []}
             rowsByType={rowsByType}
             removeLabel="Unfavorite"
-            onRemove={(id) => setList.mutate({ list: "favorites", typeId: id, add: false })}
+            onRemove={(id) =>
+              setList.mutate({ list: "favorites", typeId: id, add: false })
+            }
           />
         )}
         {tab === "blacklist" && (
@@ -246,7 +299,9 @@ function Workbench() {
             items={blacklist.data ?? []}
             rowsByType={rowsByType}
             removeLabel="Remove"
-            onRemove={(id) => setList.mutate({ list: "blacklist", typeId: id, add: false })}
+            onRemove={(id) =>
+              setList.mutate({ list: "blacklist", typeId: id, add: false })
+            }
           />
         )}
       </div>
@@ -254,10 +309,16 @@ function Workbench() {
   );
 }
 
-type ReproSortKey = "name" | "sellPrice" | "reprocessValue" | "delta" | "uplift";
+type ReproSortKey =
+  "name" | "sellPrice" | "reprocessValue" | "delta" | "uplift";
 
 const REPRO_COLUMNS: SortColumn<ReproSortKey>[] = [
-  { key: "name", label: "Ore", numeric: false, description: "The ore (refine outputs in the drill-down)." },
+  {
+    key: "name",
+    label: "Ore",
+    numeric: false,
+    description: "The ore (refine outputs in the drill-down).",
+  },
   {
     key: "sellPrice",
     label: "Sell",
@@ -268,13 +329,15 @@ const REPRO_COLUMNS: SortColumn<ReproSortKey>[] = [
     key: "reprocessValue",
     label: "Reprocess",
     numeric: true,
-    description: "Refine value per unit — output minerals at the chosen market, after efficiency.",
+    description:
+      "Refine value per unit — output minerals at the chosen market, after efficiency.",
   },
   {
     key: "delta",
     label: "Δ/unit",
     numeric: true,
-    description: "Reprocess value − sell price. Positive = refining beats selling the ore.",
+    description:
+      "Reprocess value − sell price. Positive = refining beats selling the ore.",
   },
   {
     key: "uplift",
@@ -341,7 +404,9 @@ function ReprocessTable({
                   onClick={() => setExpanded(open ? null : r.typeId)}
                   className="cursor-pointer border-t border-zinc-800 hover:bg-zinc-800/40"
                 >
-                  <td className="px-2 text-center text-zinc-500">{open ? "▾" : "▸"}</td>
+                  <td className="px-2 text-center text-zinc-500">
+                    {open ? "▾" : "▸"}
+                  </td>
                   <td className="px-2 whitespace-nowrap">
                     <button
                       onClick={(e) => {
@@ -349,7 +414,11 @@ function ReprocessTable({
                         onFavorite(r);
                       }}
                       title="Favorite"
-                      className={r.favorite ? "text-amber-400" : "text-zinc-600 hover:text-amber-400"}
+                      className={
+                        r.favorite
+                          ? "text-amber-400"
+                          : "text-zinc-600 hover:text-amber-400"
+                      }
                     >
                       ★
                     </button>
@@ -368,12 +437,17 @@ function ReprocessTable({
                     <div className="text-zinc-200">
                       {r.name}
                       {r.missingPrices.length > 0 && (
-                        <span className="ml-1 text-amber-400" title="Some outputs unpriced">
+                        <span
+                          className="ml-1 text-amber-400"
+                          title="Some outputs unpriced"
+                        >
                           ⚠
                         </span>
                       )}
                     </div>
-                    {r.group && <div className="text-xs text-zinc-500">{r.group}</div>}
+                    {r.group && (
+                      <div className="text-xs text-zinc-500">{r.group}</div>
+                    )}
                   </td>
                   <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                     {formatIsk(r.sellPrice)}
@@ -400,8 +474,12 @@ function ReprocessTable({
                       <table className="w-full text-xs">
                         <thead className="text-zinc-500">
                           <tr>
-                            <th className="text-left font-medium">Output (per unit ore)</th>
-                            <th className="text-right font-medium">Yield/unit</th>
+                            <th className="text-left font-medium">
+                              Output (per unit ore)
+                            </th>
+                            <th className="text-right font-medium">
+                              Yield/unit
+                            </th>
                             <th className="text-right font-medium">Unit</th>
                             <th className="text-right font-medium">Value</th>
                           </tr>
@@ -415,8 +493,12 @@ function ReprocessTable({
                                   maximumFractionDigits: 4,
                                 })}
                               </td>
-                              <td className="text-right tabular-nums">{formatIsk(o.unitPrice)}</td>
-                              <td className="text-right tabular-nums">{formatIsk(o.value)}</td>
+                              <td className="text-right tabular-nums">
+                                {formatIsk(o.unitPrice)}
+                              </td>
+                              <td className="text-right tabular-nums">
+                                {formatIsk(o.value)}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -502,7 +584,9 @@ function Tabs({
           key={t.value}
           onClick={() => onChange(t.value)}
           className={`rounded px-3 py-1.5 text-sm ${
-            tab === t.value ? "bg-zinc-700 text-zinc-100" : "text-zinc-400 hover:text-zinc-200"
+            tab === t.value
+              ? "bg-zinc-700 text-zinc-100"
+              : "text-zinc-400 hover:text-zinc-200"
           }`}
         >
           {t.label}
@@ -549,5 +633,7 @@ function Num({
 }
 
 function Centered({ children }: { children: ReactNode }) {
-  return <div className="p-10 text-center text-sm text-zinc-500">{children}</div>;
+  return (
+    <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
+  );
 }

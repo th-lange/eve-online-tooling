@@ -24,7 +24,10 @@ export function Characters() {
     queryKey: ["auth", "characters"],
     queryFn: authCharacters,
   });
-  const active = useQuery({ queryKey: ["auth", "active"], queryFn: activeCharacter });
+  const active = useQuery({
+    queryKey: ["auth", "active"],
+    queryFn: activeCharacter,
+  });
   const login = useMutation({ mutationFn: authLogin, onSuccess: invalidate });
   const logout = useMutation({
     mutationFn: (id: number) => authLogout(id),
@@ -85,7 +88,9 @@ export function Characters() {
       </button>
 
       {login.isError && (
-        <p className="mt-1 text-xs text-rose-400">Login failed: {String(login.error)}</p>
+        <p className="mt-1 text-xs text-rose-400">
+          Login failed: {String(login.error)}
+        </p>
       )}
     </div>
   );

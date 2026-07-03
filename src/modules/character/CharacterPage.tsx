@@ -35,7 +35,10 @@ export function CharacterPage() {
 }
 
 function Skills() {
-  const q = useQuery({ queryKey: ["char", "skills"], queryFn: characterSkills });
+  const q = useQuery({
+    queryKey: ["char", "skills"],
+    queryFn: characterSkills,
+  });
   if (q.isError) return <Err e={q.error} />;
   if (!q.data) return <Loading />;
   const d = q.data;
@@ -60,7 +63,9 @@ function Skills() {
             {d.queue.map((s, i) => (
               <tr key={i} className="border-t border-zinc-800 text-zinc-300">
                 <td className="px-3 py-1.5">{s.skillName}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums">{s.level}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">
+                  {s.level}
+                </td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                   {s.finishDate ? until(s.finishDate) : "—"}
                 </td>
@@ -81,7 +86,10 @@ function Skills() {
 }
 
 function Standings() {
-  const q = useQuery({ queryKey: ["char", "standings"], queryFn: characterStandings });
+  const q = useQuery({
+    queryKey: ["char", "standings"],
+    queryFn: characterStandings,
+  });
   if (q.isError) return <Err e={q.error} />;
   if (!q.data) return <Loading />;
   return (
@@ -101,7 +109,9 @@ function Standings() {
             <tr key={i} className="border-t border-zinc-800 text-zinc-300">
               <td className="px-3 py-1.5 text-zinc-200">{s.name}</td>
               <td className="px-3 py-1.5 text-zinc-500">{s.fromType}</td>
-              <td className="px-3 py-1.5 text-right tabular-nums">{s.base.toFixed(2)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">
+                {s.base.toFixed(2)}
+              </td>
               <td
                 className={`px-3 py-1.5 text-right tabular-nums ${
                   s.effective >= 0 ? "text-emerald-400" : "text-rose-400"
@@ -126,7 +136,10 @@ function Standings() {
 }
 
 function Research() {
-  const q = useQuery({ queryKey: ["char", "research"], queryFn: characterResearch });
+  const q = useQuery({
+    queryKey: ["char", "research"],
+    queryFn: characterResearch,
+  });
   if (q.isError) return <Err e={q.error} />;
   if (!q.data) return <Loading />;
   const d = q.data;
@@ -151,7 +164,9 @@ function Research() {
               <tr key={i} className="border-t border-zinc-800 text-zinc-300">
                 <td className="px-3 py-1.5">{r.agent}</td>
                 <td className="px-3 py-1.5 text-zinc-400">{r.skill}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums">{formatInt(Math.round(r.pointsPerDay))}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">
+                  {formatInt(Math.round(r.pointsPerDay))}
+                </td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
                   {formatInt(Math.round(r.currentPoints))}
                 </td>
@@ -172,7 +187,10 @@ function Research() {
 }
 
 function Mining() {
-  const q = useQuery({ queryKey: ["char", "mining"], queryFn: characterMining });
+  const q = useQuery({
+    queryKey: ["char", "mining"],
+    queryFn: characterMining,
+  });
   if (q.isError) return <Err e={q.error} />;
   if (!q.data) return <Loading />;
   const d = q.data;
@@ -184,7 +202,9 @@ function Mining() {
         <Window label="30d" units={d.units30d} value={d.value30d} />
       </div>
       {d.systems.length > 0 && (
-        <div className="mb-2 text-xs text-zinc-500">Recent systems: {d.systems.join(", ")}</div>
+        <div className="mb-2 text-xs text-zinc-500">
+          Recent systems: {d.systems.join(", ")}
+        </div>
       )}
       <div className="overflow-auto rounded border border-zinc-800">
         <table className="w-full text-sm">
@@ -192,14 +212,18 @@ function Mining() {
             <tr>
               <th className="px-3 py-2 text-left font-medium">Ore (30d)</th>
               <th className="px-3 py-2 text-right font-medium">Units</th>
-              <th className="px-3 py-2 text-right font-medium">Value (Jita buy)</th>
+              <th className="px-3 py-2 text-right font-medium">
+                Value (Jita buy)
+              </th>
             </tr>
           </thead>
           <tbody>
             {d.rows.map((r, i) => (
               <tr key={i} className="border-t border-zinc-800 text-zinc-300">
                 <td className="px-3 py-1.5">{r.name}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums">{formatInt(r.quantity)}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">
+                  {formatInt(r.quantity)}
+                </td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
                   {formatIsk(r.value)}
                 </td>
@@ -224,7 +248,11 @@ function Fleet() {
   if (q.isError) return <Err e={q.error} />;
   if (!q.data) return <Loading />;
   if (!q.data.inFleet) {
-    return <div className="p-8 text-center text-sm text-zinc-500">Not in a fleet.</div>;
+    return (
+      <div className="p-8 text-center text-sm text-zinc-500">
+        Not in a fleet.
+      </div>
+    );
   }
   return (
     <div className="overflow-auto rounded border border-zinc-800">
@@ -252,7 +280,15 @@ function Fleet() {
   );
 }
 
-function Window({ label, units, value }: { label: string; units: number; value: number }) {
+function Window({
+  label,
+  units,
+  value,
+}: {
+  label: string;
+  units: number;
+  value: number;
+}) {
   return (
     <div className="rounded border border-zinc-800 bg-zinc-900 p-3">
       <div className="text-xs text-zinc-500">{label}</div>
@@ -285,7 +321,9 @@ function Tabs({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
           key={t.value}
           onClick={() => onChange(t.value)}
           className={`rounded px-3 py-1.5 text-sm ${
-            tab === t.value ? "bg-zinc-700 text-zinc-100" : "text-zinc-400 hover:text-zinc-200"
+            tab === t.value
+              ? "bg-zinc-700 text-zinc-100"
+              : "text-zinc-400 hover:text-zinc-200"
           }`}
         >
           {t.label}
@@ -310,7 +348,8 @@ function Loading() {
 function Err({ e }: { e: unknown }) {
   return (
     <div className="p-6 text-sm text-rose-400">
-      {String(e)} — log in a character and ensure the scope is enabled on your EVE app.
+      {String(e)} — log in a character and ensure the scope is enabled on your
+      EVE app.
     </div>
   );
 }

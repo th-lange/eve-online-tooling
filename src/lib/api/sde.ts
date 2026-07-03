@@ -104,10 +104,16 @@ export function sdeCategories(): Promise<IdName[]> {
 export function sdeMarketCategories(): Promise<IdName[]> {
   return invoke<IdName[]>("sde_market_categories");
 }
-export function sdeGroups(categoryId: number, publishedOnly: boolean): Promise<IdName[]> {
+export function sdeGroups(
+  categoryId: number,
+  publishedOnly: boolean,
+): Promise<IdName[]> {
   return invoke<IdName[]>("sde_groups", { categoryId, publishedOnly });
 }
-export function sdeTypes(groupId: number, publishedOnly: boolean): Promise<IdName[]> {
+export function sdeTypes(
+  groupId: number,
+  publishedOnly: boolean,
+): Promise<IdName[]> {
   return invoke<IdName[]>("sde_types", { groupId, publishedOnly });
 }
 export function sdeTypeDetail(typeId: number): Promise<TypeDetail | null> {

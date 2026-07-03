@@ -27,7 +27,10 @@ import {
  */
 export function ShoppingPage() {
   const qc = useQueryClient();
-  const lists = useQuery({ queryKey: SHOPPING_LISTS_KEY, queryFn: shoppingLists });
+  const lists = useQuery({
+    queryKey: SHOPPING_LISTS_KEY,
+    queryFn: shoppingLists,
+  });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
 
@@ -167,7 +170,8 @@ function ListDetail({
       return next.size === prev.size ? prev : next;
     });
   }, [list.items]);
-  const allSelected = list.items.length > 0 && selected.size === list.items.length;
+  const allSelected =
+    list.items.length > 0 && selected.size === list.items.length;
 
   const toggle = (typeId: number) =>
     setSelected((prev) => {
@@ -178,7 +182,9 @@ function ListDetail({
     });
   const toggleAll = () =>
     setSelected((prev) =>
-      prev.size === list.items.length ? new Set() : new Set(list.items.map((i) => i.typeId)),
+      prev.size === list.items.length
+        ? new Set()
+        : new Set(list.items.map((i) => i.typeId)),
     );
 
   async function bulkApply(mode: "multiply" | "add" | "set") {
@@ -187,8 +193,16 @@ function ListDetail({
     for (const it of list.items) {
       if (!selected.has(it.typeId)) continue;
       const next =
-        mode === "multiply" ? it.quantity * n : mode === "add" ? it.quantity + n : n;
-      await shoppingSetQuantity(list.id, it.typeId, Math.max(1, Math.round(next)));
+        mode === "multiply"
+          ? it.quantity * n
+          : mode === "add"
+            ? it.quantity + n
+            : n;
+      await shoppingSetQuantity(
+        list.id,
+        it.typeId,
+        Math.max(1, Math.round(next)),
+      );
     }
     await onChange();
   }
@@ -434,7 +448,9 @@ function AddItemField({
   const parsed = useMemo(() => parseItems(text), [text]);
 
   async function add() {
-    const lines = text.split("\n").map((raw) => ({ raw, parsed: parseLine(raw) }));
+    const lines = text
+      .split("\n")
+      .map((raw) => ({ raw, parsed: parseLine(raw) }));
     const toAdd = lines.flatMap((l) => (l.parsed ? [l.parsed] : []));
     if (toAdd.length === 0 || busy) return;
     setBusy(true);
@@ -500,4 +516,3 @@ function AddItemField({
     </div>
   );
 }
-

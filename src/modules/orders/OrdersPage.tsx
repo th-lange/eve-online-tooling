@@ -5,11 +5,17 @@ import { marketOrders, openMarketWindow, type OrderRow } from "../../lib/api";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
 import { formatInt, formatIsk } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
-import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
+import {
+  SortHeaderCell,
+  type SortColumn,
+} from "../../components/SortHeaderCell";
 import { DataAge } from "../../components/DataAge";
 
 export function OrdersPage() {
-  const orders = useQuery({ queryKey: ["orders", "market"], queryFn: marketOrders });
+  const orders = useQuery({
+    queryKey: ["orders", "market"],
+    queryFn: marketOrders,
+  });
   const rows = orders.data ?? [];
   const undercut = rows.filter((r) => r.undercut).length;
 
@@ -17,7 +23,9 @@ export function OrdersPage() {
     <div className="p-6">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Market Orders</h1>
+          <h1 className="text-2xl font-semibold text-zinc-100">
+            Market Orders
+          </h1>
           <p className="mt-1 text-sm text-zinc-400">
             Your open buy/sell orders, flagged when undercut at the order's own
             station's current best price.
@@ -31,7 +39,10 @@ export function OrdersPage() {
           >
             {orders.isFetching ? "Loading…" : "Refresh"}
           </button>
-          <DataAge updatedAt={orders.dataUpdatedAt} fetching={orders.isFetching} />
+          <DataAge
+            updatedAt={orders.dataUpdatedAt}
+            fetching={orders.isFetching}
+          />
         </div>
       </div>
 
@@ -60,20 +71,46 @@ export function OrdersPage() {
 }
 
 type OrderSortKey =
-  | "name"
-  | "price"
-  | "bestPrice"
-  | "volumeRemain"
-  | "location"
-  | "issued";
+  "name" | "price" | "bestPrice" | "volumeRemain" | "location" | "issued";
 
 const COLUMNS: SortColumn<OrderSortKey>[] = [
-  { key: "name", label: "Item", numeric: false, description: "The item, with buy/sell side." },
-  { key: "price", label: "Your price", numeric: true, description: "Your order price." },
-  { key: "bestPrice", label: "Best", numeric: true, description: "Best competing price at this order's station (sell-min / buy-max)." },
-  { key: "volumeRemain", label: "Remain", numeric: true, description: "Units left / total on the order." },
-  { key: "location", label: "Location", numeric: false, description: "Where the order sits." },
-  { key: "issued", label: "Issued", numeric: false, description: "When the order was placed." },
+  {
+    key: "name",
+    label: "Item",
+    numeric: false,
+    description: "The item, with buy/sell side.",
+  },
+  {
+    key: "price",
+    label: "Your price",
+    numeric: true,
+    description: "Your order price.",
+  },
+  {
+    key: "bestPrice",
+    label: "Best",
+    numeric: true,
+    description:
+      "Best competing price at this order's station (sell-min / buy-max).",
+  },
+  {
+    key: "volumeRemain",
+    label: "Remain",
+    numeric: true,
+    description: "Units left / total on the order.",
+  },
+  {
+    key: "location",
+    label: "Location",
+    numeric: false,
+    description: "Where the order sits.",
+  },
+  {
+    key: "issued",
+    label: "Issued",
+    numeric: false,
+    description: "When the order was placed.",
+  },
 ];
 const KEYS = COLUMNS.map((c) => c.key);
 
@@ -89,9 +126,11 @@ function OrdersTable({ rows }: { rows: OrderRow[] }) {
     const dir = sortDir === "asc" ? 1 : -1;
     return [...rows].sort((a, b) => {
       if (sortKey === "name") return dir * a.name.localeCompare(b.name);
-      if (sortKey === "location") return dir * a.location.localeCompare(b.location);
+      if (sortKey === "location")
+        return dir * a.location.localeCompare(b.location);
       if (sortKey === "issued") return dir * a.issued.localeCompare(b.issued);
-      if (sortKey === "bestPrice") return dir * ((a.bestPrice ?? 0) - (b.bestPrice ?? 0));
+      if (sortKey === "bestPrice")
+        return dir * ((a.bestPrice ?? 0) - (b.bestPrice ?? 0));
       return dir * ((a[sortKey] as number) - (b[sortKey] as number));
     });
   }, [rows, sortKey, sortDir]);
@@ -102,7 +141,13 @@ function OrdersTable({ rows }: { rows: OrderRow[] }) {
         <thead className="bg-zinc-900 text-zinc-400">
           <tr>
             {COLUMNS.map((c) => (
-              <SortHeaderCell key={c.key} column={c} active={sortKey === c.key} dir={sortDir} onClick={toggleSort} />
+              <SortHeaderCell
+                key={c.key}
+                column={c}
+                active={sortKey === c.key}
+                dir={sortDir}
+                onClick={toggleSort}
+              />
             ))}
             <th className="px-3 py-1.5 text-right font-medium">Undercut</th>
           </tr>
@@ -117,11 +162,15 @@ function OrdersTable({ rows }: { rows: OrderRow[] }) {
             >
               <td className="px-3 py-1.5">
                 <span className="text-zinc-200">{r.name}</span>
-                <span className={`ml-2 text-xs ${r.isBuy ? "text-sky-400" : "text-emerald-400"}`}>
+                <span
+                  className={`ml-2 text-xs ${r.isBuy ? "text-sky-400" : "text-emerald-400"}`}
+                >
                   {r.isBuy ? "buy" : "sell"}
                 </span>
               </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">{formatIsk(r.price)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+                {formatIsk(r.price)}
+              </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                 {r.bestPrice == null ? "—" : formatIsk(r.bestPrice)}
               </td>
@@ -129,7 +178,9 @@ function OrdersTable({ rows }: { rows: OrderRow[] }) {
                 {formatInt(r.volumeRemain)} / {formatInt(r.volumeTotal)}
               </td>
               <td className="px-3 py-1.5 text-zinc-400">{r.location}</td>
-              <td className="px-3 py-1.5 text-xs text-zinc-500">{r.issued.slice(0, 10)}</td>
+              <td className="px-3 py-1.5 text-xs text-zinc-500">
+                {r.issued.slice(0, 10)}
+              </td>
               <td className="px-3 py-1.5">
                 <div className="flex items-center justify-end gap-2">
                   {r.undercut && r.bestPrice != null ? (
@@ -159,7 +210,10 @@ function OrdersTable({ rows }: { rows: OrderRow[] }) {
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={COLUMNS.length + 1} className="px-3 py-6 text-center text-zinc-500">
+              <td
+                colSpan={COLUMNS.length + 1}
+                className="px-3 py-6 text-center text-zinc-500"
+              >
                 No open orders.
               </td>
             </tr>

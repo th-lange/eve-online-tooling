@@ -48,7 +48,10 @@ function Workbench() {
   const [hideMetas, setHideMetas] = useState<Set<string>>(new Set());
   const [rows, setRows] = useState<TradeRow[]>([]);
 
-  const regions = useQuery({ queryKey: ["market", "regions"], queryFn: marketRegions });
+  const regions = useQuery({
+    queryKey: ["market", "regions"],
+    queryFn: marketRegions,
+  });
   const favorites = useQuery({
     queryKey: ["trading", "favorites"],
     queryFn: () => tradingGetList("favorites"),
@@ -187,7 +190,11 @@ function Workbench() {
             ))}
           </select>
         </Field>
-        <NumField label="Broker fee %" value={brokerPct} onChange={setBrokerPct} />
+        <NumField
+          label="Broker fee %"
+          value={brokerPct}
+          onChange={setBrokerPct}
+        />
         <NumField label="Sales tax %" value={taxPct} onChange={setTaxPct} />
         <Field label="Min volume">
           <input
@@ -223,7 +230,9 @@ function Workbench() {
                     <CheckboxGroup
                       options={categoryOptions}
                       selected={hideCategories}
-                      onToggle={(v) => setHideCategories(toggle(hideCategories, v))}
+                      onToggle={(v) =>
+                        setHideCategories(toggle(hideCategories, v))
+                      }
                     />
                   </Field>
                   <Field label="Hide tech levels (check to exclude)">
@@ -294,7 +303,12 @@ type TradeSortKey =
   | "daysOfSupply";
 
 const TRADE_COLUMNS: SortColumn<TradeSortKey>[] = [
-  { key: "name", label: "Item", numeric: false, description: "The item's name." },
+  {
+    key: "name",
+    label: "Item",
+    numeric: false,
+    description: "The item's name.",
+  },
   {
     key: "buy",
     label: "Buy",
@@ -335,7 +349,8 @@ const TRADE_COLUMNS: SortColumn<TradeSortKey>[] = [
     key: "buySellRatio",
     label: "B/S",
     numeric: true,
-    description: "Buy depth ÷ sell depth — demand vs supply pressure (>1 = more buyers listed).",
+    description:
+      "Buy depth ÷ sell depth — demand vs supply pressure (>1 = more buyers listed).",
   },
   {
     key: "dailyTraded",
@@ -348,7 +363,8 @@ const TRADE_COLUMNS: SortColumn<TradeSortKey>[] = [
     key: "daysOfSupply",
     label: "Supply",
     numeric: true,
-    description: "Sell-side depth ÷ daily-traded — days of supply on the book (lower clears faster).",
+    description:
+      "Sell-side depth ÷ daily-traded — days of supply on the book (lower clears faster).",
   },
 ];
 
@@ -398,12 +414,19 @@ function TradeTable({
         </thead>
         <tbody>
           {sorted.map((r) => (
-            <tr key={r.typeId} className="border-t border-zinc-800 hover:bg-zinc-800/40">
+            <tr
+              key={r.typeId}
+              className="border-t border-zinc-800 hover:bg-zinc-800/40"
+            >
               <td className="px-2">
                 <button
                   onClick={() => onFavorite(r)}
                   title="Favorite"
-                  className={r.favorite ? "text-amber-400" : "text-zinc-600 hover:text-amber-400"}
+                  className={
+                    r.favorite
+                      ? "text-amber-400"
+                      : "text-zinc-600 hover:text-amber-400"
+                  }
                 >
                   ★
                 </button>
@@ -441,10 +464,18 @@ function TradeTable({
                 )}
               </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                <UndercutPrice value={r.buy} tick={0.01} label="buy (overcut +0.01)" />
+                <UndercutPrice
+                  value={r.buy}
+                  tick={0.01}
+                  label="buy (overcut +0.01)"
+                />
               </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                <UndercutPrice value={r.sell} tick={-0.01} label="sell (undercut −0.01)" />
+                <UndercutPrice
+                  value={r.sell}
+                  tick={-0.01}
+                  label="sell (undercut −0.01)"
+                />
               </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
                 {formatIsk(r.profitPerUnit)}
@@ -593,7 +624,9 @@ function ListView({
               <tr key={it.typeId} className="border-t border-zinc-800">
                 <td className="px-3 py-1.5 text-zinc-200">{it.name}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                  {r ? `${formatIsk(r.profitPerUnit)}/unit · ${formatPercent(r.margin)}` : ""}
+                  {r
+                    ? `${formatIsk(r.profitPerUnit)}/unit · ${formatPercent(r.margin)}`
+                    : ""}
                 </td>
                 <td className="px-3 py-1.5 text-right">
                   <button

@@ -81,14 +81,20 @@ function Workbench() {
     5: false,
   });
 
-  const regions = useQuery({ queryKey: ["market", "regions"], queryFn: marketRegions });
+  const regions = useQuery({
+    queryKey: ["market", "regions"],
+    queryFn: marketRegions,
+  });
   // Ship-only search (no modules/charges/blueprints).
   const ships = useQuery({
     queryKey: ["fitting", "ships", query],
     queryFn: () => sdeSearchShips(query),
     enabled: query.trim().length >= 2,
   });
-  const saved = useQuery({ queryKey: ["fitting", "saved"], queryFn: fittingListLocal });
+  const saved = useQuery({
+    queryKey: ["fitting", "saved"],
+    queryFn: fittingListLocal,
+  });
   // In-game (ESI) fittings — fetched on demand (cached server-side), not on mount.
   // Auto-load in-game fits (cached server-side 30m); "Refresh" forces a fetch.
   const esiFits = useQuery({
@@ -131,8 +137,7 @@ function Workbench() {
     enabled: fit != null,
   });
   // The jammed view only applies while ECM is actually projected onto the fit.
-  const jammedActive =
-    jammed && !!stats.data?.projectedEw?.some((t) => t.jam);
+  const jammedActive = jammed && !!stats.data?.projectedEw?.some((t) => t.jam);
 
   // Per-weapon ranges keyed by (typeId, chargeTypeId), for the slot grid.
   const rangeOf = useMemo(() => {
@@ -167,9 +172,12 @@ function Workbench() {
         subsystem: free("subsystem", ship.subsystemSlots),
       },
       cpu: (res?.cpuOutput ?? ship.cpuOutput) - (res?.cpuUsed ?? 0),
-      pg: (res?.powergridOutput ?? ship.powergridOutput) - (res?.powergridUsed ?? 0),
+      pg:
+        (res?.powergridOutput ?? ship.powergridOutput) -
+        (res?.powergridUsed ?? 0),
       calibration:
-        (res?.calibrationOutput ?? ship.calibration) - (res?.calibrationUsed ?? 0),
+        (res?.calibrationOutput ?? ship.calibration) -
+        (res?.calibrationUsed ?? 0),
     };
   }, [fit, stats.data, layout.data]);
 
@@ -181,7 +189,9 @@ function Workbench() {
     },
     onError: (e) => alert(`Import failed: ${e}`),
   });
-  const price = useMutation({ mutationFn: () => fittingPrice(fit!, regionId, null) });
+  const price = useMutation({
+    mutationFn: () => fittingPrice(fit!, regionId, null),
+  });
   const save = useMutation({
     mutationFn: () => fittingSaveLocal(fit!),
     onSuccess: (id) => {
@@ -230,7 +240,9 @@ function Workbench() {
       if (capStable && !res.capStable) unmet.push("cap-stable");
       if (maxCostM.trim() && !res.withinBudget) unmet.push("ISK budget");
       setOptimizeNotice(
-        unmet.length ? `Couldn't meet ${unmet.join(" + ")} — showing the closest fit.` : null,
+        unmet.length
+          ? `Couldn't meet ${unmet.join(" + ")} — showing the closest fit.`
+          : null,
       );
     },
     onError: (e) => alert(`Optimize failed: ${e}`),
@@ -238,8 +250,14 @@ function Workbench() {
 
   // All fits (local + in-game), each tagged with its source.
   const allFits = useMemo(() => {
-    const local = (saved.data ?? []).map((f) => ({ fit: f, source: "saved" as const }));
-    const esi = (esiFits.data ?? []).map((f) => ({ fit: f, source: "in-game" as const }));
+    const local = (saved.data ?? []).map((f) => ({
+      fit: f,
+      source: "saved" as const,
+    }));
+    const esi = (esiFits.data ?? []).map((f) => ({
+      fit: f,
+      source: "in-game" as const,
+    }));
     return [...local, ...esi];
   }, [saved.data, esiFits.data]);
 
@@ -269,13 +287,22 @@ function Workbench() {
       const group = info?.group || "Other";
       const hull = info?.name || `#${f.shipTypeId}`;
       const list = byGroup.get(group) ?? [];
-      list.push({ key: `${source}:${f.id}:${i}`, hull, name: f.name, source, fit: f });
+      list.push({
+        key: `${source}:${f.id}:${i}`,
+        hull,
+        name: f.name,
+        source,
+        fit: f,
+      });
       byGroup.set(group, list);
     });
     return [...byGroup.entries()]
       .map(([group, fits]) => ({
         group,
-        fits: fits.sort((a, b) => a.hull.localeCompare(b.hull) || a.name.localeCompare(b.name)),
+        fits: fits.sort(
+          (a, b) =>
+            a.hull.localeCompare(b.hull) || a.name.localeCompare(b.name),
+        ),
       }))
       .sort((a, b) => a.group.localeCompare(b.group));
   }, [allFits, hullInfo]);
@@ -350,7 +377,9 @@ function Workbench() {
   }
   function removeProjected(idx: number) {
     setFit((f) =>
-      f ? { ...f, projected: (f.projected ?? []).filter((_, i) => i !== idx) } : f,
+      f
+        ? { ...f, projected: (f.projected ?? []).filter((_, i) => i !== idx) }
+        : f,
     );
   }
 
@@ -367,8 +396,8 @@ function Workbench() {
       <header>
         <h1 className="text-lg font-semibold text-zinc-100">Fitting</h1>
         <p className="text-sm text-zinc-400">
-          Build a fit, validate slots and resources, price it, and optimize. Import/export
-          EFT or load your in-game fittings.
+          Build a fit, validate slots and resources, price it, and optimize.
+          Import/export EFT or load your in-game fittings.
         </p>
       </header>
 
@@ -402,7 +431,9 @@ function Workbench() {
           Skills
           <select
             value={skillSource}
-            onChange={(e) => setSkillSource(e.currentTarget.value as SkillSource)}
+            onChange={(e) =>
+              setSkillSource(e.currentTarget.value as SkillSource)
+            }
             className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
           >
             <option value="allFive">All V</option>
@@ -478,7 +509,9 @@ function Workbench() {
       </div>
 
       {fit == null ? (
-        <Centered>Pick a hull, load a saved/in-game fit, or import an EFT fit to begin.</Centered>
+        <Centered>
+          Pick a hull, load a saved/in-game fit, or import an EFT fit to begin.
+        </Centered>
       ) : (
         <div className="flex min-h-0 flex-1 gap-4">
           {/* Left: editor */}
@@ -529,7 +562,9 @@ function Workbench() {
               <span className="text-zinc-500">Optimize</span>
               <select
                 value={objective}
-                onChange={(e) => setObjective(e.currentTarget.value as OptimizeObjective)}
+                onChange={(e) =>
+                  setObjective(e.currentTarget.value as OptimizeObjective)
+                }
                 className="rounded bg-zinc-800 px-2 py-0.5 text-zinc-100 outline-none"
               >
                 <option value="tank">Tank</option>
@@ -539,7 +574,9 @@ function Workbench() {
               </select>
               <select
                 value={optimizeMode}
-                onChange={(e) => setOptimizeMode(e.currentTarget.value as OptimizeMode)}
+                onChange={(e) =>
+                  setOptimizeMode(e.currentTarget.value as OptimizeMode)
+                }
                 className="rounded bg-zinc-800 px-2 py-0.5 text-zinc-100 outline-none"
                 title="Rework all relevant slots, or only fill empty ones"
               >
@@ -556,7 +593,10 @@ function Workbench() {
                   [5, "Officer"],
                 ] as [number, string][]
               ).map(([id, label]) => (
-                <label key={id} className="flex items-center gap-1 text-zinc-400">
+                <label
+                  key={id}
+                  className="flex items-center gap-1 text-zinc-400"
+                >
                   <input
                     type="checkbox"
                     checked={!!meta[id]}
@@ -580,7 +620,10 @@ function Workbench() {
                 />
                 Cap-stable
               </label>
-              <label className="flex items-center gap-1 text-zinc-400" title="Cap total fit cost">
+              <label
+                className="flex items-center gap-1 text-zinc-400"
+                title="Cap total fit cost"
+              >
                 Max
                 <input
                   type="number"
@@ -651,130 +694,156 @@ function Workbench() {
             </div>
             {stats.isError && (
               <p className="text-xs text-red-400">
-                Eval failed: {(stats.error as Error)?.message ?? String(stats.error)}
+                Eval failed:{" "}
+                {(stats.error as Error)?.message ?? String(stats.error)}
               </p>
             )}
             {!stats.data && !stats.isFetching && !stats.isError && (
               <p className="text-xs text-zinc-500">Add modules to see stats.</p>
             )}
-            <div className={stats.isFetching ? "space-y-4 opacity-50 transition-opacity" : "space-y-4"}>
-            {stats.data && (
-              <div className="space-y-2">
-                <h3 className="text-xs uppercase tracking-wide text-zinc-500">Fitting</h3>
-                <ResourceBar
-                  label="CPU"
-                  used={stats.data.resources.cpuUsed}
-                  max={stats.data.resources.cpuOutput}
-                  unit="tf"
-                />
-                <ResourceBar
-                  label="Powergrid"
-                  used={stats.data.resources.powergridUsed}
-                  max={stats.data.resources.powergridOutput}
-                  unit="MW"
-                />
-                <ResourceBar
-                  label="Calibration"
-                  used={stats.data.resources.calibrationUsed}
-                  max={stats.data.resources.calibrationOutput}
-                  unit=""
-                />
-                {stats.data.capacitor && <CapGauge cap={stats.data.capacitor} />}
-                {stats.data.validation.length > 0 && (
-                  <ul className="mt-2 space-y-1">
-                    {stats.data.validation.map((p, i) => (
-                      <li key={i} className="text-xs text-red-400">
-                        ⚠ {p.message}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
+            <div
+              className={
+                stats.isFetching
+                  ? "space-y-4 opacity-50 transition-opacity"
+                  : "space-y-4"
+              }
+            >
+              {stats.data && (
+                <div className="space-y-2">
+                  <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+                    Fitting
+                  </h3>
+                  <ResourceBar
+                    label="CPU"
+                    used={stats.data.resources.cpuUsed}
+                    max={stats.data.resources.cpuOutput}
+                    unit="tf"
+                  />
+                  <ResourceBar
+                    label="Powergrid"
+                    used={stats.data.resources.powergridUsed}
+                    max={stats.data.resources.powergridOutput}
+                    unit="MW"
+                  />
+                  <ResourceBar
+                    label="Calibration"
+                    used={stats.data.resources.calibrationUsed}
+                    max={stats.data.resources.calibrationOutput}
+                    unit=""
+                  />
+                  {stats.data.capacitor && (
+                    <CapGauge cap={stats.data.capacitor} />
+                  )}
+                  {stats.data.validation.length > 0 && (
+                    <ul className="mt-2 space-y-1">
+                      {stats.data.validation.map((p, i) => (
+                        <li key={i} className="text-xs text-red-400">
+                          ⚠ {p.message}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
 
-            {stats.data?.dps && (
-              <div className="space-y-1">
-                <h3 className="text-xs uppercase tracking-wide text-zinc-500">DPS ({skillLabel})</h3>
-                {jammedActive ? (
-                  <div className="text-sm text-amber-400">Jammed — 0 applied (no lock)</div>
-                ) : (
-                  <>
-                    <div className="text-sm text-zinc-300">{stats.data.dps.total.toFixed(1)} dps</div>
-                    {stats.data.dps.total > 0 && (
-                      <div className="text-xs text-zinc-500">
-                        {stats.data.dps.turret > 0 && `turret ${stats.data.dps.turret.toFixed(1)} `}
-                        {stats.data.dps.missile > 0 && `· missile ${stats.data.dps.missile.toFixed(1)} `}
-                        {stats.data.dps.drone > 0 && `· drone ${stats.data.dps.drone.toFixed(1)}`}
+              {stats.data?.dps && (
+                <div className="space-y-1">
+                  <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+                    DPS ({skillLabel})
+                  </h3>
+                  {jammedActive ? (
+                    <div className="text-sm text-amber-400">
+                      Jammed — 0 applied (no lock)
+                    </div>
+                  ) : (
+                    <>
+                      <div className="text-sm text-zinc-300">
+                        {stats.data.dps.total.toFixed(1)} dps
                       </div>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-
-            {stats.data?.projectedEw && stats.data.projectedEw.length > 0 && (
-              <EwPanel
-                tags={stats.data.projectedEw}
-                jammed={jammed}
-                onJam={setJammed}
-              />
-            )}
-
-            {stats.data?.tank && (
-              <div className="space-y-1">
-                <h3 className="text-xs uppercase tracking-wide text-zinc-500">Tank ({skillLabel})</h3>
-                <div className="text-sm text-zinc-300">
-                  {Math.round(stats.data.tank.ehp).toLocaleString()} EHP
+                      {stats.data.dps.total > 0 && (
+                        <div className="text-xs text-zinc-500">
+                          {stats.data.dps.turret > 0 &&
+                            `turret ${stats.data.dps.turret.toFixed(1)} `}
+                          {stats.data.dps.missile > 0 &&
+                            `· missile ${stats.data.dps.missile.toFixed(1)} `}
+                          {stats.data.dps.drone > 0 &&
+                            `· drone ${stats.data.dps.drone.toFixed(1)}`}
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
-                {(stats.data.tank.shieldRepS > 0 ||
-                  stats.data.tank.armorRepS > 0 ||
-                  stats.data.tank.passiveShieldS > 0) && (
-                  <div className="flex flex-wrap gap-x-3 text-xs text-zinc-500">
-                    {stats.data.tank.shieldRepS > 0 && (
-                      <span>
-                        shield boost{" "}
-                        <span className="tabular-nums text-sky-400">
-                          {stats.data.tank.shieldRepS.toFixed(1)}/s
-                        </span>
-                      </span>
-                    )}
-                    {stats.data.tank.armorRepS > 0 && (
-                      <span>
-                        armor rep{" "}
-                        <span className="tabular-nums text-amber-400">
-                          {stats.data.tank.armorRepS.toFixed(1)}/s
-                        </span>
-                      </span>
-                    )}
-                    {stats.data.tank.passiveShieldS > 0 && (
-                      <span>
-                        passive shield{" "}
-                        <span className="tabular-nums text-sky-300">
-                          {stats.data.tank.passiveShieldS.toFixed(1)}/s
-                        </span>
-                      </span>
-                    )}
+              )}
+
+              {stats.data?.projectedEw && stats.data.projectedEw.length > 0 && (
+                <EwPanel
+                  tags={stats.data.projectedEw}
+                  jammed={jammed}
+                  onJam={setJammed}
+                />
+              )}
+
+              {stats.data?.tank && (
+                <div className="space-y-1">
+                  <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+                    Tank ({skillLabel})
+                  </h3>
+                  <div className="text-sm text-zinc-300">
+                    {Math.round(stats.data.tank.ehp).toLocaleString()} EHP
                   </div>
-                )}
-                <TankResists tank={stats.data.tank} />
-              </div>
-            )}
-
-            {stats.data?.navigation && (
-              <div className="space-y-1">
-                <h3 className="text-xs uppercase tracking-wide text-zinc-500">Navigation</h3>
-                <div className="text-xs text-zinc-400">
-                  {Math.round(stats.data.navigation.maxVelocity)} m/s · align{" "}
-                  {stats.data.navigation.alignTime.toFixed(1)}s · sig{" "}
-                  {Math.round(stats.data.navigation.signatureRadius)}m
+                  {(stats.data.tank.shieldRepS > 0 ||
+                    stats.data.tank.armorRepS > 0 ||
+                    stats.data.tank.passiveShieldS > 0) && (
+                    <div className="flex flex-wrap gap-x-3 text-xs text-zinc-500">
+                      {stats.data.tank.shieldRepS > 0 && (
+                        <span>
+                          shield boost{" "}
+                          <span className="tabular-nums text-sky-400">
+                            {stats.data.tank.shieldRepS.toFixed(1)}/s
+                          </span>
+                        </span>
+                      )}
+                      {stats.data.tank.armorRepS > 0 && (
+                        <span>
+                          armor rep{" "}
+                          <span className="tabular-nums text-amber-400">
+                            {stats.data.tank.armorRepS.toFixed(1)}/s
+                          </span>
+                        </span>
+                      )}
+                      {stats.data.tank.passiveShieldS > 0 && (
+                        <span>
+                          passive shield{" "}
+                          <span className="tabular-nums text-sky-300">
+                            {stats.data.tank.passiveShieldS.toFixed(1)}/s
+                          </span>
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  <TankResists tank={stats.data.tank} />
                 </div>
-              </div>
-            )}
+              )}
+
+              {stats.data?.navigation && (
+                <div className="space-y-1">
+                  <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+                    Navigation
+                  </h3>
+                  <div className="text-xs text-zinc-400">
+                    {Math.round(stats.data.navigation.maxVelocity)} m/s · align{" "}
+                    {stats.data.navigation.alignTime.toFixed(1)}s · sig{" "}
+                    {Math.round(stats.data.navigation.signatureRadius)}m
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="space-y-1">
               <div className="flex items-center justify-between">
-                <h3 className="text-xs uppercase tracking-wide text-zinc-500">Price</h3>
+                <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+                  Price
+                </h3>
                 <button
                   onClick={() => price.mutate()}
                   className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
@@ -795,4 +864,3 @@ function Workbench() {
     </div>
   );
 }
-

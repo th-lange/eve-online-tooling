@@ -253,7 +253,10 @@ export function BlueprintLibrary({
               </tr>
             ))}
             {imported.map((b) => (
-              <tr key={`i${b.typeId}`} className="border-t border-zinc-800 bg-sky-950/20">
+              <tr
+                key={`i${b.typeId}`}
+                className="border-t border-zinc-800 bg-sky-950/20"
+              >
                 <td className="px-3 py-1.5 text-zinc-200">
                   {b.name}
                   <span className="ml-1 rounded bg-sky-900/60 px-1 text-[10px] text-sky-300">
@@ -365,7 +368,13 @@ export function toggle(set: Set<string>, v: string): Set<string> {
   return next;
 }
 
-export function Tabs({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
+export function Tabs({
+  tab,
+  onChange,
+}: {
+  tab: Tab;
+  onChange: (t: Tab) => void;
+}) {
   const tabs: { value: Tab; label: string }[] = [
     { value: "item", label: "Item" },
     { value: "market", label: "Market" },
@@ -391,7 +400,13 @@ export function Tabs({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }
   );
 }
 
-export function Field({ label, children }: { label: string; children: ReactNode }) {
+export function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
   return (
     <label className="flex flex-col gap-1 text-xs text-zinc-400">
       {label}

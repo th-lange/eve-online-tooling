@@ -1,12 +1,22 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { activeCharacter, authCharacters, industryJobs, type JobRow, type Slot } from "../../lib/api";
+import {
+  activeCharacter,
+  authCharacters,
+  industryJobs,
+  type JobRow,
+  type Slot,
+} from "../../lib/api";
 import { formatInt, formatIsk } from "../../lib/format";
 import { DataAge } from "../../components/DataAge";
 
 type StatusFilter = "active" | "delivered" | "all";
 type Period = "1w" | "1m" | "3m" | "all";
-const PERIOD_DAYS: Record<Exclude<Period, "all">, number> = { "1w": 7, "1m": 30, "3m": 90 };
+const PERIOD_DAYS: Record<Exclude<Period, "all">, number> = {
+  "1w": 7,
+  "1m": 30,
+  "3m": 90,
+};
 const PERIOD_LABEL: Record<Period, string> = {
   "1w": "1 week",
   "1m": "1 month",
@@ -32,8 +42,14 @@ function withinPeriod(endDate: string, period: Period, now: number): boolean {
 
 export function IndustryJobsPage() {
   const [characterId, setCharacterId] = useState<number | undefined>(undefined);
-  const characters = useQuery({ queryKey: ["auth", "characters"], queryFn: authCharacters });
-  const activeChar = useQuery({ queryKey: ["auth", "active"], queryFn: activeCharacter });
+  const characters = useQuery({
+    queryKey: ["auth", "characters"],
+    queryFn: authCharacters,
+  });
+  const activeChar = useQuery({
+    queryKey: ["auth", "active"],
+    queryFn: activeCharacter,
+  });
   const jobs = useQuery({
     queryKey: ["industry", "jobs", characterId ?? "first"],
     queryFn: () => industryJobs(characterId),
@@ -59,13 +75,17 @@ export function IndustryJobsPage() {
         withinPeriod(r.endDate, period, now),
     );
   }, [allRows, status, facility, period]);
-  const active = allRows.filter((r) => r.status === "active" || r.status === "ready").length;
+  const active = allRows.filter(
+    (r) => r.status === "active" || r.status === "ready",
+  ).length;
 
   return (
     <div className="p-6">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Industry Jobs</h1>
+          <h1 className="text-2xl font-semibold text-zinc-100">
+            Industry Jobs
+          </h1>
           <p className="mt-1 text-sm text-zinc-400">
             Your running and recently-delivered industry jobs — what's cooking,
             and when it finishes.
@@ -86,7 +106,9 @@ export function IndustryJobsPage() {
       {jobs.isError && (
         <div className="mt-3 text-sm text-rose-400">
           Failed: {String(jobs.error)}
-          <div className="mt-1 text-xs text-zinc-500">{errorHint(String(jobs.error))}</div>
+          <div className="mt-1 text-xs text-zinc-500">
+            {errorHint(String(jobs.error))}
+          </div>
         </div>
       )}
 
@@ -103,7 +125,9 @@ export function IndustryJobsPage() {
           <label className="flex flex-col gap-1 text-xs text-zinc-400">
             Character
             <select
-              value={characterId ?? activeChar.data ?? roster[0]?.characterId ?? ""}
+              value={
+                characterId ?? activeChar.data ?? roster[0]?.characterId ?? ""
+              }
               onChange={(e) => setCharacterId(Number(e.currentTarget.value))}
               className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
             >
@@ -187,19 +211,30 @@ function JobsTable({ rows }: { rows: JobRow[] }) {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.jobId} className="border-t border-zinc-800 text-zinc-300 hover:bg-zinc-800/40">
+            <tr
+              key={r.jobId}
+              className="border-t border-zinc-800 text-zinc-300 hover:bg-zinc-800/40"
+            >
               <td className="px-3 py-1.5 text-zinc-200">{r.product}</td>
               <td className="px-3 py-1.5">
-                <span className={r.owner === "Corp" ? "text-sky-400" : "text-zinc-500"}>
+                <span
+                  className={
+                    r.owner === "Corp" ? "text-sky-400" : "text-zinc-500"
+                  }
+                >
                   {r.owner}
                 </span>
               </td>
               <td className="px-3 py-1.5 text-zinc-400">{r.activity}</td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">{formatInt(r.runs)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                {formatInt(r.runs)}
+              </td>
               <td className="px-3 py-1.5">
                 <span className={statusColor(r.status)}>{r.status || "—"}</span>
               </td>
-              <td className="px-3 py-1.5 text-zinc-400">{finishLabel(r, now)}</td>
+              <td className="px-3 py-1.5 text-zinc-400">
+                {finishLabel(r, now)}
+              </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                 {r.cost == null ? "—" : formatIsk(r.cost)}
               </td>
@@ -236,7 +271,9 @@ function SlotPill({ label, slot }: { label: string; slot: Slot }) {
   return (
     <div className="rounded border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-sm">
       <span className="text-zinc-400">{label}</span>{" "}
-      <span className={`tabular-nums font-medium ${full ? "text-amber-400" : "text-zinc-100"}`}>
+      <span
+        className={`tabular-nums font-medium ${full ? "text-amber-400" : "text-zinc-100"}`}
+      >
         {slot.used}/{slot.total}
       </span>
     </div>
@@ -252,7 +289,8 @@ function statusColor(status: string): string {
 
 /** "in 3h 20m" for running jobs, else the end date. */
 function finishLabel(r: JobRow, now: number): string {
-  if (r.status !== "active" || !r.endDate) return r.endDate?.slice(0, 16).replace("T", " ") || "—";
+  if (r.status !== "active" || !r.endDate)
+    return r.endDate?.slice(0, 16).replace("T", " ") || "—";
   const end = Date.parse(r.endDate);
   if (Number.isNaN(end)) return r.endDate;
   const ms = end - now;

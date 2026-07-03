@@ -98,8 +98,12 @@ export function ModuleBrowser({
           a.name.length - b.name.length,
       );
     return {
-      fitRows: ranked.filter((r) => moduleFits(infoOf.get(r.id), fitContext)).slice(0, 30),
-      noFitRows: ranked.filter((r) => !moduleFits(infoOf.get(r.id), fitContext)).slice(0, 20),
+      fitRows: ranked
+        .filter((r) => moduleFits(infoOf.get(r.id), fitContext))
+        .slice(0, 30),
+      noFitRows: ranked
+        .filter((r) => !moduleFits(infoOf.get(r.id), fitContext))
+        .slice(0, 20),
     };
   }, [matches, infoOf, slotFilter, fitContext, q]);
   const nothingShown = fitRows.length === 0 && noFitRows.length === 0;
@@ -302,7 +306,8 @@ export function BrowseTree({
 
           {/* Leaf items, grouped by meta variant */}
           {shownItems.map((it, i) => {
-            const newMeta = i === 0 || shownItems[i - 1].metaGroup !== it.metaGroup;
+            const newMeta =
+              i === 0 || shownItems[i - 1].metaGroup !== it.metaGroup;
             return (
               <div key={`i${it.id}`}>
                 {newMeta && (
@@ -329,7 +334,9 @@ export function BrowseTree({
               onClick={() => setShowAll((v) => !v)}
               className="mt-1 px-2 py-1 text-xs text-zinc-500 hover:text-zinc-300"
             >
-              {showAll ? "Hide ones that won't fit" : `Show ${hiddenCount} that won't fit`}
+              {showAll
+                ? "Hide ones that won't fit"
+                : `Show ${hiddenCount} that won't fit`}
             </button>
           )}
 
@@ -340,11 +347,14 @@ export function BrowseTree({
                 : "Nothing here."}
             </p>
           )}
-          {groups.length === 0 && slotItems.length > 0 && shownItems.length === 0 && !showAll && (
-            <p className="px-2 py-2 text-xs text-zinc-500">
-              Nothing here fits the hull right now.
-            </p>
-          )}
+          {groups.length === 0 &&
+            slotItems.length > 0 &&
+            shownItems.length === 0 &&
+            !showAll && (
+              <p className="px-2 py-2 text-xs text-zinc-500">
+                Nothing here fits the hull right now.
+              </p>
+            )}
         </div>
       )}
     </div>
@@ -443,19 +453,26 @@ export const FIT_EPS = 1e-6;
 
 /** Does this module fit the hull's free slots + remaining resources? Unknown
  *  info or no context ⇒ treated as fitting (don't gray things out prematurely). */
-export function moduleFits(info: ModuleInfo | undefined, ctx: FitContext | null): boolean {
+export function moduleFits(
+  info: ModuleInfo | undefined,
+  ctx: FitContext | null,
+): boolean {
   return fitReason(info, ctx) === null;
 }
 
 /** Why a module won't fit (`"no slot"` / `"CPU"` / `"PG"` / `"calibration"`), or
  *  null when it fits. */
-export function fitReason(info: ModuleInfo | undefined, ctx: FitContext | null): string | null {
+export function fitReason(
+  info: ModuleInfo | undefined,
+  ctx: FitContext | null,
+): string | null {
   if (!info || !ctx) return null;
   const free = ctx.freeSlots[info.slot];
   if (free !== undefined && free <= 0) return "no slot";
   if (info.cpu > ctx.cpu + FIT_EPS) return "CPU";
   if (info.powergrid > ctx.pg + FIT_EPS) return "PG";
-  if (info.slot === "rig" && info.calibration > ctx.calibration + FIT_EPS) return "calibration";
+  if (info.slot === "rig" && info.calibration > ctx.calibration + FIT_EPS)
+    return "calibration";
   return null;
 }
 
@@ -589,7 +606,9 @@ export function ChargeControl({
   });
   const allCharges = charges.data ?? [];
   const list = q.trim()
-    ? allCharges.filter((c) => c.name.toLowerCase().includes(q.toLowerCase().trim()))
+    ? allCharges.filter((c) =>
+        c.name.toLowerCase().includes(q.toLowerCase().trim()),
+      )
     : allCharges;
   // Pick on one weapon or all of this type, depending on the toggle.
   const apply = (c: number | null) => {
@@ -659,7 +678,9 @@ export function ChargeControl({
                     <button
                       onClick={() => apply(c.id)}
                       className={`block w-full truncate rounded px-2 py-1 text-left hover:bg-zinc-800 ${
-                        c.id === chargeTypeId ? "text-amber-400" : "text-zinc-200"
+                        c.id === chargeTypeId
+                          ? "text-amber-400"
+                          : "text-zinc-200"
                       }`}
                     >
                       {c.name}
@@ -688,12 +709,20 @@ export function SlotGrid({
   activatable,
 }: {
   fit: Fit;
-  layout: { highSlots: number; midSlots: number; lowSlots: number; rigSlots: number };
+  layout: {
+    highSlots: number;
+    midSlots: number;
+    lowSlots: number;
+    rigSlots: number;
+  };
   nameOf: (id: number) => string;
   onRemove: (globalIndex: number) => void;
   onAddToSlot: (slot: SlotKind) => void;
   onSetCharge: (globalIndex: number, chargeTypeId: number | null) => void;
-  onSetChargeForType: (weaponTypeId: number, chargeTypeId: number | null) => void;
+  onSetChargeForType: (
+    weaponTypeId: number,
+    chargeTypeId: number | null,
+  ) => void;
   onSetState: (globalIndex: number, state: ModuleState) => void;
   rangeOf: Map<string, WeaponRange>;
   activatable: Set<number>;
@@ -723,7 +752,9 @@ export function SlotGrid({
             {items.length > 0 && (
               <ul className="text-sm text-zinc-300">
                 {items.map(({ it, i }) => {
-                  const range = rangeOf.get(`${it.typeId}:${it.chargeTypeId ?? 0}`);
+                  const range = rangeOf.get(
+                    `${it.typeId}:${it.chargeTypeId ?? 0}`,
+                  );
                   // Only high/mid/low modules toggle (rigs/subsystems are permanent).
                   // Activatable modules cycle active → inactive → offline; passive
                   // ones only toggle online ↔ offline and never read "active".
@@ -771,7 +802,8 @@ export function SlotGrid({
                       : "text-zinc-600 group-hover:text-zinc-300";
                   }
                   // Dim the name when the module isn't contributing.
-                  const dimmed = offline || (canActivate && it.state === "online");
+                  const dimmed =
+                    offline || (canActivate && it.state === "online");
                   return (
                     <li
                       key={i}
@@ -797,7 +829,11 @@ export function SlotGrid({
                       )}
                       <span
                         className={`min-w-0 flex-1 truncate ${
-                          offline ? "text-zinc-500" : dimmed ? "text-zinc-400" : ""
+                          offline
+                            ? "text-zinc-500"
+                            : dimmed
+                              ? "text-zinc-400"
+                              : ""
                         }`}
                       >
                         {nameOf(it.typeId)}
@@ -826,10 +862,13 @@ export function SlotGrid({
                           typeId={it.typeId}
                           chargeTypeId={it.chargeTypeId ?? null}
                           sameTypeCount={
-                            fit.items.filter((x) => x.typeId === it.typeId).length
+                            fit.items.filter((x) => x.typeId === it.typeId)
+                              .length
                           }
                           onSetCharge={(c) => onSetCharge(i, c)}
-                          onSetChargeAll={(c) => onSetChargeForType(it.typeId, c)}
+                          onSetChargeAll={(c) =>
+                            onSetChargeForType(it.typeId, c)
+                          }
                         />
                       )}
                     </li>
@@ -876,7 +915,9 @@ export function EwPanel({
   const hasEcm = tags.some((t) => t.jam);
   return (
     <div className="space-y-1">
-      <h3 className="text-xs uppercase tracking-wide text-zinc-500">EW projected</h3>
+      <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+        EW projected
+      </h3>
       <div className="flex flex-wrap gap-1.5">
         {tags.map((t) => (
           <span
@@ -924,7 +965,8 @@ export function CapGauge({ cap }: { cap: CapStats }) {
         <span className="text-zinc-400">Capacitor</span>
         {cap.stable ? (
           <span className="text-emerald-400">
-            stable · {Math.max(0, Math.min(100, cap.stablePct ?? 100)).toFixed(0)}%
+            stable ·{" "}
+            {Math.max(0, Math.min(100, cap.stablePct ?? 100)).toFixed(0)}%
           </span>
         ) : (
           <span className="text-red-400">
@@ -1043,7 +1085,9 @@ export function EsiFitStatus({
   const err = refresh.error ?? esi.error;
   if (err) {
     return (
-      <span className="mt-0.5 block w-72 text-[11px] text-rose-400">{String(err)}</span>
+      <span className="mt-0.5 block w-72 text-[11px] text-rose-400">
+        {String(err)}
+      </span>
     );
   }
   if (esi.isFetched && (esi.data?.length ?? 0) === 0) {

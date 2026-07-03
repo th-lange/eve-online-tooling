@@ -3,8 +3,14 @@ import { parseItems, parseLine } from "./parse";
 
 describe("shopping paste parser", () => {
   it("parses Multibuy name + quantity (space or tab)", () => {
-    expect(parseLine("Tritanium 1000")).toEqual({ name: "Tritanium", quantity: 1000 });
-    expect(parseLine("Tritanium\t1000")).toEqual({ name: "Tritanium", quantity: 1000 });
+    expect(parseLine("Tritanium 1000")).toEqual({
+      name: "Tritanium",
+      quantity: 1000,
+    });
+    expect(parseLine("Tritanium\t1000")).toEqual({
+      name: "Tritanium",
+      quantity: 1000,
+    });
   });
 
   it("keeps multi-word names and ignores trailing columns", () => {

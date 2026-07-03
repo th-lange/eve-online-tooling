@@ -27,16 +27,21 @@ function Workbench() {
   const [openGroup, setOpenGroup] = useState<number | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
 
-  const categories = useQuery({ queryKey: ["uni", "cats"], queryFn: sdeCategories });
+  const categories = useQuery({
+    queryKey: ["uni", "cats"],
+    queryFn: sdeCategories,
+  });
 
   return (
     <div className="p-6">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Universe browser</h1>
+          <h1 className="text-2xl font-semibold text-zinc-100">
+            Universe browser
+          </h1>
           <p className="mt-1 text-sm text-zinc-400">
-            Browse every item type: Category → Group → Type, with stats and dogma
-            attributes.
+            Browse every item type: Category → Group → Type, with stats and
+            dogma attributes.
           </p>
         </div>
         <label className="flex items-center gap-1 text-xs text-zinc-300">
@@ -57,7 +62,9 @@ function Workbench() {
                 onClick={() => setOpenCat(openCat === c.id ? null : c.id)}
                 className="flex w-full items-center gap-1 px-1 py-0.5 text-left text-zinc-200 hover:bg-zinc-800/60"
               >
-                <span className="w-3 text-zinc-500">{openCat === c.id ? "▾" : "▸"}</span>
+                <span className="w-3 text-zinc-500">
+                  {openCat === c.id ? "▾" : "▸"}
+                </span>
                 {c.name}
               </button>
               {openCat === c.id && (
@@ -75,7 +82,9 @@ function Workbench() {
         </div>
 
         <div className="rounded border border-zinc-800 bg-zinc-900 p-3">
-          {selected ? <Detail typeId={selected} /> : (
+          {selected ? (
+            <Detail typeId={selected} />
+          ) : (
             <div className="p-8 text-center text-sm text-zinc-500">
               Pick a type to see its details.
             </div>
@@ -113,7 +122,9 @@ function Groups({
             onClick={() => setOpenGroup(openGroup === g.id ? null : g.id)}
             className="flex w-full items-center gap-1 px-1 py-0.5 text-left text-zinc-300 hover:bg-zinc-800/60"
           >
-            <span className="w-3 text-zinc-500">{openGroup === g.id ? "▾" : "▸"}</span>
+            <span className="w-3 text-zinc-500">
+              {openGroup === g.id ? "▾" : "▸"}
+            </span>
             {g.name}
           </button>
           {openGroup === g.id && (
@@ -164,8 +175,14 @@ function Types({
 }
 
 function Detail({ typeId }: { typeId: number }) {
-  const detail = useQuery({ queryKey: ["uni", "detail", typeId], queryFn: () => sdeTypeDetail(typeId) });
-  const attrs = useQuery({ queryKey: ["uni", "attrs", typeId], queryFn: () => sdeTypeAttributes(typeId) });
+  const detail = useQuery({
+    queryKey: ["uni", "detail", typeId],
+    queryFn: () => sdeTypeDetail(typeId),
+  });
+  const attrs = useQuery({
+    queryKey: ["uni", "attrs", typeId],
+    queryFn: () => sdeTypeAttributes(typeId),
+  });
   const d = detail.data;
   if (!d) return <div className="p-4 text-sm text-zinc-500">Loading…</div>;
   return (
@@ -189,11 +206,23 @@ function Detail({ typeId }: { typeId: number }) {
         {!d.published && " · unpublished"}
       </div>
       <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-        <Stat label="Volume" value={d.volume != null ? `${formatInt(d.volume)} m³` : "—"} />
-        <Stat label="Capacity" value={d.capacity ? `${formatInt(d.capacity)} m³` : "—"} />
+        <Stat
+          label="Volume"
+          value={d.volume != null ? `${formatInt(d.volume)} m³` : "—"}
+        />
+        <Stat
+          label="Capacity"
+          value={d.capacity ? `${formatInt(d.capacity)} m³` : "—"}
+        />
         <Stat label="Mass" value={d.mass ? `${formatInt(d.mass)} kg` : "—"} />
-        <Stat label="Portion size" value={d.portionSize ? formatInt(d.portionSize) : "—"} />
-        <Stat label="Base price" value={d.basePrice ? formatIsk(d.basePrice) : "—"} />
+        <Stat
+          label="Portion size"
+          value={d.portionSize ? formatInt(d.portionSize) : "—"}
+        />
+        <Stat
+          label="Base price"
+          value={d.basePrice ? formatIsk(d.basePrice) : "—"}
+        />
       </dl>
       {d.description && (
         <p className="mt-3 max-h-32 overflow-auto whitespace-pre-wrap text-xs text-zinc-400">
@@ -208,13 +237,17 @@ function Detail({ typeId }: { typeId: number }) {
               <tr key={i} className="border-t border-zinc-800/60">
                 <td className="px-2 py-0.5 text-zinc-400">{a.name}</td>
                 <td className="px-2 py-0.5 text-right tabular-nums text-zinc-300">
-                  {a.value.toLocaleString(undefined, { maximumFractionDigits: 3 })}
+                  {a.value.toLocaleString(undefined, {
+                    maximumFractionDigits: 3,
+                  })}
                 </td>
               </tr>
             ))}
             {attrs.data?.length === 0 && (
               <tr>
-                <td className="px-2 py-2 text-center text-zinc-600">No attributes.</td>
+                <td className="px-2 py-2 text-center text-zinc-600">
+                  No attributes.
+                </td>
               </tr>
             )}
           </tbody>
@@ -234,5 +267,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function Centered({ children }: { children: ReactNode }) {
-  return <div className="p-10 text-center text-sm text-zinc-500">{children}</div>;
+  return (
+    <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
+  );
 }

@@ -58,7 +58,12 @@ describe("api.fitting", () => {
   });
 
   it("passes EFT text through to fitting_import_eft", async () => {
-    invokeMock.mockResolvedValue({ id: "", name: "x", shipTypeId: 1, items: [] });
+    invokeMock.mockResolvedValue({
+      id: "",
+      name: "x",
+      shipTypeId: 1,
+      items: [],
+    });
     await fittingImportEft("[Rifter, x]");
     expect(invokeMock).toHaveBeenCalledWith("fitting_import_eft", {
       text: "[Rifter, x]",
@@ -82,19 +87,29 @@ describe("api.wormholes", () => {
 
   it("invokes wh_import_evescout and returns the merged connections", async () => {
     invokeMock.mockResolvedValue([{ id: 1, source: "evescout" }]);
-    await expect(whImportEvescout()).resolves.toEqual([{ id: 1, source: "evescout" }]);
+    await expect(whImportEvescout()).resolves.toEqual([
+      { id: 1, source: "evescout" },
+    ]);
     expect(invokeMock).toHaveBeenCalledWith("wh_import_evescout");
   });
 
   it("invokes route_nearest_wormhole", async () => {
-    invokeMock.mockResolvedValue({ found: true, jumps: 3, entranceName: "Rancer" });
+    invokeMock.mockResolvedValue({
+      found: true,
+      jumps: 3,
+      entranceName: "Rancer",
+    });
     const r = await routeNearestWormhole();
     expect(r.jumps).toBe(3);
     expect(invokeMock).toHaveBeenCalledWith("route_nearest_wormhole");
   });
 
   it("forwards ship + wh code + mass status to wh_jump_plan", async () => {
-    invokeMock.mockResolvedValue({ found: true, passes: true, remainingCrossings: 12 });
+    invokeMock.mockResolvedValue({
+      found: true,
+      passes: true,
+      remainingCrossings: 12,
+    });
     await whJumpPlan(17738, "N766", "reduced");
     expect(invokeMock).toHaveBeenCalledWith("wh_jump_plan", {
       shipTypeId: 17738,
@@ -108,13 +123,24 @@ describe("api.wormholes", () => {
     await whTypeReference();
     expect(invokeMock).toHaveBeenCalledWith("wh_type_reference");
 
-    invokeMock.mockResolvedValue({ found: true, systemId: 31000005, statics: [] });
+    invokeMock.mockResolvedValue({
+      found: true,
+      systemId: 31000005,
+      statics: [],
+    });
     await whSystemReference(31000005);
-    expect(invokeMock).toHaveBeenCalledWith("wh_system_reference", { systemId: 31000005 });
+    expect(invokeMock).toHaveBeenCalledWith("wh_system_reference", {
+      systemId: 31000005,
+    });
   });
 
   it("forwards Tripwire connect args and imports", async () => {
-    invokeMock.mockResolvedValue({ configured: true, baseUrl: "https://tripwire.eve-apps.com", username: "u", mask: null });
+    invokeMock.mockResolvedValue({
+      configured: true,
+      baseUrl: "https://tripwire.eve-apps.com",
+      username: "u",
+      mask: null,
+    });
     await whTripwireConnect("https://tripwire.eve-apps.com", "u", "pw", null);
     expect(invokeMock).toHaveBeenCalledWith("wh_tripwire_connect", {
       baseUrl: "https://tripwire.eve-apps.com",
@@ -133,13 +159,17 @@ describe("api.pi", () => {
   beforeEach(() => invokeMock.mockReset());
 
   it("invokes pi_overview and pi_locked_set", async () => {
-    invokeMock.mockResolvedValue([{ planetId: 1, extractors: [], balance: [] }]);
+    invokeMock.mockResolvedValue([
+      { planetId: 1, extractors: [], balance: [] },
+    ]);
     await piOverview();
     expect(invokeMock).toHaveBeenCalledWith("pi_overview");
 
     invokeMock.mockResolvedValue(undefined);
     await piLockedSet([2389, 2390]);
-    expect(invokeMock).toHaveBeenCalledWith("pi_locked_set", { typeIds: [2389, 2390] });
+    expect(invokeMock).toHaveBeenCalledWith("pi_locked_set", {
+      typeIds: [2389, 2390],
+    });
   });
 });
 

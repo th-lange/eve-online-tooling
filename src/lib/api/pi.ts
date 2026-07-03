@@ -64,7 +64,10 @@ export function piOverview(): Promise<ColonyView[]> {
  * its system. ESI has no "open PI window" endpoint, so this is the nearest link.
  * Requires `esi-ui.open_window.v1`.
  */
-export function piShowInGame(planetId: number, systemId: number): Promise<void> {
+export function piShowInGame(
+  planetId: number,
+  systemId: number,
+): Promise<void> {
   return invoke<void>("pi_show_in_game", { planetId, systemId });
 }
 /** Type ids locked in as "produced by PI". */

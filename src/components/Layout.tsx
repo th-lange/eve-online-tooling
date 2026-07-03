@@ -1,6 +1,13 @@
 import { createContext, useEffect, useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { ChevronDown, ChevronRight, GripVertical, Search, Star, X } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  GripVertical,
+  Search,
+  Star,
+  X,
+} from "lucide-react";
 import { modules, MODULE_GROUPS, type ModuleDef } from "../modules/registry";
 import { BridgeStatus } from "./BridgeStatus";
 import { Characters } from "./Characters";
@@ -89,15 +96,21 @@ export function Layout() {
   );
   const [colors, setColors] = useState<Record<string, string>>(loadColors);
   // Collapsed section ids (sections default to open — only collapsed ones persist).
-  const [collapsed, setCollapsed] = useState<string[]>(() => loadIds(COLLAPSED_KEY));
+  const [collapsed, setCollapsed] = useState<string[]>(() =>
+    loadIds(COLLAPSED_KEY),
+  );
   // A drag in progress, tagged with the section it started in — a pinned module
   // shows in both the Pinned section and its group, so reordering is scoped to
   // the section the row was dragged from.
-  const [drag, setDrag] = useState<{ id: string; section: string } | null>(null);
+  const [drag, setDrag] = useState<{ id: string; section: string } | null>(
+    null,
+  );
 
   const toggleSection = (id: string) =>
     setCollapsed((prev) => {
-      const next = prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id];
+      const next = prev.includes(id)
+        ? prev.filter((s) => s !== id)
+        : [...prev, id];
       localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next));
       return next;
     });
@@ -114,7 +127,9 @@ export function Layout() {
 
   const togglePin = (id: string) =>
     setPins((prev) => {
-      const next = prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id];
+      const next = prev.includes(id)
+        ? prev.filter((p) => p !== id)
+        : [...prev, id];
       localStorage.setItem(PINS_KEY, JSON.stringify(next));
       return next;
     });
@@ -159,11 +174,7 @@ export function Layout() {
       <aside className="flex w-60 flex-col border-r border-zinc-800 bg-zinc-900">
         <div className="px-4 py-4">
           <div className="flex items-center gap-2.5">
-            <img
-              src={appIcon}
-              alt=""
-              className="h-8 w-8 shrink-0 rounded-lg"
-            />
+            <img src={appIcon} alt="" className="h-8 w-8 shrink-0 rounded-lg" />
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold tracking-wide text-zinc-100">
                 EVE Online Tooling
@@ -250,9 +261,13 @@ function ModuleHost() {
   const seg = location.pathname.split("/").filter(Boolean)[0];
   const activeId = modules.some((m) => m.id === seg) ? seg : modules[0].id;
 
-  const [visited, setVisited] = useState<Set<string>>(() => new Set([activeId]));
+  const [visited, setVisited] = useState<Set<string>>(
+    () => new Set([activeId]),
+  );
   useEffect(() => {
-    setVisited((prev) => (prev.has(activeId) ? prev : new Set(prev).add(activeId)));
+    setVisited((prev) =>
+      prev.has(activeId) ? prev : new Set(prev).add(activeId),
+    );
   }, [activeId]);
 
   return (
@@ -467,7 +482,9 @@ function ColorPicker({
                   setOpen(false);
                 }}
                 className={`h-7 w-7 rounded-full ring-1 ring-zinc-900 transition-transform hover:scale-110 ${
-                  color === c.key ? "outline outline-2 outline-offset-2 outline-zinc-300" : ""
+                  color === c.key
+                    ? "outline outline-2 outline-offset-2 outline-zinc-300"
+                    : ""
                 }`}
                 style={{ backgroundColor: c.hex }}
               />

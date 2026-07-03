@@ -31,7 +31,9 @@ export interface NewConnection {
 export function whConnections(): Promise<ConnectionView[]> {
   return invoke<ConnectionView[]>("wh_connections");
 }
-export function whAddConnection(connection: NewConnection): Promise<ConnectionView[]> {
+export function whAddConnection(
+  connection: NewConnection,
+): Promise<ConnectionView[]> {
   return invoke<ConnectionView[]>("wh_add_connection", { connection });
 }
 export function whUpdateConnection(
@@ -82,7 +84,12 @@ export function whTripwireConnect(
   password: string,
   mask: string | null,
 ): Promise<TripwireStatus> {
-  return invoke<TripwireStatus>("wh_tripwire_connect", { baseUrl, username, password, mask });
+  return invoke<TripwireStatus>("wh_tripwire_connect", {
+    baseUrl,
+    username,
+    password,
+    mask,
+  });
 }
 /** Opt out: clear the stored Tripwire config + keychain password. */
 export function whTripwireDisconnect(): Promise<TripwireStatus> {
@@ -126,7 +133,11 @@ export function whJumpPlan(
   whTypeCode: string,
   massStatus: string,
 ): Promise<JumpPlan> {
-  return invoke<JumpPlan>("wh_jump_plan", { shipTypeId, whTypeCode, massStatus });
+  return invoke<JumpPlan>("wh_jump_plan", {
+    shipTypeId,
+    whTypeCode,
+    massStatus,
+  });
 }
 
 export interface WormholeType {
@@ -185,7 +196,10 @@ export interface SignatureScan {
 }
 
 /** Paste a probe-scanner result for a system; returns the set + added/removed diff. */
-export function whPasteSignatures(systemId: number, text: string): Promise<SignatureScan> {
+export function whPasteSignatures(
+  systemId: number,
+  text: string,
+): Promise<SignatureScan> {
   return invoke<SignatureScan>("wh_paste_signatures", { systemId, text });
 }
 /** Stored signatures for a system. */
@@ -213,5 +227,9 @@ export function whRoute(
   destinationSystemId: number,
   avoidEol: boolean,
 ): Promise<RouteResult> {
-  return invoke<RouteResult>("wh_route", { originSystemId, destinationSystemId, avoidEol });
+  return invoke<RouteResult>("wh_route", {
+    originSystemId,
+    destinationSystemId,
+    avoidEol,
+  });
 }

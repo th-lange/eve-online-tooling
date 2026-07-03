@@ -23,7 +23,10 @@ import {
 import { AddToListButton } from "../../components/AddToListButton";
 import { formatInt, formatIsk } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
-import { SortHeaderCell, type SortColumn } from "../../components/SortHeaderCell";
+import {
+  SortHeaderCell,
+  type SortColumn,
+} from "../../components/SortHeaderCell";
 
 const FORGE = 10000002;
 
@@ -57,8 +60,14 @@ function Workbench() {
 
   const [days, setDays] = useState(90);
 
-  const regions = useQuery({ queryKey: ["market", "all-regions"], queryFn: marketAllRegions });
-  const current = useQuery({ queryKey: ["market", "current-location"], queryFn: marketCurrentLocation });
+  const regions = useQuery({
+    queryKey: ["market", "all-regions"],
+    queryFn: marketAllRegions,
+  });
+  const current = useQuery({
+    queryKey: ["market", "current-location"],
+    queryFn: marketCurrentLocation,
+  });
 
   // Default the region + jumps origin to the character's current location once.
   const seeded = useRef(false);
@@ -121,14 +130,18 @@ function Workbench() {
     enabled: tab === "search" && picked != null,
   });
 
-  const series = useMemo(() => (history.data ?? []).slice(-days), [history.data, days]);
+  const series = useMemo(
+    () => (history.data ?? []).slice(-days),
+    [history.data, days],
+  );
 
   return (
     <div className="p-6">
       <div>
         <h1 className="text-2xl font-semibold text-zinc-100">Market Search</h1>
         <p className="mt-1 text-sm text-zinc-400">
-          Find an item's sell orders across the market, or chart its price &amp; volume history.
+          Find an item's sell orders across the market, or chart its price &amp;
+          volume history.
         </p>
       </div>
 
@@ -327,7 +340,9 @@ function SearchTab({
           High-sec only
         </label>
         <span className="pb-1 text-xs text-zinc-500">
-          {highSecOnly ? "routing avoids low/null-sec" : "shortest route, ignores security"}
+          {highSecOnly
+            ? "routing avoids low/null-sec"
+            : "shortest route, ignores security"}
         </span>
       </div>
 
@@ -339,7 +354,9 @@ function SearchTab({
         ) : error ? (
           <Centered>Couldn't load orders: {String(error)}</Centered>
         ) : orders.length === 0 ? (
-          <Centered>No sell orders for this item in the selected area.</Centered>
+          <Centered>
+            No sell orders for this item in the selected area.
+          </Centered>
         ) : (
           <OrderTable orders={orders} hasOrigin={origin != null} />
         )}
@@ -348,7 +365,13 @@ function SearchTab({
   );
 }
 
-type OrderSortKey = "price" | "volumeRemain" | "stationName" | "systemName" | "regionName" | "jumps";
+type OrderSortKey =
+  | "price"
+  | "volumeRemain"
+  | "stationName"
+  | "systemName"
+  | "regionName"
+  | "jumps";
 
 const ORDER_SORT_KEYS = [
   "price",
@@ -359,10 +382,19 @@ const ORDER_SORT_KEYS = [
   "jumps",
 ] as const;
 
-const ORDER_TEXT_KEYS: OrderSortKey[] = ["stationName", "systemName", "regionName"];
+const ORDER_TEXT_KEYS: OrderSortKey[] = [
+  "stationName",
+  "systemName",
+  "regionName",
+];
 
 const ORDER_COLUMNS: SortColumn<OrderSortKey>[] = [
-  { key: "price", label: "Price", numeric: true, description: "Sell price per unit." },
+  {
+    key: "price",
+    label: "Price",
+    numeric: true,
+    description: "Sell price per unit.",
+  },
   {
     key: "volumeRemain",
     label: "Qty",
@@ -381,16 +413,28 @@ const ORDER_COLUMNS: SortColumn<OrderSortKey>[] = [
     numeric: false,
     description: "Solar system, with its security status.",
   },
-  { key: "regionName", label: "Region", numeric: false, description: "Region the order is in." },
+  {
+    key: "regionName",
+    label: "Region",
+    numeric: false,
+    description: "Region the order is in.",
+  },
   {
     key: "jumps",
     label: "Jumps",
     numeric: true,
-    description: "Jumps from your origin to the station (∞ = unreachable with current routing).",
+    description:
+      "Jumps from your origin to the station (∞ = unreachable with current routing).",
   },
 ];
 
-function OrderTable({ orders, hasOrigin }: { orders: SellOrder[]; hasOrigin: boolean }) {
+function OrderTable({
+  orders,
+  hasOrigin,
+}: {
+  orders: SellOrder[];
+  hasOrigin: boolean;
+}) {
   const { sortKey, sortDir, toggleSort } = usePersistentSort<OrderSortKey>(
     "sort.market-search-orders",
     ORDER_SORT_KEYS,
@@ -437,7 +481,9 @@ function OrderTable({ orders, hasOrigin }: { orders: SellOrder[]; hasOrigin: boo
               <td className="px-3 py-0.5 text-right tabular-nums text-rose-300">
                 {formatIsk(o.price)}
               </td>
-              <td className="px-3 py-0.5 text-right tabular-nums">{formatInt(o.volumeRemain)}</td>
+              <td className="px-3 py-0.5 text-right tabular-nums">
+                {formatInt(o.volumeRemain)}
+              </td>
               <td className="px-3 py-0.5">{o.stationName}</td>
               <td className="px-3 py-0.5">
                 <SecDot security={o.security} /> {o.systemName}
@@ -521,8 +567,16 @@ function HistoryTab({
 
       {picked && price && (
         <div className="mt-4 flex flex-wrap gap-6 text-sm">
-          <Stat label="Sell (min)" value={formatIsk(price.sellMin)} accent="text-rose-300" />
-          <Stat label="Buy (max)" value={formatIsk(price.buyMax)} accent="text-emerald-300" />
+          <Stat
+            label="Sell (min)"
+            value={formatIsk(price.sellMin)}
+            accent="text-rose-300"
+          />
+          <Stat
+            label="Buy (max)"
+            value={formatIsk(price.buyMax)}
+            accent="text-emerald-300"
+          />
           <Stat label="Spread" value={spread(price.sellMin, price.buyMax)} />
           <Stat label="Daily volume" value={formatInt(price.dailyVolume)} />
         </div>
@@ -650,7 +704,9 @@ function HistoryView({ series }: { series: HistoryPoint[] }) {
   const [showMedian, setShowMedian] = useState(true);
 
   const last = series[series.length - 1];
-  const avgVol = Math.round(series.reduce((s, p) => s + p.volume, 0) / series.length);
+  const avgVol = Math.round(
+    series.reduce((s, p) => s + p.volume, 0) / series.length,
+  );
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
@@ -731,13 +787,26 @@ function HistoryView({ series }: { series: HistoryPoint[] }) {
           </thead>
           <tbody>
             {[...series].reverse().map((p) => (
-              <tr key={p.date} className="border-t border-zinc-800/60 text-zinc-300">
+              <tr
+                key={p.date}
+                className="border-t border-zinc-800/60 text-zinc-300"
+              >
                 <td className="px-2 py-0.5">{p.date}</td>
-                <td className="px-2 py-0.5 text-right tabular-nums">{formatIsk(p.average)}</td>
-                <td className="px-2 py-0.5 text-right tabular-nums">{formatIsk(p.lowest)}</td>
-                <td className="px-2 py-0.5 text-right tabular-nums">{formatIsk(p.highest)}</td>
-                <td className="px-2 py-0.5 text-right tabular-nums">{formatInt(p.volume)}</td>
-                <td className="px-2 py-0.5 text-right tabular-nums">{formatInt(p.orderCount)}</td>
+                <td className="px-2 py-0.5 text-right tabular-nums">
+                  {formatIsk(p.average)}
+                </td>
+                <td className="px-2 py-0.5 text-right tabular-nums">
+                  {formatIsk(p.lowest)}
+                </td>
+                <td className="px-2 py-0.5 text-right tabular-nums">
+                  {formatIsk(p.highest)}
+                </td>
+                <td className="px-2 py-0.5 text-right tabular-nums">
+                  {formatInt(p.volume)}
+                </td>
+                <td className="px-2 py-0.5 text-right tabular-nums">
+                  {formatInt(p.orderCount)}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -767,18 +836,25 @@ function dailyMedian(p: HistoryPoint): number {
 
 /** Donchian channel: rolling max of the daily high / min of the daily low over
  *  `period`. Falls back to the day's average when a high/low is missing. */
-function donchian(series: HistoryPoint[], period: number): { upper: number[]; lower: number[] } {
+function donchian(
+  series: HistoryPoint[],
+  period: number,
+): { upper: number[]; lower: number[] } {
   const upper = series.map((_, i) => {
     const start = Math.max(0, i - period + 1);
     let m = -Infinity;
-    for (let j = start; j <= i; j++) m = Math.max(m, series[j].highest || series[j].average);
+    for (let j = start; j <= i; j++)
+      m = Math.max(m, series[j].highest || series[j].average);
     return m;
   });
   const lower = series.map((_, i) => {
     const start = Math.max(0, i - period + 1);
     let m = Infinity;
     for (let j = start; j <= i; j++) {
-      m = Math.min(m, series[j].lowest > 0 ? series[j].lowest : series[j].average);
+      m = Math.min(
+        m,
+        series[j].lowest > 0 ? series[j].lowest : series[j].average,
+      );
     }
     return m;
   });
@@ -812,14 +888,24 @@ function PriceChart({
   const { upper, lower } = donchian(series, period);
 
   // Scale to fit whatever is shown (the band widens the range when on).
-  const highs = showChannel ? upper : showMedian ? avg.map((v, i) => Math.max(v, med[i])) : avg;
-  const lows = showChannel ? lower : showMedian ? avg.map((v, i) => Math.min(v, med[i])) : avg;
+  const highs = showChannel
+    ? upper
+    : showMedian
+      ? avg.map((v, i) => Math.max(v, med[i]))
+      : avg;
+  const lows = showChannel
+    ? lower
+    : showMedian
+      ? avg.map((v, i) => Math.min(v, med[i]))
+      : avg;
   const min = Math.min(...lows);
   const max = Math.max(...highs);
   const span = max - min || 1;
-  const x = (i: number) => padX + (i / Math.max(series.length - 1, 1)) * (w - 2 * padX);
+  const x = (i: number) =>
+    padX + (i / Math.max(series.length - 1, 1)) * (w - 2 * padX);
   const y = (v: number) => padY + (1 - (v - min) / span) * (h - 2 * padY);
-  const line = (vals: number[]) => vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const line = (vals: number[]) =>
+    vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
   const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => padY + f * (h - 2 * padY));
 
   // Band = upper across, then lower back (a closed polygon).
@@ -831,7 +917,9 @@ function PriceChart({
   function onMove(e: React.MouseEvent<SVGSVGElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
     const rx = ((e.clientX - rect.left) / rect.width) * w;
-    const i = Math.round(((rx - padX) / (w - 2 * padX)) * Math.max(series.length - 1, 1));
+    const i = Math.round(
+      ((rx - padX) / (w - 2 * padX)) * Math.max(series.length - 1, 1),
+    );
     setHover(Math.max(0, Math.min(series.length - 1, i)));
   }
 
@@ -840,13 +928,17 @@ function PriceChart({
       <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
         <Legend color="#34d399" label="Average price" />
         {showMa && <Legend color="#f59e0b" label={`MA ${period}d`} />}
-        {showChannel && <Legend color="#38bdf8" label={`Donchian ${period}d`} />}
+        {showChannel && (
+          <Legend color="#38bdf8" label={`Donchian ${period}d`} />
+        )}
         {showMedian && <Legend color="#a78bfa" label="Daily median" />}
         <span className="ml-auto tabular-nums text-zinc-300">
           {hover != null
             ? `${series[hover].date} · ${formatIsk(avg[hover])}` +
               (showMedian ? ` · med ${formatIsk(med[hover])}` : "") +
-              (showChannel ? ` · ${formatIsk(lower[hover])}–${formatIsk(upper[hover])}` : "")
+              (showChannel
+                ? ` · ${formatIsk(lower[hover])}–${formatIsk(upper[hover])}`
+                : "")
             : `${formatIsk(min)} – ${formatIsk(max)}`}
         </span>
       </div>
@@ -859,23 +951,75 @@ function PriceChart({
         onMouseLeave={() => setHover(null)}
       >
         {grid.map((gy, i) => (
-          <line key={i} x1={padX} x2={w - padX} y1={gy} y2={gy} stroke="#27272a" strokeWidth="0.75" />
+          <line
+            key={i}
+            x1={padX}
+            x2={w - padX}
+            y1={gy}
+            y2={gy}
+            stroke="#27272a"
+            strokeWidth="0.75"
+          />
         ))}
         {showChannel && (
           <>
-            <polygon points={band} fill="#38bdf8" fillOpacity="0.08" stroke="none" />
-            <polyline points={line(upper)} fill="none" stroke="#38bdf8" strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.8" />
-            <polyline points={line(lower)} fill="none" stroke="#38bdf8" strokeWidth="1" strokeDasharray="3 3" strokeOpacity="0.8" />
+            <polygon
+              points={band}
+              fill="#38bdf8"
+              fillOpacity="0.08"
+              stroke="none"
+            />
+            <polyline
+              points={line(upper)}
+              fill="none"
+              stroke="#38bdf8"
+              strokeWidth="1"
+              strokeDasharray="3 3"
+              strokeOpacity="0.8"
+            />
+            <polyline
+              points={line(lower)}
+              fill="none"
+              stroke="#38bdf8"
+              strokeWidth="1"
+              strokeDasharray="3 3"
+              strokeOpacity="0.8"
+            />
           </>
         )}
         {showMedian && (
-          <polyline points={line(med)} fill="none" stroke="#a78bfa" strokeWidth="1.5" strokeDasharray="5 4" />
+          <polyline
+            points={line(med)}
+            fill="none"
+            stroke="#a78bfa"
+            strokeWidth="1.5"
+            strokeDasharray="5 4"
+          />
         )}
-        <polyline points={line(avg)} fill="none" stroke="#34d399" strokeWidth="1.5" />
-        {showMa && <polyline points={line(ma)} fill="none" stroke="#f59e0b" strokeWidth="1.5" />}
+        <polyline
+          points={line(avg)}
+          fill="none"
+          stroke="#34d399"
+          strokeWidth="1.5"
+        />
+        {showMa && (
+          <polyline
+            points={line(ma)}
+            fill="none"
+            stroke="#f59e0b"
+            strokeWidth="1.5"
+          />
+        )}
         {hover != null && (
           <g>
-            <line x1={x(hover)} x2={x(hover)} y1={padY} y2={h - padY} stroke="#52525b" strokeWidth="0.75" />
+            <line
+              x1={x(hover)}
+              x2={x(hover)}
+              y1={padY}
+              y2={h - padY}
+              stroke="#52525b"
+              strokeWidth="0.75"
+            />
             <circle cx={x(hover)} cy={y(avg[hover])} r="3" fill="#34d399" />
           </g>
         )}
@@ -887,7 +1031,10 @@ function PriceChart({
 function Legend({ color, label }: { color: string; label: string }) {
   return (
     <span className="flex items-center gap-1.5">
-      <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: color }} />
+      <span
+        className="inline-block h-2.5 w-2.5 rounded-sm"
+        style={{ background: color }}
+      />
       <span className="text-zinc-400">{label}</span>
     </span>
   );
@@ -917,22 +1064,30 @@ function Chart({
   const min = Math.min(...vals);
   const max = Math.max(...vals);
   const span = max - min || 1;
-  const x = (i: number) => padX + (i / Math.max(vals.length - 1, 1)) * (w - 2 * padX);
+  const x = (i: number) =>
+    padX + (i / Math.max(vals.length - 1, 1)) * (w - 2 * padX);
   const y = (v: number) => padY + (1 - (v - min) / span) * (h - 2 * padY);
-  const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const pts = vals
+    .map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`)
+    .join(" ");
   const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => padY + f * (h - 2 * padY));
 
   function onMove(e: React.MouseEvent<SVGSVGElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
     const rx = ((e.clientX - rect.left) / rect.width) * w;
-    const i = Math.round(((rx - padX) / (w - 2 * padX)) * Math.max(vals.length - 1, 1));
+    const i = Math.round(
+      ((rx - padX) / (w - 2 * padX)) * Math.max(vals.length - 1, 1),
+    );
     setHover(Math.max(0, Math.min(vals.length - 1, i)));
   }
 
   return (
     <div className="rounded border border-zinc-800 bg-zinc-900 p-2">
       <div className="mb-1 flex items-center gap-2 text-xs">
-        <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: color }} />
+        <span
+          className="inline-block h-2.5 w-2.5 rounded-sm"
+          style={{ background: color }}
+        />
         <span className="text-zinc-400">{label}</span>
         <span className="ml-auto tabular-nums text-zinc-300">
           {hover != null
@@ -949,12 +1104,27 @@ function Chart({
         onMouseLeave={() => setHover(null)}
       >
         {grid.map((gy, i) => (
-          <line key={i} x1={padX} x2={w - padX} y1={gy} y2={gy} stroke="#27272a" strokeWidth="0.75" />
+          <line
+            key={i}
+            x1={padX}
+            x2={w - padX}
+            y1={gy}
+            y2={gy}
+            stroke="#27272a"
+            strokeWidth="0.75"
+          />
         ))}
         <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" />
         {hover != null && (
           <g>
-            <line x1={x(hover)} x2={x(hover)} y1={padY} y2={h - padY} stroke="#52525b" strokeWidth="0.75" />
+            <line
+              x1={x(hover)}
+              x2={x(hover)}
+              y1={padY}
+              y2={h - padY}
+              stroke="#52525b"
+              strokeWidth="0.75"
+            />
             <circle cx={x(hover)} cy={y(vals[hover])} r="3" fill={color} />
           </g>
         )}
@@ -963,7 +1133,15 @@ function Chart({
   );
 }
 
-function Stat({ label, value, accent }: { label: string; value: string; accent?: string }) {
+function Stat({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent?: string;
+}) {
   return (
     <div>
       <div className="text-xs text-zinc-500">{label}</div>
@@ -973,5 +1151,7 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
 }
 
 function Centered({ children }: { children: ReactNode }) {
-  return <div className="p-10 text-center text-sm text-zinc-500">{children}</div>;
+  return (
+    <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
+  );
 }

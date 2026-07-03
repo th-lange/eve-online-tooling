@@ -43,7 +43,8 @@ function rowFor(title: string): HTMLElement {
 
 /** The row for `title` in the Pinned section (first instance, when mirrored). */
 function pinnedRowFor(title: string): HTMLElement {
-  return screen.getAllByRole("link", { name: title })[0].parentElement as HTMLElement;
+  return screen.getAllByRole("link", { name: title })[0]
+    .parentElement as HTMLElement;
 }
 
 /** The draggable handle of the Pinned-section row for `title`. */
@@ -66,7 +67,10 @@ describe("Layout sidebar", () => {
   });
 
   it("drag-reorders pinned modules and persists the order", () => {
-    localStorage.setItem("sidebar.pins", JSON.stringify([id(PRODUCTION), id(TRADING)]));
+    localStorage.setItem(
+      "sidebar.pins",
+      JSON.stringify([id(PRODUCTION), id(TRADING)]),
+    );
     renderLayout();
     // Pinned section leads with [Production, Trading] (registry order).
     expect(navOrder().slice(0, 2)).toEqual([PRODUCTION, TRADING]);
@@ -82,12 +86,20 @@ describe("Layout sidebar", () => {
   it("group sections are not drag-sortable (no handle)", () => {
     renderLayout();
     // Production (unpinned) sits only in its Industry group, with no drag handle.
-    expect(within(rowFor(PRODUCTION)).queryByTitle("Drag to reorder")).toBeNull();
+    expect(
+      within(rowFor(PRODUCTION)).queryByTitle("Drag to reorder"),
+    ).toBeNull();
   });
 
   it("restores a saved pinned order on mount", () => {
-    localStorage.setItem("sidebar.pins", JSON.stringify([id(PRODUCTION), id(TRADING)]));
-    localStorage.setItem("sidebar.order", JSON.stringify([id(TRADING), id(PRODUCTION)]));
+    localStorage.setItem(
+      "sidebar.pins",
+      JSON.stringify([id(PRODUCTION), id(TRADING)]),
+    );
+    localStorage.setItem(
+      "sidebar.order",
+      JSON.stringify([id(TRADING), id(PRODUCTION)]),
+    );
     renderLayout();
     // Pinned section reflects the saved order.
     expect(navOrder()[0]).toBe(TRADING);
@@ -151,7 +163,9 @@ describe("Layout sidebar", () => {
       within(row).getByRole("button", { name: `Set colour for ${PRODUCTION}` }),
     );
     fireEvent.click(screen.getByRole("button", { name: "Clear colour" }));
-    expect(JSON.parse(localStorage.getItem("sidebar.colors") ?? "{}")).toEqual({});
+    expect(JSON.parse(localStorage.getItem("sidebar.colors") ?? "{}")).toEqual(
+      {},
+    );
   });
 
   it("restores saved colours on mount", () => {
