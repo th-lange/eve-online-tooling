@@ -5,6 +5,7 @@ import {
   RegionSelect,
   StationSelect,
 } from "../../components/RegionStationPicker";
+import { STORAGE_KEYS } from "../../lib/storageKeys";
 import {
   marketRegions,
   ownedBlueprints,
@@ -61,7 +62,7 @@ export interface ImportedBlueprint {
   te: number;
 }
 
-const IMPORTED_BP_KEY = "production.importedBlueprints";
+const IMPORTED_BP_KEY = STORAGE_KEYS.importedBlueprints;
 
 function loadImported(): ImportedBlueprint[] {
   try {

@@ -13,6 +13,7 @@ import {
   type PilotRate,
   type WeaponRate,
 } from "../../lib/api";
+import { STORAGE_KEYS } from "../../lib/storageKeys";
 
 type Mode = "live" | "playback";
 
@@ -58,7 +59,7 @@ const SERIES = [
 
 /** Suggest the Gamelogs folder from a previously-entered Chatlogs path. */
 function suggestGamelogs(): string {
-  const chat = localStorage.getItem("eveLogsDir") ?? "";
+  const chat = localStorage.getItem(STORAGE_KEYS.eveChatlogsDir) ?? "";
   return chat ? chat.replace(/Chatlogs\/?$/i, "Gamelogs") : "";
 }
 
@@ -71,10 +72,11 @@ function appendTick(prev: DpsTick[], t: DpsTick): DpsTick[] {
 
 export function DpsPage() {
   const [dir, setDir] = useState(
-    () => localStorage.getItem("eveGamelogsDir") || suggestGamelogs(),
+    () =>
+      localStorage.getItem(STORAGE_KEYS.eveGamelogsDir) || suggestGamelogs(),
   );
   const [windowSecs, setWindowSecs] = useState(() =>
-    Number(localStorage.getItem("dps.windowSecs") ?? 10),
+    Number(localStorage.getItem(STORAGE_KEYS.dpsWindowSecs) ?? 10),
   );
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -131,8 +133,8 @@ export function DpsPage() {
 
   async function start() {
     setError(null);
-    localStorage.setItem("eveGamelogsDir", dir);
-    localStorage.setItem("dps.windowSecs", String(windowSecs));
+    localStorage.setItem(STORAGE_KEYS.eveGamelogsDir, dir);
+    localStorage.setItem(STORAGE_KEYS.dpsWindowSecs, String(windowSecs));
     try {
       await dpsStart({ gamelogsDir: dir, windowSecs });
       setRunning(true);
