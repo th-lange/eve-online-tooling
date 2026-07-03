@@ -20,7 +20,7 @@ import {
   type TankStats,
   type WeaponRange,
 } from "../../lib/api";
-import { formatDuration } from "../../lib/format";
+import { formatDuration, formatInt } from "../../lib/format";
 
 // Presentational components + fit helpers extracted from FittingPage (#341).
 
@@ -536,7 +536,7 @@ export function TankResists({ tank }: { tank: TankStats }) {
           <tr key={l.name}>
             <td className="text-zinc-300">{l.name}</td>
             <td className="pr-1 text-right text-zinc-400">
-              {Math.round(l.hp).toLocaleString()}
+              {formatInt(Math.round(l.hp))}
             </td>
             {l.r.map((v, i) => (
               <td key={i} className={`pl-1 text-right ${resistClass(v)}`}>

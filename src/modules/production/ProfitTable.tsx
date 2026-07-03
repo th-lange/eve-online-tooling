@@ -509,8 +509,8 @@ function BreakdownRow({ row }: { row: ProfitBreakdown }) {
         {row.invention && (
           <div className="mt-3">
             <div className="mb-1 text-xs font-medium text-zinc-400">
-              Invention — {(row.invention.probability * 100).toFixed(1)}% chance
-              × {row.invention.runsPerSuccess} runs/success ={" "}
+              Invention — {formatPercent(row.invention.probability)} chance ×{" "}
+              {row.invention.runsPerSuccess} runs/success ={" "}
               {formatIsk(row.invention.perUnit)}/unit
             </div>
             <table className="w-full text-xs">

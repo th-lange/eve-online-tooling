@@ -28,7 +28,7 @@ import {
   type WeaponRange,
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
-import { formatIsk } from "../../lib/format";
+import { formatInt, formatIsk } from "../../lib/format";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
 import {
   CapGauge,
@@ -790,7 +790,7 @@ function Workbench() {
                     Tank ({skillLabel})
                   </h3>
                   <div className="text-sm text-zinc-300">
-                    {Math.round(stats.data.tank.ehp).toLocaleString()} EHP
+                    {formatInt(Math.round(stats.data.tank.ehp))} EHP
                   </div>
                   {(stats.data.tank.shieldRepS > 0 ||
                     stats.data.tank.armorRepS > 0 ||

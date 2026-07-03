@@ -21,7 +21,7 @@ import {
   takePendingMarketSearchItem,
 } from "../../lib/deepLink";
 import { AddToListButton } from "../../components/AddToListButton";
-import { formatInt, formatIsk } from "../../lib/format";
+import { formatInt, formatIsk, formatPercent } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import {
   SortHeaderCell,
@@ -692,7 +692,7 @@ function TabButton({
 
 function spread(sell?: number | null, buy?: number | null): string {
   if (sell == null || buy == null || sell <= 0) return "—";
-  return `${(((sell - buy) / sell) * 100).toFixed(1)}%`;
+  return formatPercent((sell - buy) / sell);
 }
 
 const MA_PERIODS = [7, 20, 50, 90] as const;
