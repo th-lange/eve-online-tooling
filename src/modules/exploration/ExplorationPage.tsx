@@ -1,39 +1,90 @@
-import { Shield, ShieldCheck, Skull, TrendingUp } from "lucide-react";
+import { useEffect, useLayoutEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import { Shield, ShieldCheck, Skull, TrendingUp, X } from "lucide-react";
 
 // A curated reference for EVE exploration content — combat anomalies and the
 // scannable relic / data / DED / gas sites. This is static knowledge (site
-// types, spawns, danger and escalations aren't in ESI or the SDE), so it's a
-// hand-maintained guide rather than anything fetched.
+// types, spawns, danger, loot and damage profiles aren't in ESI or the SDE), so
+// it's a hand-maintained guide. Click a card for loot + damage-type detail.
 
 type Sec = "High" | "Low" | "Null" | "WH";
 type Danger = "safe" | "moderate" | "high";
+type Dmg = "EM" | "Thermal" | "Kinetic" | "Explosive" | "Omni";
+/** Which NPCs (if any) guard the site, driving the damage panel. */
+type Combat = "faction" | "sleeper" | "none";
 
 interface Site {
   name: string;
-  /** Security bands where this shows up. */
   sec: Sec[];
   danger: Danger;
-  /** One-line "who's shooting at you". */
   enemies: string;
   escalation: "None" | "Yes";
   escalationNote?: string;
-  /** How you run it / what you get. */
   notes: string;
+  combat: Combat;
+  loot: string[];
+  tips?: string[];
 }
 
 interface Group {
   title: string;
   blurb: string;
-  /** Whether these appear in the probe scanner without probes. */
   scanned: boolean;
   sites: Site[];
 }
+
+/** Pirate-faction damage profiles: what to *deal* (their weakness) and *tank*
+ *  (what they shoot), plus their signature EWAR. Applies to faction combat
+ *  anomalies, DED complexes and faction combat sites. */
+const FACTION_DAMAGE: {
+  faction: string;
+  deal: Dmg[];
+  tank: Dmg[];
+  ewar: string;
+}[] = [
+  {
+    faction: "Angel Cartel",
+    deal: ["Explosive"],
+    tank: ["Explosive", "Kinetic"],
+    ewar: "Webs & target painters (fast ships)",
+  },
+  {
+    faction: "Blood Raiders",
+    deal: ["EM", "Thermal"],
+    tank: ["EM", "Thermal"],
+    ewar: "Energy neutralizers — cap warfare",
+  },
+  {
+    faction: "Guristas",
+    deal: ["Kinetic"],
+    tank: ["Kinetic", "Thermal"],
+    ewar: "ECM — jamming",
+  },
+  {
+    faction: "Sansha's Nation",
+    deal: ["EM", "Thermal"],
+    tank: ["EM", "Thermal"],
+    ewar: "Tracking disruptors & neuts",
+  },
+  {
+    faction: "Serpentis",
+    deal: ["Kinetic", "Thermal"],
+    tank: ["Thermal", "Kinetic"],
+    ewar: "Sensor dampeners",
+  },
+];
+
+const SLEEPER = {
+  deal: ["Thermal", "Kinetic"] as Dmg[],
+  tank: ["Omni"] as Dmg[],
+  ewar: "Neut, web, target-paint & sensor damp — they also rep each other and switch targets",
+};
 
 const GROUPS: Group[] = [
   {
     title: "Combat anomalies",
     blurb:
-      "Pirate-faction combat sites that show in the probe scanner immediately — no scanning needed. Ratting / ISK farming.",
+      "Pirate-faction combat sites that show in the probe scanner immediately — no scanning needed.",
     scanned: false,
     sites: [
       {
@@ -43,8 +94,18 @@ const GROUPS: Group[] = [
         enemies:
           "Pirate-faction rats, scaling with security & tier — highsec Refuges are trivial, nullsec Havens/Sanctums are the toughest.",
         escalation: "None",
+        combat: "faction",
         notes:
-          "Faction (Angel / Blood / Guristas / Sansha / Serpentis) sets the damage & tank to bring. Bounties plus faction loot and tags.",
+          "Faction sets the damage & tank to bring. Bounties plus faction loot and tags.",
+        loot: [
+          "Bounties (ISK) from every rat — the main income",
+          "Meta / faction loot modules and pirate tags",
+          "Occasional faction module or BPC from a commander spawn",
+        ],
+        tips: [
+          "The system's resident pirate faction sets the damage profile (see below).",
+          "Anomalies respawn elsewhere in the constellation after you clear them.",
+        ],
       },
       {
         name: "Sleeper anomalies (Perimeter / Frontier / Core)",
@@ -53,8 +114,17 @@ const GROUPS: Group[] = [
         enemies:
           "Sleeper drones — neut, web, target-switch, hit hard. Scale sharply with wormhole class (C1 → C6).",
         escalation: "None",
-        notes:
-          "No bounties — blue-loot + salvage is the payout. No local chat, so keep d-scan up for hostiles the entire time.",
+        combat: "sleeper",
+        notes: "No bounties — blue-loot + salvage is the payout.",
+        loot: [
+          "Blue loot — Sleeper components sold to CONCORD at a fixed price",
+          "Sleeper salvage → Tech III production",
+          "Payout scales sharply with wormhole class",
+        ],
+        tips: [
+          "No local chat — keep d-scan up for hostiles the entire time.",
+          "Sleepers rep each other and switch targets; bring stable cap and enough DPS.",
+        ],
       },
     ],
   },
@@ -71,8 +141,17 @@ const GROUPS: Group[] = [
         enemies:
           "Unguarded — no rats, hack freely. In low/null the real threat is other players hunting explorers.",
         escalation: "None",
-        notes:
-          "“Ruined [Faction] … Site”. Null pays far more than highsec. A failed hack fires an alarm — bring a good analyzer + relic rigs.",
+        combat: "none",
+        notes: "“Ruined [Faction] … Site”. Null pays far more than highsec.",
+        loot: [
+          "Salvage materials for T2 rigs & components",
+          "Intact / malfunctioning / wrecked … parts (intact = most valuable)",
+          "Null variants drop the pricier parts",
+        ],
+        tips: [
+          "Relic Analyzer + relic rigs raise your hack strength.",
+          "A failed hack fires an alarm and can wipe the can — watch the minigame.",
+        ],
       },
       {
         name: "Relic sites (wormhole)",
@@ -80,8 +159,14 @@ const GROUPS: Group[] = [
         danger: "high",
         enemies: "Sleeper-guarded — clear or avoid them to reach the cans.",
         escalation: "None",
-        notes:
-          "Higher value than k-space, but guarded and no local. Best in a cloaky / nullified explorer.",
+        combat: "sleeper",
+        notes: "Higher value than k-space, but guarded and no local.",
+        loot: [
+          "Same salvage families as k-space, weighted to the pricier intact parts",
+        ],
+        tips: [
+          "Run in a cloaky / nullified explorer; no local means no warning.",
+        ],
       },
     ],
   },
@@ -98,8 +183,14 @@ const GROUPS: Group[] = [
         enemies:
           "Unguarded — no rats. Same PvP risk as relic sites in low/null.",
         escalation: "None",
-        notes:
-          "Highsec data is low-value; null/WH is better. Feeds invention (datacores/decryptors) and the odd faction BPC.",
+        combat: "none",
+        notes: "Highsec data is low-value; null/WH is better.",
+        loot: [
+          "Datacores & decryptors → invention",
+          "BPCs, SKINs, R.A.M. / R.Db parts",
+          "Occasional faction/officer BPC",
+        ],
+        tips: ["Data Analyzer + data rigs. Highsec is mostly newbie money."],
       },
       {
         name: "Data sites (wormhole)",
@@ -107,7 +198,9 @@ const GROUPS: Group[] = [
         danger: "high",
         enemies: "Sleeper-guarded, like wormhole relic sites.",
         escalation: "None",
+        combat: "sleeper",
         notes: "Sleeper-tech data alongside the usual datacores and BPCs.",
+        loot: ["Sleeper-tech data components", "Datacores, decryptors, BPCs"],
       },
     ],
   },
@@ -125,9 +218,19 @@ const GROUPS: Group[] = [
           "Combat scaling with the rating — 1/10 is soloable in a frigate, 10/10 is capital-grade. Higher ratings live in low/null.",
         escalation: "Yes",
         escalationNote:
-          "Often spawns as an escalation from a faction combat site; the DED loot room drops faction/deadspace modules and BPCs.",
+          "Often spawns as an escalation from a faction combat site; the loot room drops faction/deadspace modules and BPCs.",
+        combat: "faction",
         notes:
-          "Acceleration-gated deadspace pockets — the ‘blue loot’ of combat: officer/faction/deadspace modules and BPCs.",
+          "Acceleration-gated deadspace pockets — the ‘blue loot’ of combat.",
+        loot: [
+          "Faction, deadspace and (high-DED) officer modules",
+          "Deadspace / faction BPCs",
+          "Overseer's Effects & DED-only loot",
+        ],
+        tips: [
+          "The DED rating is the difficulty — match your ship to it.",
+          "Damage profile follows the faction running the complex (see below).",
+        ],
       },
       {
         name: "Unrated faction combat sites",
@@ -137,9 +240,17 @@ const GROUPS: Group[] = [
           "Faction rats; the final commander spawn is the escalation trigger.",
         escalation: "Yes",
         escalationNote:
-          "Killing the commander can start an expedition — a chain of follow-up sites (often nearby systems) with escalating loot.",
-        notes:
-          "The classic explorer/ratter escalation loop. Follow the expedition in your journal before it expires.",
+          "Killing the commander can start an expedition — a chain of follow-up sites (often nearby) with escalating loot.",
+        combat: "faction",
+        notes: "The classic explorer/ratter escalation loop.",
+        loot: [
+          "Faction loot + tags",
+          "The escalation itself is the prize — follow it for better loot",
+        ],
+        tips: [
+          "Follow the expedition entry in your journal before it expires.",
+          "Damage profile follows the faction (see below).",
+        ],
       },
     ],
   },
@@ -156,8 +267,17 @@ const GROUPS: Group[] = [
         enemies:
           "K-space clouds are usually unguarded; many wormhole gas sites spawn rats/Sleepers on a timer after you arrive.",
         escalation: "None",
+        combat: "none",
         notes:
-          "Booster/Mordu gas in k-space; wormhole Fullerene gas feeds Tech III. Mind the WH spawn timer.",
+          "Booster/Mordu gas in k-space; wormhole Fullerene gas feeds Tech III.",
+        loot: [
+          "Fullerene gas (wormhole) → Tech III",
+          "Booster gas — Cloud Ring / Mordu's (k-space)",
+        ],
+        tips: [
+          "Use gas-cloud harvesters, not an analyzer.",
+          "Wormhole gas sites spawn rats/Sleepers on a timer — align out before it fires.",
+        ],
       },
     ],
   },
@@ -191,6 +311,29 @@ const DANGER: Record<
   },
 };
 
+const DMG_STYLE: Record<Dmg, string> = {
+  EM: "bg-sky-500/15 text-sky-300",
+  Thermal: "bg-rose-500/15 text-rose-300",
+  Kinetic: "bg-zinc-500/25 text-zinc-300",
+  Explosive: "bg-amber-500/15 text-amber-300",
+  Omni: "bg-violet-500/15 text-violet-300",
+};
+
+function DmgChips({ types }: { types: Dmg[] }) {
+  return (
+    <span className="inline-flex flex-wrap gap-1">
+      {types.map((t) => (
+        <span
+          key={t}
+          className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${DMG_STYLE[t]}`}
+        >
+          {t}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function SecBadges({ sec }: { sec: Sec[] }) {
   return (
     <div className="flex flex-wrap gap-1">
@@ -206,39 +349,221 @@ function SecBadges({ sec }: { sec: Sec[] }) {
   );
 }
 
-function SiteCard({ site }: { site: Site }) {
+function SiteCard({
+  site,
+  onOpen,
+}: {
+  site: Site;
+  onOpen: (site: Site, rect: DOMRect) => void;
+}) {
   const d = DANGER[site.danger];
   return (
-    <div
-      className={`rounded-lg border border-zinc-800 border-l-4 bg-zinc-900/40 p-3.5 ${d.accent}`}
+    <button
+      onClick={(e) => onOpen(site, e.currentTarget.getBoundingClientRect())}
+      className={`rounded-lg border border-zinc-800 border-l-4 bg-zinc-900/40 p-3.5 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-900/70 ${d.accent}`}
     >
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-sm font-semibold text-zinc-100">{site.name}</h3>
         {site.escalation === "Yes" && (
-          <span
-            title={site.escalationNote}
-            className="flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-300 ring-1 ring-inset ring-amber-500/25"
-          >
+          <span className="flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-300 ring-1 ring-inset ring-amber-500/25">
             <TrendingUp size={11} /> Escalates
           </span>
         )}
       </div>
-
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-2">
         <SecBadges sec={site.sec} />
       </div>
-
       <div className={`mt-2.5 flex items-start gap-1.5 text-xs ${d.color}`}>
         <d.Icon size={14} className="mt-px shrink-0" />
         <span>{site.enemies}</span>
       </div>
-
       <p className="mt-2 text-xs leading-relaxed text-zinc-400">{site.notes}</p>
+      <span className="mt-2 block text-[10px] uppercase tracking-wide text-zinc-600">
+        Click for loot &amp; damage →
+      </span>
+    </button>
+  );
+}
+
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mt-3">
+      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+        {title}
+      </div>
+      {children}
     </div>
   );
 }
 
+function DamagePanel({ combat }: { combat: Combat }) {
+  if (combat === "none") {
+    return (
+      <p className="text-xs text-zinc-400">
+        No NPCs — the site is unguarded. The only threat is other players, so
+        bring a cloak / nullified hull and watch the map in low/null.
+      </p>
+    );
+  }
+  if (combat === "sleeper") {
+    return (
+      <div className="rounded border border-zinc-800 bg-zinc-900/60 p-2 text-xs">
+        <div className="flex items-center gap-2">
+          <span className="w-14 text-zinc-500">Deal</span>
+          <DmgChips types={SLEEPER.deal} />
+        </div>
+        <div className="mt-1.5 flex items-center gap-2">
+          <span className="w-14 text-zinc-500">Tank</span>
+          <DmgChips types={SLEEPER.tank} />
+        </div>
+        <p className="mt-2 text-zinc-400">{SLEEPER.ewar}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="overflow-hidden rounded border border-zinc-800">
+      <table className="w-full text-xs">
+        <thead className="bg-zinc-900 text-left text-zinc-500">
+          <tr>
+            <th className="px-2 py-1 font-medium">Faction</th>
+            <th className="px-2 py-1 font-medium">Deal</th>
+            <th className="px-2 py-1 font-medium">Tank</th>
+            <th className="px-2 py-1 font-medium">EWAR</th>
+          </tr>
+        </thead>
+        <tbody>
+          {FACTION_DAMAGE.map((f) => (
+            <tr key={f.faction} className="border-t border-zinc-800 align-top">
+              <td className="px-2 py-1.5 font-medium text-zinc-200">
+                {f.faction}
+              </td>
+              <td className="px-2 py-1.5">
+                <DmgChips types={f.deal} />
+              </td>
+              <td className="px-2 py-1.5">
+                <DmgChips types={f.tank} />
+              </td>
+              <td className="px-2 py-1.5 text-zinc-400">{f.ewar}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function SiteDetail({
+  site,
+  rect,
+  onClose,
+}: {
+  site: Site;
+  rect: DOMRect;
+  onClose: () => void;
+}) {
+  const [pos, setPos] = useState<{
+    top: number;
+    left: number;
+    maxHeight: number;
+  } | null>(null);
+  const width = Math.min(560, window.innerWidth - 24);
+
+  useLayoutEffect(() => {
+    setPos({
+      top: rect.bottom + 6,
+      left: Math.min(Math.max(12, rect.left), window.innerWidth - width - 12),
+      maxHeight: window.innerHeight - rect.bottom - 24,
+    });
+  }, [rect, width]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  if (!pos) return null;
+  const d = DANGER[site.danger];
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} />
+      <div
+        role="dialog"
+        className="fixed z-50 overflow-auto rounded-lg border border-zinc-700 bg-zinc-900 p-4 shadow-xl"
+        style={{
+          top: pos.top,
+          left: pos.left,
+          width,
+          maxHeight: pos.maxHeight,
+        }}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-100">{site.name}</h3>
+            <div className="mt-1 flex items-center gap-2">
+              <SecBadges sec={site.sec} />
+              <span
+                className={`flex items-center gap-1 text-[11px] ${d.color}`}
+              >
+                <d.Icon size={12} /> {site.enemies.split(/[—.]/)[0].trim()}
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="text-zinc-500 hover:text-zinc-200"
+          >
+            <X size={15} />
+          </button>
+        </div>
+
+        {site.escalation === "Yes" && site.escalationNote && (
+          <div className="mt-3 flex items-start gap-1.5 rounded border border-amber-500/25 bg-amber-500/10 p-2 text-xs text-amber-200">
+            <TrendingUp size={13} className="mt-px shrink-0" />
+            <span>{site.escalationNote}</span>
+          </div>
+        )}
+
+        <Section title="Loot">
+          <ul className="list-disc space-y-0.5 pl-4 text-xs text-zinc-300">
+            {site.loot.map((l) => (
+              <li key={l}>{l}</li>
+            ))}
+          </ul>
+        </Section>
+
+        <Section
+          title={site.combat === "none" ? "Threat" : "Damage — deal vs tank"}
+        >
+          <DamagePanel combat={site.combat} />
+        </Section>
+
+        {site.tips && site.tips.length > 0 && (
+          <Section title="Tips">
+            <ul className="list-disc space-y-0.5 pl-4 text-xs text-zinc-400">
+              {site.tips.map((t) => (
+                <li key={t}>{t}</li>
+              ))}
+            </ul>
+          </Section>
+        )}
+      </div>
+    </>,
+    document.body,
+  );
+}
+
 export function ExplorationPage() {
+  const [open, setOpen] = useState<{ site: Site; rect: DOMRect } | null>(null);
+
   return (
     <div className="mx-auto max-w-5xl px-6 py-6">
       <h1 className="text-2xl font-semibold text-zinc-100">
@@ -246,12 +571,12 @@ export function ExplorationPage() {
       </h1>
       <p className="mt-1 max-w-3xl text-sm text-zinc-400">
         Combat anomalies and the scannable relic / data / DED / gas sites —
-        where they spawn, whether they bite, and which ones escalate. Anomalies
-        and signatures aren't in ESI (they're scanned in-game), so this is a
-        static guide, not your live scan.
+        where they spawn, whether they bite, and which ones escalate. Click any
+        card for its loot and damage-to-deal-vs-tank. Signatures aren't in ESI
+        (they're scanned in-game), so this is a static guide, not your live
+        scan.
       </p>
 
-      {/* Legend */}
       <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs text-zinc-400">
         <span className="flex items-center gap-1.5 text-emerald-400">
           <ShieldCheck size={13} /> Unguarded
@@ -289,7 +614,11 @@ export function ExplorationPage() {
 
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             {g.sites.map((s) => (
-              <SiteCard key={s.name} site={s} />
+              <SiteCard
+                key={s.name}
+                site={s}
+                onOpen={(site, rect) => setOpen({ site, rect })}
+              />
             ))}
           </div>
         </section>
@@ -300,6 +629,14 @@ export function ExplorationPage() {
         and plain combat anomalies never do. In wormhole space everything is
         Sleeper-guarded and there's no local, so treat every site as hostile.
       </p>
+
+      {open && (
+        <SiteDetail
+          site={open.site}
+          rect={open.rect}
+          onClose={() => setOpen(null)}
+        />
+      )}
     </div>
   );
 }
