@@ -25,6 +25,7 @@ import {
   type SortColumn,
 } from "../../components/SortHeaderCell";
 import { AddToListButton } from "../../components/AddToListButton";
+import { PriceHistoryPopover } from "../../components/PriceHistoryPopover";
 
 const MAX_ROWS = 500;
 
@@ -134,10 +135,13 @@ const SORT_KEYS = COLUMNS.map((c) => c.key);
 // Pure display: the page does the filtering, this sorts + renders.
 export function ProfitTable({
   rows,
+  regionId,
   onFavorite,
   onBlacklist,
 }: {
   rows: ProfitBreakdown[];
+  /** Region the products are priced in — used by the price-history popover. */
+  regionId: number;
   onFavorite: (r: ProfitBreakdown) => void;
   onBlacklist: (r: ProfitBreakdown) => void;
 }) {
@@ -256,15 +260,20 @@ export function ProfitTable({
                       </button>
                     </td>
                     <td className="px-3 py-1.5">
-                      <div className="text-zinc-200">
-                        {r.productName}
+                      <div className="flex items-center gap-1 text-zinc-200">
+                        <span>{r.productName}</span>
                         {incomplete && (
                           <AlertTriangle
                             size={13}
-                            className="ml-1 inline align-text-bottom text-amber-400"
+                            className="inline align-text-bottom text-amber-400"
                             aria-label={`Missing prices for ${r.missingPrices.length} item(s) — numbers are incomplete`}
                           />
                         )}
+                        <PriceHistoryPopover
+                          regionId={regionId}
+                          typeId={r.productTypeId}
+                          name={r.productName}
+                        />
                       </div>
                       {subtitle && (
                         <div className="text-xs text-zinc-500">{subtitle}</div>
