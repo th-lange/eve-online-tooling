@@ -105,42 +105,76 @@ pub async fn appraisal(
         HashMap::new()
     };
 
-    let mut lines = Vec::with_capacity(resolved.len());
+    // Pick each line's buy/sell price (best hub overrides sell when requested),
+    // then hand off to the pure valuation.
+    let items: Vec<PricedItem> = resolved
+        .into_iter()
+        .map(|r| {
+            let model = r.type_id.and_then(|id| prices.get(&id));
+            let buy_price = model.and_then(|m| m.buy_percentile);
+            let (sell_price, sell_hub) = match r.type_id.and_then(|id| best.get(&id)) {
+                Some(b) => (Some(b.price), Some(b.hub.clone())),
+                None => (model.and_then(|m| m.sell_percentile), None),
+            };
+            PricedItem {
+                name: r.name,
+                type_id: r.type_id,
+                quantity: r.quantity,
+                buy_price,
+                sell_price,
+                sell_hub,
+                volume_each: r.volume_each,
+            }
+        })
+        .collect();
+
+    Ok(appraise(items))
+}
+
+/// A pasted line resolved to a type and priced, ready for valuation.
+struct PricedItem {
+    name: String,
+    type_id: Option<i64>,
+    quantity: i64,
+    buy_price: Option<f64>,
+    sell_price: Option<f64>,
+    sell_hub: Option<String>,
+    volume_each: f64,
+}
+
+/// Value priced lines: per line, `price × qty` (a missing price counts as 0) and
+/// `volume_each × qty`, plus the running buy/sell/volume totals. Pure, so the
+/// valuation is unit-tested without the SDE or market service.
+fn appraise(items: Vec<PricedItem>) -> AppraisalResult {
+    let mut lines = Vec::with_capacity(items.len());
     let (mut buy_total, mut sell_total, mut volume_total) = (0.0, 0.0, 0.0);
-    for r in resolved {
-        let model = r.type_id.and_then(|id| prices.get(&id));
-        let buy_price = model.and_then(|m| m.buy_percentile);
-        let (sell_price, sell_hub) = match r.type_id.and_then(|id| best.get(&id)) {
-            Some(b) => (Some(b.price), Some(b.hub.clone())),
-            None => (model.and_then(|m| m.sell_percentile), None),
-        };
-        let q = r.quantity as f64;
-        let buy_value = buy_price.unwrap_or(0.0) * q;
-        let sell_value = sell_price.unwrap_or(0.0) * q;
-        let volume = r.volume_each * q;
+    for it in items {
+        let q = it.quantity as f64;
+        let buy_value = it.buy_price.unwrap_or(0.0) * q;
+        let sell_value = it.sell_price.unwrap_or(0.0) * q;
+        let volume = it.volume_each * q;
         buy_total += buy_value;
         sell_total += sell_value;
         volume_total += volume;
         lines.push(AppraisalLine {
-            name: r.name,
-            type_id: r.type_id,
-            quantity: r.quantity,
-            buy_price,
-            sell_price,
+            name: it.name,
+            type_id: it.type_id,
+            quantity: it.quantity,
+            buy_price: it.buy_price,
+            sell_price: it.sell_price,
             buy_value,
             sell_value,
-            sell_hub,
+            sell_hub: it.sell_hub,
             volume,
-            resolved: r.type_id.is_some(),
+            resolved: it.type_id.is_some(),
         });
     }
-
-    Ok(AppraisalResult {
+    AppraisalResult {
         lines,
         buy_total,
         sell_total,
         volume_total,
-    })
+    }
 }
 
 // --- Reprocess appraisal: paste ores → mineral yield + value ---
@@ -326,4 +360,64 @@ pub async fn appraisal_reprocess(
         input_sell_total,
         efficiency: eff,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{appraise, PricedItem};
+
+    fn item(
+        type_id: Option<i64>,
+        quantity: i64,
+        buy: Option<f64>,
+        sell: Option<f64>,
+        volume_each: f64,
+    ) -> PricedItem {
+        PricedItem {
+            name: "x".into(),
+            type_id,
+            quantity,
+            buy_price: buy,
+            sell_price: sell,
+            sell_hub: None,
+            volume_each,
+        }
+    }
+
+    #[test]
+    fn values_lines_and_sums_totals() {
+        let r = appraise(vec![
+            item(Some(1), 10, Some(5.0), Some(8.0), 0.5),
+            item(Some(2), 3, Some(100.0), Some(120.0), 2.0),
+        ]);
+        // Line 1: buy 50, sell 80, vol 5. Line 2: buy 300, sell 360, vol 6.
+        assert_eq!(r.lines[0].buy_value, 50.0);
+        assert_eq!(r.lines[0].sell_value, 80.0);
+        assert_eq!(r.lines[0].volume, 5.0);
+        assert_eq!(r.buy_total, 350.0);
+        assert_eq!(r.sell_total, 440.0);
+        assert_eq!(r.volume_total, 11.0);
+    }
+
+    #[test]
+    fn missing_price_counts_as_zero_value() {
+        let r = appraise(vec![item(Some(1), 4, None, None, 1.0)]);
+        assert_eq!(r.lines[0].buy_value, 0.0);
+        assert_eq!(r.lines[0].sell_value, 0.0);
+        // Volume still accrues even when unpriced.
+        assert_eq!(r.volume_total, 4.0);
+        assert_eq!(r.buy_total, 0.0);
+    }
+
+    #[test]
+    fn unresolved_line_is_flagged() {
+        let r = appraise(vec![item(None, 1, None, None, 0.0)]);
+        assert!(!r.lines[0].resolved);
+    }
+
+    #[test]
+    fn resolved_flag_follows_type_id() {
+        let r = appraise(vec![item(Some(7), 1, Some(1.0), Some(1.0), 0.0)]);
+        assert!(r.lines[0].resolved);
+    }
 }
