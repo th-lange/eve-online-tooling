@@ -533,3 +533,29 @@ fn parse_epoch(s: &str) -> f64 {
     let days = era * 146_097 + doe - 719_468;
     (days * 86_400 + h * 3600 + mi * 60 + se) as f64
 }
+
+#[cfg(test)]
+mod tests {
+    use super::parse_epoch;
+
+    #[test]
+    fn parses_known_utc_timestamps() {
+        assert_eq!(parse_epoch("1970-01-01T00:00:00Z"), 0.0);
+        assert_eq!(parse_epoch("2000-01-01T00:00:00Z"), 946_684_800.0);
+        // Leap day plus a time-of-day, exercising the civil-days algorithm.
+        assert_eq!(parse_epoch("2024-02-29T12:34:56Z"), 1_709_210_096.0);
+    }
+
+    #[test]
+    fn later_timestamps_compare_greater() {
+        assert!(parse_epoch("2026-01-01T00:00:00Z") > parse_epoch("2025-12-31T23:59:59Z"));
+    }
+
+    #[test]
+    fn malformed_input_falls_back_to_now_without_panicking() {
+        // Wrong shape / too short → falls back to the current epoch (large +ve),
+        // never a panic.
+        assert!(parse_epoch("nope") > 1_000_000_000.0);
+        assert!(parse_epoch("").abs() >= 0.0);
+    }
+}
