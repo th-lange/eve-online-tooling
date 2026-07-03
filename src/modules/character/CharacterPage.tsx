@@ -6,6 +6,8 @@ import {
   characterResearch,
   characterSkills,
   characterStandings,
+  errorMessage,
+  isAuthRequired,
 } from "../../lib/api";
 import { formatInt, formatIsk } from "../../lib/format";
 
@@ -346,10 +348,18 @@ function Loading() {
   return <div className="p-8 text-center text-sm text-zinc-500">Loading…</div>;
 }
 function Err({ e }: { e: unknown }) {
+  // Auth-required is a normal empty state, not a failure — show a calm prompt
+  // rather than a red error string (#337).
+  if (isAuthRequired(e)) {
+    return (
+      <div className="p-6 text-sm text-zinc-400">
+        Log in a character first to view this.
+      </div>
+    );
+  }
   return (
     <div className="p-6 text-sm text-rose-400">
-      {String(e)} — log in a character and ensure the scope is enabled on your
-      EVE app.
+      {errorMessage(e)} — check the required scope is enabled on your EVE app.
     </div>
   );
 }

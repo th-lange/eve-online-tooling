@@ -7,13 +7,15 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::esi::{authed_get, authed_get_paged_pub, resolve_names, AuthState};
 use crate::market::{resolve_location, MarketService};
+use crate::model::AppError;
 use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
-/// The first logged-in character id, or an error message if the roster is empty.
-fn first_character(app: &AppHandle) -> Result<i64, String> {
+/// The first logged-in character id, or [`AppError::AuthRequired`] if the roster
+/// is empty — so the UI can show a clear "log in" prompt (#337).
+fn first_character(app: &AppHandle) -> Result<i64, AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())
+    storage::active_character(&dir).ok_or_else(AppError::auth_required)
 }
 
 // --- Skills (#55) ---
@@ -60,7 +62,7 @@ pub struct QueueRow {
 pub async fn character_skills(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
-) -> Result<SkillsView, String> {
+) -> Result<SkillsView, AppError> {
     let character_id = first_character(&app)?;
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
@@ -138,7 +140,7 @@ const CRIMINAL_FACTIONS: &[i64] = &[
 pub async fn character_standings(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
-) -> Result<Vec<StandingRow>, String> {
+) -> Result<Vec<StandingRow>, AppError> {
     let character_id = first_character(&app)?;
     let standings: Vec<EsiStanding> = authed_get(
         &auth_state,
@@ -227,7 +229,7 @@ pub struct ResearchView {
 pub async fn character_research(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
-) -> Result<ResearchView, String> {
+) -> Result<ResearchView, AppError> {
     let character_id = first_character(&app)?;
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
@@ -313,7 +315,7 @@ pub async fn character_mining(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
     market: State<'_, MarketService>,
-) -> Result<MiningView, String> {
+) -> Result<MiningView, AppError> {
     let character_id = first_character(&app)?;
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
@@ -444,7 +446,7 @@ pub struct FleetView {
 pub async fn character_fleet(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
-) -> Result<FleetView, String> {
+) -> Result<FleetView, AppError> {
     let character_id = first_character(&app)?;
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;

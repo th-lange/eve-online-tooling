@@ -25,3 +25,32 @@ export interface IdName {
   id: number;
   name: string;
 }
+
+/**
+ * Structured command error mirroring the Rust `AppError` (#337). Commands that
+ * have migrated reject with this shape; others still reject with a plain string,
+ * so use the helpers below rather than reading fields directly.
+ */
+export interface AppError {
+  kind: "authRequired" | "message";
+  message: string;
+}
+
+function isAppError(e: unknown): e is AppError {
+  return (
+    !!e &&
+    typeof e === "object" &&
+    typeof (e as AppError).kind === "string" &&
+    typeof (e as AppError).message === "string"
+  );
+}
+
+/** True when the failure is "no character logged in / scope not granted". */
+export function isAuthRequired(e: unknown): boolean {
+  return isAppError(e) && e.kind === "authRequired";
+}
+
+/** A human-readable message for any command rejection (structured or string). */
+export function errorMessage(e: unknown): string {
+  return isAppError(e) ? e.message : String(e);
+}
