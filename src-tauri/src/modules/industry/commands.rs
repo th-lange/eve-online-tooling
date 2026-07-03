@@ -125,6 +125,40 @@ fn slot_pool(activity_id: i64) -> Option<&'static str> {
     }
 }
 
+/// Assemble the three slot pools. `totals` is (manufacturing, science,
+/// reactions) max slots (1 base + skill ranks); `jobs` is `(activity_id,
+/// status)` per job — a job counts against a pool only while it still holds a
+/// slot (status `"active"`, or finished-but-undelivered `"ready"`). Pure, so
+/// the used-vs-available math is unit-tested without ESI.
+fn compute_slots(totals: (i64, i64, i64), jobs: &[(i64, &str)]) -> Slots {
+    let (mut used_m, mut used_s, mut used_r) = (0, 0, 0);
+    for (activity_id, status) in jobs {
+        if *status != "active" && *status != "ready" {
+            continue;
+        }
+        match slot_pool(*activity_id) {
+            Some("m") => used_m += 1,
+            Some("s") => used_s += 1,
+            Some("r") => used_r += 1,
+            _ => {}
+        }
+    }
+    Slots {
+        manufacturing: Slot {
+            used: used_m,
+            total: totals.0,
+        },
+        science: Slot {
+            used: used_s,
+            total: totals.1,
+        },
+        reactions: Slot {
+            used: used_r,
+            total: totals.2,
+        },
+    }
+}
+
 /// ESI industry activity id → label.
 fn activity_name(id: i64) -> &'static str {
     match id {
@@ -207,32 +241,11 @@ pub async fn industry_jobs(
         1 + level(3406) + level(24624),
         1 + level(45748) + level(45749),
     );
-    let (mut used_m, mut used_s, mut used_r) = (0, 0, 0);
-    for j in &jobs {
-        if j.status != "active" && j.status != "ready" {
-            continue;
-        }
-        match slot_pool(j.activity_id) {
-            Some("m") => used_m += 1,
-            Some("s") => used_s += 1,
-            Some("r") => used_r += 1,
-            _ => {}
-        }
-    }
-    let slots = Slots {
-        manufacturing: Slot {
-            used: used_m,
-            total: total_m,
-        },
-        science: Slot {
-            used: used_s,
-            total: total_s,
-        },
-        reactions: Slot {
-            used: used_r,
-            total: total_r,
-        },
-    };
+    let job_pools: Vec<(i64, &str)> = jobs
+        .iter()
+        .map(|j| (j.activity_id, j.status.as_str()))
+        .collect();
+    let slots = compute_slots((total_m, total_s, total_r), &job_pools);
 
     // Corp jobs (display-only; needs the corp scope + a corp role — else none).
     // Tag personal jobs "You" and corp jobs "Corp"; a job_id seen in both keeps
@@ -294,4 +307,43 @@ pub async fn industry_jobs(
             .then_with(|| b.end_date.cmp(&a.end_date))
     });
     Ok(JobsResult { jobs: rows, slots })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compute_slots, slot_pool};
+
+    #[test]
+    fn slot_pool_maps_activities() {
+        assert_eq!(slot_pool(1), Some("m")); // manufacturing
+        assert_eq!(slot_pool(4), Some("s")); // ME research
+        assert_eq!(slot_pool(8), Some("s")); // invention
+        assert_eq!(slot_pool(9), Some("r")); // reactions
+        assert_eq!(slot_pool(999), None);
+    }
+
+    #[test]
+    fn counts_only_active_and_ready_jobs_per_pool() {
+        let jobs = [
+            (1, "active"),    // manufacturing, counts
+            (1, "ready"),     // manufacturing, counts (finished, undelivered)
+            (1, "delivered"), // done — frees the slot, doesn't count
+            (4, "active"),    // science, counts
+            (9, "active"),    // reactions, counts
+            (9, "cancelled"), // doesn't count
+        ];
+        let slots = compute_slots((10, 5, 3), &jobs);
+        assert_eq!(slots.manufacturing.used, 2);
+        assert_eq!(slots.science.used, 1);
+        assert_eq!(slots.reactions.used, 1);
+    }
+
+    #[test]
+    fn totals_pass_through_unchanged() {
+        let slots = compute_slots((11, 6, 4), &[]);
+        assert_eq!(slots.manufacturing.total, 11);
+        assert_eq!(slots.science.total, 6);
+        assert_eq!(slots.reactions.total, 4);
+        assert_eq!(slots.manufacturing.used, 0);
+    }
 }
