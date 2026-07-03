@@ -146,16 +146,14 @@ pub async fn industry_jobs(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
     character_id: Option<i64>,
-) -> Result<JobsResult, String> {
+) -> Result<JobsResult, crate::model::AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let roster = storage::load_roster(&dir);
     let character_id = match character_id {
         // Only honour an id that's actually in the roster (else fall through).
         Some(id) if roster.iter().any(|c| c.character_id == id) => id,
         // Default to the bookmarked active character (else the first).
-        _ => {
-            storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?
-        }
+        _ => storage::active_character(&dir).ok_or_else(crate::model::AppError::auth_required)?,
     };
 
     // include_completed so delivered jobs (the cost-basis source) come through.

@@ -8,12 +8,13 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::esi::{authed_get, resolve_names, AuthState, EsiClient};
 use crate::market::{resolve_location, MarketService, PriceModel};
+use crate::model::AppError;
 use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
-fn first_character(app: &AppHandle) -> Result<i64, String> {
+fn first_character(app: &AppHandle) -> Result<i64, AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())
+    storage::active_character(&dir).ok_or_else(AppError::auth_required)
 }
 
 // --- LP balances (corp picker) ---
@@ -37,7 +38,7 @@ pub struct LpBalance {
 pub async fn lp_balances(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
-) -> Result<Vec<LpBalance>, String> {
+) -> Result<Vec<LpBalance>, AppError> {
     let character_id = first_character(&app)?;
     let points: Vec<EsiLoyalty> = authed_get(
         &auth_state,

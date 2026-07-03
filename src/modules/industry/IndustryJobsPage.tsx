@@ -3,7 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import {
   activeCharacter,
   authCharacters,
+  errorMessage,
   industryJobs,
+  isAuthRequired,
   type JobRow,
   type Slot,
 } from "../../lib/api";
@@ -103,14 +105,19 @@ export function IndustryJobsPage() {
         </div>
       </div>
 
-      {jobs.isError && (
-        <div className="mt-3 text-sm text-rose-400">
-          Failed: {String(jobs.error)}
-          <div className="mt-1 text-xs text-zinc-500">
-            {errorHint(String(jobs.error))}
+      {jobs.isError &&
+        (isAuthRequired(jobs.error) ? (
+          <div className="mt-3 text-sm text-zinc-400">
+            Log in a character first to view industry jobs.
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="mt-3 text-sm text-rose-400">
+            Failed: {errorMessage(jobs.error)}
+            <div className="mt-1 text-xs text-zinc-500">
+              {errorHint(errorMessage(jobs.error))}
+            </div>
+          </div>
+        ))}
 
       {slots && (
         <div className="mt-4 flex flex-wrap gap-3">

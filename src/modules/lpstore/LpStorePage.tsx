@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  errorMessage,
+  isAuthRequired,
   lpBalances,
   lpOffers,
   sdeStatus,
@@ -128,12 +130,16 @@ function Workbench() {
         </div>
       </div>
 
-      {balances.isError && (
-        <div className="mt-3 text-sm text-rose-400">
-          {String(balances.error)} — log in a character and enable the loyalty
-          scope.
-        </div>
-      )}
+      {balances.isError &&
+        (isAuthRequired(balances.error) ? (
+          <div className="mt-3 text-sm text-zinc-400">
+            Log in a character first to view loyalty-point balances.
+          </div>
+        ) : (
+          <div className="mt-3 text-sm text-rose-400">
+            {errorMessage(balances.error)} — check the loyalty scope is enabled.
+          </div>
+        ))}
 
       <div className="mt-4 flex flex-wrap items-end gap-3">
         <Field label="Corporation (your LP)">
