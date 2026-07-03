@@ -775,6 +775,7 @@ function Workbench() {
           ) : (
             <ProfitTable
               rows={filtered}
+              regionId={regionId}
               onFavorite={toggleFavorite}
               onBlacklist={blacklistRow}
             />
