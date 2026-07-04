@@ -37,6 +37,13 @@ const CONTEST_STYLE: Record<string, string> = {
   captured: "bg-emerald-500/15 text-emerald-300",
 };
 
+/** Contested-state → outline-ring hex on the map (uncontested = no ring). */
+const CONTEST_RING: Record<string, string | undefined> = {
+  contested: "#fbbf24",
+  vulnerable: "#fb7185",
+  captured: "#34d399",
+};
+
 // Faction-warfare warzone view: pick a warzone, see the control map (systems
 // coloured by who holds them) and a per-system table with contest state and
 // last-hour activity. Public data, no login required.
@@ -153,13 +160,31 @@ function Warzone({ data, zone }: { data: FwMap; zone: string }) {
   );
   const ids = useMemo(() => new Set(systems.map((s) => s.systemId)), [systems]);
 
-  const graphNodes: SystemGraphNode[] = systems.map((n) => ({
-    id: String(n.systemId),
-    label: n.name,
-    kind: "lowsec",
-    sub: `${n.region}${n.contested !== "uncontested" ? ` · ${n.contested}` : ""}`,
-    accent: FACTION_HEX[n.occupierId] ?? "#a1a1aa",
-  }));
+  // Lay the tiles out as a top-down star map from real galactic X/Z coords
+  // (x → horizontal, z → vertical, flipped so north is up), scaled to fit.
+  const graphNodes: SystemGraphNode[] = useMemo(() => {
+    if (systems.length === 0) return [];
+    const xs = systems.map((s) => s.x);
+    const zs = systems.map((s) => s.z);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minZ = Math.min(...zs);
+    const maxZ = Math.max(...zs);
+    const span = Math.max(maxX - minX, maxZ - minZ) || 1;
+    const scale = 1600 / span;
+    return systems.map((n) => ({
+      id: String(n.systemId),
+      label: n.name,
+      kind: "lowsec" as const,
+      sub: `${n.security.toFixed(1)}${
+        n.contested !== "uncontested" ? ` · ${n.contested}` : ""
+      }`,
+      accent: FACTION_HEX[n.occupierId] ?? "#a1a1aa",
+      ring: CONTEST_RING[n.contested],
+      x: (n.x - minX) * scale,
+      y: (maxZ - n.z) * scale,
+    }));
+  }, [systems]);
   const graphEdges: SystemGraphEdge[] = data.edges
     .filter(([a, b]) => ids.has(a) && ids.has(b))
     .map(([a, b]) => ({
@@ -177,7 +202,7 @@ function Warzone({ data, zone }: { data: FwMap; zone: string }) {
 
   return (
     <div className="mt-4">
-      <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-zinc-400">
+      <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-zinc-400">
         <span>{systems.length} systems</span>
         {factions.map(([id, name]) => (
           <span key={id} className="flex items-center gap-1.5">
@@ -188,15 +213,25 @@ function Warzone({ data, zone }: { data: FwMap; zone: string }) {
             {name}
           </span>
         ))}
-        <span className="text-zinc-600">· drag nodes to arrange</span>
+        <span className="text-zinc-600">·</span>
+        {(["contested", "vulnerable", "captured"] as const).map((c) => (
+          <span key={c} className="flex items-center gap-1.5 capitalize">
+            <span
+              className="h-2.5 w-2.5 rounded-sm ring-2"
+              style={{ boxShadow: `0 0 0 2px ${CONTEST_RING[c]}` }}
+            />
+            {c}
+          </span>
+        ))}
+        <span className="text-zinc-600">· star map — drag to arrange</span>
       </div>
 
       <div className="overflow-hidden rounded-lg border border-zinc-800">
         <SystemGraph
           nodes={graphNodes}
           edges={graphEdges}
-          height={440}
-          storageKey={`fw-${zone}`}
+          height={480}
+          storageKey={`fw-map-${zone}`}
         />
       </div>
 

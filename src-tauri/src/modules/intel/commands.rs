@@ -240,6 +240,8 @@ pub struct FwSystemNode {
     pub name: String,
     pub region: String,
     pub warzone: String,
+    /// Security status (FW space is lowsec, ~0.1–0.4).
+    pub security: f64,
     pub owner: String,
     pub occupier: String,
     pub owner_id: i64,
@@ -252,6 +254,9 @@ pub struct FwSystemNode {
     pub kills: i64,
     /// Jumps in the last hour (traffic proxy — ESI has no live player count).
     pub jumps: i64,
+    /// Galactic map-plane coordinates (seed the star-map layout).
+    pub x: f64,
+    pub z: f64,
 }
 
 /// The faction-warfare map: systems + the stargate edges between them.
@@ -297,6 +302,7 @@ pub async fn fw_systems(app: AppHandle) -> Result<FwMap, String> {
 
     let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
     let info = sde.solar_system_info().map_err(|e| e.to_string())?;
+    let pos = sde.solar_system_positions().map_err(|e| e.to_string())?;
 
     let fw_ids: HashSet<i64> = systems.iter().map(|s| s.solar_system_id).collect();
     let ids_vec: Vec<i64> = fw_ids.iter().copied().collect();
@@ -316,10 +322,11 @@ pub async fn fw_systems(app: AppHandle) -> Result<FwMap, String> {
     let mut nodes: Vec<FwSystemNode> = systems
         .into_iter()
         .map(|s| {
-            let (name, region) = info
+            let (name, security, region) = info
                 .get(&s.solar_system_id)
-                .map(|(n, _sec, r)| (n.clone(), r.clone()))
-                .unwrap_or_else(|| (format!("#{}", s.solar_system_id), String::new()));
+                .map(|(n, sec, r)| (n.clone(), *sec, r.clone()))
+                .unwrap_or_else(|| (format!("#{}", s.solar_system_id), 0.0, String::new()));
+            let (x, z) = pos.get(&s.solar_system_id).copied().unwrap_or((0.0, 0.0));
             let vp_pct = if s.victory_points_threshold > 0 {
                 s.victory_points as f64 / s.victory_points_threshold as f64
             } else {
@@ -330,6 +337,7 @@ pub async fn fw_systems(app: AppHandle) -> Result<FwMap, String> {
                 name,
                 region,
                 warzone: warzone(s.owner_faction_id).to_string(),
+                security,
                 owner: faction_name(s.owner_faction_id).to_string(),
                 occupier: faction_name(s.occupier_faction_id).to_string(),
                 owner_id: s.owner_faction_id,
@@ -338,6 +346,8 @@ pub async fn fw_systems(app: AppHandle) -> Result<FwMap, String> {
                 vp_pct,
                 kills: kill_map.get(&s.solar_system_id).copied().unwrap_or(0),
                 jumps: jump_map.get(&s.solar_system_id).copied().unwrap_or(0),
+                x,
+                z,
             }
         })
         .collect();
