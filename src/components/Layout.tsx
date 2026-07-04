@@ -3,6 +3,8 @@ import { NavLink, useLocation } from "react-router-dom";
 import {
   ChevronDown,
   ChevronRight,
+  Eye,
+  EyeOff,
   GripVertical,
   Search,
   Star,
@@ -19,6 +21,7 @@ const PINS_KEY = STORAGE_KEYS.sidebarPins;
 const ORDER_KEY = STORAGE_KEYS.sidebarOrder;
 const COLORS_KEY = STORAGE_KEYS.sidebarColors;
 const COLLAPSED_KEY = STORAGE_KEYS.sidebarCollapsed;
+const HIDDEN_KEY = STORAGE_KEYS.sidebarHidden;
 
 // Accent palette for tagging sidebar entries. Tailwind 400-level hues, spread
 // around the wheel so they stay distinct as small accents on the dark sidebar.
@@ -100,6 +103,10 @@ export function Layout() {
   const [collapsed, setCollapsed] = useState<string[]>(() =>
     loadIds(COLLAPSED_KEY),
   );
+  // Modules the user has hidden from the nav; they collect in a "Hidden" section
+  // at the bottom from which they can be restored. Hiding is nav-only — the
+  // route and command palette still reach the module.
+  const [hidden, setHidden] = useState<string[]>(() => loadIds(HIDDEN_KEY));
   // A drag in progress, tagged with the section it started in — a pinned module
   // shows in both the Pinned section and its group, so reordering is scoped to
   // the section the row was dragged from.
@@ -123,6 +130,15 @@ export function Layout() {
       if (key) next[id] = key;
       else delete next[id];
       localStorage.setItem(COLORS_KEY, JSON.stringify(next));
+      return next;
+    });
+
+  const toggleHidden = (id: string) =>
+    setHidden((prev) => {
+      const next = prev.includes(id)
+        ? prev.filter((h) => h !== id)
+        : [...prev, id];
+      localStorage.setItem(HIDDEN_KEY, JSON.stringify(next));
       return next;
     });
 
@@ -154,12 +170,17 @@ export function Layout() {
   const ordered = applyOrder(order);
   // Pinned modules mirror into a Pinned section on top; every module also stays
   // in its own group section (so pinning doesn't remove it from the group).
-  const pinned = ordered.filter((m) => pins.includes(m.id));
+  // Hidden modules drop out of both and collect in the Hidden section instead.
+  const pinned = ordered.filter(
+    (m) => pins.includes(m.id) && !hidden.includes(m.id),
+  );
+  const hiddenModules = ordered.filter((m) => hidden.includes(m.id));
 
   const rowProps = (m: ModuleDef, section: string) => ({
     module: m,
     pinned: pins.includes(m.id),
     onTogglePin: togglePin,
+    onHide: toggleHidden,
     color: colors[m.id] ?? null,
     onSetColor: setColor,
     // Only the Pinned section is drag-sortable; group sections keep a fixed order.
@@ -211,7 +232,9 @@ export function Layout() {
           )}
           {MODULE_GROUPS.map((g) => {
             // Group sections keep a fixed (registry) order — only Pinned sorts.
-            const items = modules.filter((m) => m.group === g.key);
+            const items = modules.filter(
+              (m) => m.group === g.key && !hidden.includes(m.id),
+            );
             if (items.length === 0) return null;
             return (
               <NavSection
@@ -226,6 +249,17 @@ export function Layout() {
               </NavSection>
             );
           })}
+          {hiddenModules.length > 0 && (
+            <NavSection
+              label={`Hidden (${hiddenModules.length})`}
+              collapsed={collapsed.includes("hidden")}
+              onToggle={() => toggleSection("hidden")}
+            >
+              {hiddenModules.map((m) => (
+                <HiddenRow key={m.id} module={m} onRestore={toggleHidden} />
+              ))}
+            </NavSection>
+          )}
         </nav>
         <Characters />
         <div className="border-t border-zinc-800 px-4 py-3">
@@ -326,6 +360,7 @@ function NavRow({
   module,
   pinned,
   onTogglePin,
+  onHide,
   color,
   onSetColor,
   sortable,
@@ -337,6 +372,7 @@ function NavRow({
   module: ModuleDef;
   pinned: boolean;
   onTogglePin: (id: string) => void;
+  onHide: (id: string) => void;
   color: string | null;
   onSetColor: (id: string, key: string | null) => void;
   sortable: boolean;
@@ -422,6 +458,14 @@ function NavRow({
         onSetColor={(key) => onSetColor(module.id, key)}
       />
       <button
+        onClick={() => onHide(module.id)}
+        title="Hide from sidebar"
+        aria-label={`Hide ${module.title}`}
+        className="flex shrink-0 items-center rounded p-1.5 text-zinc-500 opacity-0 transition-opacity hover:text-zinc-200 group-hover:opacity-100"
+      >
+        <EyeOff size={14} />
+      </button>
+      <button
         onClick={() => onTogglePin(module.id)}
         title={pinned ? "Unpin" : "Pin to top"}
         aria-label={pinned ? `Unpin ${module.title}` : `Pin ${module.title}`}
@@ -432,6 +476,49 @@ function NavRow({
         }`}
       >
         <Star size={14} fill={pinned ? "currentColor" : "none"} />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * A muted row in the Hidden section: the module is still reachable (the label
+ * stays a link) but a one-click restore button returns it to its group/pin.
+ */
+function HiddenRow({
+  module,
+  onRestore,
+}: {
+  module: ModuleDef;
+  onRestore: (id: string) => void;
+}) {
+  return (
+    <div className="group flex items-center gap-1">
+      {/* Spacer keeping labels aligned with the drag-handled rows above. */}
+      <span aria-hidden className="shrink-0 px-1">
+        <span className="block h-3.5 w-3.5" />
+      </span>
+      <NavLink
+        to={`/${module.id}`}
+        title={module.description}
+        draggable={false}
+        className={({ isActive }) =>
+          `block flex-1 rounded px-3 py-2 text-sm ${
+            isActive
+              ? "bg-zinc-800 text-zinc-300"
+              : "text-zinc-500 hover:bg-zinc-800/60 hover:text-zinc-300"
+          }`
+        }
+      >
+        {module.title}
+      </NavLink>
+      <button
+        onClick={() => onRestore(module.id)}
+        title="Restore to sidebar"
+        aria-label={`Restore ${module.title}`}
+        className="flex shrink-0 items-center rounded p-1.5 text-zinc-500 hover:text-zinc-200"
+      >
+        <Eye size={14} />
       </button>
     </div>
   );

@@ -16,6 +16,7 @@ export const STORAGE_KEYS = {
   sidebarOrder: "sidebar.order",
   sidebarColors: "sidebar.colors",
   sidebarCollapsed: "sidebar.collapsed",
+  sidebarHidden: "sidebar.hidden",
   // EVE log folders
   eveChatlogsDir: "eveLogsDir", // legacy value; points at the Chatlogs folder
   eveGamelogsDir: "eveGamelogsDir",
