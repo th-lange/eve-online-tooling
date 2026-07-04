@@ -93,6 +93,7 @@ pub fn run() {
             modules::production::commands::production_decryptors,
             modules::production::commands::production_get_list,
             modules::production::commands::production_set_list,
+            modules::production::commands::production_system_cost_index,
             modules::trading::commands::station_trading,
             modules::trading::commands::trading_get_list,
             modules::trading::commands::trading_set_list,

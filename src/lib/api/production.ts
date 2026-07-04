@@ -157,3 +157,11 @@ export function productionSetList(
 ): Promise<void> {
   return invoke<void>("production_set_list", { list, typeId, add });
 }
+
+/** The live manufacturing cost index for a solar system (ESI /industry/systems/,
+ *  cached ~1h). `null` when the system isn't listed (e.g. wormhole space). */
+export function productionSystemCostIndex(
+  systemId: number,
+): Promise<number | null> {
+  return invoke<number | null>("production_system_cost_index", { systemId });
+}

@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 use tauri::{AppHandle, Manager, State};
 
+use crate::esi::EsiClient;
 use crate::lists::{self, ListItem};
 use crate::market::{
     default_region_id, location_label, resolve_location, MarketService, PriceModel,
@@ -474,4 +475,51 @@ pub fn production_set_list(
 ) -> Result<(), String> {
     let key = list_key(&list)?;
     lists::set_from_app(&app, key, type_id, add)
+}
+
+// --- Live per-system industry cost index (ESI /industry/systems/) ---
+
+#[derive(Deserialize)]
+struct EsiIndustrySystem {
+    solar_system_id: i64,
+    cost_indices: Vec<EsiCostIndex>,
+}
+#[derive(Deserialize)]
+struct EsiCostIndex {
+    activity: String,
+    cost_index: f64,
+}
+
+/// The **manufacturing** cost index CCP applies to job fees in a solar system,
+/// from ESI `/industry/systems/` (public). The full list is fetched once and
+/// cached ~1h on disk, then looked up per system. `None` when the system isn't
+/// listed (e.g. wormhole space). Lets the production tab use the real index
+/// instead of a hand-entered guess.
+#[tauri::command]
+pub async fn production_system_cost_index(
+    app: AppHandle,
+    system_id: i64,
+) -> Result<Option<f64>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let map: HashMap<i64, f64> = match storage::cache_get(&dir, "industry_cost_indices") {
+        Some(cached) => cached,
+        None => {
+            let systems: Vec<EsiIndustrySystem> = EsiClient::new()
+                .get_json("/latest/industry/systems/", &[])
+                .await
+                .map_err(|e| e.to_string())?;
+            let map: HashMap<i64, f64> = systems
+                .into_iter()
+                .filter_map(|s| {
+                    s.cost_indices
+                        .iter()
+                        .find(|c| c.activity == "manufacturing")
+                        .map(|c| (s.solar_system_id, c.cost_index))
+                })
+                .collect();
+            let _ = storage::cache_put(&dir, "industry_cost_indices", &map, 3600);
+            map
+        }
+    };
+    Ok(map.get(&system_id).copied())
 }
