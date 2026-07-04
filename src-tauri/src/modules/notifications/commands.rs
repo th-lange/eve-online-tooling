@@ -1,0 +1,182 @@
+//! Notifications commands: read the character's notification feed, and dismiss
+//! individual notifications locally.
+//!
+//! ESI has no "mark read" write, so dismissal is a local, durable per-character
+//! set of hidden notification ids — the feed's "remove from the panel" action.
+
+use serde::{Deserialize, Serialize};
+use tauri::{AppHandle, Manager, State};
+
+use crate::esi::{authed_get, resolve_names, AuthState};
+use crate::model::AppError;
+use crate::storage;
+
+/// Active character or an auth-required error.
+fn active(app: &AppHandle) -> Result<(std::path::PathBuf, i64), AppError> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let id = storage::active_character(&dir).ok_or_else(AppError::auth_required)?;
+    Ok((dir, id))
+}
+
+/// Split a PascalCase ESI notification type into words:
+/// `StructureUnderAttack` → `Structure Under Attack`. Pure, so it's unit-tested.
+pub fn humanize(kind: &str) -> String {
+    let mut out = String::with_capacity(kind.len() + 4);
+    let mut prev_lower = false;
+    for ch in kind.chars() {
+        if ch.is_uppercase() && prev_lower {
+            out.push(' ');
+        }
+        out.push(ch);
+        prev_lower = ch.is_lowercase() || ch.is_ascii_digit();
+    }
+    out
+}
+
+/// Bucket a notification type into a coarse category for filtering. Keyword
+/// match on the type name (ESI has ~200 types); anything unmatched is "Other".
+/// Pure, so it's unit-tested.
+pub fn category(kind: &str) -> &'static str {
+    let k = kind.to_ascii_lowercase();
+    if k.contains("war") {
+        "War"
+    } else if k.contains("sov") || k.contains("entosis") || k.contains("tcu") {
+        // Checked before "structure": sov notifications contain "structure" too.
+        "Sovereignty"
+    } else if k.contains("structure")
+        || k.contains("tower")
+        || k.contains("orbital")
+        || k.contains("citadel")
+    {
+        "Structure"
+    } else if k.contains("moon") || k.contains("extraction") || k.contains("industry") {
+        "Industry"
+    } else if k.contains("bounty") || k.contains("wallet") || k.contains("insurance") {
+        "Wallet"
+    } else if k.contains("corp") || k.contains("alliance") || k.contains("member") {
+        "Corp"
+    } else {
+        "Other"
+    }
+}
+
+/// Raw `/characters/{id}/notifications/` entry.
+#[derive(Deserialize)]
+struct EsiNotification {
+    notification_id: i64,
+    #[serde(default)]
+    sender_id: i64,
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    timestamp: String,
+    #[serde(default)]
+    is_read: bool,
+    #[serde(default)]
+    text: String,
+}
+
+/// One notification for display.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotifRow {
+    pub id: i64,
+    /// Humanised type, e.g. "Structure Under Attack".
+    pub title: String,
+    pub category: String,
+    pub sender: String,
+    pub timestamp: String,
+    pub is_read: bool,
+    /// Raw notification body (YAML-ish key/values) for an expandable detail view.
+    pub body: String,
+}
+
+/// The active character's notifications, newest first, with dismissed ones
+/// filtered out. Sender ids are resolved to names in one batch.
+#[tauri::command]
+pub async fn notifications(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+) -> Result<Vec<NotifRow>, AppError> {
+    let (dir, character_id) = active(&app)?;
+
+    let raw: Vec<EsiNotification> = authed_get(
+        &auth_state,
+        character_id,
+        &format!("/latest/characters/{character_id}/notifications/"),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let dismissed: Vec<i64> =
+        storage::load_data(&dir, &format!("notifications_dismissed_{character_id}"))
+            .unwrap_or_default();
+
+    let sender_ids: Vec<i64> = raw.iter().map(|n| n.sender_id).collect();
+    let names = resolve_names(&auth_state, &sender_ids).await;
+
+    let mut rows: Vec<NotifRow> = raw
+        .into_iter()
+        .filter(|n| !dismissed.contains(&n.notification_id))
+        .map(|n| NotifRow {
+            id: n.notification_id,
+            title: humanize(&n.kind),
+            category: category(&n.kind).to_string(),
+            sender: names
+                .get(&n.sender_id)
+                .cloned()
+                .unwrap_or_else(|| "EVE System".to_string()),
+            timestamp: n.timestamp,
+            is_read: n.is_read,
+            body: n.text,
+        })
+        .collect();
+    // Newest first (ISO-8601 timestamps sort lexically).
+    rows.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    Ok(rows)
+}
+
+/// Hide a notification from the feed (durable, per character).
+#[tauri::command]
+pub fn notification_dismiss(app: AppHandle, notification_id: i64) -> Result<(), AppError> {
+    let (dir, character_id) = active(&app)?;
+    let key = format!("notifications_dismissed_{character_id}");
+    let mut dismissed: Vec<i64> = storage::load_data(&dir, &key).unwrap_or_default();
+    if !dismissed.contains(&notification_id) {
+        dismissed.push(notification_id);
+        storage::save_data(&dir, &key, &dismissed)?;
+    }
+    Ok(())
+}
+
+/// Un-dismiss everything (clear the hidden set), so the full feed shows again.
+#[tauri::command]
+pub fn notifications_reset(app: AppHandle) -> Result<(), AppError> {
+    let (dir, character_id) = active(&app)?;
+    let key = format!("notifications_dismissed_{character_id}");
+    storage::save_data(&dir, &key, &Vec::<i64>::new())?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{category, humanize};
+
+    #[test]
+    fn humanize_splits_pascal_case() {
+        assert_eq!(humanize("StructureUnderAttack"), "Structure Under Attack");
+        assert_eq!(humanize("WarDeclared"), "War Declared");
+        assert_eq!(humanize("Simple"), "Simple");
+    }
+
+    #[test]
+    fn category_buckets_by_keyword() {
+        assert_eq!(category("WarDeclared"), "War");
+        assert_eq!(category("StructureUnderAttack"), "Structure");
+        assert_eq!(category("SovStructureDestroyed"), "Sovereignty");
+        assert_eq!(category("MoonminingExtractionStarted"), "Industry");
+        assert_eq!(category("InsurancePayoutMsg"), "Wallet");
+        assert_eq!(category("CorpAppNewMsg"), "Corp");
+        assert_eq!(category("SomethingElse"), "Other");
+    }
+}
