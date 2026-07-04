@@ -181,7 +181,6 @@ export function Layout() {
     module: m,
     pinned: pins.includes(m.id),
     onTogglePin: togglePin,
-    onHide: toggleHidden,
     color: colors[m.id] ?? null,
     onSetColor: setColor,
     // Only the Pinned section is drag-sortable; group sections keep a fixed order.
@@ -273,7 +272,7 @@ export function Layout() {
         </div>
       </aside>
       <main className="flex-1 overflow-hidden">
-        <ModuleHost />
+        <ModuleHost onHide={toggleHidden} />
       </main>
       <CommandPalette />
       <SupportModal />
@@ -298,7 +297,7 @@ export function Layout() {
  */
 export const ModuleActiveContext = createContext(true);
 
-function ModuleHost() {
+function ModuleHost({ onHide }: { onHide: (id: string) => void }) {
   const location = useLocation();
   const seg = location.pathname.split("/").filter(Boolean)[0];
   const activeId = modules.some((m) => m.id === seg) ? seg : modules[0].id;
@@ -319,9 +318,19 @@ function ModuleHost() {
         .map((m) => (
           <div
             key={m.id}
-            className="h-full overflow-auto"
+            className="relative h-full overflow-auto"
             style={{ display: m.id === activeId ? "block" : "none" }}
           >
+            {/* Per-module hide control, tucked into the top-right corner. Hiding
+                only removes it from the nav (restore from the Hidden section). */}
+            <button
+              onClick={() => onHide(m.id)}
+              title="Hide this module from the sidebar"
+              aria-label={`Hide ${m.title} from sidebar`}
+              className="absolute right-2 top-2 z-30 rounded p-1 text-zinc-600 opacity-50 transition hover:bg-zinc-800 hover:text-zinc-300 hover:opacity-100"
+            >
+              <EyeOff size={16} />
+            </button>
             <ModuleActiveContext.Provider value={m.id === activeId}>
               <m.Component />
             </ModuleActiveContext.Provider>
@@ -367,7 +376,6 @@ function NavRow({
   module,
   pinned,
   onTogglePin,
-  onHide,
   color,
   onSetColor,
   sortable,
@@ -379,7 +387,6 @@ function NavRow({
   module: ModuleDef;
   pinned: boolean;
   onTogglePin: (id: string) => void;
-  onHide: (id: string) => void;
   color: string | null;
   onSetColor: (id: string, key: string | null) => void;
   sortable: boolean;
@@ -465,14 +472,6 @@ function NavRow({
         color={color}
         onSetColor={(key) => onSetColor(module.id, key)}
       />
-      <button
-        onClick={() => onHide(module.id)}
-        title="Hide from sidebar"
-        aria-label={`Hide ${module.title}`}
-        className="flex shrink-0 items-center rounded p-1.5 text-zinc-500 opacity-0 transition-opacity hover:text-zinc-200 group-hover:opacity-100"
-      >
-        <EyeOff size={14} />
-      </button>
       <button
         onClick={() => onTogglePin(module.id)}
         title={pinned ? "Unpin" : "Pin to top"}
