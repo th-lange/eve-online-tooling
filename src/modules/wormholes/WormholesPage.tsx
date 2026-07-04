@@ -627,6 +627,13 @@ function massEdgeColor(mass: string): string {
   return "#a855f7";
 }
 
+/** The two special EVE-Scout hub systems → a distinctive node colour. Thera is
+ * the shattered wormhole hub; Turnur is its lowsec counterpart. */
+const SPECIAL_HUBS: Record<string, string> = {
+  Thera: "#2dd4bf", // teal
+  Turnur: "#e879f9", // fuchsia
+};
+
 /** Interactive node-edge view of the mapped chain. Click a node to load its
  * signatures below. Complements the flat table (kept as the edit pane). */
 function ChainGraph({
@@ -639,10 +646,12 @@ function ChainGraph({
   const nodeMap = new Map<number, SystemGraphNode>();
   const addNode = (id: number, name: string, wspace: boolean) => {
     if (!nodeMap.has(id)) {
+      const special = SPECIAL_HUBS[name];
       nodeMap.set(id, {
         id: String(id),
         label: name,
         kind: wspace ? "wspace" : "unknown",
+        ...(special && { accent: special, sub: "EVE-Scout hub" }),
       });
     }
   };
@@ -671,7 +680,9 @@ function ChainGraph({
         <span>Chain map</span>
         <span className="normal-case tracking-normal text-zinc-600">
           click a system for its signatures · drag to rearrange (saved) · dashed
-          = EOL · purple = wormhole
+          = EOL · purple = wormhole ·{" "}
+          <span style={{ color: SPECIAL_HUBS.Thera }}>teal = Thera</span> ·{" "}
+          <span style={{ color: SPECIAL_HUBS.Turnur }}>pink = Turnur</span>
         </span>
       </div>
       <SystemGraph
