@@ -178,4 +178,55 @@ describe("Layout sidebar", () => {
       boxShadow: "inset 3px 0 0 #38bdf8",
     });
   });
+
+  it("hides a module into the Hidden section and persists it", () => {
+    renderLayout();
+    fireEvent.click(
+      within(rowFor(PRODUCTION)).getByRole("button", {
+        name: `Hide ${PRODUCTION}`,
+      }),
+    );
+    // Left its Industry group row (no more Hide control) for the Hidden section,
+    // where it's restorable instead. It stays reachable (still one link).
+    expect(
+      screen.queryByRole("button", { name: `Hide ${PRODUCTION}` }),
+    ).toBeNull();
+    expect(screen.getByText("Hidden (1)")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: `Restore ${PRODUCTION}` }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: PRODUCTION })).toHaveLength(1);
+    expect(JSON.parse(localStorage.getItem("sidebar.hidden") ?? "[]")).toEqual([
+      id(PRODUCTION),
+    ]);
+  });
+
+  it("restores a hidden module back to its group", () => {
+    localStorage.setItem("sidebar.hidden", JSON.stringify([id(PRODUCTION)]));
+    renderLayout();
+    expect(
+      screen.getByRole("button", { name: `Restore ${PRODUCTION}` }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: `Restore ${PRODUCTION}` }),
+    );
+    // Back in its group (Hide control returns), Hidden section gone.
+    expect(
+      screen.getByRole("button", { name: `Hide ${PRODUCTION}` }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Hidden (1)")).toBeNull();
+    expect(JSON.parse(localStorage.getItem("sidebar.hidden") ?? "[]")).toEqual(
+      [],
+    );
+  });
+
+  it("keeps a hidden module out of the Pinned section too", () => {
+    localStorage.setItem("sidebar.pins", JSON.stringify([id(TRADING)]));
+    localStorage.setItem("sidebar.hidden", JSON.stringify([id(TRADING)]));
+    renderLayout();
+    // Pinned + hidden → only appears once, in the Hidden section.
+    expect(screen.queryByText("Pinned")).toBeNull();
+    expect(screen.getAllByRole("link", { name: TRADING })).toHaveLength(1);
+  });
 });
