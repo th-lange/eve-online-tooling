@@ -559,7 +559,7 @@ function ColorPicker({
         <>
           {/* Click-away backdrop. */}
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 z-20 mt-1 grid grid-cols-10 gap-2.5 rounded-md border border-zinc-700 bg-zinc-800 p-3 shadow-lg">
+          <div className="absolute right-0 z-20 mt-1 grid grid-cols-5 gap-2.5 rounded-md border border-zinc-700 bg-zinc-800 p-3 shadow-lg">
             {COLORS.map((c) => (
               <button
                 key={c.key}
@@ -569,7 +569,7 @@ function ColorPicker({
                   onSetColor(c.key);
                   setOpen(false);
                 }}
-                className={`h-7 w-7 rounded-full ring-1 ring-zinc-900 transition-transform hover:scale-110 ${
+                className={`h-8 w-8 rounded-full ring-1 ring-zinc-900 transition-transform hover:scale-110 ${
                   color === c.key
                     ? "outline outline-2 outline-offset-2 outline-zinc-300"
                     : ""
@@ -584,7 +584,7 @@ function ColorPicker({
                 onSetColor(null);
                 setOpen(false);
               }}
-              className="flex h-7 w-7 items-center justify-center rounded-full border border-zinc-600 text-zinc-400 transition-transform hover:scale-110 hover:text-zinc-200"
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-zinc-600 text-zinc-400 transition-transform hover:scale-110 hover:text-zinc-200"
             >
               <X size={14} />
             </button>
