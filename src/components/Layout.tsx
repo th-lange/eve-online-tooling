@@ -250,15 +250,20 @@ export function Layout() {
             );
           })}
           {hiddenModules.length > 0 && (
-            <NavSection
-              label={`Hidden (${hiddenModules.length})`}
-              collapsed={collapsed.includes("hidden")}
-              onToggle={() => toggleSection("hidden")}
-            >
-              {hiddenModules.map((m) => (
-                <HiddenRow key={m.id} module={m} onRestore={toggleHidden} />
-              ))}
-            </NavSection>
+            // Set apart with a divider so it reads as a distinct "manage hidden"
+            // area, not just another group. Its rows can't be hidden or pinned —
+            // only restored.
+            <div className="mt-2 border-t border-zinc-800 pt-2">
+              <NavSection
+                label={`Hidden (${hiddenModules.length})`}
+                collapsed={collapsed.includes("hidden")}
+                onToggle={() => toggleSection("hidden")}
+              >
+                {hiddenModules.map((m) => (
+                  <HiddenRow key={m.id} module={m} onRestore={toggleHidden} />
+                ))}
+              </NavSection>
+            </div>
           )}
         </nav>
         <Characters />
