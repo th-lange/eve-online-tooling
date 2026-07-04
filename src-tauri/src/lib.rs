@@ -131,6 +131,7 @@ pub fn run() {
             modules::assets::commands::assets_tree,
             modules::accounting::commands::wallet_sync,
             modules::accounting::commands::profit_fifo,
+            modules::accounting::commands::transaction_ledger,
             modules::contracts::commands::contracts_scan,
             modules::route::commands::system_activity,
             modules::route::commands::system_search,

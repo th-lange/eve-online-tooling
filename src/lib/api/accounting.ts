@@ -35,3 +35,27 @@ export interface ProfitView {
 export function profitFifo(): Promise<ProfitView> {
   return invoke<ProfitView>("profit_fifo");
 }
+
+/** One market transaction (a single buy or sell fill). */
+export interface LedgerRow {
+  date: string;
+  name: string;
+  typeId: number;
+  isBuy: boolean;
+  quantity: number;
+  unitPrice: number;
+  /** quantity × unit price. */
+  total: number;
+}
+export interface LedgerView {
+  rows: LedgerRow[];
+  totalBuy: number;
+  totalSell: number;
+}
+/**
+ * Per-fill buy/sell transaction history for the active character (newest
+ * first), refreshed from ESI and accumulated durably. Needs the wallet scope.
+ */
+export function transactionLedger(): Promise<LedgerView> {
+  return invoke<LedgerView>("transaction_ledger");
+}
