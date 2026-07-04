@@ -28,6 +28,8 @@ export interface SystemGraphNode {
   accent?: string;
   /** Draw an outline ring in this hex (e.g. contested state). */
   ring?: string;
+  /** Tint the tile background with this colour (e.g. contested state). */
+  bg?: string;
   /** Seed the initial position (e.g. real map coordinates) instead of the
    *  computed BFS layout. Overridden once the user drags a node. */
   x?: number;
@@ -80,6 +82,7 @@ type SystemNodeData = {
   current?: boolean;
   accent?: string;
   ring?: string;
+  bg?: string;
 };
 
 function SystemNode({ data }: NodeProps<Node<SystemNodeData>>) {
@@ -89,12 +92,13 @@ function SystemNode({ data }: NodeProps<Node<SystemNodeData>>) {
     style.color = data.accent;
   }
   if (data.ring) style.boxShadow = `0 0 0 2px ${data.ring}`;
+  if (data.bg) style.backgroundColor = data.bg;
   return (
     <div
       className={`rounded border px-3 py-1.5 text-xs shadow ${
         data.accent ? "bg-zinc-900 text-zinc-100" : kindClass(data.kind)
       } ${data.current ? "ring-2 ring-emerald-400" : ""}`}
-      style={data.accent || data.ring ? style : undefined}
+      style={data.accent || data.ring || data.bg ? style : undefined}
     >
       {/* Hidden connection points so edges attach cleanly left↔right. */}
       <Handle
@@ -233,6 +237,7 @@ export function SystemGraph({
         current: n.current,
         accent: n.accent,
         ring: n.ring,
+        bg: n.bg,
       },
     }),
     [],
