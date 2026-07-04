@@ -263,6 +263,7 @@ function Warzone({ data, zone }: { data: FwMap; zone: string }) {
         accent: FACTION_HEX[n.occupierId] ?? "#a1a1aa",
         ring: CONTEST_RING[n.contested],
         bg: tileBg(n.contested, n.kills, maxKills),
+        group: n.region,
         x: p.x,
         y: p.y,
       };
