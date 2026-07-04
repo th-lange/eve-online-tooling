@@ -21,6 +21,31 @@ export function characterStandings(): Promise<StandingRow[]> {
   return invoke<StandingRow[]>("character_standings");
 }
 
+/** Broker fee at one major hub, derived from skills + standings. */
+export interface HubFee {
+  hub: string;
+  region: string;
+  brokerFeePct: number;
+  factionStanding: number;
+  corpStanding: number;
+}
+export interface TradeFees {
+  accounting: number;
+  brokerRelations: number;
+  connections: number;
+  /** Sales tax % (skill-only, same at every station). */
+  salesTaxPct: number;
+  hubs: HubFee[];
+}
+/**
+ * Broker fee (per major hub) + sales tax computed from the active character's
+ * Accounting / Broker Relations skills and effective standings. Needs the
+ * skills + standings scopes.
+ */
+export function characterTradeFees(): Promise<TradeFees> {
+  return invoke<TradeFees>("character_trade_fees");
+}
+
 export interface ResearchView {
   rows: {
     agent: string;
