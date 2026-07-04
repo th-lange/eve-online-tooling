@@ -1,0 +1,152 @@
+name: "🐞 Bug report"
+description: Something isn't working. Please give us enough to reproduce it.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug! A ticket we can act on needs a few basics —
+        the fields below spell out **what we need** and **how to find it**.
+        The more of it you fill in, the faster it gets fixed.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched [existing issues](https://github.com/th-lange/eve-online-tooling/issues?q=is%3Aissue) and this isn't a duplicate.
+          required: true
+        - label: I'm on the latest release (or I've noted my version below).
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      description: >-
+        The version you're running. **How to find it:** the filename of the
+        installer you downloaded from the
+        [Releases page](https://github.com/th-lange/eve-online-tooling/releases)
+        (e.g. `v0.27.0`). If you built from source, paste the commit:
+        `git rev-parse --short HEAD`.
+      placeholder: "v0.27.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+
+  - type: input
+    id: os_version
+    attributes:
+      label: OS version
+      description: "e.g. Windows 11 23H2, macOS 14.5, Ubuntu 24.04."
+      placeholder: "Windows 11 23H2"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the app?
+      description: The module or area where the problem happens (sidebar name).
+      options:
+        - Login / EVE SSO
+        - Production
+        - Station Trading / Daytrading
+        - Reprocessing
+        - Appraisal
+        - Universe / Market Search
+        - Assets
+        - Character / Skills
+        - Accounting / Transactions
+        - Public Contracts / LP Store
+        - Route / Local Intel
+        - Market Orders
+        - Industry Jobs
+        - Planetary Interaction
+        - Incursions / Faction Warfare
+        - Wormholes
+        - Exploration
+        - Fitting
+        - Shopping Lists
+        - DPS Meter
+        - Notifications
+        - Sidebar / general UI
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened?
+      description: What went wrong — the actual behaviour, and any error text on screen.
+      placeholder: "Faction Warfare map is blank after switching to the Region layout."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      placeholder: "The systems should re-arrange into per-region clusters."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The exact clicks to hit the bug. "It happens sometimes" is hard to fix — tell us how *you* trigger it.
+      value: |
+        1. Go to '...'
+        2. Click '...'
+        3. See the problem
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Errors / logs
+      description: >-
+        Any error output helps a lot. **How to obtain it:**
+        • Run the app from a terminal (Windows: `eve-online-tooling.exe` from
+        PowerShell; macOS/Linux: launch the binary from a shell) and copy any
+        red/error lines it prints.
+        • If you built from source, paste the output of `npm run tauri dev`.
+        • Otherwise, screenshot the error shown in the app and the **Bridge
+        status** indicator at the bottom-left of the sidebar.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: context
+    attributes:
+      label: Context (tick what applies)
+      description: >-
+        Many features depend on these being set up — checking them often
+        explains the bug. See the README for the one-time EVE app setup.
+      options:
+        - label: I'm logged in with an EVE character (via SSO).
+        - label: The Static Data Export (SDE) finished downloading on first run.
+        - label: The required ESI scopes are enabled on my EVE developer application, and I re-logged in after enabling them.
+        - label: The problem still happens after restarting the app.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots / anything else
+      description: Drag images in here. Anything else that might help.
+    validations:
+      required: false

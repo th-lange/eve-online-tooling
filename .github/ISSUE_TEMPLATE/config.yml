@@ -1,0 +1,7 @@
+# Nudge reporters into the structured templates instead of a blank issue, so
+# every ticket carries the minimum we need to act on it.
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Setup & requirements
+    url: https://github.com/th-lange/eve-online-tooling#readme
+    about: First-run setup (EVE app + scopes, SDE, prerequisites) — check here before filing a bug that might be a setup step.
