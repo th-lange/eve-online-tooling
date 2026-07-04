@@ -14,6 +14,7 @@ import { modules, MODULE_GROUPS, type ModuleDef } from "../modules/registry";
 import { BridgeStatus } from "./BridgeStatus";
 import { Characters } from "./Characters";
 import { CommandPalette } from "./CommandPalette";
+import { SupportMyWork, SupportModal } from "./SupportMyWork";
 import { STORAGE_KEYS } from "../lib/storageKeys";
 import appIcon from "../assets/app-icon.png";
 
@@ -267,6 +268,7 @@ export function Layout() {
           )}
         </nav>
         <Characters />
+        <SupportMyWork />
         <div className="border-t border-zinc-800 px-4 py-3">
           <BridgeStatus />
         </div>
@@ -275,6 +277,7 @@ export function Layout() {
         <ModuleHost />
       </main>
       <CommandPalette />
+      <SupportModal />
     </div>
   );
 }
