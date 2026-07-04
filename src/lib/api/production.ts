@@ -118,6 +118,12 @@ export interface ProfitParams {
   stock?: Record<number, number>;
   /** Build sub-components (recursive build-vs-buy). False = buy all materials at market. Default true. */
   buildComponents?: boolean;
+  /** Subtract sale costs (broker fee + sales tax) from product revenue. */
+  includeSalesCost?: boolean;
+  /** Sales tax fraction applied to revenue (when includeSalesCost). */
+  salesTax?: number;
+  /** Broker fee fraction applied to revenue (when includeSalesCost). */
+  brokerFee?: number;
 }
 
 /** Rank every manufacturable item by build-vs-buy profit at the chosen market. */
