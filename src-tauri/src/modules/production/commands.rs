@@ -169,6 +169,15 @@ pub struct ProfitParams {
     /// is simply bought at market — no intermediate manufacturing. Default true.
     #[serde(default = "default_build_components")]
     pub build_components: bool,
+    /// Subtract sale costs (broker fee + sales tax) from product revenue.
+    #[serde(default)]
+    pub include_sales_cost: bool,
+    /// Sales tax fraction applied to revenue (when `include_sales_cost`).
+    #[serde(default)]
+    pub sales_tax: f64,
+    /// Broker fee fraction applied to revenue (when `include_sales_cost`).
+    #[serde(default)]
+    pub broker_fee: f64,
 }
 
 fn default_build_components() -> bool {
@@ -322,7 +331,6 @@ pub async fn production_profit(
     // Invention probability multiplier from skills (1 + L/40 + 2L/30); all-V ≈ 1.458.
     let skill = params.invention_skill_level.unwrap_or(5).clamp(0, 5) as f64;
     let invention_skill_multiplier = 1.0 + skill / 40.0 + 2.0 * skill / 30.0;
-    let defaults = ProfitConfig::default();
     let config = ProfitConfig {
         system_cost_index: params.system_cost_index,
         facility_tax: params.facility_tax,
@@ -333,7 +341,9 @@ pub async fn production_profit(
         me_bonus: params.me_bonus,
         cost_bonus: params.cost_bonus,
         scc_surcharge: params.scc_surcharge,
-        ..defaults
+        include_sales_cost: params.include_sales_cost,
+        sales_tax: params.sales_tax,
+        broker_fee: params.broker_fee,
     };
 
     let meta = sde.meta_group_names().map_err(|e| e.to_string())?;

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DataAge } from "../../components/DataAge";
+import { FeesFromCharacter } from "../../components/FeesFromCharacter";
 import {
   RegionSelect,
   StationSelect,
@@ -123,6 +124,10 @@ function Workbench() {
   const [rigCostPct, setRigCostPct] = useState(0);
   const [costIndexPct, setCostIndexPct] = useState(5);
   const [facilityTaxPct, setFacilityTaxPct] = useState(0);
+  // Sale costs on the product: broker fee + sales tax, subtracted from revenue.
+  const [includeSaleCost, setIncludeSaleCost] = useState(false);
+  const [sellBrokerPct, setSellBrokerPct] = useState(3);
+  const [sellTaxPct, setSellTaxPct] = useState(4.5);
   const [materialBasis, setMaterialBasis] =
     useState<PriceBasis>("sellPercentile");
   const [productBasis, setProductBasis] =
@@ -255,6 +260,9 @@ function Workbench() {
     rigCostPct,
     costIndexPct,
     facilityTaxPct,
+    includeSaleCost,
+    sellBrokerPct,
+    sellTaxPct,
     materialBasis,
     productBasis,
     productBestHub,
@@ -289,6 +297,9 @@ function Workbench() {
       buildComponents,
       systemCostIndex: costIndexPct / 100,
       facilityTax: facilityTaxPct / 100,
+      includeSalesCost: includeSaleCost,
+      salesTax: sellTaxPct / 100,
+      brokerFee: sellBrokerPct / 100,
       materialBasis,
       productBasis,
       blueprintCostPerRun,
@@ -582,6 +593,53 @@ function Workbench() {
                 />
                 Build sub-components
               </label>
+            </Field>
+            <Field label="Sale costs">
+              <label
+                className="flex items-center gap-1 py-1 text-xs text-zinc-300"
+                title="Subtract broker fee + sales tax from the product sale when computing profit."
+              >
+                <input
+                  type="checkbox"
+                  checked={includeSaleCost}
+                  onChange={(e) => setIncludeSaleCost(e.currentTarget.checked)}
+                />
+                Subtract broker + tax
+              </label>
+              {includeSaleCost && (
+                <div className="mt-1 space-y-1">
+                  <label className="flex items-center gap-1 text-[10px] text-zinc-500">
+                    <input
+                      type="number"
+                      value={sellBrokerPct}
+                      min={0}
+                      onChange={(e) =>
+                        setSellBrokerPct(Number(e.currentTarget.value))
+                      }
+                      className="w-16 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+                    />
+                    broker %
+                  </label>
+                  <label className="flex items-center gap-1 text-[10px] text-zinc-500">
+                    <input
+                      type="number"
+                      value={sellTaxPct}
+                      min={0}
+                      onChange={(e) =>
+                        setSellTaxPct(Number(e.currentTarget.value))
+                      }
+                      className="w-16 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+                    />
+                    tax %
+                  </label>
+                  <FeesFromCharacter
+                    onApply={(b, t) => {
+                      setSellBrokerPct(b);
+                      setSellTaxPct(t);
+                    }}
+                  />
+                </div>
+              )}
             </Field>
           </div>
         )}
