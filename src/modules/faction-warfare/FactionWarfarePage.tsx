@@ -44,6 +44,13 @@ const CONTEST_RING: Record<string, string | undefined> = {
   captured: "#34d399",
 };
 
+/** Contested-state → faint tile background tint (uncontested = default). */
+const CONTEST_BG: Record<string, string | undefined> = {
+  contested: "rgba(251,191,36,0.14)",
+  vulnerable: "rgba(251,113,133,0.16)",
+  captured: "rgba(52,211,153,0.14)",
+};
+
 // Faction-warfare warzone view: pick a warzone, see the control map (systems
 // coloured by who holds them) and a per-system table with contest state and
 // last-hour activity. Public data, no login required.
@@ -171,7 +178,7 @@ function Warzone({ data, zone }: { data: FwMap; zone: string }) {
     const minZ = Math.min(...zs);
     const maxZ = Math.max(...zs);
     const span = Math.max(maxX - minX, maxZ - minZ) || 1;
-    const scale = 1600 / span;
+    const scale = 2800 / span;
     return systems.map((n) => ({
       id: String(n.systemId),
       label: n.name,
@@ -181,6 +188,7 @@ function Warzone({ data, zone }: { data: FwMap; zone: string }) {
       }`,
       accent: FACTION_HEX[n.occupierId] ?? "#a1a1aa",
       ring: CONTEST_RING[n.contested],
+      bg: CONTEST_BG[n.contested],
       x: (n.x - minX) * scale,
       y: (maxZ - n.z) * scale,
     }));
@@ -231,7 +239,7 @@ function Warzone({ data, zone }: { data: FwMap; zone: string }) {
           nodes={graphNodes}
           edges={graphEdges}
           height={480}
-          storageKey={`fw-map-${zone}`}
+          storageKey={`fw-map2-${zone}`}
         />
       </div>
 
