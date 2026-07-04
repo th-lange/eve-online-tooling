@@ -325,7 +325,7 @@ function DmgChips({ types }: { types: Dmg[] }) {
       {types.map((t) => (
         <span
           key={t}
-          className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${DMG_STYLE[t]}`}
+          className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${DMG_STYLE[t]}`}
         >
           {t}
         </span>
@@ -394,7 +394,7 @@ function Section({
 }) {
   return (
     <div className="mt-3">
-      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+      <div className="mb-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
         {title}
       </div>
       {children}
@@ -405,7 +405,7 @@ function Section({
 function DamagePanel({ combat }: { combat: Combat }) {
   if (combat === "none") {
     return (
-      <p className="text-xs text-zinc-400">
+      <p className="text-sm text-zinc-400">
         No NPCs — the site is unguarded. The only threat is other players, so
         bring a cloak / nullified hull and watch the map in low/null.
       </p>
@@ -413,7 +413,7 @@ function DamagePanel({ combat }: { combat: Combat }) {
   }
   if (combat === "sleeper") {
     return (
-      <div className="rounded border border-zinc-800 bg-zinc-900/60 p-2 text-xs">
+      <div className="rounded border border-zinc-800 bg-zinc-900/60 p-2 text-sm">
         <div className="flex items-center gap-2">
           <span className="w-14 text-zinc-500">Deal</span>
           <DmgChips types={SLEEPER.deal} />
@@ -428,7 +428,7 @@ function DamagePanel({ combat }: { combat: Combat }) {
   }
   return (
     <div className="overflow-hidden rounded border border-zinc-800">
-      <table className="w-full text-xs">
+      <table className="w-full text-sm">
         <thead className="bg-zinc-900 text-left text-zinc-500">
           <tr>
             <th className="px-2 py-1 font-medium">Faction</th>
@@ -480,12 +480,12 @@ function SiteDetail({ site, onClose }: { site: Site; onClose: () => void }) {
       >
         <div className="flex items-start justify-between gap-2">
           <div>
-            <h3 className="text-sm font-semibold text-zinc-100">{site.name}</h3>
+            <h3 className="text-base font-semibold text-zinc-100">
+              {site.name}
+            </h3>
             <div className="mt-1 flex items-center gap-2">
               <SecBadges sec={site.sec} />
-              <span
-                className={`flex items-center gap-1 text-[11px] ${d.color}`}
-              >
+              <span className={`flex items-center gap-1 text-xs ${d.color}`}>
                 <d.Icon size={12} /> {site.enemies.split(/[—.]/)[0].trim()}
               </span>
             </div>
@@ -500,14 +500,14 @@ function SiteDetail({ site, onClose }: { site: Site; onClose: () => void }) {
         </div>
 
         {site.escalation === "Yes" && site.escalationNote && (
-          <div className="mt-3 flex items-start gap-1.5 rounded border border-amber-500/25 bg-amber-500/10 p-2 text-xs text-amber-200">
+          <div className="mt-3 flex items-start gap-1.5 rounded border border-amber-500/25 bg-amber-500/10 p-2 text-sm text-amber-200">
             <TrendingUp size={13} className="mt-px shrink-0" />
             <span>{site.escalationNote}</span>
           </div>
         )}
 
         <Section title="Loot">
-          <ul className="list-disc space-y-0.5 pl-4 text-xs text-zinc-300">
+          <ul className="list-disc space-y-0.5 pl-4 text-sm text-zinc-300">
             {site.loot.map((l) => (
               <li key={l}>{l}</li>
             ))}
@@ -522,7 +522,7 @@ function SiteDetail({ site, onClose }: { site: Site; onClose: () => void }) {
 
         {site.tips && site.tips.length > 0 && (
           <Section title="Tips">
-            <ul className="list-disc space-y-0.5 pl-4 text-xs text-zinc-400">
+            <ul className="list-disc space-y-0.5 pl-4 text-sm text-zinc-400">
               {site.tips.map((t) => (
                 <li key={t}>{t}</li>
               ))}
