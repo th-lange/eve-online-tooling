@@ -18,10 +18,16 @@ export function PriceHistoryPopover({
   regionId,
   typeId,
   name,
+  regionName,
+  hub,
 }: {
   regionId: number;
   typeId: number;
   name: string;
+  /** Region the history is for (shown in the header for clarity). */
+  regionName?: string;
+  /** Selected market / hub within the region (shown alongside the region). */
+  hub?: string;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -67,35 +73,48 @@ export function PriceHistoryPopover({
             <div
               role="dialog"
               onClick={(e) => e.stopPropagation()}
-              className="relative z-10 max-h-[85vh] w-[760px] max-w-[calc(100vw-2rem)] overflow-auto rounded-lg border border-zinc-700 bg-zinc-900 p-3 shadow-xl"
+              className="relative z-10 flex max-h-[85vh] w-[760px] max-w-[calc(100vw-2rem)] flex-col rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl"
             >
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-sm font-medium text-zinc-200">
-                  {name} — price history
-                </span>
+              {/* Fixed header so the close button never sits under the content
+                  scrollbar. */}
+              <div className="flex items-start justify-between gap-3 border-b border-zinc-800 p-3">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium text-zinc-200">
+                    {name} — price history
+                  </div>
+                  {(regionName || hub) && (
+                    <div className="mt-0.5 truncate text-xs text-zinc-500">
+                      {regionName}
+                      {regionName && hub ? " · " : ""}
+                      {hub}
+                    </div>
+                  )}
+                </div>
                 <button
                   onClick={() => setOpen(false)}
                   aria-label="Close"
-                  className="text-zinc-500 hover:text-zinc-200"
+                  className="shrink-0 text-zinc-500 hover:text-zinc-200"
                 >
                   <X size={15} />
                 </button>
               </div>
-              {history.isLoading ? (
-                <div className="p-8 text-center text-sm text-zinc-500">
-                  Loading history…
-                </div>
-              ) : history.isError ? (
-                <div className="p-8 text-center text-sm text-rose-400">
-                  {errorMessage(history.error)}
-                </div>
-              ) : (history.data?.length ?? 0) === 0 ? (
-                <div className="p-8 text-center text-sm text-zinc-500">
-                  No market history for this item in the selected region.
-                </div>
-              ) : (
-                <PriceHistoryView series={history.data!} />
-              )}
+              <div className="overflow-auto p-3">
+                {history.isLoading ? (
+                  <div className="p-8 text-center text-sm text-zinc-500">
+                    Loading history…
+                  </div>
+                ) : history.isError ? (
+                  <div className="p-8 text-center text-sm text-rose-400">
+                    {errorMessage(history.error)}
+                  </div>
+                ) : (history.data?.length ?? 0) === 0 ? (
+                  <div className="p-8 text-center text-sm text-zinc-500">
+                    No market history for this item in the selected region.
+                  </div>
+                ) : (
+                  <PriceHistoryView series={history.data!} />
+                )}
+              </div>
             </div>
           </div>,
           document.body,

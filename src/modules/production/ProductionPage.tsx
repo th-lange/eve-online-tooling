@@ -831,6 +831,12 @@ function Workbench() {
             <ProfitTable
               rows={filtered}
               regionId={regionId}
+              regionName={regions.data?.find((r) => r.id === regionId)?.name}
+              hub={
+                stationId != null
+                  ? stations.find((s) => s.id === stationId)?.name
+                  : "Region average"
+              }
               onFavorite={toggleFavorite}
               onBlacklist={blacklistRow}
             />

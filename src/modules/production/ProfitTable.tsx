@@ -136,12 +136,17 @@ const SORT_KEYS = COLUMNS.map((c) => c.key);
 export function ProfitTable({
   rows,
   regionId,
+  regionName,
+  hub,
   onFavorite,
   onBlacklist,
 }: {
   rows: ProfitBreakdown[];
   /** Region the products are priced in — used by the price-history popover. */
   regionId: number;
+  /** Region name + selected market, shown in the price-history header. */
+  regionName?: string;
+  hub?: string;
   onFavorite: (r: ProfitBreakdown) => void;
   onBlacklist: (r: ProfitBreakdown) => void;
 }) {
@@ -273,6 +278,8 @@ export function ProfitTable({
                           regionId={regionId}
                           typeId={r.productTypeId}
                           name={r.productName}
+                          regionName={regionName}
+                          hub={hub}
                         />
                       </div>
                       {subtitle && (
