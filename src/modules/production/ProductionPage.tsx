@@ -111,7 +111,7 @@ function Workbench() {
   const [me, setMe] = useState(0);
   const [useOwnedMe, setUseOwnedMe] = useState(true);
   const [useStock, setUseStock] = useState(false);
-  const [buildComponents, setBuildComponents] = useState(true);
+  const [buildComponents, setBuildComponents] = useState(false);
   const [te, setTe] = useState(0);
   const [timeSkill, setTimeSkill] = useState(5);
   const [structure, setStructure] = useState<StructureKey>("npc");
