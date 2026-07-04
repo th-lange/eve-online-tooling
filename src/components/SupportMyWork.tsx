@@ -17,7 +17,7 @@ function openExternal(url: string) {
 }
 
 /** A labelled value with a copy button (creator code, etc.). */
-function CopyRow({
+export function CopyRow({
   label,
   value,
   note,
@@ -55,7 +55,7 @@ function CopyRow({
 }
 
 /** The buddy invite link: a big "sign up" button plus a copy control. */
-function LinkRow() {
+export function LinkRow() {
   const { copied, copy } = useCopyToClipboard();
   return (
     <div className="mt-2">
@@ -82,44 +82,6 @@ function LinkRow() {
           )}
         </button>
       </div>
-    </div>
-  );
-}
-
-/**
- * Sidebar "Support my work" panel: the creator code + buddy link, always to
- * hand. Can be permanently hidden with the ✕ (persisted).
- */
-export function SupportMyWork() {
-  const [hidden, setHidden] = useState(
-    () => localStorage.getItem(STORAGE_KEYS.supportHidden) === "1",
-  );
-  if (hidden) return null;
-  const hide = () => {
-    localStorage.setItem(STORAGE_KEYS.supportHidden, "1");
-    setHidden(true);
-  };
-  return (
-    <div className="border-t border-zinc-800 px-4 py-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-zinc-400">
-          <Heart size={12} className="text-rose-400" /> Support my work
-        </div>
-        <button
-          onClick={hide}
-          title="Hide this panel"
-          aria-label="Hide Support my work"
-          className="text-zinc-600 hover:text-zinc-300"
-        >
-          <X size={13} />
-        </button>
-      </div>
-      <p className="mt-1.5 text-[11px] leading-snug text-zinc-500">
-        New to EVE? Sign up with my buddy link or use my creator code — it sends
-        a few coins my way at no cost to you. 🙏
-      </p>
-      <CopyRow label="Creator code" value={CREATOR_CODE} note="(pending)" />
-      <LinkRow />
     </div>
   );
 }
@@ -180,9 +142,9 @@ export function SupportModal() {
         <LinkRow />
 
         <p className="mt-4 text-xs leading-relaxed text-zinc-500">
-          These links also live in the <strong>Support my work</strong> panel at
-          the bottom of the sidebar — you can hide that panel any time if you'd
-          rather not see it (and they&apos;re cheap chaps&nbsp;😉).
+          These links also live in the <strong>Support my work</strong> section
+          in the sidebar — you can hide it any time if you'd rather not see it.
+          It&apos;d make me sad, just so you know.
         </p>
 
         <div className="mt-4 flex justify-end">

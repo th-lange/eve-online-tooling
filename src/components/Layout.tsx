@@ -14,7 +14,7 @@ import { modules, MODULE_GROUPS, type ModuleDef } from "../modules/registry";
 import { BridgeStatus } from "./BridgeStatus";
 import { Characters } from "./Characters";
 import { CommandPalette } from "./CommandPalette";
-import { SupportMyWork, SupportModal } from "./SupportMyWork";
+import { SupportModal } from "./SupportMyWork";
 import { STORAGE_KEYS } from "../lib/storageKeys";
 import appIcon from "../assets/app-icon.png";
 
@@ -268,7 +268,6 @@ export function Layout() {
           )}
         </nav>
         <Characters />
-        <SupportMyWork />
         <div className="border-t border-zinc-800 px-4 py-3">
           <BridgeStatus />
         </div>
@@ -451,13 +450,14 @@ function NavRow({
             : undefined
         }
         className={({ isActive }) =>
-          `block flex-1 rounded px-3 py-2 text-sm ${
+          `flex flex-1 items-center gap-2 rounded px-3 py-2 text-sm ${
             isActive
               ? "bg-zinc-800 text-zinc-100"
               : "text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200"
           }`
         }
       >
+        {module.icon && <module.icon size={14} className="shrink-0" />}
         {module.title}
       </NavLink>
       <ColorPicker
