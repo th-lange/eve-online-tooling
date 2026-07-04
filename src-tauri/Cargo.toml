@@ -3,6 +3,7 @@ name = "eve-online-tooling"
 version = "0.28.0"
 description = "EVE Online tooling — production, trading and more"
 authors = ["Thomas Lange"]
+license = "MIT"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

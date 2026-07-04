@@ -44,6 +44,10 @@ jobs:
     needs: setup
     permissions:
       contents: write
+    # Surfaced from a secret so the SignPath steps below can gate on it — they
+    # stay inert until the SignPath secrets/vars are configured (see SIGNING.md).
+    env:
+      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
@@ -86,3 +90,41 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+      # --- Windows code signing via SignPath Foundation (free for OSS) --------
+      # These steps are INERT until the SignPath secrets/vars are set (see
+      # SIGNING.md); until then `env.SIGNPATH_API_TOKEN` is empty and each is
+      # skipped, so the release is published exactly as today. Once configured,
+      # they re-sign the just-built Windows installers and replace the release
+      # assets with the signed versions.
+      - name: Upload unsigned Windows installers (for signing)
+        if: matrix.platform == 'windows-latest' && env.SIGNPATH_API_TOKEN != ''
+        id: unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers-unsigned
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/msi/*.msi
+
+      - name: Submit installers to SignPath
+        if: matrix.platform == 'windows-latest' && env.SIGNPATH_API_TOKEN != ''
+        uses: signpath/github-action-submit-signing-request@v1
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: eve-online-tooling
+          signing-policy-slug: release-signing
+          artifact-configuration-slug: windows-installers
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Replace release assets with signed installers
+        if: matrix.platform == 'windows-latest' && env.SIGNPATH_API_TOKEN != ''
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ github.ref_name }}" \
+            signed/**/*-setup.exe signed/**/*.msi --clobber
