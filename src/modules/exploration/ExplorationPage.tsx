@@ -561,8 +561,48 @@ function SiteDetail({
   );
 }
 
+/** A legend tag that doubles as a hide/show toggle for matching cards. */
+function FilterToggle({
+  active,
+  onClick,
+  className,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={active ? "Show these sites" : "Hide these sites"}
+      className={`flex items-center gap-1.5 rounded px-1 py-0.5 transition ${
+        className ?? ""
+      } ${active ? "line-through opacity-40" : "hover:opacity-80"}`}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function ExplorationPage() {
   const [open, setOpen] = useState<{ site: Site; rect: DOMRect } | null>(null);
+  // Exclusion filters, as tokens: `danger:<level>`, `sec:<Sec>`, `esc`. A card
+  // is hidden if it matches any active token — clicking a legend tag toggles it.
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const toggle = (token: string) =>
+    setHidden((prev) => {
+      const next = new Set(prev);
+      if (next.has(token)) next.delete(token);
+      else next.add(token);
+      return next;
+    });
+  const visible = (s: Site) =>
+    !hidden.has(`danger:${s.danger}`) &&
+    !(hidden.has("esc") && s.escalation === "Yes") &&
+    !s.sec.some((x) => hidden.has(`sec:${x}`));
+  const anyVisible = GROUPS.some((g) => g.sites.some(visible));
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-6">
@@ -577,52 +617,98 @@ export function ExplorationPage() {
         scan.
       </p>
 
-      <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs text-zinc-400">
-        <span className="flex items-center gap-1.5 text-emerald-400">
+      <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs text-zinc-400">
+        <span className="text-[10px] uppercase tracking-wide text-zinc-600">
+          Click a tag to hide
+        </span>
+        <FilterToggle
+          active={hidden.has("danger:safe")}
+          onClick={() => toggle("danger:safe")}
+          className="text-emerald-400"
+        >
           <ShieldCheck size={13} /> Unguarded
-        </span>
-        <span className="flex items-center gap-1.5 text-amber-400">
+        </FilterToggle>
+        <FilterToggle
+          active={hidden.has("danger:moderate")}
+          onClick={() => toggle("danger:moderate")}
+          className="text-amber-400"
+        >
           <Shield size={13} /> Rats / scaling
-        </span>
-        <span className="flex items-center gap-1.5 text-rose-400">
-          <Skull size={13} /> Dangerous (Sleepers / heavy)
-        </span>
-        <span className="flex items-center gap-1.5 text-amber-300">
-          <TrendingUp size={13} /> Escalates to an expedition
-        </span>
+        </FilterToggle>
+        <FilterToggle
+          active={hidden.has("danger:high")}
+          onClick={() => toggle("danger:high")}
+          className="text-rose-400"
+        >
+          <Skull size={13} /> Dangerous
+        </FilterToggle>
+        <FilterToggle
+          active={hidden.has("esc")}
+          onClick={() => toggle("esc")}
+          className="text-amber-300"
+        >
+          <TrendingUp size={13} /> Escalates
+        </FilterToggle>
+        {hidden.size > 0 && (
+          <button
+            onClick={() => setHidden(new Set())}
+            className="rounded border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-300 hover:bg-zinc-800"
+          >
+            Reset
+          </button>
+        )}
         <span className="ml-auto flex gap-1">
           {(["High", "Low", "Null", "WH"] as Sec[]).map((s) => (
-            <span
+            <button
               key={s}
-              className={`rounded px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset ${SEC_STYLE[s]}`}
+              onClick={() => toggle(`sec:${s}`)}
+              title={`Hide ${s} sites`}
+              className={`rounded px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset ${
+                SEC_STYLE[s]
+              } ${
+                hidden.has(`sec:${s}`)
+                  ? "line-through opacity-40"
+                  : "hover:opacity-80"
+              }`}
             >
               {s}
-            </span>
+            </button>
           ))}
         </span>
       </div>
 
-      {GROUPS.map((g) => (
-        <section key={g.title} className="mt-7">
-          <div className="flex items-baseline gap-2">
-            <h2 className="text-lg font-semibold text-zinc-100">{g.title}</h2>
-            <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400">
-              {g.scanned ? "Scan with probes" : "No scanning"}
-            </span>
-          </div>
-          <p className="mt-1 max-w-3xl text-xs text-zinc-500">{g.blurb}</p>
+      {!anyVisible && (
+        <p className="mt-7 text-sm text-zinc-500">
+          Every site is filtered out — clear a tag above (or Reset) to bring
+          them back.
+        </p>
+      )}
 
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
-            {g.sites.map((s) => (
-              <SiteCard
-                key={s.name}
-                site={s}
-                onOpen={(site, rect) => setOpen({ site, rect })}
-              />
-            ))}
-          </div>
-        </section>
-      ))}
+      {GROUPS.map((g) => {
+        const sites = g.sites.filter(visible);
+        if (sites.length === 0) return null;
+        return (
+          <section key={g.title} className="mt-7">
+            <div className="flex items-baseline gap-2">
+              <h2 className="text-lg font-semibold text-zinc-100">{g.title}</h2>
+              <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400">
+                {g.scanned ? "Scan with probes" : "No scanning"}
+              </span>
+            </div>
+            <p className="mt-1 max-w-3xl text-xs text-zinc-500">{g.blurb}</p>
+
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              {sites.map((s) => (
+                <SiteCard
+                  key={s.name}
+                  site={s}
+                  onOpen={(site, rect) => setOpen({ site, rect })}
+                />
+              ))}
+            </div>
+          </section>
+        );
+      })}
 
       <p className="mt-8 max-w-3xl text-xs text-zinc-600">
         Only DED-rated complexes and faction combat sites escalate — relic, data
