@@ -1,4 +1,11 @@
-import { createContext, useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   ChevronDown,
@@ -311,31 +318,72 @@ function ModuleHost({ onHide }: { onHide: (id: string) => void }) {
     );
   }, [activeId]);
 
+  // Place the hide icon a couple of spaces after the active page's <h1> title
+  // (the pages own their titles, so we measure rather than each page wiring it).
+  const activeRef = useRef<HTMLDivElement | null>(null);
+  const [hidePos, setHidePos] = useState<{ left: number; top: number }>({
+    left: 8,
+    top: 8,
+  });
+  useLayoutEffect(() => {
+    const el = activeRef.current;
+    if (!el) return;
+    const measure = () => {
+      const h1 = el.querySelector("h1");
+      if (!h1) return;
+      const wrap = el.getBoundingClientRect();
+      const r = h1.getBoundingClientRect();
+      // Content-relative coords so the icon scrolls with the title.
+      setHidePos({
+        left: r.right - wrap.left + el.scrollLeft + 10,
+        top: r.top - wrap.top + el.scrollTop + r.height / 2,
+      });
+    };
+    measure();
+    const ro =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(measure)
+        : null;
+    ro?.observe(el);
+    window.addEventListener("resize", measure);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [activeId]);
+
   return (
     <>
       {modules
         .filter((m) => visited.has(m.id))
-        .map((m) => (
-          <div
-            key={m.id}
-            className="relative h-full overflow-auto"
-            style={{ display: m.id === activeId ? "block" : "none" }}
-          >
-            {/* Per-module hide control, tucked into the top-right corner. Hiding
-                only removes it from the nav (restore from the Hidden section). */}
-            <button
-              onClick={() => onHide(m.id)}
-              title="Hide this module from the sidebar"
-              aria-label={`Hide ${m.title} from sidebar`}
-              className="absolute right-2 top-2 z-30 rounded p-1 text-zinc-600 opacity-50 transition hover:bg-zinc-800 hover:text-zinc-300 hover:opacity-100"
+        .map((m) => {
+          const active = m.id === activeId;
+          return (
+            <div
+              key={m.id}
+              ref={active ? activeRef : undefined}
+              className="relative h-full overflow-auto"
+              style={{ display: active ? "block" : "none" }}
             >
-              <EyeOff size={16} />
-            </button>
-            <ModuleActiveContext.Provider value={m.id === activeId}>
-              <m.Component />
-            </ModuleActiveContext.Provider>
-          </div>
-        ))}
+              {/* Per-module hide control, placed just after the page title.
+                  Hiding only removes it from the nav (restore from Hidden). */}
+              {active && (
+                <button
+                  onClick={() => onHide(m.id)}
+                  title="Hide this module from the sidebar"
+                  aria-label={`Hide ${m.title} from sidebar`}
+                  className="absolute z-30 -translate-y-1/2 rounded p-1 text-zinc-600 opacity-60 transition hover:bg-zinc-800 hover:text-zinc-300 hover:opacity-100"
+                  style={{ left: hidePos.left, top: hidePos.top }}
+                >
+                  <EyeOff size={16} />
+                </button>
+              )}
+              <ModuleActiveContext.Provider value={active}>
+                <m.Component />
+              </ModuleActiveContext.Provider>
+            </div>
+          );
+        })}
     </>
   );
 }
