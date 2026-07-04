@@ -150,6 +150,8 @@ function Colony({
         </button>
       </div>
 
+      <NextCycle colony={colony} />
+
       {colony.extractors.length > 0 && (
         <Section title="Extractors">
           <div className="flex flex-col gap-1">
@@ -266,6 +268,72 @@ function Storage({ s }: { s: StorageView }) {
       </div>
       <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded bg-zinc-800">
         <div className={tone} style={{ width: `${pct}%`, height: "100%" }} />
+      </div>
+    </div>
+  );
+}
+
+const EPS = 0.0001;
+
+/** Recommend how to re-aim extraction next cycle, straight off the colony
+ *  balance: inputs running net-negative are draining (feed them), and P0s the
+ *  extractors already pull that are net-positive are banking up (ease off). */
+function extractionAdvice(colony: ColonyView) {
+  const extracted = new Set(colony.extractors.map((e) => e.productTypeId));
+  const short = colony.balance
+    .filter((b) => b.net < -EPS)
+    .sort((a, b) => a.net - b.net);
+  const over = colony.balance
+    .filter((b) => b.net > EPS && extracted.has(b.typeId))
+    .sort((a, b) => b.net - a.net);
+  return { short, over };
+}
+
+function NextCycle({ colony }: { colony: ColonyView }) {
+  // Only meaningful once the chain is running (extractors + a balance).
+  if (colony.extractors.length === 0 || colony.balance.length === 0)
+    return null;
+  const { short, over } = extractionAdvice(colony);
+
+  if (short.length === 0 && over.length === 0) {
+    return (
+      <div className="mt-2 rounded border border-zinc-800 bg-zinc-900/40 px-2.5 py-1.5 text-xs text-zinc-500">
+        Next cycle: extraction matches consumption — no change needed.
+      </div>
+    );
+  }
+  return (
+    <div className="mt-2 rounded border border-sky-900/50 bg-sky-950/20 px-2.5 py-2 text-xs">
+      <div className="mb-1 font-medium text-sky-300">Next extraction cycle</div>
+      {short.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-zinc-400">Feed (draining):</span>
+          {short.slice(0, 4).map((r) => (
+            <span
+              key={r.typeId}
+              className="rounded bg-rose-500/15 px-1.5 py-0.5 text-rose-300"
+            >
+              {r.name} <span className="tabular-nums">−{fmt(-r.net)}/h</span>
+            </span>
+          ))}
+        </div>
+      )}
+      {over.length > 0 && (
+        <div className="mt-1 flex flex-wrap items-center gap-1">
+          <span className="text-zinc-400">Ease off (banking):</span>
+          {over.slice(0, 4).map((r) => (
+            <span
+              key={r.typeId}
+              className="rounded bg-sky-500/15 px-1.5 py-0.5 text-sky-300"
+            >
+              {r.name} <span className="tabular-nums">+{fmt(r.net)}/h</span>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="mt-1.5 text-[11px] text-zinc-500">
+        Aim more extractor heads/time at the raw inputs feeding the “feed” list;
+        pull them off the “ease off” list.
       </div>
     </div>
   );
