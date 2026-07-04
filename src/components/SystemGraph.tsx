@@ -15,7 +15,12 @@ import {
   Handle,
   Position,
   useNodesState,
+  useInternalNode,
+  getBezierPath,
+  EdgeLabelRenderer,
   type Edge,
+  type EdgeProps,
+  type InternalNode,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
@@ -221,6 +226,87 @@ function SystemNode({ data }: NodeProps<Node<SystemNodeData>>) {
 
 const nodeTypes = { system: SystemNode };
 
+// --- Floating edges: connect at whichever side of each node faces the other,
+// so links take the shortest path instead of always exiting on the right. ---
+
+/** Point where the line to `target`'s centre crosses `node`'s border. */
+function nodeIntersection(node: InternalNode, target: InternalNode) {
+  const w = (node.measured.width ?? 0) / 2;
+  const h = (node.measured.height ?? 0) / 2;
+  const x2 = node.internals.positionAbsolute.x + w;
+  const y2 = node.internals.positionAbsolute.y + h;
+  const x1 =
+    target.internals.positionAbsolute.x + (target.measured.width ?? 0) / 2;
+  const y1 =
+    target.internals.positionAbsolute.y + (target.measured.height ?? 0) / 2;
+  const xx1 = (x1 - x2) / (2 * w) - (y1 - y2) / (2 * h);
+  const yy1 = (x1 - x2) / (2 * w) + (y1 - y2) / (2 * h);
+  const a = 1 / (Math.abs(xx1) + Math.abs(yy1) || 1);
+  return {
+    x: w * (a * xx1 + a * yy1) + x2,
+    y: h * (-a * xx1 + a * yy1) + y2,
+  };
+}
+
+/** Which side of `node` an intersection point sits on. */
+function edgeSide(node: InternalNode, p: { x: number; y: number }): Position {
+  const nx = node.internals.positionAbsolute.x;
+  const ny = node.internals.positionAbsolute.y;
+  const w = node.measured.width ?? 0;
+  if (Math.round(p.x) <= Math.round(nx) + 1) return Position.Left;
+  if (Math.round(p.x) >= Math.round(nx + w) - 1) return Position.Right;
+  if (Math.round(p.y) <= Math.round(ny) + 1) return Position.Top;
+  return Position.Bottom;
+}
+
+function FloatingEdge({
+  id,
+  source,
+  target,
+  markerEnd,
+  style,
+  label,
+}: EdgeProps) {
+  const s = useInternalNode(source);
+  const t = useInternalNode(target);
+  if (!s || !t) return null;
+  const sp = nodeIntersection(s, t);
+  const tp = nodeIntersection(t, s);
+  const [path, labelX, labelY] = getBezierPath({
+    sourceX: sp.x,
+    sourceY: sp.y,
+    sourcePosition: edgeSide(s, sp),
+    targetX: tp.x,
+    targetY: tp.y,
+    targetPosition: edgeSide(t, tp),
+  });
+  return (
+    <>
+      <path
+        id={id}
+        className="react-flow__edge-path"
+        d={path}
+        markerEnd={markerEnd}
+        style={style}
+      />
+      {label && (
+        <EdgeLabelRenderer>
+          <div
+            className="pointer-events-none absolute rounded bg-zinc-900 px-1 text-[10px] text-zinc-400"
+            style={{
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            }}
+          >
+            {label}
+          </div>
+        </EdgeLabelRenderer>
+      )}
+    </>
+  );
+}
+
+const edgeTypes = { floating: FloatingEdge };
+
 /**
  * Lay out nodes in BFS layers left→right (depth = column, siblings stacked in
  * rows). Deterministic and dependency-free — good enough for chain/trail shapes.
@@ -424,6 +510,7 @@ export function SystemGraph({
           id: `${e.source}-${e.target}-${i}`,
           source: e.source,
           target: e.target,
+          type: "floating",
           label: e.label,
           animated: e.variant === "wormhole" && !e.dashed,
           style: {
@@ -431,8 +518,6 @@ export function SystemGraph({
             strokeWidth: 1.5,
             strokeDasharray: e.dashed ? "5 4" : undefined,
           },
-          labelStyle: { fill: "#a1a1aa", fontSize: 10 },
-          labelBgStyle: { fill: "#18181b" },
         };
       }),
     [edges],
@@ -478,6 +563,7 @@ export function SystemGraph({
       nodes={rfNodes}
       edges={rfEdges}
       nodeTypes={nodeTypes}
+      edgeTypes={edgeTypes}
       onNodesChange={onNodesChange}
       onNodeClick={handleNodeClick}
       onNodeDragStop={persist}
