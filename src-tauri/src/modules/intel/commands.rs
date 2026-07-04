@@ -6,10 +6,13 @@
 //! names. Results are cached briefly on disk so flipping to the panel is instant
 //! and we don't hammer ESI.
 
+use std::collections::{HashMap, HashSet};
+
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
 use crate::esi::{resolve_names, AuthState, EsiClient};
+use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
 // ------------------------------------------------------------------ Incursions
@@ -185,9 +188,181 @@ pub async fn intel_fw_stats(
     Ok(rows)
 }
 
+// ------------------------------------------------------------- FW system map
+
+/// The four militia factions → display name.
+pub fn faction_name(id: i64) -> &'static str {
+    match id {
+        500001 => "Caldari State",
+        500002 => "Minmatar Republic",
+        500003 => "Amarr Empire",
+        500004 => "Gallente Federation",
+        _ => "Unknown",
+    }
+}
+
+/// Raw `/fw/systems/` entry.
+#[derive(Deserialize)]
+struct EsiFwSystem {
+    solar_system_id: i64,
+    owner_faction_id: i64,
+    occupier_faction_id: i64,
+    contested: String,
+    #[serde(default)]
+    victory_points: i64,
+    #[serde(default)]
+    victory_points_threshold: i64,
+}
+
+/// Raw `/universe/system_kills/` entry.
+#[derive(Deserialize)]
+struct EsiKills {
+    system_id: i64,
+    #[serde(default)]
+    ship_kills: i64,
+    #[serde(default)]
+    pod_kills: i64,
+}
+
+/// Raw `/universe/system_jumps/` entry.
+#[derive(Deserialize)]
+struct EsiJumps {
+    system_id: i64,
+    #[serde(default)]
+    ship_jumps: i64,
+}
+
+/// One faction-warfare system for the map + table.
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FwSystemNode {
+    pub system_id: i64,
+    pub name: String,
+    pub region: String,
+    pub warzone: String,
+    pub owner: String,
+    pub occupier: String,
+    pub owner_id: i64,
+    pub occupier_id: i64,
+    /// "uncontested" | "contested" | "vulnerable" | "captured".
+    pub contested: String,
+    /// Capture progress 0..1 (victory points / threshold).
+    pub vp_pct: f64,
+    /// Ship + pod kills in the last hour.
+    pub kills: i64,
+    /// Jumps in the last hour (traffic proxy — ESI has no live player count).
+    pub jumps: i64,
+}
+
+/// The faction-warfare map: systems + the stargate edges between them.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FwMap {
+    pub nodes: Vec<FwSystemNode>,
+    pub edges: Vec<[i64; 2]>,
+}
+
+/// Every faction-warfare system with its owner/occupier, contested state and
+/// capture progress, plus last-hour kills and jumps, and the stargate edges
+/// between the systems (for the warzone map). Public data, cached ~5 min.
+#[tauri::command]
+pub async fn fw_systems(app: AppHandle) -> Result<FwMap, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    if let Some(cached) = storage::cache_get::<FwMap>(&dir, "intel_fw_systems") {
+        return Ok(cached);
+    }
+
+    let esi = EsiClient::new();
+    let systems: Vec<EsiFwSystem> = esi
+        .get_json("/latest/fw/systems/", &[])
+        .await
+        .map_err(|e| e.to_string())?;
+    // Kills / jumps are best-effort — the map still renders without them.
+    let kills: Vec<EsiKills> = esi
+        .get_json("/latest/universe/system_kills/", &[])
+        .await
+        .unwrap_or_default();
+    let jumps: Vec<EsiJumps> = esi
+        .get_json("/latest/universe/system_jumps/", &[])
+        .await
+        .unwrap_or_default();
+    let kill_map: HashMap<i64, i64> = kills
+        .into_iter()
+        .map(|k| (k.system_id, k.ship_kills + k.pod_kills))
+        .collect();
+    let jump_map: HashMap<i64, i64> = jumps
+        .into_iter()
+        .map(|j| (j.system_id, j.ship_jumps))
+        .collect();
+
+    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    let info = sde.solar_system_info().map_err(|e| e.to_string())?;
+
+    let fw_ids: HashSet<i64> = systems.iter().map(|s| s.solar_system_id).collect();
+    let ids_vec: Vec<i64> = fw_ids.iter().copied().collect();
+
+    // Stargate edges within the FW system set (undirected, deduped).
+    let mut edge_set: HashSet<(i64, i64)> = HashSet::new();
+    for (a, b) in sde
+        .stargate_edges_from(&ids_vec)
+        .map_err(|e| e.to_string())?
+    {
+        if fw_ids.contains(&b) {
+            edge_set.insert(if a <= b { (a, b) } else { (b, a) });
+        }
+    }
+    let edges: Vec<[i64; 2]> = edge_set.into_iter().map(|(a, b)| [a, b]).collect();
+
+    let mut nodes: Vec<FwSystemNode> = systems
+        .into_iter()
+        .map(|s| {
+            let (name, region) = info
+                .get(&s.solar_system_id)
+                .map(|(n, _sec, r)| (n.clone(), r.clone()))
+                .unwrap_or_else(|| (format!("#{}", s.solar_system_id), String::new()));
+            let vp_pct = if s.victory_points_threshold > 0 {
+                s.victory_points as f64 / s.victory_points_threshold as f64
+            } else {
+                0.0
+            };
+            FwSystemNode {
+                system_id: s.solar_system_id,
+                name,
+                region,
+                warzone: warzone(s.owner_faction_id).to_string(),
+                owner: faction_name(s.owner_faction_id).to_string(),
+                occupier: faction_name(s.occupier_faction_id).to_string(),
+                owner_id: s.owner_faction_id,
+                occupier_id: s.occupier_faction_id,
+                contested: s.contested,
+                vp_pct,
+                kills: kill_map.get(&s.solar_system_id).copied().unwrap_or(0),
+                jumps: jump_map.get(&s.solar_system_id).copied().unwrap_or(0),
+            }
+        })
+        .collect();
+    // Most-contested first in the table (highest capture progress on top).
+    nodes.sort_by(|a, b| {
+        b.vp_pct
+            .partial_cmp(&a.vp_pct)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let map = FwMap { nodes, edges };
+    let _ = storage::cache_put(&dir, "intel_fw_systems", &map, 300);
+    Ok(map)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::warzone;
+    use super::{faction_name, warzone};
+
+    #[test]
+    fn faction_name_maps_the_four_militias() {
+        assert_eq!(faction_name(500001), "Caldari State");
+        assert_eq!(faction_name(500004), "Gallente Federation");
+        assert_eq!(faction_name(0), "Unknown");
+    }
 
     #[test]
     fn maps_each_militia_to_its_warzone() {

@@ -24,6 +24,8 @@ export interface SystemGraphNode {
   sub?: string;
   /** Highlight as the current / focused system. */
   current?: boolean;
+  /** Override the border/text colour with a hex (e.g. faction control). */
+  accent?: string;
 }
 
 export interface SystemGraphEdge {
@@ -70,14 +72,20 @@ type SystemNodeData = {
   kind: NodeKind;
   sub?: string;
   current?: boolean;
+  accent?: string;
 };
 
 function SystemNode({ data }: NodeProps<Node<SystemNodeData>>) {
   return (
     <div
-      className={`rounded border px-3 py-1.5 text-xs shadow ${kindClass(data.kind)} ${
-        data.current ? "ring-2 ring-emerald-400" : ""
-      }`}
+      className={`rounded border px-3 py-1.5 text-xs shadow ${
+        data.accent ? "bg-zinc-900 text-zinc-100" : kindClass(data.kind)
+      } ${data.current ? "ring-2 ring-emerald-400" : ""}`}
+      style={
+        data.accent
+          ? { borderColor: data.accent, color: data.accent }
+          : undefined
+      }
     >
       {/* Hidden connection points so edges attach cleanly left↔right. */}
       <Handle
@@ -209,7 +217,13 @@ export function SystemGraph({
       id: n.id,
       type: "system",
       position: pos,
-      data: { label: n.label, kind: n.kind, sub: n.sub, current: n.current },
+      data: {
+        label: n.label,
+        kind: n.kind,
+        sub: n.sub,
+        current: n.current,
+        accent: n.accent,
+      },
     }),
     [],
   );

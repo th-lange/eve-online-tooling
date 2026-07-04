@@ -144,6 +144,7 @@ pub fn run() {
             modules::industry::commands::industry_jobs,
             modules::intel::commands::intel_incursions,
             modules::intel::commands::intel_fw_stats,
+            modules::intel::commands::fw_systems,
             modules::notifications::commands::notifications,
             modules::notifications::commands::notification_dismiss,
             modules::notifications::commands::notifications_reset,
