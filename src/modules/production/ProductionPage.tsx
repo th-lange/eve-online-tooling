@@ -835,7 +835,7 @@ function Workbench() {
               hub={
                 stationId != null
                   ? stations.find((s) => s.id === stationId)?.name
-                  : "Region average"
+                  : undefined
               }
               onFavorite={toggleFavorite}
               onBlacklist={blacklistRow}
