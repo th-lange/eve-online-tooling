@@ -179,23 +179,17 @@ describe("Layout sidebar", () => {
     });
   });
 
-  it("hides a module into the Hidden section and persists it", () => {
+  it("hides a module from its page into the Hidden section and persists it", () => {
     renderLayout();
+    // The hide control now lives on the module page (the default active module
+    // is the first one, Production).
     fireEvent.click(
-      within(rowFor(PRODUCTION)).getByRole("button", {
-        name: `Hide ${PRODUCTION}`,
-      }),
+      screen.getByRole("button", { name: `Hide ${PRODUCTION} from sidebar` }),
     );
-    // Left its Industry group row (no more Hide control) for the Hidden section,
-    // where it's restorable instead. It stays reachable (still one link).
-    expect(
-      screen.queryByRole("button", { name: `Hide ${PRODUCTION}` }),
-    ).toBeNull();
     expect(screen.getByText("Hidden (1)")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: `Restore ${PRODUCTION}` }),
     ).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: PRODUCTION })).toHaveLength(1);
     expect(JSON.parse(localStorage.getItem("sidebar.hidden") ?? "[]")).toEqual([
       id(PRODUCTION),
     ]);
@@ -211,10 +205,7 @@ describe("Layout sidebar", () => {
     fireEvent.click(
       screen.getByRole("button", { name: `Restore ${PRODUCTION}` }),
     );
-    // Back in its group (Hide control returns), Hidden section gone.
-    expect(
-      screen.getByRole("button", { name: `Hide ${PRODUCTION}` }),
-    ).toBeInTheDocument();
+    // Hidden section gone; back in its group.
     expect(screen.queryByText("Hidden (1)")).toBeNull();
     expect(JSON.parse(localStorage.getItem("sidebar.hidden") ?? "[]")).toEqual(
       [],
