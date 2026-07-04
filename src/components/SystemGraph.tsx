@@ -40,6 +40,8 @@ export interface SystemGraphNode {
    *  computed BFS layout. Overridden once the user drags a node. */
   x?: number;
   y?: number;
+  /** Grouping key (e.g. region) — enables the "Region" cluster layout. */
+  group?: string;
 }
 
 export interface SystemGraphEdge {
@@ -86,9 +88,10 @@ export function kindFromSecurity(security: number): NodeKind {
  * offered when the nodes carry them); `tree` is the stargate BFS layout; `grid`
  * and `list` are index-based fallbacks. Switchable at runtime.
  */
-export type LayoutMode = "star" | "tree" | "grid" | "list";
+export type LayoutMode = "star" | "region" | "tree" | "grid" | "list";
 const LAYOUT_LABELS: Record<LayoutMode, string> = {
   star: "Star",
+  region: "Region",
   tree: "Tree",
   grid: "Grid",
   list: "List",
@@ -97,6 +100,47 @@ const GRID_COL = 172;
 const GRID_ROW = 66;
 const LIST_ROW = 56;
 
+/**
+ * Cluster nodes by their `group` (e.g. region): each group is a mini-grid of its
+ * systems, and the groups themselves are tiled on a coarse grid. Cell size is
+ * the largest group's, so clusters never overlap. Pure.
+ */
+function groupedLayout(
+  nodes: SystemGraphNode[],
+): Map<string, { x: number; y: number }> {
+  const groups = new Map<string, SystemGraphNode[]>();
+  for (const n of nodes) {
+    const g = n.group ?? "—";
+    const arr = groups.get(g);
+    if (arr) arr.push(n);
+    else groups.set(g, [n]);
+  }
+  const names = [...groups.keys()].sort();
+  const dims = names.map((name) => {
+    const count = groups.get(name)!.length;
+    const cols = Math.max(1, Math.ceil(Math.sqrt(count)));
+    return { cols, rows: Math.ceil(count / cols) };
+  });
+  // Uniform cluster cell (largest group + a one-tile gutter) → no overlap.
+  const cellW = (Math.max(...dims.map((d) => d.cols)) + 1) * GRID_COL;
+  const cellH = (Math.max(...dims.map((d) => d.rows)) + 1) * GRID_ROW;
+  const groupCols = Math.max(1, Math.ceil(Math.sqrt(names.length)));
+
+  const pos = new Map<string, { x: number; y: number }>();
+  names.forEach((name, gi) => {
+    const ox = (gi % groupCols) * cellW;
+    const oy = Math.floor(gi / groupCols) * cellH;
+    const cols = dims[gi].cols;
+    groups.get(name)!.forEach((n, i) => {
+      pos.set(n.id, {
+        x: ox + (i % cols) * GRID_COL,
+        y: oy + Math.floor(i / cols) * GRID_ROW,
+      });
+    });
+  });
+  return pos;
+}
+
 /** Node positions for a given layout mode. `tree` reuses the BFS `layout`. */
 function positionsForMode(
   mode: LayoutMode,
@@ -104,6 +148,7 @@ function positionsForMode(
   tree: Map<string, { x: number; y: number }>,
 ): Map<string, { x: number; y: number }> {
   if (mode === "tree") return tree;
+  if (mode === "region") return groupedLayout(nodes);
   const pos = new Map<string, { x: number; y: number }>();
   if (mode === "star") {
     nodes.forEach((n) =>
@@ -301,17 +346,24 @@ export function SystemGraph({
     () => inputNodes.some((n) => n.x != null && n.y != null),
     [inputNodes],
   );
-  const modes = useMemo<LayoutMode[]>(
-    () =>
-      hasCoords ? ["star", "tree", "grid", "list"] : ["tree", "grid", "list"],
-    [hasCoords],
+  const hasGroups = useMemo(
+    () => inputNodes.some((n) => n.group != null),
+    [inputNodes],
   );
+  const modes = useMemo<LayoutMode[]>(() => {
+    const m: LayoutMode[] = [];
+    if (hasCoords) m.push("star");
+    if (hasGroups) m.push("region");
+    m.push("tree", "grid", "list");
+    return m;
+  }, [hasCoords, hasGroups]);
 
   const [mode, setMode] = useState<LayoutMode>(() => {
     if (storageKey && typeof localStorage !== "undefined") {
       const saved = localStorage.getItem(`sysgraph.mode.${storageKey}`);
       if (
         saved === "star" ||
+        saved === "region" ||
         saved === "tree" ||
         saved === "grid" ||
         saved === "list"
