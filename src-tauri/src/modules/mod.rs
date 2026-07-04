@@ -10,6 +10,7 @@ pub mod daytrading;
 pub mod dpsmeter;
 pub mod fitting;
 pub mod industry;
+pub mod intel;
 pub mod localintel;
 pub mod lpstore;
 pub mod orders;
