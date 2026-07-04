@@ -9,6 +9,7 @@ import { MarketSearchPage } from "./marketsearch/MarketSearchPage";
 import { AssetsPage } from "./assets/AssetsPage";
 import { CharacterPage } from "./character/CharacterPage";
 import { AccountingPage } from "./accounting/AccountingPage";
+import { TransactionsPage } from "./transactions/TransactionsPage";
 import { ContractsPage } from "./contracts/ContractsPage";
 import { LpStorePage } from "./lpstore/LpStorePage";
 import { RoutePage } from "./route/RoutePage";
@@ -124,6 +125,13 @@ export const modules: ModuleDef[] = [
     description: "Wallet history and FIFO realized profit.",
     group: "character",
     Component: AccountingPage,
+  },
+  {
+    id: "transactions",
+    title: "Transactions",
+    description: "Per-fill buy/sell ledger — how each item traded for you.",
+    group: "character",
+    Component: TransactionsPage,
   },
   {
     id: "contracts",

@@ -189,6 +189,100 @@ pub async fn wallet_sync(
     })
 }
 
+// --- Transaction ledger (per-fill buy/sell history) ---
+
+/// One market transaction (a single buy or sell fill) for display.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LedgerRow {
+    pub date: String,
+    pub name: String,
+    pub type_id: i64,
+    pub is_buy: bool,
+    pub quantity: i64,
+    pub unit_price: f64,
+    /// quantity × unit price (ISK moved on this fill).
+    pub total: f64,
+}
+
+/// The transaction ledger: buy/sell fills (newest first) plus running totals.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LedgerView {
+    pub rows: Vec<LedgerRow>,
+    pub total_buy: f64,
+    pub total_sell: f64,
+}
+
+/// Per-fill market transaction history for the active character. Refreshes from
+/// ESI and merges into the same durable store used by `wallet_sync`/`profit_fifo`
+/// (so the ledger stays current even if the Accounting page is never opened),
+/// then resolves item names via the SDE. Rows are newest-first.
+#[tauri::command]
+pub async fn transaction_ledger(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+) -> Result<LedgerView, AppError> {
+    let character_id = first_character(&app)?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let tkey = format!("transactions_{character_id}");
+
+    let new_tx: Vec<Transaction> = authed_get_paged_pub(
+        &auth_state,
+        character_id,
+        &format!("/latest/characters/{character_id}/wallet/transactions/"),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    let transactions = merge_by(
+        storage::load_data(&dir, &tkey).unwrap_or_default(),
+        new_tx,
+        |t: &Transaction| t.transaction_id,
+    );
+    let _ = storage::save_data(&dir, &tkey, &transactions);
+
+    // Resolve item names from the SDE in one batch.
+    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+    let type_ids: Vec<i64> = transactions.iter().map(|t| t.type_id).collect();
+    let names: HashMap<i64, String> = sde
+        .type_names(&type_ids)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .collect();
+
+    let (mut total_buy, mut total_sell) = (0.0, 0.0);
+    let mut rows: Vec<LedgerRow> = transactions
+        .iter()
+        .map(|t| {
+            let total = t.quantity as f64 * t.unit_price;
+            if t.is_buy {
+                total_buy += total;
+            } else {
+                total_sell += total;
+            }
+            LedgerRow {
+                date: t.date.clone(),
+                name: names
+                    .get(&t.type_id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("Type {}", t.type_id)),
+                type_id: t.type_id,
+                is_buy: t.is_buy,
+                quantity: t.quantity,
+                unit_price: t.unit_price,
+                total,
+            }
+        })
+        .collect();
+    rows.sort_by(|a, b| b.date.cmp(&a.date));
+
+    Ok(LedgerView {
+        rows,
+        total_buy,
+        total_sell,
+    })
+}
+
 // --- FIFO profit tracker (#54) ---
 
 #[derive(Serialize, Default)]
