@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Shield, ShieldCheck, Skull, TrendingUp, X } from "lucide-react";
 
@@ -354,12 +354,12 @@ function SiteCard({
   onOpen,
 }: {
   site: Site;
-  onOpen: (site: Site, rect: DOMRect) => void;
+  onOpen: (site: Site) => void;
 }) {
   const d = DANGER[site.danger];
   return (
     <button
-      onClick={(e) => onOpen(site, e.currentTarget.getBoundingClientRect())}
+      onClick={() => onOpen(site)}
       className={`rounded-lg border border-zinc-800 border-l-4 bg-zinc-900/40 p-3.5 text-left transition-colors hover:border-zinc-700 hover:bg-zinc-900/70 ${d.accent}`}
     >
       <div className="flex items-start justify-between gap-2">
@@ -458,51 +458,25 @@ function DamagePanel({ combat }: { combat: Combat }) {
   );
 }
 
-function SiteDetail({
-  site,
-  rect,
-  onClose,
-}: {
-  site: Site;
-  rect: DOMRect;
-  onClose: () => void;
-}) {
-  const [pos, setPos] = useState<{
-    top: number;
-    left: number;
-    maxHeight: number;
-  } | null>(null);
-  const width = Math.min(560, window.innerWidth - 24);
-
-  useLayoutEffect(() => {
-    setPos({
-      top: rect.bottom + 6,
-      left: Math.min(Math.max(12, rect.left), window.innerWidth - width - 12),
-      maxHeight: window.innerHeight - rect.bottom - 24,
-    });
-  }, [rect, width]);
-
+function SiteDetail({ site, onClose }: { site: Site; onClose: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  if (!pos) return null;
   const d = DANGER[site.danger];
 
   return createPortal(
-    <>
-      <div className="fixed inset-0 z-40" onClick={onClose} />
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div className="absolute inset-0 bg-black/50" />
       <div
         role="dialog"
-        className="fixed z-50 overflow-auto rounded-lg border border-zinc-700 bg-zinc-900 p-4 shadow-xl"
-        style={{
-          top: pos.top,
-          left: pos.left,
-          width,
-          maxHeight: pos.maxHeight,
-        }}
+        onClick={(e) => e.stopPropagation()}
+        className="relative z-10 max-h-[85vh] w-[560px] max-w-[calc(100vw-2rem)] overflow-auto rounded-lg border border-zinc-700 bg-zinc-900 p-4 shadow-xl"
       >
         <div className="flex items-start justify-between gap-2">
           <div>
@@ -556,7 +530,7 @@ function SiteDetail({
           </Section>
         )}
       </div>
-    </>,
+    </div>,
     document.body,
   );
 }
@@ -587,7 +561,7 @@ function FilterToggle({
 }
 
 export function ExplorationPage() {
-  const [open, setOpen] = useState<{ site: Site; rect: DOMRect } | null>(null);
+  const [open, setOpen] = useState<Site | null>(null);
   // Exclusion filters, as tokens: `danger:<level>`, `sec:<Sec>`, `esc`. A card
   // is hidden if it matches any active token — clicking a legend tag toggles it.
   const [hidden, setHidden] = useState<Set<string>>(new Set());
@@ -701,11 +675,7 @@ export function ExplorationPage() {
 
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               {sites.map((s) => (
-                <SiteCard
-                  key={s.name}
-                  site={s}
-                  onOpen={(site, rect) => setOpen({ site, rect })}
-                />
+                <SiteCard key={s.name} site={s} onOpen={setOpen} />
               ))}
             </div>
           </section>
@@ -718,13 +688,7 @@ export function ExplorationPage() {
         Sleeper-guarded and there's no local, so treat every site as hostile.
       </p>
 
-      {open && (
-        <SiteDetail
-          site={open.site}
-          rect={open.rect}
-          onClose={() => setOpen(null)}
-        />
-      )}
+      {open && <SiteDetail site={open} onClose={() => setOpen(null)} />}
     </div>
   );
 }
