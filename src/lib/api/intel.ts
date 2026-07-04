@@ -37,3 +37,39 @@ export interface FwRow {
 export function intelFwStats(): Promise<FwRow[]> {
   return invoke<FwRow[]>("intel_fw_stats");
 }
+
+/** One faction-warfare system (control, contest state, activity). */
+export interface FwSystemNode {
+  systemId: number;
+  name: string;
+  region: string;
+  /** "Caldari–Gallente" | "Amarr–Minmatar". */
+  warzone: string;
+  owner: string;
+  occupier: string;
+  ownerId: number;
+  occupierId: number;
+  /** "uncontested" | "contested" | "vulnerable" | "captured". */
+  contested: string;
+  /** Capture progress 0..1 (victory points / threshold). */
+  vpPct: number;
+  /** Ship + pod kills in the last hour. */
+  kills: number;
+  /** Jumps in the last hour — traffic proxy (ESI has no live player count). */
+  jumps: number;
+}
+
+export interface FwMap {
+  nodes: FwSystemNode[];
+  /** Stargate edges `[a, b]` between FW systems. */
+  edges: [number, number][];
+}
+
+/**
+ * Every FW system with owner/occupier, contested state and capture progress,
+ * plus last-hour kills/jumps and the stargate edges between them (warzone map).
+ * Public data, cached ~5 min.
+ */
+export function fwSystems(): Promise<FwMap> {
+  return invoke<FwMap>("fw_systems");
+}
