@@ -601,7 +601,9 @@ export function ExplorationPage() {
   const visible = (s: Site) =>
     !hidden.has(`danger:${s.danger}`) &&
     !(hidden.has("esc") && s.escalation === "Yes") &&
-    !s.sec.some((x) => hidden.has(`sec:${x}`));
+    // Security is multi-valued: only hide when *all* of a card's spaces are
+    // excluded — hiding Low+Null still shows a site that's also in Highsec.
+    !s.sec.every((x) => hidden.has(`sec:${x}`));
   const anyVisible = GROUPS.some((g) => g.sites.some(visible));
 
   return (
