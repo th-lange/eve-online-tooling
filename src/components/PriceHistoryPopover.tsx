@@ -1,15 +1,13 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { LineChart, X } from "lucide-react";
 import { errorMessage, marketHistory } from "../lib/api";
 import { PriceHistoryView } from "./PriceHistory";
 
-const WIDTH = 760;
-
 /**
- * A chart-icon button that opens a popover with an item's price/volume history
- * at `regionId` — the same view as the Market Search history tab.
+ * A chart-icon button that opens a centered modal with an item's price/volume
+ * history at `regionId` — the same view as the Market Search history tab.
  *
  * The history is fetched **lazily on first open** (`enabled: open`) and cached:
  * react-query keys it by region+type with a long stale time, and the market
@@ -26,12 +24,6 @@ export function PriceHistoryPopover({
   name: string;
 }) {
   const [open, setOpen] = useState(false);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const [pos, setPos] = useState<{
-    top: number;
-    left: number;
-    maxHeight: number;
-  } | null>(null);
 
   const history = useQuery({
     queryKey: ["market", "history", regionId, typeId],
@@ -39,21 +31,6 @@ export function PriceHistoryPopover({
     enabled: open,
     staleTime: 30 * 60 * 1000, // history is daily — cache aggressively
   });
-
-  // Anchor the panel under the button, clamped to the viewport.
-  useLayoutEffect(() => {
-    if (!open || !btnRef.current) return;
-    const r = btnRef.current.getBoundingClientRect();
-    const width = Math.min(WIDTH, window.innerWidth - 24);
-    setPos({
-      top: r.bottom + 6,
-      left: Math.min(
-        Math.max(12, r.left - width / 2),
-        window.innerWidth - width - 12,
-      ),
-      maxHeight: window.innerHeight - r.bottom - 24,
-    });
-  }, [open]);
 
   // Close on Escape.
   useEffect(() => {
@@ -63,40 +40,34 @@ export function PriceHistoryPopover({
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
-  const width = Math.min(WIDTH, window.innerWidth - 24);
-
   return (
     <>
       <button
-        ref={btnRef}
         onClick={(e) => {
           e.stopPropagation();
           setOpen((o) => !o);
         }}
         title={`Price history — ${name}`}
         aria-label={`Price history for ${name}`}
-        className={`rounded p-1 ${open ? "text-sky-400" : "text-zinc-400 hover:text-sky-400"}`}
+        className={`rounded p-1 transition ${
+          open
+            ? "bg-sky-400/15 text-sky-300"
+            : "text-sky-400 hover:bg-sky-400/10 hover:text-sky-300"
+        }`}
       >
-        <LineChart size={15} />
+        <LineChart size={16} />
       </button>
       {open &&
-        pos &&
         createPortal(
-          <>
-            <div
-              className="fixed inset-0 z-40"
-              onClick={() => setOpen(false)}
-            />
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            onClick={() => setOpen(false)}
+          >
+            <div className="absolute inset-0 bg-black/60" />
             <div
               role="dialog"
-              className="fixed z-50 overflow-auto rounded-lg border border-zinc-700 bg-zinc-900 p-3 shadow-xl"
-              style={{
-                top: pos.top,
-                left: pos.left,
-                width,
-                maxHeight: pos.maxHeight,
-              }}
               onClick={(e) => e.stopPropagation()}
+              className="relative z-10 max-h-[85vh] w-[760px] max-w-[calc(100vw-2rem)] overflow-auto rounded-lg border border-zinc-700 bg-zinc-900 p-3 shadow-xl"
             >
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-sm font-medium text-zinc-200">
@@ -126,7 +97,7 @@ export function PriceHistoryPopover({
                 <PriceHistoryView series={history.data!} />
               )}
             </div>
-          </>,
+          </div>,
           document.body,
         )}
     </>
