@@ -1,0 +1,62 @@
+name: "💡 Feature request"
+description: Suggest a new feature or an improvement.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea! A good request explains **what you want** and
+        **why** — the problem it solves matters more than the exact solution.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched [existing issues](https://github.com/th-lange/eve-online-tooling/issues?q=is%3Aissue) and this isn't already suggested.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: The workflow or pain point behind the request. What are you trying to do?
+      placeholder: "When ranking builds I have to hand-enter the system cost index every time…"
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to happen?
+      description: Your idea for the feature or change.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the app?
+      options:
+        - Industry (Production / Reprocessing / Industry Jobs / PI)
+        - Trading (Station / Daytrading / Orders / Contracts / LP Store)
+        - Market (Appraisal / Universe / Market Search)
+        - Character (Assets / Skills / Accounting / Transactions / Fitting)
+        - Combat (DPS Meter)
+        - Intel / Space (Route / Local Intel / Incursions / Faction Warfare / Wormholes / Exploration)
+        - Notifications
+        - A new module
+        - General / cross-cutting
+    validations:
+      required: false
+
+  - type: input
+    id: esi
+    attributes:
+      label: ESI data source (if you know it)
+      description: >-
+        If this needs EVE data, which ESI endpoint or scope? Optional — a link
+        to the [ESI reference](https://esi.evetech.net/ui/) helps but isn't
+        required.
+    validations:
+      required: false
