@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { FeesFromCharacter } from "../../components/FeesFromCharacter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   contractsScan,
@@ -115,6 +116,14 @@ function Workbench() {
             className="w-24 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
           />
         </Field>
+        <div className="self-end pb-1">
+          <FeesFromCharacter
+            onApply={(b, t) => {
+              setBrokerPct(String(b));
+              setTaxPct(String(t));
+            }}
+          />
+        </div>
         <span className="text-xs text-zinc-500">
           Values up to 150 item-exchange contracts at Jita sell, net of resale
           fees (BPCs unpriceable).

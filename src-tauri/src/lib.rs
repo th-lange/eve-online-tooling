@@ -176,6 +176,7 @@ pub fn run() {
             modules::lpstore::commands::lp_offers,
             modules::character::commands::character_skills,
             modules::character::commands::character_standings,
+            modules::character::commands::character_trade_fees,
             modules::character::commands::character_research,
             modules::character::commands::character_mining,
             modules::character::commands::character_fleet,

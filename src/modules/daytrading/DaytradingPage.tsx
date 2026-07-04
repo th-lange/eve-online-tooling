@@ -17,6 +17,7 @@ import {
 import { SdeSetup } from "../production/SdeSetup";
 import { formatInt, formatIsk, formatPercent } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
+import { FeesFromCharacter } from "../../components/FeesFromCharacter";
 import {
   SortHeaderCell,
   type SortColumn,
@@ -287,6 +288,14 @@ function Workbench() {
             onChange={setBrokerPct}
           />
           <NumField label="Sales tax %" value={taxPct} onChange={setTaxPct} />
+          <div className="self-end pb-1">
+            <FeesFromCharacter
+              onApply={(b, t) => {
+                setBrokerPct(b);
+                setTaxPct(t);
+              }}
+            />
+          </div>
           <NumField
             label="Shipping ISK/m³"
             value={shippingRate}

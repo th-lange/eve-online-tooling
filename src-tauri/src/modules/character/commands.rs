@@ -197,6 +197,139 @@ pub async fn character_standings(
         .collect())
 }
 
+// --- Trade fees from skills + standings ---
+
+/// Major trade hubs and their NPC station owners: (hub, region, owning faction,
+/// owning corporation). Broker fee at a hub scales with standing toward these.
+const TRADE_HUBS: &[(&str, &str, &str, &str)] = &[
+    ("Jita", "The Forge", "Caldari State", "Caldari Navy"),
+    ("Amarr", "Domain", "Amarr Empire", "Emperor Family"),
+    (
+        "Dodixie",
+        "Sinq Laison",
+        "Gallente Federation",
+        "Federation Navy",
+    ),
+    ("Rens", "Heimatar", "Minmatar Republic", "Brutor Tribe"),
+    (
+        "Hek",
+        "Metropolis",
+        "Minmatar Republic",
+        "Boundless Creation",
+    ),
+];
+
+/// Sales/transaction tax %: 4.5% base, −11% per Accounting level. Pure.
+fn sales_tax_pct(accounting: i64) -> f64 {
+    (4.5 * (1.0 - 0.11 * accounting as f64)).max(0.0)
+}
+
+/// Broker fee %: 3% base, −0.3%/Broker Relations level, −0.03%/point of faction
+/// standing and −0.02%/point of corp standing (effective standings), floored at
+/// 1%. Pure. (#broker)
+fn broker_fee_pct(broker_relations: i64, faction_eff: f64, corp_eff: f64) -> f64 {
+    (3.0 - 0.3 * broker_relations as f64 - 0.03 * faction_eff - 0.02 * corp_eff).max(1.0)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HubFee {
+    pub hub: String,
+    pub region: String,
+    pub broker_fee_pct: f64,
+    /// Effective standing toward the owning faction / corp (post social skills).
+    pub faction_standing: f64,
+    pub corp_standing: f64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TradeFees {
+    pub accounting: i64,
+    pub broker_relations: i64,
+    pub connections: i64,
+    /// Sales tax % (same at every station — skill-only).
+    pub sales_tax_pct: f64,
+    pub hubs: Vec<HubFee>,
+}
+
+/// Broker fee (per major hub) and sales tax computed from the active character's
+/// Accounting / Broker Relations skills and effective standings toward each
+/// hub's owner. Used to pre-fill the fee inputs across the trading/build tools.
+#[tauri::command]
+pub async fn character_trade_fees(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+) -> Result<TradeFees, AppError> {
+    let character_id = first_character(&app)?;
+
+    let skills: EsiSkills = authed_get(
+        &auth_state,
+        character_id,
+        &format!("/latest/characters/{character_id}/skills/"),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    let level = |id: i64| {
+        skills
+            .skills
+            .iter()
+            .find(|s| s.skill_id == id)
+            .map(|s| s.active_skill_level)
+            .unwrap_or(0)
+    };
+    let accounting = level(16622);
+    let broker_relations = level(3446);
+    let connections = level(3359);
+    let diplomacy = level(3357);
+
+    let standings: Vec<EsiStanding> = authed_get(
+        &auth_state,
+        character_id,
+        &format!("/latest/characters/{character_id}/standings/"),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    let ids: Vec<i64> = standings.iter().map(|s| s.from_id).collect();
+    let names = resolve_names(&auth_state, &ids).await;
+    // Resolve owner name → base standing, so hubs can be matched by owner name.
+    let mut by_name: HashMap<String, f64> = HashMap::new();
+    for s in &standings {
+        if let Some(n) = names.get(&s.from_id) {
+            by_name.insert(n.clone(), s.standing);
+        }
+    }
+    // Effective standing = base + (10 − base) × 0.04 × level (Connections for
+    // positive, Diplomacy for negative) — same as the standings view.
+    let eff = |base: f64| {
+        let lvl = if base < 0.0 { diplomacy } else { connections };
+        base + (10.0 - base) * 0.04 * lvl as f64
+    };
+
+    let hubs = TRADE_HUBS
+        .iter()
+        .map(|(hub, region, faction, corp)| {
+            let f_eff = eff(by_name.get(*faction).copied().unwrap_or(0.0));
+            let c_eff = eff(by_name.get(*corp).copied().unwrap_or(0.0));
+            HubFee {
+                hub: hub.to_string(),
+                region: region.to_string(),
+                broker_fee_pct: broker_fee_pct(broker_relations, f_eff, c_eff),
+                faction_standing: f_eff,
+                corp_standing: c_eff,
+            }
+        })
+        .collect();
+
+    Ok(TradeFees {
+        accounting,
+        broker_relations,
+        connections,
+        sales_tax_pct: sales_tax_pct(accounting),
+        hubs,
+    })
+}
+
 // --- Research agents (#57) ---
 
 #[derive(Deserialize)]
@@ -536,7 +669,22 @@ fn parse_epoch(s: &str) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_epoch;
+    use super::{broker_fee_pct, parse_epoch, sales_tax_pct};
+
+    #[test]
+    fn sales_tax_scales_with_accounting() {
+        assert!((sales_tax_pct(0) - 4.5).abs() < 1e-9);
+        assert!((sales_tax_pct(5) - 2.025).abs() < 1e-9);
+    }
+
+    #[test]
+    fn broker_fee_scales_and_floors_at_one() {
+        assert!((broker_fee_pct(0, 0.0, 0.0) - 3.0).abs() < 1e-9);
+        // BR V, +5 faction, +2 corp → 3 − 1.5 − 0.15 − 0.04 = 1.31
+        assert!((broker_fee_pct(5, 5.0, 2.0) - 1.31).abs() < 1e-9);
+        // Maxed standings can't push it below the 1% floor.
+        assert!((broker_fee_pct(5, 10.0, 10.0) - 1.0).abs() < 1e-9);
+    }
 
     #[test]
     fn parses_known_utc_timestamps() {
