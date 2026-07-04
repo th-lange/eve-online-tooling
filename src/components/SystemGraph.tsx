@@ -43,6 +43,9 @@ export interface SystemGraphNode {
   ring?: string;
   /** Tint the tile background with this colour (e.g. contested state). */
   bg?: string;
+  /** Render a solid filled tile in this colour with black text (stands out
+   *  most — e.g. special hub systems). Overrides accent/bg. */
+  fill?: string;
   /** Seed the initial position (e.g. real map coordinates) instead of the
    *  computed BFS layout. Overridden once the user drags a node. */
   x?: number;
@@ -188,22 +191,36 @@ type SystemNodeData = {
   accent?: string;
   ring?: string;
   bg?: string;
+  fill?: string;
 };
 
 function SystemNode({ data }: NodeProps<Node<SystemNodeData>>) {
   const style: CSSProperties = {};
-  if (data.accent) {
-    style.borderColor = data.accent;
-    style.color = data.accent;
+  if (data.fill) {
+    // Solid filled tile with black text — highest contrast.
+    style.backgroundColor = data.fill;
+    style.borderColor = data.fill;
+    style.color = "#000";
+  } else {
+    if (data.accent) {
+      style.borderColor = data.accent;
+      style.color = data.accent;
+    }
+    if (data.ring) style.boxShadow = `0 0 0 2px ${data.ring}`;
+    if (data.bg) style.backgroundColor = data.bg;
   }
-  if (data.ring) style.boxShadow = `0 0 0 2px ${data.ring}`;
-  if (data.bg) style.backgroundColor = data.bg;
   return (
     <div
       className={`rounded border px-3 py-1.5 text-xs shadow ${
-        data.accent ? "bg-zinc-900 text-zinc-100" : kindClass(data.kind)
+        data.fill
+          ? "font-semibold"
+          : data.accent
+            ? "bg-zinc-900 text-zinc-100"
+            : kindClass(data.kind)
       } ${data.current ? "ring-2 ring-emerald-400" : ""}`}
-      style={data.accent || data.ring || data.bg ? style : undefined}
+      style={
+        data.fill || data.accent || data.ring || data.bg ? style : undefined
+      }
     >
       {/* Hidden connection points so edges attach cleanly left↔right. */}
       <Handle
@@ -424,6 +441,7 @@ export function SystemGraph({
         accent: n.accent,
         ring: n.ring,
         bg: n.bg,
+        fill: n.fill,
       },
     }),
     [],

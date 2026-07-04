@@ -651,7 +651,7 @@ function ChainGraph({
         id: String(id),
         label: name,
         kind: wspace ? "wspace" : "unknown",
-        ...(special && { accent: special, sub: "EVE-Scout hub" }),
+        ...(special && { fill: special, sub: "EVE-Scout hub" }),
       });
     }
   };
