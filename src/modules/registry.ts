@@ -20,6 +20,7 @@ import { PIPage } from "./pi/PIPage";
 import { WormholesPage } from "./wormholes/WormholesPage";
 import { ExplorationPage } from "./exploration/ExplorationPage";
 import { IntelPage } from "./intel/IntelPage";
+import { NotificationsPage } from "./notifications/NotificationsPage";
 import { FittingPage } from "./fitting/FittingPage";
 import { ShoppingPage } from "./shopping/ShoppingPage";
 import { DpsPage } from "./dpsmeter/DpsPage";
@@ -118,6 +119,14 @@ export const modules: ModuleDef[] = [
     description: "Skills, standings and R&D research.",
     group: "character",
     Component: CharacterPage,
+  },
+  {
+    id: "notifications",
+    title: "Notifications",
+    description:
+      "In-game notification feed — war decs, structure attacks, wallet events.",
+    group: "character",
+    Component: NotificationsPage,
   },
   {
     id: "accounting",

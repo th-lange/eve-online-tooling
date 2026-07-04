@@ -16,6 +16,7 @@ export * from "./industry";
 export * from "./intel";
 export * from "./orders";
 export * from "./localintel";
+export * from "./notifications";
 export * from "./route";
 export * from "./wormholes";
 export * from "./pi";

@@ -46,6 +46,7 @@ const SCOPES: &[&str] = &[
     "esi-corporations.read_contacts.v1",
     "esi-alliances.read_contacts.v1",
     "esi-characters.read_agents_research.v1",
+    "esi-characters.read_notifications.v1",
     "esi-industry.read_character_mining.v1",
     "esi-industry.read_character_jobs.v1",
     "esi-industry.read_corporation_jobs.v1",
