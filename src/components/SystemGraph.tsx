@@ -5,6 +5,8 @@ import {
   useState,
   type CSSProperties,
 } from "react";
+import { createPortal } from "react-dom";
+import { Maximize2, Minimize2 } from "lucide-react";
 import {
   ReactFlow,
   Background,
@@ -380,6 +382,16 @@ export function SystemGraph({
     [inputNodes, layout],
   );
 
+  // Full-screen toggle (Escape exits).
+  const [maximized, setMaximized] = useState(false);
+  useEffect(() => {
+    if (!maximized) return;
+    const onKey = (e: KeyboardEvent) =>
+      e.key === "Escape" && setMaximized(false);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [maximized]);
+
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState<
     Node<SystemNodeData>
   >([]);
@@ -461,55 +473,74 @@ export function SystemGraph({
     [storageKey, positionsFor, inputNodes, toRfNode, setRfNodes],
   );
 
+  const graph = (
+    <ReactFlow
+      nodes={rfNodes}
+      edges={rfEdges}
+      nodeTypes={nodeTypes}
+      onNodesChange={onNodesChange}
+      onNodeClick={handleNodeClick}
+      onNodeDragStop={persist}
+      fitView
+      proOptions={{ hideAttribution: true }}
+      minZoom={0.2}
+    >
+      <Background color="#27272a" gap={20} />
+      <Controls
+        showInteractive={false}
+        className="!bg-zinc-900 !border-zinc-700"
+      />
+      <Panel position="top-right">
+        <div className="flex items-center gap-1">
+          {modes.map((m) => (
+            <button
+              key={m}
+              onClick={() => applyMode(m)}
+              className={`rounded border px-2 py-0.5 text-[11px] ${
+                mode === m
+                  ? "border-zinc-500 bg-zinc-700 text-zinc-100"
+                  : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
+              }`}
+              title={`${LAYOUT_LABELS[m]} layout`}
+            >
+              {LAYOUT_LABELS[m]}
+            </button>
+          ))}
+          {storageKey && (
+            <button
+              onClick={() => applyMode(mode)}
+              className="rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400 hover:bg-zinc-800"
+              title="Re-run this layout and clear saved positions"
+            >
+              Reset
+            </button>
+          )}
+          <button
+            onClick={() => setMaximized((v) => !v)}
+            className="flex items-center rounded border border-zinc-700 bg-zinc-900 p-1 text-zinc-300 hover:bg-zinc-800"
+            title={maximized ? "Exit full screen (Esc)" : "Maximize"}
+            aria-label={maximized ? "Exit full screen" : "Maximize"}
+          >
+            {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+          </button>
+        </div>
+      </Panel>
+    </ReactFlow>
+  );
+
+  // Full-screen: portal a fixed overlay so it escapes the layout's clipping.
+  if (maximized) {
+    return createPortal(
+      <div className="fixed inset-0 z-50 bg-zinc-950">{graph}</div>,
+      document.body,
+    );
+  }
   return (
     <div
       style={{ height }}
       className="rounded border border-zinc-800 bg-zinc-950/40"
     >
-      <ReactFlow
-        nodes={rfNodes}
-        edges={rfEdges}
-        nodeTypes={nodeTypes}
-        onNodesChange={onNodesChange}
-        onNodeClick={handleNodeClick}
-        onNodeDragStop={persist}
-        fitView
-        proOptions={{ hideAttribution: true }}
-        minZoom={0.2}
-      >
-        <Background color="#27272a" gap={20} />
-        <Controls
-          showInteractive={false}
-          className="!bg-zinc-900 !border-zinc-700"
-        />
-        <Panel position="top-right">
-          <div className="flex items-center gap-1">
-            {modes.map((m) => (
-              <button
-                key={m}
-                onClick={() => applyMode(m)}
-                className={`rounded border px-2 py-0.5 text-[11px] ${
-                  mode === m
-                    ? "border-zinc-500 bg-zinc-700 text-zinc-100"
-                    : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
-                }`}
-                title={`${LAYOUT_LABELS[m]} layout`}
-              >
-                {LAYOUT_LABELS[m]}
-              </button>
-            ))}
-            {storageKey && (
-              <button
-                onClick={() => applyMode(mode)}
-                className="rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400 hover:bg-zinc-800"
-                title="Re-run this layout and clear saved positions"
-              >
-                Reset
-              </button>
-            )}
-          </div>
-        </Panel>
-      </ReactFlow>
+      {graph}
     </div>
   );
 }
