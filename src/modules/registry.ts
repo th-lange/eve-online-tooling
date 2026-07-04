@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import { Heart, type LucideIcon } from "lucide-react";
 import { ProductionPage } from "./production/ProductionPage";
 import { TradingPage } from "./trading/TradingPage";
 import { DaytradingPage } from "./daytrading/DaytradingPage";
@@ -25,10 +26,17 @@ import { NotificationsPage } from "./notifications/NotificationsPage";
 import { FittingPage } from "./fitting/FittingPage";
 import { ShoppingPage } from "./shopping/ShoppingPage";
 import { DpsPage } from "./dpsmeter/DpsPage";
+import { SupportPage } from "./support/SupportPage";
 
 /** Sidebar section a module belongs to (the nav's information architecture). */
 export type ModuleGroup =
-  "industry" | "trading" | "market" | "character" | "combat" | "intel";
+  | "industry"
+  | "trading"
+  | "market"
+  | "character"
+  | "combat"
+  | "intel"
+  | "support";
 
 /** Section labels + display order, driving the grouped sidebar nav (#224). */
 export const MODULE_GROUPS: { key: ModuleGroup; label: string }[] = [
@@ -38,6 +46,7 @@ export const MODULE_GROUPS: { key: ModuleGroup; label: string }[] = [
   { key: "character", label: "Characters" },
   { key: "combat", label: "Combat" },
   { key: "intel", label: "Intel / Space" },
+  { key: "support", label: "Support" },
 ];
 
 // A feature module = a nav entry + the page rendered at `/{id}`. Adding a new
@@ -52,6 +61,8 @@ export interface ModuleDef {
   description: string;
   /** Sidebar section this module is filed under. */
   group: ModuleGroup;
+  /** Optional nav icon (lucide) shown before the title. */
+  icon?: LucideIcon;
   /** Page component rendered for this module. */
   Component: ComponentType;
 }
@@ -243,5 +254,13 @@ export const modules: ModuleDef[] = [
       "Live combat meter from your gamelog — DPS, logi and cap, graphed.",
     group: "combat",
     Component: DpsPage,
+  },
+  {
+    id: "support",
+    title: "Support my work",
+    description: "Creator code and buddy invite link — support the project.",
+    group: "support",
+    icon: Heart,
+    Component: SupportPage,
   },
 ];
