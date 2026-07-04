@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+} from "react";
 import {
   ReactFlow,
   Background,
@@ -73,6 +79,53 @@ export function kindFromSecurity(security: number): NodeKind {
   if (security >= 0.5) return "hisec";
   if (security > 0.0) return "lowsec";
   return "nullsec";
+}
+
+/**
+ * How the nodes are arranged. `star` uses each node's real coordinates (only
+ * offered when the nodes carry them); `tree` is the stargate BFS layout; `grid`
+ * and `list` are index-based fallbacks. Switchable at runtime.
+ */
+export type LayoutMode = "star" | "tree" | "grid" | "list";
+const LAYOUT_LABELS: Record<LayoutMode, string> = {
+  star: "Star",
+  tree: "Tree",
+  grid: "Grid",
+  list: "List",
+};
+const GRID_COL = 172;
+const GRID_ROW = 66;
+const LIST_ROW = 56;
+
+/** Node positions for a given layout mode. `tree` reuses the BFS `layout`. */
+function positionsForMode(
+  mode: LayoutMode,
+  nodes: SystemGraphNode[],
+  tree: Map<string, { x: number; y: number }>,
+): Map<string, { x: number; y: number }> {
+  if (mode === "tree") return tree;
+  const pos = new Map<string, { x: number; y: number }>();
+  if (mode === "star") {
+    nodes.forEach((n) =>
+      pos.set(
+        n.id,
+        n.x != null && n.y != null
+          ? { x: n.x, y: n.y }
+          : (tree.get(n.id) ?? { x: 0, y: 0 }),
+      ),
+    );
+  } else if (mode === "grid") {
+    const cols = Math.max(1, Math.ceil(Math.sqrt(nodes.length)));
+    nodes.forEach((n, i) =>
+      pos.set(n.id, {
+        x: (i % cols) * GRID_COL,
+        y: Math.floor(i / cols) * GRID_ROW,
+      }),
+    );
+  } else {
+    nodes.forEach((n, i) => pos.set(n.id, { x: 0, y: i * LIST_ROW }));
+  }
+  return pos;
 }
 
 type SystemNodeData = {
@@ -243,12 +296,36 @@ export function SystemGraph({
     [],
   );
 
-  // A node's seed position: its explicit coordinates (e.g. a star map) if given,
-  // else the computed BFS layout.
-  const seedPos = useCallback(
-    (n: SystemGraphNode) =>
-      n.x != null && n.y != null ? { x: n.x, y: n.y } : layout.get(n.id),
-    [layout],
+  // Available layouts: `star` only when the nodes carry real coordinates.
+  const hasCoords = useMemo(
+    () => inputNodes.some((n) => n.x != null && n.y != null),
+    [inputNodes],
+  );
+  const modes = useMemo<LayoutMode[]>(
+    () =>
+      hasCoords ? ["star", "tree", "grid", "list"] : ["tree", "grid", "list"],
+    [hasCoords],
+  );
+
+  const [mode, setMode] = useState<LayoutMode>(() => {
+    if (storageKey && typeof localStorage !== "undefined") {
+      const saved = localStorage.getItem(`sysgraph.mode.${storageKey}`);
+      if (
+        saved === "star" ||
+        saved === "tree" ||
+        saved === "grid" ||
+        saved === "list"
+      ) {
+        return saved;
+      }
+    }
+    // Default to the star map when coordinates are available, else the tree.
+    return inputNodes.some((n) => n.x != null && n.y != null) ? "star" : "tree";
+  });
+
+  const positionsFor = useCallback(
+    (m: LayoutMode) => positionsForMode(m, inputNodes, layout),
+    [inputNodes, layout],
   );
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState<
@@ -256,20 +333,23 @@ export function SystemGraph({
   >([]);
 
   // Sync nodes when the inputs change, but keep positions the user has already
-  // dragged (or previously saved) — only new nodes get a fresh computed spot.
+  // dragged (or previously saved) — only new nodes get a spot from the current
+  // layout mode. (Mode switches are handled by `applyMode`, so `mode` is read
+  // via closure and left out of the deps.)
   useEffect(() => {
     const saved = loadPositions(storageKey);
+    const base = positionsFor(mode);
     setRfNodes((cur) => {
       const curPos = new Map(cur.map((n) => [n.id, n.position]));
       return inputNodes.map((n) =>
         toRfNode(
           n,
-          curPos.get(n.id) ?? saved[n.id] ?? seedPos(n) ?? { x: 0, y: 0 },
+          curPos.get(n.id) ?? saved[n.id] ?? base.get(n.id) ?? { x: 0, y: 0 },
         ),
       );
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inputNodes, layout, storageKey]);
+  }, [inputNodes, positionsFor, storageKey]);
 
   const rfEdges: Edge[] = useMemo(
     () =>
@@ -308,30 +388,26 @@ export function SystemGraph({
     });
   }, [storageKey, setRfNodes]);
 
-  const resetLayout = useCallback(() => {
-    const fresh = computeLayout(inputNodes, edges, rootId);
-    setRfNodes(
-      inputNodes.map((n) =>
-        toRfNode(
-          n,
-          // Reset to real coordinates if the node has them, else the BFS layout.
-          (n.x != null && n.y != null
-            ? { x: n.x, y: n.y }
-            : fresh.get(n.id)) ?? {
-            x: 0,
-            y: 0,
-          },
-        ),
-      ),
-    );
-    if (storageKey && typeof localStorage !== "undefined") {
-      try {
-        localStorage.removeItem(`sysgraph.${storageKey}`);
-      } catch {
-        /* ignore */
+  // Switch layout: re-place every node from the chosen mode, drop saved drags,
+  // and remember the choice. Clicking the current mode acts as a reset.
+  const applyMode = useCallback(
+    (m: LayoutMode) => {
+      setMode(m);
+      if (storageKey && typeof localStorage !== "undefined") {
+        try {
+          localStorage.setItem(`sysgraph.mode.${storageKey}`, m);
+          localStorage.removeItem(`sysgraph.${storageKey}`);
+        } catch {
+          /* ignore */
+        }
       }
-    }
-  }, [inputNodes, edges, rootId, storageKey, toRfNode, setRfNodes]);
+      const base = positionsFor(m);
+      setRfNodes(
+        inputNodes.map((n) => toRfNode(n, base.get(n.id) ?? { x: 0, y: 0 })),
+      );
+    },
+    [storageKey, positionsFor, inputNodes, toRfNode, setRfNodes],
+  );
 
   return (
     <div
@@ -354,17 +430,33 @@ export function SystemGraph({
           showInteractive={false}
           className="!bg-zinc-900 !border-zinc-700"
         />
-        {storageKey && (
-          <Panel position="top-right">
-            <button
-              onClick={resetLayout}
-              className="rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
-              title="Re-run the automatic layout and clear saved positions"
-            >
-              Reset layout
-            </button>
-          </Panel>
-        )}
+        <Panel position="top-right">
+          <div className="flex items-center gap-1">
+            {modes.map((m) => (
+              <button
+                key={m}
+                onClick={() => applyMode(m)}
+                className={`rounded border px-2 py-0.5 text-[11px] ${
+                  mode === m
+                    ? "border-zinc-500 bg-zinc-700 text-zinc-100"
+                    : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
+                }`}
+                title={`${LAYOUT_LABELS[m]} layout`}
+              >
+                {LAYOUT_LABELS[m]}
+              </button>
+            ))}
+            {storageKey && (
+              <button
+                onClick={() => applyMode(mode)}
+                className="rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400 hover:bg-zinc-800"
+                title="Re-run this layout and clear saved positions"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        </Panel>
       </ReactFlow>
     </div>
   );
