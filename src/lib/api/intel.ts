@@ -45,6 +45,8 @@ export interface FwSystemNode {
   region: string;
   /** "Caldari–Gallente" | "Amarr–Minmatar". */
   warzone: string;
+  /** Security status (FW space is lowsec, ~0.1–0.4). */
+  security: number;
   owner: string;
   occupier: string;
   ownerId: number;
@@ -57,6 +59,9 @@ export interface FwSystemNode {
   kills: number;
   /** Jumps in the last hour — traffic proxy (ESI has no live player count). */
   jumps: number;
+  /** Galactic map-plane coordinates (seed the star-map layout). */
+  x: number;
+  z: number;
 }
 
 export interface FwMap {

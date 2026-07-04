@@ -1362,6 +1362,26 @@ impl Sde {
         Ok(map)
     }
 
+    /// Galactic map-plane coordinates `(x, z)` for every solar system. EVE's
+    /// star map is the x/z plane (y is height above it), so these plot a
+    /// top-down map. Used to seed the faction-warfare map layout.
+    pub fn solar_system_positions(&self) -> Result<HashMap<i64, (f64, f64)>, SdeError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT solarSystemID, x, z FROM mapSolarSystems")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                (
+                    r.get::<_, Option<f64>>(1)?.unwrap_or(0.0),
+                    r.get::<_, Option<f64>>(2)?.unwrap_or(0.0),
+                ),
+            ))
+        })?;
+        rows.collect::<Result<HashMap<_, _>, _>>()
+            .map_err(Into::into)
+    }
+
     /// Map of solar system id -> name (for mining ledger / fleet).
     pub fn system_names(&self) -> Result<HashMap<i64, String>, SdeError> {
         let mut stmt = self

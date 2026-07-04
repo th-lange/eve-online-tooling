@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, type CSSProperties } from "react";
 import {
   ReactFlow,
   Background,
@@ -26,6 +26,12 @@ export interface SystemGraphNode {
   current?: boolean;
   /** Override the border/text colour with a hex (e.g. faction control). */
   accent?: string;
+  /** Draw an outline ring in this hex (e.g. contested state). */
+  ring?: string;
+  /** Seed the initial position (e.g. real map coordinates) instead of the
+   *  computed BFS layout. Overridden once the user drags a node. */
+  x?: number;
+  y?: number;
 }
 
 export interface SystemGraphEdge {
@@ -73,19 +79,22 @@ type SystemNodeData = {
   sub?: string;
   current?: boolean;
   accent?: string;
+  ring?: string;
 };
 
 function SystemNode({ data }: NodeProps<Node<SystemNodeData>>) {
+  const style: CSSProperties = {};
+  if (data.accent) {
+    style.borderColor = data.accent;
+    style.color = data.accent;
+  }
+  if (data.ring) style.boxShadow = `0 0 0 2px ${data.ring}`;
   return (
     <div
       className={`rounded border px-3 py-1.5 text-xs shadow ${
         data.accent ? "bg-zinc-900 text-zinc-100" : kindClass(data.kind)
       } ${data.current ? "ring-2 ring-emerald-400" : ""}`}
-      style={
-        data.accent
-          ? { borderColor: data.accent, color: data.accent }
-          : undefined
-      }
+      style={data.accent || data.ring ? style : undefined}
     >
       {/* Hidden connection points so edges attach cleanly left↔right. */}
       <Handle
@@ -223,9 +232,18 @@ export function SystemGraph({
         sub: n.sub,
         current: n.current,
         accent: n.accent,
+        ring: n.ring,
       },
     }),
     [],
+  );
+
+  // A node's seed position: its explicit coordinates (e.g. a star map) if given,
+  // else the computed BFS layout.
+  const seedPos = useCallback(
+    (n: SystemGraphNode) =>
+      n.x != null && n.y != null ? { x: n.x, y: n.y } : layout.get(n.id),
+    [layout],
   );
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState<
@@ -241,7 +259,7 @@ export function SystemGraph({
       return inputNodes.map((n) =>
         toRfNode(
           n,
-          curPos.get(n.id) ?? saved[n.id] ?? layout.get(n.id) ?? { x: 0, y: 0 },
+          curPos.get(n.id) ?? saved[n.id] ?? seedPos(n) ?? { x: 0, y: 0 },
         ),
       );
     });
@@ -288,7 +306,18 @@ export function SystemGraph({
   const resetLayout = useCallback(() => {
     const fresh = computeLayout(inputNodes, edges, rootId);
     setRfNodes(
-      inputNodes.map((n) => toRfNode(n, fresh.get(n.id) ?? { x: 0, y: 0 })),
+      inputNodes.map((n) =>
+        toRfNode(
+          n,
+          // Reset to real coordinates if the node has them, else the BFS layout.
+          (n.x != null && n.y != null
+            ? { x: n.x, y: n.y }
+            : fresh.get(n.id)) ?? {
+            x: 0,
+            y: 0,
+          },
+        ),
+      ),
     );
     if (storageKey && typeof localStorage !== "undefined") {
       try {
