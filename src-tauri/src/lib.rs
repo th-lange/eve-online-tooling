@@ -141,6 +141,8 @@ pub fn run() {
             modules::route::commands::route_nearest_wormhole,
             modules::orders::commands::market_orders,
             modules::industry::commands::industry_jobs,
+            modules::intel::commands::intel_incursions,
+            modules::intel::commands::intel_fw_stats,
             modules::pi::commands::pi_overview,
             modules::pi::commands::pi_show_in_game,
             modules::pi::commands::pi_locked_get,

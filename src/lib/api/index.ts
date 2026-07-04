@@ -13,6 +13,7 @@ export * from "./accounting";
 export * from "./contracts";
 export * from "./lpstore";
 export * from "./industry";
+export * from "./intel";
 export * from "./orders";
 export * from "./localintel";
 export * from "./route";

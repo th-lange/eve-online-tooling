@@ -18,6 +18,7 @@ import { IndustryJobsPage } from "./industry/IndustryJobsPage";
 import { PIPage } from "./pi/PIPage";
 import { WormholesPage } from "./wormholes/WormholesPage";
 import { ExplorationPage } from "./exploration/ExplorationPage";
+import { IntelPage } from "./intel/IntelPage";
 import { FittingPage } from "./fitting/FittingPage";
 import { ShoppingPage } from "./shopping/ShoppingPage";
 import { DpsPage } from "./dpsmeter/DpsPage";
@@ -173,6 +174,14 @@ export const modules: ModuleDef[] = [
     description: "Colonies, extractor timers, storage, and input balance.",
     group: "industry",
     Component: PIPage,
+  },
+  {
+    id: "intel",
+    title: "Intel",
+    description:
+      "Live public status: active incursions and faction-warfare control.",
+    group: "intel",
+    Component: IntelPage,
   },
   {
     id: "wormholes",
