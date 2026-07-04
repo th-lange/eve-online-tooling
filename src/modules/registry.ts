@@ -19,7 +19,8 @@ import { IndustryJobsPage } from "./industry/IndustryJobsPage";
 import { PIPage } from "./pi/PIPage";
 import { WormholesPage } from "./wormholes/WormholesPage";
 import { ExplorationPage } from "./exploration/ExplorationPage";
-import { IntelPage } from "./intel/IntelPage";
+import { IncursionsPage } from "./incursions/IncursionsPage";
+import { FactionWarfarePage } from "./faction-warfare/FactionWarfarePage";
 import { NotificationsPage } from "./notifications/NotificationsPage";
 import { FittingPage } from "./fitting/FittingPage";
 import { ShoppingPage } from "./shopping/ShoppingPage";
@@ -193,12 +194,18 @@ export const modules: ModuleDef[] = [
     Component: PIPage,
   },
   {
-    id: "intel",
-    title: "Intel",
-    description:
-      "Live public status: active incursions and faction-warfare control.",
+    id: "incursions",
+    title: "Incursions",
+    description: "Active Sansha incursions — staging, influence and state.",
     group: "intel",
-    Component: IntelPage,
+    Component: IncursionsPage,
+  },
+  {
+    id: "faction-warfare",
+    title: "Faction Warfare",
+    description: "Militia control, systems and kills by warzone.",
+    group: "intel",
+    Component: FactionWarfarePage,
   },
   {
     id: "wormholes",
