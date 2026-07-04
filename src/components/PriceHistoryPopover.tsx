@@ -24,9 +24,10 @@ export function PriceHistoryPopover({
   regionId: number;
   typeId: number;
   name: string;
-  /** Region the history is for (shown in the header for clarity). */
+  /** Region the history is for (ESI history is region-wide). */
   regionName?: string;
-  /** Selected market / hub within the region (shown alongside the region). */
+  /** The pricing market/station, if a specific one is selected (not the history
+   *  basis — that's always regional). */
   hub?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -82,13 +83,14 @@ export function PriceHistoryPopover({
                   <div className="truncate text-sm font-medium text-zinc-200">
                     {name} — price history
                   </div>
-                  {(regionName || hub) && (
-                    <div className="mt-0.5 truncate text-xs text-zinc-500">
-                      {regionName}
-                      {regionName && hub ? " · " : ""}
-                      {hub}
-                    </div>
-                  )}
+                  {/* ESI publishes history per region only, so this is always
+                      regional; `hub` (if any) is just the pricing market. */}
+                  <div className="mt-0.5 truncate text-xs text-zinc-500">
+                    {regionName
+                      ? `${regionName} — regional history`
+                      : "Regional history (ESI)"}
+                    {hub ? ` · priced at ${hub}` : ""}
+                  </div>
                 </div>
                 <button
                   onClick={() => setOpen(false)}
