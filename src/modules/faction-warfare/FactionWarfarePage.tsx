@@ -44,12 +44,72 @@ const CONTEST_RING: Record<string, string | undefined> = {
   captured: "#34d399",
 };
 
-/** Contested-state → faint tile background tint (uncontested = default). */
-const CONTEST_BG: Record<string, string | undefined> = {
-  contested: "rgba(251,191,36,0.14)",
-  vulnerable: "rgba(251,113,133,0.16)",
-  captured: "rgba(52,211,153,0.14)",
+/** Solid tile-background base per contest state (uncontested = plain dark). */
+const BASE_RGB: [number, number, number] = [24, 24, 27]; // zinc-900
+const CONTEST_RGB: Record<string, [number, number, number]> = {
+  contested: [92, 71, 14], // solid amber
+  vulnerable: [96, 30, 48], // solid rose
+  captured: [16, 78, 56], // solid emerald
 };
+/** Colour the background deepens toward as a system's kills rise. */
+const HEAT_RGB: [number, number, number] = [200, 32, 32];
+
+/**
+ * A tile's solid background: the contest-state base, deepened toward red as the
+ * system's kills approach the warzone's busiest. Quiet uncontested systems keep
+ * the default (transparent) background.
+ */
+function tileBg(
+  contested: string,
+  kills: number,
+  maxKills: number,
+): string | undefined {
+  const base = CONTEST_RGB[contested] ?? BASE_RGB;
+  const t = Math.min(1, kills / Math.max(10, maxKills)) * 0.75;
+  if (t <= 0) {
+    return contested === "uncontested" ? undefined : `rgb(${base.join(",")})`;
+  }
+  const mix = base.map((c, i) => Math.round(c + (HEAT_RGB[i] - c) * t));
+  return `rgb(${mix.join(",")})`;
+}
+
+/**
+ * Snap coordinate-placed tiles onto a grid so none overlap: each tile takes its
+ * nearest cell, and collisions spiral out to the closest free one. Keeps the
+ * rough geography while guaranteeing clear spacing. Pure.
+ */
+function spreadNoOverlap(
+  points: { id: string; x: number; y: number }[],
+  cellW: number,
+  cellH: number,
+): Map<string, { x: number; y: number }> {
+  const order = [...points].sort((a, b) => a.y - b.y || a.x - b.x);
+  const taken = new Set<string>();
+  const out = new Map<string, { x: number; y: number }>();
+  const key = (cx: number, cy: number) => `${cx},${cy}`;
+  for (const p of order) {
+    let cx = Math.round(p.x / cellW);
+    let cy = Math.round(p.y / cellH);
+    if (taken.has(key(cx, cy))) {
+      let done = false;
+      for (let r = 1; r < 300 && !done; r++) {
+        for (let dx = -r; dx <= r && !done; dx++) {
+          for (let dy = -r; dy <= r && !done; dy++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue; // ring only
+            if (!taken.has(key(cx + dx, cy + dy))) {
+              cx += dx;
+              cy += dy;
+              done = true;
+            }
+          }
+        }
+      }
+    }
+    taken.add(key(cx, cy));
+    out.set(p.id, { x: cx * cellW, y: cy * cellH });
+  }
+  return out;
+}
 
 // Faction-warfare warzone view: pick a warzone, see the control map (systems
 // coloured by who holds them) and a per-system table with contest state and
@@ -179,19 +239,34 @@ function Warzone({ data, zone }: { data: FwMap; zone: string }) {
     const maxZ = Math.max(...zs);
     const span = Math.max(maxX - minX, maxZ - minZ) || 1;
     const scale = 2800 / span;
-    return systems.map((n) => ({
-      id: String(n.systemId),
-      label: n.name,
-      kind: "lowsec" as const,
-      sub: `${n.security.toFixed(1)}${
-        n.contested !== "uncontested" ? ` · ${n.contested}` : ""
-      }`,
-      accent: FACTION_HEX[n.occupierId] ?? "#a1a1aa",
-      ring: CONTEST_RING[n.contested],
-      bg: CONTEST_BG[n.contested],
-      x: (n.x - minX) * scale,
-      y: (maxZ - n.z) * scale,
-    }));
+    const maxKills = Math.max(1, ...systems.map((s) => s.kills));
+    // Scale by real coords (x → horizontal, z → vertical, north up), then snap
+    // to a grid so no two tiles overlap on first load.
+    const placed = spreadNoOverlap(
+      systems.map((n) => ({
+        id: String(n.systemId),
+        x: (n.x - minX) * scale,
+        y: (maxZ - n.z) * scale,
+      })),
+      168,
+      66,
+    );
+    return systems.map((n) => {
+      const p = placed.get(String(n.systemId)) ?? { x: 0, y: 0 };
+      return {
+        id: String(n.systemId),
+        label: n.name,
+        kind: "lowsec" as const,
+        sub: `${n.security.toFixed(1)}${
+          n.contested !== "uncontested" ? ` · ${n.contested}` : ""
+        }${n.kills > 0 ? ` · ${n.kills} kills` : ""}`,
+        accent: FACTION_HEX[n.occupierId] ?? "#a1a1aa",
+        ring: CONTEST_RING[n.contested],
+        bg: tileBg(n.contested, n.kills, maxKills),
+        x: p.x,
+        y: p.y,
+      };
+    });
   }, [systems]);
   const graphEdges: SystemGraphEdge[] = data.edges
     .filter(([a, b]) => ids.has(a) && ids.has(b))
@@ -231,6 +306,13 @@ function Warzone({ data, zone }: { data: FwMap; zone: string }) {
             {c}
           </span>
         ))}
+        <span className="flex items-center gap-1.5">
+          <span
+            className="h-2.5 w-2.5 rounded-sm"
+            style={{ backgroundColor: "rgb(200,32,32)" }}
+          />
+          more kills
+        </span>
         <span className="text-zinc-600">· star map — drag to arrange</span>
       </div>
 
@@ -239,7 +321,7 @@ function Warzone({ data, zone }: { data: FwMap; zone: string }) {
           nodes={graphNodes}
           edges={graphEdges}
           height={480}
-          storageKey={`fw-map2-${zone}`}
+          storageKey={`fw-map3-${zone}`}
         />
       </div>
 
