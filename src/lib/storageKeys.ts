@@ -27,4 +27,7 @@ export const STORAGE_KEYS = {
   localintelAlertNeutrals: "localintel.alertNeutrals",
   // Production
   importedBlueprints: "production.importedBlueprints",
+  // "Support my work" panel (referral / creator code)
+  supportSeen: "support.firstRunSeen",
+  supportHidden: "support.hidden",
 } as const;
