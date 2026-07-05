@@ -70,6 +70,15 @@ export interface SystemGraphEdge {
 const COL = 190;
 const ROW = 74;
 
+/** Hex colour of a node by kind — used to fill it when selected. */
+const KIND_HEX: Record<NodeKind, string> = {
+  wspace: "#a855f7",
+  hisec: "#34d399",
+  lowsec: "#fbbf24",
+  nullsec: "#fb7185",
+  unknown: "#a1a1aa",
+};
+
 /** Colour of a node's border/text by kind. */
 function kindClass(kind: NodeKind): string {
   switch (kind) {
@@ -194,12 +203,16 @@ type SystemNodeData = {
   fill?: string;
 };
 
-function SystemNode({ data }: NodeProps<Node<SystemNodeData>>) {
+function SystemNode({ data, selected }: NodeProps<Node<SystemNodeData>>) {
   const style: CSSProperties = {};
-  if (data.fill) {
-    // Solid filled tile with black text — highest contrast.
-    style.backgroundColor = data.fill;
-    style.borderColor = data.fill;
+  // The node's own colour (explicit fill/accent, else its security band).
+  const bandColor = data.fill ?? data.accent ?? KIND_HEX[data.kind];
+  // A selected node fills with that band colour (keeping the region's colour,
+  // just solid with contrasting text) — as does an explicitly-filled node.
+  const filled = !!data.fill || (!!selected && !!bandColor);
+  if (filled && bandColor) {
+    style.backgroundColor = bandColor;
+    style.borderColor = bandColor;
     style.color = "#000";
   } else {
     if (data.accent) {
@@ -212,15 +225,13 @@ function SystemNode({ data }: NodeProps<Node<SystemNodeData>>) {
   return (
     <div
       className={`rounded border px-3 py-1.5 text-xs shadow ${
-        data.fill
+        filled
           ? "font-semibold"
           : data.accent
             ? "bg-zinc-900 text-zinc-100"
             : kindClass(data.kind)
       } ${data.current ? "ring-2 ring-emerald-400" : ""}`}
-      style={
-        data.fill || data.accent || data.ring || data.bg ? style : undefined
-      }
+      style={filled || data.accent || data.ring || data.bg ? style : undefined}
     >
       {/* Hidden connection points so edges attach cleanly left↔right. */}
       <Handle

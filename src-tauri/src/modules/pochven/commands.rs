@@ -270,6 +270,164 @@ fn path_ids(pred: &HashMap<i64, i64>, from: i64, to: i64) -> Vec<i64> {
     ids
 }
 
+/// How a `dp[mask][v]` cell was reached, for Steiner-tree reconstruction.
+#[derive(Clone, Copy)]
+enum Back {
+    None,
+    /// Grown one gate from vertex index `u` (same terminal subset).
+    Edge(usize),
+    /// Merge of subset `sub` and `mask ^ sub`, both meeting at `v`.
+    Merge(usize),
+}
+
+/// Minimum **Steiner tree** connecting `terminals` in the unit-weight stargate
+/// graph, via the **Dreyfus–Wagner** dynamic program — the smallest set of gate
+/// links that ties all the terminals together (using extra "through" systems
+/// where that saves jumps). Returns the tree's edges as system-id pairs.
+///
+/// The DP is `dp[S][v]` = min jumps of a tree spanning terminal-subset `S` and
+/// touching vertex `v`; it grows by (a) merging two sub-trees that meet at `v`
+/// and (b) extending along a gate (a Dijkstra relaxation). It's exponential in
+/// the terminal count, so the caller caps that; we also restrict the working
+/// vertex set to the union of shortest paths between terminal pairs, which keeps
+/// the graph small without changing the optimum in practice.
+fn steiner_tree(adj: &HashMap<i64, Vec<i64>>, terminals: &[i64]) -> Vec<(i64, i64)> {
+    let k = terminals.len();
+    if k <= 1 {
+        return Vec::new();
+    }
+    // Per-terminal BFS, then W = union of the terminal-to-terminal shortest paths.
+    let bfss: Vec<Bfs> = terminals.iter().map(|&t| bfs(adj, t)).collect();
+    let mut wset: HashSet<i64> = terminals.iter().copied().collect();
+    for i in 0..k {
+        let (di, pi) = &bfss[i];
+        for (j, &tj) in terminals.iter().enumerate().skip(i + 1) {
+            let _ = j;
+            if di.contains_key(&tj) {
+                wset.extend(path_ids(pi, terminals[i], tj));
+            }
+        }
+    }
+    // Index the working vertices and build the induced adjacency.
+    let verts: Vec<i64> = wset.iter().copied().collect();
+    let idx: HashMap<i64, usize> = verts.iter().enumerate().map(|(i, &v)| (v, i)).collect();
+    let m = verts.len();
+    let mut wadj: Vec<Vec<usize>> = vec![Vec::new(); m];
+    for (vi, &v) in verts.iter().enumerate() {
+        for &n in adj.get(&v).into_iter().flatten() {
+            if let Some(&ni) = idx.get(&n) {
+                wadj[vi].push(ni);
+            }
+        }
+    }
+    let term_idx: Vec<usize> = terminals.iter().map(|&t| idx[&t]).collect();
+
+    const INF: i64 = i64::MAX / 4;
+    let full = (1usize << k) - 1;
+    let mut dp = vec![vec![INF; m]; 1 << k];
+    let mut back = vec![vec![Back::None; m]; 1 << k];
+
+    // Process subsets in increasing size so a mask's sub-parts are already done.
+    let mut masks: Vec<usize> = (1..=full).collect();
+    masks.sort_by_key(|mm| mm.count_ones());
+    for &mask in &masks {
+        if mask.count_ones() == 1 {
+            let t = mask.trailing_zeros() as usize;
+            dp[mask][term_idx[t]] = 0;
+        } else {
+            // Merge step: split `mask` into two non-empty parts meeting at v.
+            // Enumerate sub-masks that contain the lowest set bit (avoids dupes).
+            let low = mask & mask.wrapping_neg();
+            let mut sub = (mask - 1) & mask;
+            while sub > 0 {
+                if sub & low != 0 {
+                    let other = mask ^ sub;
+                    // Indexes four parallel vectors, so a range loop is clearest.
+                    #[allow(clippy::needless_range_loop)]
+                    for v in 0..m {
+                        let c = dp[sub][v].saturating_add(dp[other][v]);
+                        if c < dp[mask][v] {
+                            dp[mask][v] = c;
+                            back[mask][v] = Back::Merge(sub);
+                        }
+                    }
+                }
+                sub = (sub - 1) & mask;
+            }
+        }
+        // Grow step: Dijkstra (unit weights) seeded with the current dp[mask].
+        let mut heap = BinaryHeap::new();
+        for (v, &d) in dp[mask].iter().enumerate() {
+            if d < INF {
+                heap.push(Reverse((d, v)));
+            }
+        }
+        while let Some(Reverse((d, u))) = heap.pop() {
+            if d > dp[mask][u] {
+                continue;
+            }
+            for &w in &wadj[u] {
+                let nd = d + 1;
+                if nd < dp[mask][w] {
+                    dp[mask][w] = nd;
+                    back[mask][w] = Back::Edge(u);
+                    heap.push(Reverse((nd, w)));
+                }
+            }
+        }
+    }
+
+    // Root at the cheapest vertex for the full terminal set, then unwind.
+    let root = (0..m).min_by_key(|&v| dp[full][v]).unwrap_or(0);
+    let mut edges: Vec<(i64, i64)> = Vec::new();
+    let mut stack = vec![(full, root)];
+    while let Some((mask, v)) = stack.pop() {
+        match back[mask][v] {
+            Back::Edge(u) => {
+                edges.push((verts[u], verts[v]));
+                stack.push((mask, u));
+            }
+            Back::Merge(sub) => {
+                stack.push((sub, v));
+                stack.push((mask ^ sub, v));
+            }
+            Back::None => {}
+        }
+    }
+    edges
+}
+
+/// Depth-first visit order of a tree from `root`. At each node, nearer branches
+/// (by `dist` from the origin) are taken first, so the numbering fans outward.
+fn tree_preorder(edges: &[(i64, i64)], root: i64, dist: &HashMap<i64, i64>) -> Vec<i64> {
+    let mut tadj: HashMap<i64, Vec<i64>> = HashMap::new();
+    for &(a, b) in edges {
+        tadj.entry(a).or_default().push(b);
+        tadj.entry(b).or_default().push(a);
+    }
+    for ch in tadj.values_mut() {
+        ch.sort_by_key(|c| (dist.get(c).copied().unwrap_or(i64::MAX), *c));
+    }
+    let mut order = Vec::new();
+    let mut visited = HashSet::new();
+    let mut stack = vec![root];
+    while let Some(u) = stack.pop() {
+        if !visited.insert(u) {
+            continue;
+        }
+        order.push(u);
+        if let Some(ch) = tadj.get(&u) {
+            // Push in reverse so the nearest child is popped (visited) first.
+            for &c in ch.iter().rev() {
+                if !visited.contains(&c) {
+                    stack.push(c);
+                }
+            }
+        }
+    }
+    order
+}
+
 /// One C729 candidate exit near the searcher.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -282,7 +440,7 @@ pub struct EntryCandidate {
     pub kills: i64,
     /// Jumps from the searcher's current system.
     pub jumps: i64,
-    /// Scan order (1-based) along the nearest-neighbour route.
+    /// Scan order (1-based): the depth-first visit order of the Steiner tree.
     pub order: i64,
     /// Pochven system(s) this candidate's C729 leads into.
     pub leads_to: Vec<String>,
@@ -391,27 +549,56 @@ pub async fn pochven_search(
     targets.sort();
     targets.dedup();
 
-    // Scan order = distance from origin, nearest first (shortest-path-first).
-    // No travelling-salesman reordering: that made the numbering wander across
-    // the map (a nearby candidate could be scanned much later, forcing a long
-    // hop). Nearest-first keeps every step short.
-    let order_map: HashMap<i64, i64> = in_range
-        .iter()
-        .enumerate()
-        .map(|(i, &(id, _))| (id, (i + 1) as i64))
-        .collect();
-    let order_ids: Vec<i64> = in_range.iter().map(|&(id, _)| id).collect();
+    // Scan order + map from a minimum **Steiner tree** (Dreyfus–Wagner): the
+    // smallest gate sub-network tying your origin to the candidates, walked
+    // depth-first. The DFS visit order is the scan order — it limits total jumps
+    // far better than numbering by raw distance (which can jump you back and
+    // forth across the map). Terminals are capped so the DP stays tractable.
+    const STEINER_MAX: usize = 10;
+    let mut terminals: Vec<i64> = vec![system_id];
+    for &(id, _) in in_range.iter().take(STEINER_MAX) {
+        if id != system_id {
+            terminals.push(id);
+        }
+    }
+    let tree_edges = steiner_tree(&adj, &terminals);
+    let visit = tree_preorder(&tree_edges, system_id, &dist);
 
-    // Map = the shortest-path tree from the origin to the nearest candidates
-    // (each reached by its own shortest route). A tree can't produce the long
-    // cross-map edges a chained trip did.
+    // Scan order: candidates in DFS visit order first, then any candidates
+    // beyond the Steiner cap, nearest first.
+    let mut order_map: HashMap<i64, i64> = HashMap::new();
+    let mut n_order = 0i64;
+    for &v in &visit {
+        if leads.contains_key(&v) {
+            n_order += 1;
+            order_map.insert(v, n_order);
+        }
+    }
+    for &(id, _) in &in_range {
+        order_map.entry(id).or_insert_with(|| {
+            n_order += 1;
+            n_order
+        });
+    }
+
+    // Map = the Steiner tree, plus a shortest path for any in-range candidate it
+    // didn't cover (those beyond the terminal cap).
     const MAP_CAP: usize = 30;
     let mut node_ids: HashSet<i64> = HashSet::from([system_id]);
     let mut edge_set: HashSet<(i64, i64)> = HashSet::new();
-    for &cid in order_ids.iter().take(MAP_CAP) {
+    let norm = |a: i64, b: i64| if a <= b { (a, b) } else { (b, a) };
+    for &(a, b) in &tree_edges {
+        edge_set.insert(norm(a, b));
+        node_ids.insert(a);
+        node_ids.insert(b);
+    }
+    for &(cid, _) in in_range.iter().take(MAP_CAP) {
+        if node_ids.contains(&cid) {
+            continue;
+        }
         let path = path_ids(&pred, system_id, cid);
         for w in path.windows(2) {
-            edge_set.insert((w[0], w[1]));
+            edge_set.insert(norm(w[0], w[1]));
         }
         node_ids.extend(path);
     }
@@ -448,10 +635,10 @@ pub async fn pochven_search(
         .collect();
     let edges = edge_set.into_iter().map(|(a, b)| [a, b]).collect();
 
-    // Breadcrumb to the first scan target.
-    let route = order_ids
+    // Breadcrumb to the nearest candidate.
+    let route = in_range
         .first()
-        .map(|&first| {
+        .map(|&(first, _)| {
             path_ids(&pred, system_id, first)
                 .iter()
                 .map(|&id| name(id))
@@ -522,6 +709,23 @@ mod tests {
         assert_eq!(s.median, 5.0); // (4+6)/2
         assert_eq!(stat(vec![]).avg, 0.0);
         assert_eq!(stat(vec![3, 1, 2]).median, 2.0);
+    }
+
+    #[test]
+    fn steiner_tree_uses_a_shared_hub() {
+        // Three terminals each one gate from a common hub (4); the minimum
+        // Steiner tree is the 3-spoke star through the hub (cost 3), not the
+        // pairwise shortest paths (which would double up edges).
+        let adj = HashMap::from([(1, vec![4]), (2, vec![4]), (3, vec![4]), (4, vec![1, 2, 3])]);
+        let edges = steiner_tree(&adj, &[1, 2, 3]);
+        assert_eq!(edges.len(), 3);
+        let nodes: HashSet<i64> = edges.iter().flat_map(|&(a, b)| [a, b]).collect();
+        assert!(nodes.contains(&4)); // the shared hub is a Steiner point
+                                     // DFS from terminal 1 visits every tree node, root first.
+        let dist = HashMap::from([(1, 0), (4, 1), (2, 2), (3, 2)]);
+        let order = tree_preorder(&edges, 1, &dist);
+        assert_eq!(order.first(), Some(&1));
+        assert_eq!(order.len(), 4);
     }
 
     #[test]
