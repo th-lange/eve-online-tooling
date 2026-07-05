@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 
-import { SHOPPING_LISTS_KEY } from "../../components/AddToListButton";
+import { SHOPPING_LISTS_KEY } from "../../lib/queryKeys";
 import { useCopyToClipboard } from "../../lib/useCopyToClipboard";
 import { parseItems, parseLine } from "./parse";
 import {

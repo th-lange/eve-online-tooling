@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
-import {
-  computeLayout,
-  kindFromSecurity,
-  type SystemGraphEdge,
-  type SystemGraphNode,
-} from "./SystemGraph";
+import { computeLayout, kindFromSecurity } from "./systemGraphLayout";
+import type { SystemGraphEdge, SystemGraphNode } from "./SystemGraph";
 
 describe("SystemGraph.computeLayout", () => {
   it("lays a connected chain out in BFS columns from the root", () => {

@@ -2,9 +2,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { shoppingAddItem, shoppingLists } from "../lib/api";
-
-/** TanStack key for the shopping lists; shared so adds can invalidate the page. */
-export const SHOPPING_LISTS_KEY = ["shopping", "lists"] as const;
+import { SHOPPING_LISTS_KEY } from "../lib/queryKeys";
 
 /** One item to push onto a list. */
 export interface AddToListItem {

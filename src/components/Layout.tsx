@@ -1,11 +1,11 @@
 import {
-  createContext,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
 } from "react";
+import { ModuleActiveContext } from "./moduleActiveContext";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   ChevronDown,
@@ -291,16 +291,6 @@ export function Layout() {
  * scroll position are all preserved, and its data revalidates in the background.
  * Pages are mounted lazily (only once visited), so nothing fetches up front.
  */
-/**
- * Whether the module reading this context is the one currently on screen.
- * `ModuleHost` keeps every visited page mounted (hidden with `display:none`),
- * so a page with a live subscription (e.g. the DPS meter's tick feed) would
- * otherwise keep re-rendering while invisible. Pages can read this to pause
- * work while backgrounded. Defaults to `true` so a page rendered on its own
- * (tests, or any non-`ModuleHost` mount) always behaves as active.
- */
-export const ModuleActiveContext = createContext(true);
-
 function ModuleHost({ onHide }: { onHide: (id: string) => void }) {
   const location = useLocation();
   const seg = location.pathname.split("/").filter(Boolean)[0];

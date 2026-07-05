@@ -27,10 +27,10 @@ import {
 import { DataAge } from "../../components/DataAge";
 import {
   SystemGraph,
-  kindFromSecurity,
   type SystemGraphEdge,
   type SystemGraphNode,
 } from "../../components/SystemGraph";
+import { kindFromSecurity } from "../../components/systemGraphLayout";
 
 export function RoutePage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
@@ -136,8 +136,14 @@ function Workbench() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto, fromMe, centre, depth]);
 
-  const source: SystemActivity[] =
-    mode === "neighbouring" ? (hood.data?.nodes ?? []) : (activity.data ?? []);
+  // Memoised so the `filtered` memo's dependency stays referentially stable.
+  const source: SystemActivity[] = useMemo(
+    () =>
+      mode === "neighbouring"
+        ? (hood.data?.nodes ?? [])
+        : (activity.data ?? []),
+    [mode, hood.data, activity.data],
+  );
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return source;

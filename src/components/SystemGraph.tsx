@@ -25,6 +25,7 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { computeLayout } from "./systemGraphLayout";
 
 /** Visual class of a system node — drives its colour. */
 export type NodeKind = "wspace" | "hisec" | "lowsec" | "nullsec" | "unknown";
@@ -67,9 +68,6 @@ export interface SystemGraphEdge {
   label?: string;
 }
 
-const COL = 190;
-const ROW = 74;
-
 /** Hex colour of a node by kind — used to fill it when selected. */
 const KIND_HEX: Record<NodeKind, string> = {
   wspace: "#a855f7",
@@ -93,13 +91,6 @@ function kindClass(kind: NodeKind): string {
     default:
       return "border-zinc-700 bg-zinc-900 text-zinc-200";
   }
-}
-
-/** Map a raw SDE security value to a node kind (w-space handled by caller). */
-export function kindFromSecurity(security: number): NodeKind {
-  if (security >= 0.5) return "hisec";
-  if (security > 0.0) return "lowsec";
-  return "nullsec";
 }
 
 /**
@@ -336,55 +327,6 @@ function FloatingEdge({
 }
 
 const edgeTypes = { floating: FloatingEdge };
-
-/**
- * Lay out nodes in BFS layers left→right (depth = column, siblings stacked in
- * rows). Deterministic and dependency-free — good enough for chain/trail shapes.
- * Disconnected components stack below one another. Pure.
- */
-export function computeLayout(
-  nodes: SystemGraphNode[],
-  edges: SystemGraphEdge[],
-  rootId?: string,
-): Map<string, { x: number; y: number }> {
-  const adj = new Map<string, string[]>();
-  nodes.forEach((n) => adj.set(n.id, []));
-  edges.forEach((e) => {
-    if (adj.has(e.source) && adj.has(e.target)) {
-      adj.get(e.source)!.push(e.target);
-      adj.get(e.target)!.push(e.source);
-    }
-  });
-
-  const pos = new Map<string, { x: number; y: number }>();
-  const visited = new Set<string>();
-  const rowAtDepth = new Map<number, number>();
-
-  // Visit the requested root first so it anchors the top-left.
-  const order = nodes.map((n) => n.id);
-  if (rootId && adj.has(rootId)) {
-    order.sort((a, b) => (a === rootId ? -1 : b === rootId ? 1 : 0));
-  }
-
-  for (const start of order) {
-    if (visited.has(start)) continue;
-    const queue: [string, number][] = [[start, 0]];
-    visited.add(start);
-    while (queue.length) {
-      const [id, depth] = queue.shift()!;
-      const row = rowAtDepth.get(depth) ?? 0;
-      rowAtDepth.set(depth, row + 1);
-      pos.set(id, { x: depth * COL, y: row * ROW });
-      for (const nb of adj.get(id) ?? []) {
-        if (!visited.has(nb)) {
-          visited.add(nb);
-          queue.push([nb, depth + 1]);
-        }
-      }
-    }
-  }
-  return pos;
-}
 
 /** Load saved node positions for a graph (keyed by `storageKey`), if any. */
 function loadPositions(key?: string): Record<string, { x: number; y: number }> {

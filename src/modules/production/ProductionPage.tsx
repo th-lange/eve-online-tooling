@@ -39,9 +39,8 @@ import {
   StaleBar,
   Tabs,
   ViewTabs,
-  toggle,
-  uniqueSorted,
 } from "./components";
+import { toggle, uniqueSorted } from "./helpers";
 
 export type ResultsView =
   "opportunities" | "favorites" | "blacklist" | "library";
