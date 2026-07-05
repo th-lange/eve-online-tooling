@@ -39,6 +39,8 @@ export interface EntryCandidate {
   region: string;
   /** Jumps from the searcher's current system. */
   jumps: number;
+  /** Scan order (1-based) along the nearest-neighbour route. */
+  order: number;
   /** Pochven system(s) this candidate's C729 leads into. */
   leadsTo: string[];
 }
@@ -51,6 +53,8 @@ export interface PochvenMapNode {
   candidate: boolean;
   origin: boolean;
   jumps: number;
+  /** Scan order (1-based) for candidates; 0 for travel/origin. */
+  order: number;
   leadsTo: string[];
 }
 export interface PochvenMap {
