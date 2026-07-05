@@ -208,9 +208,6 @@ export function Layout() {
               <div className="truncate text-sm font-semibold tracking-wide text-zinc-100">
                 EVE Online Tooling
               </div>
-              <div className="truncate text-xs text-zinc-500">
-                production &amp; trading
-              </div>
             </div>
           </div>
           <button
