@@ -17,6 +17,13 @@ export interface PilotRate {
 }
 
 /** One live sample: per-second rates over the averaging window. */
+/** Counts of high-quality hits within the window. */
+export interface HitQuality {
+  penetrates: number;
+  smashes: number;
+  wrecks: number;
+}
+
 export interface DpsTick {
   dpsOut: number;
   dpsIn: number;
@@ -28,6 +35,10 @@ export interface DpsTick {
   capWarfareIn: number;
   /** Mined volume per second (m³/s). */
   miningM3: number;
+  /** High-quality outgoing hits within the window. */
+  hitsOut: HitQuality;
+  /** High-quality incoming hits within the window. */
+  hitsIn: HitQuality;
   /** Top weapons by outgoing DPS. */
   byWeapon: WeaponRate[];
   /** Top counterparties by engaged DPS. */

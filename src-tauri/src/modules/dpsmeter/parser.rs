@@ -56,6 +56,9 @@ pub struct DpsEvent {
     pub pilot: Option<String>,
     pub ship: Option<String>,
     pub weapon: Option<String>,
+    /// Hit quality on damage lines ("Grazes" … "Penetrates", "Smashes",
+    /// "Wrecks"); `None` for non-damage events.
+    pub quality: Option<String>,
     /// Mined ore type name (mining lines only) — used to resolve its volume.
     pub ore: Option<String>,
     /// Mined volume in m³ (mining only; filled by the tail loop from the SDE).
@@ -76,9 +79,9 @@ pub fn parse_line(line: &str) -> Option<DpsEvent> {
     let amount = first_bold_int(line)?.unsigned_abs() as i64;
     // Pilot/ship/weapon are only meaningful (and only present) on damage lines;
     // they drive the breakdown tables.
-    let (pilot, ship, weapon) = match kind {
+    let (pilot, ship, weapon, quality) = match kind {
         EventKind::DamageOut | EventKind::DamageIn => extract_actor(line),
-        _ => (None, None, None),
+        _ => (None, None, None, None),
     };
     Some(DpsEvent {
         ts,
@@ -87,6 +90,7 @@ pub fn parse_line(line: &str) -> Option<DpsEvent> {
         pilot,
         ship,
         weapon,
+        quality,
         ore: None,
         volume: 0.0,
     })
@@ -107,6 +111,7 @@ fn parse_mining(line: &str) -> Option<DpsEvent> {
         pilot: None,
         ship: None,
         weapon: None,
+        quality: None,
         ore,
         volume: 0.0,
     })
@@ -152,10 +157,18 @@ fn first_inner_text(s: &str) -> Option<String> {
 /// followed by ` - WEAPON - quality`. (The first `<b>…</b>` is the damage
 /// number.) NPCs may omit the `[CORP]`/`(SHIP)` parts, so every field is
 /// optional.
-fn extract_actor(line: &str) -> (Option<String>, Option<String>, Option<String>) {
+fn extract_actor(
+    line: &str,
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
     let mut pilot = None;
     let mut ship = None;
     let mut weapon = None;
+    let mut quality = None;
     if let Some(bpos) = line.rfind("<b>") {
         let after = &line[bpos + 3..];
         let (block, tail) = after.split_once("</b>").unwrap_or((after, ""));
@@ -176,14 +189,19 @@ fn extract_actor(line: &str) -> (Option<String>, Option<String>, Option<String>)
         // Weapon: the first ` - `-separated field after the name block (the tail
         // looks like ` - WEAPON - quality`; drop the leading separator first).
         let tail_txt = strip_tags(tail);
-        weapon = tail_txt
+        let fields: Vec<&str> = tail_txt
             .trim_start_matches(['-', ' '])
             .split(" - ")
             .map(str::trim)
-            .find(|s| !s.is_empty())
-            .map(str::to_string);
+            .filter(|s| !s.is_empty())
+            .collect();
+        weapon = fields.first().map(|s| s.to_string());
+        // The hit quality is the last field ("… - WEAPON - Smashes"; a bare
+        // "… - Hits" has quality only, which first() also picked up as weapon —
+        // long-standing behaviour the breakdown table tolerates).
+        quality = fields.last().map(|s| s.to_string());
     }
-    (pilot, ship, weapon)
+    (pilot, ship, weapon, quality)
 }
 
 /// Strip `<…>` markup from a fragment, returning the trimmed plain text.
@@ -331,6 +349,13 @@ mod tests {
         assert_eq!(e.kind, EventKind::DamageOut);
         assert_eq!(e.amount, 342);
         assert_eq!(e.ts, ts());
+        assert_eq!(e.quality.as_deref(), Some("Hits"));
+
+        let smash = out.replace(" - Hits", " - Smashes");
+        assert_eq!(
+            parse_line(&smash).unwrap().quality.as_deref(),
+            Some("Smashes")
+        );
 
         let inc = "[ 2026.06.25 12:00:00 ] (combat) <color=0xff..><b>88</b> <color=0x77ffffff><font size=10>from</font> <b><color=0xff..>Bad Guy[Y](Frigate)</b> - Hits";
         let e = parse_line(inc).unwrap();
