@@ -688,10 +688,10 @@ function PochvenSystemsPopover() {
   }, [open]);
 
   // Real Pochven gate links from the SDE, laid out as a triangle whose corners
-  // are the three clade home systems (Kino / Archee / Niarja). Each other system
-  // is placed by its gate-distance to the three homes (inverse-distance blend),
-  // so clade-mates cluster toward their home and border systems sit between two
-  // corners. Falls back to a schematic triangle while the SDE data loads.
+  // are the three clade home systems (Kino / Archee / Niarja). Every other
+  // system is aligned on the straight line between the two homes it is gate-
+  // nearest to, evenly spaced along that line. Falls back to a schematic
+  // triangle while the SDE data loads.
   const topo = useQuery({
     queryKey: ["pochven", "map"],
     queryFn: pochvenMap,
@@ -738,30 +738,50 @@ function PochvenSystemsPopover() {
         }
         return dist;
       };
-      const dists = homes.map((h) => bfs(idOf.get(h) ?? -1));
-      const place = (id: number, name: string, fan: number) => {
-        if (CORNERS[name]) return { x: CORNERS[name][0], y: CORNERS[name][1] };
-        let wx = 0;
-        let wy = 0;
-        let ws = 0;
-        homes.forEach((h, i) => {
-          const d = dists[i].get(id);
-          const w = d == null ? 0 : 1 / (d + 1);
-          wx += w * CORNERS[h][0];
-          wy += w * CORNERS[h][1];
-          ws += w;
+      const distByHome: Record<string, Map<number, number>> = {};
+      homes.forEach((h) => {
+        distByHome[h] = bfs(idOf.get(h) ?? -1);
+      });
+      const distTo = (h: string, id: number) => distByHome[h].get(id) ?? 999;
+
+      // Put every non-home system on the straight line between the two homes it
+      // is gate-nearest to (its two clade neighbours), then spread the systems
+      // on each line evenly so nothing overlaps. Homes sit at the corners.
+      const onEdge = new Map<string, number[]>(); // "A|B" -> systemIds, unsorted
+      for (const s of sys) {
+        if (CORNERS[s.name]) continue;
+        const near = [...homes].sort(
+          (a, b) => distTo(a, s.systemId) - distTo(b, s.systemId),
+        );
+        const key = [near[0], near[1]].sort().join("|");
+        const arr = onEdge.get(key);
+        if (arr) arr.push(s.systemId);
+        else onEdge.set(key, [s.systemId]);
+      }
+      const posOf = new Map<number, { x: number; y: number }>();
+      for (const [key, ids] of onEdge) {
+        const [a, b] = key.split("|");
+        const pa = CORNERS[a];
+        const pb = CORNERS[b];
+        // Order along the line by distance ratio to the two endpoints…
+        ids.sort(
+          (i, j) =>
+            distTo(a, i) / (distTo(a, i) + distTo(b, i)) -
+            distTo(a, j) / (distTo(a, j) + distTo(b, j)),
+        );
+        // …then place at even fractions so spacing equals the line / (n+1).
+        ids.forEach((id, i) => {
+          const f = (i + 1) / (ids.length + 1);
+          posOf.set(id, {
+            x: pa[0] + (pb[0] - pa[0]) * f,
+            y: pa[1] + (pb[1] - pa[1]) * f,
+          });
         });
-        if (ws === 0) return { x: W / 2, y: H / 2 };
-        // Golden-angle fan so systems that land on the same spot don't overlap.
-        const ang = fan * 2.399963;
-        return {
-          x: wx / ws + Math.cos(ang) * 52,
-          y: wy / ws + Math.sin(ang) * 52,
-        };
-      };
-      let fan = 0;
+      }
       const nodes: SystemGraphNode[] = sys.map((s) => {
-        const p = place(s.systemId, s.name, CORNERS[s.name] ? 0 : fan++);
+        const p = CORNERS[s.name]
+          ? { x: CORNERS[s.name][0], y: CORNERS[s.name][1] }
+          : (posOf.get(s.systemId) ?? { x: W / 2, y: H / 2 });
         return {
           id: String(s.systemId),
           label: s.name,
@@ -823,8 +843,9 @@ function PochvenSystemsPopover() {
                   </div>
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500">
                     <span>
-                      triangle on the clade homes (Kino / Archee / Niarja) ·
-                      real gate links · drag to move, Reset restores
+                      homes (Kino / Archee / Niarja) at the corners · others
+                      aligned on the edges between them · drag to move, Reset
+                      restores
                     </span>
                     {/* Role — the tile fill. */}
                     <span className="text-zinc-600">fill = role:</span>
