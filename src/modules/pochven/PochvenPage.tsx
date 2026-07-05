@@ -395,7 +395,18 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
           storageKey={`pochven-map-${originId}`}
           defaultMode="tree"
           onNodeClick={(id) => toggleVisited(Number(id))}
-          onSelectionChange={(ids) => setSelected(ids.map(Number))}
+          onSelectionChange={(ids) =>
+            setSelected((prev) => {
+              // Bail (keep the same reference) when the selection is unchanged —
+              // React Flow re-fires this on every internal node update, and a
+              // fresh array each time would loop render → rebuild → re-fire.
+              const next = ids.map(Number);
+              return prev.length === next.length &&
+                prev.every((v, i) => v === next[i])
+                ? prev
+                : next;
+            })
+          }
         />
       </div>
 
