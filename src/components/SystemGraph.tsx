@@ -6,7 +6,7 @@ import {
   type CSSProperties,
 } from "react";
 import { createPortal } from "react-dom";
-import { Crosshair, Maximize2, Minimize2 } from "lucide-react";
+import { Crosshair, Maximize2, Minimize2, Skull, Swords } from "lucide-react";
 import {
   ReactFlow,
   Background,
@@ -36,6 +36,8 @@ export interface SystemGraphNode {
   kind: NodeKind;
   /** Secondary line (e.g. sec status, region, or a signature code). */
   sub?: string;
+  /** Last-hour kill activity, rendered as an icon row with heat colours. */
+  stats?: { kills: number; podKills: number };
   /** Highlight as the current / focused system. */
   current?: boolean;
   /** Override the border/text colour with a hex (e.g. faction control). */
@@ -187,12 +189,20 @@ type SystemNodeData = {
   label: string;
   kind: NodeKind;
   sub?: string;
+  stats?: { kills: number; podKills: number };
   current?: boolean;
   accent?: string;
   ring?: string;
   bg?: string;
   fill?: string;
 };
+
+/** Heat colour for a kill count: dim when quiet, amber when warm, rose when hot. */
+function killHeat(n: number, hotAt: number): string {
+  if (n <= 0) return "text-zinc-600";
+  if (n < hotAt) return "text-amber-400";
+  return "text-rose-400 font-semibold";
+}
 
 function SystemNode({ data, selected }: NodeProps<Node<SystemNodeData>>) {
   const style: CSSProperties = {};
@@ -245,6 +255,26 @@ function SystemNode({ data, selected }: NodeProps<Node<SystemNodeData>>) {
       </div>
       {data.sub && (
         <div className="text-[10px] opacity-70 leading-tight">{data.sub}</div>
+      )}
+      {data.stats && (
+        <div className="mt-0.5 flex items-center gap-2 text-[10px] leading-tight tabular-nums">
+          {/* Ship kills (last hour): grey = quiet, amber = warm, rose = hot. */}
+          <span
+            title="Ship kills (last hour)"
+            className={`flex items-center gap-0.5 ${killHeat(data.stats.kills, 10)}`}
+          >
+            <Swords size={9} className="shrink-0" />
+            {data.stats.kills}
+          </span>
+          {/* Pod kills — rarer and nastier, so they run hot sooner. */}
+          <span
+            title="Pod kills (last hour)"
+            className={`flex items-center gap-0.5 ${killHeat(data.stats.podKills, 3)}`}
+          >
+            <Skull size={9} className="shrink-0" />
+            {data.stats.podKills}
+          </span>
+        </div>
       )}
       <Handle
         type="source"
@@ -408,6 +438,7 @@ export function SystemGraph({
         label: n.label,
         kind: n.kind,
         sub: n.sub,
+        stats: n.stats,
         current: n.current,
         accent: n.accent,
         ring: n.ring,

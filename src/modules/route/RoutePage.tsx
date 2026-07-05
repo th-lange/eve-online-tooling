@@ -459,14 +459,13 @@ function TravelGraph({
   const nodeMap = new Map<number, SystemGraphNode>();
   entries.forEach((e, i) => {
     const act = activity.get(e.systemId);
-    const kills = act ? ` · ${act.shipKills} kills · ${act.podKills} pods` : "";
     const node: SystemGraphNode = {
       id: String(e.systemId),
       label: e.name,
       kind: e.wspace ? "wspace" : kindFromSecurity(e.security),
-      sub: e.wspace
-        ? (e.region || "wormhole") + kills
-        : e.security.toFixed(1) + kills,
+      sub: e.wspace ? e.region || "wormhole" : e.security.toFixed(1),
+      // Last-hour ship/pod kills as an icon row (CCP publishes k-space only).
+      stats: act ? { kills: act.shipKills, podKills: act.podKills } : undefined,
       current: i === entries.length - 1,
     };
     // Keep the latest occurrence so "current" wins on a revisit.
