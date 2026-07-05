@@ -20,6 +20,7 @@ import { IndustryJobsPage } from "./industry/IndustryJobsPage";
 import { PIPage } from "./pi/PIPage";
 import { WormholesPage } from "./wormholes/WormholesPage";
 import { ExplorationPage } from "./exploration/ExplorationPage";
+import { PochvenPage } from "./pochven/PochvenPage";
 import { IncursionsPage } from "./incursions/IncursionsPage";
 import { FactionWarfarePage } from "./faction-warfare/FactionWarfarePage";
 import { NotificationsPage } from "./notifications/NotificationsPage";
@@ -217,6 +218,13 @@ export const modules: ModuleDef[] = [
     description: "Militia control, systems and kills by warzone.",
     group: "intel",
     Component: FactionWarfarePage,
+  },
+  {
+    id: "pochven",
+    title: "Pochven",
+    description: "Find C729 wormhole entries into Pochven from your region.",
+    group: "intel",
+    Component: PochvenPage,
   },
   {
     id: "wormholes",
