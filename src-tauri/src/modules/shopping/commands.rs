@@ -386,37 +386,6 @@ pub fn shopping_move_item(
 /// Built-in id/name for the list the chat listener fills.
 const CHAT_LIST: (&str, &str) = ("chat", "Chat");
 
-/// Read an EVE chatlog, decoding the UTF-16LE (BOM) it writes, else UTF-8.
-fn read_chatlog(path: &std::path::Path) -> Option<String> {
-    let bytes = std::fs::read(path).ok()?;
-    if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
-        let u16s: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
-            .collect();
-        Some(String::from_utf16_lossy(&u16s))
-    } else {
-        Some(String::from_utf8_lossy(&bytes).into_owned())
-    }
-}
-
-/// The message text of each chat line, in order. Lines look like
-/// `[ 2026.06.25 12:00:00 ] Sender > text`; system lines are skipped.
-fn parse_chat_messages(content: &str) -> Vec<String> {
-    content
-        .lines()
-        .filter_map(|line| {
-            let (_, after) = line.split_once("] ")?;
-            let (sender, msg) = after.split_once(" > ")?;
-            if sender.trim() == "EVE System" {
-                return None;
-            }
-            let m = msg.trim();
-            (!m.is_empty()).then(|| m.to_string())
-        })
-        .collect()
-}
-
 /// Result of a chat-capture poll.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -487,7 +456,9 @@ pub fn shopping_chat_sync(
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let msgs = parse_chat_messages(&read_chatlog(&path).unwrap_or_default());
+    let msgs = crate::chatlog::parse_chat_messages(
+        &crate::chatlog::read_chatlog(&path).unwrap_or_default(),
+    );
 
     // `from_now` (sent on Start) marks everything already in the log as seen and
     // adds nothing, so we only capture messages linked from here on — important
@@ -512,6 +483,15 @@ pub fn shopping_chat_sync(
     } else {
         0
     };
+
+    // Nothing new since the last poll → don't rewrite the store every 4s.
+    if start == msgs.len() && store.chat.channel == chan && store.chat.file == file_name {
+        return Ok(ChatSync {
+            added: Vec::new(),
+            file: file_name,
+            found: true,
+        });
+    }
 
     let mut added = Vec::new();
     {
@@ -545,19 +525,4 @@ pub fn shopping_chat_sync(
         file: file_name,
         found: true,
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_item_messages_and_skips_system_lines() {
-        let log = "\
-[ 2026.06.25 12:00:00 ] EVE System > Channel MOTD: hi
-[ 2026.06.25 12:00:05 ] Buyer Pilot > Tritanium
-[ 2026.06.25 12:00:06 ] Buyer Pilot > Pyerite
-[ 2026.06.25 12:00:07 ] Buyer Pilot >   ";
-        assert_eq!(parse_chat_messages(log), vec!["Tritanium", "Pyerite"]);
-    }
 }

@@ -561,45 +561,6 @@ pub async fn localintel_zkill(
     Ok(out)
 }
 
-/// Read an EVE chatlog file, decoding UTF-16LE (the format EVE writes) or UTF-8.
-fn read_chatlog(path: &std::path::Path) -> Option<String> {
-    let bytes = std::fs::read(path).ok()?;
-    if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
-        // UTF-16LE with BOM.
-        let u16s: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
-            .collect();
-        Some(String::from_utf16_lossy(&u16s))
-    } else {
-        Some(String::from_utf8_lossy(&bytes).into_owned())
-    }
-}
-
-/// Distinct sender names from chatlog content. Message lines look like
-/// `[ 2026.06.25 12:00:00 ] Sender Name > text`. The member list isn't logged,
-/// so this only yields pilots who actually spoke. Pure (testable).
-fn parse_chat_senders(content: &str) -> Vec<String> {
-    let mut seen = HashSet::new();
-    let mut out = Vec::new();
-    for line in content.lines() {
-        let Some((_, after)) = line.split_once("] ") else {
-            continue;
-        };
-        let Some((sender, _msg)) = after.split_once(" > ") else {
-            continue;
-        };
-        let s = sender.trim();
-        if s.is_empty() || s == "EVE System" {
-            continue;
-        }
-        if seen.insert(s.to_string()) {
-            out.push(s.to_string());
-        }
-    }
-    out
-}
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalLogResult {
@@ -638,9 +599,9 @@ pub fn local_log_names(logs_dir: String) -> Result<LocalLogResult, String> {
             file: String::new(),
         });
     };
-    let content = read_chatlog(&path).unwrap_or_default();
+    let content = crate::chatlog::read_chatlog(&path).unwrap_or_default();
     Ok(LocalLogResult {
-        senders: parse_chat_senders(&content),
+        senders: crate::chatlog::parse_chat_senders(&content),
         file: path
             .file_name()
             .map(|f| f.to_string_lossy().into_owned())
@@ -692,17 +653,6 @@ mod tests {
     fn parses_dedupes_and_trims_names() {
         let text = "  Alice \nBob\n\nAlice\n  \nCharlie\n";
         assert_eq!(parse_names(text), vec!["Alice", "Bob", "Charlie"]);
-    }
-
-    #[test]
-    fn parses_chat_senders_from_log() {
-        let log = "---------------------------------------------------------------\n\
-                   [ 2026.06.25 12:00:00 ] EVE System > Channel changed to Local : Jita\n\
-                   [ 2026.06.25 12:01:02 ] Alice Pilot > hi\n\
-                   [ 2026.06.25 12:01:30 ] Bob Pilot > o7\n\
-                   [ 2026.06.25 12:02:00 ] Alice Pilot > again\n";
-        // Distinct real speakers, EVE System filtered out, deduped, ordered.
-        assert_eq!(parse_chat_senders(log), vec!["Alice Pilot", "Bob Pilot"]);
     }
 
     #[test]
