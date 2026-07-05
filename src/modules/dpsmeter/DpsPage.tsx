@@ -10,6 +10,7 @@ import {
   onDpsTick,
   type DpsLogFile,
   type DpsTick,
+  type HitQuality,
   type PilotRate,
   type WeaponRate,
 } from "../../lib/api";
@@ -101,12 +102,17 @@ export function DpsPage() {
   const activeRef = useRef(active);
   activeRef.current = active;
   const bufferedRef = useRef<DpsTick[]>([]);
+  // Session peaks for the two primary readouts (reset on Start / Play).
+  const peaksRef = useRef({ out: 0, in: 0 });
 
   // Subscribe once; the feed survives navigation. Ticks only arrive while a
   // capture is running.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     onDpsTick((t) => {
+      const peaks = peaksRef.current;
+      peaks.out = Math.max(peaks.out, t.dpsOut);
+      peaks.in = Math.max(peaks.in, t.dpsIn);
       if (!activeRef.current) {
         // Hidden: accumulate without triggering a render; flushed on re-show.
         const buf = bufferedRef.current;
@@ -136,6 +142,7 @@ export function DpsPage() {
     setError(null);
     localStorage.setItem(STORAGE_KEYS.eveGamelogsDir, dir);
     localStorage.setItem(STORAGE_KEYS.dpsWindowSecs, String(windowSecs));
+    peaksRef.current = { out: 0, in: 0 };
     try {
       await dpsStart({ gamelogsDir: dir, windowSecs });
       setRunning(true);
@@ -164,6 +171,7 @@ export function DpsPage() {
   async function playback() {
     setError(null);
     setTicks([]);
+    peaksRef.current = { out: 0, in: 0 };
     try {
       await dpsPlayback({ file, speed, windowSecs });
       setRunning(true);
@@ -318,6 +326,18 @@ export function DpsPage() {
             >
               {latest ? formatInt(Math.round(latest[s.key])) : "—"}
             </div>
+            {s.key === "dpsOut" && (
+              <PrimaryExtras
+                peak={peaksRef.current.out}
+                quality={latest?.hitsOut}
+              />
+            )}
+            {s.key === "dpsIn" && (
+              <PrimaryExtras
+                peak={peaksRef.current.in}
+                quality={latest?.hitsIn}
+              />
+            )}
           </div>
         ))}
       </div>
@@ -427,6 +447,45 @@ const PilotTable = memo(function PilotTable({ rows }: { rows: PilotRate[] }) {
   );
 });
 
+/** Session peak + hit-quality indicators under a primary DPS readout.
+ *  "pen"/"smash"/"wreck" count the high-quality hits inside the rolling
+ *  window (from the gamelog's hit-quality suffix); dim when zero. */
+function PrimaryExtras({
+  peak,
+  quality,
+}: {
+  peak: number;
+  quality?: HitQuality;
+}) {
+  const q = quality ?? { penetrates: 0, smashes: 0, wrecks: 0 };
+  const chip = (n: number, cls: string) => (n > 0 ? cls : "text-zinc-600");
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-2.5 text-[11px] tabular-nums">
+      <span className="text-zinc-500" title="Session peak">
+        max {formatInt(Math.round(peak))}
+      </span>
+      <span
+        className={chip(q.penetrates, "text-amber-400")}
+        title="Penetrating hits in the window"
+      >
+        pen {q.penetrates}
+      </span>
+      <span
+        className={chip(q.smashes, "text-orange-400")}
+        title="Smashing hits in the window"
+      >
+        smash {q.smashes}
+      </span>
+      <span
+        className={chip(q.wrecks, "text-fuchsia-400 font-semibold")}
+        title="Wrecking hits in the window"
+      >
+        wreck {q.wrecks}
+      </span>
+    </div>
+  );
+}
+
 /** Multi-line rolling chart, inline SVG (no chart dependency — same approach as
  *  the market history chart). All series share one y-scale so out/in compare.
  *  Memoized + path math in a `useMemo` so unrelated re-renders (typing in a
@@ -436,29 +495,53 @@ const DpsChart = memo(function DpsChart({ ticks }: { ticks: DpsTick[] }) {
   const h = 280;
   const padX = 8;
   const padY = 10;
+  const padB = 24; // room for the time labels along the bottom
 
-  const { max, lines, grid, n } = useMemo(() => {
+  const { max, lines, grid, n, timeMarks, windowSecs } = useMemo(() => {
     const n = ticks.length;
     const max = Math.max(
       1,
       ...ticks.flatMap((t) => SERIES.map((s) => t[s.key] as number)),
     );
     const x = (i: number) => padX + (i / Math.max(n - 1, 1)) * (w - 2 * padX);
-    const y = (v: number) => padY + (1 - v / max) * (h - 2 * padY);
+    const y = (v: number) => padY + (1 - v / max) * (h - padY - padB);
     const lines = SERIES.map((s) => ({
       key: s.key,
       points: ticks
         .map((t, i) => `${x(i).toFixed(1)},${y(t[s.key] as number).toFixed(1)}`)
         .join(" "),
     }));
-    const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => padY + f * (h - 2 * padY));
-    return { max, lines, grid, n };
+    const grid = [0, 0.25, 0.5, 0.75, 1].map(
+      (f) => padY + f * (h - padY - padB),
+    );
+
+    // Vertical time segments, one per rolling window (coarsened so at most ~8
+    // fit), labelled as seconds back from the newest sample.
+    const windowSecs = ticks[n - 1]?.windowSecs ?? 0;
+    const timeMarks: { x: number; label: string }[] = [];
+    if (n > 1 && windowSecs > 0) {
+      const t0 = ticks[0].at;
+      const tN = ticks[n - 1].at;
+      const span = Math.max(1, tN - t0);
+      const step = windowSecs * Math.max(1, Math.ceil(span / (windowSecs * 8)));
+      const xAt = (t: number) => padX + ((t - t0) / span) * (w - 2 * padX);
+      for (let back = 0; back <= span; back += step) {
+        timeMarks.push({
+          x: xAt(tN - back),
+          label: back === 0 ? "now" : `-${back}s`,
+        });
+      }
+    }
+    return { max, lines, grid, n, timeMarks, windowSecs };
   }, [ticks]);
 
   return (
     <div className="rounded border border-zinc-800 bg-zinc-900 p-2">
       <div className="mb-1 flex items-center justify-between text-xs text-zinc-400">
-        <span>Rolling rate (per second)</span>
+        <span>
+          Rolling rate (per second)
+          {windowSecs > 0 ? ` · ${windowSecs}s window` : ""}
+        </span>
         <span className="tabular-nums text-zinc-300">
           peak {formatInt(Math.round(max))}
         </span>
@@ -479,6 +562,27 @@ const DpsChart = memo(function DpsChart({ ticks }: { ticks: DpsTick[] }) {
             stroke="#27272a"
             strokeWidth="0.75"
           />
+        ))}
+        {timeMarks.map((m, i) => (
+          <g key={`t${i}`}>
+            <line
+              x1={m.x}
+              x2={m.x}
+              y1={padY}
+              y2={h - padB}
+              stroke="#27272a"
+              strokeWidth="0.75"
+            />
+            <text
+              x={m.x}
+              y={h - 8}
+              textAnchor={i === 0 ? "end" : "middle"}
+              fill="#71717a"
+              fontSize="11"
+            >
+              {m.label}
+            </text>
+          </g>
         ))}
         {n > 1 &&
           SERIES.map((s, i) => (

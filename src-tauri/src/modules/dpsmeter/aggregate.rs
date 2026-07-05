@@ -32,6 +32,27 @@ pub struct PilotRate {
     pub dps_in: f64,
 }
 
+/// Counts of high-quality hits within the window ("Penetrates" / "Smashes" /
+/// "Wrecks" per the gamelog's hit-quality suffix).
+#[derive(Debug, Clone, PartialEq, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HitQuality {
+    pub penetrates: i64,
+    pub smashes: i64,
+    pub wrecks: i64,
+}
+
+impl HitQuality {
+    fn count(&mut self, quality: Option<&str>) {
+        match quality {
+            Some(q) if q.eq_ignore_ascii_case("penetrates") => self.penetrates += 1,
+            Some(q) if q.eq_ignore_ascii_case("smashes") => self.smashes += 1,
+            Some(q) if q.eq_ignore_ascii_case("wrecks") => self.wrecks += 1,
+            _ => {}
+        }
+    }
+}
+
 /// A single emitted sample: per-second rates over the current window.
 #[derive(Debug, Clone, PartialEq, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -46,6 +67,10 @@ pub struct DpsTick {
     pub cap_warfare_in: f64,
     /// Mined volume per second (m³/s) over the window.
     pub mining_m3: f64,
+    /// High-quality outgoing hits within the window.
+    pub hits_out: HitQuality,
+    /// High-quality incoming hits within the window.
+    pub hits_in: HitQuality,
     /// Top weapons by outgoing DPS over the window.
     pub by_weapon: Vec<WeaponRate>,
     /// Top counterparties by total engaged DPS (out + in) over the window.
@@ -93,8 +118,14 @@ impl Window {
         for ev in &self.events {
             let v = ev.amount as f64;
             match ev.kind {
-                EventKind::DamageOut => t.dps_out += v,
-                EventKind::DamageIn => t.dps_in += v,
+                EventKind::DamageOut => {
+                    t.dps_out += v;
+                    t.hits_out.count(ev.quality.as_deref());
+                }
+                EventKind::DamageIn => {
+                    t.dps_in += v;
+                    t.hits_in.count(ev.quality.as_deref());
+                }
                 EventKind::RepOut => t.logi_out += v,
                 EventKind::RepIn => t.logi_in += v,
                 EventKind::CapTransferOut => t.cap_transfer_out += v,
@@ -173,6 +204,7 @@ mod tests {
             pilot: None,
             ship: None,
             weapon: None,
+            quality: None,
             ore: None,
             volume: 0.0,
         }
@@ -184,6 +216,7 @@ mod tests {
             kind,
             amount,
             pilot: Some(pilot.to_string()),
+            quality: None,
             ship: None,
             weapon: Some(weapon.to_string()),
             ore: None,
