@@ -240,3 +240,80 @@ export function pochvenRegions(): string[] {
     for (const z of s.c729) if (z.region !== INTERNAL) set.add(z.region);
   return [...set].sort();
 }
+
+// --- Clade / role + filaments (#413, #416) ---
+
+export type Clade = "Perun" | "Svarog" | "Veles";
+export type Role = "Home" | "Border" | "Internal";
+
+/** Each system's Triglavian clade + role, from the Pochven GPS sheet. */
+export const POCHVEN_META: Record<string, { clade: Clade; role: Role }> = {
+  Ahtila: { clade: "Svarog", role: "Border" },
+  Ala: { clade: "Veles", role: "Internal" },
+  Angymonne: { clade: "Veles", role: "Internal" },
+  Archee: { clade: "Veles", role: "Home" },
+  Arvasaras: { clade: "Veles", role: "Border" },
+  Harva: { clade: "Svarog", role: "Internal" },
+  Ichoriya: { clade: "Veles", role: "Internal" },
+  Ignebaener: { clade: "Perun", role: "Internal" },
+  Kaunokka: { clade: "Veles", role: "Internal" },
+  Kino: { clade: "Perun", role: "Home" },
+  Komo: { clade: "Perun", role: "Internal" },
+  Konola: { clade: "Perun", role: "Internal" },
+  Krirald: { clade: "Perun", role: "Internal" },
+  Kuharah: { clade: "Svarog", role: "Internal" },
+  Nalvula: { clade: "Perun", role: "Internal" },
+  Nani: { clade: "Svarog", role: "Internal" },
+  Niarja: { clade: "Svarog", role: "Home" },
+  Otanuomi: { clade: "Perun", role: "Border" },
+  Otela: { clade: "Perun", role: "Internal" },
+  Raravoss: { clade: "Svarog", role: "Internal" },
+  Sakenta: { clade: "Perun", role: "Border" },
+  Senda: { clade: "Veles", role: "Border" },
+  Skarkon: { clade: "Svarog", role: "Internal" },
+  Tunudan: { clade: "Svarog", role: "Internal" },
+  Urhinichi: { clade: "Svarog", role: "Border" },
+  Vale: { clade: "Veles", role: "Internal" },
+  Wirashoda: { clade: "Veles", role: "Internal" },
+};
+
+/** System names grouped by role (for "which systems can this filament drop me in"). */
+export function systemsByRole(): Record<Role, string[]> {
+  const out: Record<Role, string[]> = { Home: [], Border: [], Internal: [] };
+  for (const [name, m] of Object.entries(POCHVEN_META)) out[m.role].push(name);
+  for (const r of Object.keys(out) as Role[]) out[r].sort();
+  return out;
+}
+
+/** System names grouped by clade. */
+export function systemsByClade(): Record<Clade, string[]> {
+  const out: Record<Clade, string[]> = { Perun: [], Svarog: [], Veles: [] };
+  for (const [name, m] of Object.entries(POCHVEN_META)) out[m.clade].push(name);
+  for (const c of Object.keys(out) as Clade[]) out[c].sort();
+  return out;
+}
+
+/** Filament reference (EVE support / EVE-University). */
+export const FILAMENTS = {
+  sizes: [1, 5, 15] as const,
+  requirements: [
+    "Be in a fleet (everyone within range)",
+    "All safeties yellow or red",
+    "No combat timer",
+    "≥ 1000 km from celestials & stations",
+  ],
+  types: [
+    {
+      name: "System-type",
+      detail:
+        "Home / Border / Internal — drops the fleet into a random system of that role (any clade).",
+    },
+    {
+      name: "Cladistic",
+      detail:
+        "Perun / Veles / Svarog — drops into a random system of that clade.",
+    },
+  ],
+  // Wormhole (C729) entry has no fleet cap and no wait timer, unlike filaments.
+  note: "Filaments cap the fleet at 1 / 5 / 15 sub-caps and have a wait timer; a C729 wormhole has neither.",
+};

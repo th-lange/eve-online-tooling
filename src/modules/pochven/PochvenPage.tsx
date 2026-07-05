@@ -10,6 +10,10 @@ import {
 import {
   C729,
   POCHVEN_SYSTEMS,
+  POCHVEN_META,
+  FILAMENTS,
+  systemsByRole,
+  systemsByClade,
   entriesInRegion,
   pochvenRegions,
   INTERNAL,
@@ -190,12 +194,86 @@ export function PochvenPage() {
       </details>
 
       <Logistics />
+      <FilamentGuide />
 
       <p className="mt-4 text-[11px] text-zinc-600">
         Entry data: Electus Matari Pochven entry manual. Hub distances computed
         live over the stargate graph.
       </p>
     </div>
+  );
+}
+
+// Filament entry guide (#416): how filaments drop you into Pochven by role /
+// clade, with fleet caps and requirements. Data-driven from the clade/role map.
+function FilamentGuide() {
+  const byRole = useMemo(() => systemsByRole(), []);
+  const byClade = useMemo(() => systemsByClade(), []);
+
+  return (
+    <section className="mt-8">
+      <h2 className="text-lg font-semibold text-zinc-100">Filaments</h2>
+      <p className="mt-1 max-w-3xl text-sm text-zinc-400">
+        Filaments jump a small fleet straight into Pochven — capped at{" "}
+        <strong>1 / 5 / 15</strong> sub-caps (the number in the filament name).{" "}
+        {FILAMENTS.note}
+      </p>
+
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* By role — System-type filaments. */}
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+          <div className="text-sm font-medium text-zinc-200">
+            System-type filaments
+          </div>
+          <p className="mt-0.5 text-xs text-zinc-500">
+            Drop into a random system of that role (any clade).
+          </p>
+          <div className="mt-3 space-y-2">
+            {(["Home", "Border", "Internal"] as const).map((role) => (
+              <div key={role} className="text-sm">
+                <span className="inline-block w-20 font-medium text-zinc-300">
+                  {role}
+                </span>
+                <span className="text-zinc-500">{byRole[role].join(", ")}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* By clade — Cladistic filaments. */}
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+          <div className="text-sm font-medium text-zinc-200">
+            Cladistic filaments
+          </div>
+          <p className="mt-0.5 text-xs text-zinc-500">
+            Drop into a random system of that clade.
+          </p>
+          <div className="mt-3 space-y-2">
+            {(["Perun", "Svarog", "Veles"] as const).map((clade) => (
+              <div key={clade} className="text-sm">
+                <span className="inline-block w-20 font-medium text-zinc-300">
+                  {clade}
+                </span>
+                <span className="text-zinc-500">
+                  {byClade[clade].join(", ")}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-4 py-3 text-xs text-zinc-400">
+        <span className="font-semibold uppercase tracking-wide text-zinc-500">
+          To activate a filament
+        </span>
+        <ul className="mt-1 list-disc space-y-0.5 pl-4">
+          {FILAMENTS.requirements.map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+        </ul>
+      </div>
+    </section>
   );
 }
 
@@ -268,6 +346,8 @@ function Logistics() {
             <thead className="bg-zinc-900 text-zinc-400">
               <tr>
                 <th className="px-3 py-1.5 text-left font-medium">System</th>
+                <th className="px-3 py-1.5 text-left font-medium">Clade</th>
+                <th className="px-3 py-1.5 text-left font-medium">Role</th>
                 {hubs.map((h) => (
                   <th
                     key={h}
@@ -290,6 +370,12 @@ function Logistics() {
                 >
                   <td className="px-3 py-1.5 font-medium text-zinc-200">
                     {r.system}
+                  </td>
+                  <td className="px-3 py-1.5 text-zinc-400">
+                    {POCHVEN_META[r.system]?.clade ?? "—"}
+                  </td>
+                  <td className="px-3 py-1.5 text-zinc-400">
+                    {POCHVEN_META[r.system]?.role ?? "—"}
                   </td>
                   {hubs.map((h) => {
                     const s = r.cells[h];

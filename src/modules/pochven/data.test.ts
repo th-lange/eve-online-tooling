@@ -1,8 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
   POCHVEN_SYSTEMS,
+  POCHVEN_META,
   entriesInRegion,
   pochvenRegions,
+  systemsByRole,
+  systemsByClade,
   INTERNAL,
 } from "./data";
 
@@ -30,6 +33,25 @@ describe("Pochven data", () => {
     expect(niarja?.count).toBe(16);
     expect(niarja?.others.map((z) => z.region)).toEqual(
       expect.arrayContaining(["Kador", "The Citadel", "The Forge"]),
+    );
+  });
+
+  it("has clade + role for every system, 9 per clade (1 Home/2 Border/6 Internal)", () => {
+    expect(Object.keys(POCHVEN_META)).toHaveLength(27);
+    // Every dataset system has metadata.
+    for (const s of POCHVEN_SYSTEMS) expect(POCHVEN_META[s.name]).toBeDefined();
+
+    const byClade = systemsByClade();
+    expect(byClade.Perun).toHaveLength(9);
+    expect(byClade.Svarog).toHaveLength(9);
+    expect(byClade.Veles).toHaveLength(9);
+
+    const byRole = systemsByRole();
+    expect(byRole.Home).toHaveLength(3); // 1 per clade
+    expect(byRole.Border).toHaveLength(6); // 2 per clade
+    expect(byRole.Internal).toHaveLength(18); // 6 per clade
+    expect(byRole.Home).toEqual(
+      expect.arrayContaining(["Kino", "Niarja", "Archee"]),
     );
   });
 
