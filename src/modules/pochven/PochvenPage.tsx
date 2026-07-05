@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
-import { MapPin } from "lucide-react";
+import { MapPin, X } from "lucide-react";
 import {
   SystemGraph,
   type SystemGraphNode,
@@ -18,6 +19,9 @@ import {
   C729,
   POCHVEN_SYSTEMS,
   POCHVEN_META,
+  POCHVEN_INTERNAL_LINKS,
+  POCHVEN_ENTRY_BAND,
+  hasKspaceEntry,
   FILAMENTS,
   systemsByRole,
   systemsByClade,
@@ -48,42 +52,10 @@ export function PochvenPage() {
         <span>Lifetime: {C729.lifetime}</span>
       </div>
 
-      {/* Full reference. */}
-      <details className="mt-6">
-        <summary className="cursor-pointer text-sm text-zinc-400 hover:text-zinc-200">
-          All 27 Pochven systems → C729 spawn regions
-        </summary>
-        <div className="mt-2 overflow-auto rounded-lg border border-zinc-800">
-          <table className="w-full border-collapse text-sm">
-            <thead className="bg-zinc-900 text-zinc-400">
-              <tr>
-                <th className="px-3 py-1.5 text-left font-medium">System</th>
-                <th className="px-3 py-1.5 text-left font-medium">
-                  C729 spawn regions (candidate count)
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {POCHVEN_SYSTEMS.map((s) => (
-                <tr key={s.name} className="border-t border-zinc-800">
-                  <td className="px-3 py-1.5 font-medium text-zinc-200">
-                    {s.name}
-                  </td>
-                  <td className="px-3 py-1.5 text-zinc-400">
-                    {s.c729
-                      .map((z) =>
-                        z.region === INTERNAL
-                          ? `internal (${z.count})`
-                          : `${z.region} (${z.count})`,
-                      )
-                      .join(" · ")}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </details>
+      {/* Full reference — opens a centred map + table popover. */}
+      <div className="mt-6">
+        <PochvenSystemsPopover />
+      </div>
 
       <Logistics />
       <FilamentGuide />
@@ -339,6 +311,7 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
           rootId={String(originId)}
           height={420}
           storageKey={`pochven-map-${originId}`}
+          defaultMode="tree"
           onNodeClick={(id) => toggleVisited(Number(id))}
         />
       </div>
@@ -392,6 +365,148 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
         </div>
       </details>
     </div>
+  );
+}
+
+const BAND_HEX: Record<string, string> = {
+  hisec: "#34d399",
+  lowsec: "#fbbf24",
+  nullsec: "#fb7185",
+};
+
+// Centred popover: the 27 Pochven systems + their internal connections, coloured
+// by the security you can enter each from (full colour = enterable from k-space,
+// outline = internal-only).
+function PochvenSystemsPopover() {
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  const nodes: SystemGraphNode[] = POCHVEN_SYSTEMS.map((s) => {
+    const band = POCHVEN_ENTRY_BAND[s.name] ?? "nullsec";
+    const enter = hasKspaceEntry(s.name);
+    const meta = POCHVEN_META[s.name];
+    return {
+      id: s.name,
+      label: s.name,
+      kind: band as "hisec" | "lowsec" | "nullsec",
+      sub: meta ? `${meta.clade} · ${meta.role}` : undefined,
+      group: meta?.clade,
+      ...(enter ? { fill: BAND_HEX[band] } : { accent: BAND_HEX[band] }),
+    };
+  });
+  const edges: SystemGraphEdge[] = POCHVEN_INTERNAL_LINKS.map(([a, b]) => ({
+    source: a,
+    target: b,
+    variant: "wormhole",
+  }));
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="text-sm text-sky-400 hover:text-sky-300"
+      >
+        All 27 Pochven systems — map &amp; C729 spawn regions →
+      </button>
+      {open &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            onClick={() => setOpen(false)}
+          >
+            <div className="absolute inset-0 bg-black/60" />
+            <div
+              role="dialog"
+              onClick={(e) => e.stopPropagation()}
+              className="relative z-10 flex max-h-[88vh] w-[920px] max-w-[calc(100vw-2rem)] flex-col rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl"
+            >
+              <div className="flex items-start justify-between gap-3 border-b border-zinc-800 p-3">
+                <div>
+                  <div className="text-sm font-medium text-zinc-200">
+                    Pochven systems
+                  </div>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[11px] text-zinc-500">
+                    <span>clustered by clade · internal links shown</span>
+                    {(["hisec", "lowsec", "nullsec"] as const).map((b) => (
+                      <span key={b} className="flex items-center gap-1">
+                        <span
+                          className="h-2.5 w-2.5 rounded-sm"
+                          style={{ backgroundColor: BAND_HEX[b] }}
+                        />
+                        {b}
+                      </span>
+                    ))}
+                    <span className="text-zinc-600">
+                      full = enterable from k-space · outline = internal-only
+                    </span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setOpen(false)}
+                  aria-label="Close"
+                  className="shrink-0 text-zinc-500 hover:text-zinc-200"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="overflow-auto p-3">
+                <SystemGraph
+                  nodes={nodes}
+                  edges={edges}
+                  height={380}
+                  storageKey="pochven-systems-ref"
+                  defaultMode="region"
+                />
+                <table className="mt-3 w-full border-collapse text-sm">
+                  <thead className="bg-zinc-900 text-zinc-400">
+                    <tr>
+                      <th className="px-3 py-1.5 text-left font-medium">
+                        System
+                      </th>
+                      <th className="px-3 py-1.5 text-left font-medium">
+                        Clade / role
+                      </th>
+                      <th className="px-3 py-1.5 text-left font-medium">
+                        C729 spawn regions (candidate count)
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {POCHVEN_SYSTEMS.map((s) => (
+                      <tr key={s.name} className="border-t border-zinc-800">
+                        <td className="px-3 py-1.5 font-medium text-zinc-200">
+                          {s.name}
+                        </td>
+                        <td className="px-3 py-1.5 text-zinc-500">
+                          {POCHVEN_META[s.name]
+                            ? `${POCHVEN_META[s.name].clade} · ${POCHVEN_META[s.name].role}`
+                            : "—"}
+                        </td>
+                        <td className="px-3 py-1.5 text-zinc-400">
+                          {s.c729
+                            .map((z) =>
+                              z.region === INTERNAL
+                                ? `internal (${z.count})`
+                                : `${z.region} (${z.count})`,
+                            )
+                            .join(" · ")}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 

@@ -411,6 +411,7 @@ export function SystemGraph({
   onNodeClick,
   height = 360,
   storageKey,
+  defaultMode,
 }: {
   nodes: SystemGraphNode[];
   edges: SystemGraphEdge[];
@@ -419,6 +420,8 @@ export function SystemGraph({
   height?: number;
   /** Persist hand-dragged positions under this key (localStorage). */
   storageKey?: string;
+  /** Initial layout when nothing is saved (else star-if-coords, otherwise tree). */
+  defaultMode?: LayoutMode;
 }) {
   const layout = useMemo(
     () => computeLayout(inputNodes, edges, rootId),
@@ -478,6 +481,7 @@ export function SystemGraph({
       }
     }
     // Default to the star map when coordinates are available, else the tree.
+    if (defaultMode) return defaultMode;
     return inputNodes.some((n) => n.x != null && n.y != null) ? "star" : "tree";
   });
 

@@ -6,8 +6,7 @@
 // (https://pochven.electusmatari.com/). A `region` of "Pochven" denotes an
 // *internal* C729 to another Pochven system — not a k-space entry.
 //
-// clade / role are intentionally omitted for now (no clean public per-system
-// source yet — tracked in #413).
+// clade / role come from the Pochven GPS sheet (POCHVEN_META below).
 
 /** One region a system's C729 can spawn in, with its candidate-system count. */
 export interface C729Zone {
@@ -291,6 +290,54 @@ export function systemsByClade(): Record<Clade, string[]> {
   for (const [name, m] of Object.entries(POCHVEN_META)) out[m.clade].push(name);
   for (const c of Object.keys(out) as Clade[]) out[c].sort();
   return out;
+}
+
+/** Internal C729 links between Pochven systems (Electus Matari data). */
+export const POCHVEN_INTERNAL_LINKS: [string, string][] = [
+  ["Otanuomi", "Wirashoda"],
+  ["Kaunokka", "Kino"],
+  ["Kaunokka", "Tunudan"],
+  ["Ahtila", "Ichoriya"],
+];
+
+/** Best (highest) security band a system's C729 can be entered from. */
+export const POCHVEN_ENTRY_BAND: Record<
+  string,
+  "hisec" | "lowsec" | "nullsec"
+> = {
+  Ahtila: "hisec",
+  Ala: "hisec",
+  Angymonne: "hisec",
+  Archee: "hisec",
+  Arvasaras: "hisec",
+  Harva: "hisec",
+  Ichoriya: "hisec",
+  Ignebaener: "hisec",
+  Kaunokka: "hisec",
+  Kino: "hisec",
+  Komo: "hisec",
+  Konola: "hisec",
+  Krirald: "hisec",
+  Kuharah: "lowsec",
+  Nalvula: "hisec",
+  Nani: "hisec",
+  Niarja: "hisec",
+  Otanuomi: "hisec",
+  Otela: "hisec",
+  Raravoss: "hisec",
+  Sakenta: "hisec",
+  Senda: "hisec",
+  Skarkon: "hisec",
+  Tunudan: "hisec",
+  Urhinichi: "hisec",
+  Vale: "hisec",
+  Wirashoda: "hisec",
+};
+
+/** Whether a system has a k-space C729 entry (vs internal-only). */
+export function hasKspaceEntry(name: string): boolean {
+  const s = POCHVEN_SYSTEMS.find((x) => x.name === name);
+  return !!s && s.c729.some((z) => z.region !== INTERNAL);
 }
 
 /** Filament reference (EVE support / EVE-University). */
