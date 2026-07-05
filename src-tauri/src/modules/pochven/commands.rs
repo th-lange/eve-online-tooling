@@ -8,7 +8,7 @@
 //! **computed live** over the SDE stargate graph (no ESI, no stale numbers).
 
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap, VecDeque};
+use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
@@ -251,6 +251,39 @@ pub struct EntryCandidate {
     pub leads_to: Vec<String>,
 }
 
+/// Security band → node colour class (matches the SystemGraph kinds).
+fn sec_kind(sec: f64) -> &'static str {
+    if sec >= 0.45 {
+        "hisec"
+    } else if sec > 0.0 {
+        "lowsec"
+    } else {
+        "nullsec"
+    }
+}
+
+/// A node in the entry-scan map.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MapNode {
+    pub system_id: i64,
+    pub name: String,
+    /// "origin" | "travel" (grey pass-through) | hisec/lowsec/nullsec (candidate).
+    pub kind: String,
+    pub candidate: bool,
+    pub origin: bool,
+    pub jumps: i64,
+    pub leads_to: Vec<String>,
+}
+
+/// A small stargate graph: the union of the paths to the nearest candidates.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryMap {
+    pub nodes: Vec<MapNode>,
+    pub edges: Vec<[i64; 2]>,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EntrySearch {
@@ -259,6 +292,8 @@ pub struct EntrySearch {
     pub route: Vec<String>,
     /// Candidate C729 exit systems, nearest first — the systems to jump/scan.
     pub candidates: Vec<EntryCandidate>,
+    /// Scan map: candidate systems + the grey travel systems linking them.
+    pub map: EntryMap,
 }
 
 /// From `system_id`, route to the nearest Pochven C729 exit candidate and list
@@ -290,14 +325,15 @@ pub async fn pochven_search(app: AppHandle, system_id: i64) -> Result<EntrySearc
         }
     }
 
-    // Score reachable candidates by jump distance.
+    // Score reachable candidates by jump distance (borrow `leads` — reused below).
     let mut scored: Vec<(i64, i64, Vec<String>)> = leads
-        .into_iter()
-        .filter_map(|(id, mut to)| {
+        .iter()
+        .filter_map(|(&id, to)| {
             let j = *dist.get(&id)?;
-            to.sort();
-            to.dedup();
-            Some((id, j, to))
+            let mut v = to.clone();
+            v.sort();
+            v.dedup();
+            Some((id, j, v))
         })
         .collect();
     scored.sort_by_key(|&(id, j, _)| (j, id));
@@ -329,10 +365,56 @@ pub async fn pochven_search(app: AppHandle, system_id: i64) -> Result<EntrySearc
         })
         .collect();
 
+    // Scan map: union of the paths to the nearest ~12 candidates (a tree rooted
+    // at the origin). Travel-through systems are grey; candidates keep their sec
+    // colour and a leads-to.
+    let k = 12.min(scored.len());
+    let mut node_ids: HashSet<i64> = HashSet::from([system_id]);
+    let mut edge_set: HashSet<(i64, i64)> = HashSet::new();
+    for &(cid, _, _) in scored.iter().take(k) {
+        let p = path_ids(&pred, system_id, cid);
+        for w in p.windows(2) {
+            edge_set.insert((w[0], w[1]));
+        }
+        node_ids.extend(p);
+    }
+    let sec_of = |id: i64| info.get(&id).map(|(_, s, _)| *s).unwrap_or(0.0);
+    let nodes = node_ids
+        .iter()
+        .map(|&id| {
+            let cand = leads.contains_key(&id);
+            let origin = id == system_id;
+            let mut lt = if cand {
+                leads.get(&id).cloned().unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            lt.sort();
+            lt.dedup();
+            MapNode {
+                system_id: id,
+                name: name(id),
+                kind: if origin {
+                    "origin".into()
+                } else if cand {
+                    sec_kind(sec_of(id)).into()
+                } else {
+                    "travel".into()
+                },
+                candidate: cand,
+                origin,
+                jumps: *dist.get(&id).unwrap_or(&0),
+                leads_to: lt,
+            }
+        })
+        .collect();
+    let edges = edge_set.into_iter().map(|(a, b)| [a, b]).collect();
+
     Ok(EntrySearch {
         from: name(system_id),
         route,
         candidates,
+        map: EntryMap { nodes, edges },
     })
 }
 
