@@ -209,14 +209,14 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
       return next;
     });
 
-  // Number the unvisited candidates by distance (what to visit next); visited
-  // ones show a check instead.
+  // Number the unvisited candidates along the scan route (what to visit next);
+  // visited ones show a check instead.
   const order = useMemo(() => {
     const m = new Map<number, number>();
     let n = 0;
     data.map.nodes
       .filter((x) => x.candidate)
-      .sort((a, b) => a.jumps - b.jumps)
+      .sort((a, b) => a.order - b.order)
       .forEach((c) => {
         if (!visited.has(c.systemId)) m.set(c.systemId, ++n);
       });

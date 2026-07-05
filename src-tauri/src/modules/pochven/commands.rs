@@ -204,8 +204,11 @@ pub async fn pochven_routes(app: AppHandle) -> Result<PochvenRoutes, String> {
 
 // --- Entry search: nearest C729 candidates + a route to the closest ---
 
+/// A BFS result: (distance per system, predecessor per system).
+type Bfs = (HashMap<i64, i64>, HashMap<i64, i64>);
+
 /// Shortest-jump BFS from `start`: distance + predecessor per reachable system.
-fn bfs(adj: &HashMap<i64, Vec<i64>>, start: i64) -> (HashMap<i64, i64>, HashMap<i64, i64>) {
+fn bfs(adj: &HashMap<i64, Vec<i64>>, start: i64) -> Bfs {
     let mut dist: HashMap<i64, i64> = HashMap::from([(start, 0)]);
     let mut pred: HashMap<i64, i64> = HashMap::new();
     let mut q = VecDeque::from([start]);
@@ -247,6 +250,8 @@ pub struct EntryCandidate {
     pub region: String,
     /// Jumps from the searcher's current system.
     pub jumps: i64,
+    /// Scan order (1-based) along the nearest-neighbour route.
+    pub order: i64,
     /// Pochven system(s) this candidate's C729 leads into.
     pub leads_to: Vec<String>,
 }
@@ -273,6 +278,8 @@ pub struct MapNode {
     pub candidate: bool,
     pub origin: bool,
     pub jumps: i64,
+    /// Scan order (1-based) for candidates; 0 for travel/origin.
+    pub order: i64,
     pub leads_to: Vec<String>,
 }
 
@@ -338,41 +345,69 @@ pub async fn pochven_search(app: AppHandle, system_id: i64) -> Result<EntrySearc
         .collect();
     scored.sort_by_key(|&(id, j, _)| (j, id));
 
-    let route = scored
-        .first()
-        .map(|&(nearest, _, _)| {
-            path_ids(&pred, system_id, nearest)
-                .iter()
-                .map(|&id| name(id))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let candidates = scored
-        .iter()
-        .take(30)
-        .map(|(id, j, to)| {
-            let (sys, _sec, region) = info
-                .get(id)
-                .cloned()
-                .unwrap_or_else(|| (format!("#{id}"), 0.0, String::new()));
-            EntryCandidate {
-                system: sys,
-                region,
-                jumps: *j,
-                leads_to: to.clone(),
-            }
-        })
-        .collect();
-
-    // Scan map: union of the paths to the nearest ~12 candidates (a tree rooted
-    // at the origin). Travel-through systems are grey; candidates keep their sec
-    // colour and a leads-to.
+    // Nearest-neighbour scan route over the closest K candidates: greedily hop
+    // to the nearest not-yet-taken candidate from the current position, so
+    // consecutive scan targets are adjacent (fewer total jumps than fanning out
+    // from the origin). BFS from each mapped candidate gives the hop distances.
     let k = 12.min(scored.len());
+    let route_ids: Vec<i64> = scored.iter().take(k).map(|&(id, _, _)| id).collect();
+    let cand_bfs: HashMap<i64, Bfs> = route_ids.iter().map(|&cid| (cid, bfs(&adj, cid))).collect();
+
+    let mut remaining = route_ids.clone();
+    let mut order_ids: Vec<i64> = Vec::new();
+    let mut current = system_id;
+    while !remaining.is_empty() {
+        let from_dist = |c: i64| -> i64 {
+            if current == system_id {
+                *dist.get(&c).unwrap_or(&i64::MAX)
+            } else {
+                cand_bfs
+                    .get(&current)
+                    .and_then(|(d, _)| d.get(&c))
+                    .copied()
+                    .unwrap_or(i64::MAX)
+            }
+        };
+        let idx = remaining
+            .iter()
+            .enumerate()
+            .min_by_key(|&(_, &c)| from_dist(c))
+            .map(|(i, _)| i)
+            .unwrap();
+        current = remaining.remove(idx);
+        order_ids.push(current);
+    }
+
+    // Scan order per candidate: route order for the mapped K, then the rest by
+    // distance from the origin.
+    let mut order_map: HashMap<i64, i64> = HashMap::new();
+    for (i, &id) in order_ids.iter().enumerate() {
+        order_map.insert(id, (i + 1) as i64);
+    }
+    let mut next_order = order_ids.len() as i64;
+    for &(id, _, _) in scored.iter().skip(k) {
+        next_order += 1;
+        order_map.insert(id, next_order);
+    }
+
+    // Map = union of the route segments (origin → c1 → c2 → …), so scan targets
+    // are connected in the order you'd travel them.
     let mut node_ids: HashSet<i64> = HashSet::from([system_id]);
     let mut edge_set: HashSet<(i64, i64)> = HashSet::new();
-    for &(cid, _, _) in scored.iter().take(k) {
-        let p = path_ids(&pred, system_id, cid);
+    let mut segs: Vec<(i64, i64)> = Vec::new();
+    if let Some(&first) = order_ids.first() {
+        segs.push((system_id, first));
+    }
+    for w in order_ids.windows(2) {
+        segs.push((w[0], w[1]));
+    }
+    for (a, b) in segs {
+        let pred_a = if a == system_id {
+            &pred
+        } else {
+            &cand_bfs[&a].1
+        };
+        let p = path_ids(pred_a, a, b);
         for w in p.windows(2) {
             edge_set.insert((w[0], w[1]));
         }
@@ -404,11 +439,43 @@ pub async fn pochven_search(app: AppHandle, system_id: i64) -> Result<EntrySearc
                 candidate: cand,
                 origin,
                 jumps: *dist.get(&id).unwrap_or(&0),
+                order: order_map.get(&id).copied().unwrap_or(0),
                 leads_to: lt,
             }
         })
         .collect();
     let edges = edge_set.into_iter().map(|(a, b)| [a, b]).collect();
+
+    // Breadcrumb to the first scan target.
+    let route = order_ids
+        .first()
+        .map(|&first| {
+            path_ids(&pred, system_id, first)
+                .iter()
+                .map(|&id| name(id))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Nearest 30 candidates, in scan order.
+    let mut candidates: Vec<EntryCandidate> = scored
+        .iter()
+        .take(30)
+        .map(|(id, j, to)| {
+            let (sys, _sec, region) = info
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| (format!("#{id}"), 0.0, String::new()));
+            EntryCandidate {
+                system: sys,
+                region,
+                jumps: *j,
+                order: order_map.get(id).copied().unwrap_or(0),
+                leads_to: to.clone(),
+            }
+        })
+        .collect();
+    candidates.sort_by_key(|c| c.order);
 
     Ok(EntrySearch {
         from: name(system_id),
