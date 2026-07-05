@@ -14,6 +14,7 @@
 //!
 //! Feature modules live under [`modules`] (production first).
 
+mod chatlog;
 mod commands;
 mod esi;
 mod evescout;
