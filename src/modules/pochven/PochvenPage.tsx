@@ -102,6 +102,7 @@ function EntryFinder() {
   const [systemId, setSystemId] = useState<number | null>(null);
   const [label, setLabel] = useState("");
   const [query, setQuery] = useState("");
+  const [maxJumps, setMaxJumps] = useState(15);
 
   const search = useQuery({
     queryKey: ["system", "search", query],
@@ -116,8 +117,8 @@ function EntryFinder() {
     enabled: false,
   });
   const result = useQuery({
-    queryKey: ["pochven", "search", systemId],
-    queryFn: () => pochvenSearch(systemId!),
+    queryKey: ["pochven", "search", systemId, maxJumps],
+    queryFn: () => pochvenSearch(systemId!, maxJumps),
     enabled: systemId != null,
     staleTime: 5 * 60_000,
   });
@@ -164,6 +165,21 @@ function EntryFinder() {
         >
           <MapPin size={13} /> Detect
         </button>
+        <label className="flex flex-col gap-1 text-xs text-zinc-400">
+          Max jumps
+          <input
+            type="number"
+            value={maxJumps}
+            min={1}
+            max={30}
+            onChange={(e) =>
+              setMaxJumps(
+                Math.min(30, Math.max(1, Number(e.currentTarget.value) || 1)),
+              )
+            }
+            className="w-24 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+          />
+        </label>
         {label && (
           <span className="pb-1 text-xs text-zinc-500">
             from <span className="text-zinc-300">{label}</span>
@@ -258,12 +274,33 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
   if (data.candidates.length === 0)
     return (
       <div className="mt-4 text-sm text-zinc-400">
-        No C729 candidates reachable by gate from here — try a filament.
+        No C729 candidates within {data.maxJumps} jumps — raise the max, move
+        closer, or use a filament.
       </div>
     );
 
   return (
     <div className="mt-4 space-y-4">
+      {/* Reachable Pochven target systems (via the in-range candidates). */}
+      {data.targets.length > 0 && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+            Pochven systems reachable within {data.maxJumps} jumps (
+            {data.targets.length})
+          </div>
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {data.targets.map((t) => (
+              <span
+                key={t}
+                className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-300"
+              >
+                {t}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {data.route.length > 1 && (
         <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
           <div className="text-[10px] uppercase tracking-wide text-zinc-500">
