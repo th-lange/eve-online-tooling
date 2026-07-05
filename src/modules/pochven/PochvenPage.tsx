@@ -1016,8 +1016,8 @@ function PochvenSystemsPopover() {
 
                                 {/* Outbound — Proximity 'Extraction' filament. */}
                                 <div className="mt-2.5 text-[11px] uppercase tracking-wide text-zinc-500">
-                                  Outbound — 'Extraction' filament (k-space
-                                  within 2.5 ly)
+                                  Outbound — Proximity 'Extraction' filament
+                                  (k-space within 2.5 ly)
                                 </div>
                                 {(() => {
                                   const exits = exitsByName.get(s.name);
@@ -1068,6 +1068,13 @@ function PochvenSystemsPopover() {
                                     </div>
                                   );
                                 })()}
+                                <div className="mt-1 text-[11px] text-zinc-600">
+                                  Proximity 'Extraction' filaments drop you into
+                                  k-space within 2.5 ly of here. A Glorification
+                                  'Devana' filament instead drops you into one
+                                  of the 28 Triglavian Minor Victory Systems at
+                                  random (hi- or low-sec).
+                                </div>
                               </td>
                             </tr>
                           )}
