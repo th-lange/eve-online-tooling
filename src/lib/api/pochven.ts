@@ -42,12 +42,29 @@ export interface EntryCandidate {
   /** Pochven system(s) this candidate's C729 leads into. */
   leadsTo: string[];
 }
+/** A node in the entry-scan map. */
+export interface PochvenMapNode {
+  systemId: number;
+  name: string;
+  /** "origin" | "travel" | hisec | lowsec | nullsec. */
+  kind: string;
+  candidate: boolean;
+  origin: boolean;
+  jumps: number;
+  leadsTo: string[];
+}
+export interface PochvenMap {
+  nodes: PochvenMapNode[];
+  edges: [number, number][];
+}
 export interface EntrySearch {
   from: string;
   /** Jump path (system names) to the nearest candidate. */
   route: string[];
   /** Candidate exit systems, nearest first. */
   candidates: EntryCandidate[];
+  /** Scan map: candidates + the grey travel systems linking them. */
+  map: PochvenMap;
 }
 
 /**

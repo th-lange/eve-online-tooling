@@ -2,6 +2,11 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MapPin } from "lucide-react";
 import {
+  SystemGraph,
+  type SystemGraphNode,
+  type SystemGraphEdge,
+} from "../../components/SystemGraph";
+import {
   marketCurrentLocation,
   systemSearch,
   pochvenRoutes,
@@ -174,19 +179,89 @@ function EntryFinder() {
             {String(result.error)}
           </div>
         ) : result.data ? (
-          <EntryResults data={result.data} />
+          <EntryResults key={systemId} data={result.data} />
         ) : null)}
     </div>
   );
 }
 
 function EntryResults({ data }: { data: EntrySearchResult }) {
+  const originId = data.map.nodes.find((n) => n.origin)?.systemId ?? 0;
+  const storeKey = `pochven.visited.${originId}`;
+  const [visited, setVisited] = useState<Set<number>>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(storeKey) ?? "[]");
+      return new Set<number>(Array.isArray(raw) ? raw : []);
+    } catch {
+      return new Set();
+    }
+  });
+  const toggleVisited = (id: number) =>
+    setVisited((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      try {
+        localStorage.setItem(storeKey, JSON.stringify([...next]));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+
+  // Number the unvisited candidates by distance (what to visit next); visited
+  // ones show a check instead.
+  const order = useMemo(() => {
+    const m = new Map<number, number>();
+    let n = 0;
+    data.map.nodes
+      .filter((x) => x.candidate)
+      .sort((a, b) => a.jumps - b.jumps)
+      .forEach((c) => {
+        if (!visited.has(c.systemId)) m.set(c.systemId, ++n);
+      });
+    return m;
+  }, [data.map.nodes, visited]);
+
+  const graphNodes: SystemGraphNode[] = data.map.nodes.map((node) => {
+    const done = node.candidate && visited.has(node.systemId);
+    const num = order.get(node.systemId);
+    const prefix = node.origin
+      ? "⌂ "
+      : node.candidate
+        ? done
+          ? "✓ "
+          : num != null
+            ? `${num} `
+            : ""
+        : "";
+    return {
+      id: String(node.systemId),
+      label: `${prefix}${node.name}`,
+      kind:
+        node.kind === "hisec" ||
+        node.kind === "lowsec" ||
+        node.kind === "nullsec"
+          ? node.kind
+          : "unknown",
+      sub: node.candidate ? `→ ${node.leadsTo.join(" / ")}` : undefined,
+      current: node.origin,
+      accent: done ? "#34d399" : undefined,
+    };
+  });
+  const graphEdges: SystemGraphEdge[] = data.map.edges.map(([a, b]) => ({
+    source: String(a),
+    target: String(b),
+    variant: "stargate",
+  }));
+
   if (data.candidates.length === 0)
     return (
       <div className="mt-4 text-sm text-zinc-400">
         No C729 candidates reachable by gate from here — try a filament.
       </div>
     );
+
   return (
     <div className="mt-4 space-y-4">
       {data.route.length > 1 && (
@@ -213,14 +288,33 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
         </div>
       )}
 
+      {/* Scan map: grey = travel-through, coloured = candidate (numbered by what
+          to scan next; ✓ once you've clicked it as searched). */}
       <div>
-        <div className="mb-1 text-sm text-zinc-300">
-          Systems to jump &amp; scan (nearest first)
+        <div className="mb-1 flex flex-wrap items-center gap-x-3 text-xs text-zinc-500">
+          <span className="text-zinc-300">Scan map</span>
+          <span>numbers = scan order · click a system to tick it ✓</span>
+          <span className="text-zinc-600">grey = travel-through</span>
         </div>
-        <div className="overflow-auto rounded-lg border border-zinc-800">
+        <SystemGraph
+          nodes={graphNodes}
+          edges={graphEdges}
+          rootId={String(originId)}
+          height={420}
+          storageKey={`pochven-map-${originId}`}
+          onNodeClick={(id) => toggleVisited(Number(id))}
+        />
+      </div>
+
+      <details>
+        <summary className="cursor-pointer text-sm text-zinc-300 hover:text-zinc-100">
+          Systems to jump &amp; scan ({data.candidates.length})
+        </summary>
+        <div className="mt-2 overflow-auto rounded-lg border border-zinc-800">
           <table className="w-full border-collapse text-sm">
             <thead className="bg-zinc-900 text-zinc-400">
               <tr>
+                <th className="px-3 py-1.5 text-left font-medium">#</th>
                 <th className="px-3 py-1.5 text-left font-medium">System</th>
                 <th className="px-3 py-1.5 text-left font-medium">Region</th>
                 <th className="px-3 py-1.5 text-right font-medium">Jumps</th>
@@ -230,27 +324,36 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
               </tr>
             </thead>
             <tbody>
-              {data.candidates.map((c) => (
-                <tr
-                  key={c.system}
-                  className="border-t border-zinc-800 text-zinc-300"
-                >
-                  <td className="px-3 py-1.5 font-medium text-zinc-200">
-                    {c.system}
-                  </td>
-                  <td className="px-3 py-1.5 text-zinc-500">{c.region}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums">
-                    {c.jumps}
-                  </td>
-                  <td className="px-3 py-1.5 text-zinc-400">
-                    {c.leadsTo.join(", ")}
-                  </td>
-                </tr>
-              ))}
+              {data.candidates.map((c) => {
+                const node = data.map.nodes.find((n) => n.name === c.system);
+                const id = node?.systemId;
+                const done = id != null && visited.has(id);
+                return (
+                  <tr
+                    key={c.system}
+                    onClick={() => id != null && toggleVisited(id)}
+                    className="cursor-pointer border-t border-zinc-800 text-zinc-300 hover:bg-zinc-800/40"
+                  >
+                    <td className="px-3 py-1.5 tabular-nums text-zinc-500">
+                      {done ? "✓" : (id != null && order.get(id)) || "·"}
+                    </td>
+                    <td className="px-3 py-1.5 font-medium text-zinc-200">
+                      {c.system}
+                    </td>
+                    <td className="px-3 py-1.5 text-zinc-500">{c.region}</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">
+                      {c.jumps}
+                    </td>
+                    <td className="px-3 py-1.5 text-zinc-400">
+                      {c.leadsTo.join(", ")}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
-      </div>
+      </details>
     </div>
   );
 }
