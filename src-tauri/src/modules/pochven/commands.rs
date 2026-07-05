@@ -581,21 +581,19 @@ pub async fn pochven_search(
         });
     }
 
-    // Map = the Steiner tree, plus a shortest path for any in-range candidate it
-    // didn't cover (those beyond the terminal cap).
+    // Map = the shortest-path tree: each candidate reached by its OWN true
+    // shortest route from the origin over the full k-space graph. We deliberately
+    // do NOT draw the Steiner tree here — that minimises the *total* network and
+    // can route a candidate the long way round (through a shared branch) to save
+    // edges elsewhere, so its drawn route would show more jumps than the Jumps
+    // column. Routing each candidate independently uses whatever nearby systems
+    // are shortest (including ones with no Pochven link) and matches Jumps.
+    // (The Steiner tree above is used only to order the scan, not to draw it.)
     const MAP_CAP: usize = 30;
     let mut node_ids: HashSet<i64> = HashSet::from([system_id]);
     let mut edge_set: HashSet<(i64, i64)> = HashSet::new();
     let norm = |a: i64, b: i64| if a <= b { (a, b) } else { (b, a) };
-    for &(a, b) in &tree_edges {
-        edge_set.insert(norm(a, b));
-        node_ids.insert(a);
-        node_ids.insert(b);
-    }
     for &(cid, _) in in_range.iter().take(MAP_CAP) {
-        if node_ids.contains(&cid) {
-            continue;
-        }
         let path = path_ids(&pred, system_id, cid);
         for w in path.windows(2) {
             edge_set.insert(norm(w[0], w[1]));
