@@ -128,3 +128,28 @@ jobs:
         run: |
           gh release upload "${{ github.ref_name }}" \
             signed/**/*-setup.exe signed/**/*.msi --clobber
+
+  # Fill in the GitHub Release description once the builds are up: keep the
+  # download/unsigned note on top and append GitHub's auto-generated changelog
+  # (the merged PRs since the previous tag). Replaces the old fixed-text-only
+  # body that had to be hand-edited after every release.
+  notes:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Generate + set release notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          {
+            echo "Download the installer for your platform below. The builds are **unsigned** — see the README for how to open them on macOS/Windows."
+            echo
+            echo "---"
+            echo
+            gh api "repos/$REPO/releases/generate-notes" -f tag_name="$TAG" --jq .body
+          } > notes.md
+          gh release edit "$TAG" --repo "$REPO" --notes-file notes.md

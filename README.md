@@ -31,6 +31,13 @@ built as a set of feature **modules** over a shared service layer.
   graph, cross-chain routing (stargates ∪ your scanned holes), probe-scanner signature paste, a
   ship-mass **jump planner** (can this hull pass, and how many crossings until critical?), and an
   offline **wormhole reference** (per-type mass/lifetime table + per-system class/effect/statics).
+- **Pochven** — get into (and out of) Triglavian space: from your current system it plans the
+  **C729 entry scan** — the nearest wormhole-spawn candidates in a minimal-jump visiting order on an
+  interactive map (tick systems off as you scan, the green "next jump" leg follows you), with sec
+  status and recent kills per candidate. Plus a reference map of all **27 systems** (triangle on the
+  three clade homes, coloured by role/constellation), a full **filament guide** (inbound System-type
+  / Cladistic and outbound Proximity 'Extraction' targets within 2.5 ly, per system), and live
+  **hub-distance logistics** for every exit.
 - **Fitting** — build a ship fit (EFT import/export + local saves), validate slots / CPU / powergrid /
   calibration / drone bay, price the whole fit, and simulate PYFA-style stats — **DPS, per-weapon
   range (optimal/falloff, missiles, mining), EHP/tank with resist breakdown + active/passive reps,
@@ -41,7 +48,10 @@ built as a set of feature **modules** over a shared service layer.
   ECM "jammed" view).
 - **Shopping Lists** — keep named lists of items to buy (a built-in *default* and *production* list,
   plus your own), fed by "add to list" buttons across Market Search, Production, Station Trading and
-  Daytrading, with quantity editing and one-click in-game Multibuy export.
+  Daytrading, with quantity editing (incl. bulk +10/+100/×2/×10), moving items between lists, and
+  one-click in-game Multibuy export. **Chat capture**: listen to an EVE chat channel (a private
+  buy-orders channel, or Corp/Alliance/Fleet) and every item linked there lands in a *Chat* list —
+  non-item chatter is ignored.
 - **DPS Meter** — a live combat readout from your gamelog (à la PyEveLiveDPS): damage in/out, remote
   reps, cap warfare and mining as a moving-average graph, with per-pilot / per-weapon breakdowns and
   N× log playback. EULA-safe — it only reads the logs the client already writes.
