@@ -704,6 +704,14 @@ function PochvenSystemsPopover() {
   const byRole = useMemo(() => systemsByRole(), []);
   const byClade = useMemo(() => systemsByClade(), []);
   const [expanded, setExpanded] = useState<string | null>(null);
+  // Outbound 'Extraction' filament targets (k-space within 2.5 ly), per system.
+  const exitsByName = useMemo(
+    () =>
+      new Map(
+        (topo.data?.systems ?? []).map((s) => [s.name, s.exits] as const),
+      ),
+    [topo.data],
+  );
 
   const { nodes, edges } = useMemo(() => {
     // Use the real SDE map only when it carries both systems and gate links;
@@ -967,7 +975,8 @@ function PochvenSystemsPopover() {
                             <tr className="border-t border-zinc-800/60 bg-zinc-900/60">
                               <td colSpan={4} className="px-3 py-2">
                                 <div className="text-[11px] uppercase tracking-wide text-zinc-500">
-                                  Filaments that drop you into {s.name}
+                                  Inbound — filaments that drop you into{" "}
+                                  {s.name}
                                 </div>
                                 <ul className="mt-1 space-y-1 text-xs text-zinc-400">
                                   <li>
@@ -1004,6 +1013,61 @@ function PochvenSystemsPopover() {
                                   role / clade (★ = this one); a C729 wormhole
                                   is the only way to target a specific system.
                                 </div>
+
+                                {/* Outbound — Proximity 'Extraction' filament. */}
+                                <div className="mt-2.5 text-[11px] uppercase tracking-wide text-zinc-500">
+                                  Outbound — 'Extraction' filament (k-space
+                                  within 2.5 ly)
+                                </div>
+                                {(() => {
+                                  const exits = exitsByName.get(s.name);
+                                  if (exits == null)
+                                    return (
+                                      <div className="mt-1 text-xs text-zinc-600">
+                                        {topo.isLoading
+                                          ? "Loading…"
+                                          : "No data."}
+                                      </div>
+                                    );
+                                  if (exits.length === 0)
+                                    return (
+                                      <div className="mt-1 text-xs text-zinc-500">
+                                        No k-space within 2.5 ly — use a
+                                        Glorification 'Devana' filament or a
+                                        wormhole instead.
+                                      </div>
+                                    );
+                                  return (
+                                    <div className="mt-1 flex flex-wrap gap-1">
+                                      {exits.map((e) => (
+                                        <span
+                                          key={e.name}
+                                          className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs"
+                                          title={`${e.region} · ${e.lightYears.toFixed(2)} ly`}
+                                        >
+                                          <span
+                                            style={{
+                                              color:
+                                                BAND_HEX[
+                                                  e.security >= 0.45
+                                                    ? "hisec"
+                                                    : e.security > 0
+                                                      ? "lowsec"
+                                                      : "nullsec"
+                                                ],
+                                            }}
+                                          >
+                                            {e.name}
+                                          </span>
+                                          <span className="text-zinc-500">
+                                            {" "}
+                                            {e.lightYears.toFixed(1)} ly
+                                          </span>
+                                        </span>
+                                      ))}
+                                    </div>
+                                  );
+                                })()}
                               </td>
                             </tr>
                           )}

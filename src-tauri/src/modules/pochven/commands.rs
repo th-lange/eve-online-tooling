@@ -680,6 +680,17 @@ pub async fn pochven_search(
 
 // --- Reference map: real Pochven topology from the SDE ---
 
+/// A k-space system an 'Extraction' filament can drop you into from a Pochven
+/// system (within 2.5 ly of it).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExitTarget {
+    pub name: String,
+    pub security: f64,
+    pub region: String,
+    pub light_years: f64,
+}
+
 /// One Pochven system on the reference map, at its true galactic position.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -690,6 +701,9 @@ pub struct PochvenMapSystem {
     /// Galactic map-plane coordinates (x, z) — same plane dotlan plots.
     pub x: f64,
     pub y: f64,
+    /// K-space systems within 2.5 ly — where a Proximity 'Extraction' filament
+    /// activated here can drop you (nearest first).
+    pub exits: Vec<ExitTarget>,
 }
 
 /// The 27 Pochven systems + their internal stargate links, from the SDE.
@@ -710,18 +724,57 @@ pub async fn pochven_map(app: AppHandle) -> Result<PochvenTopology, String> {
     let poch_ids: HashSet<i64> = POCHVEN_CANDIDATES.iter().map(|&(_, id, _)| id).collect();
     let info = sde.solar_system_info().map_err(|e| e.to_string())?;
     let pos = sde.solar_system_positions().map_err(|e| e.to_string())?;
+    let geo = sde.solar_system_geo().map_err(|e| e.to_string())?;
+
+    // K-space systems (known space, i.e. regionID < 11_000_000 — excludes
+    // w-space / Abyssal — and not Pochven itself) for the 2.5 ly 'Extraction'
+    // filament range check.
+    const LY_M: f64 = 9.460_730_472_580_8e15; // one light-year in metres
+    const EXTRACTION_LY: f64 = 2.5;
+    let max_m = EXTRACTION_LY * LY_M;
+    const POCHVEN_REGION: i64 = 10_000_070;
+    let kspace: Vec<(i64, f64, f64, f64)> = geo
+        .iter()
+        .filter(|(_, (region, ..))| *region < 11_000_000 && *region != POCHVEN_REGION)
+        .map(|(&id, &(_, x, y, z))| (id, x, y, z))
+        .collect();
 
     let systems = POCHVEN_CANDIDATES
         .iter()
         .map(|&(name, id, _)| {
             let security = info.get(&id).map(|(_, s, _)| *s).unwrap_or(0.0);
             let (x, z) = pos.get(&id).copied().unwrap_or((0.0, 0.0));
+            // 'Extraction' filament targets: k-space within 2.5 ly of here.
+            let mut exits: Vec<ExitTarget> = Vec::new();
+            if let Some(&(_, px, py, pz)) = geo.get(&id) {
+                for &(kid, kx, ky, kz) in &kspace {
+                    let d = ((kx - px).powi(2) + (ky - py).powi(2) + (kz - pz).powi(2)).sqrt();
+                    if d <= max_m {
+                        let (kname, ksec, kregion) = info
+                            .get(&kid)
+                            .cloned()
+                            .unwrap_or_else(|| (format!("#{kid}"), 0.0, String::new()));
+                        exits.push(ExitTarget {
+                            name: kname,
+                            security: ksec,
+                            region: kregion,
+                            light_years: d / LY_M,
+                        });
+                    }
+                }
+                exits.sort_by(|a, b| {
+                    a.light_years
+                        .partial_cmp(&b.light_years)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
             PochvenMapSystem {
                 system_id: id,
                 name: name.to_string(),
                 security,
                 x,
                 y: z,
+                exits,
             }
         })
         .collect();

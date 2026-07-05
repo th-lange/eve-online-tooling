@@ -11,6 +11,9 @@ use super::types::{
 };
 use super::SdeError;
 
+/// A solar system's `(regionID, x, y, z)` — region id plus 3D metre coordinates.
+pub type SystemGeo = (i64, f64, f64, f64);
+
 /// A read-only handle to the SDE database. Opening is cheap, so callers may
 /// open one per request; this also means an SDE update (which swaps the file)
 /// is picked up on the next open.
@@ -1375,6 +1378,28 @@ impl Sde {
                 (
                     r.get::<_, Option<f64>>(1)?.unwrap_or(0.0),
                     r.get::<_, Option<f64>>(2)?.unwrap_or(0.0),
+                ),
+            ))
+        })?;
+        rows.collect::<Result<HashMap<_, _>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Full 3D galactic coordinates `(regionID, x, y, z)` in metres per solar
+    /// system — for true light-year distances (e.g. filament range). `y` is the
+    /// height off the map plane, which matters for distance.
+    pub fn solar_system_geo(&self) -> Result<HashMap<i64, SystemGeo>, SdeError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT solarSystemID, regionID, x, y, z FROM mapSolarSystems")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                (
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, Option<f64>>(2)?.unwrap_or(0.0),
+                    r.get::<_, Option<f64>>(3)?.unwrap_or(0.0),
+                    r.get::<_, Option<f64>>(4)?.unwrap_or(0.0),
                 ),
             ))
         })?;
