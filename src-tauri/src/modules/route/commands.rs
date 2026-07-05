@@ -258,6 +258,47 @@ pub struct BreadcrumbEntry {
     pub wspace: bool,
     /// Unix seconds this system was first recorded on this leg.
     pub entered_at: u64,
+    /// Gate jumps from the previous trail entry: 1 = direct gate, >1 = systems
+    /// were skipped between location polls, -1 = no gate path (wormhole /
+    /// filament / clone jump), 0 = unknown (trail start, or an entry recorded
+    /// before this field existed).
+    #[serde(default)]
+    pub gap_jumps: i64,
+}
+
+/// Gate distance between two systems over the stargate graph (BFS), or -1 when
+/// unreachable by gates. Capped: anything beyond `cap` also reports -1, so a
+/// runaway search on disconnected inputs stays cheap.
+fn gate_distance(sde: &Sde, from: i64, to: i64, cap: i64) -> i64 {
+    if from == to {
+        return 0;
+    }
+    let Ok(edges) = sde.all_stargate_edges() else {
+        return 0; // unknown — don't invent a gap on SDE trouble
+    };
+    let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
+    for (a, b) in edges {
+        adj.entry(a).or_default().push(b);
+        adj.entry(b).or_default().push(a);
+    }
+    let mut dist: HashMap<i64, i64> = HashMap::from([(from, 0)]);
+    let mut queue = std::collections::VecDeque::from([from]);
+    while let Some(u) = queue.pop_front() {
+        let du = dist[&u];
+        if du >= cap {
+            continue;
+        }
+        for &v in adj.get(&u).into_iter().flatten() {
+            if v == to {
+                return du + 1;
+            }
+            if let std::collections::hash_map::Entry::Vacant(e) = dist.entry(v) {
+                e.insert(du + 1);
+                queue.push_back(v);
+            }
+        }
+    }
+    -1
 }
 
 fn now_secs() -> u64 {
@@ -302,13 +343,24 @@ pub async fn route_location(
             .get(&loc.solar_system_id)
             .cloned()
             .unwrap_or_else(|| (format!("J{}", loc.solar_system_id), 0.0, String::new()));
+        // Gate distance from the previous entry, so the travel graph can tell a
+        // real gate hop (1) from a leg where polling skipped systems (>1) or
+        // non-gate travel like a wormhole/filament (-1). W-space endpoints have
+        // no gate graph — mark those -1 directly.
+        let wspace = loc.solar_system_id >= WSPACE_MIN_SYSTEM_ID;
+        let gap_jumps = match trail.last() {
+            None => 0,
+            Some(prev) if prev.wspace || wspace => -1,
+            Some(prev) => gate_distance(&sde, prev.system_id, loc.solar_system_id, 30),
+        };
         trail.push(BreadcrumbEntry {
             system_id: loc.solar_system_id,
             name,
             security,
             region,
-            wspace: loc.solar_system_id >= WSPACE_MIN_SYSTEM_ID,
+            wspace,
             entered_at: now_secs(),
+            gap_jumps,
         });
         if trail.len() > BREADCRUMB_CAP {
             let excess = trail.len() - BREADCRUMB_CAP;

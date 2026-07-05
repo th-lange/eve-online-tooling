@@ -6,7 +6,7 @@ import {
   type CSSProperties,
 } from "react";
 import { createPortal } from "react-dom";
-import { Maximize2, Minimize2 } from "lucide-react";
+import { Crosshair, Maximize2, Minimize2 } from "lucide-react";
 import {
   ReactFlow,
   Background,
@@ -223,7 +223,11 @@ function SystemNode({ data, selected }: NodeProps<Node<SystemNodeData>>) {
           : data.accent
             ? "bg-zinc-900 text-zinc-100"
             : kindClass(data.kind)
-      } ${data.current ? "ring-2 ring-emerald-400" : ""}`}
+      } ${
+        data.current
+          ? "ring-2 ring-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.45)]"
+          : ""
+      }`}
       style={filled || data.accent || data.ring || data.bg ? style : undefined}
     >
       {/* Hidden connection points so edges attach cleanly left↔right. */}
@@ -232,7 +236,13 @@ function SystemNode({ data, selected }: NodeProps<Node<SystemNodeData>>) {
         position={Position.Left}
         className="!bg-transparent !border-0"
       />
-      <div className="font-medium leading-tight">{data.label}</div>
+      <div className="flex items-center gap-1 font-medium leading-tight">
+        {/* Location marker: this tile is where you are right now. */}
+        {data.current && (
+          <Crosshair size={11} className="shrink-0 text-emerald-400" />
+        )}
+        <span>{data.label}</span>
+      </div>
       {data.sub && (
         <div className="text-[10px] opacity-70 leading-tight">{data.sub}</div>
       )}

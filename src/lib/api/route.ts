@@ -51,6 +51,10 @@ export interface BreadcrumbEntry {
   /** True for a wormhole (J-space) system. */
   wspace: boolean;
   enteredAt: number;
+  /** Gate jumps from the previous trail entry: 1 = direct gate, >1 = systems
+   *  skipped between polls, -1 = no gate path (wormhole/filament/clone),
+   *  0 = unknown (trail start or legacy entry). */
+  gapJumps: number;
 }
 
 /**
