@@ -9,6 +9,7 @@ use crate::esi::{EsiClient, EsiError};
 
 use super::aggregate::assemble_price_model;
 use super::cache::TtlCache;
+use super::flight::KeyLocks;
 use super::fuzzwork::{Aggregate, FuzzworkClient};
 use super::markets::Location;
 use super::types::{AdjustedPrice, HistoryDay, Order, PriceModel};
@@ -33,6 +34,12 @@ pub struct MarketService {
     aggregates: TtlCache<((i64, i64), i64), Aggregate>,
     // Global adjusted prices (one document for all types; the EIV basis).
     prices: TtlCache<(), Arc<HashMap<i64, AdjustedPrice>>>,
+    // Single-flight guards (see flight.rs): concurrent identical lookups
+    // collapse into one upstream request instead of each hitting ESI/Fuzzwork.
+    orders_flight: KeyLocks<(i64, i64)>,
+    history_flight: KeyLocks<(i64, i64)>,
+    aggregates_flight: KeyLocks<(i64, i64)>,
+    prices_flight: KeyLocks<()>,
 }
 
 impl Default for MarketService {
@@ -63,11 +70,22 @@ impl MarketService {
             history: TtlCache::new(Duration::from_secs(1200)),
             aggregates: TtlCache::new(Duration::from_secs(900)),
             prices: TtlCache::new(Duration::from_secs(3600)),
+            orders_flight: KeyLocks::new(),
+            history_flight: KeyLocks::new(),
+            aggregates_flight: KeyLocks::new(),
+            prices_flight: KeyLocks::new(),
         }
     }
 
     /// Spot orders for a type in a region (cached per region).
     async fn orders_for(&self, region_id: i64, type_id: i64) -> Result<Vec<Order>, EsiError> {
+        if let Some(cached) = self.orders.get(&(region_id, type_id)) {
+            return Ok(cached);
+        }
+        // Single-flight: if another caller is fetching this key, wait for it,
+        // then take the cache hit it left behind.
+        let gate = self.orders_flight.lock_for(&(region_id, type_id));
+        let _flight = gate.lock().await;
         if let Some(cached) = self.orders.get(&(region_id, type_id)) {
             return Ok(cached);
         }
@@ -106,6 +124,11 @@ impl MarketService {
         if let Some(cached) = self.history.get(&(region_id, type_id)) {
             return Ok(cached);
         }
+        let gate = self.history_flight.lock_for(&(region_id, type_id));
+        let _flight = gate.lock().await;
+        if let Some(cached) = self.history.get(&(region_id, type_id)) {
+            return Ok(cached);
+        }
         let path = format!("/latest/markets/{region_id}/history/");
         let history: Vec<HistoryDay> = match self
             .esi
@@ -122,6 +145,11 @@ impl MarketService {
 
     /// Global adjusted/average prices, keyed by type id (cached as a whole).
     async fn adjusted_prices(&self) -> Result<Arc<HashMap<i64, AdjustedPrice>>, EsiError> {
+        if let Some(cached) = self.prices.get(&()) {
+            return Ok(cached);
+        }
+        let gate = self.prices_flight.lock_for(&());
+        let _flight = gate.lock().await;
         if let Some(cached) = self.prices.get(&()) {
             return Ok(cached);
         }
@@ -199,10 +227,24 @@ impl MarketService {
             }
         }
         if !misses.is_empty() {
-            let fetched = self.fuzzwork.aggregates(location, &misses).await?;
-            for (type_id, agg) in fetched {
-                self.aggregates.put((key, type_id), agg.clone());
-                out.insert(type_id, agg);
+            // Single-flight per location: a concurrent scan of the same hub
+            // waits here, then re-checks the cache and fetches only what's
+            // still missing (usually nothing).
+            let gate = self.aggregates_flight.lock_for(&key);
+            let _flight = gate.lock().await;
+            misses.retain(|&type_id| match self.aggregates.get(&(key, type_id)) {
+                Some(agg) => {
+                    out.insert(type_id, agg);
+                    false
+                }
+                None => true,
+            });
+            if !misses.is_empty() {
+                let fetched = self.fuzzwork.aggregates(location, &misses).await?;
+                for (type_id, agg) in fetched {
+                    self.aggregates.put((key, type_id), agg.clone());
+                    out.insert(type_id, agg);
+                }
             }
         }
         Ok(out)

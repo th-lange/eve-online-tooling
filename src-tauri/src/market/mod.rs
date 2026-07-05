@@ -11,6 +11,7 @@ pub mod commands;
 
 mod aggregate;
 mod cache;
+mod flight;
 mod fuzzwork;
 mod markets;
 mod service;
