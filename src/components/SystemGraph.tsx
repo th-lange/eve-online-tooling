@@ -524,12 +524,17 @@ export function SystemGraph({
     const base = positionsFor(mode);
     setRfNodes((cur) => {
       const curPos = new Map(cur.map((n) => [n.id, n.position]));
-      return inputNodes.map((n) =>
-        toRfNode(
+      // Preserve which node is selected — otherwise a re-render (e.g. clicking a
+      // system on the scan map re-runs this effect) wipes the selection before
+      // its highlight can show.
+      const curSel = new Map(cur.map((n) => [n.id, n.selected]));
+      return inputNodes.map((n) => ({
+        ...toRfNode(
           n,
           curPos.get(n.id) ?? saved[n.id] ?? base.get(n.id) ?? { x: 0, y: 0 },
         ),
-      );
+        selected: curSel.get(n.id) ?? false,
+      }));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inputNodes, positionsFor, storageKey]);
