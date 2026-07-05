@@ -691,6 +691,23 @@ pub struct ExitTarget {
     pub light_years: f64,
 }
 
+/// C729 entry-candidate counts per security band for one Pochven system.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryBands {
+    pub hisec: i64,
+    pub lowsec: i64,
+    pub nullsec: i64,
+}
+
+/// A k-space region a system's C729 can spawn in, with its candidate count.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpawnRegion {
+    pub region: String,
+    pub count: i64,
+}
+
 /// One Pochven system on the reference map, at its true galactic position.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -704,6 +721,11 @@ pub struct PochvenMapSystem {
     /// K-space systems within 2.5 ly — where a Proximity 'Extraction' filament
     /// activated here can drop you (nearest first).
     pub exits: Vec<ExitTarget>,
+    /// Entry-candidate counts per security band, from the candidate dataset +
+    /// SDE securities (replaces the hand-curated frontend table).
+    pub bands: EntryBands,
+    /// Candidate counts per k-space spawn region, descending by count.
+    pub spawn_regions: Vec<SpawnRegion>,
 }
 
 /// The 27 Pochven systems + their internal stargate links, from the SDE.
@@ -741,9 +763,39 @@ pub async fn pochven_map(app: AppHandle) -> Result<PochvenTopology, String> {
 
     let systems = POCHVEN_CANDIDATES
         .iter()
-        .map(|&(name, id, _)| {
+        .map(|&(name, id, cands)| {
             let security = info.get(&id).map(|(_, s, _)| *s).unwrap_or(0.0);
             let (x, z) = pos.get(&id).copied().unwrap_or((0.0, 0.0));
+            // Candidate counts per security band and per k-space region — the
+            // frontend's reference table is derived from these, so the numbers
+            // can't drift from the candidate dataset.
+            let mut bands = EntryBands {
+                hisec: 0,
+                lowsec: 0,
+                nullsec: 0,
+            };
+            let mut per_region: HashMap<&str, i64> = HashMap::new();
+            for c in cands {
+                let Some((_, csec, cregion)) = info.get(c) else {
+                    continue;
+                };
+                if *csec >= HIGHSEC {
+                    bands.hisec += 1;
+                } else if *csec > 0.0 {
+                    bands.lowsec += 1;
+                } else {
+                    bands.nullsec += 1;
+                }
+                *per_region.entry(cregion.as_str()).or_default() += 1;
+            }
+            let mut spawn_regions: Vec<SpawnRegion> = per_region
+                .into_iter()
+                .map(|(region, count)| SpawnRegion {
+                    region: region.to_string(),
+                    count,
+                })
+                .collect();
+            spawn_regions.sort_by(|a, b| b.count.cmp(&a.count).then(a.region.cmp(&b.region)));
             // 'Extraction' filament targets: k-space within 2.5 ly of here.
             let mut exits: Vec<ExitTarget> = Vec::new();
             if let Some(&(_, px, py, pz)) = geo.get(&id) {
@@ -775,6 +827,8 @@ pub async fn pochven_map(app: AppHandle) -> Result<PochvenTopology, String> {
                 x,
                 y: z,
                 exits,
+                bands,
+                spawn_regions,
             }
         })
         .collect();

@@ -100,6 +100,19 @@ export interface ExitTarget {
   lightYears: number;
 }
 
+/** C729 entry-candidate counts per security band for one Pochven system. */
+export interface EntryBands {
+  hisec: number;
+  lowsec: number;
+  nullsec: number;
+}
+
+/** A k-space region a system's C729 can spawn in, with its candidate count. */
+export interface SpawnRegion {
+  region: string;
+  count: number;
+}
+
 /** One Pochven system on the reference map, at its true galactic position. */
 export interface PochvenMapSystem {
   systemId: number;
@@ -111,6 +124,10 @@ export interface PochvenMapSystem {
   /** K-space systems within 2.5 ly — where a Proximity 'Extraction' filament
    *  activated here can drop you (nearest first). */
   exits: ExitTarget[];
+  /** Entry-candidate counts per security band (from the backend dataset). */
+  bands: EntryBands;
+  /** Candidate counts per k-space spawn region, descending by count. */
+  spawnRegions: SpawnRegion[];
 }
 export interface PochvenTopology {
   systems: PochvenMapSystem[];
