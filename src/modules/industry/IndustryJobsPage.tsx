@@ -56,7 +56,8 @@ export function IndustryJobsPage() {
     queryKey: ["industry", "jobs", characterId ?? "first"],
     queryFn: () => industryJobs(characterId),
   });
-  const allRows = jobs.data?.jobs ?? [];
+  // Memoised so downstream useMemo deps stay referentially stable while loading.
+  const allRows = useMemo(() => jobs.data?.jobs ?? [], [jobs.data]);
   const slots = jobs.data?.slots;
   const [status, setStatus] = useState<StatusFilter>("active");
   const [facility, setFacility] = useState("all");
@@ -200,7 +201,8 @@ export function IndustryJobsPage() {
 }
 
 function JobsTable({ rows }: { rows: JobRow[] }) {
-  const now = useMemo(() => Date.now(), [rows]);
+  // Plain read: cheap, and each render shows current countdowns.
+  const now = Date.now();
   return (
     <div className="mt-3 overflow-auto rounded border border-zinc-800">
       <table className="w-full border-collapse text-sm">

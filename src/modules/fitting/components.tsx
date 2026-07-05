@@ -455,7 +455,7 @@ export const FIT_EPS = 1e-6;
 
 /** Does this module fit the hull's free slots + remaining resources? Unknown
  *  info or no context ⇒ treated as fitting (don't gray things out prematurely). */
-export function moduleFits(
+function moduleFits(
   info: ModuleInfo | undefined,
   ctx: FitContext | null,
 ): boolean {
@@ -464,7 +464,7 @@ export function moduleFits(
 
 /** Why a module won't fit (`"no slot"` / `"CPU"` / `"PG"` / `"calibration"`), or
  *  null when it fits. */
-export function fitReason(
+function fitReason(
   info: ModuleInfo | undefined,
   ctx: FitContext | null,
 ): string | null {
@@ -480,7 +480,7 @@ export function fitReason(
 
 /** Lower = better fuzzy match of `name` against the (already term-filtered)
  *  query: prefix beats substring beats scattered terms; ties broken by length. */
-export function fuzzyScore(name: string, q: string): number {
+function fuzzyScore(name: string, q: string): number {
   const n = name.toLowerCase();
   const query = q.toLowerCase().trim();
   if (!query) return 0;
@@ -496,15 +496,15 @@ export function fuzzyScore(name: string, q: string): number {
 }
 
 /** Metres → a compact "X.X km" label. */
-export function km(metres: number): string {
+function km(metres: number): string {
   const v = metres / 1000;
   return `${v >= 100 ? Math.round(v) : v.toFixed(1)} km`;
 }
 
-export const DAMAGE_TYPES = ["EM", "Th", "Kin", "Exp"] as const;
+const DAMAGE_TYPES = ["EM", "Th", "Kin", "Exp"] as const;
 
 /** A resist % cell, tinted greener the higher the resistance (spot tank holes). */
-export function resistClass(v: number): string {
+function resistClass(v: number): string {
   if (v >= 0.5) return "text-emerald-400";
   if (v >= 0.3) return "text-emerald-500/80";
   if (v > 0) return "text-zinc-300";
@@ -550,7 +550,7 @@ export function TankResists({ tank }: { tank: TankStats }) {
   );
 }
 
-export const SLOT_BADGE: Partial<Record<SlotKind, string>> = {
+const SLOT_BADGE: Partial<Record<SlotKind, string>> = {
   high: "High",
   mid: "Mid",
   low: "Low",

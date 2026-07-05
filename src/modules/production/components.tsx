@@ -350,24 +350,6 @@ export function ListView({
 
 // --- small helpers / components ---
 
-export function uniqueSorted(
-  rows: ProfitBreakdown[],
-  pick: (r: ProfitBreakdown) => string | null,
-): string[] {
-  const set = new Set<string>();
-  for (const r of rows) {
-    const v = pick(r);
-    if (v) set.add(v);
-  }
-  return [...set].sort();
-}
-
-export function toggle(set: Set<string>, v: string): Set<string> {
-  const next = new Set(set);
-  next.has(v) ? next.delete(v) : next.add(v);
-  return next;
-}
-
 export function Tabs({
   tab,
   onChange,

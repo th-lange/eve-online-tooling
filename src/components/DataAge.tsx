@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 /** Compact "X min/h/d ago" from a millisecond epoch timestamp. */
-export function agoMs(ms: number): string {
+function agoMs(ms: number): string {
   const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
   if (s < 60) return "just now";
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;

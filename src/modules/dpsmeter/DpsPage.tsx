@@ -1,6 +1,6 @@
 import { memo, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Play, Square } from "lucide-react";
-import { ModuleActiveContext } from "../../components/Layout";
+import { ModuleActiveContext } from "../../components/moduleActiveContext";
 import {
   dpsListLogs,
   dpsPlayback,
