@@ -92,6 +92,14 @@ export function pochvenSearch(
   return invoke<EntrySearch>("pochven_search", { systemId, maxJumps });
 }
 
+/** A k-space system a 'Extraction' filament can reach from a Pochven system. */
+export interface ExitTarget {
+  name: string;
+  security: number;
+  region: string;
+  lightYears: number;
+}
+
 /** One Pochven system on the reference map, at its true galactic position. */
 export interface PochvenMapSystem {
   systemId: number;
@@ -100,6 +108,9 @@ export interface PochvenMapSystem {
   /** Galactic map-plane coordinates (x, z) — the plane dotlan plots. */
   x: number;
   y: number;
+  /** K-space systems within 2.5 ly — where a Proximity 'Extraction' filament
+   *  activated here can drop you (nearest first). */
+  exits: ExitTarget[];
 }
 export interface PochvenTopology {
   systems: PochvenMapSystem[];
