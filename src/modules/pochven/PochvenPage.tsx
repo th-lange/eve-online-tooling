@@ -667,9 +667,11 @@ function PochvenSystemsPopover() {
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
-  // Real Pochven map from the SDE: true galactic positions + internal stargate
-  // links (matches dotlan / the in-game map). Falls back to a schematic triangle
-  // while the SDE data loads. Drag to move; Reset restores the layout.
+  // Real Pochven gate links from the SDE, laid out as a triangle whose corners
+  // are the three clade home systems (Kino / Archee / Niarja). Each other system
+  // is placed by its gate-distance to the three homes (inverse-distance blend),
+  // so clade-mates cluster toward their home and border systems sit between two
+  // corners. Falls back to a schematic triangle while the SDE data loads.
   const topo = useQuery({
     queryKey: ["pochven", "map"],
     queryFn: pochvenMap,
@@ -682,27 +684,66 @@ function PochvenSystemsPopover() {
     // otherwise keep the schematic triangle so the map never looks disconnected.
     if (topo.data && topo.data.systems.length && topo.data.edges.length) {
       const sys = topo.data.systems;
-      const xs = sys.map((s) => s.x);
-      const ys = sys.map((s) => s.y);
-      const minX = Math.min(...xs);
-      const maxX = Math.max(...xs);
-      const minY = Math.min(...ys);
-      const maxY = Math.max(...ys);
       const W = 880;
       const H = 560;
-      // EVE's z grows "up"; screen y grows down, so flip y for a north-up map.
-      const nx = (x: number) =>
-        maxX > minX ? ((x - minX) / (maxX - minX)) * W : W / 2;
-      const ny = (y: number) =>
-        maxY > minY ? (1 - (y - minY) / (maxY - minY)) * H : H / 2;
-      const nodes: SystemGraphNode[] = sys.map((s) => ({
-        id: String(s.systemId),
-        label: s.name,
-        x: nx(s.x),
-        y: ny(s.y),
-        ...systemVisual(s.name),
-        kind: systemVisual(s.name).kind ?? "unknown",
-      }));
+      // Triangle corners = the three clade home systems.
+      const CORNERS: Record<string, [number, number]> = {
+        Kino: [W / 2, 30], // Perun — top
+        Archee: [40, H - 20], // Veles — bottom-left
+        Niarja: [W - 40, H - 20], // Svarog — bottom-right
+      };
+      const homes = ["Kino", "Archee", "Niarja"] as const;
+      const idOf = new Map(sys.map((s) => [s.name, s.systemId]));
+      // Gate adjacency + BFS distance from each home.
+      const adj = new Map<number, number[]>();
+      const add = (a: number, b: number) => {
+        const l = adj.get(a);
+        if (l) l.push(b);
+        else adj.set(a, [b]);
+      };
+      for (const [a, b] of topo.data.edges) {
+        add(a, b);
+        add(b, a);
+      }
+      const bfs = (start: number) => {
+        const dist = new Map<number, number>([[start, 0]]);
+        const q = [start];
+        while (q.length) {
+          const u = q.shift()!;
+          for (const v of adj.get(u) ?? [])
+            if (!dist.has(v)) {
+              dist.set(v, dist.get(u)! + 1);
+              q.push(v);
+            }
+        }
+        return dist;
+      };
+      const dists = homes.map((h) => bfs(idOf.get(h) ?? -1));
+      const place = (id: number, name: string) => {
+        if (CORNERS[name]) return { x: CORNERS[name][0], y: CORNERS[name][1] };
+        let wx = 0;
+        let wy = 0;
+        let ws = 0;
+        homes.forEach((h, i) => {
+          const d = dists[i].get(id);
+          const w = d == null ? 0 : 1 / (d + 1);
+          wx += w * CORNERS[h][0];
+          wy += w * CORNERS[h][1];
+          ws += w;
+        });
+        return ws === 0 ? { x: W / 2, y: H / 2 } : { x: wx / ws, y: wy / ws };
+      };
+      const nodes: SystemGraphNode[] = sys.map((s) => {
+        const p = place(s.systemId, s.name);
+        return {
+          id: String(s.systemId),
+          label: s.name,
+          x: p.x,
+          y: p.y,
+          ...systemVisual(s.name),
+          kind: systemVisual(s.name).kind ?? "unknown",
+        };
+      });
       const edges: SystemGraphEdge[] = topo.data.edges.map(([a, b]) => ({
         source: String(a),
         target: String(b),
@@ -755,8 +796,8 @@ function PochvenSystemsPopover() {
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[11px] text-zinc-500">
                     <span>
-                      true map (SDE positions + internal gates) · drag to move,
-                      Reset restores
+                      triangle on the clade homes (Kino / Archee / Niarja) ·
+                      real gate links · drag to move, Reset restores
                     </span>
                     {(["hisec", "lowsec", "nullsec"] as const).map((b) => (
                       <span key={b} className="flex items-center gap-1">
