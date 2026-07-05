@@ -149,6 +149,7 @@ pub fn run() {
             modules::notifications::commands::notification_dismiss,
             modules::notifications::commands::notifications_reset,
             modules::pochven::commands::pochven_routes,
+            modules::pochven::commands::pochven_search,
             modules::pi::commands::pi_overview,
             modules::pi::commands::pi_show_in_game,
             modules::pi::commands::pi_locked_get,

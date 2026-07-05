@@ -2,10 +2,12 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MapPin } from "lucide-react";
 import {
-  marketAllRegions,
   marketCurrentLocation,
+  systemSearch,
   pochvenRoutes,
+  pochvenSearch,
   type PochvenStat,
+  type EntrySearch as EntrySearchResult,
 } from "../../lib/api";
 import {
   C729,
@@ -14,137 +16,22 @@ import {
   FILAMENTS,
   systemsByRole,
   systemsByClade,
-  entriesInRegion,
-  pochvenRegions,
   INTERNAL,
 } from "./data";
 
-// Pochven entry finder (#415): given your region, which Pochven systems' C729
-// wormholes can spawn near you. C729 spawn zones are fixed per system (Electus
-// Matari data); the exact hole is still scanned in-game within that zone.
+// Pochven "get me in" tools + reference (epic #417).
 export function PochvenPage() {
-  const [region, setRegion] = useState<string | null>(null);
-
-  const regions = useQuery({
-    queryKey: ["market", "allRegions"],
-    queryFn: marketAllRegions,
-    staleTime: Infinity,
-  });
-  const location = useQuery({
-    queryKey: ["market", "currentLocation"],
-    queryFn: marketCurrentLocation,
-    staleTime: 60_000,
-  });
-
-  const matches = useMemo(
-    () => (region ? entriesInRegion(region) : []),
-    [region],
-  );
-  const hasEntries = useMemo(() => new Set(pochvenRegions()), []);
-
   return (
     <div className="mx-auto max-w-4xl p-6">
       <h1 className="text-2xl font-semibold text-zinc-100">Pochven entry</h1>
       <p className="mt-1 max-w-2xl text-sm text-zinc-400">
-        Each Pochven system has one <strong>C729</strong> wormhole whose k-space
-        side spawns in a fixed set of regions. Pick your region (or detect it)
-        to see which Pochven systems you could reach — the exact hole is still
-        scanned in-game within that zone.
+        Pochven has no gates to k-space — you get in via a <strong>C729</strong>{" "}
+        wormhole or a filament. Enter your current system and it'll route you to
+        the nearest C729 spawn candidate and list the systems to jump &amp;
+        scan.
       </p>
 
-      {/* Region picker + detect. */}
-      <div className="mt-5 flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-xs text-zinc-400">
-          Your region
-          <select
-            value={region ?? ""}
-            onChange={(e) => setRegion(e.currentTarget.value || null)}
-            className="w-64 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
-          >
-            <option value="">Select a region…</option>
-            {(regions.data ?? [])
-              .slice()
-              .sort((a, b) => a.name.localeCompare(b.name))
-              .map((r) => (
-                <option key={r.id} value={r.name}>
-                  {r.name}
-                  {hasEntries.has(r.name) ? " ★" : ""}
-                </option>
-              ))}
-          </select>
-        </label>
-        <button
-          onClick={() => {
-            const loc = location.data;
-            if (loc) setRegion(loc.regionName);
-            else location.refetch();
-          }}
-          disabled={location.isFetching}
-          title="Use your logged-in character's current region"
-          className="flex items-center gap-1.5 rounded border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-        >
-          <MapPin size={13} /> Detect my location
-        </button>
-        {location.data && (
-          <span className="pb-1 text-xs text-zinc-500">
-            You're in{" "}
-            <span className="text-zinc-300">{location.data.systemName}</span> ·{" "}
-            {location.data.regionName}
-          </span>
-        )}
-      </div>
-      <div className="mt-1 text-[11px] text-zinc-600">
-        ★ = region has at least one Pochven entry.
-      </div>
-
-      {/* Results. */}
-      {region && (
-        <div className="mt-5">
-          {matches.length === 0 ? (
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 text-sm text-zinc-400">
-              No Pochven C729 entries spawn in <strong>{region}</strong>. Head
-              to a neighbouring region with a ★, or use a filament.
-            </div>
-          ) : (
-            <>
-              <div className="mb-2 text-sm text-zinc-300">
-                {matches.length} Pochven system
-                {matches.length === 1 ? "" : "s"} reachable from{" "}
-                <span className="font-medium text-zinc-100">{region}</span>
-              </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {matches
-                  .slice()
-                  .sort((a, b) => b.count - a.count)
-                  .map((m) => (
-                    <div
-                      key={m.name}
-                      className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3"
-                    >
-                      <div className="flex items-baseline justify-between">
-                        <span className="font-medium text-zinc-100">
-                          {m.name}
-                        </span>
-                        <span className="text-xs text-zinc-400">
-                          {m.count} candidate{m.count === 1 ? "" : "s"} in{" "}
-                          {region}
-                        </span>
-                      </div>
-                      {m.others.length > 0 && (
-                        <div className="mt-1 text-[11px] text-zinc-500">
-                          also spawns in{" "}
-                          {m.others
-                            .map((z) => `${z.region} (${z.count})`)
-                            .join(", ")}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-              </div>
-            </>
-          )}
-        </div>
-      )}
+      <EntryFinder />
 
       {/* C729 specs. */}
       <div className="mt-6 flex flex-wrap gap-x-6 gap-y-1 rounded-lg border border-zinc-800 bg-zinc-900/40 px-4 py-3 text-xs text-zinc-400">
@@ -200,6 +87,170 @@ export function PochvenPage() {
         Entry data: Electus Matari Pochven entry manual. Hub distances computed
         live over the stargate graph.
       </p>
+    </div>
+  );
+}
+
+// Active entry search: from your current system, route to the nearest C729
+// candidate and list the systems to jump & scan.
+function EntryFinder() {
+  const [systemId, setSystemId] = useState<number | null>(null);
+  const [label, setLabel] = useState("");
+  const [query, setQuery] = useState("");
+
+  const search = useQuery({
+    queryKey: ["system", "search", query],
+    queryFn: () => systemSearch(query),
+    enabled: query.trim().length >= 2,
+    staleTime: 60_000,
+  });
+  const location = useQuery({
+    queryKey: ["market", "currentLocation"],
+    queryFn: marketCurrentLocation,
+    staleTime: 60_000,
+    enabled: false,
+  });
+  const result = useQuery({
+    queryKey: ["pochven", "search", systemId],
+    queryFn: () => pochvenSearch(systemId!),
+    enabled: systemId != null,
+    staleTime: 5 * 60_000,
+  });
+
+  const pick = (id: number, name: string) => {
+    setSystemId(id);
+    setLabel(name);
+    setQuery("");
+  };
+
+  return (
+    <div className="mt-5">
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="relative flex flex-col gap-1 text-xs text-zinc-400">
+          Your current system
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.currentTarget.value)}
+            placeholder={label || "Search a system…"}
+            className="w-64 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+          />
+          {query.trim().length >= 2 && (search.data?.length ?? 0) > 0 && (
+            <div className="absolute top-full z-20 mt-1 max-h-56 w-64 overflow-auto rounded border border-zinc-700 bg-zinc-800 shadow-lg">
+              {search.data!.slice(0, 25).map((m) => (
+                <button
+                  key={m.id}
+                  onClick={() => pick(m.id, m.name)}
+                  className="block w-full px-2 py-1 text-left text-sm text-zinc-200 hover:bg-zinc-700"
+                >
+                  {m.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </label>
+        <button
+          onClick={async () => {
+            const loc = await location.refetch();
+            if (loc.data) pick(loc.data.systemId, loc.data.systemName);
+          }}
+          disabled={location.isFetching}
+          title="Use your logged-in character's current system"
+          className="flex items-center gap-1.5 rounded border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+        >
+          <MapPin size={13} /> Detect
+        </button>
+        {label && (
+          <span className="pb-1 text-xs text-zinc-500">
+            from <span className="text-zinc-300">{label}</span>
+          </span>
+        )}
+      </div>
+
+      {systemId != null &&
+        (result.isLoading ? (
+          <div className="mt-4 text-sm text-zinc-500">Finding entries…</div>
+        ) : result.isError ? (
+          <div className="mt-4 text-sm text-rose-400">
+            {String(result.error)}
+          </div>
+        ) : result.data ? (
+          <EntryResults data={result.data} />
+        ) : null)}
+    </div>
+  );
+}
+
+function EntryResults({ data }: { data: EntrySearchResult }) {
+  if (data.candidates.length === 0)
+    return (
+      <div className="mt-4 text-sm text-zinc-400">
+        No C729 candidates reachable by gate from here — try a filament.
+      </div>
+    );
+  return (
+    <div className="mt-4 space-y-4">
+      {data.route.length > 1 && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+            Route to the nearest candidate ({data.route.length - 1} jumps)
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-1 text-sm">
+            {data.route.map((s, i) => (
+              <span key={i} className="flex items-center gap-1">
+                {i > 0 && <span className="text-zinc-600">→</span>}
+                <span
+                  className={
+                    i === data.route.length - 1
+                      ? "font-medium text-sky-300"
+                      : "text-zinc-300"
+                  }
+                >
+                  {s}
+                </span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <div className="mb-1 text-sm text-zinc-300">
+          Systems to jump &amp; scan (nearest first)
+        </div>
+        <div className="overflow-auto rounded-lg border border-zinc-800">
+          <table className="w-full border-collapse text-sm">
+            <thead className="bg-zinc-900 text-zinc-400">
+              <tr>
+                <th className="px-3 py-1.5 text-left font-medium">System</th>
+                <th className="px-3 py-1.5 text-left font-medium">Region</th>
+                <th className="px-3 py-1.5 text-right font-medium">Jumps</th>
+                <th className="px-3 py-1.5 text-left font-medium">
+                  C729 leads to
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.candidates.map((c) => (
+                <tr
+                  key={c.system}
+                  className="border-t border-zinc-800 text-zinc-300"
+                >
+                  <td className="px-3 py-1.5 font-medium text-zinc-200">
+                    {c.system}
+                  </td>
+                  <td className="px-3 py-1.5 text-zinc-500">{c.region}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">
+                    {c.jumps}
+                  </td>
+                  <td className="px-3 py-1.5 text-zinc-400">
+                    {c.leadsTo.join(", ")}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
