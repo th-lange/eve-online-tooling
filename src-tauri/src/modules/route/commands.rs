@@ -266,20 +266,22 @@ pub struct BreadcrumbEntry {
     pub gap_jumps: i64,
 }
 
-/// Gate distance between two systems over the stargate graph (BFS), or -1 when
-/// unreachable by gates. Capped: anything beyond `cap` also reports -1, so a
-/// runaway search on disconnected inputs stays cheap.
-fn gate_distance(sde: &Sde, from: i64, to: i64, cap: i64) -> i64 {
-    if from == to {
-        return 0;
-    }
-    let Ok(edges) = sde.all_stargate_edges() else {
-        return 0; // unknown — don't invent a gap on SDE trouble
-    };
+/// Undirected stargate adjacency for gate-distance checks.
+fn gate_adjacency(sde: &Sde) -> Result<HashMap<i64, Vec<i64>>, String> {
     let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
-    for (a, b) in edges {
+    for (a, b) in sde.all_stargate_edges().map_err(|e| e.to_string())? {
         adj.entry(a).or_default().push(b);
         adj.entry(b).or_default().push(a);
+    }
+    Ok(adj)
+}
+
+/// Gate distance between two systems (BFS over `adj`), or -1 when unreachable
+/// by gates. Capped: anything beyond `cap` also reports -1, so a runaway search
+/// on disconnected inputs stays cheap.
+fn gate_distance_over(adj: &HashMap<i64, Vec<i64>>, from: i64, to: i64, cap: i64) -> i64 {
+    if from == to {
+        return 0;
     }
     let mut dist: HashMap<i64, i64> = HashMap::from([(from, 0)]);
     let mut queue = std::collections::VecDeque::from([from]);
@@ -299,6 +301,15 @@ fn gate_distance(sde: &Sde, from: i64, to: i64, cap: i64) -> i64 {
         }
     }
     -1
+}
+
+/// [`gate_distance_over`] with a one-shot adjacency build. Returns 0
+/// ("unknown") on SDE trouble rather than inventing a gap.
+fn gate_distance(sde: &Sde, from: i64, to: i64, cap: i64) -> i64 {
+    match gate_adjacency(sde) {
+        Ok(adj) => gate_distance_over(&adj, from, to, cap),
+        Err(_) => 0,
+    }
 }
 
 fn now_secs() -> u64 {
@@ -371,11 +382,33 @@ pub async fn route_location(
     Ok(trail)
 }
 
-/// The stored travel trail without polling ESI.
+/// The stored travel trail without polling ESI. Entries recorded before
+/// `gap_jumps` existed are backfilled here (and persisted), so old trails also
+/// render honestly — solid lines only where the hop really was one gate.
 #[tauri::command]
 pub fn route_breadcrumb(app: AppHandle) -> Result<Vec<BreadcrumbEntry>, AppError> {
     let (dir, _id, key) = breadcrumb_key(&app)?;
-    Ok(storage::load_data(&dir, &key).unwrap_or_default())
+    let mut trail: Vec<BreadcrumbEntry> = storage::load_data(&dir, &key).unwrap_or_default();
+    if trail.iter().skip(1).any(|e| e.gap_jumps == 0) {
+        if let Ok(sde) = Sde::open(&SdePaths::new(dir.clone()).db) {
+            if let Ok(adj) = gate_adjacency(&sde) {
+                for i in 1..trail.len() {
+                    if trail[i].gap_jumps != 0 {
+                        continue;
+                    }
+                    let prev = trail[i - 1].clone();
+                    let cur = &mut trail[i];
+                    cur.gap_jumps = if prev.wspace || cur.wspace {
+                        -1
+                    } else {
+                        gate_distance_over(&adj, prev.system_id, cur.system_id, 30)
+                    };
+                }
+                let _ = storage::save_data(&dir, &key, &trail);
+            }
+        }
+    }
+    Ok(trail)
 }
 
 /// Clear the travel trail.
