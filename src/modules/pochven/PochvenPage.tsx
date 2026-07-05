@@ -328,7 +328,9 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
                 <th className="px-3 py-1.5 text-left font-medium">#</th>
                 <th className="px-3 py-1.5 text-left font-medium">System</th>
                 <th className="px-3 py-1.5 text-left font-medium">Region</th>
+                <th className="px-3 py-1.5 text-right font-medium">Sec</th>
                 <th className="px-3 py-1.5 text-right font-medium">Jumps</th>
+                <th className="px-3 py-1.5 text-right font-medium">Kills 1h</th>
                 <th className="px-3 py-1.5 text-left font-medium">
                   C729 leads to
                 </th>
@@ -339,6 +341,12 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
                 const node = data.map.nodes.find((n) => n.name === c.system);
                 const id = node?.systemId;
                 const done = id != null && visited.has(id);
+                const band =
+                  c.security >= 0.45
+                    ? "hisec"
+                    : c.security > 0
+                      ? "lowsec"
+                      : "nullsec";
                 return (
                   <tr
                     key={c.system}
@@ -352,8 +360,21 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
                       {c.system}
                     </td>
                     <td className="px-3 py-1.5 text-zinc-500">{c.region}</td>
+                    <td
+                      className="px-3 py-1.5 text-right tabular-nums"
+                      style={{ color: BAND_HEX[band] }}
+                    >
+                      {c.security.toFixed(1)}
+                    </td>
                     <td className="px-3 py-1.5 text-right tabular-nums">
                       {c.jumps}
+                    </td>
+                    <td
+                      className={`px-3 py-1.5 text-right tabular-nums ${
+                        c.kills > 0 ? "text-rose-300" : "text-zinc-600"
+                      }`}
+                    >
+                      {c.kills > 0 ? c.kills : "—"}
                     </td>
                     <td className="px-3 py-1.5 text-zinc-400">
                       {c.leadsTo.join(", ")}

@@ -207,6 +207,34 @@ pub async fn pochven_routes(app: AppHandle) -> Result<PochvenRoutes, String> {
 /// A BFS result: (distance per system, predecessor per system).
 type Bfs = (HashMap<i64, i64>, HashMap<i64, i64>);
 
+/// Raw `/universe/system_kills/` entry (public, hourly).
+#[derive(Deserialize)]
+struct EsiKills {
+    system_id: i64,
+    #[serde(default)]
+    ship_kills: i64,
+    #[serde(default)]
+    pod_kills: i64,
+}
+
+/// Ship + pod kills per system (last hour), from public ESI. Cached ~5 min;
+/// best-effort (empty on failure — the search still works).
+async fn system_kills(dir: &std::path::Path) -> HashMap<i64, i64> {
+    if let Some(c) = storage::cache_get::<HashMap<i64, i64>>(dir, "pochven_kills") {
+        return c;
+    }
+    let rows: Vec<EsiKills> = crate::esi::EsiClient::new()
+        .get_json("/latest/universe/system_kills/", &[])
+        .await
+        .unwrap_or_default();
+    let map: HashMap<i64, i64> = rows
+        .into_iter()
+        .map(|k| (k.system_id, k.ship_kills + k.pod_kills))
+        .collect();
+    let _ = storage::cache_put(dir, "pochven_kills", &map, 300);
+    map
+}
+
 /// Shortest-jump BFS from `start`: distance + predecessor per reachable system.
 fn bfs(adj: &HashMap<i64, Vec<i64>>, start: i64) -> Bfs {
     let mut dist: HashMap<i64, i64> = HashMap::from([(start, 0)]);
@@ -248,6 +276,10 @@ fn path_ids(pred: &HashMap<i64, i64>, from: i64, to: i64) -> Vec<i64> {
 pub struct EntryCandidate {
     pub system: String,
     pub region: String,
+    /// Security status of the candidate system.
+    pub security: f64,
+    /// Ship + pod kills in the last hour (ESI hourly aggregate).
+    pub kills: i64,
     /// Jumps from the searcher's current system.
     pub jumps: i64,
     /// Scan order (1-based) along the nearest-neighbour route.
@@ -317,7 +349,8 @@ pub async fn pochven_search(
     max_jumps: Option<i64>,
 ) -> Result<EntrySearch, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    let kills = system_kills(&dir).await;
 
     let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
     for (a, b) in sde.all_stargate_edges().map_err(|e| e.to_string())? {
@@ -502,7 +535,7 @@ pub async fn pochven_search(
         .iter()
         .take(60)
         .map(|&(id, j)| {
-            let (sys, _sec, region) = info
+            let (sys, sec, region) = info
                 .get(&id)
                 .cloned()
                 .unwrap_or_else(|| (format!("#{id}"), 0.0, String::new()));
@@ -512,6 +545,8 @@ pub async fn pochven_search(
             EntryCandidate {
                 system: sys,
                 region,
+                security: sec,
+                kills: kills.get(&id).copied().unwrap_or(0),
                 jumps: j,
                 order: order_map.get(&id).copied().unwrap_or(0),
                 leads_to: lt,
