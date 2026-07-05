@@ -73,3 +73,35 @@ export function shoppingRemoveItem(id: string, typeId: number): Promise<void> {
 export function shoppingClearList(id: string): Promise<void> {
   return invoke<void>("shopping_clear_list", { id });
 }
+
+/** Move an item between lists (whole entry unless `quantity` is given). */
+export function shoppingMoveItem(
+  fromId: string,
+  toId: string,
+  typeId: number,
+  quantity?: number,
+): Promise<void> {
+  return invoke<void>("shopping_move_item", { fromId, toId, typeId, quantity });
+}
+
+/** Result of a chat-capture poll. */
+export interface ChatSync {
+  /** Item names newly added to the Chat list this poll. */
+  added: string[];
+  /** The chatlog file being followed (empty if none matched the channel). */
+  file: string;
+  /** Whether a matching chatlog file was found. */
+  found: boolean;
+}
+
+/**
+ * Follow an EVE chat channel's log and add linked/typed items to the Chat list.
+ * `logsDir` is the EVE Chatlogs folder; `channel` is the channel name. Poll
+ * every few seconds while listening.
+ */
+export function shoppingChatSync(
+  logsDir: string,
+  channel: string,
+): Promise<ChatSync> {
+  return invoke<ChatSync>("shopping_chat_sync", { logsDir, channel });
+}

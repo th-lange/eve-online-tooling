@@ -22,6 +22,19 @@ const BUILTIN: [(&str, &str); 2] = [("default", "Default"), ("production", "Prod
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct Store {
     lists: Vec<StoredList>,
+    /// Progress marker for the chat-capture listener (see `shopping_chat_sync`).
+    #[serde(default)]
+    chat: ChatState,
+}
+
+/// Where the chat listener left off, so we only ingest new messages.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct ChatState {
+    channel: String,
+    /// The chatlog file currently being followed.
+    file: String,
+    /// Number of message lines already processed from `file`.
+    count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -316,4 +329,217 @@ pub fn shopping_clear_list(app: AppHandle, id: String) -> Result<(), String> {
     let mut store = load(&dir);
     list_mut(&mut store, &id)?.items.clear();
     save(&dir, &store)
+}
+
+/// Move an item between lists. Moves `quantity` if given (capped to what's
+/// there), otherwise the whole entry. Quantities accumulate on the target;
+/// the source entry is removed once it hits zero. No-op if `from == to`.
+#[tauri::command]
+pub fn shopping_move_item(
+    app: AppHandle,
+    from_id: String,
+    to_id: String,
+    type_id: i64,
+    quantity: Option<i64>,
+) -> Result<(), String> {
+    if from_id == to_id {
+        return Ok(());
+    }
+    let (dir, _sde) = dir_and_sde(&app)?;
+    let mut store = load(&dir);
+
+    // Take from the source.
+    let moved;
+    {
+        let src = list_mut(&mut store, &from_id)?;
+        let avail = src
+            .items
+            .iter()
+            .find(|e| e.type_id == type_id)
+            .map(|e| e.quantity)
+            .unwrap_or(0);
+        if avail <= 0 {
+            return Ok(());
+        }
+        moved = quantity.filter(|q| *q > 0).unwrap_or(avail).min(avail);
+        if let Some(e) = src.items.iter_mut().find(|e| e.type_id == type_id) {
+            e.quantity -= moved;
+        }
+        src.items.retain(|e| e.quantity > 0);
+    }
+    // Give to the target.
+    {
+        let dst = list_mut(&mut store, &to_id)?;
+        match dst.items.iter_mut().find(|e| e.type_id == type_id) {
+            Some(e) => e.quantity += moved,
+            None => dst.items.push(StoredEntry {
+                type_id,
+                quantity: moved,
+            }),
+        }
+    }
+    save(&dir, &store)
+}
+
+// --- Chat capture -----------------------------------------------------------
+
+/// Built-in id/name for the list the chat listener fills.
+const CHAT_LIST: (&str, &str) = ("chat", "Chat");
+
+/// Read an EVE chatlog, decoding the UTF-16LE (BOM) it writes, else UTF-8.
+fn read_chatlog(path: &std::path::Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
+        let u16s: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        Some(String::from_utf16_lossy(&u16s))
+    } else {
+        Some(String::from_utf8_lossy(&bytes).into_owned())
+    }
+}
+
+/// The message text of each chat line, in order. Lines look like
+/// `[ 2026.06.25 12:00:00 ] Sender > text`; system lines are skipped.
+fn parse_chat_messages(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .filter_map(|line| {
+            let (_, after) = line.split_once("] ")?;
+            let (sender, msg) = after.split_once(" > ")?;
+            if sender.trim() == "EVE System" {
+                return None;
+            }
+            let m = msg.trim();
+            (!m.is_empty()).then(|| m.to_string())
+        })
+        .collect()
+}
+
+/// Result of a chat-capture poll.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatSync {
+    /// Item names newly added to the Chat list this poll.
+    pub added: Vec<String>,
+    /// The chatlog file being followed (empty if none matched the channel).
+    pub file: String,
+    /// Whether a matching chatlog file was found.
+    pub found: bool,
+}
+
+/// Follow an EVE chat channel's log and add any linked/typed items to the Chat
+/// list. Finds the newest `<channel>_*.txt` in `logs_dir`, ingests messages it
+/// hasn't seen yet (tracked per file), and resolves each as an item name via the
+/// SDE — non-item chatter is ignored. Poll this every few seconds while
+/// listening. Public — chat capture needs no login.
+#[tauri::command]
+pub fn shopping_chat_sync(
+    app: AppHandle,
+    logs_dir: String,
+    channel: String,
+) -> Result<ChatSync, String> {
+    let (dir, sde) = dir_and_sde(&app)?;
+    let chan = channel.trim();
+    if chan.is_empty() {
+        return Err("channel name is empty".into());
+    }
+
+    // Newest chatlog whose name starts with "<channel>_" (EVE appends
+    // _<date>_<time>_<charId>.txt), by modified time.
+    let logs = std::path::Path::new(&logs_dir);
+    let prefix = format!("{}_", chan.to_ascii_lowercase());
+    let newest = std::fs::read_dir(logs)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .starts_with(&prefix)
+        })
+        .filter_map(|e| Some((e.path(), e.metadata().ok()?.modified().ok()?)))
+        .max_by_key(|(_, m)| *m);
+
+    let mut store = load(&dir);
+    // Ensure the Chat list exists.
+    if !store.lists.iter().any(|l| l.id == CHAT_LIST.0) {
+        store.lists.push(StoredList {
+            id: CHAT_LIST.0.to_string(),
+            name: CHAT_LIST.1.to_string(),
+            items: Vec::new(),
+        });
+    }
+
+    let Some((path, _)) = newest else {
+        // Remember the channel even if no file yet, so the UI can show it.
+        store.chat.channel = chan.to_string();
+        save(&dir, &store)?;
+        return Ok(ChatSync {
+            added: Vec::new(),
+            file: String::new(),
+            found: false,
+        });
+    };
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let msgs = parse_chat_messages(&read_chatlog(&path).unwrap_or_default());
+
+    // Resume where we left off if it's the same channel + file; else start fresh.
+    let start = if store.chat.channel == chan && store.chat.file == file_name {
+        store.chat.count.min(msgs.len())
+    } else {
+        0
+    };
+
+    let mut added = Vec::new();
+    {
+        // Find (or create above) the chat list and append resolved items.
+        let list = store
+            .lists
+            .iter_mut()
+            .find(|l| l.id == CHAT_LIST.0)
+            .expect("chat list ensured above");
+        for m in msgs.iter().skip(start) {
+            if let Some((type_id, _)) = sde.type_by_name(m).map_err(|e| e.to_string())? {
+                match list.items.iter_mut().find(|e| e.type_id == type_id) {
+                    Some(e) => e.quantity += 1,
+                    None => list.items.push(StoredEntry {
+                        type_id,
+                        quantity: 1,
+                    }),
+                }
+                added.push(m.clone());
+            }
+        }
+    }
+    store.chat = ChatState {
+        channel: chan.to_string(),
+        file: file_name.clone(),
+        count: msgs.len(),
+    };
+    save(&dir, &store)?;
+    Ok(ChatSync {
+        added,
+        file: file_name,
+        found: true,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_item_messages_and_skips_system_lines() {
+        let log = "\
+[ 2026.06.25 12:00:00 ] EVE System > Channel MOTD: hi
+[ 2026.06.25 12:00:05 ] Buyer Pilot > Tritanium
+[ 2026.06.25 12:00:06 ] Buyer Pilot > Pyerite
+[ 2026.06.25 12:00:07 ] Buyer Pilot >   ";
+        assert_eq!(parse_chat_messages(log), vec!["Tritanium", "Pyerite"]);
+    }
 }
