@@ -150,6 +150,7 @@ pub fn run() {
             modules::notifications::commands::notifications_reset,
             modules::pochven::commands::pochven_routes,
             modules::pochven::commands::pochven_search,
+            modules::pochven::commands::pochven_map,
             modules::pi::commands::pi_overview,
             modules::pi::commands::pi_show_in_game,
             modules::pi::commands::pi_locked_get,

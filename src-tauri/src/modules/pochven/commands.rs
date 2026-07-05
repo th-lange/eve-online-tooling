@@ -678,6 +678,68 @@ pub async fn pochven_search(
     })
 }
 
+// --- Reference map: real Pochven topology from the SDE ---
+
+/// One Pochven system on the reference map, at its true galactic position.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PochvenMapSystem {
+    pub system_id: i64,
+    pub name: String,
+    pub security: f64,
+    /// Galactic map-plane coordinates (x, z) — same plane dotlan plots.
+    pub x: f64,
+    pub y: f64,
+}
+
+/// The 27 Pochven systems + their internal stargate links, from the SDE.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PochvenTopology {
+    pub systems: Vec<PochvenMapSystem>,
+    pub edges: Vec<[i64; 2]>,
+}
+
+/// The real Pochven map: each of the 27 systems at its true galactic position
+/// plus the actual internal stargate links between them (both endpoints in
+/// Pochven), straight from the SDE — so it matches the in-game / dotlan map.
+#[tauri::command]
+pub async fn pochven_map(app: AppHandle) -> Result<PochvenTopology, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+    let poch_ids: HashSet<i64> = POCHVEN_CANDIDATES.iter().map(|&(_, id, _)| id).collect();
+    let info = sde.solar_system_info().map_err(|e| e.to_string())?;
+    let pos = sde.solar_system_positions().map_err(|e| e.to_string())?;
+
+    let systems = POCHVEN_CANDIDATES
+        .iter()
+        .map(|&(name, id, _)| {
+            let security = info.get(&id).map(|(_, s, _)| *s).unwrap_or(0.0);
+            let (x, z) = pos.get(&id).copied().unwrap_or((0.0, 0.0));
+            PochvenMapSystem {
+                system_id: id,
+                name: name.to_string(),
+                security,
+                x,
+                y: z,
+            }
+        })
+        .collect();
+
+    // Internal gate links = stargate edges with both ends inside Pochven.
+    let mut seen: HashSet<(i64, i64)> = HashSet::new();
+    let mut edges = Vec::new();
+    for (a, b) in sde.all_stargate_edges().map_err(|e| e.to_string())? {
+        if poch_ids.contains(&a) && poch_ids.contains(&b) {
+            let key = if a <= b { (a, b) } else { (b, a) };
+            if seen.insert(key) {
+                edges.push([key.0, key.1]);
+            }
+        }
+    }
+    Ok(PochvenTopology { systems, edges })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
