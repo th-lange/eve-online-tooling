@@ -75,7 +75,7 @@ function EntryFinder() {
   const [systemId, setSystemId] = useState<number | null>(null);
   const [label, setLabel] = useState("");
   const [query, setQuery] = useState("");
-  const [maxJumps, setMaxJumps] = useState(15);
+  const [maxJumps, setMaxJumps] = useState(10);
 
   const search = useQuery({
     queryKey: ["system", "search", query],
@@ -215,7 +215,7 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
   // Root the scan map at the origin so, for each edge, we know which candidates
   // lie beyond it (its subtree). That drives the route colours: an edge is the
   // way to reach every candidate in the subtree below it.
-  const { parent, subtreeCands } = useMemo(() => {
+  const { parent, subtreeCands, candIds } = useMemo(() => {
     const adj = new Map<number, number[]>();
     const add = (a: number, b: number) => {
       const l = adj.get(a);
@@ -254,22 +254,72 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
           for (const x of subtreeCands.get(v) ?? []) s.add(x);
       subtreeCands.set(u, s);
     }
-    return { parent, subtreeCands };
+    return { parent, subtreeCands, candIds };
   }, [data.map.edges, data.map.nodes, originId]);
 
-  // Systems on the route from the origin to any selected node → shown in red.
   const [selected, setSelected] = useState<number[]>([]);
-  const selectedRoute = useMemo(() => {
-    const set = new Set<number>();
-    for (const id of selected) {
-      let cur = id;
+
+  // Candidates in scan (visit) order.
+  const orderedCands = useMemo(
+    () =>
+      data.map.nodes
+        .filter((n) => n.candidate)
+        .sort((a, b) => a.order - b.order)
+        .map((n) => n.systemId),
+    [data.map.nodes],
+  );
+
+  // The green route = the *next* jump(s) to make. Normally that's the leg from
+  // the player's current position (the last candidate they've ticked, else the
+  // origin) to the next unticked candidate. When a candidate is selected, it's
+  // instead that candidate's previous- and next-jump legs, so you can inspect
+  // any step of the tour. Edges are keyed as "min-max" system-id pairs.
+  const greenEdges = useMemo(() => {
+    const edgeKey = (a: number, b: number) =>
+      a < b ? `${a}-${b}` : `${b}-${a}`;
+    const toRoot = (x: number) => {
+      const path = [x];
+      let cur = x;
       while (cur !== originId && parent.has(cur)) {
-        set.add(cur);
         cur = parent.get(cur)!;
+        path.push(cur);
       }
+      return path; // x … origin
+    };
+    // Tree path between two systems, via their lowest common ancestor.
+    const treePath = (a: number, b: number): number[] => {
+      const A = toRoot(a);
+      const bIndex = new Map(toRoot(b).map((n, i) => [n, i]));
+      const lcaAt = A.findIndex((n) => bIndex.has(n));
+      if (lcaAt < 0) return [];
+      const B = toRoot(b);
+      const down = B.slice(0, bIndex.get(A[lcaAt])!).reverse();
+      return [...A.slice(0, lcaAt + 1), ...down];
+    };
+    const legEdges = (a: number, b: number, into: Set<string>) => {
+      const nodes = treePath(a, b);
+      for (let i = 0; i + 1 < nodes.length; i++)
+        into.add(edgeKey(nodes[i], nodes[i + 1]));
+    };
+
+    const set = new Set<string>();
+    const selCand = selected.find((id) => candIds.has(id));
+    if (selCand != null) {
+      const i = orderedCands.indexOf(selCand);
+      const prev = i > 0 ? orderedCands[i - 1] : originId;
+      legEdges(prev, selCand, set);
+      if (i >= 0 && i < orderedCands.length - 1)
+        legEdges(selCand, orderedCands[i + 1], set);
+      return set;
     }
+    const visitedInOrder = orderedCands.filter((id) => visited.has(id));
+    const pos = visitedInOrder.length
+      ? visitedInOrder[visitedInOrder.length - 1]
+      : originId;
+    const nextTarget = orderedCands.find((id) => !visited.has(id));
+    if (nextTarget != null) legEdges(pos, nextTarget, set);
     return set;
-  }, [selected, parent, originId]);
+  }, [selected, candIds, orderedCands, visited, parent, originId]);
 
   const graphNodes: SystemGraphNode[] = data.map.nodes.map((node) => {
     const done = node.candidate && visited.has(node.systemId);
@@ -297,21 +347,23 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
       accent: done ? "#34d399" : undefined,
     };
   });
-  // Route colouring: green = a way to reach a candidate you still need; red =
-  // on the route to the selected system; hidden = the branch is fully done.
+  // Route colouring: green = the next jump(s) to make (or the selected system's
+  // prev/next legs); hidden = the branch beyond is fully ticked; grey = a
+  // pending route that isn't the immediate next hop.
   const graphEdges: SystemGraphEdge[] = data.map.edges.flatMap(([a, b]) => {
+    const key = a < b ? `${a}-${b}` : `${b}-${a}`;
+    const isGreen = greenEdges.has(key);
     // The deeper endpoint owns the subtree this edge leads into.
     const child = parent.get(b) === a ? b : a;
     const served = subtreeCands.get(child) ?? new Set<number>();
-    const onSelectedRoute = selectedRoute.has(child);
     const stillNeeded = [...served].some((c) => !visited.has(c));
-    if (!onSelectedRoute && !stillNeeded) return [];
+    if (!isGreen && !stillNeeded) return [];
     return [
       {
         source: String(a),
         target: String(b),
         variant: "stargate" as const,
-        color: onSelectedRoute ? "#fb7185" : "#34d399",
+        color: isGreen ? "#34d399" : "#52525b",
       },
     ];
   });
@@ -378,13 +430,10 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
           <span className="text-zinc-300">Scan map</span>
           <span>numbers = scan order · click a system to tick it ✓</span>
           <span className="flex items-center gap-1">
-            <span className="inline-block h-0.5 w-3 bg-emerald-400" /> route to
-            reach
+            <span className="inline-block h-0.5 w-3 bg-emerald-400" /> next
+            jump(s)
           </span>
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-0.5 w-3 bg-rose-400" /> selected
-            route
-          </span>
+          <span>select a system → its prev/next legs</span>
           <span className="text-zinc-600">ticked routes hidden</span>
         </div>
         <SystemGraph
