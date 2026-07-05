@@ -197,6 +197,14 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
       }
       return next;
     });
+  const clearVisited = () => {
+    try {
+      localStorage.removeItem(storeKey);
+    } catch {
+      /* ignore */
+    }
+    setVisited(new Set());
+  };
 
   // Number the unvisited candidates along the scan route (what to visit next);
   // visited ones show a check instead.
@@ -435,6 +443,15 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
           </span>
           <span>select a system → its prev/next legs</span>
           <span className="text-zinc-600">ticked routes hidden</span>
+          {visited.size > 0 && (
+            <button
+              onClick={clearVisited}
+              className="ml-auto rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
+              title="Clear all ✓ ticks"
+            >
+              Reset ticks ({visited.size})
+            </button>
+          )}
         </div>
         <SystemGraph
           nodes={graphNodes}
@@ -787,6 +804,30 @@ function FilamentGuide() {
           ))}
         </ul>
       </div>
+
+      {/* Getting back to known space. */}
+      <h3 className="mt-6 text-sm font-semibold text-zinc-200">
+        Getting back to known space
+      </h3>
+      <p className="mt-1 max-w-3xl text-xs text-zinc-400">
+        {FILAMENTS.exit.intro}
+      </p>
+      <div className="mt-3 space-y-2">
+        {FILAMENTS.exit.options.map((o) => (
+          <div
+            key={o.name}
+            className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-4 py-2.5 text-sm"
+          >
+            <span className="font-medium text-zinc-200">{o.name}</span>
+            <span className="text-zinc-500"> — {o.detail}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 max-w-3xl text-[11px] text-zinc-600">
+        Want to land near a trade hub? The Logistics table above lists each
+        Pochven system's C729 exit distance to Jita, Amarr, Dodixie, Rens and
+        Hek.
+      </p>
     </section>
   );
 }

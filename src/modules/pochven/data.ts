@@ -454,4 +454,27 @@ export const FILAMENTS = {
   ],
   // Wormhole (C729) entry has no fleet cap and no wait timer, unlike filaments.
   note: "Filaments cap the fleet at 1 / 5 / 15 sub-caps and have a wait timer; a C729 wormhole has neither.",
+  // Getting back out of Pochven to known space. Exit filaments only work from
+  // inside Pochven and keep the same 1 / 5 / 15 fleet caps.
+  exit: {
+    intro:
+      "To leave Pochven you use an exit filament or a wormhole — the entry filaments above only move you deeper in. Exit filaments keep the 1 / 5 / 15 fleet cap.",
+    options: [
+      {
+        name: "Proximity 'Extraction' filament",
+        detail:
+          "Drops the fleet into a k-space system within 2.5 light-years of the system you activate in — the closest thing to a targeted exit near a known area.",
+      },
+      {
+        name: "Glorification 'Devana' filament",
+        detail:
+          "Drops the fleet into one of the 28 Triglavian Minor Victory Systems at random — lands in hi- or low-sec.",
+      },
+      {
+        name: "C729 wormhole",
+        detail:
+          "Scan it down from the Pochven side. Each system has exactly one active k-space C729 (spawns in the regions listed above, ~3 jumps from its old-map location), plus possible J-space holes.",
+      },
+    ],
+  },
 };
