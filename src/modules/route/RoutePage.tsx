@@ -152,6 +152,12 @@ function Workbench() {
     );
   }, [source, search]);
 
+  // Kill/jump activity by system id, for the travel-graph tiles.
+  const activityById = useMemo(
+    () => new Map((activity.data ?? []).map((a) => [a.systemId, a])),
+    [activity.data],
+  );
+
   const showResults =
     query.trim().length >= 2 && (matches.data?.length ?? 0) > 0;
   const entries = trail.data ?? [];
@@ -304,7 +310,9 @@ function Workbench() {
           </div>
         )}
 
-        {entries.length > 1 && <TravelGraph entries={entries} />}
+        {entries.length > 1 && (
+          <TravelGraph entries={entries} activity={activityById} />
+        )}
 
         <NearestWormholeCard onFocus={focusSystem} />
       </div>
@@ -437,16 +445,28 @@ function NearestWormholeCard({
   );
 }
 
-/** The travel trail as a node-edge path: current system highlighted, and
- * k-space↔w-space transitions (likely wormholes) drawn in purple. */
-function TravelGraph({ entries }: { entries: BreadcrumbEntry[] }) {
+/** The travel trail as a node-edge path: current system highlighted, per-tile
+ * kill activity, and honest legs — a solid line only where the hop really was
+ * one gate; skipped stretches are dashed with the true jump count, non-gate
+ * travel (wormhole/filament/clone) is dashed purple. */
+function TravelGraph({
+  entries,
+  activity,
+}: {
+  entries: BreadcrumbEntry[];
+  activity: Map<number, SystemActivity>;
+}) {
   const nodeMap = new Map<number, SystemGraphNode>();
   entries.forEach((e, i) => {
+    const act = activity.get(e.systemId);
+    const kills = act ? ` · ${act.shipKills} kills · ${act.podKills} pods` : "";
     const node: SystemGraphNode = {
       id: String(e.systemId),
       label: e.name,
       kind: e.wspace ? "wspace" : kindFromSecurity(e.security),
-      sub: e.wspace ? e.region || "wormhole" : e.security.toFixed(1),
+      sub: e.wspace
+        ? (e.region || "wormhole") + kills
+        : e.security.toFixed(1) + kills,
       current: i === entries.length - 1,
     };
     // Keep the latest occurrence so "current" wins on a revisit.
@@ -462,11 +482,16 @@ function TravelGraph({ entries }: { entries: BreadcrumbEntry[] }) {
     const key = `${a.systemId}-${b.systemId}`;
     if (seen.has(key)) continue;
     seen.add(key);
+    // A k-space↔w-space change can only be a wormhole; otherwise trust the
+    // recorded gate distance: only a 1-gap leg is a real direct connection.
+    const wormhole = a.wspace !== b.wspace || b.gapJumps === -1;
+    const skipped = !wormhole && b.gapJumps > 1;
     edges.push({
       source: String(a.systemId),
       target: String(b.systemId),
-      // A k-space↔w-space change can only be a wormhole; highlight it.
-      variant: a.wspace !== b.wspace ? "wormhole" : "stargate",
+      variant: wormhole ? "wormhole" : "stargate",
+      dashed: wormhole ? a.wspace === b.wspace : skipped,
+      label: skipped ? `${b.gapJumps} jumps` : undefined,
     });
   }
 
@@ -475,7 +500,8 @@ function TravelGraph({ entries }: { entries: BreadcrumbEntry[] }) {
       <div className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">
         Travel graph{" "}
         <span className="normal-case tracking-normal text-zinc-600">
-          · purple = w-space transition
+          · solid = direct gate · dashed = jumps skipped between polls · purple
+          = wormhole/filament
         </span>
       </div>
       <SystemGraph
