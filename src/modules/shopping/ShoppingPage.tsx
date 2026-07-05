@@ -352,8 +352,7 @@ function ListDetail({
         : new Set(list.items.map((i) => i.typeId)),
     );
 
-  async function bulkApply(mode: "multiply" | "add" | "set") {
-    const n = Number(amount);
+  async function applyToSelected(mode: "multiply" | "add" | "set", n: number) {
     if (!Number.isFinite(n) || selected.size === 0) return;
     for (const it of list.items) {
       if (!selected.has(it.typeId)) continue;
@@ -371,6 +370,8 @@ function ListDetail({
     }
     await onChange();
   }
+  const bulkApply = (mode: "multiply" | "add" | "set") =>
+    applyToSelected(mode, Number(amount));
 
   async function setQty(typeId: number, quantity: number) {
     await shoppingSetQuantity(list.id, typeId, quantity);
@@ -422,20 +423,45 @@ function ListDetail({
       <AddItemField listId={list.id} onAdded={onChange} />
 
       {selected.size > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 rounded border border-zinc-800 bg-zinc-900/40 px-2 py-1.5 text-xs">
-          <span className="text-zinc-400">{selected.size} selected</span>
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2.5 text-sm">
+          <span className="font-medium text-zinc-300">
+            {selected.size} selected
+          </span>
+          {/* Quick presets — no typing needed. */}
+          {(
+            [
+              ["add", 10, "+10"],
+              ["add", 100, "+100"],
+              ["multiply", 2, "×2"],
+              ["multiply", 10, "×10"],
+            ] as const
+          ).map(([mode, n, label]) => (
+            <button
+              key={label}
+              onClick={() => void applyToSelected(mode, n)}
+              title={
+                mode === "add"
+                  ? `Add ${n} to each selected quantity`
+                  : `Multiply each selected quantity by ${n}`
+              }
+              className="rounded border border-zinc-700 px-3 py-1 text-zinc-200 hover:bg-zinc-800"
+            >
+              {label}
+            </button>
+          ))}
+          <span className="mx-1 h-5 w-px bg-zinc-700" />
           <input
             type="number"
             value={amount}
             onChange={(e) => setAmount(e.currentTarget.value)}
             placeholder="n"
-            className="w-20 rounded bg-zinc-800 px-2 py-0.5 text-right text-zinc-100 outline-none placeholder:text-zinc-500"
+            className="w-24 rounded bg-zinc-800 px-2 py-1 text-right text-zinc-100 outline-none placeholder:text-zinc-500"
           />
           <button
             onClick={() => void bulkApply("multiply")}
             disabled={amount.trim() === ""}
             title="Multiply each selected quantity by n"
-            className="rounded border border-zinc-700 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+            className="rounded border border-zinc-700 px-3 py-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
           >
             × n
           </button>
@@ -443,7 +469,7 @@ function ListDetail({
             onClick={() => void bulkApply("add")}
             disabled={amount.trim() === ""}
             title="Add n to each selected quantity"
-            className="rounded border border-zinc-700 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+            className="rounded border border-zinc-700 px-3 py-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
           >
             + n
           </button>
@@ -451,7 +477,7 @@ function ListDetail({
             onClick={() => void bulkApply("set")}
             disabled={amount.trim() === ""}
             title="Set each selected quantity to n"
-            className="rounded border border-zinc-700 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+            className="rounded border border-zinc-700 px-3 py-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
           >
             set n
           </button>
@@ -463,7 +489,7 @@ function ListDetail({
                 e.currentTarget.value = "";
               }}
               title="Move the selected items to another list"
-              className="rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-zinc-300 outline-none"
+              className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-zinc-300 outline-none"
             >
               <option value="" disabled>
                 Move to…
@@ -477,7 +503,7 @@ function ListDetail({
           )}
           <button
             onClick={() => setSelected(new Set())}
-            className="ml-auto rounded px-1.5 py-0.5 text-zinc-400 hover:text-zinc-200"
+            className="ml-auto rounded px-2 py-1 text-zinc-400 hover:text-zinc-200"
           >
             Clear selection
           </button>
