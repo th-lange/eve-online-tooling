@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 
@@ -39,7 +39,10 @@ export function ShoppingPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
 
-  const refresh = () => qc.invalidateQueries({ queryKey: SHOPPING_LISTS_KEY });
+  const refresh = useCallback(
+    () => qc.invalidateQueries({ queryKey: SHOPPING_LISTS_KEY }),
+    [qc],
+  );
 
   // Keep a valid selection as lists load / change.
   const data = lists.data;
@@ -160,6 +163,8 @@ function ChatCapture({ onSync }: { onSync: () => Promise<unknown> }) {
   const [status, setStatus] = useState("");
   const [total, setTotal] = useState(0);
   const { copied, copy } = useCopyToClipboard(1500);
+  // True until the first poll of a session, so we skip pre-existing log content.
+  const fromNow = useRef(false);
 
   // Suggest the Chatlogs folder if we don't have one saved.
   useEffect(() => {
@@ -172,7 +177,9 @@ function ChatCapture({ onSync }: { onSync: () => Promise<unknown> }) {
     let cancelled = false;
     const poll = async () => {
       try {
-        const r = await shoppingChatSync(logsDir, channel.trim());
+        const first = fromNow.current;
+        fromNow.current = false;
+        const r = await shoppingChatSync(logsDir, channel.trim(), first);
         if (cancelled) return;
         setStatus(
           r.found
@@ -202,6 +209,7 @@ function ChatCapture({ onSync }: { onSync: () => Promise<unknown> }) {
     if (!listening) {
       localStorage.setItem(STORAGE_KEYS.eveChatlogsDir, logsDir.trim());
       setTotal(0);
+      fromNow.current = true;
     }
     setListening((v) => !v);
   }
@@ -213,10 +221,12 @@ function ChatCapture({ onSync }: { onSync: () => Promise<unknown> }) {
       </summary>
       <div className="space-y-3 px-4 pb-4 text-sm">
         <p className="text-xs text-zinc-500">
-          Create a private chat channel in EVE with the name below, then drag or
-          link items into it — each linked item is added to the{" "}
-          <span className="text-zinc-300">Chat</span> list. Great for taking buy
-          orders from fleet mates.
+          Point at any EVE chat channel and each item linked into it is added to
+          the <span className="text-zinc-300">Chat</span> list. Make a private
+          channel for buy orders, or listen to a standing one like{" "}
+          <span className="text-zinc-300">Corp</span>. Messages that aren't a
+          known item are ignored, and only items linked after you press Start
+          are captured.
         </p>
         <div className="flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-1 text-xs text-zinc-400">
@@ -237,6 +247,17 @@ function ChatCapture({ onSync }: { onSync: () => Promise<unknown> }) {
               >
                 Random
               </button>
+              {(["Corp", "Alliance", "Fleet"] as const).map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setChannel(c)}
+                  disabled={listening}
+                  title={`Listen to the ${c} channel`}
+                  className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+                >
+                  {c}
+                </button>
+              ))}
               <button
                 onClick={() => copy(channel)}
                 disabled={!channel}
