@@ -221,12 +221,15 @@ function ChatCapture({ onSync }: { onSync: () => Promise<unknown> }) {
       </summary>
       <div className="space-y-3 px-4 pb-4 text-sm">
         <p className="text-xs text-zinc-500">
-          Point at any EVE chat channel and each item linked into it is added to
+          Point at any EVE chat channel and each item posted into it is added to
           the <span className="text-zinc-300">Chat</span> list. Make a private
           channel for buy orders, or listen to a standing one like{" "}
-          <span className="text-zinc-300">Corp</span>. Messages that aren't a
-          known item are ignored, and only items linked after you press Start
-          are captured.
+          <span className="text-zinc-300">Corp</span>. Paste several items at
+          once — <span className="text-zinc-300">one item per line</span>, with
+          an optional quantity after the name (
+          <span className="text-zinc-300">Tritanium 100</span>, Multibuy
+          tab-format works too). Anything that isn't a known item name is
+          ignored, and only messages after you press Start are captured.
         </p>
         <div className="flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-1 text-xs text-zinc-400">

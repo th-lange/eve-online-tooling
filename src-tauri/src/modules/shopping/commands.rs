@@ -386,6 +386,64 @@ pub fn shopping_move_item(
 /// Built-in id/name for the list the chat listener fills.
 const CHAT_LIST: (&str, &str) = ("chat", "Chat");
 
+/// Most lines we ingest from a single chat message (bounds hostile pastes).
+const MAX_LINES_PER_MESSAGE: usize = 100;
+/// Longest item name we try to resolve (no EVE type name comes close).
+const MAX_NAME_LEN: usize = 200;
+/// Quantity ceiling per line, so a stray number can't blow a list up.
+const MAX_LINE_QTY: i64 = 1_000_000_000;
+
+/// A token that is purely a number (optional `,`/`.` thousands separators and
+/// an `x` prefix/suffix like "x100"/"100x"). Mirrors the frontend paste parser
+/// (`shopping/parse.ts`), so chat and paste accept the same formats.
+fn is_number_token(t: &str) -> bool {
+    let t = t.strip_prefix(['x', 'X']).unwrap_or(t);
+    let t = t.strip_suffix(['x', 'X']).unwrap_or(t);
+    !t.is_empty()
+        && t.chars().any(|c| c.is_ascii_digit())
+        && t.chars()
+            .all(|c| c.is_ascii_digit() || c == '.' || c == ',')
+}
+
+/// Parse one chat line into `(item name, quantity)`: the name is the leading
+/// run of non-numeric tokens, the quantity the first number after it (absent →
+/// 1); anything after the quantity is ignored. Chat text is untrusted input, so
+/// control characters are stripped and name length / quantity are capped —
+/// unparseable or oversized lines yield `None` and are simply ignored (the
+/// resolver only ever matches real SDE type names, exactly, via a
+/// parameterised query).
+fn parse_chat_line(raw: &str) -> Option<(String, i64)> {
+    // Strip control characters, but keep tabs — they're a legal separator in
+    // Multibuy-style pastes and the tokenizer splits on them below.
+    let line: String = raw
+        .chars()
+        .filter(|c| !c.is_control() || *c == '\t')
+        .collect();
+    let tokens: Vec<&str> = line.split([' ', '\t']).filter(|t| !t.is_empty()).collect();
+    let split = tokens
+        .iter()
+        .position(|t| is_number_token(t))
+        .unwrap_or(tokens.len());
+    if split == 0 {
+        return None; // empty or quantity-first line — no name
+    }
+    let name = tokens[..split].join(" ");
+    if name.len() > MAX_NAME_LEN {
+        return None;
+    }
+    let mut qty = 1i64;
+    if split < tokens.len() {
+        let digits: String = tokens[split]
+            .chars()
+            .filter(|c| c.is_ascii_digit())
+            .collect();
+        if let Ok(n) = digits.parse::<i64>() {
+            qty = n.clamp(1, MAX_LINE_QTY);
+        }
+    }
+    Some((name, qty))
+}
+
 /// Result of a chat-capture poll.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -501,16 +559,28 @@ pub fn shopping_chat_sync(
             .iter_mut()
             .find(|l| l.id == CHAT_LIST.0)
             .expect("chat list ensured above");
+        // One item per line: multi-line pastes arrive as one message with
+        // embedded newlines (see chatlog.rs), and each line may carry a
+        // quantity ("Tritanium 100", "Pyerite\t50", "x3" styles).
         for m in msgs.iter().skip(start) {
-            if let Some((type_id, _)) = sde.type_by_name(m).map_err(|e| e.to_string())? {
-                match list.items.iter_mut().find(|e| e.type_id == type_id) {
-                    Some(e) => e.quantity += 1,
-                    None => list.items.push(StoredEntry {
-                        type_id,
-                        quantity: 1,
-                    }),
+            for raw in m.lines().take(MAX_LINES_PER_MESSAGE) {
+                let Some((name, qty)) = parse_chat_line(raw) else {
+                    continue;
+                };
+                if let Some((type_id, _)) = sde.type_by_name(&name).map_err(|e| e.to_string())? {
+                    match list.items.iter_mut().find(|e| e.type_id == type_id) {
+                        Some(e) => e.quantity = e.quantity.saturating_add(qty),
+                        None => list.items.push(StoredEntry {
+                            type_id,
+                            quantity: qty,
+                        }),
+                    }
+                    added.push(if qty > 1 {
+                        format!("{name} ×{qty}")
+                    } else {
+                        name
+                    });
                 }
-                added.push(m.clone());
             }
         }
     }
@@ -525,4 +595,61 @@ pub fn shopping_chat_sync(
         file: file_name,
         found: true,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_name_only_lines_as_quantity_one() {
+        assert_eq!(parse_chat_line("Tritanium"), Some(("Tritanium".into(), 1)));
+    }
+
+    #[test]
+    fn parses_trailing_quantities_in_multibuy_styles() {
+        assert_eq!(
+            parse_chat_line("Tritanium 100"),
+            Some(("Tritanium".into(), 100))
+        );
+        assert_eq!(
+            parse_chat_line("Pyerite\t1,500"),
+            Some(("Pyerite".into(), 1500))
+        );
+        assert_eq!(
+            parse_chat_line("Mexallon x25"),
+            Some(("Mexallon".into(), 25))
+        );
+        // Trailing columns after the quantity are ignored.
+        assert_eq!(
+            parse_chat_line("Isogen\t10\tMineral\t1 m3"),
+            Some(("Isogen".into(), 10))
+        );
+    }
+
+    #[test]
+    fn keeps_numbers_that_are_part_of_the_name() {
+        assert_eq!(
+            parse_chat_line("125mm Gatling AutoCannon I 2"),
+            Some(("125mm Gatling AutoCannon I".into(), 2))
+        );
+    }
+
+    #[test]
+    fn rejects_untrusted_junk() {
+        assert_eq!(parse_chat_line(""), None);
+        assert_eq!(parse_chat_line("   "), None);
+        assert_eq!(parse_chat_line("100"), None); // quantity-first, no name
+                                                  // Control characters are stripped before parsing.
+        assert_eq!(
+            parse_chat_line("Trit\x07anium"),
+            Some(("Tritanium".into(), 1))
+        );
+        // Absurd names/quantities are bounded.
+        assert_eq!(parse_chat_line(&"a".repeat(300)), None);
+        assert_eq!(
+            parse_chat_line("Tritanium 99999999999999999999"),
+            Some(("Tritanium".into(), 1)) // unparseable digits → default 1
+        );
+    }
 }
