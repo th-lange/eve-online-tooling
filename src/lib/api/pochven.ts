@@ -32,3 +32,28 @@ export interface PochvenRoutes {
 export function pochvenRoutes(): Promise<PochvenRoutes> {
   return invoke<PochvenRoutes>("pochven_routes");
 }
+
+/** A C729 entry candidate near the searcher. */
+export interface EntryCandidate {
+  system: string;
+  region: string;
+  /** Jumps from the searcher's current system. */
+  jumps: number;
+  /** Pochven system(s) this candidate's C729 leads into. */
+  leadsTo: string[];
+}
+export interface EntrySearch {
+  from: string;
+  /** Jump path (system names) to the nearest candidate. */
+  route: string[];
+  /** Candidate exit systems, nearest first. */
+  candidates: EntryCandidate[];
+}
+
+/**
+ * From `systemId`, route to the nearest C729 entry candidate and list the
+ * closest candidates (nearest first) to jump to and scan.
+ */
+export function pochvenSearch(systemId: number): Promise<EntrySearch> {
+  return invoke<EntrySearch>("pochven_search", { systemId });
+}
