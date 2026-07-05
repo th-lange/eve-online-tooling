@@ -23,7 +23,6 @@ import {
   POCHVEN_ENTRY_COUNTS,
   pochvenTriangle,
   dominantBand,
-  hasKspaceEntry,
   FILAMENTS,
   systemsByRole,
   systemsByClade,
@@ -629,15 +628,35 @@ const BAND_HEX: Record<string, string> = {
   nullsec: "#fb7185",
 };
 
-/** Colour + sub-label for a Pochven system on the reference map, by name. */
+/** Fill colour by system role. */
+const ROLE_HEX: Record<string, string> = {
+  Home: "#f59e0b",
+  Border: "#38bdf8",
+  Internal: "#94a3b8",
+};
+/** Ring (outline) colour by clade / constellation. */
+const CLADE_HEX: Record<string, string> = {
+  Perun: "#fb7185",
+  Svarog: "#a78bfa",
+  Veles: "#2dd4bf",
+};
+/** Constellation names, keyed by clade. */
+const CLADE_KRAI: Record<string, string> = {
+  Perun: "Krai Perun",
+  Svarog: "Krai Svarog",
+  Veles: "Krai Veles",
+};
+
+/**
+ * Colour + sub-label for a Pochven system on the reference map: fill = role
+ * (Home / Border / Internal), ring = constellation (Krai Perun/Svarog/Veles),
+ * sub-label = where you can enter from.
+ */
 function systemVisual(name: string): Partial<SystemGraphNode> {
-  const band = dominantBand(name);
-  const enter = hasKspaceEntry(name);
   const meta = POCHVEN_META[name];
   const c = POCHVEN_ENTRY_COUNTS[name];
   return {
-    kind: band,
-    // Where you can enter from: e.g. "10 hi · 11 low".
+    kind: dominantBand(name),
     sub: c
       ? [
           c.hisec ? `${c.hisec} hi` : "",
@@ -650,7 +669,8 @@ function systemVisual(name: string): Partial<SystemGraphNode> {
         ? `${meta.clade} · ${meta.role}`
         : undefined,
     group: meta?.clade,
-    ...(enter ? { fill: BAND_HEX[band] } : { accent: BAND_HEX[band] }),
+    ...(meta?.role ? { fill: ROLE_HEX[meta.role] } : {}),
+    ...(meta?.clade ? { ring: CLADE_HEX[meta.clade] } : {}),
   };
 }
 
@@ -684,13 +704,13 @@ function PochvenSystemsPopover() {
     // otherwise keep the schematic triangle so the map never looks disconnected.
     if (topo.data && topo.data.systems.length && topo.data.edges.length) {
       const sys = topo.data.systems;
-      const W = 880;
-      const H = 560;
+      const W = 1120;
+      const H = 760;
       // Triangle corners = the three clade home systems.
       const CORNERS: Record<string, [number, number]> = {
-        Kino: [W / 2, 30], // Perun — top
-        Archee: [40, H - 20], // Veles — bottom-left
-        Niarja: [W - 40, H - 20], // Svarog — bottom-right
+        Kino: [W / 2, 40], // Perun — top
+        Archee: [50, H - 30], // Veles — bottom-left
+        Niarja: [W - 50, H - 30], // Svarog — bottom-right
       };
       const homes = ["Kino", "Archee", "Niarja"] as const;
       const idOf = new Map(sys.map((s) => [s.name, s.systemId]));
@@ -719,7 +739,7 @@ function PochvenSystemsPopover() {
         return dist;
       };
       const dists = homes.map((h) => bfs(idOf.get(h) ?? -1));
-      const place = (id: number, name: string) => {
+      const place = (id: number, name: string, fan: number) => {
         if (CORNERS[name]) return { x: CORNERS[name][0], y: CORNERS[name][1] };
         let wx = 0;
         let wy = 0;
@@ -731,10 +751,17 @@ function PochvenSystemsPopover() {
           wy += w * CORNERS[h][1];
           ws += w;
         });
-        return ws === 0 ? { x: W / 2, y: H / 2 } : { x: wx / ws, y: wy / ws };
+        if (ws === 0) return { x: W / 2, y: H / 2 };
+        // Golden-angle fan so systems that land on the same spot don't overlap.
+        const ang = fan * 2.399963;
+        return {
+          x: wx / ws + Math.cos(ang) * 52,
+          y: wy / ws + Math.sin(ang) * 52,
+        };
       };
+      let fan = 0;
       const nodes: SystemGraphNode[] = sys.map((s) => {
-        const p = place(s.systemId, s.name);
+        const p = place(s.systemId, s.name, CORNERS[s.name] ? 0 : fan++);
         return {
           id: String(s.systemId),
           label: s.name,
@@ -787,30 +814,42 @@ function PochvenSystemsPopover() {
             <div
               role="dialog"
               onClick={(e) => e.stopPropagation()}
-              className="relative z-10 flex max-h-[88vh] w-[920px] max-w-[calc(100vw-2rem)] flex-col rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl"
+              className="relative z-10 flex max-h-[88vh] w-[1040px] max-w-[calc(100vw-2rem)] flex-col rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl"
             >
               <div className="flex items-start justify-between gap-3 border-b border-zinc-800 p-3">
                 <div>
                   <div className="text-sm font-medium text-zinc-200">
                     Pochven systems
                   </div>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[11px] text-zinc-500">
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-zinc-500">
                     <span>
                       triangle on the clade homes (Kino / Archee / Niarja) ·
                       real gate links · drag to move, Reset restores
                     </span>
-                    {(["hisec", "lowsec", "nullsec"] as const).map((b) => (
-                      <span key={b} className="flex items-center gap-1">
+                    {/* Role — the tile fill. */}
+                    <span className="text-zinc-600">fill = role:</span>
+                    {(["Home", "Border", "Internal"] as const).map((r) => (
+                      <span key={r} className="flex items-center gap-1">
                         <span
                           className="h-2.5 w-2.5 rounded-sm"
-                          style={{ backgroundColor: BAND_HEX[b] }}
+                          style={{ backgroundColor: ROLE_HEX[r] }}
                         />
-                        {b}
+                        {r}
+                      </span>
+                    ))}
+                    {/* Constellation — the outline ring. */}
+                    <span className="text-zinc-600">ring = constellation:</span>
+                    {(["Perun", "Svarog", "Veles"] as const).map((c) => (
+                      <span key={c} className="flex items-center gap-1">
+                        <span
+                          className="h-2.5 w-2.5 rounded-sm border-2"
+                          style={{ borderColor: CLADE_HEX[c] }}
+                        />
+                        {CLADE_KRAI[c]}
                       </span>
                     ))}
                     <span className="text-zinc-600">
-                      colour = where most C729 candidates are; sub-label = count
-                      per band
+                      sub-label = k-space entries per band
                     </span>
                   </div>
                 </div>
@@ -826,7 +865,7 @@ function PochvenSystemsPopover() {
                 <SystemGraph
                   nodes={nodes}
                   edges={edges}
-                  height={380}
+                  height={480}
                   storageKey="pochven-systems-ref"
                   defaultMode="star"
                 />

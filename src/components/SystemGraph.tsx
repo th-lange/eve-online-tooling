@@ -219,9 +219,11 @@ function SystemNode({ data, selected }: NodeProps<Node<SystemNodeData>>) {
       style.borderColor = data.accent;
       style.color = data.accent;
     }
-    if (data.ring) style.boxShadow = `0 0 0 2px ${data.ring}`;
     if (data.bg) style.backgroundColor = data.bg;
   }
+  // The ring is a second, independent channel (e.g. constellation) — show it
+  // whether or not the tile is filled.
+  if (data.ring) style.boxShadow = `0 0 0 2px ${data.ring}`;
   return (
     <div
       className={`rounded border px-3 py-1.5 text-xs shadow ${
