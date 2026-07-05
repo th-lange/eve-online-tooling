@@ -6,18 +6,22 @@ import { SHOPPING_LISTS_KEY } from "../../components/AddToListButton";
 import { useCopyToClipboard } from "../../lib/useCopyToClipboard";
 import { parseItems, parseLine } from "./parse";
 import {
+  eveDefaultLogDir,
   sdeSearch,
   shoppingAddItem,
   shoppingAddText,
+  shoppingChatSync,
   shoppingClearList,
   shoppingCreateList,
   shoppingDeleteList,
   shoppingLists,
+  shoppingMoveItem,
   shoppingRemoveItem,
   shoppingSetQuantity,
   type ShoppingList,
 } from "../../lib/api";
 import { formatInt } from "../../lib/format";
+import { STORAGE_KEYS } from "../../lib/storageKeys";
 
 /**
  * Shopping Lists — a group of named lists you fill while browsing other modules.
@@ -72,6 +76,8 @@ export function ShoppingPage() {
           Daytrading.
         </p>
       </div>
+
+      <ChatCapture onSync={refresh} />
 
       <div className="mt-5 flex gap-6">
         {/* List selector. */}
@@ -129,7 +135,11 @@ export function ShoppingPage() {
         {/* Selected list. */}
         <div className="min-w-0 flex-1">
           {selected ? (
-            <ListDetail list={selected} onChange={refresh} />
+            <ListDetail
+              list={selected}
+              allLists={data ?? []}
+              onChange={refresh}
+            />
           ) : (
             <p className="text-sm text-zinc-500">No list selected.</p>
           )}
@@ -139,13 +149,146 @@ export function ShoppingPage() {
   );
 }
 
+// --- Chat capture: listen to an EVE chat channel and collect linked items ---
+
+function ChatCapture({ onSync }: { onSync: () => Promise<unknown> }) {
+  const [channel, setChannel] = useState("");
+  const [logsDir, setLogsDir] = useState(
+    () => localStorage.getItem(STORAGE_KEYS.eveChatlogsDir) ?? "",
+  );
+  const [listening, setListening] = useState(false);
+  const [status, setStatus] = useState("");
+  const [total, setTotal] = useState(0);
+  const { copied, copy } = useCopyToClipboard(1500);
+
+  // Suggest the Chatlogs folder if we don't have one saved.
+  useEffect(() => {
+    if (!logsDir) eveDefaultLogDir("chatlogs").then((d) => d && setLogsDir(d));
+  }, [logsDir]);
+
+  // Poll the channel's log while listening.
+  useEffect(() => {
+    if (!listening || !channel.trim() || !logsDir.trim()) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const r = await shoppingChatSync(logsDir, channel.trim());
+        if (cancelled) return;
+        setStatus(
+          r.found
+            ? `listening to ${r.file}`
+            : "waiting for the channel log (create the channel in EVE)…",
+        );
+        if (r.added.length) {
+          setTotal((t) => t + r.added.length);
+          await onSync();
+        }
+      } catch (e) {
+        if (!cancelled) setStatus(String(e));
+      }
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 4000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [listening, channel, logsDir, onSync]);
+
+  function generate() {
+    setChannel(`buy-${crypto.randomUUID().slice(0, 8)}`);
+  }
+  function toggle() {
+    if (!listening) {
+      localStorage.setItem(STORAGE_KEYS.eveChatlogsDir, logsDir.trim());
+      setTotal(0);
+    }
+    setListening((v) => !v);
+  }
+
+  return (
+    <details className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/40">
+      <summary className="cursor-pointer px-4 py-2 text-sm text-zinc-300">
+        Capture items from an EVE chat channel
+      </summary>
+      <div className="space-y-3 px-4 pb-4 text-sm">
+        <p className="text-xs text-zinc-500">
+          Create a private chat channel in EVE with the name below, then drag or
+          link items into it — each linked item is added to the{" "}
+          <span className="text-zinc-300">Chat</span> list. Great for taking buy
+          orders from fleet mates.
+        </p>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="flex flex-col gap-1 text-xs text-zinc-400">
+            Channel name
+            <div className="flex gap-1">
+              <input
+                value={channel}
+                onChange={(e) => setChannel(e.currentTarget.value)}
+                placeholder="channel name…"
+                disabled={listening}
+                className="w-56 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none disabled:opacity-60"
+              />
+              <button
+                onClick={generate}
+                disabled={listening}
+                title="Generate a random channel name"
+                className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+              >
+                Random
+              </button>
+              <button
+                onClick={() => copy(channel)}
+                disabled={!channel}
+                title="Copy the channel name"
+                className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+              >
+                {copied ? "Copied ✓" : "Copy"}
+              </button>
+            </div>
+          </label>
+          <button
+            onClick={toggle}
+            disabled={!channel.trim() || !logsDir.trim()}
+            className={`rounded px-3 py-1.5 text-sm disabled:opacity-40 ${
+              listening
+                ? "bg-red-600/80 text-white hover:bg-red-600"
+                : "bg-sky-600 text-white hover:bg-sky-500"
+            }`}
+          >
+            {listening ? "Stop" : "Start listening"}
+          </button>
+        </div>
+        <label className="flex flex-col gap-1 text-xs text-zinc-400">
+          EVE Chatlogs folder
+          <input
+            value={logsDir}
+            onChange={(e) => setLogsDir(e.currentTarget.value)}
+            placeholder="…/EVE/logs/Chatlogs"
+            className="w-full max-w-xl rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+          />
+        </label>
+        {listening && (
+          <div className="text-xs text-zinc-500">
+            <span className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-emerald-400 align-middle" />
+            {status || "starting…"} · {total} item
+            {total === 1 ? "" : "s"} captured
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
 // --- One list's items + add field ---
 
 function ListDetail({
   list,
+  allLists,
   onChange,
 }: {
   list: ShoppingList;
+  allLists: ShoppingList[];
   onChange: () => Promise<unknown>;
 }) {
   const totalQty = useMemo(
@@ -220,6 +363,16 @@ function ListDetail({
     await shoppingClearList(list.id);
     await onChange();
   }
+  async function moveSelected(toId: string) {
+    if (!toId) return;
+    for (const it of list.items) {
+      if (selected.has(it.typeId))
+        await shoppingMoveItem(list.id, toId, it.typeId);
+    }
+    setSelected(new Set());
+    await onChange();
+  }
+  const otherLists = allLists.filter((l) => l.id !== list.id);
 
   return (
     <div>
@@ -281,6 +434,26 @@ function ListDetail({
           >
             set n
           </button>
+          {otherLists.length > 0 && (
+            <select
+              value=""
+              onChange={(e) => {
+                void moveSelected(e.currentTarget.value);
+                e.currentTarget.value = "";
+              }}
+              title="Move the selected items to another list"
+              className="rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-zinc-300 outline-none"
+            >
+              <option value="" disabled>
+                Move to…
+              </option>
+              {otherLists.map((l) => (
+                <option key={l.id} value={l.id}>
+                  {l.name}
+                </option>
+              ))}
+            </select>
+          )}
           <button
             onClick={() => setSelected(new Set())}
             className="ml-auto rounded px-1.5 py-0.5 text-zinc-400 hover:text-zinc-200"
