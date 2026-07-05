@@ -439,6 +439,7 @@ pub fn shopping_chat_sync(
     app: AppHandle,
     logs_dir: String,
     channel: String,
+    from_now: Option<bool>,
 ) -> Result<ChatSync, String> {
     let (dir, sde) = dir_and_sde(&app)?;
     let chan = channel.trim();
@@ -487,6 +488,23 @@ pub fn shopping_chat_sync(
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     let msgs = parse_chat_messages(&read_chatlog(&path).unwrap_or_default());
+
+    // `from_now` (sent on Start) marks everything already in the log as seen and
+    // adds nothing, so we only capture messages linked from here on — important
+    // for busy channels like Corp that already hold the whole day's chatter.
+    if from_now == Some(true) {
+        store.chat = ChatState {
+            channel: chan.to_string(),
+            file: file_name.clone(),
+            count: msgs.len(),
+        };
+        save(&dir, &store)?;
+        return Ok(ChatSync {
+            added: Vec::new(),
+            file: file_name,
+            found: true,
+        });
+    }
 
     // Resume where we left off if it's the same channel + file; else start fresh.
     let start = if store.chat.channel == chan && store.chat.file == file_name {

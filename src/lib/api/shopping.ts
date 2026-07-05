@@ -96,12 +96,14 @@ export interface ChatSync {
 
 /**
  * Follow an EVE chat channel's log and add linked/typed items to the Chat list.
- * `logsDir` is the EVE Chatlogs folder; `channel` is the channel name. Poll
- * every few seconds while listening.
+ * `logsDir` is the EVE Chatlogs folder; `channel` is the channel name. Pass
+ * `fromNow` on the first poll to mark existing log content as seen (so only new
+ * messages are captured). Poll every few seconds while listening.
  */
 export function shoppingChatSync(
   logsDir: string,
   channel: string,
+  fromNow?: boolean,
 ): Promise<ChatSync> {
-  return invoke<ChatSync>("shopping_chat_sync", { logsDir, channel });
+  return invoke<ChatSync>("shopping_chat_sync", { logsDir, channel, fromNow });
 }
