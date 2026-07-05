@@ -420,6 +420,7 @@ export function SystemGraph({
   edges,
   rootId,
   onNodeClick,
+  onSelectionChange,
   height = 360,
   storageKey,
   defaultMode,
@@ -428,6 +429,8 @@ export function SystemGraph({
   edges: SystemGraphEdge[];
   rootId?: string;
   onNodeClick?: (id: string) => void;
+  /** Fired with the ids of the currently-selected nodes whenever it changes. */
+  onSelectionChange?: (ids: string[]) => void;
   height?: number;
   /** Persist hand-dragged positions under this key (localStorage). */
   storageKey?: string;
@@ -566,6 +569,12 @@ export function SystemGraph({
     [onNodeClick],
   );
 
+  const handleSelectionChange = useCallback(
+    ({ nodes }: { nodes: Node[] }) =>
+      onSelectionChange?.(nodes.map((n) => n.id)),
+    [onSelectionChange],
+  );
+
   // Persist positions after a drag settles (no-op state set just to read current).
   const persist = useCallback(() => {
     if (!storageKey) return;
@@ -604,6 +613,7 @@ export function SystemGraph({
       edgeTypes={edgeTypes}
       onNodesChange={onNodesChange}
       onNodeClick={handleNodeClick}
+      onSelectionChange={handleSelectionChange}
       onNodeDragStop={persist}
       fitView
       proOptions={{ hideAttribution: true }}
