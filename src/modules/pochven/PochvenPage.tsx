@@ -212,6 +212,65 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
     return m;
   }, [data.map.nodes, visited]);
 
+  // Root the scan map at the origin so, for each edge, we know which candidates
+  // lie beyond it (its subtree). That drives the route colours: an edge is the
+  // way to reach every candidate in the subtree below it.
+  const { parent, subtreeCands } = useMemo(() => {
+    const adj = new Map<number, number[]>();
+    const add = (a: number, b: number) => {
+      const l = adj.get(a);
+      if (l) l.push(b);
+      else adj.set(a, [b]);
+    };
+    for (const [a, b] of data.map.edges) {
+      add(a, b);
+      add(b, a);
+    }
+    const parent = new Map<number, number>();
+    const bfsOrder: number[] = [];
+    const seen = new Set<number>([originId]);
+    const queue: number[] = [originId];
+    while (queue.length) {
+      const u = queue.shift()!;
+      bfsOrder.push(u);
+      for (const v of adj.get(u) ?? []) {
+        if (!seen.has(v)) {
+          seen.add(v);
+          parent.set(v, u);
+          queue.push(v);
+        }
+      }
+    }
+    const candIds = new Set(
+      data.map.nodes.filter((n) => n.candidate).map((n) => n.systemId),
+    );
+    const subtreeCands = new Map<number, Set<number>>();
+    for (let i = bfsOrder.length - 1; i >= 0; i--) {
+      const u = bfsOrder[i];
+      const s = new Set<number>();
+      if (candIds.has(u)) s.add(u);
+      for (const v of adj.get(u) ?? [])
+        if (parent.get(v) === u)
+          for (const x of subtreeCands.get(v) ?? []) s.add(x);
+      subtreeCands.set(u, s);
+    }
+    return { parent, subtreeCands };
+  }, [data.map.edges, data.map.nodes, originId]);
+
+  // Systems on the route from the origin to any selected node → shown in red.
+  const [selected, setSelected] = useState<number[]>([]);
+  const selectedRoute = useMemo(() => {
+    const set = new Set<number>();
+    for (const id of selected) {
+      let cur = id;
+      while (cur !== originId && parent.has(cur)) {
+        set.add(cur);
+        cur = parent.get(cur)!;
+      }
+    }
+    return set;
+  }, [selected, parent, originId]);
+
   const graphNodes: SystemGraphNode[] = data.map.nodes.map((node) => {
     const done = node.candidate && visited.has(node.systemId);
     const num = order.get(node.systemId);
@@ -238,11 +297,24 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
       accent: done ? "#34d399" : undefined,
     };
   });
-  const graphEdges: SystemGraphEdge[] = data.map.edges.map(([a, b]) => ({
-    source: String(a),
-    target: String(b),
-    variant: "stargate",
-  }));
+  // Route colouring: green = a way to reach a candidate you still need; red =
+  // on the route to the selected system; hidden = the branch is fully done.
+  const graphEdges: SystemGraphEdge[] = data.map.edges.flatMap(([a, b]) => {
+    // The deeper endpoint owns the subtree this edge leads into.
+    const child = parent.get(b) === a ? b : a;
+    const served = subtreeCands.get(child) ?? new Set<number>();
+    const onSelectedRoute = selectedRoute.has(child);
+    const stillNeeded = [...served].some((c) => !visited.has(c));
+    if (!onSelectedRoute && !stillNeeded) return [];
+    return [
+      {
+        source: String(a),
+        target: String(b),
+        variant: "stargate" as const,
+        color: onSelectedRoute ? "#fb7185" : "#34d399",
+      },
+    ];
+  });
 
   if (data.candidates.length === 0)
     return (
@@ -299,12 +371,21 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
       )}
 
       {/* Scan map: grey = travel-through, coloured = candidate (numbered by what
-          to scan next; ✓ once you've clicked it as searched). */}
+          to scan next; ✓ once you've clicked it as searched). Route edges are
+          green (still to reach), red (selected route) or hidden (branch done). */}
       <div>
         <div className="mb-1 flex flex-wrap items-center gap-x-3 text-xs text-zinc-500">
           <span className="text-zinc-300">Scan map</span>
           <span>numbers = scan order · click a system to tick it ✓</span>
-          <span className="text-zinc-600">grey = travel-through</span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-0.5 w-3 bg-emerald-400" /> route to
+            reach
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-0.5 w-3 bg-rose-400" /> selected
+            route
+          </span>
+          <span className="text-zinc-600">ticked routes hidden</span>
         </div>
         <SystemGraph
           nodes={graphNodes}
@@ -314,6 +395,7 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
           storageKey={`pochven-map-${originId}`}
           defaultMode="tree"
           onNodeClick={(id) => toggleVisited(Number(id))}
+          onSelectionChange={(ids) => setSelected(ids.map(Number))}
         />
       </div>
 
