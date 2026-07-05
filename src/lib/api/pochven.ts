@@ -91,3 +91,25 @@ export function pochvenSearch(
 ): Promise<EntrySearch> {
   return invoke<EntrySearch>("pochven_search", { systemId, maxJumps });
 }
+
+/** One Pochven system on the reference map, at its true galactic position. */
+export interface PochvenMapSystem {
+  systemId: number;
+  name: string;
+  security: number;
+  /** Galactic map-plane coordinates (x, z) — the plane dotlan plots. */
+  x: number;
+  y: number;
+}
+export interface PochvenTopology {
+  systems: PochvenMapSystem[];
+  edges: [number, number][];
+}
+
+/**
+ * The real Pochven map: the 27 systems at their true galactic positions plus
+ * the actual internal stargate links, from the SDE (matches the in-game map).
+ */
+export function pochvenMap(): Promise<PochvenTopology> {
+  return invoke<PochvenTopology>("pochven_map");
+}

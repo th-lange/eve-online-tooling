@@ -12,6 +12,7 @@ import {
   systemSearch,
   pochvenRoutes,
   pochvenSearch,
+  pochvenMap,
   type PochvenStat,
   type EntrySearch as EntrySearchResult,
 } from "../../lib/api";
@@ -206,20 +207,6 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
     setVisited(new Set());
   };
 
-  // Number the unvisited candidates along the scan route (what to visit next);
-  // visited ones show a check instead.
-  const order = useMemo(() => {
-    const m = new Map<number, number>();
-    let n = 0;
-    data.map.nodes
-      .filter((x) => x.candidate)
-      .sort((a, b) => a.order - b.order)
-      .forEach((c) => {
-        if (!visited.has(c.systemId)) m.set(c.systemId, ++n);
-      });
-    return m;
-  }, [data.map.nodes, visited]);
-
   // Root the scan map at the origin so, for each edge, we know which candidates
   // lie beyond it (its subtree). That drives the route colours: an edge is the
   // way to reach every candidate in the subtree below it.
@@ -267,14 +254,76 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
 
   const [selected, setSelected] = useState<number[]>([]);
 
-  // Candidates in scan (visit) order.
+  // Target Pochven systems the user has narrowed to (empty = all of interest).
+  const [interest, setInterest] = useState<Set<string>>(new Set());
+  const toggleInterest = (name: string) =>
+    setInterest((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+
+  // Candidate systemId → the Pochven systems its C729 leads into.
+  const candLeads = useMemo(() => {
+    const m = new Map<number, string[]>();
+    for (const n of data.map.nodes)
+      if (n.candidate) m.set(n.systemId, n.leadsTo);
+    return m;
+  }, [data.map.nodes]);
+
+  // Candidates "of interest": all, or only those leading to a picked target.
+  const activeCandIds = useMemo(() => {
+    const s = new Set<number>();
+    for (const [id, leads] of candLeads)
+      if (interest.size === 0 || leads.some((t) => interest.has(t))) s.add(id);
+    return s;
+  }, [candLeads, interest]);
+
+  // Which map nodes/edges to actually draw: the routes from the origin to the
+  // active candidates only (so narrowing the targets prunes the map).
+  const kept = useMemo(() => {
+    const nodes = new Set<number>([originId]);
+    const edges = new Set<string>();
+    for (const cid of activeCandIds) {
+      let cur = cid;
+      nodes.add(cur);
+      while (cur !== originId && parent.has(cur)) {
+        const p = parent.get(cur)!;
+        edges.add(cur < p ? `${cur}-${p}` : `${p}-${cur}`);
+        nodes.add(p);
+        cur = p;
+      }
+    }
+    return { nodes, edges };
+  }, [activeCandIds, parent, originId]);
+
+  // Active candidates in scan (visit) order.
   const orderedCands = useMemo(
     () =>
       data.map.nodes
-        .filter((n) => n.candidate)
+        .filter((n) => n.candidate && activeCandIds.has(n.systemId))
         .sort((a, b) => a.order - b.order)
         .map((n) => n.systemId),
-    [data.map.nodes],
+    [data.map.nodes, activeCandIds],
+  );
+
+  // Number the unticked active candidates in scan order (what to visit next);
+  // ticked ones show a check instead.
+  const order = useMemo(() => {
+    const m = new Map<number, number>();
+    let n = 0;
+    for (const id of orderedCands) if (!visited.has(id)) m.set(id, ++n);
+    return m;
+  }, [orderedCands, visited]);
+
+  // Candidate rows to list: all, or only those leading to a picked target.
+  const visibleCandidates = useMemo(
+    () =>
+      data.candidates.filter(
+        (c) => interest.size === 0 || c.leadsTo.some((t) => interest.has(t)),
+      ),
+    [data.candidates, interest],
   );
 
   // The green route = the *next* jump(s) to make. Normally that's the leg from
@@ -329,42 +378,48 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
     return set;
   }, [selected, candIds, orderedCands, visited, parent, originId]);
 
-  const graphNodes: SystemGraphNode[] = data.map.nodes.map((node) => {
-    const done = node.candidate && visited.has(node.systemId);
-    const num = order.get(node.systemId);
-    const prefix = node.origin
-      ? "⌂ "
-      : node.candidate
-        ? done
-          ? "✓ "
-          : num != null
-            ? `${num} `
-            : ""
-        : "";
-    return {
-      id: String(node.systemId),
-      label: `${prefix}${node.name}`,
-      kind:
-        node.kind === "hisec" ||
-        node.kind === "lowsec" ||
-        node.kind === "nullsec"
-          ? node.kind
-          : "unknown",
-      sub: node.candidate ? `→ ${node.leadsTo.join(" / ")}` : undefined,
-      current: node.origin,
-      accent: done ? "#34d399" : undefined,
-    };
-  });
+  const graphNodes: SystemGraphNode[] = data.map.nodes
+    .filter((node) => kept.nodes.has(node.systemId))
+    .map((node) => {
+      const done = node.candidate && visited.has(node.systemId);
+      const num = order.get(node.systemId);
+      const prefix = node.origin
+        ? "⌂ "
+        : node.candidate
+          ? done
+            ? "✓ "
+            : num != null
+              ? `${num} `
+              : ""
+          : "";
+      return {
+        id: String(node.systemId),
+        label: `${prefix}${node.name}`,
+        kind:
+          node.kind === "hisec" ||
+          node.kind === "lowsec" ||
+          node.kind === "nullsec"
+            ? node.kind
+            : "unknown",
+        sub: node.candidate ? `→ ${node.leadsTo.join(" / ")}` : undefined,
+        current: node.origin,
+        accent: done ? "#34d399" : undefined,
+      };
+    });
   // Route colouring: green = the next jump(s) to make (or the selected system's
   // prev/next legs); hidden = the branch beyond is fully ticked; grey = a
   // pending route that isn't the immediate next hop.
   const graphEdges: SystemGraphEdge[] = data.map.edges.flatMap(([a, b]) => {
     const key = a < b ? `${a}-${b}` : `${b}-${a}`;
+    // Only draw edges on a route to an active (of-interest) candidate.
+    if (!kept.edges.has(key)) return [];
     const isGreen = greenEdges.has(key);
     // The deeper endpoint owns the subtree this edge leads into.
     const child = parent.get(b) === a ? b : a;
     const served = subtreeCands.get(child) ?? new Set<number>();
-    const stillNeeded = [...served].some((c) => !visited.has(c));
+    const stillNeeded = [...served].some(
+      (c) => activeCandIds.has(c) && !visited.has(c),
+    );
     if (!isGreen && !stillNeeded) return [];
     return [
       {
@@ -389,19 +444,38 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
       {/* Reachable Pochven target systems (via the in-range candidates). */}
       {data.targets.length > 0 && (
         <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-          <div className="text-[10px] uppercase tracking-wide text-zinc-500">
-            Pochven systems reachable within {data.maxJumps} jumps (
-            {data.targets.length})
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+              Pochven systems reachable within {data.maxJumps} jumps (
+              {data.targets.length}) — click to focus
+            </div>
+            {interest.size > 0 && (
+              <button
+                onClick={() => setInterest(new Set())}
+                className="rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
+                title="Show all reachable systems again"
+              >
+                Reset ({interest.size})
+              </button>
+            )}
           </div>
           <div className="mt-1.5 flex flex-wrap gap-1">
-            {data.targets.map((t) => (
-              <span
-                key={t}
-                className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-300"
-              >
-                {t}
-              </span>
-            ))}
+            {data.targets.map((t) => {
+              const on = interest.has(t);
+              return (
+                <button
+                  key={t}
+                  onClick={() => toggleInterest(t)}
+                  className={`rounded px-1.5 py-0.5 text-xs ${
+                    on
+                      ? "bg-sky-600 text-white"
+                      : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                  }`}
+                >
+                  {t}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -478,7 +552,7 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
 
       <details>
         <summary className="cursor-pointer text-sm text-zinc-300 hover:text-zinc-100">
-          Systems to jump &amp; scan ({data.candidates.length})
+          Systems to jump &amp; scan ({visibleCandidates.length})
         </summary>
         <div className="mt-2 overflow-auto rounded-lg border border-zinc-800">
           <table className="w-full border-collapse text-sm">
@@ -496,7 +570,7 @@ function EntryResults({ data }: { data: EntrySearchResult }) {
               </tr>
             </thead>
             <tbody>
-              {data.candidates.map((c) => {
+              {visibleCandidates.map((c) => {
                 const node = data.map.nodes.find((n) => n.name === c.system);
                 const id = node?.systemId;
                 const done = id != null && visited.has(id);
@@ -555,6 +629,31 @@ const BAND_HEX: Record<string, string> = {
   nullsec: "#fb7185",
 };
 
+/** Colour + sub-label for a Pochven system on the reference map, by name. */
+function systemVisual(name: string): Partial<SystemGraphNode> {
+  const band = dominantBand(name);
+  const enter = hasKspaceEntry(name);
+  const meta = POCHVEN_META[name];
+  const c = POCHVEN_ENTRY_COUNTS[name];
+  return {
+    kind: band,
+    // Where you can enter from: e.g. "10 hi · 11 low".
+    sub: c
+      ? [
+          c.hisec ? `${c.hisec} hi` : "",
+          c.lowsec ? `${c.lowsec} low` : "",
+          c.nullsec ? `${c.nullsec} null` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : meta
+        ? `${meta.clade} · ${meta.role}`
+        : undefined,
+    group: meta?.clade,
+    ...(enter ? { fill: BAND_HEX[band] } : { accent: BAND_HEX[band] }),
+  };
+}
+
 // Centred popover: the 27 Pochven systems + their internal connections, coloured
 // by the security you can enter each from (full colour = enterable from k-space,
 // outline = internal-only).
@@ -568,41 +667,66 @@ function PochvenSystemsPopover() {
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
-  // Fixed triangular coordinates + gate-loop edges, so the map always draws in
-  // Pochven's recognisable shape (drag to move; Reset restores the triangle).
-  const tri = useMemo(() => pochvenTriangle(), []);
-  const nodes: SystemGraphNode[] = POCHVEN_SYSTEMS.map((s) => {
-    const band = dominantBand(s.name);
-    const enter = hasKspaceEntry(s.name);
-    const meta = POCHVEN_META[s.name];
-    const c = POCHVEN_ENTRY_COUNTS[s.name];
-    return {
+  // Real Pochven map from the SDE: true galactic positions + internal stargate
+  // links (matches dotlan / the in-game map). Falls back to a schematic triangle
+  // while the SDE data loads. Drag to move; Reset restores the layout.
+  const topo = useQuery({
+    queryKey: ["pochven", "map"],
+    queryFn: pochvenMap,
+    staleTime: 24 * 60 * 60_000,
+    enabled: open,
+  });
+
+  const { nodes, edges } = useMemo(() => {
+    // Use the real SDE map only when it carries both systems and gate links;
+    // otherwise keep the schematic triangle so the map never looks disconnected.
+    if (topo.data && topo.data.systems.length && topo.data.edges.length) {
+      const sys = topo.data.systems;
+      const xs = sys.map((s) => s.x);
+      const ys = sys.map((s) => s.y);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      const W = 880;
+      const H = 560;
+      // EVE's z grows "up"; screen y grows down, so flip y for a north-up map.
+      const nx = (x: number) =>
+        maxX > minX ? ((x - minX) / (maxX - minX)) * W : W / 2;
+      const ny = (y: number) =>
+        maxY > minY ? (1 - (y - minY) / (maxY - minY)) * H : H / 2;
+      const nodes: SystemGraphNode[] = sys.map((s) => ({
+        id: String(s.systemId),
+        label: s.name,
+        x: nx(s.x),
+        y: ny(s.y),
+        ...systemVisual(s.name),
+        kind: systemVisual(s.name).kind ?? "unknown",
+      }));
+      const edges: SystemGraphEdge[] = topo.data.edges.map(([a, b]) => ({
+        source: String(a),
+        target: String(b),
+        variant: "stargate" as const,
+      }));
+      return { nodes, edges };
+    }
+    // Fallback schematic triangle (name-keyed) until the SDE map arrives.
+    const tri = pochvenTriangle();
+    const nodes: SystemGraphNode[] = POCHVEN_SYSTEMS.map((s) => ({
       id: s.name,
       label: s.name,
-      kind: band,
-      // Show where you can enter from: e.g. "10 hi · 11 low".
-      sub: c
-        ? [
-            c.hisec ? `${c.hisec} hi` : "",
-            c.lowsec ? `${c.lowsec} low` : "",
-            c.nullsec ? `${c.nullsec} null` : "",
-          ]
-            .filter(Boolean)
-            .join(" · ")
-        : meta
-          ? `${meta.clade} · ${meta.role}`
-          : undefined,
-      group: meta?.clade,
       x: tri.pos[s.name]?.x,
       y: tri.pos[s.name]?.y,
-      ...(enter ? { fill: BAND_HEX[band] } : { accent: BAND_HEX[band] }),
-    };
-  });
-  const edges: SystemGraphEdge[] = tri.edges.map(([a, b]) => ({
-    source: a,
-    target: b,
-    variant: "wormhole",
-  }));
+      ...systemVisual(s.name),
+      kind: systemVisual(s.name).kind ?? "unknown",
+    }));
+    const edges: SystemGraphEdge[] = tri.edges.map(([a, b]) => ({
+      source: a,
+      target: b,
+      variant: "wormhole" as const,
+    }));
+    return { nodes, edges };
+  }, [topo.data]);
 
   return (
     <>
@@ -631,8 +755,8 @@ function PochvenSystemsPopover() {
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[11px] text-zinc-500">
                     <span>
-                      triangle: each clade an edge, homes branch off · drag to
-                      move, Reset restores
+                      true map (SDE positions + internal gates) · drag to move,
+                      Reset restores
                     </span>
                     {(["hisec", "lowsec", "nullsec"] as const).map((b) => (
                       <span key={b} className="flex items-center gap-1">
