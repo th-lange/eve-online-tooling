@@ -20,7 +20,8 @@ import {
   POCHVEN_SYSTEMS,
   POCHVEN_META,
   POCHVEN_INTERNAL_LINKS,
-  POCHVEN_ENTRY_BAND,
+  POCHVEN_ENTRY_COUNTS,
+  dominantBand,
   hasKspaceEntry,
   FILAMENTS,
   systemsByRole,
@@ -388,14 +389,26 @@ function PochvenSystemsPopover() {
   }, [open]);
 
   const nodes: SystemGraphNode[] = POCHVEN_SYSTEMS.map((s) => {
-    const band = POCHVEN_ENTRY_BAND[s.name] ?? "nullsec";
+    const band = dominantBand(s.name);
     const enter = hasKspaceEntry(s.name);
     const meta = POCHVEN_META[s.name];
+    const c = POCHVEN_ENTRY_COUNTS[s.name];
     return {
       id: s.name,
       label: s.name,
-      kind: band as "hisec" | "lowsec" | "nullsec",
-      sub: meta ? `${meta.clade} · ${meta.role}` : undefined,
+      kind: band,
+      // Show where you can enter from: e.g. "10 hi · 11 low".
+      sub: c
+        ? [
+            c.hisec ? `${c.hisec} hi` : "",
+            c.lowsec ? `${c.lowsec} low` : "",
+            c.nullsec ? `${c.nullsec} null` : "",
+          ]
+            .filter(Boolean)
+            .join(" · ")
+        : meta
+          ? `${meta.clade} · ${meta.role}`
+          : undefined,
       group: meta?.clade,
       ...(enter ? { fill: BAND_HEX[band] } : { accent: BAND_HEX[band] }),
     };
@@ -443,7 +456,8 @@ function PochvenSystemsPopover() {
                       </span>
                     ))}
                     <span className="text-zinc-600">
-                      full = enterable from k-space · outline = internal-only
+                      colour = where most C729 candidates are; sub-label = count
+                      per band
                     </span>
                   </div>
                 </div>
@@ -473,32 +487,55 @@ function PochvenSystemsPopover() {
                         Clade / role
                       </th>
                       <th className="px-3 py-1.5 text-left font-medium">
+                        Enter from
+                      </th>
+                      <th className="px-3 py-1.5 text-left font-medium">
                         C729 spawn regions (candidate count)
                       </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {POCHVEN_SYSTEMS.map((s) => (
-                      <tr key={s.name} className="border-t border-zinc-800">
-                        <td className="px-3 py-1.5 font-medium text-zinc-200">
-                          {s.name}
-                        </td>
-                        <td className="px-3 py-1.5 text-zinc-500">
-                          {POCHVEN_META[s.name]
-                            ? `${POCHVEN_META[s.name].clade} · ${POCHVEN_META[s.name].role}`
-                            : "—"}
-                        </td>
-                        <td className="px-3 py-1.5 text-zinc-400">
-                          {s.c729
-                            .map((z) =>
-                              z.region === INTERNAL
-                                ? `internal (${z.count})`
-                                : `${z.region} (${z.count})`,
-                            )
-                            .join(" · ")}
-                        </td>
-                      </tr>
-                    ))}
+                    {POCHVEN_SYSTEMS.map((s) => {
+                      const c = POCHVEN_ENTRY_COUNTS[s.name];
+                      return (
+                        <tr key={s.name} className="border-t border-zinc-800">
+                          <td className="px-3 py-1.5 font-medium text-zinc-200">
+                            {s.name}
+                          </td>
+                          <td className="px-3 py-1.5 text-zinc-500">
+                            {POCHVEN_META[s.name]
+                              ? `${POCHVEN_META[s.name].clade} · ${POCHVEN_META[s.name].role}`
+                              : "—"}
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <span className="flex gap-2 tabular-nums">
+                              {(
+                                [
+                                  ["hisec", c?.hisec ?? 0],
+                                  ["lowsec", c?.lowsec ?? 0],
+                                  ["nullsec", c?.nullsec ?? 0],
+                                ] as const
+                              )
+                                .filter(([, n]) => n > 0)
+                                .map(([b, n]) => (
+                                  <span key={b} style={{ color: BAND_HEX[b] }}>
+                                    {n} {b.replace("sec", "")}
+                                  </span>
+                                ))}
+                            </span>
+                          </td>
+                          <td className="px-3 py-1.5 text-zinc-400">
+                            {s.c729
+                              .map((z) =>
+                                z.region === INTERNAL
+                                  ? `internal (${z.count})`
+                                  : `${z.region} (${z.count})`,
+                              )
+                              .join(" · ")}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
