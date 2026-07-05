@@ -5,6 +5,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { ModuleActiveContext } from "./moduleActiveContext";
 import { NavLink, useLocation } from "react-router-dom";
 import {
@@ -305,37 +306,44 @@ function ModuleHost({ onHide }: { onHide: (id: string) => void }) {
     );
   }, [activeId]);
 
-  // Place the hide icon a couple of spaces after the active page's <h1> title
-  // (the pages own their titles, so we measure rather than each page wiring it).
+  // The hide icon renders *inside* the active page's <h1>: a <span> slot is
+  // appended to the title element and the button is portalled into it, so it
+  // flows with the text (no measuring, nothing to drift). Pages own their
+  // titles, so a MutationObserver re-attaches the slot when a page swaps its
+  // header in late (e.g. after an SDE check).
   const activeRef = useRef<HTMLDivElement | null>(null);
-  const [hidePos, setHidePos] = useState<{ left: number; top: number }>({
-    left: 8,
-    top: 8,
-  });
+  const [hideSlot, setHideSlot] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => {
     const el = activeRef.current;
     if (!el) return;
-    const measure = () => {
+    let slot: HTMLSpanElement | null = null;
+    const attach = () => {
       const h1 = el.querySelector("h1");
-      if (!h1) return;
-      const wrap = el.getBoundingClientRect();
-      const r = h1.getBoundingClientRect();
-      // Content-relative coords so the icon scrolls with the title.
-      setHidePos({
-        left: r.right - wrap.left + el.scrollLeft + 10,
-        top: r.top - wrap.top + el.scrollTop + r.height / 2,
-      });
+      if (!h1) {
+        if (slot) {
+          slot.remove();
+          slot = null;
+          setHideSlot(null);
+        }
+        return;
+      }
+      if (slot && slot.parentElement === h1) return;
+      slot?.remove();
+      slot = document.createElement("span");
+      slot.className = "ml-2 inline-flex align-middle";
+      h1.appendChild(slot);
+      setHideSlot(slot);
     };
-    measure();
-    const ro =
-      typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver(measure)
+    attach();
+    const mo =
+      typeof MutationObserver !== "undefined"
+        ? new MutationObserver(attach)
         : null;
-    ro?.observe(el);
-    window.addEventListener("resize", measure);
+    mo?.observe(el, { childList: true, subtree: true });
     return () => {
-      ro?.disconnect();
-      window.removeEventListener("resize", measure);
+      mo?.disconnect();
+      slot?.remove();
+      setHideSlot(null);
     };
   }, [activeId]);
 
@@ -352,19 +360,27 @@ function ModuleHost({ onHide }: { onHide: (id: string) => void }) {
               className="relative h-full overflow-auto"
               style={{ display: active ? "block" : "none" }}
             >
-              {/* Per-module hide control, placed just after the page title.
-                  Hiding only removes it from the nav (restore from Hidden). */}
-              {active && (
-                <button
-                  onClick={() => onHide(m.id)}
-                  title="Hide this module from the sidebar"
-                  aria-label={`Hide ${m.title} from sidebar`}
-                  className="absolute z-30 -translate-y-1/2 rounded p-1 text-zinc-600 opacity-60 transition hover:bg-zinc-800 hover:text-zinc-300 hover:opacity-100"
-                  style={{ left: hidePos.left, top: hidePos.top }}
-                >
-                  <EyeOff size={16} />
-                </button>
-              )}
+              {/* Per-module hide control, portalled into the page title so it
+                  sits right behind the header text. Pages without an <h1>
+                  (e.g. still on a setup/loading screen) fall back to the page
+                  corner. Hiding only removes the module from the nav (restore
+                  from Hidden). */}
+              {active &&
+                (() => {
+                  const btn = (
+                    <button
+                      onClick={() => onHide(m.id)}
+                      title="Hide this module from the sidebar"
+                      aria-label={`Hide ${m.title} from sidebar`}
+                      className={`rounded p-1 text-zinc-600 opacity-60 transition hover:bg-zinc-800 hover:text-zinc-300 hover:opacity-100 ${
+                        hideSlot ? "" : "absolute right-2 top-2 z-30"
+                      }`}
+                    >
+                      <EyeOff size={16} />
+                    </button>
+                  );
+                  return hideSlot ? createPortal(btn, hideSlot) : btn;
+                })()}
               <ModuleActiveContext.Provider value={active}>
                 <m.Component />
               </ModuleActiveContext.Provider>
