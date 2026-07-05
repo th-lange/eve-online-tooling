@@ -300,6 +300,84 @@ export const POCHVEN_INTERNAL_LINKS: [string, string][] = [
   ["Ahtila", "Ichoriya"],
 ];
 
+// --- Fixed triangle layout for the "27 systems" reference map ---
+//
+// Pochven's 27 systems are three clade constellations (Perun / Svarog / Veles)
+// whose gates form one big loop — the region reads as a triangle. Each clade is
+// one edge of the triangle: its two Border systems sit at the corners (shared
+// with the neighbouring clade), its six Internal systems run along the edge, and
+// its Home system branches off the middle. We pin explicit coordinates so the
+// reference map always draws in this recognisable shape (drag to move; a reset
+// restores it).  Corners: A = Perun∩Veles, B = Veles∩Svarog, C = Perun∩Svarog.
+const TRI_CORNER: Record<string, [number, number]> = {
+  A: [470, 40],
+  B: [90, 620],
+  C: [850, 620],
+};
+const TRI_EDGE: Record<
+  Clade,
+  {
+    c1: keyof typeof TRI_CORNER;
+    c2: keyof typeof TRI_CORNER;
+    b1: string;
+    b2: string;
+    home: string;
+  }
+> = {
+  Perun: { c1: "A", c2: "C", b1: "Sakenta", b2: "Otanuomi", home: "Kino" },
+  Veles: { c1: "A", c2: "B", b1: "Arvasaras", b2: "Senda", home: "Archee" },
+  Svarog: { c1: "B", c2: "C", b1: "Ahtila", b2: "Urhinichi", home: "Niarja" },
+};
+/** Border-to-border gate links joining the clades at each triangle corner. */
+const TRI_CORNER_LINKS: [string, string][] = [
+  ["Arvasaras", "Sakenta"], // corner A (Veles ↔ Perun)
+  ["Senda", "Ahtila"], // corner B (Veles ↔ Svarog)
+  ["Otanuomi", "Urhinichi"], // corner C (Perun ↔ Svarog)
+];
+
+/**
+ * Fixed triangular coordinates + gate-loop edges for all 27 systems, so the
+ * reference map always renders in the same recognisable Pochven shape.
+ */
+export function pochvenTriangle(): {
+  pos: Record<string, { x: number; y: number }>;
+  edges: [string, string][];
+} {
+  const pos: Record<string, { x: number; y: number }> = {};
+  const edges: [string, string][] = [];
+  const cx = (TRI_CORNER.A[0] + TRI_CORNER.B[0] + TRI_CORNER.C[0]) / 3;
+  const cy = (TRI_CORNER.A[1] + TRI_CORNER.B[1] + TRI_CORNER.C[1]) / 3;
+  for (const clade of Object.keys(TRI_EDGE) as Clade[]) {
+    const e = TRI_EDGE[clade];
+    const p1 = TRI_CORNER[e.c1];
+    const p2 = TRI_CORNER[e.c2];
+    const internals = Object.entries(POCHVEN_META)
+      .filter(([, m]) => m.clade === clade && m.role === "Internal")
+      .map(([n]) => n)
+      .sort();
+    // Line systems along the edge: border, six internals, border.
+    const line = [e.b1, ...internals, e.b2];
+    line.forEach((name, i) => {
+      const t = 0.08 + (0.84 * i) / (line.length - 1);
+      pos[name] = {
+        x: p1[0] + (p2[0] - p1[0]) * t,
+        y: p1[1] + (p2[1] - p1[1]) * t,
+      };
+      if (i > 0) edges.push([line[i - 1], name]);
+    });
+    // Home branches off the middle of the edge, pushed outward from the centre.
+    const mx = (p1[0] + p2[0]) / 2;
+    const my = (p1[1] + p2[1]) / 2;
+    const dx = mx - cx;
+    const dy = my - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    pos[e.home] = { x: mx + (dx / len) * 90, y: my + (dy / len) * 90 };
+    edges.push([line[Math.floor(line.length / 2)], e.home]);
+  }
+  edges.push(...TRI_CORNER_LINKS);
+  return { pos, edges };
+}
+
 export type SecBand = "hisec" | "lowsec" | "nullsec";
 export interface EntryBands {
   hisec: number;

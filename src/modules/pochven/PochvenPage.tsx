@@ -19,8 +19,8 @@ import {
   C729,
   POCHVEN_SYSTEMS,
   POCHVEN_META,
-  POCHVEN_INTERNAL_LINKS,
   POCHVEN_ENTRY_COUNTS,
+  pochvenTriangle,
   dominantBand,
   hasKspaceEntry,
   FILAMENTS,
@@ -409,6 +409,9 @@ function PochvenSystemsPopover() {
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
+  // Fixed triangular coordinates + gate-loop edges, so the map always draws in
+  // Pochven's recognisable shape (drag to move; Reset restores the triangle).
+  const tri = useMemo(() => pochvenTriangle(), []);
   const nodes: SystemGraphNode[] = POCHVEN_SYSTEMS.map((s) => {
     const band = dominantBand(s.name);
     const enter = hasKspaceEntry(s.name);
@@ -431,10 +434,12 @@ function PochvenSystemsPopover() {
           ? `${meta.clade} · ${meta.role}`
           : undefined,
       group: meta?.clade,
+      x: tri.pos[s.name]?.x,
+      y: tri.pos[s.name]?.y,
       ...(enter ? { fill: BAND_HEX[band] } : { accent: BAND_HEX[band] }),
     };
   });
-  const edges: SystemGraphEdge[] = POCHVEN_INTERNAL_LINKS.map(([a, b]) => ({
+  const edges: SystemGraphEdge[] = tri.edges.map(([a, b]) => ({
     source: a,
     target: b,
     variant: "wormhole",
@@ -466,7 +471,10 @@ function PochvenSystemsPopover() {
                     Pochven systems
                   </div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-3 text-[11px] text-zinc-500">
-                    <span>clustered by clade · internal links shown</span>
+                    <span>
+                      triangle: each clade an edge, homes branch off · drag to
+                      move, Reset restores
+                    </span>
                     {(["hisec", "lowsec", "nullsec"] as const).map((b) => (
                       <span key={b} className="flex items-center gap-1">
                         <span
@@ -496,7 +504,7 @@ function PochvenSystemsPopover() {
                   edges={edges}
                   height={380}
                   storageKey="pochven-systems-ref"
-                  defaultMode="region"
+                  defaultMode="star"
                 />
                 <table className="mt-3 w-full border-collapse text-sm">
                   <thead className="bg-zinc-900 text-zinc-400">

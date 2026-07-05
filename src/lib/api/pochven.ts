@@ -43,7 +43,7 @@ export interface EntryCandidate {
   kills: number;
   /** Jumps from the searcher's current system. */
   jumps: number;
-  /** Scan order (1-based) along the nearest-neighbour route. */
+  /** Scan order (1-based), nearest system first. */
   order: number;
   /** Pochven system(s) this candidate's C729 leads into. */
   leadsTo: string[];
@@ -80,8 +80,9 @@ export interface EntrySearch {
 }
 
 /**
- * From `systemId`, plan a minimal-jump trip through every C729 entry candidate
- * within `maxJumps`, and list the reachable Pochven target systems.
+ * From `systemId`, find every C729 entry candidate within `maxJumps` (ordered
+ * nearest-first, each reached by its shortest path), and list the reachable
+ * Pochven target systems.
  */
 export function pochvenSearch(
   systemId: number,
