@@ -7,6 +7,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { Crosshair, Maximize2, Minimize2, Skull, Swords } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   ReactFlow,
   Background,
@@ -36,8 +37,9 @@ export interface SystemGraphNode {
   kind: NodeKind;
   /** Secondary line (e.g. sec status, region, or a signature code). */
   sub?: string;
-  /** Last-hour kill activity, rendered as an icon row with heat colours. */
-  stats?: { kills: number; podKills: number };
+  /** Last-hour kill activity, rendered as an icon row with heat colours.
+   *  With `zkillId` set, the row links to that system's zKillboard page. */
+  stats?: { kills: number; podKills: number; zkillId?: number };
   /** Highlight as the current / focused system. */
   current?: boolean;
   /** Override the border/text colour with a hex (e.g. faction control). */
@@ -189,7 +191,7 @@ type SystemNodeData = {
   label: string;
   kind: NodeKind;
   sub?: string;
-  stats?: { kills: number; podKills: number };
+  stats?: { kills: number; podKills: number; zkillId?: number };
   current?: boolean;
   accent?: string;
   ring?: string;
@@ -257,7 +259,28 @@ function SystemNode({ data, selected }: NodeProps<Node<SystemNodeData>>) {
         <div className="text-[10px] opacity-70 leading-tight">{data.sub}</div>
       )}
       {data.stats && (
-        <div className="mt-0.5 flex items-center gap-2 text-[10px] leading-tight tabular-nums">
+        <div
+          role={data.stats.zkillId != null ? "link" : undefined}
+          title={
+            data.stats.zkillId != null
+              ? "Open this system on zKillboard"
+              : undefined
+          }
+          onClick={(e) => {
+            const id = data.stats?.zkillId;
+            if (id == null) return;
+            e.stopPropagation();
+            void openUrl(`https://zkillboard.com/system/${id}/`).catch(
+              () => {},
+            );
+          }}
+          // "nodrag" stops React Flow from treating the click as a node drag.
+          className={`mt-0.5 flex items-center gap-2 text-[10px] leading-tight tabular-nums ${
+            data.stats.zkillId != null
+              ? "nodrag cursor-pointer hover:underline"
+              : ""
+          }`}
+        >
           {/* Ship kills (last hour): grey = quiet, amber = warm, rose = hot. */}
           <span
             title="Ship kills (last hour)"

@@ -6,6 +6,7 @@ import {
 } from "../../components/SystemGraph";
 import type { EntrySearch as EntrySearchResult } from "../../lib/api";
 import { BAND_HEX } from "./visual";
+import { ZkillSystemLink } from "../../components/ZkillLink";
 import { buildScanTree, computeGreenEdges, edgeKey, keptSets } from "./graph";
 
 export function EntryResults({ data }: { data: EntrySearchResult }) {
@@ -356,7 +357,15 @@ export function EntryResults({ data }: { data: EntrySearchResult }) {
                         c.kills > 0 ? "text-rose-300" : "text-zinc-600"
                       }`}
                     >
-                      {c.kills > 0 ? c.kills : "—"}
+                      {id != null ? (
+                        <ZkillSystemLink systemId={id}>
+                          {c.kills > 0 ? c.kills : "—"}
+                        </ZkillSystemLink>
+                      ) : c.kills > 0 ? (
+                        c.kills
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td className="px-3 py-1.5 text-zinc-400">
                       {c.leadsTo.join(", ")}

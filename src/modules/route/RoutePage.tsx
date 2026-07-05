@@ -31,6 +31,7 @@ import {
   type SystemGraphNode,
 } from "../../components/SystemGraph";
 import { kindFromSecurity } from "../../components/systemGraphLayout";
+import { ZkillSystemLink } from "../../components/ZkillLink";
 
 export function RoutePage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
@@ -465,7 +466,13 @@ function TravelGraph({
       kind: e.wspace ? "wspace" : kindFromSecurity(e.security),
       sub: e.wspace ? e.region || "wormhole" : e.security.toFixed(1),
       // Last-hour ship/pod kills as an icon row (CCP publishes k-space only).
-      stats: act ? { kills: act.shipKills, podKills: act.podKills } : undefined,
+      stats: act
+        ? {
+            kills: act.shipKills,
+            podKills: act.podKills,
+            zkillId: e.systemId,
+          }
+        : undefined,
       current: i === entries.length - 1,
     };
     // Keep the latest occurrence so "current" wins on a revisit.
@@ -649,12 +656,16 @@ function ActivityTable({ rows }: { rows: SystemActivity[] }) {
               <td
                 className={`px-3 py-1.5 text-right tabular-nums ${r.shipKills > 0 ? "text-rose-400" : "text-zinc-500"}`}
               >
-                {formatInt(r.shipKills)}
+                <ZkillSystemLink systemId={r.systemId}>
+                  {formatInt(r.shipKills)}
+                </ZkillSystemLink>
               </td>
               <td
                 className={`px-3 py-1.5 text-right tabular-nums ${r.podKills > 0 ? "text-rose-300" : "text-zinc-500"}`}
               >
-                {formatInt(r.podKills)}
+                <ZkillSystemLink systemId={r.systemId}>
+                  {formatInt(r.podKills)}
+                </ZkillSystemLink>
               </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                 {formatInt(r.npcKills)}
