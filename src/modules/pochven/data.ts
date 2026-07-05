@@ -300,39 +300,52 @@ export const POCHVEN_INTERNAL_LINKS: [string, string][] = [
   ["Ahtila", "Ichoriya"],
 ];
 
-/** Best (highest) security band a system's C729 can be entered from. */
-export const POCHVEN_ENTRY_BAND: Record<
-  string,
-  "hisec" | "lowsec" | "nullsec"
-> = {
-  Ahtila: "hisec",
-  Ala: "hisec",
-  Angymonne: "hisec",
-  Archee: "hisec",
-  Arvasaras: "hisec",
-  Harva: "hisec",
-  Ichoriya: "hisec",
-  Ignebaener: "hisec",
-  Kaunokka: "hisec",
-  Kino: "hisec",
-  Komo: "hisec",
-  Konola: "hisec",
-  Krirald: "hisec",
-  Kuharah: "lowsec",
-  Nalvula: "hisec",
-  Nani: "hisec",
-  Niarja: "hisec",
-  Otanuomi: "hisec",
-  Otela: "hisec",
-  Raravoss: "hisec",
-  Sakenta: "hisec",
-  Senda: "hisec",
-  Skarkon: "hisec",
-  Tunudan: "hisec",
-  Urhinichi: "hisec",
-  Vale: "hisec",
-  Wirashoda: "hisec",
+export type SecBand = "hisec" | "lowsec" | "nullsec";
+export interface EntryBands {
+  hisec: number;
+  lowsec: number;
+  nullsec: number;
+}
+
+/** How many of a system's C729 candidate exits sit in each security band
+ *  (Electus Matari candidate securities). */
+export const POCHVEN_ENTRY_COUNTS: Record<string, EntryBands> = {
+  Ahtila: { hisec: 10, lowsec: 11, nullsec: 0 },
+  Ala: { hisec: 7, lowsec: 8, nullsec: 0 },
+  Angymonne: { hisec: 15, lowsec: 0, nullsec: 0 },
+  Archee: { hisec: 12, lowsec: 0, nullsec: 0 },
+  Arvasaras: { hisec: 10, lowsec: 1, nullsec: 0 },
+  Harva: { hisec: 10, lowsec: 0, nullsec: 0 },
+  Ichoriya: { hisec: 7, lowsec: 11, nullsec: 0 },
+  Ignebaener: { hisec: 7, lowsec: 8, nullsec: 0 },
+  Kaunokka: { hisec: 8, lowsec: 1, nullsec: 0 },
+  Kino: { hisec: 13, lowsec: 0, nullsec: 0 },
+  Komo: { hisec: 23, lowsec: 0, nullsec: 0 },
+  Konola: { hisec: 7, lowsec: 2, nullsec: 0 },
+  Krirald: { hisec: 2, lowsec: 8, nullsec: 0 },
+  Kuharah: { hisec: 0, lowsec: 8, nullsec: 1 },
+  Nalvula: { hisec: 8, lowsec: 7, nullsec: 6 },
+  Nani: { hisec: 10, lowsec: 0, nullsec: 0 },
+  Niarja: { hisec: 26, lowsec: 0, nullsec: 0 },
+  Otanuomi: { hisec: 10, lowsec: 6, nullsec: 0 },
+  Otela: { hisec: 14, lowsec: 0, nullsec: 0 },
+  Raravoss: { hisec: 14, lowsec: 7, nullsec: 0 },
+  Sakenta: { hisec: 17, lowsec: 0, nullsec: 0 },
+  Senda: { hisec: 7, lowsec: 0, nullsec: 0 },
+  Skarkon: { hisec: 2, lowsec: 8, nullsec: 7 },
+  Tunudan: { hisec: 10, lowsec: 2, nullsec: 0 },
+  Urhinichi: { hisec: 14, lowsec: 0, nullsec: 0 },
+  Vale: { hisec: 11, lowsec: 1, nullsec: 0 },
+  Wirashoda: { hisec: 4, lowsec: 3, nullsec: 0 },
 };
+
+/** The band most of a system's C729 candidates sit in (ties → safer). */
+export function dominantBand(name: string): SecBand {
+  const c = POCHVEN_ENTRY_COUNTS[name] ?? { hisec: 0, lowsec: 0, nullsec: 0 };
+  if (c.hisec >= c.lowsec && c.hisec >= c.nullsec) return "hisec";
+  if (c.lowsec >= c.nullsec) return "lowsec";
+  return "nullsec";
+}
 
 /** Whether a system has a k-space C729 entry (vs internal-only). */
 export function hasKspaceEntry(name: string): boolean {
