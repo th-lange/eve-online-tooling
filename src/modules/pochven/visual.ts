@@ -2,7 +2,8 @@
 // components) so react-refresh hot-reloads the map components cleanly.
 
 import type { SystemGraphNode } from "../../components/SystemGraph";
-import { POCHVEN_ENTRY_COUNTS, POCHVEN_META, dominantBand } from "./data";
+import type { EntryBands } from "../../lib/api";
+import { POCHVEN_META } from "./data";
 
 export const BAND_HEX: Record<string, string> = {
   hisec: "#34d399",
@@ -29,21 +30,32 @@ export const CLADE_KRAI: Record<string, string> = {
   Veles: "Krai Veles",
 };
 
+/** The band most of a system's C729 candidates sit in (ties → safer). */
+export function dominantBand(c: EntryBands): "hisec" | "lowsec" | "nullsec" {
+  if (c.hisec >= c.lowsec && c.hisec >= c.nullsec) return "hisec";
+  if (c.lowsec >= c.nullsec) return "lowsec";
+  return "nullsec";
+}
+
 /**
  * Colour + sub-label for a Pochven system on the reference map: fill = role
  * (Home / Border / Internal), ring = constellation (Krai Perun/Svarog/Veles),
- * sub-label = where you can enter from.
+ * sub-label = where you can enter from. `bands` comes from the backend
+ * (`pochven_map`); while it's still loading the sub-label falls back to
+ * clade · role and the band colour to "unknown".
  */
-export function systemVisual(name: string): Partial<SystemGraphNode> {
+export function systemVisual(
+  name: string,
+  bands?: EntryBands,
+): Partial<SystemGraphNode> {
   const meta = POCHVEN_META[name];
-  const c = POCHVEN_ENTRY_COUNTS[name];
   return {
-    kind: dominantBand(name),
-    sub: c
+    kind: bands ? dominantBand(bands) : "unknown",
+    sub: bands
       ? [
-          c.hisec ? `${c.hisec} hi` : "",
-          c.lowsec ? `${c.lowsec} low` : "",
-          c.nullsec ? `${c.nullsec} null` : "",
+          bands.hisec ? `${bands.hisec} hi` : "",
+          bands.lowsec ? `${bands.lowsec} low` : "",
+          bands.nullsec ? `${bands.nullsec} null` : "",
         ]
           .filter(Boolean)
           .join(" · ")

@@ -9,10 +9,8 @@ import {
 } from "../../components/SystemGraph";
 import { pochvenMap } from "../../lib/api";
 import {
-  INTERNAL,
-  POCHVEN_ENTRY_COUNTS,
+  POCHVEN_INTERNAL_LINKS,
   POCHVEN_META,
-  POCHVEN_SYSTEMS,
   pochvenTriangle,
   systemsByClade,
   systemsByRole,
@@ -65,6 +63,24 @@ export function PochvenSystemsPopover() {
     [topo.data],
   );
 
+  // Table rows: the 27 system names (from the static clade/role map) enriched
+  // with the backend's band + spawn-region counts once loaded. The internal
+  // C729 count is the system's degree in the static internal-link list — the
+  // backend candidate dataset covers k-space exits only.
+  const tableRows = useMemo(() => {
+    const byName = new Map((topo.data?.systems ?? []).map((s) => [s.name, s]));
+    return Object.keys(POCHVEN_META)
+      .sort()
+      .map((name) => ({
+        name,
+        bands: byName.get(name)?.bands,
+        spawnRegions: byName.get(name)?.spawnRegions,
+        internal: POCHVEN_INTERNAL_LINKS.filter(
+          ([a, b]) => a === name || b === name,
+        ).length,
+      }));
+  }, [topo.data]);
+
   const { nodes, edges } = useMemo(() => {
     // Use the real SDE map only when it carries both systems and gate links;
     // otherwise keep the schematic triangle so the map never looks disconnected.
@@ -75,13 +91,14 @@ export function PochvenSystemsPopover() {
       const posOf = homeTriangleLayout(sys, topo.data.edges);
       const nodes: SystemGraphNode[] = sys.map((s) => {
         const p = posOf.get(s.systemId) ?? { x: 0, y: 0 };
+        const visual = systemVisual(s.name, s.bands);
         return {
           id: String(s.systemId),
           label: s.name,
           x: p.x,
           y: p.y,
-          ...systemVisual(s.name),
-          kind: systemVisual(s.name).kind ?? "unknown",
+          ...visual,
+          kind: visual.kind ?? "unknown",
         };
       });
       const edges: SystemGraphEdge[] = topo.data.edges.map(([a, b]) => ({
@@ -93,14 +110,17 @@ export function PochvenSystemsPopover() {
     }
     // Fallback schematic triangle (name-keyed) until the SDE map arrives.
     const tri = pochvenTriangle();
-    const nodes: SystemGraphNode[] = POCHVEN_SYSTEMS.map((s) => ({
-      id: s.name,
-      label: s.name,
-      x: tri.pos[s.name]?.x,
-      y: tri.pos[s.name]?.y,
-      ...systemVisual(s.name),
-      kind: systemVisual(s.name).kind ?? "unknown",
-    }));
+    const nodes: SystemGraphNode[] = Object.keys(POCHVEN_META).map((name) => {
+      const visual = systemVisual(name);
+      return {
+        id: name,
+        label: name,
+        x: tri.pos[name]?.x,
+        y: tri.pos[name]?.y,
+        ...visual,
+        kind: visual.kind ?? "unknown",
+      };
+    });
     const edges: SystemGraphEdge[] = tri.edges.map(([a, b]) => ({
       source: a,
       target: b,
@@ -201,8 +221,8 @@ export function PochvenSystemsPopover() {
                     </tr>
                   </thead>
                   <tbody>
-                    {POCHVEN_SYSTEMS.map((s) => {
-                      const c = POCHVEN_ENTRY_COUNTS[s.name];
+                    {tableRows.map((s) => {
+                      const c = s.bands;
                       const meta = POCHVEN_META[s.name];
                       const isOpen = expanded === s.name;
                       return (
@@ -241,13 +261,16 @@ export function PochvenSystemsPopover() {
                               </span>
                             </td>
                             <td className="px-3 py-1.5 text-zinc-400">
-                              {s.c729
-                                .map((z) =>
-                                  z.region === INTERNAL
-                                    ? `internal (${z.count})`
-                                    : `${z.region} (${z.count})`,
-                                )
-                                .join(" · ")}
+                              {s.spawnRegions
+                                ? [
+                                    ...s.spawnRegions.map(
+                                      (z) => `${z.region} (${z.count})`,
+                                    ),
+                                    ...(s.internal > 0
+                                      ? [`internal (${s.internal})`]
+                                      : []),
+                                  ].join(" · ")
+                                : "…"}
                             </td>
                           </tr>
                           {isOpen && meta && (
