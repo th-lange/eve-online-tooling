@@ -43,7 +43,8 @@ export interface EntryCandidate {
   kills: number;
   /** Jumps from the searcher's current system. */
   jumps: number;
-  /** Scan order (1-based), nearest system first. */
+  /** Scan order (1-based): depth-first visit order of the minimal-jump
+   *  (Steiner-tree) network through the candidates. */
   order: number;
   /** Pochven system(s) this candidate's C729 leads into. */
   leadsTo: string[];
@@ -80,9 +81,9 @@ export interface EntrySearch {
 }
 
 /**
- * From `systemId`, find every C729 entry candidate within `maxJumps` (ordered
- * nearest-first, each reached by its shortest path), and list the reachable
- * Pochven target systems.
+ * From `systemId`, find every C729 entry candidate within `maxJumps`, order
+ * them by a minimal-jump visiting sequence (depth-first over a Dreyfus–Wagner
+ * Steiner tree), and list the reachable Pochven target systems.
  */
 export function pochvenSearch(
   systemId: number,
