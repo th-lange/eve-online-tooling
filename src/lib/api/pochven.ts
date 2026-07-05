@@ -63,18 +63,25 @@ export interface PochvenMap {
 }
 export interface EntrySearch {
   from: string;
-  /** Jump path (system names) to the nearest candidate. */
+  /** Max jump distance the candidates were filtered to. */
+  maxJumps: number;
+  /** Pochven systems reachable via the in-range candidates. */
+  targets: string[];
+  /** Jump path (system names) to the first scan target. */
   route: string[];
-  /** Candidate exit systems, nearest first. */
+  /** Candidate exit systems, in scan order. */
   candidates: EntryCandidate[];
   /** Scan map: candidates + the grey travel systems linking them. */
   map: PochvenMap;
 }
 
 /**
- * From `systemId`, route to the nearest C729 entry candidate and list the
- * closest candidates (nearest first) to jump to and scan.
+ * From `systemId`, plan a minimal-jump trip through every C729 entry candidate
+ * within `maxJumps`, and list the reachable Pochven target systems.
  */
-export function pochvenSearch(systemId: number): Promise<EntrySearch> {
-  return invoke<EntrySearch>("pochven_search", { systemId });
+export function pochvenSearch(
+  systemId: number,
+  maxJumps: number,
+): Promise<EntrySearch> {
+  return invoke<EntrySearch>("pochven_search", { systemId, maxJumps });
 }
