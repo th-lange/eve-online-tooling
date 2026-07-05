@@ -391,101 +391,29 @@ pub async fn pochven_search(
     targets.sort();
     targets.dedup();
 
-    // Optimise a trip that visits the in-range candidates with minimal total
-    // jumps: nearest-neighbour seed, then 2-opt. Distances come from a BFS per
-    // trip system (capped for tractability).
-    const TRIP_CAP: usize = 40;
-    let trip_ids: Vec<i64> = in_range.iter().take(TRIP_CAP).map(|&(id, _)| id).collect();
-    let bfs_map: HashMap<i64, Bfs> = trip_ids.iter().map(|&id| (id, bfs(&adj, id))).collect();
-    let dist_between = |a: i64, b: i64| -> i64 {
-        if a == system_id {
-            dist.get(&b).copied().unwrap_or(i64::MAX)
-        } else {
-            bfs_map
-                .get(&a)
-                .and_then(|(d, _)| d.get(&b))
-                .copied()
-                .unwrap_or(i64::MAX)
-        }
-    };
+    // Scan order = distance from origin, nearest first (shortest-path-first).
+    // No travelling-salesman reordering: that made the numbering wander across
+    // the map (a nearby candidate could be scanned much later, forcing a long
+    // hop). Nearest-first keeps every step short.
+    let order_map: HashMap<i64, i64> = in_range
+        .iter()
+        .enumerate()
+        .map(|(i, &(id, _))| (id, (i + 1) as i64))
+        .collect();
+    let order_ids: Vec<i64> = in_range.iter().map(|&(id, _)| id).collect();
 
-    // Nearest-neighbour seed order starting from the origin.
-    let mut remaining = trip_ids.clone();
-    let mut order_ids: Vec<i64> = Vec::new();
-    let mut current = system_id;
-    while !remaining.is_empty() {
-        let idx = remaining
-            .iter()
-            .enumerate()
-            .min_by_key(|&(_, &c)| dist_between(current, c))
-            .map(|(i, _)| i)
-            .unwrap();
-        current = remaining.remove(idx);
-        order_ids.push(current);
-    }
-
-    // 2-opt on the open path [origin, order_ids…] to shorten the total trip.
-    if order_ids.len() >= 3 {
-        let mut seq: Vec<i64> = std::iter::once(system_id)
-            .chain(order_ids.iter().copied())
-            .collect();
-        let n = seq.len();
-        let mut improved = true;
-        let mut guard = 0;
-        while improved && guard < 60 {
-            improved = false;
-            guard += 1;
-            for a in 1..n {
-                for b in (a + 1)..n {
-                    let has_next = b + 1 < n;
-                    let before = dist_between(seq[a - 1], seq[a])
-                        + if has_next {
-                            dist_between(seq[b], seq[b + 1])
-                        } else {
-                            0
-                        };
-                    let after = dist_between(seq[a - 1], seq[b])
-                        + if has_next {
-                            dist_between(seq[a], seq[b + 1])
-                        } else {
-                            0
-                        };
-                    if after < before {
-                        seq[a..=b].reverse();
-                        improved = true;
-                    }
-                }
-            }
-        }
-        order_ids = seq[1..].to_vec();
-    }
-
-    // Scan order per candidate: trip order first, then any further in-range ones.
-    let mut order_map: HashMap<i64, i64> = HashMap::new();
-    for (i, &id) in order_ids.iter().enumerate() {
-        order_map.insert(id, (i + 1) as i64);
-    }
-    let mut next_order = order_ids.len() as i64;
-    for &(id, _) in in_range.iter().skip(trip_ids.len()) {
-        next_order += 1;
-        order_map.insert(id, next_order);
-    }
-
-    // Map = union of the trip segments (origin → c1 → c2 → …).
+    // Map = the shortest-path tree from the origin to the nearest candidates
+    // (each reached by its own shortest route). A tree can't produce the long
+    // cross-map edges a chained trip did.
+    const MAP_CAP: usize = 30;
     let mut node_ids: HashSet<i64> = HashSet::from([system_id]);
     let mut edge_set: HashSet<(i64, i64)> = HashSet::new();
-    let mut prev = system_id;
-    for &cid in &order_ids {
-        let pred_a = if prev == system_id {
-            &pred
-        } else {
-            &bfs_map[&prev].1
-        };
-        for w in path_ids(pred_a, prev, cid).windows(2) {
+    for &cid in order_ids.iter().take(MAP_CAP) {
+        let path = path_ids(&pred, system_id, cid);
+        for w in path.windows(2) {
             edge_set.insert((w[0], w[1]));
         }
-        node_ids.extend(path_ids(pred_a, prev, cid));
-        prev = cid;
+        node_ids.extend(path);
     }
     let sec_of = |id: i64| info.get(&id).map(|(_, s, _)| *s).unwrap_or(0.0);
     let nodes = node_ids
