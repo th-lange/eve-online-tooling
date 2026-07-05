@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { MapPin, X } from "lucide-react";
@@ -699,6 +699,12 @@ function PochvenSystemsPopover() {
     enabled: open,
   });
 
+  // Which filaments drop you into each system (by its role / clade), and the
+  // pool each one can land in. Click a row to expand.
+  const byRole = useMemo(() => systemsByRole(), []);
+  const byClade = useMemo(() => systemsByClade(), []);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
   const { nodes, edges } = useMemo(() => {
     // Use the real SDE map only when it carries both systems and gate links;
     // otherwise keep the schematic triangle so the map never looks disconnected.
@@ -910,43 +916,98 @@ function PochvenSystemsPopover() {
                   <tbody>
                     {POCHVEN_SYSTEMS.map((s) => {
                       const c = POCHVEN_ENTRY_COUNTS[s.name];
+                      const meta = POCHVEN_META[s.name];
+                      const isOpen = expanded === s.name;
                       return (
-                        <tr key={s.name} className="border-t border-zinc-800">
-                          <td className="px-3 py-1.5 font-medium text-zinc-200">
-                            {s.name}
-                          </td>
-                          <td className="px-3 py-1.5 text-zinc-500">
-                            {POCHVEN_META[s.name]
-                              ? `${POCHVEN_META[s.name].clade} · ${POCHVEN_META[s.name].role}`
-                              : "—"}
-                          </td>
-                          <td className="px-3 py-1.5">
-                            <span className="flex gap-2 tabular-nums">
-                              {(
-                                [
-                                  ["hisec", c?.hisec ?? 0],
-                                  ["lowsec", c?.lowsec ?? 0],
-                                  ["nullsec", c?.nullsec ?? 0],
-                                ] as const
-                              )
-                                .filter(([, n]) => n > 0)
-                                .map(([b, n]) => (
-                                  <span key={b} style={{ color: BAND_HEX[b] }}>
-                                    {n} {b.replace("sec", "")}
-                                  </span>
-                                ))}
-                            </span>
-                          </td>
-                          <td className="px-3 py-1.5 text-zinc-400">
-                            {s.c729
-                              .map((z) =>
-                                z.region === INTERNAL
-                                  ? `internal (${z.count})`
-                                  : `${z.region} (${z.count})`,
-                              )
-                              .join(" · ")}
-                          </td>
-                        </tr>
+                        <Fragment key={s.name}>
+                          <tr
+                            onClick={() => setExpanded(isOpen ? null : s.name)}
+                            className="cursor-pointer border-t border-zinc-800 hover:bg-zinc-800/40"
+                          >
+                            <td className="px-3 py-1.5 font-medium text-zinc-200">
+                              <span className="mr-1 inline-block w-2 text-zinc-500">
+                                {isOpen ? "▾" : "▸"}
+                              </span>
+                              {s.name}
+                            </td>
+                            <td className="px-3 py-1.5 text-zinc-500">
+                              {meta ? `${meta.clade} · ${meta.role}` : "—"}
+                            </td>
+                            <td className="px-3 py-1.5">
+                              <span className="flex gap-2 tabular-nums">
+                                {(
+                                  [
+                                    ["hisec", c?.hisec ?? 0],
+                                    ["lowsec", c?.lowsec ?? 0],
+                                    ["nullsec", c?.nullsec ?? 0],
+                                  ] as const
+                                )
+                                  .filter(([, n]) => n > 0)
+                                  .map(([b, n]) => (
+                                    <span
+                                      key={b}
+                                      style={{ color: BAND_HEX[b] }}
+                                    >
+                                      {n} {b.replace("sec", "")}
+                                    </span>
+                                  ))}
+                              </span>
+                            </td>
+                            <td className="px-3 py-1.5 text-zinc-400">
+                              {s.c729
+                                .map((z) =>
+                                  z.region === INTERNAL
+                                    ? `internal (${z.count})`
+                                    : `${z.region} (${z.count})`,
+                                )
+                                .join(" · ")}
+                            </td>
+                          </tr>
+                          {isOpen && meta && (
+                            <tr className="border-t border-zinc-800/60 bg-zinc-900/60">
+                              <td colSpan={4} className="px-3 py-2">
+                                <div className="text-[11px] uppercase tracking-wide text-zinc-500">
+                                  Filaments that drop you into {s.name}
+                                </div>
+                                <ul className="mt-1 space-y-1 text-xs text-zinc-400">
+                                  <li>
+                                    <span className="font-medium text-sky-300">
+                                      System-type · {meta.role}
+                                    </span>{" "}
+                                    — random {meta.role} system (
+                                    {byRole[meta.role].length}):{" "}
+                                    <span className="text-zinc-500">
+                                      {byRole[meta.role]
+                                        .map((n) =>
+                                          n === s.name ? `${n}★` : n,
+                                        )
+                                        .join(", ")}
+                                    </span>
+                                  </li>
+                                  <li>
+                                    <span className="font-medium text-violet-300">
+                                      Cladistic · {meta.clade}
+                                    </span>{" "}
+                                    — random {meta.clade} system (
+                                    {byClade[meta.clade].length}):{" "}
+                                    <span className="text-zinc-500">
+                                      {byClade[meta.clade]
+                                        .map((n) =>
+                                          n === s.name ? `${n}★` : n,
+                                        )
+                                        .join(", ")}
+                                    </span>
+                                  </li>
+                                </ul>
+                                <div className="mt-1 text-[11px] text-zinc-600">
+                                  Filaments land you in a random system of that
+                                  role / clade (★ = this one); a C729 wormhole
+                                  is the only way to target a specific system.
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
                       );
                     })}
                   </tbody>
