@@ -37,6 +37,10 @@ export function pochvenRoutes(): Promise<PochvenRoutes> {
 export interface EntryCandidate {
   system: string;
   region: string;
+  /** Security status of the candidate system. */
+  security: number;
+  /** Ship + pod kills in the last hour (ESI hourly aggregate). */
+  kills: number;
   /** Jumps from the searcher's current system. */
   jumps: number;
   /** Scan order (1-based) along the nearest-neighbour route. */
