@@ -1,7 +1,7 @@
 {
   "name": "eve-online-tooling",
   "private": true,
-  "version": "0.30.2",
+  "version": "0.30.3",
   "license": "MIT",
   "type": "module",
   "scripts": {
