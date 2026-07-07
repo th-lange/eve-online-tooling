@@ -204,8 +204,9 @@ pub async fn roster_stock(
     Ok(stock)
 }
 
-/// Open the in-game market window for a type, using the first logged-in
-/// character. Requires the `esi-ui.open_window.v1` scope (re-login if added).
+/// Open the in-game market window for a type, using the active character (the
+/// one whose orders are shown). Requires the `esi-ui.open_window.v1` scope
+/// (re-login if added).
 #[tauri::command]
 pub async fn open_market_window(
     app: AppHandle,
@@ -213,11 +214,8 @@ pub async fn open_market_window(
     type_id: i64,
 ) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let character = storage::load_roster(&dir)
-        .into_iter()
-        .next()
-        .ok_or("Log in a character first")?;
-    character::open_market_window(&auth_state, character.character_id, type_id)
+    let character_id = storage::active_character(&dir).ok_or("Log in a character first")?;
+    character::open_market_window(&auth_state, character_id, type_id)
         .await
         .map_err(|e| e.to_string())
 }
