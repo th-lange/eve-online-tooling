@@ -1008,7 +1008,7 @@ dependencies = [
 
 [[package]]
 name = "eve-online-tooling"
-version = "0.30.4"
+version = "0.30.5"
 dependencies = [
  "base64 0.22.1",
  "flate2",
