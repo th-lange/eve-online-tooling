@@ -36,10 +36,11 @@ struct Store {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct ChatState {
     channel: String,
-    /// Per-file progress: chatlog filename -> message lines already processed.
-    /// Only currently-recent files are kept, so this stays small.
+    /// Keys (`[ ts ] Sender`) of messages already ingested, so the same channel
+    /// message logged by several of the user's clients is imported only once,
+    /// and re-polls don't re-add it. Pruned to the current window each poll.
     #[serde(default)]
-    files: std::collections::BTreeMap<String, usize>,
+    seen: std::collections::BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -522,7 +523,7 @@ pub fn shopping_chat_sync(
     let channel_changed = store.chat.channel != chan;
     if channel_changed {
         store.chat.channel = chan.to_string();
-        store.chat.files.clear();
+        store.chat.seen.clear();
     }
 
     if recent.is_empty() {
@@ -543,18 +544,29 @@ pub fn shopping_chat_sync(
         format!("{} logs", recent.len())
     };
 
-    // `from_now` (sent on Start) baselines every current file to its length and
-    // adds nothing, so we only capture messages linked from here on — important
-    // for busy channels like Corp that already hold the whole day's chatter.
-    if from_now == Some(true) {
-        let mut files = std::collections::BTreeMap::new();
-        for (path, name) in &recent {
-            let msgs = crate::chatlog::parse_chat_messages(
-                &crate::chatlog::read_chatlog(path).unwrap_or_default(),
-            );
-            files.insert(name.clone(), msgs.len());
+    // The de-duplicated union of messages across all followed files. Several of
+    // the user's online characters each log the *same* channel to their own
+    // file, so a message shows up once per client — key on `[ ts ] Sender`
+    // (identical across those copies) to import it exactly once. Distinct
+    // messages (incl. the same text posted twice) keep distinct keys via their
+    // timestamps. Insertion order = first file that carried each message.
+    let mut union: Vec<crate::chatlog::ChatEntry> = Vec::new();
+    let mut union_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for (path, _name) in &recent {
+        for entry in crate::chatlog::parse_chat_entries(
+            &crate::chatlog::read_chatlog(path).unwrap_or_default(),
+        ) {
+            if union_keys.insert(entry.key.clone()) {
+                union.push(entry);
+            }
         }
-        store.chat.files = files;
+    }
+
+    // `from_now` (sent on Start) marks every current message as seen and adds
+    // nothing, so we only capture messages linked from here on — important for
+    // busy channels like Corp that already hold the whole day's chatter.
+    if from_now == Some(true) {
+        store.chat.seen = union_keys;
         save(&dir, &store)?;
         return Ok(ChatSync {
             added: Vec::new(),
@@ -563,11 +575,9 @@ pub fn shopping_chat_sync(
         });
     }
 
-    // Ingest new lines across all followed files, resuming each from where we
-    // left off. Files not seen before (opened after Start) resume from 0 — their
-    // MOTD is an "EVE System" line and already filtered out by the parser.
-    let prior = store.chat.files.clone();
-    let mut next: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    // Ingest messages we haven't seen before. A message opened after Start (or
+    // in a client that joined later) is new here regardless of which file it
+    // landed in; its MOTD is an "EVE System" line, already filtered by the parser.
     let mut added = Vec::new();
     {
         // Find (or create above) the chat list and append resolved items.
@@ -576,45 +586,42 @@ pub fn shopping_chat_sync(
             .iter_mut()
             .find(|l| l.id == CHAT_LIST.0)
             .expect("chat list ensured above");
-        for (path, name) in &recent {
-            let msgs = crate::chatlog::parse_chat_messages(
-                &crate::chatlog::read_chatlog(path).unwrap_or_default(),
-            );
-            let start = prior.get(name).copied().unwrap_or(0).min(msgs.len());
-            next.insert(name.clone(), msgs.len());
+        for entry in &union {
+            if store.chat.seen.contains(&entry.key) {
+                continue;
+            }
             // One item per line: multi-line pastes arrive as one message with
             // embedded newlines (see chatlog.rs), and each line may carry a
             // quantity ("Tritanium 100", "Pyerite\t50", "x3" styles).
-            for m in msgs.iter().skip(start) {
-                for raw in m.lines().take(MAX_LINES_PER_MESSAGE) {
-                    let Some((name, qty)) = parse_chat_line(raw) else {
-                        continue;
-                    };
-                    if let Some((type_id, _)) = sde.type_by_name(&name).map_err(|e| e.to_string())? {
-                        match list.items.iter_mut().find(|e| e.type_id == type_id) {
-                            Some(e) => e.quantity = e.quantity.saturating_add(qty),
-                            None => list.items.push(StoredEntry {
-                                type_id,
-                                quantity: qty,
-                            }),
-                        }
-                        added.push(if qty > 1 {
-                            format!("{name} ×{qty}")
-                        } else {
-                            name
-                        });
+            for raw in entry.text.lines().take(MAX_LINES_PER_MESSAGE) {
+                let Some((name, qty)) = parse_chat_line(raw) else {
+                    continue;
+                };
+                if let Some((type_id, _)) = sde.type_by_name(&name).map_err(|e| e.to_string())? {
+                    match list.items.iter_mut().find(|e| e.type_id == type_id) {
+                        Some(e) => e.quantity = e.quantity.saturating_add(qty),
+                        None => list.items.push(StoredEntry {
+                            type_id,
+                            quantity: qty,
+                        }),
                     }
+                    added.push(if qty > 1 {
+                        format!("{name} ×{qty}")
+                    } else {
+                        name
+                    });
                 }
             }
         }
     }
 
-    // Only rewrite the store when something actually moved — the poll runs every
-    // few seconds and most ticks are no-ops. `next` also prunes files that
-    // aged out of the window, keeping `files` bounded.
-    let files_changed = next != store.chat.files;
-    store.chat.files = next;
-    if channel_changed || files_changed || !added.is_empty() {
+    // Everything currently in the window is now seen. Assigning the fresh set
+    // also prunes keys whose files aged out, keeping `seen` bounded. Only
+    // rewrite the store when something actually moved — the poll runs every few
+    // seconds and most ticks are no-ops.
+    let seen_changed = union_keys != store.chat.seen;
+    store.chat.seen = union_keys;
+    if channel_changed || seen_changed || !added.is_empty() {
         save(&dir, &store)?;
     }
     Ok(ChatSync {
