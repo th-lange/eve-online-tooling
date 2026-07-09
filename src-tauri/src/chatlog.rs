@@ -122,7 +122,10 @@ mod tests {
     /// The message text of each entry — what the old `parse_chat_messages`
     /// returned; kept as a test helper now that callers want `ChatEntry`.
     fn parse_chat_messages(content: &str) -> Vec<String> {
-        parse_chat_entries(content).into_iter().map(|e| e.text).collect()
+        parse_chat_entries(content)
+            .into_iter()
+            .map(|e| e.text)
+            .collect()
     }
 
     const LOG: &str = "\
@@ -169,13 +172,19 @@ mod tests {
         for u in content.encode_utf16() {
             bytes.extend_from_slice(&u.to_le_bytes());
         }
-        let path =
-            std::env::temp_dir().join(format!("chatlog_bom_{}_{}.txt", std::process::id(), line!()));
+        let path = std::env::temp_dir().join(format!(
+            "chatlog_bom_{}_{}.txt",
+            std::process::id(),
+            line!()
+        ));
         std::fs::write(&path, &bytes).unwrap();
         let text = read_chatlog(&path).unwrap();
         std::fs::remove_file(&path).ok();
 
-        assert!(!text.contains('\u{feff}'), "per-line BOMs should be stripped");
+        assert!(
+            !text.contains('\u{feff}'),
+            "per-line BOMs should be stripped"
+        );
         assert_eq!(
             parse_chat_messages(&text),
             vec!["Titanium Carbide 30000", "Fullerides"]

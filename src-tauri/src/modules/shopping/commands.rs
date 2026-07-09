@@ -462,24 +462,33 @@ pub struct ChatSync {
     pub found: bool,
 }
 
-/// Follow an EVE chat channel's logs and add any linked/typed items to the Chat
-/// list. Follows *all* `<channel>_*.txt` in `logs_dir` modified in the last day
-/// (EVE writes one file per client/session), ingests messages it hasn't seen yet
-/// (tracked per file), and resolves each as an item name via the SDE — non-item
-/// chatter is ignored. Poll this every few seconds while listening. Public —
-/// chat capture needs no login.
+/// Follow an EVE chat channel's logs and add any linked/typed items to a target
+/// list (`list_id`, default the built-in Chat list). Follows *all*
+/// `<channel>_*.txt` in `logs_dir` modified in the last day (EVE writes one file
+/// per client/session), imports each distinct message once (de-duplicated across
+/// the per-client copies), and resolves each line as an item name via the SDE —
+/// non-item chatter is ignored. Poll this every few seconds while listening.
+/// Public — chat capture needs no login.
 #[tauri::command]
 pub fn shopping_chat_sync(
     app: AppHandle,
     logs_dir: String,
     channel: String,
     from_now: Option<bool>,
+    list_id: Option<String>,
 ) -> Result<ChatSync, String> {
     let (dir, sde) = dir_and_sde(&app)?;
     let chan = channel.trim();
     if chan.is_empty() {
         return Err("channel name is empty".into());
     }
+    // Where captured items land — defaults to the built-in Chat list.
+    let target_id = list_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(CHAT_LIST.0)
+        .to_string();
 
     // Every chatlog whose name starts with "<channel>_" (EVE appends
     // _<date>_<time>_<charId>.txt) that was modified in the last day — only
@@ -510,13 +519,19 @@ pub fn shopping_chat_sync(
     recent.sort_by(|a, b| a.1.cmp(&b.1));
 
     let mut store = load(&dir);
-    // Ensure the Chat list exists.
-    if !store.lists.iter().any(|l| l.id == CHAT_LIST.0) {
-        store.lists.push(StoredList {
-            id: CHAT_LIST.0.to_string(),
-            name: CHAT_LIST.1.to_string(),
-            items: Vec::new(),
-        });
+    // Ensure the target list exists. The built-in Chat list is auto-created on
+    // demand (it isn't seeded like default/production); any other target must
+    // already exist — the UI only offers lists that do.
+    if !store.lists.iter().any(|l| l.id == target_id) {
+        if target_id == CHAT_LIST.0 {
+            store.lists.push(StoredList {
+                id: CHAT_LIST.0.to_string(),
+                name: CHAT_LIST.1.to_string(),
+                items: Vec::new(),
+            });
+        } else {
+            return Err(format!("no such list: {target_id}"));
+        }
     }
 
     // Switching channels drops progress for the old one.
@@ -580,12 +595,12 @@ pub fn shopping_chat_sync(
     // landed in; its MOTD is an "EVE System" line, already filtered by the parser.
     let mut added = Vec::new();
     {
-        // Find (or create above) the chat list and append resolved items.
+        // Find (ensured above) the target list and append resolved items.
         let list = store
             .lists
             .iter_mut()
-            .find(|l| l.id == CHAT_LIST.0)
-            .expect("chat list ensured above");
+            .find(|l| l.id == target_id)
+            .expect("target list ensured above");
         for entry in &union {
             if store.chat.seen.contains(&entry.key) {
                 continue;

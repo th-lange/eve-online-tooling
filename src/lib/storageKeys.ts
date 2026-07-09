@@ -20,6 +20,8 @@ export const STORAGE_KEYS = {
   // EVE log folders
   eveChatlogsDir: "eveLogsDir", // legacy value; points at the Chatlogs folder
   eveGamelogsDir: "eveGamelogsDir",
+  // Shopping: which list chat capture imports into
+  shoppingChatTarget: "shopping.chatTarget",
   // DPS meter
   dpsWindowSecs: "dps.windowSecs",
   // Local Intel
