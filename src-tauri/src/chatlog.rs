@@ -10,16 +10,21 @@ use std::collections::HashSet;
 /// Read an EVE chatlog file, decoding UTF-16LE (the format EVE writes) or UTF-8.
 pub fn read_chatlog(path: &std::path::Path) -> Option<String> {
     let bytes = std::fs::read(path).ok()?;
-    if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
+    let text = if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
         // UTF-16LE with BOM.
         let u16s: Vec<u16> = bytes[2..]
             .chunks_exact(2)
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .collect();
-        Some(String::from_utf16_lossy(&u16s))
+        String::from_utf16_lossy(&u16s)
     } else {
-        Some(String::from_utf8_lossy(&bytes).into_owned())
-    }
+        String::from_utf8_lossy(&bytes).into_owned()
+    };
+    // EVE prefixes U+FEFF (BOM / zero-width no-break space) to *every* logged
+    // chat line, not just the file start. Left in place, each message line reads
+    // as `\u{feff}[ ts ] …` and header detection (`starts_with('[')`) fails, so
+    // no messages parse. It's never meaningful in chat text, so strip them all.
+    Some(text.replace('\u{feff}', ""))
 }
 
 /// Distinct sender names from chatlog content, in order of first appearance.
@@ -112,6 +117,30 @@ mod tests {
     #[test]
     fn parses_messages_and_skips_system_and_empty_lines() {
         assert_eq!(parse_chat_messages(LOG), vec!["Tritanium", "Pyerite", "o7"]);
+    }
+
+    #[test]
+    fn read_chatlog_strips_per_line_bom_from_utf16() {
+        // EVE writes UTF-16LE with a file BOM *and* a U+FEFF before every line.
+        // Without stripping those, each header reads as `\u{feff}[ ts ] …` and
+        // no messages parse (the corp-capture bug this guards against).
+        let content = "\u{feff}[ 2026.07.09 16:46:33 ] Tarimaka > Titanium Carbide 30000\n\
+             \u{feff}[ 2026.07.09 16:47:00 ] Tarimaka > Fullerides";
+        let mut bytes = vec![0xFF, 0xFE];
+        for u in content.encode_utf16() {
+            bytes.extend_from_slice(&u.to_le_bytes());
+        }
+        let path =
+            std::env::temp_dir().join(format!("chatlog_bom_{}_{}.txt", std::process::id(), line!()));
+        std::fs::write(&path, &bytes).unwrap();
+        let text = read_chatlog(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        assert!(!text.contains('\u{feff}'), "per-line BOMs should be stripped");
+        assert_eq!(
+            parse_chat_messages(&text),
+            vec!["Titanium Carbide 30000", "Fullerides"]
+        );
     }
 
     #[test]
