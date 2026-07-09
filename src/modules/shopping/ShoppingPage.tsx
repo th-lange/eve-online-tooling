@@ -38,6 +38,9 @@ export function ShoppingPage() {
   });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
+  // Lists that changed while not being viewed (e.g. a chat import into another
+  // list) — surfaced with a dot in the selector, cleared when the list is opened.
+  const [changed, setChanged] = useState<Set<string>>(new Set());
 
   const refresh = useCallback(
     () => qc.invalidateQueries({ queryKey: SHOPPING_LISTS_KEY }),
@@ -52,6 +55,44 @@ export function ShoppingPage() {
       setSelectedId(data[0].id);
     }
   }, [data, selectedId]);
+
+  // Flag any not-currently-viewed list whose contents changed between refetches.
+  // Signatures are per-item `typeId:qty`, so an added item or quantity bump both
+  // count. The first populate seeds signatures without flagging anything.
+  const sigRef = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    if (!data) return;
+    const prev = sigRef.current;
+    const next = new Map<string, string>();
+    const newlyChanged: string[] = [];
+    for (const l of data) {
+      const sig = l.items.map((i) => `${i.typeId}:${i.quantity}`).join(",");
+      next.set(l.id, sig);
+      const before = prev.get(l.id);
+      if (before !== undefined && before !== sig && l.id !== selectedId) {
+        newlyChanged.push(l.id);
+      }
+    }
+    sigRef.current = next;
+    if (newlyChanged.length > 0) {
+      setChanged((prevSet) => {
+        const s = new Set(prevSet);
+        for (const id of newlyChanged) s.add(id);
+        return s;
+      });
+    }
+  }, [data, selectedId]);
+
+  // Opening a list clears its "changed" dot.
+  useEffect(() => {
+    if (!selectedId) return;
+    setChanged((prev) => {
+      if (!prev.has(selectedId)) return prev;
+      const s = new Set(prev);
+      s.delete(selectedId);
+      return s;
+    });
+  }, [selectedId]);
 
   const selected = data?.find((l) => l.id === selectedId) ?? null;
 
@@ -80,7 +121,7 @@ export function ShoppingPage() {
         </p>
       </div>
 
-      <ChatCapture onSync={refresh} />
+      <ChatCapture onSync={refresh} lists={data ?? []} />
 
       <div className="mt-5 flex gap-6">
         {/* List selector. */}
@@ -95,12 +136,18 @@ export function ShoppingPage() {
               >
                 <button
                   onClick={() => setSelectedId(l.id)}
-                  className="flex-1 px-2 py-1 text-left text-sm text-zinc-200"
+                  className="flex flex-1 items-center px-2 py-1 text-left text-sm text-zinc-200"
                 >
                   {l.name}
                   <span className="ml-1 text-xs text-zinc-500">
                     {l.items.length}
                   </span>
+                  {changed.has(l.id) && (
+                    <span
+                      title="Updated since you last viewed it"
+                      className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-amber-400"
+                    />
+                  )}
                 </button>
                 {l.removable && (
                   <button
@@ -154,7 +201,13 @@ export function ShoppingPage() {
 
 // --- Chat capture: listen to an EVE chat channel and collect linked items ---
 
-function ChatCapture({ onSync }: { onSync: () => Promise<unknown> }) {
+function ChatCapture({
+  onSync,
+  lists,
+}: {
+  onSync: () => Promise<unknown>;
+  lists: ShoppingList[];
+}) {
   const [channel, setChannel] = useState("");
   const [logsDir, setLogsDir] = useState(
     () => localStorage.getItem(STORAGE_KEYS.eveChatlogsDir) ?? "",
@@ -165,6 +218,28 @@ function ChatCapture({ onSync }: { onSync: () => Promise<unknown> }) {
   const { copied, copy } = useCopyToClipboard(1500);
   // True until the first poll of a session, so we skip pre-existing log content.
   const fromNow = useRef(false);
+
+  // Where captured items go. Defaults to the built-in Chat list, which we always
+  // offer even before it exists (it's created on first import). Persisted.
+  const [targetId, setTargetId] = useState(
+    () => localStorage.getItem(STORAGE_KEYS.shoppingChatTarget) ?? "chat",
+  );
+  const targetOptions = useMemo(() => {
+    const opts = lists.map((l) => ({ id: l.id, name: l.name }));
+    if (!opts.some((o) => o.id === "chat"))
+      opts.unshift({ id: "chat", name: "Chat" });
+    return opts;
+  }, [lists]);
+  // If the chosen list was deleted, fall back to Chat.
+  useEffect(() => {
+    if (!targetOptions.some((o) => o.id === targetId)) setTargetId("chat");
+  }, [targetOptions, targetId]);
+  // Read inside the poll without resubscribing the interval on every change.
+  const targetRef = useRef(targetId);
+  useEffect(() => {
+    targetRef.current = targetId;
+    localStorage.setItem(STORAGE_KEYS.shoppingChatTarget, targetId);
+  }, [targetId]);
 
   // Suggest the Chatlogs folder if we don't have one saved.
   useEffect(() => {
@@ -179,7 +254,12 @@ function ChatCapture({ onSync }: { onSync: () => Promise<unknown> }) {
       try {
         const first = fromNow.current;
         fromNow.current = false;
-        const r = await shoppingChatSync(logsDir, channel.trim(), first);
+        const r = await shoppingChatSync(
+          logsDir,
+          channel.trim(),
+          first,
+          targetRef.current,
+        );
         if (cancelled) return;
         setStatus(
           r.found
@@ -222,8 +302,9 @@ function ChatCapture({ onSync }: { onSync: () => Promise<unknown> }) {
       <div className="space-y-3 px-4 pb-4 text-sm">
         <p className="text-xs text-zinc-500">
           Point at any EVE chat channel and each item posted into it is added to
-          the <span className="text-zinc-300">Chat</span> list. Make a private
-          channel for buy orders, or listen to a standing one like{" "}
+          the list you pick below (the{" "}
+          <span className="text-zinc-300">Chat</span> list by default). Make a
+          private channel for buy orders, or listen to a standing one like{" "}
           <span className="text-zinc-300">Corp</span>. Paste several items at
           once — <span className="text-zinc-300">one item per line</span>, with
           an optional quantity after the name (
@@ -270,6 +351,21 @@ function ChatCapture({ onSync }: { onSync: () => Promise<unknown> }) {
                 {copied ? "Copied ✓" : "Copy"}
               </button>
             </div>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-zinc-400">
+            Import to
+            <select
+              value={targetId}
+              onChange={(e) => setTargetId(e.currentTarget.value)}
+              title="Which list captured items are added to"
+              className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+            >
+              {targetOptions.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.name}
+                </option>
+              ))}
+            </select>
           </label>
           <button
             onClick={toggle}

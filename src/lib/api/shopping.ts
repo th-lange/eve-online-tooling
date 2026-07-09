@@ -86,24 +86,31 @@ export function shoppingMoveItem(
 
 /** Result of a chat-capture poll. */
 export interface ChatSync {
-  /** Item names newly added to the Chat list this poll. */
+  /** Item names newly added to the target list this poll. */
   added: string[];
-  /** The chatlog file being followed (empty if none matched the channel). */
+  /** A label for what's being followed (a filename, or "N logs"). */
   file: string;
   /** Whether a matching chatlog file was found. */
   found: boolean;
 }
 
 /**
- * Follow an EVE chat channel's log and add linked/typed items to the Chat list.
- * `logsDir` is the EVE Chatlogs folder; `channel` is the channel name. Pass
- * `fromNow` on the first poll to mark existing log content as seen (so only new
- * messages are captured). Poll every few seconds while listening.
+ * Follow an EVE chat channel's log and add linked/typed items to a target list.
+ * `logsDir` is the EVE Chatlogs folder; `channel` is the channel name; `listId`
+ * is where items land (defaults to the built-in `chat` list). Pass `fromNow` on
+ * the first poll to mark existing log content as seen (so only new messages are
+ * captured). Poll every few seconds while listening.
  */
 export function shoppingChatSync(
   logsDir: string,
   channel: string,
   fromNow?: boolean,
+  listId?: string,
 ): Promise<ChatSync> {
-  return invoke<ChatSync>("shopping_chat_sync", { logsDir, channel, fromNow });
+  return invoke<ChatSync>("shopping_chat_sync", {
+    logsDir,
+    channel,
+    fromNow,
+    listId,
+  });
 }
