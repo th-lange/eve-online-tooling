@@ -47,11 +47,13 @@ built as a set of feature **modules** over a shared service layer.
   **active / inactive / offline**, and see which **EW is projected onto the fit** (with an opt-in
   ECM "jammed" view).
 - **Shopping Lists** — keep named lists of items to buy (a built-in *default* and *production* list,
-  plus your own), fed by "add to list" buttons across Market Search, Production, Station Trading and
-  Daytrading, with quantity editing (incl. bulk +10/+100/×2/×10), moving items between lists, and
-  one-click in-game Multibuy export. **Chat capture**: listen to an EVE chat channel (a private
-  buy-orders channel, or Corp/Alliance/Fleet) and every item linked there lands in a *Chat* list —
-  non-item chatter is ignored.
+  plus your own), with quantity editing (incl. bulk +10/+100/×2/×10), moving items between lists, and
+  one-click in-game Multibuy export. The "add to list" buttons across Market Search, Production,
+  Station Trading and Daytrading write into whichever list you've selected. **Chat capture**: listen
+  to an EVE chat channel (a private buy-orders channel, or Corp/Alliance/Fleet) and every item linked
+  there is written to a dedicated built-in *Chat* list (created automatically) — regardless of who
+  posts it, non-item chatter is ignored. It follows all of the channel's recent logs at once, so it
+  keeps working across multiple clients/sessions.
 - **DPS Meter** — a live combat readout from your gamelog (à la PyEveLiveDPS): damage in/out, remote
   reps, cap warfare and mining as a moving-average graph, with per-pilot / per-weapon breakdowns and
   N× log playback. EULA-safe — it only reads the logs the client already writes.
