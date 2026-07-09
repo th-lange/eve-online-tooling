@@ -28,13 +28,18 @@ struct Store {
 }
 
 /// Where the chat listener left off, so we only ingest new messages.
+///
+/// EVE writes a *separate* log file per client/session for a channel (and
+/// rotates them daily), so a multiboxer or anyone who reopens the channel ends
+/// up with several `<channel>_*` files receiving messages at once. We therefore
+/// follow *every* recent file for the channel and track our progress per file.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct ChatState {
     channel: String,
-    /// The chatlog file currently being followed.
-    file: String,
-    /// Number of message lines already processed from `file`.
-    count: usize,
+    /// Per-file progress: chatlog filename -> message lines already processed.
+    /// Only currently-recent files are kept, so this stays small.
+    #[serde(default)]
+    files: std::collections::BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -456,11 +461,12 @@ pub struct ChatSync {
     pub found: bool,
 }
 
-/// Follow an EVE chat channel's log and add any linked/typed items to the Chat
-/// list. Finds the newest `<channel>_*.txt` in `logs_dir`, ingests messages it
-/// hasn't seen yet (tracked per file), and resolves each as an item name via the
-/// SDE — non-item chatter is ignored. Poll this every few seconds while
-/// listening. Public — chat capture needs no login.
+/// Follow an EVE chat channel's logs and add any linked/typed items to the Chat
+/// list. Follows *all* `<channel>_*.txt` in `logs_dir` modified in the last day
+/// (EVE writes one file per client/session), ingests messages it hasn't seen yet
+/// (tracked per file), and resolves each as an item name via the SDE — non-item
+/// chatter is ignored. Poll this every few seconds while listening. Public —
+/// chat capture needs no login.
 #[tauri::command]
 pub fn shopping_chat_sync(
     app: AppHandle,
@@ -474,11 +480,15 @@ pub fn shopping_chat_sync(
         return Err("channel name is empty".into());
     }
 
-    // Newest chatlog whose name starts with "<channel>_" (EVE appends
-    // _<date>_<time>_<charId>.txt), by modified time.
+    // Every chatlog whose name starts with "<channel>_" (EVE appends
+    // _<date>_<time>_<charId>.txt) that was modified in the last day — only
+    // those can carry today's messages, and a new write pulls an idle file back
+    // into the window on the next poll.
     let logs = std::path::Path::new(&logs_dir);
     let prefix = format!("{}_", chan.to_ascii_lowercase());
-    let newest = std::fs::read_dir(logs)
+    let cutoff =
+        std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(24 * 60 * 60));
+    let mut recent: Vec<(std::path::PathBuf, String)> = std::fs::read_dir(logs)
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok())
         .filter(|e| {
@@ -487,8 +497,16 @@ pub fn shopping_chat_sync(
                 .to_ascii_lowercase()
                 .starts_with(&prefix)
         })
-        .filter_map(|e| Some((e.path(), e.metadata().ok()?.modified().ok()?)))
-        .max_by_key(|(_, m)| *m);
+        .filter_map(|e| {
+            let modified = e.metadata().ok()?.modified().ok()?;
+            if cutoff.map(|c| modified < c).unwrap_or(false) {
+                return None;
+            }
+            let name = e.file_name().to_string_lossy().into_owned();
+            Some((e.path(), name))
+        })
+        .collect();
+    recent.sort_by(|a, b| a.1.cmp(&b.1));
 
     let mut store = load(&dir);
     // Ensure the Chat list exists.
@@ -500,57 +518,56 @@ pub fn shopping_chat_sync(
         });
     }
 
-    let Some((path, _)) = newest else {
-        // Remember the channel even if no file yet, so the UI can show it.
+    // Switching channels drops progress for the old one.
+    let channel_changed = store.chat.channel != chan;
+    if channel_changed {
         store.chat.channel = chan.to_string();
+        store.chat.files.clear();
+    }
+
+    if recent.is_empty() {
+        // Remember the channel even if no file yet, so the UI can show it.
         save(&dir, &store)?;
         return Ok(ChatSync {
             added: Vec::new(),
             file: String::new(),
             found: false,
         });
-    };
-    let file_name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let msgs = crate::chatlog::parse_chat_messages(
-        &crate::chatlog::read_chatlog(&path).unwrap_or_default(),
-    );
+    }
 
-    // `from_now` (sent on Start) marks everything already in the log as seen and
+    // What to show as "listening to …" — one name, or a count when we follow
+    // several files at once (multiboxing / rotated logs).
+    let label = if recent.len() == 1 {
+        recent[0].1.clone()
+    } else {
+        format!("{} logs", recent.len())
+    };
+
+    // `from_now` (sent on Start) baselines every current file to its length and
     // adds nothing, so we only capture messages linked from here on — important
     // for busy channels like Corp that already hold the whole day's chatter.
     if from_now == Some(true) {
-        store.chat = ChatState {
-            channel: chan.to_string(),
-            file: file_name.clone(),
-            count: msgs.len(),
-        };
+        let mut files = std::collections::BTreeMap::new();
+        for (path, name) in &recent {
+            let msgs = crate::chatlog::parse_chat_messages(
+                &crate::chatlog::read_chatlog(path).unwrap_or_default(),
+            );
+            files.insert(name.clone(), msgs.len());
+        }
+        store.chat.files = files;
         save(&dir, &store)?;
         return Ok(ChatSync {
             added: Vec::new(),
-            file: file_name,
+            file: label,
             found: true,
         });
     }
 
-    // Resume where we left off if it's the same channel + file; else start fresh.
-    let start = if store.chat.channel == chan && store.chat.file == file_name {
-        store.chat.count.min(msgs.len())
-    } else {
-        0
-    };
-
-    // Nothing new since the last poll → don't rewrite the store every 4s.
-    if start == msgs.len() && store.chat.channel == chan && store.chat.file == file_name {
-        return Ok(ChatSync {
-            added: Vec::new(),
-            file: file_name,
-            found: true,
-        });
-    }
-
+    // Ingest new lines across all followed files, resuming each from where we
+    // left off. Files not seen before (opened after Start) resume from 0 — their
+    // MOTD is an "EVE System" line and already filtered out by the parser.
+    let prior = store.chat.files.clone();
+    let mut next: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
     let mut added = Vec::new();
     {
         // Find (or create above) the chat list and append resolved items.
@@ -559,40 +576,50 @@ pub fn shopping_chat_sync(
             .iter_mut()
             .find(|l| l.id == CHAT_LIST.0)
             .expect("chat list ensured above");
-        // One item per line: multi-line pastes arrive as one message with
-        // embedded newlines (see chatlog.rs), and each line may carry a
-        // quantity ("Tritanium 100", "Pyerite\t50", "x3" styles).
-        for m in msgs.iter().skip(start) {
-            for raw in m.lines().take(MAX_LINES_PER_MESSAGE) {
-                let Some((name, qty)) = parse_chat_line(raw) else {
-                    continue;
-                };
-                if let Some((type_id, _)) = sde.type_by_name(&name).map_err(|e| e.to_string())? {
-                    match list.items.iter_mut().find(|e| e.type_id == type_id) {
-                        Some(e) => e.quantity = e.quantity.saturating_add(qty),
-                        None => list.items.push(StoredEntry {
-                            type_id,
-                            quantity: qty,
-                        }),
+        for (path, name) in &recent {
+            let msgs = crate::chatlog::parse_chat_messages(
+                &crate::chatlog::read_chatlog(path).unwrap_or_default(),
+            );
+            let start = prior.get(name).copied().unwrap_or(0).min(msgs.len());
+            next.insert(name.clone(), msgs.len());
+            // One item per line: multi-line pastes arrive as one message with
+            // embedded newlines (see chatlog.rs), and each line may carry a
+            // quantity ("Tritanium 100", "Pyerite\t50", "x3" styles).
+            for m in msgs.iter().skip(start) {
+                for raw in m.lines().take(MAX_LINES_PER_MESSAGE) {
+                    let Some((name, qty)) = parse_chat_line(raw) else {
+                        continue;
+                    };
+                    if let Some((type_id, _)) = sde.type_by_name(&name).map_err(|e| e.to_string())? {
+                        match list.items.iter_mut().find(|e| e.type_id == type_id) {
+                            Some(e) => e.quantity = e.quantity.saturating_add(qty),
+                            None => list.items.push(StoredEntry {
+                                type_id,
+                                quantity: qty,
+                            }),
+                        }
+                        added.push(if qty > 1 {
+                            format!("{name} ×{qty}")
+                        } else {
+                            name
+                        });
                     }
-                    added.push(if qty > 1 {
-                        format!("{name} ×{qty}")
-                    } else {
-                        name
-                    });
                 }
             }
         }
     }
-    store.chat = ChatState {
-        channel: chan.to_string(),
-        file: file_name.clone(),
-        count: msgs.len(),
-    };
-    save(&dir, &store)?;
+
+    // Only rewrite the store when something actually moved — the poll runs every
+    // few seconds and most ticks are no-ops. `next` also prunes files that
+    // aged out of the window, keeping `files` bounded.
+    let files_changed = next != store.chat.files;
+    store.chat.files = next;
+    if channel_changed || files_changed || !added.is_empty() {
+        save(&dir, &store)?;
+    }
     Ok(ChatSync {
         added,
-        file: file_name,
+        file: label,
         found: true,
     })
 }
