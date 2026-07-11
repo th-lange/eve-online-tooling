@@ -8,7 +8,6 @@ import {
   piOverview,
   piShowInGame,
   sdeStatus,
-  type BalanceRow,
   type ColonyView,
   type ExtractorView,
   type StorageView,
@@ -171,8 +170,8 @@ function Colony({
       )}
 
       {colony.balance.length > 0 && (
-        <Section title="Required vs available (per hour)">
-          <Balance rows={colony.balance} />
+        <Section title="Required vs available · runway">
+          <Balance colony={colony} />
         </Section>
       )}
 
@@ -389,41 +388,57 @@ function NextCycle({ colony }: { colony: ColonyView }) {
   );
 }
 
-function Balance({ rows }: { rows: BalanceRow[] }) {
+function Balance({ colony }: { colony: ColonyView }) {
+  const { stock } = stockMaps(colony);
   return (
     <table className="w-full text-xs">
       <thead className="text-zinc-500">
         <tr>
           <th className="py-0.5 text-left font-medium">Commodity</th>
-          <th className="py-0.5 text-right font-medium">Made</th>
-          <th className="py-0.5 text-right font-medium">Used</th>
-          <th className="py-0.5 text-right font-medium">Net</th>
+          <th className="py-0.5 text-right font-medium">Made/h</th>
+          <th className="py-0.5 text-right font-medium">Used/h</th>
+          <th className="py-0.5 text-right font-medium">Net/h</th>
+          <th className="py-0.5 text-right font-medium">On hand</th>
+          <th className="py-0.5 text-right font-medium">Runway</th>
         </tr>
       </thead>
       <tbody>
-        {rows.map((r) => (
-          <tr key={r.typeId} className="border-t border-zinc-800/60">
-            <td className="py-0.5 text-zinc-300">{r.name}</td>
-            <td className="py-0.5 text-right tabular-nums text-zinc-400">
-              {fmt(r.producedPerHour)}
-            </td>
-            <td className="py-0.5 text-right tabular-nums text-zinc-400">
-              {fmt(r.consumedPerHour)}
-            </td>
-            <td
-              className={`py-0.5 text-right tabular-nums ${
-                r.net < -0.0001
-                  ? "text-rose-400"
-                  : r.net > 0.0001
-                    ? "text-emerald-400"
-                    : "text-zinc-500"
-              }`}
-            >
-              {r.net > 0 ? "+" : ""}
-              {fmt(r.net)}
-            </td>
-          </tr>
-        ))}
+        {colony.balance.map((r) => {
+          const onHand = stock.get(r.typeId) ?? 0;
+          const rw = runway(onHand, r.net);
+          return (
+            <tr key={r.typeId} className="border-t border-zinc-800/60">
+              <td className="py-0.5 text-zinc-300">{r.name}</td>
+              <td className="py-0.5 text-right tabular-nums text-zinc-400">
+                {fmt(r.producedPerHour)}
+              </td>
+              <td className="py-0.5 text-right tabular-nums text-zinc-400">
+                {fmt(r.consumedPerHour)}
+              </td>
+              <td
+                className={`py-0.5 text-right tabular-nums ${
+                  r.net < -EPS
+                    ? "text-rose-400"
+                    : r.net > EPS
+                      ? "text-emerald-400"
+                      : "text-zinc-500"
+                }`}
+              >
+                {r.net > 0 ? "+" : ""}
+                {fmt(r.net)}
+              </td>
+              <td className="py-0.5 text-right tabular-nums text-zinc-400">
+                {formatInt(Math.round(onHand))}
+              </td>
+              <td
+                className={`py-0.5 text-right tabular-nums font-medium ${rw.tone}`}
+                title={rw.title}
+              >
+                {rw.label}
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );
@@ -433,6 +448,64 @@ function Balance({ rows }: { rows: BalanceRow[] }) {
 function fmt(n: number): string {
   if (n === 0) return "0";
   return Math.abs(n) >= 10 ? formatInt(Math.round(n)) : n.toFixed(1);
+}
+
+/** Deficit runway under this many hours reads red (about to stall the chain). */
+const RUNWAY_RED_HOURS = 6;
+/** Deficit runway under this many hours reads amber (feed it this cycle). */
+const RUNWAY_AMBER_HOURS = 24;
+
+/** How long current stock lasts against the balance rate, as a triage label +
+ *  colour tone (and a hover `title`). Runway is only a countdown for a deficit
+ *  (net < 0): a surplus accumulates and a break-even holds, so those report
+ *  status instead. Colour is by *urgency* — empty/soon is red, this-cycle is
+ *  amber, well-buffered/steady/surplus is calm. Pure. */
+export function runway(
+  stock: number,
+  net: number,
+): { label: string; tone: string; title: string } {
+  if (net > EPS)
+    return {
+      label: "▲ surplus",
+      tone: "text-emerald-400",
+      title: "Accumulating — extraction outpaces use; ease off next cycle.",
+    };
+  if (net >= -EPS)
+    return {
+      label: "steady",
+      tone: "text-zinc-500",
+      title: "Break-even — made and used at the same rate.",
+    };
+  if (stock <= EPS)
+    return {
+      label: "empty",
+      tone: "text-rose-400",
+      title: "No stock and running a deficit — the chain is stalled on this.",
+    };
+  const hours = stock / -net;
+  const tone =
+    hours < RUNWAY_RED_HOURS
+      ? "text-rose-400"
+      : hours < RUNWAY_AMBER_HOURS
+        ? "text-amber-300"
+        : "text-zinc-400";
+  return {
+    label: formatRunway(hours),
+    tone,
+    title: `About ${formatRunway(hours)} of stock left at the current deficit.`,
+  };
+}
+
+/** A runway in hours as a compact duration: minutes under 1h, whole hours
+ *  under a day, else days (+ hours). Rounds to whole hours first so it never
+ *  shows "24h" or "1d 24h". Pure. */
+function formatRunway(hours: number): string {
+  if (hours < 1) return `${Math.max(1, Math.round(hours * 60))}m`;
+  const rh = Math.round(hours);
+  if (rh < 24) return `${rh}h`;
+  const d = Math.floor(rh / 24);
+  const h = rh % 24;
+  return h > 0 ? `${d}d ${h}h` : `${d}d`;
 }
 
 /** Remaining time to an ISO expiry, as a label + colour tone. */
