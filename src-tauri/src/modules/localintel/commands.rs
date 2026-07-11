@@ -131,7 +131,7 @@ async fn cached_standings(app: &AppHandle, auth_state: &AuthState) -> HashMap<i6
     let Ok(dir) = app.path().app_data_dir() else {
         return load_standings(app, auth_state).await;
     };
-    let Some(character_id) = storage::active_character(&dir) else {
+    let Some(character_id) = storage::primary_character(&dir) else {
         return HashMap::new();
     };
     let key = format!("localintel_standings_{character_id}");
@@ -407,7 +407,7 @@ async fn load_standings(app: &AppHandle, auth_state: &AuthState) -> HashMap<i64,
     let Ok(dir) = app.path().app_data_dir() else {
         return HashMap::new();
     };
-    let Some(character_id) = storage::active_character(&dir) else {
+    let Some(character_id) = storage::primary_character(&dir) else {
         return HashMap::new();
     };
 

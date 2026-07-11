@@ -22,8 +22,15 @@ export function OrdersPage() {
     queryKey: ["orders", "market"],
     queryFn: marketOrders,
   });
-  const rows = orders.data ?? [];
+  const rows = useMemo(() => orders.data ?? [], [orders.data]);
   const undercut = rows.filter((r) => r.undercut).length;
+  // Show the Character column only once orders span more than one character
+  // (i.e. "All characters" is active); single-character views stay exactly
+  // as before.
+  const multiCharacter = useMemo(
+    () => new Set(rows.map((r) => r.characterId)).size > 1,
+    [rows],
+  );
 
   return (
     <div className="p-6">
@@ -76,7 +83,7 @@ export function OrdersPage() {
         </div>
       )}
 
-      <OrdersTable rows={rows} />
+      <OrdersTable rows={rows} showCharacter={multiCharacter} />
     </div>
   );
 }
@@ -125,7 +132,13 @@ const COLUMNS: SortColumn<OrderSortKey>[] = [
 ];
 const KEYS = COLUMNS.map((c) => c.key);
 
-function OrdersTable({ rows }: { rows: OrderRow[] }) {
+function OrdersTable({
+  rows,
+  showCharacter,
+}: {
+  rows: OrderRow[];
+  showCharacter: boolean;
+}) {
   const { sortKey, sortDir, toggleSort } = usePersistentSort<OrderSortKey>(
     "sort.orders",
     KEYS,
@@ -151,6 +164,9 @@ function OrdersTable({ rows }: { rows: OrderRow[] }) {
       <table className="w-full border-collapse text-sm">
         <thead className="bg-zinc-900 text-zinc-400">
           <tr>
+            {showCharacter && (
+              <th className="px-3 py-1.5 text-left font-medium">Character</th>
+            )}
             {COLUMNS.map((c) => (
               <SortHeaderCell
                 key={c.key}
@@ -171,6 +187,11 @@ function OrdersTable({ rows }: { rows: OrderRow[] }) {
                 r.undercut ? "bg-rose-950/30" : ""
               }`}
             >
+              {showCharacter && (
+                <td className="px-3 py-1.5 text-zinc-400">
+                  {r.characterName}
+                </td>
+              )}
               <td className="px-3 py-1.5">
                 <span className="text-zinc-200">{r.name}</span>
                 <span
@@ -222,7 +243,7 @@ function OrdersTable({ rows }: { rows: OrderRow[] }) {
           {rows.length === 0 && (
             <tr>
               <td
-                colSpan={COLUMNS.length + 1}
+                colSpan={COLUMNS.length + 1 + (showCharacter ? 1 : 0)}
                 className="px-3 py-6 text-center text-zinc-500"
               >
                 No open orders.

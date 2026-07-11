@@ -54,6 +54,8 @@ pub struct JobRow {
     pub facility: String,
     /// "You" for personal jobs, "Corp" for corporation jobs.
     pub owner: String,
+    pub character_id: i64,
+    pub character_name: String,
 }
 
 /// Fetch corporation industry jobs (403/error → none: needs the scope + a corp
@@ -172,30 +174,22 @@ fn activity_name(id: i64) -> &'static str {
     }
 }
 
-/// The character's industry jobs (running + recently delivered), names resolved.
-/// Durably accumulates delivered jobs across syncs. `character_id` selects which
-/// roster character; `None` = the first.
-#[tauri::command]
-pub async fn industry_jobs(
-    app: AppHandle,
-    auth_state: State<'_, AuthState>,
-    character_id: Option<i64>,
-) -> Result<JobsResult, crate::model::AppError> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let roster = storage::load_roster(&dir);
-    let character_id = match character_id {
-        // Only honour an id that's actually in the roster (else fall through).
-        Some(id) if roster.iter().any(|c| c.character_id == id) => id,
-        // Default to the bookmarked active character (else the first).
-        _ => storage::active_character(&dir).ok_or_else(crate::model::AppError::auth_required)?,
-    };
-
+/// Fetch + durably merge one character's industry jobs, and their slot usage.
+/// Rows are stamped with `character_id`/`character_name` so an aggregate view
+/// can attribute each job. Pulled out of [`industry_jobs`] so it can be looped
+/// per roster character when "All characters" is active.
+async fn character_industry_jobs(
+    dir: &std::path::Path,
+    auth_state: &State<'_, AuthState>,
+    character_id: i64,
+    character_name: &str,
+) -> Result<(Vec<JobRow>, Slots), crate::model::AppError> {
     // include_completed so delivered jobs (the cost-basis source) come through.
     // The shared ESI client retries transient 5xx/timeouts (this endpoint 504s
     // under load) and backs off the error budget; a real 4xx (403 missing scope)
     // still fails fast.
     let incoming: Vec<StoredJob> = authed_get(
-        &auth_state,
+        auth_state,
         character_id,
         &format!("/latest/characters/{character_id}/industry/jobs/?include_completed=true"),
     )
@@ -204,7 +198,7 @@ pub async fn industry_jobs(
 
     // Merge into the durable store, keyed by job id (delivered jobs persist).
     let key = format!("industry_jobs_{character_id}");
-    let stored: Vec<StoredJob> = storage::load_data(&dir, &key).unwrap_or_default();
+    let stored: Vec<StoredJob> = storage::load_data(dir, &key).unwrap_or_default();
     let mut seen: HashSet<i64> = stored.iter().map(|j| j.job_id).collect();
     let mut jobs = stored;
     for j in incoming {
@@ -215,12 +209,12 @@ pub async fn industry_jobs(
             *existing = j;
         }
     }
-    let _ = storage::save_data(&dir, &key, &jobs);
+    let _ = storage::save_data(dir, &key, &jobs);
 
     // Slot usage: max slots come from skills (1 base + each rank), used = jobs
     // occupying a slot now (active or finished-but-undelivered).
     let skills: EsiSkills = authed_get(
-        &auth_state,
+        auth_state,
         character_id,
         &format!("/latest/characters/{character_id}/skills/"),
     )
@@ -252,9 +246,9 @@ pub async fn industry_jobs(
     // the personal one. Slots above stay character-only.
     let mut combined: Vec<(StoredJob, &'static str)> =
         jobs.into_iter().map(|j| (j, "You")).collect();
-    if let Ok(corp_id) = corporation_id(&auth_state, character_id).await {
+    if let Ok(corp_id) = corporation_id(auth_state, character_id).await {
         let seen: HashSet<i64> = combined.iter().map(|(j, _)| j.job_id).collect();
-        for j in fetch_corp_jobs(&auth_state, character_id, corp_id).await {
+        for j in fetch_corp_jobs(auth_state, character_id, corp_id).await {
             if !seen.contains(&j.job_id) {
                 combined.push((j, "Corp"));
             }
@@ -262,12 +256,14 @@ pub async fn industry_jobs(
     }
 
     // Resolve names: product/blueprint via SDE, facility via /universe/names.
-    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+    // Opened here (not passed in) so no `!Sync` connection is held across an
+    // earlier `.await`, which would make this future non-`Send`.
+    let sde = Sde::open(&SdePaths::new(dir.to_path_buf()).db).map_err(|e| e.to_string())?;
     let facility_ids: Vec<i64> = combined
         .iter()
         .filter_map(|(j, _)| j.facility_id.or(j.station_id))
         .collect();
-    let facilities = resolve_names(&auth_state, &facility_ids).await;
+    let facilities = resolve_names(auth_state, &facility_ids).await;
     let type_name = |id: i64| {
         sde.type_info(id)
             .ok()
@@ -276,7 +272,7 @@ pub async fn industry_jobs(
             .unwrap_or_else(|| format!("Type {id}"))
     };
 
-    let mut rows: Vec<JobRow> = combined
+    let rows: Vec<JobRow> = combined
         .into_iter()
         .map(|(j, owner)| {
             let product = type_name(j.product_type_id.unwrap_or(j.blueprint_type_id));
@@ -296,9 +292,76 @@ pub async fn industry_jobs(
                 end_date: j.end_date,
                 facility,
                 owner: owner.to_string(),
+                character_id,
+                character_name: character_name.to_string(),
             }
         })
         .collect();
+    Ok((rows, slots))
+}
+
+/// The character's industry jobs (running + recently delivered), names resolved.
+/// Durably accumulates delivered jobs across syncs. `character_id` selects which
+/// roster character; `None` defaults to the active selection — every roster
+/// character when "All characters" is active (rows tagged, slots summed; a
+/// character whose ESI fetch fails is skipped rather than failing the whole
+/// call), otherwise just the active one (errors propagate, as before).
+#[tauri::command]
+pub async fn industry_jobs(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+    character_id: Option<i64>,
+) -> Result<JobsResult, crate::model::AppError> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let roster = storage::load_roster(&dir);
+
+    // An explicit, valid roster id always means "just this character". Else
+    // fan out over the active selection's target set: the whole roster when
+    // ALL_CHARACTERS is active, otherwise just the active character.
+    let (targets, aggregating): (Vec<i64>, bool) = match character_id {
+        Some(id) if roster.iter().any(|c| c.character_id == id) => (vec![id], false),
+        _ => {
+            let targets = storage::target_characters(&dir);
+            if targets.is_empty() {
+                return Err(crate::model::AppError::auth_required());
+            }
+            let aggregating = targets.len() > 1;
+            (targets, aggregating)
+        }
+    };
+
+    let names = storage::character_names(&dir);
+
+    let mut rows: Vec<JobRow> = Vec::new();
+    let mut slots = Slots {
+        manufacturing: Slot { used: 0, total: 0 },
+        science: Slot { used: 0, total: 0 },
+        reactions: Slot { used: 0, total: 0 },
+    };
+    for cid in targets {
+        let name = names
+            .get(&cid)
+            .cloned()
+            .unwrap_or_else(|| cid.to_string());
+        match character_industry_jobs(&dir, &auth_state, cid, &name).await {
+            Ok((mut r, s)) => {
+                rows.append(&mut r);
+                slots.manufacturing.used += s.manufacturing.used;
+                slots.manufacturing.total += s.manufacturing.total;
+                slots.science.used += s.science.used;
+                slots.science.total += s.science.total;
+                slots.reactions.used += s.reactions.used;
+                slots.reactions.total += s.reactions.total;
+            }
+            Err(e) => {
+                if aggregating {
+                    continue;
+                }
+                return Err(e);
+            }
+        }
+    }
+
     // Active jobs first, then most-recently-ending.
     rows.sort_by(|a, b| {
         let rank = |s: &str| if s == "active" || s == "ready" { 0 } else { 1 };

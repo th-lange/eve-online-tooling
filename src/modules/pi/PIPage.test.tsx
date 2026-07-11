@@ -11,6 +11,8 @@ const T2_ITEM = 3;
  * balance is running a deficit). */
 function colony(overrides: Partial<ColonyView> = {}): ColonyView {
   return {
+    characterId: 1,
+    characterName: "Test Pilot",
     planetId: 1,
     systemId: 1,
     systemName: "Jita",

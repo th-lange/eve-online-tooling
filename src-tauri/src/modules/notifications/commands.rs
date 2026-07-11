@@ -11,10 +11,11 @@ use crate::esi::{authed_get, resolve_names, AuthState};
 use crate::model::AppError;
 use crate::storage;
 
-/// Active character or an auth-required error.
-fn active(app: &AppHandle) -> Result<(std::path::PathBuf, i64), AppError> {
+/// Active character or an auth-required error (used by the per-character
+/// mutations: dismiss/reset act on one concrete character).
+fn primary(app: &AppHandle) -> Result<(std::path::PathBuf, i64), AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let id = storage::active_character(&dir).ok_or_else(AppError::auth_required)?;
+    let id = storage::primary_character(&dir).ok_or_else(AppError::auth_required)?;
     Ok((dir, id))
 }
 
@@ -81,6 +82,8 @@ struct EsiNotification {
 #[serde(rename_all = "camelCase")]
 pub struct NotifRow {
     pub id: i64,
+    pub character_id: i64,
+    pub character_name: String,
     /// Humanised type, e.g. "Structure Under Attack".
     pub title: String,
     pub category: String,
@@ -91,35 +94,59 @@ pub struct NotifRow {
     pub body: String,
 }
 
-/// The active character's notifications, newest first, with dismissed ones
-/// filtered out. Sender ids are resolved to names in one batch.
+/// The active character's notifications (every roster character's when "all
+/// characters" is active, each row tagged with its owner), newest first, with
+/// each character's own dismissed ids filtered out. Sender ids are resolved to
+/// names in one batch. A character whose fetch fails is skipped rather than
+/// failing the whole call.
 #[tauri::command]
 pub async fn notifications(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<Vec<NotifRow>, AppError> {
-    let (dir, character_id) = active(&app)?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let targets = storage::target_characters(&dir);
+    if targets.is_empty() {
+        return Err(AppError::auth_required());
+    }
+    let names_by_char = storage::character_names(&dir);
 
-    let raw: Vec<EsiNotification> = authed_get(
-        &auth_state,
-        character_id,
-        &format!("/latest/characters/{character_id}/notifications/"),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let mut fetched: Vec<(i64, EsiNotification)> = Vec::new();
+    for character_id in targets {
+        let raw: Vec<EsiNotification> = match authed_get(
+            &auth_state,
+            character_id,
+            &format!("/latest/characters/{character_id}/notifications/"),
+        )
+        .await
+        {
+            Ok(raw) => raw,
+            Err(_) => continue,
+        };
 
-    let dismissed: Vec<i64> =
-        storage::load_data(&dir, &format!("notifications_dismissed_{character_id}"))
-            .unwrap_or_default();
+        let dismissed: Vec<i64> =
+            storage::load_data(&dir, &format!("notifications_dismissed_{character_id}"))
+                .unwrap_or_default();
 
-    let sender_ids: Vec<i64> = raw.iter().map(|n| n.sender_id).collect();
+        fetched.extend(
+            raw.into_iter()
+                .filter(|n| !dismissed.contains(&n.notification_id))
+                .map(|n| (character_id, n)),
+        );
+    }
+
+    let sender_ids: Vec<i64> = fetched.iter().map(|(_, n)| n.sender_id).collect();
     let names = resolve_names(&auth_state, &sender_ids).await;
 
-    let mut rows: Vec<NotifRow> = raw
+    let mut rows: Vec<NotifRow> = fetched
         .into_iter()
-        .filter(|n| !dismissed.contains(&n.notification_id))
-        .map(|n| NotifRow {
+        .map(|(character_id, n)| NotifRow {
             id: n.notification_id,
+            character_id,
+            character_name: names_by_char
+                .get(&character_id)
+                .cloned()
+                .unwrap_or_default(),
             title: humanize(&n.kind),
             category: category(&n.kind).to_string(),
             sender: names
@@ -136,10 +163,11 @@ pub async fn notifications(
     Ok(rows)
 }
 
-/// Hide a notification from the feed (durable, per character).
+/// Hide a notification from the feed (durable, per character). Under "all
+/// characters" this applies to the primary (first) character.
 #[tauri::command]
 pub fn notification_dismiss(app: AppHandle, notification_id: i64) -> Result<(), AppError> {
-    let (dir, character_id) = active(&app)?;
+    let (dir, character_id) = primary(&app)?;
     let key = format!("notifications_dismissed_{character_id}");
     let mut dismissed: Vec<i64> = storage::load_data(&dir, &key).unwrap_or_default();
     if !dismissed.contains(&notification_id) {
@@ -150,9 +178,10 @@ pub fn notification_dismiss(app: AppHandle, notification_id: i64) -> Result<(), 
 }
 
 /// Un-dismiss everything (clear the hidden set), so the full feed shows again.
+/// Under "all characters" this applies to the primary (first) character.
 #[tauri::command]
 pub fn notifications_reset(app: AppHandle) -> Result<(), AppError> {
-    let (dir, character_id) = active(&app)?;
+    let (dir, character_id) = primary(&app)?;
     let key = format!("notifications_dismissed_{character_id}");
     storage::save_data(&dir, &key, &Vec::<i64>::new())?;
     Ok(())

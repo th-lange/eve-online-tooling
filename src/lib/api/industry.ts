@@ -12,6 +12,8 @@ export interface JobRow {
   facility: string;
   /** "You" for personal jobs, "Corp" for corporation jobs. */
   owner: string;
+  characterId: number;
+  characterName: string;
 }
 
 export interface Slot {
@@ -31,7 +33,9 @@ export interface JobsResult {
 
 /**
  * A character's industry jobs (running + recently delivered) plus slot usage,
- * durably accumulated. `characterId` selects the roster character (default: first).
+ * durably accumulated. `characterId` selects the roster character (default:
+ * the active selection — every roster character, rows tagged and slots
+ * summed, when "All characters" is active).
  * Requires `esi-industry.read_character_jobs.v1` (re-login if added).
  */
 export function industryJobs(characterId?: number): Promise<JobsResult> {

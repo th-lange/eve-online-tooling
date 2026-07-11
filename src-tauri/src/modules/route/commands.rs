@@ -321,7 +321,7 @@ fn now_secs() -> u64 {
 
 fn breadcrumb_key(app: &AppHandle) -> Result<(std::path::PathBuf, i64, String), AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let character_id = storage::active_character(&dir).ok_or_else(AppError::auth_required)?;
+    let character_id = storage::primary_character(&dir).ok_or_else(AppError::auth_required)?;
     let key = format!("route_breadcrumb_{character_id}");
     Ok((dir, character_id, key))
 }

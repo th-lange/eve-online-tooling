@@ -67,6 +67,14 @@ function Workbench() {
     );
   }, [colonies.data, sort]);
 
+  // Show the pilot label on each card only once colonies span more than one
+  // character (i.e. "All characters" is active); single-character views stay
+  // exactly as before.
+  const multiCharacter = useMemo(
+    () => new Set(rows.map((c) => c.characterId)).size > 1,
+    [rows],
+  );
+
   return (
     <div className="p-6">
       <div className="flex items-start justify-between">
@@ -125,11 +133,12 @@ function Workbench() {
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
         {rows.map((c) => (
           <Colony
-            key={c.planetId}
+            key={`${c.characterId}:${c.planetId}`}
             colony={c}
             now={now}
             lockedSet={lockedSet}
             onToggleLock={toggleLock}
+            showCharacter={multiCharacter}
           />
         ))}
       </div>
@@ -142,11 +151,13 @@ function Colony({
   now,
   lockedSet,
   onToggleLock,
+  showCharacter,
 }: {
   colony: ColonyView;
   now: number;
   lockedSet: Set<number>;
   onToggleLock: (typeId: number) => void;
+  showCharacter: boolean;
 }) {
   return (
     <div
@@ -158,6 +169,11 @@ function Colony({
         <span className="text-sm font-semibold text-zinc-100">
           {colony.systemName}
         </span>
+        {showCharacter && (
+          <span className="text-[11px] text-zinc-500">
+            {colony.characterName}
+          </span>
+        )}
         <span className="rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[11px] capitalize text-zinc-300">
           {colony.planetType}
         </span>

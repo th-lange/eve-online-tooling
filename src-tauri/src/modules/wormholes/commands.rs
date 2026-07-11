@@ -867,7 +867,7 @@ pub async fn wh_tripwire_import(app: AppHandle) -> Result<Vec<ConnectionView>, S
     let mask = cfg
         .mask
         .clone()
-        .or_else(|| storage::active_character(&dir).map(|id| format!("{id}.1")))
+        .or_else(|| storage::primary_character(&dir).map(|id| format!("{id}.1")))
         .ok_or_else(|| "No Tripwire mask set and no active character to derive one".to_string())?;
 
     let (sigs, whs) = tripwire::fetch(&cfg, &password, &mask).await?;
