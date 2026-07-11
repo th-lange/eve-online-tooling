@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractionAdvice } from "./PIPage";
+import { extractionAdvice, runway } from "./PIPage";
 import type { ColonyView } from "../../lib/api";
 
 const PLASMOID = 1;
@@ -113,5 +113,56 @@ describe("extractionAdvice", () => {
   it("does not flag a non-extracted product as something to ease off", () => {
     const { over } = extractionAdvice(colony());
     expect(over.map((r) => r.typeId)).not.toContain(T2_ITEM);
+  });
+});
+
+describe("runway", () => {
+  it("reports surplus for a net-positive balance (no countdown)", () => {
+    const r = runway(0, 50);
+    expect(r.label).toBe("▲ surplus");
+    expect(r.tone).toContain("emerald");
+  });
+
+  it("reports steady at break-even (net ~ 0)", () => {
+    expect(runway(1000, 0).label).toBe("steady");
+  });
+
+  it("calls a deficit with no stock empty and red", () => {
+    const r = runway(0, -200);
+    expect(r.label).toBe("empty");
+    expect(r.tone).toContain("rose");
+  });
+
+  it("computes hours of stock left for a buffered deficit", () => {
+    // 1600 units at -80/h = 20h left -> amber (< 24h, >= 6h).
+    const r = runway(1600, -80);
+    expect(r.label).toBe("20h");
+    expect(r.tone).toContain("amber");
+  });
+
+  it("flags a near-empty deficit red (< 6h left)", () => {
+    // 100 units at -50/h = 2h.
+    const r = runway(100, -50);
+    expect(r.label).toBe("2h");
+    expect(r.tone).toContain("rose");
+  });
+
+  it("stays calm when well-buffered (>= 24h left)", () => {
+    // 9000 units at -200/h = 45h -> 1d 21h, neutral tone.
+    const r = runway(9000, -200);
+    expect(r.label).toBe("1d 21h");
+    expect(r.tone).toContain("zinc");
+  });
+
+  it("shows minutes under an hour and never rounds to zero", () => {
+    // 10 units at -600/h = 0.0167h -> 1m (floor guarded to 1).
+    expect(runway(10, -600).label).toBe("1m");
+    // 300 units at -600/h = 0.5h -> 30m.
+    expect(runway(300, -600).label).toBe("30m");
+  });
+
+  it("never renders 24h — rounds up into days", () => {
+    // 23.7h worth of stock rounds to a clean 1d, not 24h.
+    expect(runway(237, -10).label).toBe("1d");
   });
 });
