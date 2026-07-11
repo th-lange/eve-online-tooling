@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractionAdvice, runway } from "./PIPage";
+import { extractionAdvice, runway } from "./balance";
 import type { ColonyView } from "../../lib/api";
 
 const PLASMOID = 1;
