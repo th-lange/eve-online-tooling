@@ -62,10 +62,44 @@ export function extractionAdvice(colony: ColonyView) {
   return { short, over };
 }
 
-/** Deficit runway under this many hours reads red (about to stall the chain). */
-const RUNWAY_RED_HOURS = 6;
-/** Deficit runway under this many hours reads amber (feed it this cycle). */
-const RUNWAY_AMBER_HOURS = 24;
+/** Fallback runway cutoff (hours) when the colony has no live extractor
+ *  program to key urgency off — a deficit under this reads red. */
+const FALLBACK_RED_HOURS = 6;
+/** Fallback runway cutoff (hours) — under this reads amber. */
+const FALLBACK_AMBER_HOURS = 24;
+
+/** Runway urgency cutoffs (hours). Below `redHours` is about to stall; below
+ *  `amberHours` wants feeding this cycle. */
+export interface RunwayThresholds {
+  redHours: number;
+  amberHours: number;
+}
+
+const FALLBACK_THRESHOLDS: RunwayThresholds = {
+  redHours: FALLBACK_RED_HOURS,
+  amberHours: FALLBACK_AMBER_HOURS,
+};
+
+/** Derive runway urgency cutoffs from the colony's own rhythm: the
+ *  soonest-expiring extractor program is your next forced visit, so a deficit
+ *  that empties before then (red) stalls the chain before you're back anyway;
+ *  within ~2× that window is amber. When no program is live (nothing with a
+ *  future expiry), fall back to fixed hours. `now` is unix ms. Pure. */
+export function runwayThresholds(
+  colony: ColonyView,
+  now: number,
+): RunwayThresholds {
+  let soonest = Infinity;
+  for (const e of colony.extractors) {
+    if (!e.expiryTime) continue;
+    const ms = Date.parse(e.expiryTime);
+    if (Number.isNaN(ms)) continue;
+    const hours = (ms - now) / 3_600_000;
+    if (hours > 0 && hours < soonest) soonest = hours;
+  }
+  if (!Number.isFinite(soonest)) return FALLBACK_THRESHOLDS;
+  return { redHours: soonest, amberHours: soonest * 2 };
+}
 
 /** How long current stock lasts against the balance rate, as a triage label +
  *  colour tone (and a hover `title`). Runway is only a countdown for a deficit
@@ -75,6 +109,7 @@ const RUNWAY_AMBER_HOURS = 24;
 export function runway(
   stock: number,
   net: number,
+  thresholds: RunwayThresholds = FALLBACK_THRESHOLDS,
 ): { label: string; tone: string; title: string } {
   if (net > EPS)
     return {
@@ -96,9 +131,9 @@ export function runway(
     };
   const hours = stock / -net;
   const tone =
-    hours < RUNWAY_RED_HOURS
+    hours < thresholds.redHours
       ? "text-rose-400"
-      : hours < RUNWAY_AMBER_HOURS
+      : hours < thresholds.amberHours
         ? "text-amber-300"
         : "text-zinc-400";
   return {
