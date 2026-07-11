@@ -56,7 +56,8 @@ pub fn parse_chat_senders(content: &str) -> Vec<String> {
 const MAX_MESSAGE_LEN: usize = 10_000;
 
 /// One parsed chat message: a stable `key` identifying it independently of
-/// which log file it came from, plus the message `text`.
+/// which log file it came from, the `sender` and message `ts` (unix seconds),
+/// plus the message `text`.
 ///
 /// `key` is the header's `[ timestamp ] Sender` — identical across every
 /// client's log of the same channel, so the same message logged by several of
@@ -64,6 +65,10 @@ const MAX_MESSAGE_LEN: usize = 10_000;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatEntry {
     pub key: String,
+    /// Sender character name (trimmed).
+    pub sender: String,
+    /// Message time as unix epoch seconds (UTC); 0 when the stamp won't parse.
+    pub ts: i64,
     pub text: String,
 }
 
@@ -93,6 +98,8 @@ pub fn parse_chat_entries(content: &str) -> Vec<ChatEntry> {
                         // `ts` still carries the leading '['; keep it as-is —
                         // we only need it to be stable, not pretty.
                         key: format!("{ts}] {}", sender.trim()),
+                        sender: sender.trim().to_string(),
+                        ts: parse_ts(ts),
                         text: msg.trim().to_string(),
                     });
                     in_message = true;
@@ -113,6 +120,45 @@ pub fn parse_chat_entries(content: &str) -> Vec<ChatEntry> {
     }
     out.retain(|e| !e.text.trim().is_empty());
     out
+}
+
+/// Parse a `[ 2026.06.25 12:00:05 ]`-style stamp (leading `[`/spaces tolerated,
+/// trailing `]` optional) to unix epoch seconds (UTC). Returns 0 when it can't
+/// parse — callers use the value only for relative ordering/windowing.
+fn parse_ts(stamp: &str) -> i64 {
+    let inner = stamp
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim();
+    let Some((date, time)) = inner.split_once(' ') else {
+        return 0;
+    };
+    let mut d = date.split('.');
+    let mut t = time.split(':');
+    let p = |x: Option<&str>| x.and_then(|s| s.trim().parse::<i64>().ok());
+    let (Some(y), Some(mo), Some(da)) = (p(d.next()), p(d.next()), p(d.next())) else {
+        return 0;
+    };
+    let (Some(h), Some(mi), Some(s)) = (p(t.next()), p(t.next()), p(t.next())) else {
+        return 0;
+    };
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&da) {
+        return 0;
+    }
+    days_from_civil(y, mo, da) * 86_400 + h * 3_600 + mi * 60 + s
+}
+
+/// Days since 1970-01-01 for a proleptic-Gregorian date (Howard Hinnant's
+/// `days_from_civil`). Avoids pulling in `chrono` just to window chat messages.
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = (if y >= 0 { y } else { y - 399 }) / 400;
+    let yoe = y - era * 400; // [0, 399]
+    let mp = if m > 2 { m - 3 } else { m + 9 }; // [0, 11], Mar..Feb
+    let doy = (153 * mp + 2) / 5 + d - 1; // [0, 365]
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
+    era * 146_097 + doe - 719_468
 }
 
 #[cfg(test)]
@@ -204,5 +250,19 @@ Mexallon
             parse_chat_messages(log),
             vec!["Tritanium 100\nPyerite 50\nMexallon", "o7"]
         );
+    }
+
+    #[test]
+    fn populates_sender_and_epoch_ts() {
+        let e = parse_chat_entries("[ 2026.06.25 12:00:05 ] Alice Pilot > Tritanium");
+        assert_eq!(e[0].sender, "Alice Pilot");
+        // 2026.06.25 12:00:05 UTC.
+        assert_eq!(e[0].ts, days_from_civil(2026, 6, 25) * 86_400 + 12 * 3_600 + 5);
+        // A repeat 4s later is a distinct message, 4s apart.
+        let two = parse_chat_entries(
+            "[ 2026.06.25 12:00:05 ] Alice Pilot > Tritanium\n\
+             [ 2026.06.25 12:00:09 ] Alice Pilot > Tritanium",
+        );
+        assert_eq!(two[1].ts - two[0].ts, 4);
     }
 }

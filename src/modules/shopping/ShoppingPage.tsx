@@ -310,7 +310,9 @@ function ChatCapture({
           an optional quantity after the name (
           <span className="text-zinc-300">Tritanium 100</span>, Multibuy
           tab-format works too). Anything that isn't a known item name is
-          ignored, and only messages after you press Start are captured.
+          ignored, and only messages after you press Start are captured. The same
+          item re-posted by the same person within a few seconds is treated as a
+          duplicate and skipped.
         </p>
         <div className="flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-1 text-xs text-zinc-400">

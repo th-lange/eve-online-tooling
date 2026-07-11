@@ -41,6 +41,13 @@ struct ChatState {
     /// and re-polls don't re-add it. Pruned to the current window each poll.
     #[serde(default)]
     seen: std::collections::BTreeSet<String>,
+    /// Cooldown guard for chat capture: last-accepted message time (unix secs)
+    /// per `sender \u{1f} type_id`, so the same sender re-posting the same item
+    /// within `CHAT_DEDUP_COOLDOWN_SECS` is dropped as a duplicate. Persisted so
+    /// the window spans polls; pruned to the follow window and cleared on a
+    /// channel change.
+    #[serde(default)]
+    cooldown: std::collections::BTreeMap<String, i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -398,6 +405,11 @@ const MAX_LINES_PER_MESSAGE: usize = 100;
 const MAX_NAME_LEN: usize = 200;
 /// Quantity ceiling per line, so a stray number can't blow a list up.
 const MAX_LINE_QTY: i64 = 1_000_000_000;
+/// A sender re-posting the same item within this many seconds of their last
+/// accepted post of it is treated as a duplicate and dropped (see
+/// `apply_cooldown`). Distinct items, distinct senders, and posts spaced beyond
+/// the window all still count.
+const CHAT_DEDUP_COOLDOWN_SECS: i64 = 3;
 
 /// A token that is purely a number (optional `,`/`.` thousands separators and
 /// an `x` prefix/suffix like "x100"/"100x"). Mirrors the frontend paste parser
@@ -448,6 +460,42 @@ fn parse_chat_line(raw: &str) -> Option<(String, i64)> {
         }
     }
     Some((name, qty))
+}
+
+/// One resolved item line captured from chat, tagged with who posted it and
+/// when — the unit the cooldown de-duplicator works on.
+struct ChatItem {
+    ts: i64,
+    sender: String,
+    type_id: i64,
+    quantity: i64,
+    /// Display label for the poll result (`Name` or `Name ×N`).
+    label: String,
+}
+
+/// Drop a sender's repeat of the same item posted within `cooldown_secs` of
+/// their previous accepted post of it; different senders, different items, and
+/// posts spaced beyond the window all pass. `last_seen` maps
+/// `sender \u{1f} type_id` to the last accepted time and carries across polls.
+/// Input MUST be in ascending `ts` order. Pure (testable).
+fn apply_cooldown(
+    candidates: Vec<ChatItem>,
+    last_seen: &mut std::collections::BTreeMap<String, i64>,
+    cooldown_secs: i64,
+) -> Vec<ChatItem> {
+    let mut kept = Vec::new();
+    for c in candidates {
+        let pair = format!("{}\u{1f}{}", c.sender, c.type_id);
+        let dup = last_seen
+            .get(&pair)
+            .is_some_and(|&last| (0..cooldown_secs).contains(&(c.ts - last)));
+        if dup {
+            continue;
+        }
+        last_seen.insert(pair, c.ts);
+        kept.push(c);
+    }
+    kept
 }
 
 /// Result of a chat-capture poll.
@@ -539,6 +587,7 @@ pub fn shopping_chat_sync(
     if channel_changed {
         store.chat.channel = chan.to_string();
         store.chat.seen.clear();
+        store.chat.cooldown.clear();
     }
 
     if recent.is_empty() {
@@ -590,43 +639,73 @@ pub fn shopping_chat_sync(
         });
     }
 
-    // Ingest messages we haven't seen before. A message opened after Start (or
-    // in a client that joined later) is new here regardless of which file it
-    // landed in; its MOTD is an "EVE System" line, already filtered by the parser.
-    let mut added = Vec::new();
+    // Ingest messages we haven't seen before (a message opened after Start, or
+    // in a client that joined later, is new here regardless of which file it
+    // landed in; its MOTD is an "EVE System" line, already filtered out). Gather
+    // the resolved item lines, then apply the per-sender cooldown before adding
+    // — a rapid duplicate from the same sender is dropped, but different senders
+    // / items and spaced re-posts still count.
+    let mut candidates: Vec<ChatItem> = Vec::new();
+    for entry in &union {
+        if store.chat.seen.contains(&entry.key) {
+            continue;
+        }
+        // One item per line: multi-line pastes arrive as one message with
+        // embedded newlines (see chatlog.rs), and each line may carry a
+        // quantity ("Tritanium 100", "Pyerite\t50", "x3" styles).
+        for raw in entry.text.lines().take(MAX_LINES_PER_MESSAGE) {
+            let Some((name, qty)) = parse_chat_line(raw) else {
+                continue;
+            };
+            if let Some((type_id, _)) = sde.type_by_name(&name).map_err(|e| e.to_string())? {
+                candidates.push(ChatItem {
+                    ts: entry.ts,
+                    sender: entry.sender.clone(),
+                    type_id,
+                    quantity: qty,
+                    label: if qty > 1 {
+                        format!("{name} ×{qty}")
+                    } else {
+                        name
+                    },
+                });
+            }
+        }
+    }
+    // Timestamp order so the cooldown accepts the first of a burst and drops the
+    // rest, deterministically regardless of which client's file carried it.
+    candidates.sort_by_key(|c| c.ts);
+
+    // Prune cooldown entries older than the follow window so it stays bounded
+    // (stale entries flush to disk on the next save).
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    store
+        .chat
+        .cooldown
+        .retain(|_, ts| *ts >= now_secs - 24 * 60 * 60);
+
+    let kept = apply_cooldown(candidates, &mut store.chat.cooldown, CHAT_DEDUP_COOLDOWN_SECS);
+
+    let mut added = Vec::with_capacity(kept.len());
     {
-        // Find (ensured above) the target list and append resolved items.
+        // Find (ensured above) the target list and append the kept items.
         let list = store
             .lists
             .iter_mut()
             .find(|l| l.id == target_id)
             .expect("target list ensured above");
-        for entry in &union {
-            if store.chat.seen.contains(&entry.key) {
-                continue;
+        for c in kept {
+            match list.items.iter_mut().find(|e| e.type_id == c.type_id) {
+                Some(e) => e.quantity = e.quantity.saturating_add(c.quantity),
+                None => list.items.push(StoredEntry {
+                    type_id: c.type_id,
+                    quantity: c.quantity,
+                }),
             }
-            // One item per line: multi-line pastes arrive as one message with
-            // embedded newlines (see chatlog.rs), and each line may carry a
-            // quantity ("Tritanium 100", "Pyerite\t50", "x3" styles).
-            for raw in entry.text.lines().take(MAX_LINES_PER_MESSAGE) {
-                let Some((name, qty)) = parse_chat_line(raw) else {
-                    continue;
-                };
-                if let Some((type_id, _)) = sde.type_by_name(&name).map_err(|e| e.to_string())? {
-                    match list.items.iter_mut().find(|e| e.type_id == type_id) {
-                        Some(e) => e.quantity = e.quantity.saturating_add(qty),
-                        None => list.items.push(StoredEntry {
-                            type_id,
-                            quantity: qty,
-                        }),
-                    }
-                    added.push(if qty > 1 {
-                        format!("{name} ×{qty}")
-                    } else {
-                        name
-                    });
-                }
-            }
+            added.push(c.label);
         }
     }
 
@@ -700,5 +779,66 @@ mod tests {
             parse_chat_line("Tritanium 99999999999999999999"),
             Some(("Tritanium".into(), 1)) // unparseable digits → default 1
         );
+    }
+
+    fn item(ts: i64, sender: &str, type_id: i64) -> ChatItem {
+        ChatItem {
+            ts,
+            sender: sender.into(),
+            type_id,
+            quantity: 1,
+            label: "x".into(),
+        }
+    }
+    fn ids(kept: &[ChatItem]) -> Vec<(i64, &str, i64)> {
+        kept.iter()
+            .map(|c| (c.ts, c.sender.as_str(), c.type_id))
+            .collect()
+    }
+
+    #[test]
+    fn cooldown_drops_a_senders_rapid_repeat_of_the_same_item() {
+        let mut seen = std::collections::BTreeMap::new();
+        let kept = apply_cooldown(
+            vec![
+                item(100, "Bob", 34), // accepted
+                item(102, "Bob", 34), // +2s → dropped (within cooldown)
+                item(104, "Bob", 34), // +4s from accepted → accepted again
+            ],
+            &mut seen,
+            3,
+        );
+        assert_eq!(ids(&kept), vec![(100, "Bob", 34), (104, "Bob", 34)]);
+    }
+
+    #[test]
+    fn cooldown_is_per_sender_and_per_item() {
+        let mut seen = std::collections::BTreeMap::new();
+        let kept = apply_cooldown(
+            vec![
+                item(100, "Bob", 34),   // different sender / item combos all pass
+                item(100, "Alice", 34), // other sender, same item
+                item(101, "Bob", 35),   // same sender, other item
+            ],
+            &mut seen,
+            3,
+        );
+        assert_eq!(
+            ids(&kept),
+            vec![(100, "Bob", 34), (100, "Alice", 34), (101, "Bob", 35)]
+        );
+    }
+
+    #[test]
+    fn cooldown_state_carries_across_calls() {
+        let mut seen = std::collections::BTreeMap::new();
+        apply_cooldown(vec![item(100, "Bob", 34)], &mut seen, 3);
+        // Next poll: a repeat 1s later is dropped, one 5s later is kept.
+        let kept = apply_cooldown(
+            vec![item(101, "Bob", 34), item(105, "Bob", 34)],
+            &mut seen,
+            3,
+        );
+        assert_eq!(ids(&kept), vec![(105, "Bob", 34)]);
     }
 }

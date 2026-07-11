@@ -36,11 +36,13 @@ import {
   FilterChips,
   ListView,
   Num,
+  PasteVerdict,
   StaleBar,
   Tabs,
   ViewTabs,
 } from "./components";
-import { toggle, uniqueSorted } from "./helpers";
+import { classifyPaste, dedupNames, toggle, uniqueSorted } from "./helpers";
+import { parseItems } from "../shopping/parse";
 
 export type ResultsView =
   "opportunities" | "favorites" | "blacklist" | "library";
@@ -78,7 +80,7 @@ function loadImported(): ImportedBlueprint[] {
 
 const FORGE = 10000002;
 
-export type Tab = "item" | "market" | "industry" | "thresholds";
+export type Tab = "item" | "market" | "industry" | "thresholds" | "paste";
 
 export function ProductionPage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
@@ -144,6 +146,8 @@ function Workbench() {
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [minRoiPct, setMinRoiPct] = useState("");
   const [minVolume, setMinVolume] = useState("");
+  const [pasteList, setPasteList] = useState("");
+  const [pasteMinRoiPct, setPasteMinRoiPct] = useState("20");
 
   const regions = useQuery({
     queryKey: ["market", "regions"],
@@ -334,12 +338,36 @@ function Workbench() {
     [rows],
   );
 
+  // "Paste list" filter — parse pasted item names (reusing the shopping paste
+  // parser), dedup (keeping original casing), then classify against the full
+  // priced set for the build-and-sell verdict.
+  const pastedItems = useMemo(() => dedupNames(parseItems(pasteList)), [
+    pasteList,
+  ]);
+  const pastedNames = useMemo(
+    () => new Set(pastedItems.map((n) => n.toLowerCase())),
+    [pastedItems],
+  );
+  const pasteMinRoi = pasteMinRoiPct.trim() === "" ? 0 : Number(pasteMinRoiPct) / 100;
+  const pasteVerdict = useMemo(
+    () =>
+      pastedItems.length === 0
+        ? null
+        : classifyPaste(pastedItems, rows, pasteMinRoi),
+    [pastedItems, rows, pasteMinRoi],
+  );
+
   const filtered = useMemo(() => {
     const needle = name.trim().toLowerCase();
     const minRoi = minRoiPct.trim() === "" ? null : Number(minRoiPct) / 100;
     const minVol =
       stationId === null || minVolume.trim() === "" ? null : Number(minVolume);
     return rows.filter((r) => {
+      if (
+        pastedNames.size > 0 &&
+        !pastedNames.has(r.productName.toLowerCase())
+      )
+        return false;
       if (
         needle &&
         ![r.productName, r.category, r.group, r.metaGroup]
@@ -370,6 +398,7 @@ function Workbench() {
     minRoiPct,
     minVolume,
     stationId,
+    pastedNames,
   ]);
 
   const stations = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
@@ -423,6 +452,12 @@ function Workbench() {
       label: `Volume ≥ ${minVolume}`,
       clear: () => setMinVolume(""),
     });
+  if (pastedNames.size > 0)
+    activeFilters.push({
+      key: "paste",
+      label: `Pasted list (${pastedNames.size})`,
+      clear: () => setPasteList(""),
+    });
   function resetAllFilters() {
     setName("");
     setCategories(new Set());
@@ -431,6 +466,7 @@ function Workbench() {
     setFavoritesOnly(false);
     setMinRoiPct("");
     setMinVolume("");
+    setPasteList("");
   }
 
   return (
@@ -802,6 +838,36 @@ function Workbench() {
             </Field>
           </div>
         )}
+
+        {tab === "paste" && (
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="md:col-span-2">
+              <Field label="Paste items (names, EVE Multibuy, inventory dump)">
+                <textarea
+                  value={pasteList}
+                  onChange={(e) => setPasteList(e.currentTarget.value)}
+                  rows={6}
+                  placeholder={"Rifter\nWarrior II\n…"}
+                  className="w-full rounded bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-100 outline-none placeholder:text-zinc-500"
+                />
+              </Field>
+              <p className="mt-1 text-[11px] text-zinc-500">
+                Filters Opportunities to the pasted items and flags which clear
+                the min ROI below.
+              </p>
+            </div>
+            <Field label="Min ROI % to count as worth selling">
+              <input
+                type="number"
+                value={pasteMinRoiPct}
+                min={0}
+                onChange={(e) => setPasteMinRoiPct(e.currentTarget.value)}
+                placeholder="0"
+                className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+              />
+            </Field>
+          </div>
+        )}
       </div>
 
       <ViewTabs
@@ -816,6 +882,15 @@ function Workbench() {
 
       {view === "opportunities" && activeFilters.length > 0 && (
         <FilterChips filters={activeFilters} onReset={resetAllFilters} />
+      )}
+
+      {view === "opportunities" && pasteVerdict && (
+        <PasteVerdict
+          worth={pasteVerdict.worth}
+          skip={pasteVerdict.skip}
+          notBuildable={pasteVerdict.notBuildable}
+          minRoiPct={pasteMinRoi * 100}
+        />
       )}
 
       <div className="mt-3">

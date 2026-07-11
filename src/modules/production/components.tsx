@@ -95,6 +95,46 @@ export function FilterChips({
   );
 }
 
+/**
+ * Verdict banner for the "Paste list" filter: given the pasted item names,
+ * split into those worth building & selling (ROI at or above the requested
+ * minimum), those below it, and those with no manufacturable product here.
+ * Answers "does it make sense to sell?" at a glance above the filtered table.
+ */
+export function PasteVerdict({
+  worth,
+  skip,
+  notBuildable,
+  minRoiPct,
+}: {
+  worth: string[];
+  skip: string[];
+  notBuildable: string[];
+  minRoiPct: number;
+}) {
+  const total = worth.length + skip.length + notBuildable.length;
+  return (
+    <div className="mt-3 space-y-2 rounded border border-zinc-800 bg-zinc-900 p-3 text-xs">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-zinc-400">{total} pasted:</span>
+        <span className="text-emerald-400">
+          {worth.length} worth selling (ROI ≥ {minRoiPct}%)
+        </span>
+        <span className="text-amber-400">{skip.length} below ROI</span>
+        <span className="text-zinc-500">
+          {notBuildable.length} not manufacturable
+        </span>
+      </div>
+      {notBuildable.length > 0 && (
+        <div className="text-zinc-500">
+          <span className="text-zinc-400">No blueprint here:</span>{" "}
+          {notBuildable.join(", ")}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ViewTabs({
   view,
   onChange,
@@ -362,6 +402,7 @@ export function Tabs({
     { value: "market", label: "Market" },
     { value: "industry", label: "Industry" },
     { value: "thresholds", label: "Thresholds" },
+    { value: "paste", label: "Paste list" },
   ];
   return (
     <div className="mt-4 inline-flex rounded border border-zinc-800 bg-zinc-900 p-0.5">
