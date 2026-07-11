@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   errorMessage,
@@ -51,12 +51,21 @@ function Workbench() {
 
   // Tick so extractor restart countdowns stay live (minute granularity is plenty).
   const [now, setNow] = useState(() => Date.now());
+  const [sort, setSort] = useState<"default" | "restart">("default");
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(id);
   }, []);
 
-  const rows = colonies.data ?? [];
+  // "restart" floats colonies whose extractor program has ended to the top;
+  // stable within each group so it otherwise keeps ESI's default order.
+  const rows = useMemo(() => {
+    const base = colonies.data ?? [];
+    if (sort === "default") return base;
+    return [...base].sort(
+      (a, b) => Number(b.needsAttention) - Number(a.needsAttention),
+    );
+  }, [colonies.data, sort]);
 
   return (
     <div className="p-6">
@@ -70,13 +79,28 @@ function Workbench() {
             restart, storage usage, and where inputs fall short.
           </p>
         </div>
-        <button
-          onClick={() => colonies.refetch()}
-          disabled={colonies.isFetching}
-          className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-        >
-          {colonies.isFetching ? "Loading…" : "Refresh"}
-        </button>
+        <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1 text-xs text-zinc-400">
+            Sort
+            <select
+              value={sort}
+              onChange={(e) =>
+                setSort(e.currentTarget.value as "default" | "restart")
+              }
+              className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-100 outline-none"
+            >
+              <option value="default">Default</option>
+              <option value="restart">Restart required</option>
+            </select>
+          </label>
+          <button
+            onClick={() => colonies.refetch()}
+            disabled={colonies.isFetching}
+            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+          >
+            {colonies.isFetching ? "Loading…" : "Refresh"}
+          </button>
+        </div>
       </div>
 
       {colonies.isError &&
