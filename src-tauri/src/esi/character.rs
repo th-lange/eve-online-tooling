@@ -162,18 +162,26 @@ pub async fn open_market_window(
     Ok(())
 }
 
-/// Open the in-game Show Info window for an entity (ESI UI write). ESI has no
-/// "open PI window" endpoint; this is the closest hook (systems are always
-/// supported; some celestials may not be, so callers can fall back).
-pub async fn open_information_window(
+
+/// Set the character's autopilot destination to a solar system (ESI UI write).
+/// This is the closest *working* in-game hook for "take me to this colony":
+/// `/ui/openwindow/information/` only accepts character/corporation/alliance
+/// target ids — CCP never extended it to planets or systems (esi-issues#358) —
+/// so PI's "Show in-game" sets a waypoint instead of trying (and failing) to
+/// open a Show Info window. Clears other waypoints so it's a direct route.
+pub async fn set_autopilot_waypoint(
     auth: &AuthState,
     character_id: i64,
-    target_id: i64,
+    destination_system_id: i64,
 ) -> Result<(), AuthError> {
     let token = auth.access_token_for(character_id).await?;
     auth.http()
-        .post(format!("{ESI_BASE}/latest/ui/openwindow/information/"))
-        .query(&[("target_id", target_id.to_string())])
+        .post(format!("{ESI_BASE}/latest/ui/autopilot/waypoint/"))
+        .query(&[
+            ("destination_id", destination_system_id.to_string()),
+            ("add_to_beginning", "true".to_string()),
+            ("clear_other_waypoints", "true".to_string()),
+        ])
         .bearer_auth(&token)
         .send()
         .await?

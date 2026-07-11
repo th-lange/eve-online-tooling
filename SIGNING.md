@@ -1,56 +1,34 @@
-# Code signing
+# Code signing — not happening (for now)
 
-Where things stand and how to turn on **free Windows code signing**.
+**Decision: builds stay unsigned.** Not a gap to fill in, not a TODO — a
+deliberate call, revisit only if the underlying gatekeeping changes.
 
 | Platform | Status | Notes |
 | --- | --- | --- |
-| 🐧 Linux | ✅ nothing needed | AppImage/deb/rpm run unsigned. |
-| 🪟 Windows | 🟡 prepped, off | Free via **SignPath Foundation** (OSS) — steps below. |
-| 🍎 macOS | ❌ not free | Needs an Apple Developer account ($99/yr) for a Developer ID cert + notarization. Left unsigned; users right-click → **Open** the first time. |
+| 🐧 Linux | ✅ no signing needed | AppImage/deb/rpm run unsigned, no OS prompt. |
+| 🍎 macOS | ❌ unsigned | Gatekeeper warns on first launch — right-click → **Open**, or `xattr -dr com.apple.quarantine`. |
+| 🪟 Windows | ❌ unsigned | SmartScreen warns on first launch — **More info** → **Run anyway**. |
 
-## Windows — SignPath Foundation (free for open source)
+## Why
 
-[SignPath Foundation](https://signpath.org/) issues free Authenticode certificates
-to OSS projects. The release workflow already has the signing steps wired in —
-they stay **inert until the secrets/variables below exist**, so nothing changes
-until you finish setup.
+Every practical path to a trusted Authenticode certificate on Windows —
+Microsoft's own **Azure Artifact Signing** (formerly Trusted Signing), or a
+traditional EV cert — requires **identity validation**, and for Public Trust
+certs (the only kind that actually suppresses the SmartScreen prompt) that
+validation is currently only available to developers billing out of the
+**US, Canada, the EU, or the UK**. Outside those regions there is no path at
+a reasonable price — full price, no free/OSS tier, no shortcut. Apple's
+equivalent (a $99/year Developer ID + notarization) is at least available
+everywhere, but it's still a recurring cost for a free hobby project.
 
-### 1. Apply
-- Sign up at <https://about.signpath.io/product/open-source> and create an
-  organization for this project.
-- Requirement met: the repo is public **and MIT-licensed** (`LICENSE`).
+This project isn't paying an ongoing fee, or routing around a geography
+requirement, so a handful of maintainers can dodge a warning dialog. The
+SmartScreen/Gatekeeper prompts exist to let platform vendors gatekeep who
+gets to look "trustworthy" by default; small independent, non-US-aligned
+developers just eat the warning. So: unsigned it stays. If Microsoft ever
+opens Public Trust identity validation to the rest of the world at a sane
+price, this file gets rewritten — until then, this is a closed question, not
+an open one.
 
-### 2. Create the SignPath project
-In the SignPath dashboard, create:
-- **Project** with slug **`eve-online-tooling`**
-- **Artifact configuration** with slug **`windows-installers`** (a ZIP containing
-  the `.exe` + `.msi`; SignPath's "authenticode" template)
-- **Signing policy** with slug **`release-signing`** (bound to the Foundation
-  certificate)
-- A **CI user** with an **API token**
-
-> If you pick different slugs, update them in `.github/workflows/release.yml`
-> (the three "SignPath" steps).
-
-### 3. Add the GitHub secrets/variables
-On `th-lange/eve-online-tooling` → Settings:
-- **Secret** `SIGNPATH_API_TOKEN` = the SignPath CI user's API token
-- **Variable** `SIGNPATH_ORGANIZATION_ID` = your SignPath organization id
-
-That's it. The next **minor** release tag (`vX.Y.0`, which builds Windows) will:
-1. build the installers,
-2. submit them to SignPath (`signpath/github-action-submit-signing-request`),
-3. replace the release's `.exe`/`.msi` with the **signed** versions.
-
-### 4. Housekeeping
-- Once signing works, drop the "**unsigned**" line from `releaseBody` in
-  `release.yml` for Windows, and update the README's open instructions.
-- SmartScreen reputation builds up over the first downloads even with a valid
-  cert — early users may still see a prompt until reputation accrues.
-
-## macOS (optional, paid)
-
-If you later get an Apple Developer account, `tauri-action` supports signing +
-notarization via `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
-`APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID` secrets —
-see the Tauri docs. Not wired up here.
+Every release page repeats the click-through instructions and this
+reasoning — see `.github/workflows/release.yml`'s `notes` job.

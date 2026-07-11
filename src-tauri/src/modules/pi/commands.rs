@@ -434,27 +434,22 @@ fn build_colony(
     })
 }
 
-/// Open the colony in-game via Show Info: the planet if ESI accepts it, else the
-/// system (always supported). ESI has no "open the PI window" endpoint, so this
-/// is the nearest per-colony link. Requires `esi-ui.open_window.v1`.
+/// Route the character to the colony's system in-game. ESI's `/ui/openwindow/
+/// information/` endpoint only accepts character/corporation/alliance target
+/// ids (CCP never extended it to planets or systems — esi-issues#358), so a
+/// Show Info window for a planet or system isn't something ESI can open; the
+/// closest *working* hook is setting the autopilot destination to the system.
+/// Requires `esi-ui.write_waypoint.v1`.
 #[tauri::command]
 pub async fn pi_show_in_game(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
-    planet_id: i64,
     system_id: i64,
 ) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let character_id =
         storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?;
-    // Prefer the planet; fall back to the system if the client rejects the id.
-    if crate::esi::open_information_window(&auth_state, character_id, planet_id)
-        .await
-        .is_ok()
-    {
-        return Ok(());
-    }
-    crate::esi::open_information_window(&auth_state, character_id, system_id)
+    crate::esi::set_autopilot_waypoint(&auth_state, character_id, system_id)
         .await
         .map_err(|e| e.to_string())
 }

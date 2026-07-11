@@ -60,15 +60,13 @@ export function piOverview(): Promise<ColonyView[]> {
   return invoke<ColonyView[]>("pi_overview");
 }
 /**
- * Open the colony in-game (Show Info): the planet if the client accepts it, else
- * its system. ESI has no "open PI window" endpoint, so this is the nearest link.
- * Requires `esi-ui.open_window.v1`.
+ * Set autopilot to the colony's system in-game. ESI's "open info window"
+ * endpoint only accepts character/corporation/alliance ids — it can't open a
+ * planet or system window — so this routes you there instead.
+ * Requires `esi-ui.write_waypoint.v1`.
  */
-export function piShowInGame(
-  planetId: number,
-  systemId: number,
-): Promise<void> {
-  return invoke<void>("pi_show_in_game", { planetId, systemId });
+export function piShowInGame(systemId: number): Promise<void> {
+  return invoke<void>("pi_show_in_game", { systemId });
 }
 /** Type ids locked in as "produced by PI". */
 export function piLockedGet(): Promise<number[]> {

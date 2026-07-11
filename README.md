@@ -72,8 +72,8 @@ Grab the installer for your OS from the
 - **macOS** — open the `.dmg` and drag the app to Applications. The build is **unsigned**, so on first
   launch right-click the app → **Open** (or run
   `xattr -dr com.apple.quarantine "/Applications/EVE Online Tooling.app"`).
-- **Windows** — run the `.msi` (or the NSIS `-setup.exe`). SmartScreen may warn (unsigned):
-  **More info → Run anyway**.
+- **Windows** — run the `.msi` (or the NSIS `-setup.exe`). SmartScreen will warn (unsigned):
+  **More info → Run anyway**. Why it's unsigned (and staying that way): [`SIGNING.md`](SIGNING.md).
 
 Prefer to run from source? See *Getting started* below.
 
@@ -208,12 +208,11 @@ To cut a release:
    `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json` and regenerates both lockfiles). Review the diff.
 2. Commit, then tag and push: `git commit -am "chore(release): v0.25.0" && git tag v0.25.0 && git push origin main --tags`.
 
-The workflow currently builds **Windows** installers only (the Linux and macOS matrix entries are
-commented out to conserve Actions minutes — uncomment them in `release.yml` to restore the full
-Linux / macOS / Windows build). It attaches the installers to the GitHub Release for that tag (it can
-also be run manually from the **Actions** tab against an existing tag). Builds are currently
-**unsigned** — code signing (Apple notarization, Windows
-Authenticode) and in-app auto-update can be layered into the same workflow later.
+The workflow builds **Windows** installers on every tag; **macOS** (universal) and **Linux** join in
+on minor releases (`vX.Y.0`) or a manual run with `all_platforms` — see `release.yml`'s `setup` job.
+It attaches the installers to the GitHub Release for that tag, then fills in the release notes with
+the changelog and a note on why the builds are unsigned (see [`SIGNING.md`](SIGNING.md) — it's a
+deliberate call, not a TODO).
 
 ## Status & tracking
 

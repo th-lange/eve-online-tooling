@@ -140,13 +140,11 @@ function Colony({
           </span>
         )}
         <button
-          onClick={() =>
-            piShowInGame(colony.planetId, colony.systemId).catch(() => {})
-          }
-          title="Show this colony in-game (planet, or its system) — ESI can't open the PI window directly"
+          onClick={() => piShowInGame(colony.systemId).catch(() => {})}
+          title="Set autopilot to this colony's system — ESI can't open a planet/system Show Info window directly"
           className="ml-auto rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
         >
-          Show in-game ↗
+          Route here ↗
         </button>
       </div>
 
@@ -275,17 +273,58 @@ function Storage({ s }: { s: StorageView }) {
 
 const EPS = 0.0001;
 
-/** Recommend how to re-aim extraction next cycle, straight off the colony
- *  balance: inputs running net-negative are draining (feed them), and P0s the
- *  extractors already pull that are net-positive are banking up (ease off). */
-function extractionAdvice(colony: ColonyView) {
+/** Total units and stored volume of a type id across a colony's storage pins. */
+function stockMaps(colony: ColonyView) {
+  const stock = new Map<number, number>();
+  const volume = new Map<number, number>();
+  for (const s of colony.storage) {
+    for (const c of s.contents) {
+      stock.set(c.typeId, (stock.get(c.typeId) ?? 0) + c.amount);
+      volume.set(c.typeId, (volume.get(c.typeId) ?? 0) + c.volume);
+    }
+  }
+  return { stock, volume };
+}
+
+/** A commodity is "banking" (worth easing off) once it alone ties up this much
+ *  of the colony's total storage capacity, even if its instantaneous balance
+ *  isn't net-positive (e.g. a starved factory stopped consuming it). */
+const BANK_VOLUME_SHARE = 0.15;
+
+/** Recommend how to re-aim extraction next cycle. Balance `net` (produced −
+ *  consumed per hour) alone only says which way a commodity is trending — it
+ *  misses that PI is bursty: what actually matters next cycle is what's about
+ *  to run OUT (a near-empty stock drains fast even off a mild deficit) versus
+ *  what's already piled up (a big stockpile means "stop feeding it" even if
+ *  its rate looks balanced, e.g. a factory stalled on a missing input). So:
+ *  - "feed": net-negative inputs, ranked by runway (stock ÷ deficit) — lowest
+ *    runway (closest to empty) first, regardless of how large the deficit is.
+ *  - "ease off": extracted P0s that are either net-positive OR already
+ *    hogging a big share of colony storage, ranked by stockpile size.
+ */
+export function extractionAdvice(colony: ColonyView) {
   const extracted = new Set(colony.extractors.map((e) => e.productTypeId));
+  const { stock, volume } = stockMaps(colony);
+  const totalCapacity =
+    colony.storage.reduce((sum, s) => sum + s.capacity, 0) || 1;
+
   const short = colony.balance
     .filter((b) => b.net < -EPS)
-    .sort((a, b) => a.net - b.net);
+    .map((b) => {
+      const onHand = stock.get(b.typeId) ?? 0;
+      return { ...b, stock: onHand, runwayHours: onHand / -b.net };
+    })
+    .sort((a, b) => a.runwayHours - b.runwayHours);
+
   const over = colony.balance
-    .filter((b) => b.net > EPS && extracted.has(b.typeId))
-    .sort((a, b) => b.net - a.net);
+    .filter((b) => {
+      if (!extracted.has(b.typeId)) return false;
+      const share = (volume.get(b.typeId) ?? 0) / totalCapacity;
+      return b.net > EPS || share > BANK_VOLUME_SHARE;
+    })
+    .map((b) => ({ ...b, stock: stock.get(b.typeId) ?? 0 }))
+    .sort((a, b) => b.stock - a.stock || b.net - a.net);
+
   return { short, over };
 }
 
@@ -312,8 +351,16 @@ function NextCycle({ colony }: { colony: ColonyView }) {
             <span
               key={r.typeId}
               className="rounded bg-rose-500/15 px-1.5 py-0.5 text-rose-300"
+              title={`${formatInt(Math.round(r.stock))} in storage`}
             >
               {r.name} <span className="tabular-nums">−{fmt(-r.net)}/h</span>
+              {r.stock <= EPS ? (
+                <span className="ml-1 text-rose-400">· empty</span>
+              ) : Number.isFinite(r.runwayHours) ? (
+                <span className="ml-1 tabular-nums text-rose-400/80">
+                  · {fmt(r.runwayHours)}h left
+                </span>
+              ) : null}
             </span>
           ))}
         </div>
@@ -326,14 +373,17 @@ function NextCycle({ colony }: { colony: ColonyView }) {
               key={r.typeId}
               className="rounded bg-sky-500/15 px-1.5 py-0.5 text-sky-300"
             >
-              {r.name} <span className="tabular-nums">+{fmt(r.net)}/h</span>
+              {r.name}{" "}
+              <span className="tabular-nums">
+                {formatInt(Math.round(r.stock))} on hand
+              </span>
             </span>
           ))}
         </div>
       )}
       <div className="mt-1.5 text-[11px] text-zinc-500">
-        Aim more extractor heads/time at the raw inputs feeding the “feed” list;
-        pull them off the “ease off” list.
+        Aim more extractor heads/time at the raw inputs feeding the “feed” list
+        (lowest runway first); pull them off the “ease off” list.
       </div>
     </div>
   );

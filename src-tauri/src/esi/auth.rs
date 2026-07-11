@@ -37,6 +37,7 @@ const SCOPES: &[&str] = &[
     // Character-data features. NOTE: these must also be enabled on the EVE
     // developer application, or SSO rejects the whole login.
     "esi-ui.open_window.v1",
+    "esi-ui.write_waypoint.v1",
     "esi-characters.read_loyalty.v1",
     "esi-wallet.read_character_wallet.v1",
     "esi-skills.read_skills.v1",
