@@ -438,7 +438,7 @@ pub async fn fitting_esi_push(
 ) -> Result<i64, crate::model::AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let character_id =
-        storage::active_character(&dir).ok_or_else(crate::model::AppError::auth_required)?;
+        storage::primary_character(&dir).ok_or_else(crate::model::AppError::auth_required)?;
     let granted = storage::load_roster(&dir)
         .iter()
         .find(|c| c.character_id == character_id)
@@ -495,7 +495,7 @@ pub async fn fitting_esi_list(
 ) -> Result<Vec<Fit>, crate::model::AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let character_id =
-        storage::active_character(&dir).ok_or_else(crate::model::AppError::auth_required)?;
+        storage::primary_character(&dir).ok_or_else(crate::model::AppError::auth_required)?;
 
     // Up-front, actionable error when the active character never granted the
     // fittings scope (the common reason nothing loads).

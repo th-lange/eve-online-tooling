@@ -14,7 +14,7 @@ use crate::storage;
 
 fn first_character(app: &AppHandle) -> Result<i64, AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    storage::active_character(&dir).ok_or_else(AppError::auth_required)
+    storage::primary_character(&dir).ok_or_else(AppError::auth_required)
 }
 
 // --- LP balances (corp picker) ---

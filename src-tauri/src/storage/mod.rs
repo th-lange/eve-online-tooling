@@ -98,17 +98,62 @@ pub fn save_active_character(app_data_dir: &Path, character_id: i64) -> Result<(
     save_data(app_data_dir, ACTIVE_CHARACTER_KEY, &character_id)
 }
 
-/// The active character id if one is bookmarked and still in the roster, else
+/// Sentinel "active character" id meaning **all characters in the roster**.
+/// Negative so it can never collide with a real EVE character id (always
+/// positive). Persisted like any other active id; commands fan out on it.
+pub const ALL_CHARACTERS: i64 = -1;
+
+/// The active character id if one is bookmarked and still in the roster (or the
+/// [`ALL_CHARACTERS`] sentinel when at least one character is logged in), else
 /// the first roster character. The single source of truth for "which character"
 /// every per-character command defaults to.
 pub fn active_character(app_data_dir: &Path) -> Option<i64> {
     let roster = load_roster(app_data_dir);
     if let Some(id) = load_data::<i64>(app_data_dir, ACTIVE_CHARACTER_KEY) {
+        if id == ALL_CHARACTERS && !roster.is_empty() {
+            return Some(ALL_CHARACTERS);
+        }
         if roster.iter().any(|c| c.character_id == id) {
             return Some(id);
         }
     }
     roster.into_iter().next().map(|c| c.character_id)
+}
+
+/// The character ids a per-character command should operate on: every roster
+/// member when [`ALL_CHARACTERS`] is active, otherwise just the active one.
+/// Empty when nobody is logged in. Aggregating commands loop this and merge.
+pub fn target_characters(app_data_dir: &Path) -> Vec<i64> {
+    match active_character(app_data_dir) {
+        Some(ALL_CHARACTERS) => load_roster(app_data_dir)
+            .into_iter()
+            .map(|c| c.character_id)
+            .collect(),
+        Some(id) => vec![id],
+        None => Vec::new(),
+    }
+}
+
+/// A single concrete character for commands that can't aggregate (in-game
+/// actions, "my location"): the active character, or the first roster member
+/// when [`ALL_CHARACTERS`] is selected. `None` when nobody is logged in.
+pub fn primary_character(app_data_dir: &Path) -> Option<i64> {
+    match active_character(app_data_dir) {
+        Some(ALL_CHARACTERS) => load_roster(app_data_dir)
+            .into_iter()
+            .next()
+            .map(|c| c.character_id),
+        other => other,
+    }
+}
+
+/// Roster character id → name, for tagging aggregated ("all characters") rows
+/// without an extra ESI lookup (names are already stored on the roster).
+pub fn character_names(app_data_dir: &Path) -> std::collections::HashMap<i64, String> {
+    load_roster(app_data_dir)
+        .into_iter()
+        .map(|c| (c.character_id, c.name))
+        .collect()
 }
 
 /// Load a persisted list of type ids (e.g. `blacklist`, `favorites`).

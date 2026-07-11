@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  ALL_CHARACTERS,
   activeCharacter,
   authCharacters,
   errorMessage,
@@ -136,9 +137,13 @@ export function IndustryJobsPage() {
               value={
                 characterId ?? activeChar.data ?? roster[0]?.characterId ?? ""
               }
-              onChange={(e) => setCharacterId(Number(e.currentTarget.value))}
+              onChange={(e) => {
+                const value = Number(e.currentTarget.value);
+                setCharacterId(value === ALL_CHARACTERS ? undefined : value);
+              }}
               className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
             >
+              <option value={ALL_CHARACTERS}>All characters</option>
               {roster.map((c) => (
                 <option key={c.characterId} value={c.characterId}>
                   {c.name}
@@ -203,12 +208,16 @@ export function IndustryJobsPage() {
 function JobsTable({ rows }: { rows: JobRow[] }) {
   // Plain read: cheap, and each render shows current countdowns.
   const now = Date.now();
+  const showCharacter = new Set(rows.map((r) => r.characterId)).size > 1;
   return (
     <div className="mt-3 overflow-auto rounded border border-zinc-800">
       <table className="w-full border-collapse text-sm">
         <thead className="bg-zinc-900 text-zinc-400">
           <tr>
             <th className="px-3 py-1.5 text-left font-medium">Product</th>
+            {showCharacter && (
+              <th className="px-3 py-1.5 text-left font-medium">Character</th>
+            )}
             <th className="px-3 py-1.5 text-left font-medium">Owner</th>
             <th className="px-3 py-1.5 text-left font-medium">Activity</th>
             <th className="px-3 py-1.5 text-right font-medium">Runs</th>
@@ -225,6 +234,11 @@ function JobsTable({ rows }: { rows: JobRow[] }) {
               className="border-t border-zinc-800 text-zinc-300 hover:bg-zinc-800/40"
             >
               <td className="px-3 py-1.5 text-zinc-200">{r.product}</td>
+              {showCharacter && (
+                <td className="px-3 py-1.5 text-zinc-400">
+                  {r.characterName}
+                </td>
+              )}
               <td className="px-3 py-1.5">
                 <span
                   className={
@@ -252,7 +266,10 @@ function JobsTable({ rows }: { rows: JobRow[] }) {
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={8} className="px-3 py-6 text-center text-zinc-500">
+              <td
+                colSpan={showCharacter ? 9 : 8}
+                className="px-3 py-6 text-center text-zinc-500"
+              >
                 No industry jobs.
               </td>
             </tr>

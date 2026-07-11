@@ -128,6 +128,8 @@ pub struct ProducedItem {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ColonyView {
+    pub character_id: i64,
+    pub character_name: String,
     pub planet_id: i64,
     pub system_id: i64,
     pub system_name: String,
@@ -218,22 +220,19 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 }
 
 /// Colonies overview with extractor timers, storage usage, and the balance.
+/// Fans out over [`storage::target_characters`] so "All characters" merges
+/// every roster member's colonies; a character whose ESI fetch fails is
+/// skipped rather than failing the whole call.
 #[tauri::command]
 pub async fn pi_overview(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<Vec<ColonyView>, crate::model::AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let character_id =
-        storage::active_character(&dir).ok_or_else(crate::model::AppError::auth_required)?;
-
-    let colonies: Vec<EsiColony> = authed_get(
-        &auth_state,
-        character_id,
-        &format!("/latest/characters/{character_id}/planets/"),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let character_ids = storage::target_characters(&dir);
+    if character_ids.is_empty() {
+        return Err(crate::model::AppError::auth_required());
+    }
 
     let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
     let schematics = sde.planet_schematics().map_err(|e| e.to_string())?;
@@ -241,25 +240,51 @@ pub async fn pi_overview(
     let locked: HashSet<i64> = storage::load_id_list(&dir, LOCKED_LIST)
         .into_iter()
         .collect();
+    let names = storage::character_names(&dir);
 
-    let mut views = Vec::with_capacity(colonies.len());
-    for c in &colonies {
-        let planet: EsiPlanet = authed_get(
+    let mut views = Vec::new();
+    for character_id in character_ids {
+        let character_name = names
+            .get(&character_id)
+            .cloned()
+            .unwrap_or_else(|| format!("Character {character_id}"));
+
+        let colonies: Vec<EsiColony> = match authed_get(
             &auth_state,
             character_id,
-            &format!("/latest/characters/{character_id}/planets/{}/", c.planet_id),
+            &format!("/latest/characters/{character_id}/planets/"),
         )
         .await
-        .map_err(|e| e.to_string())?;
+        {
+            Ok(colonies) => colonies,
+            Err(_) => continue,
+        };
 
-        views.push(build_colony(
-            c,
-            &planet,
-            &schematics,
-            &systems,
-            &sde,
-            &locked,
-        )?);
+        for c in &colonies {
+            let planet: EsiPlanet = match authed_get(
+                &auth_state,
+                character_id,
+                &format!("/latest/characters/{character_id}/planets/{}/", c.planet_id),
+            )
+            .await
+            {
+                Ok(planet) => planet,
+                Err(_) => continue,
+            };
+
+            if let Ok(view) = build_colony(
+                c,
+                &planet,
+                &schematics,
+                &systems,
+                &sde,
+                &locked,
+                character_id,
+                &character_name,
+            ) {
+                views.push(view);
+            }
+        }
     }
     Ok(views)
 }
@@ -272,6 +297,8 @@ fn build_colony(
     systems: &HashMap<i64, (String, f64, String)>,
     sde: &Sde,
     locked: &HashSet<i64>,
+    character_id: i64,
+    character_name: &str,
 ) -> Result<ColonyView, String> {
     // Classify pins: extractor (has extractor_details), factory (has schematic),
     // else storage-like (command centre / storage / launchpad).
@@ -420,6 +447,8 @@ fn build_colony(
         .unwrap_or_else(|| format!("System {}", colony.solar_system_id));
 
     Ok(ColonyView {
+        character_id,
+        character_name: character_name.to_string(),
         planet_id: colony.planet_id,
         system_id: colony.solar_system_id,
         system_name,
@@ -447,8 +476,8 @@ pub async fn pi_show_in_game(
     system_id: i64,
 ) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let character_id =
-        storage::active_character(&dir).ok_or_else(|| "Log in a character first".to_string())?;
+    let character_id = storage::primary_character(&dir)
+        .ok_or_else(|| "Log in a character first".to_string())?;
     crate::esi::set_autopilot_waypoint(&auth_state, character_id, system_id)
         .await
         .map_err(|e| e.to_string())

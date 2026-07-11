@@ -31,6 +31,11 @@ export function activeCharacter(): Promise<number | null> {
   return invoke<number | null>("active_character");
 }
 
+/** Sentinel active-character id meaning "all characters" — per-character views
+ *  that can aggregate fan out over the whole roster. Negative so it never
+ *  collides with a real EVE character id (always positive). */
+export const ALL_CHARACTERS = -1;
+
 export interface OwnedBlueprint {
   characterId: number;
   characterName: string;

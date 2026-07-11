@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export interface OrderRow {
+  characterId: number;
+  characterName: string;
   orderId: number;
   typeId: number;
   name: string;

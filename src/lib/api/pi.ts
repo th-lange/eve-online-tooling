@@ -38,6 +38,8 @@ export interface ProducedItem {
   locked: boolean;
 }
 export interface ColonyView {
+  characterId: number;
+  characterName: string;
   planetId: number;
   systemId: number;
   systemName: string;

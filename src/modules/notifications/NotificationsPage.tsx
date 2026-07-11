@@ -50,6 +50,7 @@ export function NotificationsPage() {
     (n) => cat === "All" || n.category === cat,
   );
   const unread = (q.data ?? []).filter((n) => !n.isRead).length;
+  const multiCharacter = new Set((q.data ?? []).map((n) => n.characterId)).size > 1;
 
   return (
     <div className="p-6">
@@ -126,6 +127,7 @@ export function NotificationsPage() {
           <NotificationCard
             key={n.id}
             row={n}
+            showCharacter={multiCharacter}
             onDismiss={() => dismiss.mutate(n.id)}
           />
         ))}
@@ -136,9 +138,11 @@ export function NotificationsPage() {
 
 function NotificationCard({
   row,
+  showCharacter,
   onDismiss,
 }: {
   row: NotifRow;
+  showCharacter: boolean;
   onDismiss: () => void;
 }) {
   const catClass = CATEGORY_STYLE[row.category] ?? CATEGORY_STYLE.Other;
@@ -161,6 +165,9 @@ function NotificationCard({
             </span>
           </div>
           <div className="mt-1 text-xs text-zinc-500">
+            {showCharacter && (
+              <span className="text-zinc-400">{row.characterName} · </span>
+            )}
             {row.sender} · {fmtTime(row.timestamp)}
           </div>
           {row.body.trim() !== "" && (

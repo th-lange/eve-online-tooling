@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 /** One in-game notification. */
 export interface NotifRow {
   id: number;
+  characterId: number;
+  characterName: string;
   /** Humanised type, e.g. "Structure Under Attack". */
   title: string;
   /** War | Sovereignty | Structure | Industry | Wallet | Corp | Other. */

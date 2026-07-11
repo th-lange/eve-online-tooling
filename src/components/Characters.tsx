@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import {
+  ALL_CHARACTERS,
   activeCharacter,
   authCharacters,
   authLogin,
@@ -58,13 +59,16 @@ export function Characters() {
             aria-label="Active character"
             className="min-w-0 flex-1 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
           >
+            {chars.data!.length > 1 && (
+              <option value={ALL_CHARACTERS}>All characters</option>
+            )}
             {chars.data!.map((c) => (
               <option key={c.characterId} value={c.characterId}>
                 {c.name}
               </option>
             ))}
           </select>
-          {activeId != null && (
+          {activeId != null && activeId !== ALL_CHARACTERS && (
             <button
               onClick={() => logout.mutate(activeId)}
               className="flex shrink-0 items-center rounded p-1.5 text-zinc-400 hover:text-rose-400"

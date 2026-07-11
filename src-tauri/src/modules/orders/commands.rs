@@ -33,6 +33,8 @@ struct EsiOrder {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderRow {
+    pub character_id: i64,
+    pub character_name: String,
     pub order_id: i64,
     pub type_id: i64,
     pub name: String,
@@ -51,8 +53,11 @@ pub struct OrderRow {
     pub issued: String,
 }
 
-/// The first roster character's open market orders, each flagged as undercut or
-/// top-of-book against the current best price **at the order's own station**.
+/// Open market orders across the target characters (the whole roster when
+/// "All characters" is active, else just the active one), each flagged as
+/// undercut or top-of-book against the current best price **at the order's
+/// own station**. A character whose orders can't be fetched is skipped
+/// rather than failing the whole call.
 #[tauri::command]
 pub async fn market_orders(
     app: AppHandle,
@@ -60,10 +65,35 @@ pub async fn market_orders(
     market: State<'_, MarketService>,
 ) -> Result<Vec<OrderRow>, AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let character_id = storage::active_character(&dir).ok_or_else(AppError::auth_required)?;
+    let character_ids = storage::target_characters(&dir);
+    if character_ids.is_empty() {
+        return Err(AppError::auth_required());
+    }
+    let names = storage::character_names(&dir);
 
+    let mut rows = Vec::new();
+    for character_id in character_ids {
+        let character_name = names.get(&character_id).cloned().unwrap_or_default();
+        if let Ok(mut character_rows) =
+            fetch_character_orders(&auth_state, &market, &dir, character_id, &character_name)
+                .await
+        {
+            rows.append(&mut character_rows);
+        }
+    }
+    Ok(rows)
+}
+
+/// One character's open orders, priced and flagged for undercut.
+async fn fetch_character_orders(
+    auth_state: &State<'_, AuthState>,
+    market: &State<'_, MarketService>,
+    dir: &std::path::Path,
+    character_id: i64,
+    character_name: &str,
+) -> Result<Vec<OrderRow>, AppError> {
     let orders: Vec<EsiOrder> = authed_get(
-        &auth_state,
+        auth_state,
         character_id,
         &format!("/latest/characters/{character_id}/orders/"),
     )
@@ -96,9 +126,9 @@ pub async fn market_orders(
 
     // Names: type from SDE, location from /universe/names (NPC stations resolve;
     // player structures may not — fall back to the id).
-    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
     let loc_ids: Vec<i64> = orders.iter().map(|o| o.location_id).collect();
-    let loc_names = resolve_names(&auth_state, &loc_ids).await;
+    let loc_names = resolve_names(auth_state, &loc_ids).await;
+    let sde = Sde::open(&SdePaths::new(dir.to_path_buf()).db).map_err(|e| e.to_string())?;
 
     let rows = orders
         .into_iter()
@@ -117,6 +147,8 @@ pub async fn market_orders(
                 .map(|t| t.name)
                 .unwrap_or_else(|| format!("Type {}", o.type_id));
             OrderRow {
+                character_id,
+                character_name: character_name.to_string(),
                 order_id: o.order_id,
                 type_id: o.type_id,
                 name,
