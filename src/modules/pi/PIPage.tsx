@@ -14,7 +14,13 @@ import {
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
 import { formatInt } from "../../lib/format";
-import { EPS, extractionAdvice, runway, stockMaps } from "./balance";
+import {
+  EPS,
+  extractionAdvice,
+  runway,
+  runwayThresholds,
+  stockMaps,
+} from "./balance";
 
 export function PIPage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
@@ -334,6 +340,7 @@ function NextCycle({ colony }: { colony: ColonyView }) {
 
 function Balance({ colony }: { colony: ColonyView }) {
   const { stock } = stockMaps(colony);
+  const thresholds = runwayThresholds(colony, Date.now());
   return (
     <table className="w-full text-xs">
       <thead className="text-zinc-500">
@@ -349,7 +356,7 @@ function Balance({ colony }: { colony: ColonyView }) {
       <tbody>
         {colony.balance.map((r) => {
           const onHand = stock.get(r.typeId) ?? 0;
-          const rw = runway(onHand, r.net);
+          const rw = runway(onHand, r.net, thresholds);
           return (
             <tr key={r.typeId} className="border-t border-zinc-800/60">
               <td className="py-0.5 text-zinc-300">{r.name}</td>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractionAdvice, runway } from "./balance";
+import { extractionAdvice, runway, runwayThresholds } from "./balance";
 import type { ColonyView } from "../../lib/api";
 
 const PLASMOID = 1;
@@ -164,5 +164,45 @@ describe("runway", () => {
   it("never renders 24h — rounds up into days", () => {
     // 23.7h worth of stock rounds to a clean 1d, not 24h.
     expect(runway(237, -10).label).toBe("1d");
+  });
+});
+
+describe("runwayThresholds", () => {
+  const NOW = Date.parse("2026-01-01T00:00:00Z");
+  const inHours = (h: number) => new Date(NOW + h * 3_600_000).toISOString();
+
+  it("keys off the soonest future extractor expiry (red = that window, amber = 2×)", () => {
+    const c = colony({
+      extractors: [
+        { productTypeId: 1, product: "A", qtyPerCycle: 0, cycleTime: 0, installTime: null, expiryTime: inHours(30) },
+        { productTypeId: 2, product: "B", qtyPerCycle: 0, cycleTime: 0, installTime: null, expiryTime: inHours(10) },
+      ],
+    });
+    expect(runwayThresholds(c, NOW)).toEqual({ redHours: 10, amberHours: 20 });
+  });
+
+  it("ignores already-expired programs, using the soonest still in the future", () => {
+    const c = colony({
+      extractors: [
+        { productTypeId: 1, product: "A", qtyPerCycle: 0, cycleTime: 0, installTime: null, expiryTime: inHours(-5) },
+        { productTypeId: 2, product: "B", qtyPerCycle: 0, cycleTime: 0, installTime: null, expiryTime: inHours(8) },
+      ],
+    });
+    expect(runwayThresholds(c, NOW)).toEqual({ redHours: 8, amberHours: 16 });
+  });
+
+  it("falls back to fixed 6h/24h when no program has a future expiry", () => {
+    // The default fixture's extractors have null expiry.
+    expect(runwayThresholds(colony(), NOW)).toEqual({
+      redHours: 6,
+      amberHours: 24,
+    });
+  });
+
+  it("drives runway urgency: the same 8h runway reads red under a 10h-expiry cadence but amber under fallback", () => {
+    // 800 units at -100/h = 8h of stock.
+    const cadence = { redHours: 10, amberHours: 20 };
+    expect(runway(800, -100, cadence).tone).toContain("rose"); // 8h < 10h → red
+    expect(runway(800, -100).tone).toContain("amber"); // 8h in fallback [6,24) → amber
   });
 });
