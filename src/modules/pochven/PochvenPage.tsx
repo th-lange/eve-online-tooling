@@ -8,8 +8,8 @@ import { FilamentGuide } from "./FilamentGuide";
 const SUBTITLE = (
   <>
     Pochven has no gates to k-space — you get in via a <strong>C729</strong>{" "}
-    wormhole or a filament. Enter your current system and it'll route you to
-    the nearest C729 spawn candidate and list the systems to jump &amp; scan.
+    wormhole or a filament. Enter your current system and it'll route you to the
+    nearest C729 spawn candidate and list the systems to jump &amp; scan.
   </>
 );
 

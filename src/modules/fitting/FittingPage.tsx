@@ -413,468 +413,473 @@ function Workbench() {
     <Page>
       <PageHeader title={TITLE} subtitle={SUBTITLE} />
       <div className="flex h-full flex-col gap-4">
-
-      {/* Controls: Ship · Skills · Price · (right) Fits */}
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="relative">
+        {/* Controls: Ship · Skills · Price · (right) Fits */}
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="relative">
+            <label className="flex flex-col gap-1 text-xs text-zinc-400">
+              Ship (hull)
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.currentTarget.value)}
+                placeholder="search a hull…"
+                className="w-56 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+              />
+            </label>
+            {query.trim().length >= 2 && (ships.data?.length ?? 0) > 0 && (
+              <div className="absolute z-20 mt-1 max-h-60 w-56 overflow-auto rounded border border-zinc-700 bg-zinc-900 text-sm shadow-lg">
+                {ships.data!.map((r) => (
+                  <button
+                    key={r.id}
+                    onClick={() => pickShip(r.id, r.name)}
+                    className="block w-full px-2 py-1 text-left text-zinc-300 hover:bg-zinc-800"
+                  >
+                    {r.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <label className="flex flex-col gap-1 text-xs text-zinc-400">
-            Ship (hull)
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.currentTarget.value)}
-              placeholder="search a hull…"
-              className="w-56 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
-            />
-          </label>
-          {query.trim().length >= 2 && (ships.data?.length ?? 0) > 0 && (
-            <div className="absolute z-20 mt-1 max-h-60 w-56 overflow-auto rounded border border-zinc-700 bg-zinc-900 text-sm shadow-lg">
-              {ships.data!.map((r) => (
-                <button
-                  key={r.id}
-                  onClick={() => pickShip(r.id, r.name)}
-                  className="block w-full px-2 py-1 text-left text-zinc-300 hover:bg-zinc-800"
-                >
-                  {r.name}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-        <label className="flex flex-col gap-1 text-xs text-zinc-400">
-          Skills
-          <select
-            value={skillSource}
-            onChange={(e) =>
-              setSkillSource(e.currentTarget.value as SkillSource)
-            }
-            className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
-          >
-            <option value="allFive">All V</option>
-            <option value="character">Character</option>
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-zinc-400">
-          Price at
-          <select
-            value={regionId}
-            onChange={(e) => setRegionId(Number(e.currentTarget.value))}
-            className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
-          >
-            {regions.data?.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {/* Fits picker — independent of the hull, grouped by ship group → hull → name */}
-        <div className="ml-auto flex items-end gap-2">
-          <label className="flex flex-col gap-1 text-xs text-zinc-400">
-            Fits ({allFits.length} saved + in-game)
+            Skills
             <select
-              value=""
-              onChange={(e) => {
-                const f = fitByKey.get(e.currentTarget.value);
-                if (f) setFit(f);
-              }}
-              className="w-72 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+              value={skillSource}
+              onChange={(e) =>
+                setSkillSource(e.currentTarget.value as SkillSource)
+              }
+              className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
             >
-              <option value="">load a fit…</option>
-              {fitGroups.map((g) => (
-                <optgroup key={g.group} label={g.group}>
-                  {g.fits.map((f) => (
-                    <option key={f.key} value={f.key}>
-                      {f.hull} — {f.name}
-                      {f.source === "in-game" ? "  (EVE)" : ""}
-                    </option>
-                  ))}
-                </optgroup>
+              <option value="allFive">All V</option>
+              <option value="character">Character</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-xs text-zinc-400">
+            Price at
+            <select
+              value={regionId}
+              onChange={(e) => setRegionId(Number(e.currentTarget.value))}
+              className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+            >
+              {regions.data?.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
               ))}
             </select>
-            <EsiFitStatus esi={esiFits} refresh={refreshEsi} />
           </label>
+
+          {/* Fits picker — independent of the hull, grouped by ship group → hull → name */}
+          <div className="ml-auto flex items-end gap-2">
+            <label className="flex flex-col gap-1 text-xs text-zinc-400">
+              Fits ({allFits.length} saved + in-game)
+              <select
+                value=""
+                onChange={(e) => {
+                  const f = fitByKey.get(e.currentTarget.value);
+                  if (f) setFit(f);
+                }}
+                className="w-72 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+              >
+                <option value="">load a fit…</option>
+                {fitGroups.map((g) => (
+                  <optgroup key={g.group} label={g.group}>
+                    {g.fits.map((f) => (
+                      <option key={f.key} value={f.key}>
+                        {f.hull} — {f.name}
+                        {f.source === "in-game" ? "  (EVE)" : ""}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              <EsiFitStatus esi={esiFits} refresh={refreshEsi} />
+            </label>
+            <button
+              onClick={() => refreshEsi.mutate()}
+              disabled={refreshEsi.isPending}
+              title="Refresh in-game fittings from EVE (bypasses the cache)"
+              className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+            >
+              {refreshEsi.isPending ? "…" : "Refresh"}
+            </button>
+          </div>
+        </div>
+
+        <div className="flex items-start gap-2">
+          <textarea
+            value={eft}
+            onChange={(e) => setEft(e.currentTarget.value)}
+            placeholder="paste an EFT fit here…"
+            className="h-16 w-96 rounded bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-100 outline-none placeholder:text-zinc-500"
+          />
           <button
-            onClick={() => refreshEsi.mutate()}
-            disabled={refreshEsi.isPending}
-            title="Refresh in-game fittings from EVE (bypasses the cache)"
-            className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+            onClick={() => importEft.mutate()}
+            disabled={eft.trim().length === 0 || importEft.isPending}
+            className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
           >
-            {refreshEsi.isPending ? "…" : "Refresh"}
+            {importEft.isPending ? "Importing…" : "Import EFT"}
           </button>
         </div>
-      </div>
 
-      <div className="flex items-start gap-2">
-        <textarea
-          value={eft}
-          onChange={(e) => setEft(e.currentTarget.value)}
-          placeholder="paste an EFT fit here…"
-          className="h-16 w-96 rounded bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-100 outline-none placeholder:text-zinc-500"
-        />
-        <button
-          onClick={() => importEft.mutate()}
-          disabled={eft.trim().length === 0 || importEft.isPending}
-          className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
-        >
-          {importEft.isPending ? "Importing…" : "Import EFT"}
-        </button>
-      </div>
-
-      {fit == null ? (
-        <Centered>
-          Pick a hull, load a saved/in-game fit, or import an EFT fit to begin.
-        </Centered>
-      ) : (
-        <div className="flex min-h-0 flex-1 gap-4">
-          {/* Left: editor */}
-          <section className="min-w-0 flex-1 overflow-auto">
-            <div className="mb-2 flex items-center gap-2">
-              <h2 className="font-medium text-zinc-200">
-                {layout.data?.name ?? nameOf(fit.shipTypeId)} — {fit.name}
-              </h2>
-              <button
-                onClick={() => save.mutate()}
-                className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
-              >
-                {save.isPending ? "Saving…" : "Save"}
-              </button>
-              <button
-                onClick={() => exportEft.mutate()}
-                className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
-              >
-                Export EFT
-              </button>
-              <button
-                onClick={() => pushEsi.mutate()}
-                disabled={pushEsi.isPending}
-                title="Save this fit to your in-game fittings (ESI)"
-                className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
-              >
-                {pushEsi.isPending
-                  ? "Saving…"
-                  : pushEsi.isSuccess
-                    ? "Saved to EVE ✓"
-                    : "Save to EVE"}
-              </button>
-              {saved.data?.some((s) => s.id === fit.id) && (
+        {fit == null ? (
+          <Centered>
+            Pick a hull, load a saved/in-game fit, or import an EFT fit to
+            begin.
+          </Centered>
+        ) : (
+          <div className="flex min-h-0 flex-1 gap-4">
+            {/* Left: editor */}
+            <section className="min-w-0 flex-1 overflow-auto">
+              <div className="mb-2 flex items-center gap-2">
+                <h2 className="font-medium text-zinc-200">
+                  {layout.data?.name ?? nameOf(fit.shipTypeId)} — {fit.name}
+                </h2>
                 <button
-                  onClick={() => {
-                    del.mutate(fit.id);
-                    setFit(null);
-                  }}
-                  className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-rose-400"
+                  onClick={() => save.mutate()}
+                  className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
                 >
-                  Delete
+                  {save.isPending ? "Saving…" : "Save"}
                 </button>
-              )}
-            </div>
+                <button
+                  onClick={() => exportEft.mutate()}
+                  className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
+                >
+                  Export EFT
+                </button>
+                <button
+                  onClick={() => pushEsi.mutate()}
+                  disabled={pushEsi.isPending}
+                  title="Save this fit to your in-game fittings (ESI)"
+                  className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
+                >
+                  {pushEsi.isPending
+                    ? "Saving…"
+                    : pushEsi.isSuccess
+                      ? "Saved to EVE ✓"
+                      : "Save to EVE"}
+                </button>
+                {saved.data?.some((s) => s.id === fit.id) && (
+                  <button
+                    onClick={() => {
+                      del.mutate(fit.id);
+                      setFit(null);
+                    }}
+                    className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-rose-400"
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
 
-            {/* Optimize */}
-            <div className="mb-3 flex flex-wrap items-center gap-2 rounded border border-zinc-800 bg-zinc-900/40 p-2 text-xs">
-              <span className="text-zinc-500">Optimize</span>
-              <select
-                value={objective}
-                onChange={(e) =>
-                  setObjective(e.currentTarget.value as OptimizeObjective)
-                }
-                className="rounded bg-zinc-800 px-2 py-0.5 text-zinc-100 outline-none"
-              >
-                <option value="tank">Tank</option>
-                <option value="damage">Damage</option>
-                <option value="repair">Repair</option>
-                <option value="yield">Yield (mining)</option>
-              </select>
-              <select
-                value={optimizeMode}
-                onChange={(e) =>
-                  setOptimizeMode(e.currentTarget.value as OptimizeMode)
-                }
-                className="rounded bg-zinc-800 px-2 py-0.5 text-zinc-100 outline-none"
-                title="Rework all relevant slots, or only fill empty ones"
-              >
-                <option value="all">All modules</option>
-                <option value="empty">Empty modules only</option>
-              </select>
-              <span className="text-zinc-700">·</span>
-              {(
-                [
-                  [1, "T1"],
-                  [2, "T2"],
-                  [4, "Faction"],
-                  [6, "Deadspace"],
-                  [5, "Officer"],
-                ] as [number, string][]
-              ).map(([id, label]) => (
+              {/* Optimize */}
+              <div className="mb-3 flex flex-wrap items-center gap-2 rounded border border-zinc-800 bg-zinc-900/40 p-2 text-xs">
+                <span className="text-zinc-500">Optimize</span>
+                <select
+                  value={objective}
+                  onChange={(e) =>
+                    setObjective(e.currentTarget.value as OptimizeObjective)
+                  }
+                  className="rounded bg-zinc-800 px-2 py-0.5 text-zinc-100 outline-none"
+                >
+                  <option value="tank">Tank</option>
+                  <option value="damage">Damage</option>
+                  <option value="repair">Repair</option>
+                  <option value="yield">Yield (mining)</option>
+                </select>
+                <select
+                  value={optimizeMode}
+                  onChange={(e) =>
+                    setOptimizeMode(e.currentTarget.value as OptimizeMode)
+                  }
+                  className="rounded bg-zinc-800 px-2 py-0.5 text-zinc-100 outline-none"
+                  title="Rework all relevant slots, or only fill empty ones"
+                >
+                  <option value="all">All modules</option>
+                  <option value="empty">Empty modules only</option>
+                </select>
+                <span className="text-zinc-700">·</span>
+                {(
+                  [
+                    [1, "T1"],
+                    [2, "T2"],
+                    [4, "Faction"],
+                    [6, "Deadspace"],
+                    [5, "Officer"],
+                  ] as [number, string][]
+                ).map(([id, label]) => (
+                  <label
+                    key={id}
+                    className="flex items-center gap-1 text-zinc-400"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!!meta[id]}
+                      onChange={(e) => {
+                        const checked = e.currentTarget.checked;
+                        setMeta((m) => ({ ...m, [id]: checked }));
+                      }}
+                    />
+                    {label}
+                  </label>
+                ))}
+                <span className="text-zinc-700">·</span>
                 <label
-                  key={id}
                   className="flex items-center gap-1 text-zinc-400"
+                  title="Keep the result capacitor-stable"
                 >
                   <input
                     type="checkbox"
-                    checked={!!meta[id]}
-                    onChange={(e) => {
-                      const checked = e.currentTarget.checked;
-                      setMeta((m) => ({ ...m, [id]: checked }));
-                    }}
+                    checked={capStable}
+                    onChange={(e) => setCapStable(e.currentTarget.checked)}
                   />
-                  {label}
+                  Cap-stable
                 </label>
-              ))}
-              <span className="text-zinc-700">·</span>
-              <label
-                className="flex items-center gap-1 text-zinc-400"
-                title="Keep the result capacitor-stable"
-              >
-                <input
-                  type="checkbox"
-                  checked={capStable}
-                  onChange={(e) => setCapStable(e.currentTarget.checked)}
-                />
-                Cap-stable
-              </label>
-              <label
-                className="flex items-center gap-1 text-zinc-400"
-                title="Cap total fit cost"
-              >
-                Max
-                <input
-                  type="number"
-                  min={0}
-                  value={maxCostM}
-                  onChange={(e) => setMaxCostM(e.currentTarget.value)}
-                  placeholder="∞"
-                  className="w-16 rounded bg-zinc-800 px-1 py-0.5 text-zinc-100 outline-none"
-                />
-                M ISK
-              </label>
-              <button
-                onClick={() => optimize.mutate()}
-                disabled={optimize.isPending}
-                className="rounded border border-zinc-700 px-2 py-0.5 text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
-              >
-                {optimize.isPending ? "Optimizing…" : "Optimize"}
-              </button>
-              {optimizeNotice && (
-                <span className="w-full text-amber-400">{optimizeNotice}</span>
-              )}
-            </div>
-
-            {/* Prefer the resolved layout (T3 subsystems grant slots). */}
-            {(stats.data?.layout ?? layout.data) && (
-              <SlotGrid
-                fit={fit}
-                layout={stats.data?.layout ?? layout.data!}
-                nameOf={nameOf}
-                onRemove={removeItem}
-                onAddToSlot={setSlotFilter}
-                onSetCharge={setCharge}
-                onSetChargeForType={setChargeForType}
-                onSetState={setModuleState}
-                rangeOf={rangeOf}
-                activatable={activatable}
-              />
-            )}
-
-            <ModuleBrowser
-              onAdd={(typeId) => addItem.mutate(typeId)}
-              pending={addItem.isPending}
-              slotFilter={slotFilter}
-              onSlotFilter={setSlotFilter}
-              fitContext={fitContext}
-              shipTypeId={fit.shipTypeId}
-              skillSource={skillSource}
-            />
-
-            <ProjectedPanel
-              projected={fit.projected ?? []}
-              nameOf={nameOf}
-              onAdd={addProjected}
-              onRemove={removeProjected}
-            />
-          </section>
-
-          {/* Right: stats */}
-          <aside className="w-72 shrink-0 space-y-4 overflow-auto">
-            <div className="flex h-5 items-center justify-between">
-              <h2 className="text-sm font-medium text-zinc-200">Stats</h2>
-              {stats.isFetching && (
-                <span className="flex items-center gap-1.5 text-xs text-zinc-400">
-                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-300" />
-                  Evaluating…
-                </span>
-              )}
-            </div>
-            {stats.isError && (
-              <p className="text-xs text-red-400">
-                Eval failed:{" "}
-                {(stats.error as Error)?.message ?? String(stats.error)}
-              </p>
-            )}
-            {!stats.data && !stats.isFetching && !stats.isError && (
-              <p className="text-xs text-zinc-500">Add modules to see stats.</p>
-            )}
-            <div
-              className={
-                stats.isFetching
-                  ? "space-y-4 opacity-50 transition-opacity"
-                  : "space-y-4"
-              }
-            >
-              {stats.data && (
-                <div className="space-y-2">
-                  <h3 className="text-xs uppercase tracking-wide text-zinc-500">
-                    Fitting
-                  </h3>
-                  <ResourceBar
-                    label="CPU"
-                    used={stats.data.resources.cpuUsed}
-                    max={stats.data.resources.cpuOutput}
-                    unit="tf"
-                  />
-                  <ResourceBar
-                    label="Powergrid"
-                    used={stats.data.resources.powergridUsed}
-                    max={stats.data.resources.powergridOutput}
-                    unit="MW"
-                  />
-                  <ResourceBar
-                    label="Calibration"
-                    used={stats.data.resources.calibrationUsed}
-                    max={stats.data.resources.calibrationOutput}
-                    unit=""
-                  />
-                  {stats.data.capacitor && (
-                    <CapGauge cap={stats.data.capacitor} />
-                  )}
-                  {stats.data.validation.length > 0 && (
-                    <ul className="mt-2 space-y-1">
-                      {stats.data.validation.map((p, i) => (
-                        <li key={i} className="text-xs text-red-400">
-                          ⚠ {p.message}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-
-              {stats.data?.dps && (
-                <div className="space-y-1">
-                  <h3 className="text-xs uppercase tracking-wide text-zinc-500">
-                    DPS ({skillLabel})
-                  </h3>
-                  {jammedActive ? (
-                    <div className="text-sm text-amber-400">
-                      Jammed — 0 applied (no lock)
-                    </div>
-                  ) : (
-                    <>
-                      <div className="text-sm text-zinc-300">
-                        {stats.data.dps.total.toFixed(1)} dps
-                      </div>
-                      {stats.data.dps.total > 0 && (
-                        <div className="text-xs text-zinc-500">
-                          {stats.data.dps.turret > 0 &&
-                            `turret ${stats.data.dps.turret.toFixed(1)} `}
-                          {stats.data.dps.missile > 0 &&
-                            `· missile ${stats.data.dps.missile.toFixed(1)} `}
-                          {stats.data.dps.drone > 0 &&
-                            `· drone ${stats.data.dps.drone.toFixed(1)}`}
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-
-              {stats.data?.projectedEw && stats.data.projectedEw.length > 0 && (
-                <EwPanel
-                  tags={stats.data.projectedEw}
-                  jammed={jammed}
-                  onJam={setJammed}
-                />
-              )}
-
-              {stats.data?.tank && (
-                <div className="space-y-1">
-                  <h3 className="text-xs uppercase tracking-wide text-zinc-500">
-                    Tank ({skillLabel})
-                  </h3>
-                  <div className="text-sm text-zinc-300">
-                    {formatInt(Math.round(stats.data.tank.ehp))} EHP
-                  </div>
-                  {(stats.data.tank.shieldRepS > 0 ||
-                    stats.data.tank.armorRepS > 0 ||
-                    stats.data.tank.passiveShieldS > 0) && (
-                    <div className="flex flex-wrap gap-x-3 text-xs text-zinc-500">
-                      {stats.data.tank.shieldRepS > 0 && (
-                        <span>
-                          shield boost{" "}
-                          <span className="tabular-nums text-sky-400">
-                            {stats.data.tank.shieldRepS.toFixed(1)}/s
-                          </span>
-                        </span>
-                      )}
-                      {stats.data.tank.armorRepS > 0 && (
-                        <span>
-                          armor rep{" "}
-                          <span className="tabular-nums text-amber-400">
-                            {stats.data.tank.armorRepS.toFixed(1)}/s
-                          </span>
-                        </span>
-                      )}
-                      {stats.data.tank.passiveShieldS > 0 && (
-                        <span>
-                          passive shield{" "}
-                          <span className="tabular-nums text-sky-300">
-                            {stats.data.tank.passiveShieldS.toFixed(1)}/s
-                          </span>
-                        </span>
-                      )}
-                    </div>
-                  )}
-                  <TankResists tank={stats.data.tank} />
-                </div>
-              )}
-
-              {stats.data?.navigation && (
-                <div className="space-y-1">
-                  <h3 className="text-xs uppercase tracking-wide text-zinc-500">
-                    Navigation
-                  </h3>
-                  <div className="text-xs text-zinc-400">
-                    {Math.round(stats.data.navigation.maxVelocity)} m/s · align{" "}
-                    {stats.data.navigation.alignTime.toFixed(1)}s · sig{" "}
-                    {Math.round(stats.data.navigation.signatureRadius)}m
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-1">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs uppercase tracking-wide text-zinc-500">
-                  Price
-                </h3>
-                <button
-                  onClick={() => price.mutate()}
-                  className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
+                <label
+                  className="flex items-center gap-1 text-zinc-400"
+                  title="Cap total fit cost"
                 >
-                  {price.isPending ? "…" : "Price fit"}
+                  Max
+                  <input
+                    type="number"
+                    min={0}
+                    value={maxCostM}
+                    onChange={(e) => setMaxCostM(e.currentTarget.value)}
+                    placeholder="∞"
+                    className="w-16 rounded bg-zinc-800 px-1 py-0.5 text-zinc-100 outline-none"
+                  />
+                  M ISK
+                </label>
+                <button
+                  onClick={() => optimize.mutate()}
+                  disabled={optimize.isPending}
+                  className="rounded border border-zinc-700 px-2 py-0.5 text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+                >
+                  {optimize.isPending ? "Optimizing…" : "Optimize"}
                 </button>
+                {optimizeNotice && (
+                  <span className="w-full text-amber-400">
+                    {optimizeNotice}
+                  </span>
+                )}
               </div>
-              {price.data && (
-                <div className="text-sm text-zinc-300">
-                  <div>Buy: {formatIsk(price.data.buyTotal)}</div>
-                  <div>Sell: {formatIsk(price.data.sellTotal)}</div>
-                </div>
+
+              {/* Prefer the resolved layout (T3 subsystems grant slots). */}
+              {(stats.data?.layout ?? layout.data) && (
+                <SlotGrid
+                  fit={fit}
+                  layout={stats.data?.layout ?? layout.data!}
+                  nameOf={nameOf}
+                  onRemove={removeItem}
+                  onAddToSlot={setSlotFilter}
+                  onSetCharge={setCharge}
+                  onSetChargeForType={setChargeForType}
+                  onSetState={setModuleState}
+                  rangeOf={rangeOf}
+                  activatable={activatable}
+                />
               )}
-            </div>
-          </aside>
-        </div>
-      )}
-    </div>
+
+              <ModuleBrowser
+                onAdd={(typeId) => addItem.mutate(typeId)}
+                pending={addItem.isPending}
+                slotFilter={slotFilter}
+                onSlotFilter={setSlotFilter}
+                fitContext={fitContext}
+                shipTypeId={fit.shipTypeId}
+                skillSource={skillSource}
+              />
+
+              <ProjectedPanel
+                projected={fit.projected ?? []}
+                nameOf={nameOf}
+                onAdd={addProjected}
+                onRemove={removeProjected}
+              />
+            </section>
+
+            {/* Right: stats */}
+            <aside className="w-72 shrink-0 space-y-4 overflow-auto">
+              <div className="flex h-5 items-center justify-between">
+                <h2 className="text-sm font-medium text-zinc-200">Stats</h2>
+                {stats.isFetching && (
+                  <span className="flex items-center gap-1.5 text-xs text-zinc-400">
+                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-300" />
+                    Evaluating…
+                  </span>
+                )}
+              </div>
+              {stats.isError && (
+                <p className="text-xs text-red-400">
+                  Eval failed:{" "}
+                  {(stats.error as Error)?.message ?? String(stats.error)}
+                </p>
+              )}
+              {!stats.data && !stats.isFetching && !stats.isError && (
+                <p className="text-xs text-zinc-500">
+                  Add modules to see stats.
+                </p>
+              )}
+              <div
+                className={
+                  stats.isFetching
+                    ? "space-y-4 opacity-50 transition-opacity"
+                    : "space-y-4"
+                }
+              >
+                {stats.data && (
+                  <div className="space-y-2">
+                    <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+                      Fitting
+                    </h3>
+                    <ResourceBar
+                      label="CPU"
+                      used={stats.data.resources.cpuUsed}
+                      max={stats.data.resources.cpuOutput}
+                      unit="tf"
+                    />
+                    <ResourceBar
+                      label="Powergrid"
+                      used={stats.data.resources.powergridUsed}
+                      max={stats.data.resources.powergridOutput}
+                      unit="MW"
+                    />
+                    <ResourceBar
+                      label="Calibration"
+                      used={stats.data.resources.calibrationUsed}
+                      max={stats.data.resources.calibrationOutput}
+                      unit=""
+                    />
+                    {stats.data.capacitor && (
+                      <CapGauge cap={stats.data.capacitor} />
+                    )}
+                    {stats.data.validation.length > 0 && (
+                      <ul className="mt-2 space-y-1">
+                        {stats.data.validation.map((p, i) => (
+                          <li key={i} className="text-xs text-red-400">
+                            ⚠ {p.message}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+
+                {stats.data?.dps && (
+                  <div className="space-y-1">
+                    <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+                      DPS ({skillLabel})
+                    </h3>
+                    {jammedActive ? (
+                      <div className="text-sm text-amber-400">
+                        Jammed — 0 applied (no lock)
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-sm text-zinc-300">
+                          {stats.data.dps.total.toFixed(1)} dps
+                        </div>
+                        {stats.data.dps.total > 0 && (
+                          <div className="text-xs text-zinc-500">
+                            {stats.data.dps.turret > 0 &&
+                              `turret ${stats.data.dps.turret.toFixed(1)} `}
+                            {stats.data.dps.missile > 0 &&
+                              `· missile ${stats.data.dps.missile.toFixed(1)} `}
+                            {stats.data.dps.drone > 0 &&
+                              `· drone ${stats.data.dps.drone.toFixed(1)}`}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {stats.data?.projectedEw &&
+                  stats.data.projectedEw.length > 0 && (
+                    <EwPanel
+                      tags={stats.data.projectedEw}
+                      jammed={jammed}
+                      onJam={setJammed}
+                    />
+                  )}
+
+                {stats.data?.tank && (
+                  <div className="space-y-1">
+                    <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+                      Tank ({skillLabel})
+                    </h3>
+                    <div className="text-sm text-zinc-300">
+                      {formatInt(Math.round(stats.data.tank.ehp))} EHP
+                    </div>
+                    {(stats.data.tank.shieldRepS > 0 ||
+                      stats.data.tank.armorRepS > 0 ||
+                      stats.data.tank.passiveShieldS > 0) && (
+                      <div className="flex flex-wrap gap-x-3 text-xs text-zinc-500">
+                        {stats.data.tank.shieldRepS > 0 && (
+                          <span>
+                            shield boost{" "}
+                            <span className="tabular-nums text-sky-400">
+                              {stats.data.tank.shieldRepS.toFixed(1)}/s
+                            </span>
+                          </span>
+                        )}
+                        {stats.data.tank.armorRepS > 0 && (
+                          <span>
+                            armor rep{" "}
+                            <span className="tabular-nums text-amber-400">
+                              {stats.data.tank.armorRepS.toFixed(1)}/s
+                            </span>
+                          </span>
+                        )}
+                        {stats.data.tank.passiveShieldS > 0 && (
+                          <span>
+                            passive shield{" "}
+                            <span className="tabular-nums text-sky-300">
+                              {stats.data.tank.passiveShieldS.toFixed(1)}/s
+                            </span>
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    <TankResists tank={stats.data.tank} />
+                  </div>
+                )}
+
+                {stats.data?.navigation && (
+                  <div className="space-y-1">
+                    <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+                      Navigation
+                    </h3>
+                    <div className="text-xs text-zinc-400">
+                      {Math.round(stats.data.navigation.maxVelocity)} m/s ·
+                      align {stats.data.navigation.alignTime.toFixed(1)}s · sig{" "}
+                      {Math.round(stats.data.navigation.signatureRadius)}m
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+                    Price
+                  </h3>
+                  <button
+                    onClick={() => price.mutate()}
+                    className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
+                  >
+                    {price.isPending ? "…" : "Price fit"}
+                  </button>
+                </div>
+                {price.data && (
+                  <div className="text-sm text-zinc-300">
+                    <div>Buy: {formatIsk(price.data.buyTotal)}</div>
+                    <div>Sell: {formatIsk(price.data.sellTotal)}</div>
+                  </div>
+                )}
+              </div>
+            </aside>
+          </div>
+        )}
+      </div>
     </Page>
   );
 }

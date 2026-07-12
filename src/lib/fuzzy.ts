@@ -13,7 +13,10 @@ export function fuzzy(haystack: string, needle: string): boolean {
  * lowercase the needle once, then call this per row — avoiding the
  * per-call `toLowerCase()` allocations `fuzzy` would otherwise repeat.
  */
-export function subsequence(lowerHaystack: string, lowerNeedle: string): boolean {
+export function subsequence(
+  lowerHaystack: string,
+  lowerNeedle: string,
+): boolean {
   if (!lowerNeedle) return true;
   let i = 0;
   for (let k = 0; k < lowerNeedle.length; k++) {

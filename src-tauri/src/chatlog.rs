@@ -257,7 +257,10 @@ Mexallon
         let e = parse_chat_entries("[ 2026.06.25 12:00:05 ] Alice Pilot > Tritanium");
         assert_eq!(e[0].sender, "Alice Pilot");
         // 2026.06.25 12:00:05 UTC.
-        assert_eq!(e[0].ts, days_from_civil(2026, 6, 25) * 86_400 + 12 * 3_600 + 5);
+        assert_eq!(
+            e[0].ts,
+            days_from_civil(2026, 6, 25) * 86_400 + 12 * 3_600 + 5
+        );
         // A repeat 4s later is a distinct message, 4s apart.
         let two = parse_chat_entries(
             "[ 2026.06.25 12:00:05 ] Alice Pilot > Tritanium\n\

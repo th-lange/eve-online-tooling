@@ -268,14 +268,16 @@ export function useWorkbench(): WorkbenchState {
   // "Paste list" filter — parse pasted item names (reusing the shopping paste
   // parser), dedup (keeping original casing), then classify against the full
   // priced set for the build-and-sell verdict.
-  const pastedItems = useMemo(() => dedupNames(parseItems(pasteList)), [
-    pasteList,
-  ]);
+  const pastedItems = useMemo(
+    () => dedupNames(parseItems(pasteList)),
+    [pasteList],
+  );
   const pastedNames = useMemo(
     () => new Set(pastedItems.map((n) => n.toLowerCase())),
     [pastedItems],
   );
-  const pasteMinRoi = pasteMinRoiPct.trim() === "" ? 0 : Number(pasteMinRoiPct) / 100;
+  const pasteMinRoi =
+    pasteMinRoiPct.trim() === "" ? 0 : Number(pasteMinRoiPct) / 100;
   const pasteVerdict = useMemo(
     () =>
       pastedItems.length === 0
@@ -290,10 +292,7 @@ export function useWorkbench(): WorkbenchState {
     const minVol =
       stationId === null || minVolume.trim() === "" ? null : Number(minVolume);
     return rows.filter((r) => {
-      if (
-        pastedNames.size > 0 &&
-        !pastedNames.has(r.productName.toLowerCase())
-      )
+      if (pastedNames.size > 0 && !pastedNames.has(r.productName.toLowerCase()))
         return false;
       if (
         needle &&

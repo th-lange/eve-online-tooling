@@ -102,7 +102,10 @@ export function IndustryJobsPage() {
             >
               {jobs.isFetching ? "Loading…" : "Refresh"}
             </button>
-            <DataAge updatedAt={jobs.dataUpdatedAt} fetching={jobs.isFetching} />
+            <DataAge
+              updatedAt={jobs.dataUpdatedAt}
+              fetching={jobs.isFetching}
+            />
           </>
         }
       />
@@ -235,9 +238,7 @@ function JobsTable({ rows }: { rows: JobRow[] }) {
             >
               <td className="px-3 py-1.5 text-zinc-200">{r.product}</td>
               {showCharacter && (
-                <td className="px-3 py-1.5 text-zinc-400">
-                  {r.characterName}
-                </td>
+                <td className="px-3 py-1.5 text-zinc-400">{r.characterName}</td>
               )}
               <td className="px-3 py-1.5">
                 <span

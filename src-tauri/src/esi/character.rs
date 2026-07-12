@@ -162,7 +162,6 @@ pub async fn open_market_window(
     Ok(())
 }
 
-
 /// Set the character's autopilot destination to a solar system (ESI UI write).
 /// This is the closest *working* in-game hook for "take me to this colony":
 /// `/ui/openwindow/information/` only accepts character/corporation/alliance

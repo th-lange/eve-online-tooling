@@ -1,7 +1,4 @@
-import type {
-  UseMutationResult,
-  UseQueryResult,
-} from "@tanstack/react-query";
+import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import type {
   Decryptor,
   ListItem,

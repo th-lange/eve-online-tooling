@@ -51,7 +51,8 @@ export function NotificationsPage() {
     (n) => cat === "All" || n.category === cat,
   );
   const unread = (q.data ?? []).filter((n) => !n.isRead).length;
-  const multiCharacter = new Set((q.data ?? []).map((n) => n.characterId)).size > 1;
+  const multiCharacter =
+    new Set((q.data ?? []).map((n) => n.characterId)).size > 1;
 
   return (
     <Page>

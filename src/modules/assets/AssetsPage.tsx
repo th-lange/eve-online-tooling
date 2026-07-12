@@ -344,12 +344,7 @@ function Workbench() {
 }
 
 type AssetSortKey =
-  | "name"
-  | "owner"
-  | "quantity"
-  | "sellPrice"
-  | "sellValue"
-  | "volume";
+  "name" | "owner" | "quantity" | "sellPrice" | "sellValue" | "volume";
 const ASSET_COLUMNS: SortColumn<AssetSortKey>[] = [
   {
     key: "name",
@@ -446,9 +441,7 @@ function Row({ r }: { r: AssetRow }) {
       <td className="px-3 py-1.5">
         <span
           className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs ${
-            r.isCorp
-              ? "bg-sky-950 text-sky-300"
-              : "bg-zinc-800 text-zinc-300"
+            r.isCorp ? "bg-sky-950 text-sky-300" : "bg-zinc-800 text-zinc-300"
           }`}
           title={r.isCorp ? "Corporation hangar" : "Personal hangar"}
         >
@@ -590,4 +583,3 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
     </label>
   );
 }
-

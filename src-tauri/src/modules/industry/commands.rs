@@ -339,10 +339,7 @@ pub async fn industry_jobs(
         reactions: Slot { used: 0, total: 0 },
     };
     for cid in targets {
-        let name = names
-            .get(&cid)
-            .cloned()
-            .unwrap_or_else(|| cid.to_string());
+        let name = names.get(&cid).cloned().unwrap_or_else(|| cid.to_string());
         match character_industry_jobs(&dir, &auth_state, cid, &name).await {
             Ok((mut r, s)) => {
                 rows.append(&mut r);

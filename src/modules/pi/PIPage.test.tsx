@@ -176,8 +176,22 @@ describe("runwayThresholds", () => {
   it("keys off the soonest future extractor expiry (red = that window, amber = 2×)", () => {
     const c = colony({
       extractors: [
-        { productTypeId: 1, product: "A", qtyPerCycle: 0, cycleTime: 0, installTime: null, expiryTime: inHours(30) },
-        { productTypeId: 2, product: "B", qtyPerCycle: 0, cycleTime: 0, installTime: null, expiryTime: inHours(10) },
+        {
+          productTypeId: 1,
+          product: "A",
+          qtyPerCycle: 0,
+          cycleTime: 0,
+          installTime: null,
+          expiryTime: inHours(30),
+        },
+        {
+          productTypeId: 2,
+          product: "B",
+          qtyPerCycle: 0,
+          cycleTime: 0,
+          installTime: null,
+          expiryTime: inHours(10),
+        },
       ],
     });
     expect(runwayThresholds(c, NOW)).toEqual({ redHours: 10, amberHours: 20 });
@@ -186,8 +200,22 @@ describe("runwayThresholds", () => {
   it("ignores already-expired programs, using the soonest still in the future", () => {
     const c = colony({
       extractors: [
-        { productTypeId: 1, product: "A", qtyPerCycle: 0, cycleTime: 0, installTime: null, expiryTime: inHours(-5) },
-        { productTypeId: 2, product: "B", qtyPerCycle: 0, cycleTime: 0, installTime: null, expiryTime: inHours(8) },
+        {
+          productTypeId: 1,
+          product: "A",
+          qtyPerCycle: 0,
+          cycleTime: 0,
+          installTime: null,
+          expiryTime: inHours(-5),
+        },
+        {
+          productTypeId: 2,
+          product: "B",
+          qtyPerCycle: 0,
+          cycleTime: 0,
+          installTime: null,
+          expiryTime: inHours(8),
+        },
       ],
     });
     expect(runwayThresholds(c, NOW)).toEqual({ redHours: 8, amberHours: 16 });

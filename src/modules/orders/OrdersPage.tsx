@@ -184,9 +184,7 @@ function OrdersTable({
               }`}
             >
               {showCharacter && (
-                <td className="px-3 py-1.5 text-zinc-400">
-                  {r.characterName}
-                </td>
+                <td className="px-3 py-1.5 text-zinc-400">{r.characterName}</td>
               )}
               <td className="px-3 py-1.5">
                 <span className="text-zinc-200">{r.name}</span>

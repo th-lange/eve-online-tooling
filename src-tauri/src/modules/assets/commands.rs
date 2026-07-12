@@ -98,8 +98,7 @@ pub async fn assets_value(
                     if !seen_corps.insert(corp_id) {
                         continue;
                     }
-                    let Ok(corp_assets) = fetch_corp_assets(&auth_state, cid, corp_id).await
-                    else {
+                    let Ok(corp_assets) = fetch_corp_assets(&auth_state, cid, corp_id).await else {
                         continue;
                     };
                     if corp_assets.is_empty() {
