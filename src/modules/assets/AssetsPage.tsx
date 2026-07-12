@@ -59,6 +59,7 @@ function Workbench() {
   const [stationId, setStationId] = useState<number | null>(JITA);
   const [bestHub, setBestHub] = useState(false);
   const [search, setSearch] = useState("");
+  const [owners, setOwners] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<AssetsResult | null>(null);
 
   const [tree, setTree] = useState<AssetsTreeResult | null>(null);
@@ -72,6 +73,7 @@ function Workbench() {
     onSuccess: (r) => {
       setResult(r);
       setTree(null);
+      setOwners(new Set());
     },
   });
   const treeRun = useMutation({
@@ -83,14 +85,29 @@ function Workbench() {
   });
 
   const stations = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
+  // Distinct owners present in the current result, characters first then
+  // corps, each alphabetical — drives the source filter chips.
+  const ownerList = useMemo(() => {
+    const seen = new Map<string, boolean>();
+    for (const r of result?.rows ?? []) {
+      if (!seen.has(r.owner)) seen.set(r.owner, r.isCorp);
+    }
+    return [...seen.entries()]
+      .map(([name, isCorp]) => ({ name, isCorp }))
+      .sort(
+        (a, b) =>
+          Number(a.isCorp) - Number(b.isCorp) || a.name.localeCompare(b.name),
+      );
+  }, [result]);
   const rows = useMemo(() => {
     const q = search.trim();
-    const all = result?.rows ?? [];
+    let all = result?.rows ?? [];
+    if (owners.size > 0) all = all.filter((r) => owners.has(r.owner));
     if (!q) return all;
     return all.filter((r) =>
       fuzzy([r.name, r.category, r.group, r.owner].filter(Boolean).join(" "), q),
     );
-  }, [result, search]);
+  }, [result, search, owners]);
 
   return (
     <Page>
@@ -198,8 +215,52 @@ function Workbench() {
               label="Volume"
               value={`${formatInt(Math.round(result.volumeTotal))} m³`}
             />
-            <Stat label="Item types" value={formatInt(result.rows.length)} />
+            <Stat
+              label="Item types"
+              value={formatInt(new Set(result.rows.map((r) => r.typeId)).size)}
+            />
           </div>
+          {ownerList.length > 1 && (
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-xs text-zinc-500">Source:</span>
+              <button
+                onClick={() => setOwners(new Set())}
+                className={`rounded px-2 py-0.5 text-xs transition ${
+                  owners.size === 0
+                    ? "bg-indigo-600 text-white"
+                    : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                }`}
+              >
+                All
+              </button>
+              {ownerList.map((o) => {
+                const on = owners.has(o.name);
+                return (
+                  <button
+                    key={o.name}
+                    onClick={() =>
+                      setOwners((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(o.name)) next.delete(o.name);
+                        else next.add(o.name);
+                        return next;
+                      })
+                    }
+                    className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs transition ${
+                      on
+                        ? o.isCorp
+                          ? "bg-sky-700 text-white"
+                          : "bg-indigo-600 text-white"
+                        : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                    }`}
+                  >
+                    {o.isCorp ? <Building2 size={11} /> : <User size={11} />}
+                    {o.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <input
             value={search}
             onChange={(e) => setSearch(e.currentTarget.value)}
