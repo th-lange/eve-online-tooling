@@ -1,0 +1,23 @@
+# Test fixture only — NOT part of the app build (src-tauri is not a workspace,
+# so cargo never picks this up). Compiled by hand to wasm32-unknown-unknown and
+# the resulting .wasm checked in at src/plugins/testdata/echo.wasm; rebuild with:
+#   rustup target add wasm32-unknown-unknown
+#   cargo build --release --target wasm32-unknown-unknown \
+#     --manifest-path tests/fixtures/echo-plugin/Cargo.toml
+#   cp tests/fixtures/echo-plugin/target/wasm32-unknown-unknown/release/echo_plugin.wasm \
+#      src/plugins/testdata/echo.wasm
+[package]
+name = "echo-plugin"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+extism-pdk = "1"
+
+[profile.release]
+opt-level = "s"
+strip = true

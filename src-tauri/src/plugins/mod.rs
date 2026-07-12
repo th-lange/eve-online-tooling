@@ -7,7 +7,10 @@
 //! separate tickets. A plugin with an invalid manifest is skipped (logged),
 //! never fatal, so a single bad drop-in can't stop the app from booting.
 
+pub mod manager;
 pub mod manifest;
+
+pub use manager::PluginManager;
 
 use std::path::Path;
 
@@ -91,6 +94,7 @@ pub fn plugins_list(registry: State<'_, PluginRegistry>) -> Vec<PluginEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     /// A unique temp dir for one test, cleaned up front.
     fn tmp(tag: &str) -> std::path::PathBuf {

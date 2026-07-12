@@ -40,4 +40,5 @@ httpdate = "1"
 rand = "0.8"
 tiny_http = "0.12"
 semver = "1.0.28"
+extism = "1.30.0"
 
