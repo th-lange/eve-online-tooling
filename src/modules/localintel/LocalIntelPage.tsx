@@ -22,6 +22,7 @@ import {
 import { formatInt } from "../../lib/format";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { usePersistentState } from "../../lib/usePersistentState";
+import { Page, PageHeader } from "../../components/page";
 
 /** Best-effort desktop notification — requests permission, never throws. */
 async function notify(title: string, body: string) {
@@ -238,26 +239,21 @@ export function LocalIntelPage() {
 
   return (
     <div className="flex h-full">
-      <div className="min-w-0 flex-1 overflow-auto p-6">
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold text-zinc-100">
-              Local Intel
-            </h1>
-            <p className="mt-1 text-sm text-zinc-400">
-              Select-all in the in-game Local member list, copy, and paste it
-              here to classify every pilot by corp/alliance against your
-              character's contacts (blue/red) and standings.
-            </p>
-          </div>
-          <button
-            onClick={() => scan.mutate(text)}
-            disabled={scan.isPending || text.trim() === ""}
-            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-          >
-            {scan.isPending ? "Scanning…" : "Scan local"}
-          </button>
-        </div>
+      <div className="min-w-0 flex-1 overflow-auto">
+        <Page>
+          <PageHeader
+            title="Local Intel"
+            subtitle="Select-all in the in-game Local member list, copy, and paste it here to classify every pilot by corp/alliance against your character's contacts (blue/red) and standings."
+            actions={
+              <button
+                onClick={() => scan.mutate(text)}
+                disabled={scan.isPending || text.trim() === ""}
+                className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              >
+                {scan.isPending ? "Scanning…" : "Scan local"}
+              </button>
+            }
+          />
 
         <textarea
           value={text}
@@ -380,6 +376,7 @@ export function LocalIntelPage() {
             {result.unresolved.join(", ")}
           </div>
         )}
+        </Page>
       </div>
       <aside className="flex w-64 shrink-0 flex-col overflow-auto border-l border-zinc-800 bg-zinc-900/40">
         <HostileCorpsPanel

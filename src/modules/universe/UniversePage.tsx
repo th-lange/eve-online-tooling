@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   openMarketWindow,
@@ -11,12 +11,29 @@ import {
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
 import { formatInt, formatIsk } from "../../lib/format";
+import { Page, PageHeader, Centered } from "../../components/page";
+
+const TITLE = "Universe browser";
+const SUBTITLE =
+  "Browse every item type: Category → Group → Type, with stats and dogma attributes.";
 
 export function UniversePage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) return <Centered>Checking static data…</Centered>;
+  if (status.isLoading) {
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <Centered>Checking static data…</Centered>
+      </Page>
+    );
+  }
   if (!status.data?.installed) {
-    return <SdeSetup onInstalled={() => status.refetch()} />;
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <SdeSetup onInstalled={() => status.refetch()} />
+      </Page>
+    );
   }
   return <Workbench />;
 }
@@ -33,26 +50,21 @@ function Workbench() {
   });
 
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">
-            Universe browser
-          </h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Browse every item type: Category → Group → Type, with stats and
-            dogma attributes.
-          </p>
-        </div>
-        <label className="flex items-center gap-1 text-xs text-zinc-300">
-          <input
-            type="checkbox"
-            checked={publishedOnly}
-            onChange={(e) => setPublishedOnly(e.currentTarget.checked)}
-          />
-          Published only
-        </label>
-      </div>
+    <Page>
+      <PageHeader
+        title={TITLE}
+        subtitle={SUBTITLE}
+        actions={
+          <label className="flex items-center gap-1 text-xs text-zinc-300">
+            <input
+              type="checkbox"
+              checked={publishedOnly}
+              onChange={(e) => setPublishedOnly(e.currentTarget.checked)}
+            />
+            Published only
+          </label>
+        }
+      />
 
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <div className="max-h-[70vh] overflow-auto rounded border border-zinc-800 bg-zinc-900 p-2 text-sm">
@@ -91,7 +103,7 @@ function Workbench() {
           )}
         </div>
       </div>
-    </div>
+    </Page>
   );
 }
 
@@ -263,11 +275,5 @@ function Stat({ label, value }: { label: string; value: string }) {
       <dt className="text-zinc-500">{label}</dt>
       <dd className="text-right tabular-nums text-zinc-200">{value}</dd>
     </>
-  );
-}
-
-function Centered({ children }: { children: ReactNode }) {
-  return (
-    <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
   );
 }

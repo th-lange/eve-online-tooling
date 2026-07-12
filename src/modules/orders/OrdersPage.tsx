@@ -16,6 +16,7 @@ import {
   type SortColumn,
 } from "../../components/SortHeaderCell";
 import { DataAge } from "../../components/DataAge";
+import { Page, PageHeader } from "../../components/page";
 
 export function OrdersPage() {
   const orders = useQuery({
@@ -33,31 +34,26 @@ export function OrdersPage() {
   );
 
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">
-            Market Orders
-          </h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Your open buy/sell orders, flagged when undercut at the order's own
-            station's current best price.
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <button
-            onClick={() => orders.refetch()}
-            disabled={orders.isFetching}
-            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-          >
-            {orders.isFetching ? "Loading…" : "Refresh"}
-          </button>
-          <DataAge
-            updatedAt={orders.dataUpdatedAt}
-            fetching={orders.isFetching}
-          />
-        </div>
-      </div>
+    <Page>
+      <PageHeader
+        title="Market Orders"
+        subtitle="Your open buy/sell orders, flagged when undercut at the order's own station's current best price."
+        actions={
+          <>
+            <button
+              onClick={() => orders.refetch()}
+              disabled={orders.isFetching}
+              className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+            >
+              {orders.isFetching ? "Loading…" : "Refresh"}
+            </button>
+            <DataAge
+              updatedAt={orders.dataUpdatedAt}
+              fetching={orders.isFetching}
+            />
+          </>
+        }
+      />
 
       {orders.isError &&
         (isAuthRequired(orders.error) ? (
@@ -84,7 +80,7 @@ export function OrdersPage() {
       )}
 
       <OrdersTable rows={rows} showCharacter={multiCharacter} />
-    </div>
+    </Page>
   );
 }
 

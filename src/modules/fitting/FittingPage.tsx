@@ -28,6 +28,7 @@ import {
   type WeaponRange,
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
+import { Page, PageHeader } from "../../components/page";
 import { formatInt, formatIsk } from "../../lib/format";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
 import {
@@ -45,12 +46,28 @@ import {
 
 const FORGE = 10000002;
 
+const TITLE = "Fitting";
+const SUBTITLE =
+  "Build a fit, validate slots and resources, price it, and optimize. Import/export EFT or load your in-game fittings.";
+
 /** Gate the editor on the SDE being installed (like the other SDE-backed pages). */
 export function FittingPage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) return <Centered>Checking static data…</Centered>;
+  if (status.isLoading) {
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <Centered>Checking static data…</Centered>
+      </Page>
+    );
+  }
   if (!status.data?.installed) {
-    return <SdeSetup onInstalled={() => status.refetch()} />;
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <SdeSetup onInstalled={() => status.refetch()} />
+      </Page>
+    );
   }
   return <Workbench />;
 }
@@ -393,14 +410,9 @@ function Workbench() {
   });
 
   return (
-    <div className="flex h-full flex-col gap-4 p-4">
-      <header>
-        <h1 className="text-lg font-semibold text-zinc-100">Fitting</h1>
-        <p className="text-sm text-zinc-400">
-          Build a fit, validate slots and resources, price it, and optimize.
-          Import/export EFT or load your in-game fittings.
-        </p>
-      </header>
+    <Page>
+      <PageHeader title={TITLE} subtitle={SUBTITLE} />
+      <div className="flex h-full flex-col gap-4">
 
       {/* Controls: Ship · Skills · Price · (right) Fits */}
       <div className="flex flex-wrap items-end gap-3">
@@ -863,5 +875,6 @@ function Workbench() {
         </div>
       )}
     </div>
+    </Page>
   );
 }

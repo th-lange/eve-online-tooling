@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Shield, ShieldCheck, Skull, TrendingUp, X } from "lucide-react";
+import { Page, PageHeader } from "../../components/page";
 
 // A curated reference for EVE exploration content — combat anomalies and the
 // scannable relic / data / DED / gas sites. This is static knowledge (site
@@ -581,17 +582,11 @@ export function ExplorationPage() {
   const anyVisible = GROUPS.some((g) => g.sites.some(visible));
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-6">
-      <h1 className="text-2xl font-semibold text-zinc-100">
-        Exploration sites
-      </h1>
-      <p className="mt-1 max-w-3xl text-sm text-zinc-400">
-        Combat anomalies and the scannable relic / data / DED / gas sites —
-        where they spawn, whether they bite, and which ones escalate. Click any
-        card for its loot and damage-to-deal-vs-tank. Signatures aren't in ESI
-        (they're scanned in-game), so this is a static guide, not your live
-        scan.
-      </p>
+    <Page>
+      <PageHeader
+        title="Exploration sites"
+        subtitle="Combat anomalies and the scannable relic / data / DED / gas sites — where they spawn, whether they bite, and which ones escalate. Click any card for its loot and damage-to-deal-vs-tank. Signatures aren't in ESI (they're scanned in-game), so this is a static guide, not your live scan."
+      />
 
       <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs text-zinc-400">
         <span className="text-[10px] uppercase tracking-wide text-zinc-600">
@@ -689,6 +684,6 @@ export function ExplorationPage() {
       </p>
 
       {open && <SiteDetail site={open} onClose={() => setOpen(null)} />}
-    </div>
+    </Page>
   );
 }

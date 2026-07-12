@@ -20,14 +20,31 @@ import {
   SortHeaderCell,
   type SortColumn,
 } from "../../components/SortHeaderCell";
+import { Page, PageHeader, Centered } from "../../components/page";
 
 const FORGE = 10000002;
 
+const TITLE = "Public contracts";
+const SUBTITLE =
+  "Item-exchange contracts whose contents are worth more at Jita than the asking price.";
+
 export function ContractsPage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) return <Centered>Checking static data…</Centered>;
+  if (status.isLoading) {
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <Centered>Checking static data…</Centered>
+      </Page>
+    );
+  }
   if (!status.data?.installed) {
-    return <SdeSetup onInstalled={() => status.refetch()} />;
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <SdeSetup onInstalled={() => status.refetch()} />
+      </Page>
+    );
   }
   return <Workbench />;
 }
@@ -51,32 +68,27 @@ function Workbench() {
   });
 
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">
-            Public contracts
-          </h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Item-exchange contracts whose contents are worth more at Jita than
-            the asking price.
-          </p>
-        </div>
-        <button
-          onClick={() =>
-            run.mutate({
-              regionId,
-              minRoi: num(minRoiPct) / 100,
-              brokerFee: num(brokerPct) / 100,
-              salesTax: num(taxPct) / 100,
-            })
-          }
-          disabled={run.isPending}
-          className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-        >
-          {run.isPending ? "Scanning…" : "Scan"}
-        </button>
-      </div>
+    <Page>
+      <PageHeader
+        title={TITLE}
+        subtitle={SUBTITLE}
+        actions={
+          <button
+            onClick={() =>
+              run.mutate({
+                regionId,
+                minRoi: num(minRoiPct) / 100,
+                brokerFee: num(brokerPct) / 100,
+                salesTax: num(taxPct) / 100,
+              })
+            }
+            disabled={run.isPending}
+            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+          >
+            {run.isPending ? "Scanning…" : "Scan"}
+          </button>
+        }
+      />
 
       <div className="mt-4 flex flex-wrap items-end gap-3">
         <Field label="Region">
@@ -142,7 +154,7 @@ function Workbench() {
           {formatInt(rows.length)} profitable contract(s)
         </div>
       )}
-    </div>
+    </Page>
   );
 }
 
@@ -263,11 +275,5 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       {label}
       {children}
     </label>
-  );
-}
-
-function Centered({ children }: { children: ReactNode }) {
-  return (
-    <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
   );
 }

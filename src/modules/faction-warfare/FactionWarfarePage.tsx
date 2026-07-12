@@ -12,6 +12,7 @@ import {
   type SystemGraphNode,
   type SystemGraphEdge,
 } from "../../components/SystemGraph";
+import { Page, PageHeader } from "../../components/page";
 
 /** Militia faction id → accent hex, used for the map + legend. */
 const FACTION_HEX: Record<number, string> = {
@@ -136,28 +137,23 @@ export function FactionWarfarePage() {
   const activeZone = zone ?? warzones[0] ?? null;
 
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">
-            Faction warfare
-          </h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Warzone control map and per-system state. Public data, no login
-            required.
-          </p>
-        </div>
-        <button
-          onClick={() => {
-            stats.refetch();
-            map.refetch();
-          }}
-          disabled={map.isFetching}
-          className="rounded border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-        >
-          {map.isFetching ? "Loading…" : "Refresh"}
-        </button>
-      </div>
+    <Page>
+      <PageHeader
+        title="Faction warfare"
+        subtitle="Warzone control map and per-system state. Public data, no login required."
+        actions={
+          <button
+            onClick={() => {
+              stats.refetch();
+              map.refetch();
+            }}
+            disabled={map.isFetching}
+            className="rounded border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+          >
+            {map.isFetching ? "Loading…" : "Refresh"}
+          </button>
+        }
+      />
 
       {/* Militia summary strip (systems held / pilots / 24h kills). */}
       {stats.data && stats.data.length > 0 && (
@@ -216,7 +212,7 @@ export function FactionWarfarePage() {
       )}
 
       {map.data && activeZone && <Warzone data={map.data} zone={activeZone} />}
-    </div>
+    </Page>
   );
 }
 

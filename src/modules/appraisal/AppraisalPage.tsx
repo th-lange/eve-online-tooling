@@ -22,15 +22,32 @@ import {
   SortHeaderCell,
   type SortColumn,
 } from "../../components/SortHeaderCell";
+import { Page, PageHeader, Centered } from "../../components/page";
 
 const FORGE = 10000002;
 const JITA = 60003760;
 
+const TITLE = "Appraisal";
+const SUBTITLE =
+  "Paste items (from EVE: select → copy) and get a buy/sell ISK value and cargo volume.";
+
 export function AppraisalPage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) return <Centered>Checking static data…</Centered>;
+  if (status.isLoading) {
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <Centered>Checking static data…</Centered>
+      </Page>
+    );
+  }
   if (!status.data?.installed) {
-    return <SdeSetup onInstalled={() => status.refetch()} />;
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <SdeSetup onInstalled={() => status.refetch()} />
+      </Page>
+    );
   }
   return <Workbench />;
 }
@@ -72,25 +89,22 @@ function Workbench() {
   const stations = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
 
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Appraisal</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Paste items (from EVE: select → copy) and get a buy/sell ISK value
-            and cargo volume.
-          </p>
-        </div>
-        <button
-          onClick={calculate}
-          disabled={run.isPending || runRepro.isPending || items.length === 0}
-          className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-        >
-          {run.isPending || runRepro.isPending
-            ? "Pricing…"
-            : `${reprocess ? "Reprocess" : "Appraise"} (${items.length})`}
-        </button>
-      </div>
+    <Page>
+      <PageHeader
+        title={TITLE}
+        subtitle={SUBTITLE}
+        actions={
+          <button
+            onClick={calculate}
+            disabled={run.isPending || runRepro.isPending || items.length === 0}
+            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+          >
+            {run.isPending || runRepro.isPending
+              ? "Pricing…"
+              : `${reprocess ? "Reprocess" : "Appraise"} (${items.length})`}
+          </button>
+        }
+      />
 
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <textarea
@@ -179,7 +193,7 @@ function Workbench() {
 
       {!reprocess && result && <LineTable lines={result.lines} />}
       {reprocess && repro && <ReproResult d={repro} />}
-    </div>
+    </Page>
   );
 }
 
@@ -453,8 +467,3 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function Centered({ children }: { children: ReactNode }) {
-  return (
-    <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
-  );
-}

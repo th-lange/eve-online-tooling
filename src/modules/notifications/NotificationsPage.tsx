@@ -9,6 +9,7 @@ import {
   notificationsReset,
   type NotifRow,
 } from "../../lib/api";
+import { Page, PageHeader } from "../../components/page";
 
 const CATEGORY_STYLE: Record<string, string> = {
   War: "bg-rose-500/15 text-rose-300",
@@ -53,40 +54,39 @@ export function NotificationsPage() {
   const multiCharacter = new Set((q.data ?? []).map((n) => n.characterId)).size > 1;
 
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">
+    <Page>
+      <PageHeader
+        title={
+          <>
             Notifications
             {unread > 0 && (
               <span className="ml-2 rounded-full bg-indigo-600 px-2 py-0.5 text-xs font-medium text-white align-middle">
                 {unread} new
               </span>
             )}
-          </h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Your in-game notification feed — war decs, structure attacks,
-            industry and wallet events.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => reset.mutate()}
-            disabled={reset.isPending}
-            title="Un-hide every dismissed notification"
-            className="rounded border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-          >
-            Restore dismissed
-          </button>
-          <button
-            onClick={() => q.refetch()}
-            disabled={q.isFetching}
-            className="rounded border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-          >
-            {q.isFetching ? "Syncing…" : "Refresh"}
-          </button>
-        </div>
-      </div>
+          </>
+        }
+        subtitle="Your in-game notification feed — war decs, structure attacks, industry and wallet events."
+        actions={
+          <div className="flex gap-2">
+            <button
+              onClick={() => reset.mutate()}
+              disabled={reset.isPending}
+              title="Un-hide every dismissed notification"
+              className="rounded border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+            >
+              Restore dismissed
+            </button>
+            <button
+              onClick={() => q.refetch()}
+              disabled={q.isFetching}
+              className="rounded border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+            >
+              {q.isFetching ? "Syncing…" : "Refresh"}
+            </button>
+          </div>
+        }
+      />
 
       {q.isError &&
         (isAuthRequired(q.error) ? (
@@ -132,7 +132,7 @@ export function NotificationsPage() {
           />
         ))}
       </div>
-    </div>
+    </Page>
   );
 }
 

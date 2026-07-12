@@ -3,7 +3,8 @@ import { useMutation } from "@tanstack/react-query";
 import { onSdeProgress, sdeUpdate, type SdeProgress } from "../../lib/api";
 
 // Shown when the SDE isn't installed yet: a one-click download with live
-// progress (the Production module can't compute anything without it).
+// progress. Rendered as a body section under the page's `PageHeader` (it must
+// not carry its own <h1> — the page template owns the title).
 export function SdeSetup({ onInstalled }: { onInstalled: () => void }) {
   const [progress, setProgress] = useState<SdeProgress | null>(null);
 
@@ -25,11 +26,11 @@ export function SdeSetup({ onInstalled }: { onInstalled: () => void }) {
 
   return (
     <div className="mx-auto mt-16 max-w-xl px-6 text-center">
-      <h1 className="text-2xl font-semibold text-zinc-100">
+      <h2 className="text-2xl font-semibold text-zinc-100">
         Download EVE static data
-      </h1>
+      </h2>
       <p className="mt-3 text-zinc-400">
-        The Production module needs the EVE Static Data Export (blueprints &
+        This module needs the EVE Static Data Export (blueprints, items &
         materials). It's a few hundred MB and only downloads once.
       </p>
 

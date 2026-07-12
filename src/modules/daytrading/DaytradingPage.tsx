@@ -22,17 +22,34 @@ import {
   SortHeaderCell,
   type SortColumn,
 } from "../../components/SortHeaderCell";
+import { Page, PageHeader, SplitPane, Centered } from "../../components/page";
 
 type Tab = "opportunities" | "favorites" | "blacklist";
 
 /** EVE category ids for the default day-trade set: Ship / Module / Charge. */
 const DEFAULT_CATEGORY_IDS = [6, 7, 8];
 
+const TITLE = "Daytrading";
+const SUBTITLE =
+  "Short-term flips across regions — scans hubs for price gaps on the same item, ranked by ISK/m³.";
+
 export function DaytradingPage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) return <Centered>Checking static data…</Centered>;
+  if (status.isLoading) {
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <Centered>Checking static data…</Centered>
+      </Page>
+    );
+  }
   if (!status.data?.installed) {
-    return <SdeSetup onInstalled={() => status.refetch()} />;
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <SdeSetup onInstalled={() => status.refetch()} />
+      </Page>
+    );
   }
   return <Workbench />;
 }
@@ -168,174 +185,181 @@ function Workbench() {
   }
 
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Daytrading</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Short-term flips across regions — scans hubs for price gaps on the
-            same item, ranked by ISK/m³.
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <button
-            onClick={calculate}
-            disabled={
-              run.isPending || selectedCount < 2 || categoryIds.size === 0
-            }
-            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-            title={
-              selectedCount < 2
-                ? "Select at least two hubs"
-                : categoryIds.size === 0
-                  ? "Select at least one category"
-                  : undefined
-            }
-          >
-            {run.isPending ? "Scanning…" : "Calculate"}
-          </button>
-          <DataAge
-            updatedAt={run.isSuccess ? run.submittedAt : undefined}
-            fetching={run.isPending}
-          />
-        </div>
-      </div>
-
-      <div className="mt-4 grid grid-cols-1 gap-3 rounded border border-zinc-800 bg-zinc-900 p-3 md:grid-cols-2">
-        <Field label={`Hubs to compare (${selectedCount})`}>
-          <div className="flex flex-wrap gap-1">
-            {allRegions.map((r) => {
-              const on = regionIds.size === 0 || regionIds.has(r.id);
-              return (
-                <label
-                  key={r.id}
-                  className={`flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 text-xs ${
-                    on
-                      ? "bg-zinc-700 text-zinc-100"
-                      : "bg-zinc-800 text-zinc-400"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={regionIds.has(r.id)}
-                    onChange={() => toggleRegion(r.id)}
-                  />
-                  {r.name}
-                </label>
-              );
-            })}
-          </div>
-          <span className="mt-1 text-[11px] text-zinc-500">
-            None checked = all hubs.
-          </span>
-        </Field>
-        <Field label={`Categories to scan (${categoryIds.size})`}>
-          <div className="flex max-h-28 flex-wrap gap-1 overflow-auto">
-            {allCategories.map((c) => {
-              const on = categoryIds.has(c.id);
-              return (
-                <label
-                  key={c.id}
-                  className={`flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 text-xs ${
-                    on
-                      ? "bg-zinc-700 text-zinc-100"
-                      : "bg-zinc-800 text-zinc-400"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={on}
-                    onChange={() => toggleCategory(c.id)}
-                  />
-                  {c.name}
-                </label>
-              );
-            })}
-          </div>
-          <div className="mt-1 flex items-center gap-2 text-[11px]">
+    <Page>
+      <PageHeader
+        title={TITLE}
+        subtitle={SUBTITLE}
+        actions={
+          <>
             <button
-              type="button"
-              onClick={() => setCategoryIds(new Set(DEFAULT_CATEGORY_IDS))}
-              className="rounded border border-zinc-700 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800"
-            >
-              Ships + Modules + Charges
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                setCategoryIds(new Set(allCategories.map((c) => c.id)))
+              onClick={calculate}
+              disabled={
+                run.isPending || selectedCount < 2 || categoryIds.size === 0
               }
-              className="rounded border border-zinc-700 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800"
+              className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              title={
+                selectedCount < 2
+                  ? "Select at least two hubs"
+                  : categoryIds.size === 0
+                    ? "Select at least one category"
+                    : undefined
+              }
             >
-              Select all
+              {run.isPending ? "Scanning…" : "Calculate"}
             </button>
-            <button
-              type="button"
-              onClick={() => setCategoryIds(new Set())}
-              className="rounded border border-zinc-700 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800"
-            >
-              Clear
-            </button>
-            <span className="text-zinc-500">
-              Only the chosen categories are pulled — fewer = faster.
-            </span>
-          </div>
-        </Field>
-        <div className="grid grid-cols-3 gap-3">
-          <NumField
-            label="Broker fee %"
-            value={brokerPct}
-            onChange={setBrokerPct}
-          />
-          <NumField label="Sales tax %" value={taxPct} onChange={setTaxPct} />
-          <div className="self-end pb-1">
-            <FeesFromCharacter
-              onApply={(b, t) => {
-                setBrokerPct(b);
-                setTaxPct(t);
-              }}
+            <DataAge
+              updatedAt={run.isSuccess ? run.submittedAt : undefined}
+              fetching={run.isPending}
             />
-          </div>
-          <NumField
-            label="Shipping ISK/m³"
-            value={shippingRate}
-            onChange={setShippingRate}
-          />
-          <NumField
-            label="Stock days"
-            value={purchaseDays}
-            onChange={setPurchaseDays}
-          />
-          <Field label="Min profit/unit">
-            <input
-              type="number"
-              value={minProfit}
-              min={0}
-              onChange={(e) => setMinProfit(e.currentTarget.value)}
-              className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
-            />
-          </Field>
-          <Field label="Min sell-hub vol/day">
-            <input
-              type="number"
-              value={minDailyDemand}
-              min={0}
-              onChange={(e) => setMinDailyDemand(e.currentTarget.value)}
-              className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
-            />
-          </Field>
-          <Field label="Owned stock">
-            <label className="flex cursor-pointer items-center gap-2 py-1 text-xs text-zinc-300">
-              <input
-                type="checkbox"
-                checked={subtractStock}
-                onChange={(e) => setSubtractStock(e.currentTarget.checked)}
+          </>
+        }
+      />
+
+      <SplitPane
+        left={
+          <>
+            <Field label={`Hubs to compare (${selectedCount})`}>
+              <div className="flex flex-wrap gap-1">
+                {allRegions.map((r) => {
+                  const on = regionIds.size === 0 || regionIds.has(r.id);
+                  return (
+                    <label
+                      key={r.id}
+                      className={`flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 text-xs ${
+                        on
+                          ? "bg-zinc-700 text-zinc-100"
+                          : "bg-zinc-800 text-zinc-400"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={regionIds.has(r.id)}
+                        onChange={() => toggleRegion(r.id)}
+                      />
+                      {r.name}
+                    </label>
+                  );
+                })}
+              </div>
+              <span className="mt-1 text-[11px] text-zinc-500">
+                None checked = all hubs.
+              </span>
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <NumField
+                label="Broker fee %"
+                value={brokerPct}
+                onChange={setBrokerPct}
               />
-              Subtract from qty{stock.isFetching ? " (loading…)" : ""}
-            </label>
+              <NumField
+                label="Sales tax %"
+                value={taxPct}
+                onChange={setTaxPct}
+              />
+              <div className="col-span-2">
+                <FeesFromCharacter
+                  onApply={(b, t) => {
+                    setBrokerPct(b);
+                    setTaxPct(t);
+                  }}
+                />
+              </div>
+              <NumField
+                label="Shipping ISK/m³"
+                value={shippingRate}
+                onChange={setShippingRate}
+              />
+              <NumField
+                label="Stock days"
+                value={purchaseDays}
+                onChange={setPurchaseDays}
+              />
+              <Field label="Min profit/unit">
+                <input
+                  type="number"
+                  value={minProfit}
+                  min={0}
+                  onChange={(e) => setMinProfit(e.currentTarget.value)}
+                  className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+                />
+              </Field>
+              <Field label="Min sell-hub vol/day">
+                <input
+                  type="number"
+                  value={minDailyDemand}
+                  min={0}
+                  onChange={(e) => setMinDailyDemand(e.currentTarget.value)}
+                  className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+                />
+              </Field>
+              <Field label="Owned stock">
+                <label className="flex cursor-pointer items-center gap-2 py-1 text-xs text-zinc-300">
+                  <input
+                    type="checkbox"
+                    checked={subtractStock}
+                    onChange={(e) => setSubtractStock(e.currentTarget.checked)}
+                  />
+                  Subtract from qty{stock.isFetching ? " (loading…)" : ""}
+                </label>
+              </Field>
+            </div>
+          </>
+        }
+        right={
+          <Field label={`Categories to scan (${categoryIds.size})`}>
+            <div className="flex max-h-64 flex-wrap gap-1 overflow-auto">
+              {allCategories.map((c) => {
+                const on = categoryIds.has(c.id);
+                return (
+                  <label
+                    key={c.id}
+                    className={`flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 text-xs ${
+                      on
+                        ? "bg-zinc-700 text-zinc-100"
+                        : "bg-zinc-800 text-zinc-400"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={() => toggleCategory(c.id)}
+                    />
+                    {c.name}
+                  </label>
+                );
+              })}
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px]">
+              <button
+                type="button"
+                onClick={() => setCategoryIds(new Set(DEFAULT_CATEGORY_IDS))}
+                className="rounded border border-zinc-700 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800"
+              >
+                Ships + Modules + Charges
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setCategoryIds(new Set(allCategories.map((c) => c.id)))
+                }
+                className="rounded border border-zinc-700 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800"
+              >
+                Select all
+              </button>
+              <button
+                type="button"
+                onClick={() => setCategoryIds(new Set())}
+                className="rounded border border-zinc-700 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800"
+              >
+                Clear
+              </button>
+              <span className="text-zinc-500">
+                Only the chosen categories are pulled — fewer = faster.
+              </span>
+            </div>
           </Field>
-        </div>
-      </div>
+        }
+      />
 
       <Tabs
         tab={tab}
@@ -413,7 +437,7 @@ function Workbench() {
           />
         )}
       </div>
-    </div>
+    </Page>
   );
 }
 
@@ -801,11 +825,5 @@ function NumField({
         className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
       />
     </Field>
-  );
-}
-
-function Centered({ children }: { children: ReactNode }) {
-  return (
-    <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
   );
 }

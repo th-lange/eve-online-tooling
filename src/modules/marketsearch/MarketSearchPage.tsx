@@ -24,6 +24,7 @@ import { AddToListButton } from "../../components/AddToListButton";
 import { PriceHistoryView, Stat } from "../../components/PriceHistory";
 import { formatInt, formatIsk, formatPercent } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
+import { Page, PageHeader, Centered } from "../../components/page";
 import {
   SortHeaderCell,
   type SortColumn,
@@ -34,11 +35,27 @@ const FORGE = 10000002;
 type Tab = "search" | "history";
 type Picked = { id: number; name: string } | null;
 
+const TITLE = "Market Search";
+const SUBTITLE =
+  "Find an item's sell orders across the market, or chart its price & volume history.";
+
 export function MarketSearchPage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) return <Centered>Checking static data…</Centered>;
+  if (status.isLoading) {
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <Centered>Checking static data…</Centered>
+      </Page>
+    );
+  }
   if (!status.data?.installed) {
-    return <SdeSetup onInstalled={() => status.refetch()} />;
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <SdeSetup onInstalled={() => status.refetch()} />
+      </Page>
+    );
   }
   return <Workbench />;
 }
@@ -137,14 +154,8 @@ function Workbench() {
   );
 
   return (
-    <div className="p-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-zinc-100">Market Search</h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          Find an item's sell orders across the market, or chart its price &amp;
-          volume history.
-        </p>
-      </div>
+    <Page>
+      <PageHeader title={TITLE} subtitle={SUBTITLE} />
 
       {/* Item search (shared by both tabs). */}
       <div className="mt-4 flex flex-wrap items-end gap-3">
@@ -241,7 +252,7 @@ function Workbench() {
           loading={history.isLoading}
         />
       )}
-    </div>
+    </Page>
   );
 }
 
@@ -694,10 +705,4 @@ function TabButton({
 function spread(sell?: number | null, buy?: number | null): string {
   if (sell == null || buy == null || sell <= 0) return "—";
   return formatPercent((sell - buy) / sell);
-}
-
-function Centered({ children }: { children: ReactNode }) {
-  return (
-    <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
-  );
 }

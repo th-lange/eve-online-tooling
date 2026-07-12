@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { intelIncursions, type IncursionRow } from "../../lib/api";
+import { Page, PageHeader } from "../../components/page";
 
 const STATE_STYLE: Record<string, string> = {
   established: "bg-emerald-500/15 text-emerald-300",
@@ -16,23 +17,20 @@ export function IncursionsPage() {
   });
 
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Incursions</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Active Sansha incursions, most-contested first. Public data, no
-            login required.
-          </p>
-        </div>
-        <button
-          onClick={() => q.refetch()}
-          disabled={q.isFetching}
-          className="rounded border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-        >
-          {q.isFetching ? "Loading…" : "Refresh"}
-        </button>
-      </div>
+    <Page>
+      <PageHeader
+        title="Incursions"
+        subtitle="Active Sansha incursions, most-contested first. Public data, no login required."
+        actions={
+          <button
+            onClick={() => q.refetch()}
+            disabled={q.isFetching}
+            className="rounded border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+          >
+            {q.isFetching ? "Loading…" : "Refresh"}
+          </button>
+        }
+      />
 
       <div className="mt-5">
         {q.isLoading ? (
@@ -51,7 +49,7 @@ export function IncursionsPage() {
           </div>
         )}
       </div>
-    </div>
+    </Page>
   );
 }
 

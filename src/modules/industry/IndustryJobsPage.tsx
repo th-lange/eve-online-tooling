@@ -12,6 +12,11 @@ import {
 } from "../../lib/api";
 import { formatInt, formatIsk } from "../../lib/format";
 import { DataAge } from "../../components/DataAge";
+import { Page, PageHeader } from "../../components/page";
+
+const TITLE = "Industry Jobs";
+const SUBTITLE =
+  "Your running and recently-delivered industry jobs — what's cooking, and when it finishes.";
 
 type StatusFilter = "active" | "delivered" | "all";
 type Period = "1w" | "1m" | "3m" | "all";
@@ -84,28 +89,23 @@ export function IndustryJobsPage() {
   ).length;
 
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">
-            Industry Jobs
-          </h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Your running and recently-delivered industry jobs — what's cooking,
-            and when it finishes.
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <button
-            onClick={() => jobs.refetch()}
-            disabled={jobs.isFetching}
-            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-          >
-            {jobs.isFetching ? "Loading…" : "Refresh"}
-          </button>
-          <DataAge updatedAt={jobs.dataUpdatedAt} fetching={jobs.isFetching} />
-        </div>
-      </div>
+    <Page>
+      <PageHeader
+        title={TITLE}
+        subtitle={SUBTITLE}
+        actions={
+          <>
+            <button
+              onClick={() => jobs.refetch()}
+              disabled={jobs.isFetching}
+              className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+            >
+              {jobs.isFetching ? "Loading…" : "Refresh"}
+            </button>
+            <DataAge updatedAt={jobs.dataUpdatedAt} fetching={jobs.isFetching} />
+          </>
+        }
+      />
 
       {jobs.isError &&
         (isAuthRequired(jobs.error) ? (
@@ -201,7 +201,7 @@ export function IndustryJobsPage() {
       </div>
 
       <JobsTable rows={rows} />
-    </div>
+    </Page>
   );
 }
 

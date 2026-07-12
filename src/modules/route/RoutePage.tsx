@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   errorMessage,
@@ -32,12 +32,29 @@ import {
 } from "../../components/SystemGraph";
 import { kindFromSecurity } from "../../components/systemGraphLayout";
 import { ZkillSystemLink } from "../../components/ZkillLink";
+import { Page, PageHeader, Centered } from "../../components/page";
+
+const TITLE = "Route";
+const SUBTITLE =
+  "Per-system activity over the last hour — jumps and ship/pod/NPC kills. Known-space only (CCP excludes wormhole systems).";
 
 export function RoutePage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) return <Centered>Checking static data…</Centered>;
+  if (status.isLoading) {
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <Centered>Checking static data…</Centered>
+      </Page>
+    );
+  }
   if (!status.data?.installed) {
-    return <SdeSetup onInstalled={() => status.refetch()} />;
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <SdeSetup onInstalled={() => status.refetch()} />
+      </Page>
+    );
   }
   return <Workbench />;
 }
@@ -164,29 +181,26 @@ function Workbench() {
   const entries = trail.data ?? [];
 
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Route</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Per-system activity over the last hour — jumps and ship/pod/NPC
-            kills. Known-space only (CCP excludes wormhole systems).
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <button
-            onClick={() => activity.refetch()}
-            disabled={activity.isFetching}
-            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-          >
-            {activity.isFetching ? "Loading…" : "Refresh"}
-          </button>
-          <DataAge
-            updatedAt={activity.dataUpdatedAt}
-            fetching={activity.isFetching}
-          />
-        </div>
-      </div>
+    <Page>
+      <PageHeader
+        title={TITLE}
+        subtitle={SUBTITLE}
+        actions={
+          <>
+            <button
+              onClick={() => activity.refetch()}
+              disabled={activity.isFetching}
+              className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+            >
+              {activity.isFetching ? "Loading…" : "Refresh"}
+            </button>
+            <DataAge
+              updatedAt={activity.dataUpdatedAt}
+              fetching={activity.isFetching}
+            />
+          </>
+        }
+      />
 
       {activity.isError && (
         <div className="mt-3 text-sm text-rose-400">
@@ -362,7 +376,7 @@ function Workbench() {
       ) : (
         <ActivityTable rows={filtered} />
       )}
-    </div>
+    </Page>
   );
 }
 
@@ -693,10 +707,4 @@ function secColor(sec: number): string {
   if (sec >= 0.5) return "text-emerald-400";
   if (sec > 0.0) return "text-amber-400";
   return "text-rose-400";
-}
-
-function Centered({ children }: { children: ReactNode }) {
-  return (
-    <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
-  );
 }

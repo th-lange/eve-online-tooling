@@ -7,6 +7,7 @@ import {
   type LedgerRow,
 } from "../../lib/api";
 import { formatInt, formatIsk } from "../../lib/format";
+import { Page, PageHeader } from "../../components/page";
 
 type Side = "all" | "buy" | "sell";
 
@@ -33,25 +34,21 @@ export function TransactionsPage() {
   }, [q.data, side, search]);
 
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Transactions</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Every market buy and sell fill, newest first — how each item
-            actually traded for you.
-          </p>
-        </div>
-        <button
-          onClick={() => q.refetch()}
-          disabled={q.isFetching}
-          title="Re-pull transactions from ESI"
-          className="rounded border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-        >
-          {q.isFetching ? "Syncing…" : "Refresh"}
-        </button>
-      </div>
-
+    <Page>
+      <PageHeader
+        title="Transactions"
+        subtitle="Every market buy and sell fill, newest first — how each item actually traded for you."
+        actions={
+          <button
+            onClick={() => q.refetch()}
+            disabled={q.isFetching}
+            title="Re-pull transactions from ESI"
+            className="rounded border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+          >
+            {q.isFetching ? "Syncing…" : "Refresh"}
+          </button>
+        }
+      />
       {q.isError &&
         (isAuthRequired(q.error) ? (
           <div className="mt-3 text-sm text-zinc-400">
@@ -109,7 +106,7 @@ export function TransactionsPage() {
       </div>
 
       <Table rows={rows} loading={q.isLoading} />
-    </div>
+    </Page>
   );
 }
 
