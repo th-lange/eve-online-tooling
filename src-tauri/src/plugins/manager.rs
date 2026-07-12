@@ -100,12 +100,19 @@ impl PluginManager {
         }
         result
     }
+
+    /// Drop the cached instance for `id` (e.g. on deactivation), so a later
+    /// activation rebuilds it fresh with its then-current grants.
+    pub fn evict(&self, id: &str) {
+        self.loaded.lock().remove(id);
+    }
 }
 
-/// Invoke an exported function of an installed plugin with a JSON argument,
+/// Invoke an exported function of an **activated** plugin with a JSON argument,
 /// returning its JSON result. The single runtime dispatch point for logic
-/// plugins. Unknown plugin/function, a plugin without a wasm entry point, a
-/// non-JSON result, or a resource-limit termination all surface as `AppError`.
+/// plugins. An unknown, inactive, or wasm-less plugin, a non-JSON result, or a
+/// resource-limit termination all surface as `AppError`. An inactive plugin is
+/// inert — it is refused before any code runs.
 #[tauri::command]
 pub fn plugin_invoke(
     app: AppHandle,
@@ -115,22 +122,26 @@ pub fn plugin_invoke(
     r#fn: String,
     args: Value,
 ) -> Result<Value, AppError> {
-    let entry = registry
-        .entries()
-        .iter()
-        .find(|e| e.manifest.id == plugin_id)
+    let manifest = registry
+        .manifest(&plugin_id)
         .ok_or_else(|| AppError::from(format!("unknown plugin {plugin_id:?}")))?;
-    let wasm_rel =
-        entry.manifest.wasm.as_deref().ok_or_else(|| {
-            AppError::from(format!("plugin {plugin_id:?} has no wasm entry point"))
-        })?;
+    if !registry.is_active(&plugin_id) {
+        return Err(AppError::from(format!(
+            "plugin {plugin_id:?} is not active"
+        )));
+    }
+    let wasm_rel = manifest
+        .wasm
+        .as_deref()
+        .ok_or_else(|| AppError::from(format!("plugin {plugin_id:?} has no wasm entry point")))?;
     // The wasm path is author-controlled; keep it inside the plugin's own dir.
     if wasm_rel.contains("..") || Path::new(wasm_rel).is_absolute() {
         return Err(AppError::from(format!(
             "plugin {plugin_id:?} wasm path {wasm_rel:?} must be relative to its dir"
         )));
     }
-    let granted: HashSet<Permission> = entry.granted.iter().copied().collect();
+    // An active plugin is granted exactly the permissions it declared.
+    let granted: HashSet<Permission> = manifest.permissions.iter().copied().collect();
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let wasm_path = dir.join("plugins").join(&plugin_id).join(wasm_rel);
 
@@ -139,6 +150,25 @@ pub fn plugin_invoke(
     let value = serde_json::from_slice::<Value>(&out)
         .map_err(|e| AppError::from(format!("plugin {plugin_id:?} returned non-JSON: {e}")))?;
     Ok(value)
+}
+
+/// Activate or deactivate an installed plugin. Deactivating evicts any cached
+/// instance so it stops running immediately; activating lets the next
+/// `plugin_invoke` build it fresh with its declared permissions.
+#[tauri::command]
+pub fn plugin_set_active(
+    registry: State<'_, PluginRegistry>,
+    manager: State<'_, PluginManager>,
+    plugin_id: String,
+    active: bool,
+) -> Result<(), AppError> {
+    registry
+        .set_active(&plugin_id, active)
+        .map_err(AppError::from)?;
+    if !active {
+        manager.evict(&plugin_id);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

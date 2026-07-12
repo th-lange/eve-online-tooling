@@ -60,6 +60,7 @@ pub fn run() {
             commands::ping,
             plugins::plugins_list,
             plugins::manager::plugin_invoke,
+            plugins::manager::plugin_set_active,
             commands::eve_default_log_dir,
             esi::commands::auth_login,
             esi::commands::auth_characters,
