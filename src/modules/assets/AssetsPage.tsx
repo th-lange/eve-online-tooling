@@ -59,6 +59,7 @@ function Workbench() {
   const [stationId, setStationId] = useState<number | null>(JITA);
   const [bestHub, setBestHub] = useState(false);
   const [search, setSearch] = useState("");
+  const [treeSearch, setTreeSearch] = useState("");
   const [owners, setOwners] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<AssetsResult | null>(null);
 
@@ -154,16 +155,33 @@ function Workbench() {
             />
             <Stat label="Locations" value={formatInt(tree.roots.length)} />
           </div>
-          <div className="mt-3 rounded border border-zinc-800">
-            {tree.roots.map((n) => (
-              <TreeRow key={n.id} node={n} depth={0} />
-            ))}
-            {tree.roots.length === 0 && (
-              <div className="px-3 py-6 text-center text-sm text-zinc-500">
-                No assets.
+          <input
+            value={treeSearch}
+            onChange={(e) => setTreeSearch(e.currentTarget.value)}
+            placeholder="Fuzzy search tree: name / category / group / metatype / owner…"
+            className="mt-3 w-96 max-w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+          />
+          {(() => {
+            const q = treeSearch.trim();
+            const roots = q ? filterTree(tree.roots, q) : tree.roots;
+            return (
+              <div className="mt-2 rounded border border-zinc-800">
+                {roots.map((n) => (
+                  <TreeRow
+                    key={n.isOwner ? `owner:${n.owner}` : n.id}
+                    node={n}
+                    depth={0}
+                    forceOpen={q.length > 0}
+                  />
+                ))}
+                {roots.length === 0 && (
+                  <div className="px-3 py-6 text-center text-sm text-zinc-500">
+                    {q ? "No matches." : "No assets."}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            );
+          })()}
         </>
       )}
 
@@ -403,10 +421,39 @@ function Row({ r }: { r: AssetRow }) {
   );
 }
 
-/** A collapsible row in the asset location tree (locations expanded by default). */
-function TreeRow({ node, depth }: { node: AssetNode; depth: number }) {
+/** Prune the tree to nodes matching `q`: a matching node (by its own
+ *  name/classifiers/owner, fuzzy) keeps its whole subtree; a non-match
+ *  survives only to carry a matching descendant. */
+function filterTree(nodes: AssetNode[], q: string): AssetNode[] {
+  const out: AssetNode[] = [];
+  for (const n of nodes) {
+    const hay = [n.name, n.category, n.group, n.metaGroup, n.owner]
+      .filter(Boolean)
+      .join(" ");
+    if (fuzzy(hay, q)) {
+      out.push(n);
+      continue;
+    }
+    const kids = filterTree(n.children, q);
+    if (kids.length > 0) out.push({ ...n, children: kids });
+  }
+  return out;
+}
+
+/** A collapsible row in the asset location tree (locations expanded by default;
+ *  everything forced open while a search is active). */
+function TreeRow({
+  node,
+  depth,
+  forceOpen,
+}: {
+  node: AssetNode;
+  depth: number;
+  forceOpen: boolean;
+}) {
   const [open, setOpen] = useState(depth === 0);
   const hasChildren = node.children.length > 0;
+  const expanded = forceOpen || open;
   return (
     <>
       <div
@@ -419,19 +466,35 @@ function TreeRow({ node, depth }: { node: AssetNode; depth: number }) {
               onClick={() => setOpen(!open)}
               className="w-4 text-zinc-500"
             >
-              {open ? "▾" : "▸"}
+              {expanded ? "▾" : "▸"}
             </button>
           ) : (
             <span className="w-4" />
           )}
-          <span
-            className={
-              node.isLocation ? "font-medium text-zinc-100" : "text-zinc-300"
-            }
-          >
-            {node.name}
-          </span>
-          {node.quantity > 1 && !node.isLocation && (
+          {node.isOwner ? (
+            <span
+              className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${
+                node.isCorp
+                  ? "bg-sky-950 text-sky-300"
+                  : "bg-zinc-800 text-zinc-200"
+              }`}
+              title={node.isCorp ? "Corporation hangar" : "Personal hangar"}
+            >
+              {node.isCorp ? <Building2 size={11} /> : <User size={11} />}
+              {node.name}
+            </span>
+          ) : (
+            <span
+              className={
+                node.isLocation
+                  ? "font-medium text-zinc-100"
+                  : "text-zinc-300"
+              }
+            >
+              {node.name}
+            </span>
+          )}
+          {node.quantity > 1 && !node.isLocation && !node.isOwner && (
             <span className="text-xs text-zinc-500">
               ×{formatInt(node.quantity)}
             </span>
@@ -446,9 +509,14 @@ function TreeRow({ node, depth }: { node: AssetNode; depth: number }) {
           {formatIsk(node.sellValue)}
         </span>
       </div>
-      {open &&
+      {expanded &&
         node.children.map((c) => (
-          <TreeRow key={c.id} node={c} depth={depth + 1} />
+          <TreeRow
+            key={c.isOwner ? `owner:${c.owner}` : c.id}
+            node={c}
+            depth={depth + 1}
+            forceOpen={forceOpen}
+          />
         ))}
     </>
   );

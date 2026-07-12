@@ -212,23 +212,33 @@ pub async fn assets_value(
 /// SDE, so their names fall back to a generic label.
 const STRUCTURE_ID_MIN: i64 = 1_000_000_000_000;
 
-/// A flattened asset for nesting (ids only — pure layer).
+/// A flattened asset for nesting (ids only — pure layer), tagged with the
+/// owner (character or corp name) it came from.
 #[derive(Debug, Clone)]
 struct FlatAsset {
     item_id: i64,
     location_id: i64,
     type_id: i64,
     quantity: i64,
+    owner: String,
+    is_corp: bool,
 }
 
 /// Bare nesting node (ids only) before names/values are attached.
 #[derive(Debug, PartialEq)]
 struct TreeNode {
-    /// Root nodes carry a location id; leaf/container nodes carry an item id.
+    /// Root nodes carry a location id; leaf/container nodes carry an item id;
+    /// owner-bucket nodes carry 0 (keyed by owner in the UI).
     id: i64,
     type_id: Option<i64>,
     quantity: i64,
     is_location: bool,
+    /// A synthetic "who owns this" grouping node between a location and its
+    /// top-level stacks/containers.
+    is_owner: bool,
+    /// The owning character or corporation (set on every non-location node).
+    owner: Option<String>,
+    is_corp: bool,
     children: Vec<TreeNode>,
 }
 
@@ -259,6 +269,9 @@ fn build_asset_tree(assets: &[FlatAsset]) -> Vec<TreeNode> {
                 type_id: Some(a.type_id),
                 quantity: a.quantity,
                 is_location: false,
+                is_owner: false,
+                owner: Some(a.owner.clone()),
+                is_corp: a.is_corp,
                 children: if a.item_id != 0 {
                     build(a.item_id, children_of)
                 } else {
@@ -277,7 +290,42 @@ fn build_asset_tree(assets: &[FlatAsset]) -> Vec<TreeNode> {
             type_id: None,
             quantity: 0,
             is_location: true,
-            children: build(loc, &children_of),
+            is_owner: false,
+            owner: None,
+            is_corp: false,
+            children: group_by_owner(build(loc, &children_of)),
+        })
+        .collect()
+}
+
+/// Insert a synthetic owner-bucket layer between a location and its top-level
+/// stacks/containers, so the tree reads "location → who owns it → their gear".
+/// Buckets are ordered characters-first then corps, alphabetical within each.
+fn group_by_owner(nodes: Vec<TreeNode>) -> Vec<TreeNode> {
+    let mut order: Vec<(String, bool)> = Vec::new();
+    let mut buckets: HashMap<String, Vec<TreeNode>> = HashMap::new();
+    for n in nodes {
+        let owner = n.owner.clone().unwrap_or_default();
+        if !buckets.contains_key(&owner) {
+            order.push((owner.clone(), n.is_corp));
+        }
+        buckets.entry(owner).or_default().push(n);
+    }
+    order.sort_by(|a, b| (a.1 as u8).cmp(&(b.1 as u8)).then_with(|| a.0.cmp(&b.0)));
+    order
+        .into_iter()
+        .map(|(owner, is_corp)| {
+            let children = buckets.remove(&owner).unwrap_or_default();
+            TreeNode {
+                id: 0,
+                type_id: None,
+                quantity: 0,
+                is_location: false,
+                is_owner: true,
+                owner: Some(owner),
+                is_corp,
+                children,
+            }
         })
         .collect()
 }
@@ -297,6 +345,15 @@ pub struct AssetNode {
     /// Best hub for a leaf stack (when "best hub" pricing is on), else null.
     pub best_hub: Option<String>,
     pub is_location: bool,
+    /// Synthetic owner-grouping node (its `owner` names the character/corp).
+    pub is_owner: bool,
+    /// Owning character or corp (set on owner buckets and their descendants).
+    pub owner: Option<String>,
+    pub is_corp: bool,
+    /// Classifiers for item nodes, so the tree is searchable by them.
+    pub category: Option<String>,
+    pub group: Option<String>,
+    pub meta_group: Option<String>,
     pub children: Vec<AssetNode>,
 }
 
@@ -319,8 +376,11 @@ pub async fn assets_tree(
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
 
-    // Gather every roster asset (item-level, for nesting).
+    // Gather every roster asset (item-level, for nesting), tagged with its
+    // owner: each character's personal hangar, plus each distinct corp's
+    // hangar (fetched once per corp — same 403-tolerant path as assets_value).
     let mut assets: Vec<FlatAsset> = Vec::new();
+    let mut seen_corps: HashSet<i64> = HashSet::new();
     for c in storage::load_roster(&dir) {
         if let Ok(rows) = fetch_assets(&auth_state, c.character_id).await {
             for a in rows {
@@ -329,8 +389,37 @@ pub async fn assets_tree(
                     location_id: a.location_id,
                     type_id: a.type_id,
                     quantity: a.quantity,
+                    owner: c.name.clone(),
+                    is_corp: false,
                 });
             }
+        }
+        let Ok(corp_id) = corporation_id(&auth_state, c.character_id).await else {
+            continue;
+        };
+        if !seen_corps.insert(corp_id) {
+            continue;
+        }
+        let Ok(corp_rows) = fetch_corp_assets(&auth_state, c.character_id, corp_id).await else {
+            continue;
+        };
+        if corp_rows.is_empty() {
+            continue;
+        }
+        let corp_name = resolve_names(&auth_state, &[corp_id])
+            .await
+            .get(&corp_id)
+            .cloned()
+            .unwrap_or_else(|| format!("Corporation #{corp_id}"));
+        for a in corp_rows {
+            assets.push(FlatAsset {
+                item_id: a.item_id,
+                location_id: a.location_id,
+                type_id: a.type_id,
+                quantity: a.quantity,
+                owner: corp_name.clone(),
+                is_corp: true,
+            });
         }
     }
     if assets.is_empty() {
@@ -358,6 +447,11 @@ pub async fn assets_tree(
         .into_iter()
         .map(|m| (m.type_id, (m.name, m.volume.unwrap_or(0.0))))
         .collect();
+    let cls = Classifiers {
+        categories: sde.category_names().map_err(|e| e.to_string())?,
+        groups: sde.group_names().map_err(|e| e.to_string())?,
+        metas: sde.meta_group_names().map_err(|e| e.to_string())?,
+    };
 
     // Resolve root location names: NPC stations from SDE, systems from SDE,
     // structures by id fallback.
@@ -395,12 +489,21 @@ pub async fn assets_tree(
         .collect();
 
     let bare = build_asset_tree(&assets);
-    let (roots, sell_total, volume_total) = value_nodes(bare, &best_simple, &name_vol, &loc_name);
+    let (roots, sell_total, volume_total) =
+        value_nodes(bare, &best_simple, &name_vol, &loc_name, &cls);
     Ok(AssetsTreeResult {
         roots,
         sell_total,
         volume_total,
     })
+}
+
+/// SDE classifiers used to make item nodes searchable (category / group /
+/// meta group), keyed by type id.
+struct Classifiers {
+    categories: HashMap<i64, String>,
+    groups: HashMap<i64, String>,
+    metas: HashMap<i64, String>,
 }
 
 /// Recursively name + value bare nodes, rolling value/volume up to each parent.
@@ -410,14 +513,17 @@ fn value_nodes(
     best: &HashMap<i64, (String, f64)>,
     name_vol: &HashMap<i64, (String, f64)>,
     loc_name: &dyn Fn(i64) -> String,
+    cls: &Classifiers,
 ) -> (Vec<AssetNode>, f64, f64) {
     let mut out = Vec::with_capacity(nodes.len());
     let (mut total_value, mut total_volume) = (0.0, 0.0);
     for n in nodes {
         let (children, child_value, child_volume) =
-            value_nodes(n.children, best, name_vol, loc_name);
+            value_nodes(n.children, best, name_vol, loc_name, cls);
         let (name, mut value, mut volume, best_hub) = if n.is_location {
             (loc_name(n.id), 0.0, 0.0, None)
+        } else if n.is_owner {
+            (n.owner.clone().unwrap_or_default(), 0.0, 0.0, None)
         } else {
             let tid = n.type_id.unwrap_or(0);
             let (nm, vol_each) = name_vol
@@ -437,6 +543,7 @@ fn value_nodes(
         volume += child_volume;
         total_value += value;
         total_volume += volume;
+        let tid = n.type_id.unwrap_or(0);
         out.push(AssetNode {
             id: n.id,
             name,
@@ -446,6 +553,12 @@ fn value_nodes(
             volume,
             best_hub,
             is_location: n.is_location,
+            is_owner: n.is_owner,
+            owner: n.owner.clone(),
+            is_corp: n.is_corp,
+            category: cls.categories.get(&tid).cloned(),
+            group: cls.groups.get(&tid).cloned(),
+            meta_group: cls.metas.get(&tid).cloned(),
             children,
         });
     }
@@ -463,27 +576,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nests_items_under_containers_under_stations() {
-        // Station 60000 holds a ship (item 1); the ship holds a module (item 2).
-        // A second stack (item 3) sits directly in the station.
+    fn nests_items_under_owner_then_containers_then_stations() {
+        // Station 60000 holds Alice's ship (item 1); the ship holds a module
+        // (item 2). A second stack (item 3) — Bob's — sits in the station.
         let assets = vec![
             FlatAsset {
                 item_id: 1,
                 location_id: 60000,
                 type_id: 600,
                 quantity: 1,
+                owner: "Alice".into(),
+                is_corp: false,
             },
             FlatAsset {
                 item_id: 2,
                 location_id: 1,
                 type_id: 700,
                 quantity: 5,
+                owner: "Alice".into(),
+                is_corp: false,
             },
             FlatAsset {
                 item_id: 3,
                 location_id: 60000,
                 type_id: 34,
                 quantity: 1000,
+                owner: "Bob".into(),
+                is_corp: false,
             },
         ];
         let roots = build_asset_tree(&assets);
@@ -491,9 +610,19 @@ mod tests {
         let station = &roots[0];
         assert_eq!(station.id, 60000);
         assert!(station.is_location);
-        assert_eq!(station.children.len(), 2); // ship + mineral stack
-        let ship = station.children.iter().find(|n| n.id == 1).unwrap();
-        assert_eq!(ship.children.len(), 1); // the module inside
+        // Direct children are now owner buckets (Alice, Bob), alphabetical.
+        assert_eq!(station.children.len(), 2);
+        let alice = &station.children[0];
+        assert!(alice.is_owner);
+        assert_eq!(alice.owner.as_deref(), Some("Alice"));
+        let bob = &station.children[1];
+        assert_eq!(bob.owner.as_deref(), Some("Bob"));
+        // Alice's bucket holds her ship; the ship holds the module.
+        let ship = alice.children.iter().find(|n| n.id == 1).unwrap();
+        assert_eq!(ship.children.len(), 1);
         assert_eq!(ship.children[0].id, 2);
+        // Bob's bucket holds just the mineral stack.
+        assert_eq!(bob.children.len(), 1);
+        assert_eq!(bob.children[0].id, 3);
     }
 }
