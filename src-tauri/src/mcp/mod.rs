@@ -13,6 +13,7 @@
 //! mutate anything, by construction. Market lookups reuse `MarketService` and
 //! therefore its caches (so a looping agent mostly hits cache, not ESI).
 
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -258,6 +259,41 @@ fn tool_list() -> Value {
                 "required": ["typeId"],
             },
         },
+        {
+            "name": "appraise",
+            "description": "Value a list of items at market: total buy/sell ISK and cargo volume.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "description": "Items to value.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string" },
+                                "quantity": { "type": "integer" },
+                            },
+                            "required": ["name"],
+                        },
+                    },
+                    "regionId": { "type": "integer", "description": "Optional; defaults to The Forge." },
+                },
+                "required": ["items"],
+            },
+        },
+        {
+            "name": "route",
+            "description": "Shortest stargate route between two solar systems (by name). Returns the jump count.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "from": { "type": "string", "description": "Origin system name." },
+                    "to": { "type": "string", "description": "Destination system name." },
+                },
+                "required": ["from", "to"],
+            },
+        },
     ])
 }
 
@@ -275,6 +311,8 @@ fn call_tool(params: Option<&Value>, ctx: &ToolCtx) -> Result<Value, (i64, Strin
         "sde_search" => tool_sde_search(args, ctx),
         "sde_type" => tool_sde_type(args, ctx),
         "market_price" => tool_market_price(args, ctx),
+        "appraise" => tool_appraise(args, ctx),
+        "route" => tool_route(args, ctx),
         other => Err((-32602, format!("unknown tool: {other}"))),
     }
 }
@@ -331,6 +369,147 @@ fn tool_market_price(args: &Value, ctx: &ToolCtx) -> Result<Value, (i64, String)
     let model = tauri::async_runtime::block_on(ctx.market.price_model(location, type_id))
         .map_err(|e| (-32603, format!("market lookup failed: {e}")))?;
     json_content(&json!(model))
+}
+
+/// Value a list of `{name, quantity}` items at market. Read-only: resolves
+/// names via the SDE, prices via the cached `MarketService`, sums buy/sell/vol.
+fn tool_appraise(args: &Value, ctx: &ToolCtx) -> Result<Value, (i64, String)> {
+    let items = args
+        .get("items")
+        .and_then(Value::as_array)
+        .ok_or((-32602, "appraise requires an \"items\" array".to_string()))?;
+    if items.is_empty() || items.len() > 500 {
+        return Err((-32602, "items must be 1..=500 entries".to_string()));
+    }
+    let region_id = args
+        .get("regionId")
+        .and_then(Value::as_i64)
+        .unwrap_or_else(default_region_id);
+    let sde = ctx.open_sde()?;
+
+    struct Line {
+        name: String,
+        quantity: i64,
+        type_id: Option<i64>,
+        volume_each: f64,
+    }
+    let mut lines = Vec::with_capacity(items.len());
+    for it in items {
+        let name = it
+            .get("name")
+            .and_then(Value::as_str)
+            .ok_or((-32602, "each item needs a string \"name\"".to_string()))?;
+        let quantity = it
+            .get("quantity")
+            .and_then(Value::as_i64)
+            .unwrap_or(1)
+            .max(0);
+        let lookup = sde
+            .type_by_name(name.trim())
+            .map_err(|e| (-32603, format!("lookup failed: {e}")))?;
+        lines.push(Line {
+            name: name.to_string(),
+            quantity,
+            type_id: lookup.map(|(id, _)| id),
+            volume_each: lookup.and_then(|(_, v)| v).unwrap_or(0.0),
+        });
+    }
+
+    let ids: Vec<i64> = lines.iter().filter_map(|l| l.type_id).collect();
+    let location = resolve_location(region_id, None);
+    let prices: HashMap<i64, _> =
+        tauri::async_runtime::block_on(ctx.market.price_models_at(location, &ids))
+            .map_err(|e| (-32603, format!("market lookup failed: {e}")))?
+            .into_iter()
+            .map(|m| (m.type_id, m))
+            .collect();
+
+    let (mut buy_total, mut sell_total, mut volume_total) = (0.0, 0.0, 0.0);
+    let out_lines: Vec<Value> = lines
+        .iter()
+        .map(|l| {
+            let model = l.type_id.and_then(|id| prices.get(&id));
+            let buy = model.and_then(|m| m.buy_percentile);
+            let sell = model.and_then(|m| m.sell_percentile);
+            let q = l.quantity as f64;
+            buy_total += buy.unwrap_or(0.0) * q;
+            sell_total += sell.unwrap_or(0.0) * q;
+            volume_total += l.volume_each * q;
+            json!({
+                "name": l.name, "quantity": l.quantity, "typeId": l.type_id,
+                "buyPrice": buy, "sellPrice": sell,
+            })
+        })
+        .collect();
+
+    json_content(&json!({
+        "buyTotal": buy_total, "sellTotal": sell_total, "volume": volume_total,
+        "lines": out_lines,
+    }))
+}
+
+/// Shortest stargate route (jump count) between two systems, by name.
+fn tool_route(args: &Value, ctx: &ToolCtx) -> Result<Value, (i64, String)> {
+    let from_name = args
+        .get("from")
+        .and_then(Value::as_str)
+        .ok_or((-32602, "route requires a \"from\" system name".to_string()))?;
+    let to_name = args
+        .get("to")
+        .and_then(Value::as_str)
+        .ok_or((-32602, "route requires a \"to\" system name".to_string()))?;
+    let sde = ctx.open_sde()?;
+    let from = resolve_system(&sde, from_name)?;
+    let to = resolve_system(&sde, to_name)?;
+    let edges = sde
+        .all_stargate_edges()
+        .map_err(|e| (-32603, format!("route data unavailable: {e}")))?;
+    let jumps = shortest_path(&edges, from.0, to.0);
+    json_content(&json!({
+        "from": from.1, "to": to.1,
+        "jumps": jumps,
+        "reachable": jumps.is_some(),
+    }))
+}
+
+/// Resolve a solar-system name to `(id, canonical name)`, requiring an exact
+/// (case-insensitive) match so an ambiguous prefix never routes the wrong way.
+fn resolve_system(sde: &Sde, name: &str) -> Result<(i64, String), (i64, String)> {
+    let hits = sde
+        .search_systems(name.trim(), 25)
+        .map_err(|e| (-32603, format!("system lookup failed: {e}")))?;
+    hits.into_iter()
+        .find(|(_, n)| n.eq_ignore_ascii_case(name.trim()))
+        .ok_or((-32602, format!("unknown system: {name:?}")))
+}
+
+/// BFS shortest path (jump count) over an undirected stargate edge list.
+/// `None` when unreachable. Pure — unit-tested.
+fn shortest_path(edges: &[(i64, i64)], from: i64, to: i64) -> Option<i64> {
+    if from == to {
+        return Some(0);
+    }
+    let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
+    for &(a, b) in edges {
+        adj.entry(a).or_default().push(b);
+        adj.entry(b).or_default().push(a);
+    }
+    let mut dist: HashMap<i64, i64> = HashMap::from([(from, 0)]);
+    let mut queue = VecDeque::from([from]);
+    while let Some(system) = queue.pop_front() {
+        let d = dist[&system];
+        for &next in adj.get(&system).into_iter().flatten() {
+            if dist.contains_key(&next) {
+                continue;
+            }
+            if next == to {
+                return Some(d + 1);
+            }
+            dist.insert(next, d + 1);
+            queue.push_back(next);
+        }
+    }
+    None
 }
 
 /// MCP tool result carrying a plain-text payload.
@@ -406,7 +585,11 @@ mod tests {
             "CREATE TABLE invGroups(groupID INT, categoryID INT, groupName TEXT);
              CREATE TABLE invTypes(typeID INT, groupID INT, typeName TEXT, volume REAL, published INT, marketGroupID INT);
              INSERT INTO invGroups VALUES (18, 4, 'Mineral');
-             INSERT INTO invTypes VALUES (34, 18, 'Tritanium', 0.01, 1, 1);",
+             INSERT INTO invTypes VALUES (34, 18, 'Tritanium', 0.01, 1, 1);
+             CREATE TABLE mapSolarSystems(solarSystemID INT, solarSystemName TEXT);
+             INSERT INTO mapSolarSystems VALUES (30000001, 'Alpha'), (30000002, 'Beta'), (30000003, 'Gamma');
+             CREATE TABLE mapSolarSystemJumps(fromSolarSystemID INT, toSolarSystemID INT);
+             INSERT INTO mapSolarSystemJumps VALUES (30000001, 30000002), (30000002, 30000001), (30000002, 30000003), (30000003, 30000002);",
         )
         .unwrap();
         let ctx = ToolCtx {
@@ -487,6 +670,49 @@ mod tests {
         assert_eq!(e3["error"]["code"], -32602);
         let e4 = call(&ctx, "unknown_tool", json!({}));
         assert_eq!(e4["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn route_counts_stargate_jumps_by_name() {
+        let (_d, ctx) = ctx_with_sde("route");
+        // Alpha - Beta - Gamma; Alpha to Gamma is 2 jumps.
+        let r = call(&ctx, "route", json!({ "from": "Alpha", "to": "Gamma" }));
+        let p = payload(&r);
+        assert_eq!(p["jumps"], 2);
+        assert_eq!(p["reachable"], true);
+        assert_eq!(p["from"], "Alpha");
+        assert_eq!(p["to"], "Gamma");
+        // Same system is zero jumps (case-insensitive name match).
+        let self_route = call(&ctx, "route", json!({ "from": "beta", "to": "Beta" }));
+        assert_eq!(payload(&self_route)["jumps"], 0);
+    }
+
+    #[test]
+    fn route_unknown_system_is_a_clean_error() {
+        let (_d, ctx) = ctx_with_sde("route-bad");
+        let r = call(&ctx, "route", json!({ "from": "Alpha", "to": "Nowhere" }));
+        assert_eq!(r["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn appraise_validates_input_without_touching_the_market() {
+        let (_d, ctx) = ctx_with_sde("appraise-bad");
+        // No items array, and empty array -> validation errors, no network.
+        assert_eq!(call(&ctx, "appraise", json!({}))["error"]["code"], -32602);
+        assert_eq!(
+            call(&ctx, "appraise", json!({ "items": [] }))["error"]["code"],
+            -32602
+        );
+    }
+
+    #[test]
+    fn shortest_path_bfs() {
+        // 1-2-3-4 chain plus a 1-4 shortcut.
+        let edges = [(1, 2), (2, 3), (3, 4), (1, 4)];
+        assert_eq!(shortest_path(&edges, 1, 4), Some(1)); // via the shortcut
+        assert_eq!(shortest_path(&edges, 1, 3), Some(2));
+        assert_eq!(shortest_path(&edges, 2, 2), Some(0));
+        assert_eq!(shortest_path(&edges, 1, 99), None); // unreachable
     }
 
     #[test]

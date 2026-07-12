@@ -27,6 +27,8 @@ All tools are read-only and operate on public data:
 | `sde_search` | `query`, `limit?` (≤50) | matching item type ids + names |
 | `sde_type` | `typeId` | name, group, packaged volume (or null) |
 | `market_price` | `typeId`, `regionId?` | sell/buy percentile, adjusted & average price (default region: The Forge / Jita) |
+| `appraise` | `items` (`[{name, quantity}]`), `regionId?` | total buy/sell ISK value + cargo volume, per-line prices |
+| `route` | `from`, `to` (system names) | shortest stargate jump count between two systems |
 
 Prices come through the app's cached market service, so repeated lookups mostly
 hit cache rather than hammering EVE's servers.
