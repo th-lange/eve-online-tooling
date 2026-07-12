@@ -121,6 +121,8 @@ jobs:
             echo "- **Windows**: SmartScreen → **More info** → **Run anyway**."
             echo "- **macOS**: right-click the app → **Open** (or \`xattr -dr com.apple.quarantine \"/Applications/EVE Online Tooling.app\"\`)."
             echo
-            echo "Why unsigned, and why it's staying that way: a Windows Authenticode cert with enough reputation to skip that prompt (Microsoft's Trusted Signing / Azure Artifact Signing, or a traditional EV cert) is gated behind identity verification that, as of writing, only clears developers billing out of the US, Canada, the EU, or the UK — everyone else gets no path at a sane price, full stop. Apple's story isn't much better: \$99/year gets you the privilege of also being allowed to *ask* for notarization. This is a free hobby project; it is not spending real money to satisfy a screening tollbooth two platform vendors erected around their own OS. So: unsigned it stays. Read the source, build it yourself, or click through the warning — your call. Fuck Microsoft's regional gatekeeping in particular; the SmartScreen warning is doing exactly what it's designed to do, which is make small independent developers look shady for the crime of not being able to wire money the way Redmond prefers."
+            echo "### Why unsigned"
+            echo
+            echo "Code signing is not available to developers outside North America at a reasonable price. Microsoft's Authenticode (with enough reputation to skip SmartScreen) and Apple's notarization both gate their cert/identity requirements behind verification and fees that effectively exclude non-North-American independent developers. This is a free hobby project — it ships unsigned rather than pay a screening tollbooth that isn't offered on fair terms outside the US/Canada. Build from source if you'd rather not click through the warning."
           } > notes.md
           gh release edit "$TAG" --repo "$REPO" --notes-file notes.md
