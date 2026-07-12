@@ -64,36 +64,41 @@ pub async fn assets_value(
 ) -> Result<AssetsResult, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
-    // Quantity per (type, owner) across the roster — personal hangars plus,
-    // for each distinct corp represented in the roster, that corp's hangar
-    // (fetched once per corp, not once per character in it, so multiple
-    // roster alts in the same corp don't double-count its assets). Reuses the
-    // durable roster-stock cache.
+    // Quantity per (type, owner) for the active selection: a single character
+    // (personal hangar + their corp's hangar) when one is picked, or every
+    // roster member (each corp fetched once, so alts in the same corp don't
+    // double-count) when "all characters" is active. Cached per selection.
+    let sel = storage::active_character(&dir).unwrap_or(0);
+    let cache_key = format!("assets_stock_{sel}");
     let stock: HashMap<i64, HashMap<String, (bool, i64)>> =
-        match storage::cache_get(&dir, "roster_stock_v2") {
+        match storage::cache_get(&dir, &cache_key) {
             Some(s) => s,
             None => {
+                let names = storage::character_names(&dir);
                 let mut s: HashMap<i64, HashMap<String, (bool, i64)>> = HashMap::new();
                 let mut seen_corps: HashSet<i64> = HashSet::new();
-                for c in storage::load_roster(&dir) {
-                    if let Ok(assets) = fetch_assets(&auth_state, c.character_id).await {
+                for cid in storage::target_characters(&dir) {
+                    let cname = names
+                        .get(&cid)
+                        .cloned()
+                        .unwrap_or_else(|| format!("Character #{cid}"));
+                    if let Ok(assets) = fetch_assets(&auth_state, cid).await {
                         for a in assets {
                             let entry = s
                                 .entry(a.type_id)
                                 .or_default()
-                                .entry(c.name.clone())
+                                .entry(cname.clone())
                                 .or_insert((false, 0));
                             entry.1 += a.quantity;
                         }
                     }
-                    let Ok(corp_id) = corporation_id(&auth_state, c.character_id).await else {
+                    let Ok(corp_id) = corporation_id(&auth_state, cid).await else {
                         continue;
                     };
                     if !seen_corps.insert(corp_id) {
                         continue;
                     }
-                    let Ok(corp_assets) =
-                        fetch_corp_assets(&auth_state, c.character_id, corp_id).await
+                    let Ok(corp_assets) = fetch_corp_assets(&auth_state, cid, corp_id).await
                     else {
                         continue;
                     };
@@ -114,7 +119,7 @@ pub async fn assets_value(
                         entry.1 += a.quantity;
                     }
                 }
-                let _ = storage::cache_put(&dir, "roster_stock_v2", &s, 600);
+                let _ = storage::cache_put(&dir, &cache_key, &s, 600);
                 s
             }
         };
@@ -337,31 +342,38 @@ pub async fn assets_tree(
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
 
-    // Gather every roster asset (item-level, for nesting), tagged with its
-    // owner: each character's personal hangar, plus each distinct corp's
-    // hangar (fetched once per corp — same 403-tolerant path as assets_value).
+    // Gather assets for the active selection (a single character, or the whole
+    // roster when "all characters" is active), item-level for nesting, each
+    // tagged with its owner: the character's personal hangar plus that
+    // character's corp hangar (each corp fetched once — same 403-tolerant path
+    // as assets_value).
+    let names = storage::character_names(&dir);
     let mut assets: Vec<FlatAsset> = Vec::new();
     let mut seen_corps: HashSet<i64> = HashSet::new();
-    for c in storage::load_roster(&dir) {
-        if let Ok(rows) = fetch_assets(&auth_state, c.character_id).await {
+    for cid in storage::target_characters(&dir) {
+        let cname = names
+            .get(&cid)
+            .cloned()
+            .unwrap_or_else(|| format!("Character #{cid}"));
+        if let Ok(rows) = fetch_assets(&auth_state, cid).await {
             for a in rows {
                 assets.push(FlatAsset {
                     item_id: a.item_id,
                     location_id: a.location_id,
                     type_id: a.type_id,
                     quantity: a.quantity,
-                    owner: c.name.clone(),
+                    owner: cname.clone(),
                     is_corp: false,
                 });
             }
         }
-        let Ok(corp_id) = corporation_id(&auth_state, c.character_id).await else {
+        let Ok(corp_id) = corporation_id(&auth_state, cid).await else {
             continue;
         };
         if !seen_corps.insert(corp_id) {
             continue;
         }
-        let Ok(corp_rows) = fetch_corp_assets(&auth_state, c.character_id, corp_id).await else {
+        let Ok(corp_rows) = fetch_corp_assets(&auth_state, cid, corp_id).await else {
             continue;
         };
         if corp_rows.is_empty() {

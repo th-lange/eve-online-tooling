@@ -1,6 +1,7 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  activeCharacter,
   assetsTree,
   assetsValue,
   marketRegions,
@@ -84,6 +85,26 @@ function Workbench() {
       setResult(null);
     },
   });
+
+  // The Assets view follows the global character selector: when it changes,
+  // re-run whichever view is loaded so it reflects the new selection (a single
+  // character's assets, or everyone's under "all characters"). The guard keys
+  // on the active id so unrelated re-renders don't re-value.
+  const active = useQuery({
+    queryKey: ["auth", "active"],
+    queryFn: activeCharacter,
+  });
+  const prevActive = useRef<number | null | undefined>(undefined);
+  useEffect(() => {
+    if (prevActive.current === undefined) {
+      prevActive.current = active.data;
+      return;
+    }
+    if (active.data === prevActive.current) return;
+    prevActive.current = active.data;
+    if (tree) treeRun.mutate();
+    else if (result) run.mutate({ regionId, stationId, bestHub });
+  }, [active.data, tree, result, regionId, stationId, bestHub, run, treeRun]);
 
   const stations = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
   // Distinct owners present in the current result, characters first then
