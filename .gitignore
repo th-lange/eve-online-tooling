@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# local agent token-tracking state (not part of the project)
+.tokensave/
