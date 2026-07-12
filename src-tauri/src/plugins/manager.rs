@@ -158,6 +158,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         dir
     }
+    fn example_wasm() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../examples/plugins/pricing-model/pricing_model.wasm")
+    }
+    /// Write a minimal SDE db at `<dir>/sde/sde.sqlite` with one type (34 =
+    /// Tritanium, volume 0.01) so `sde_type_info` has something to read.
+    fn write_sde(dir: &Path) {
+        let sde_dir = dir.join("sde");
+        std::fs::create_dir_all(&sde_dir).unwrap();
+        let conn = rusqlite::Connection::open(sde_dir.join("sde.sqlite")).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE invGroups(groupID INT, categoryID INT, groupName TEXT);
+             CREATE TABLE invTypes(typeID INT, groupID INT, typeName TEXT, volume REAL);
+             INSERT INTO invGroups VALUES (18, 4, 'Mineral');
+             INSERT INTO invTypes VALUES (34, 18, 'Tritanium', 0.01);",
+        )
+        .unwrap();
+    }
 
     #[test]
     fn echo_round_trips_a_json_payload() {
@@ -269,6 +287,66 @@ mod tests {
             .invoke(&dir, "a", &granted, &kv_path(), "kv_get", br#""""#)
             .unwrap();
         assert_eq!(serde_json::from_slice::<Value>(&a).unwrap(), "from-a");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn example_plugin_reads_sde_and_counts_in_storage() {
+        let manager = PluginManager::new();
+        let dir = tmp("example");
+        write_sde(&dir);
+        let granted = HashSet::from([Permission::SdeRead, Permission::StorageOwn]);
+        // Type id sent as a bare JSON number (what plugin_invoke serializes).
+        let out = manager
+            .invoke(
+                &dir,
+                "pricing-model",
+                &granted,
+                &example_wasm(),
+                "evaluate",
+                b"34",
+            )
+            .unwrap();
+        let v: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(v["name"], "Tritanium");
+        assert_eq!(v["score"].as_i64(), Some(100_000)); // round(1000 / 0.01)
+        assert_eq!(v["evaluations"].as_u64(), Some(1));
+        // Storage counter survives across calls.
+        let out2 = manager
+            .invoke(
+                &dir,
+                "pricing-model",
+                &granted,
+                &example_wasm(),
+                "evaluate",
+                b"34",
+            )
+            .unwrap();
+        let v2: Value = serde_json::from_slice(&out2).unwrap();
+        assert_eq!(v2["evaluations"].as_u64(), Some(2));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn plugin_cannot_reach_an_ungranted_capability() {
+        // The example imports sde_type_info; granting only storage:own leaves
+        // that import unsatisfied, so it can't even instantiate — the sandbox +
+        // broker deny reaching a service it wasn't granted.
+        let manager = PluginManager::new();
+        let dir = tmp("escape");
+        write_sde(&dir);
+        let storage_only = HashSet::from([Permission::StorageOwn]);
+        let err = manager
+            .invoke(
+                &dir,
+                "pricing-model",
+                &storage_only,
+                &example_wasm(),
+                "evaluate",
+                b"34",
+            )
+            .unwrap_err();
+        assert!(!err.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

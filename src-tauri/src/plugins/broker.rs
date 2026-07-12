@@ -21,6 +21,7 @@ use std::sync::Arc;
 use extism::{CurrentPlugin, Error, Function, UserData, Val, PTR};
 
 use super::manifest::Permission;
+use crate::sde::{Sde, SdePaths};
 
 /// Everything a plugin's host functions are allowed to know about it: where its
 /// private storage lives. Shared (immutably) into each host-fn closure.
@@ -108,6 +109,35 @@ pub fn host_functions(granted: &HashSet<Permission>, ctx: Arc<BrokerCtx>) -> Vec
             },
         ));
     }
+    if granted.contains(&Permission::SdeRead) {
+        let sde_ctx = ctx.clone();
+        functions.push(Function::new(
+            "sde_type_info",
+            [PTR],
+            [PTR],
+            UserData::new(()),
+            move |plugin: &mut CurrentPlugin,
+                  inputs: &[Val],
+                  outputs: &mut [Val],
+                  _ud: UserData<()>|
+                  -> Result<(), Error> {
+                let arg: String = plugin.memory_get_val(&inputs[0])?;
+                let type_id: i64 = arg
+                    .trim()
+                    .parse()
+                    .map_err(|_| Error::msg(format!("sde_type_info: not a type id: {arg:?}")))?;
+                let sde = Sde::open(&SdePaths::new(sde_ctx.app_data_dir.clone()).db)
+                    .map_err(|e| Error::msg(e.to_string()))?;
+                let info = sde
+                    .type_info(type_id)
+                    .map_err(|e| Error::msg(e.to_string()))?;
+                // `null` when the type is unknown — a clean, parseable result.
+                let json = serde_json::to_string(&info).map_err(|e| Error::msg(e.to_string()))?;
+                plugin.memory_set_val(&mut outputs[0], json)?;
+                Ok(())
+            },
+        ));
+    }
 
     functions
 }
@@ -132,10 +162,17 @@ mod tests {
     }
 
     #[test]
-    fn no_host_functions_without_the_grant() {
+    fn host_functions_track_grants() {
         let ctx = Arc::new(BrokerCtx::new(PathBuf::from("/data"), "acme".into()));
         assert!(host_functions(&HashSet::new(), ctx.clone()).is_empty());
-        let granted = HashSet::from([Permission::StorageOwn]);
-        assert_eq!(host_functions(&granted, ctx).len(), 2);
+        // storage:own -> storage_get + storage_set.
+        let storage = HashSet::from([Permission::StorageOwn]);
+        assert_eq!(host_functions(&storage, ctx.clone()).len(), 2);
+        // sde:read -> sde_type_info.
+        let sde = HashSet::from([Permission::SdeRead]);
+        assert_eq!(host_functions(&sde, ctx.clone()).len(), 1);
+        // Both -> all three.
+        let both = HashSet::from([Permission::StorageOwn, Permission::SdeRead]);
+        assert_eq!(host_functions(&both, ctx).len(), 3);
     }
 }
