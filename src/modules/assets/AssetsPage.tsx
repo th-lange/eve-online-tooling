@@ -23,7 +23,8 @@ import {
   type SortColumn,
 } from "../../components/SortHeaderCell";
 import { Page, PageHeader, Centered } from "../../components/page";
-import { fuzzy } from "../../lib/fuzzy";
+import { subsequence } from "../../lib/fuzzy";
+import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { Building2, User } from "lucide-react";
 
 const FORGE = 10000002;
@@ -100,15 +101,56 @@ function Workbench() {
           Number(a.isCorp) - Number(b.isCorp) || a.name.localeCompare(b.name),
       );
   }, [result]);
+  // Precompute each row's lowercased search haystack once per result, so
+  // typing only scans (indexOf) instead of re-building + re-lowercasing
+  // strings for every row on every keystroke.
+  const haystacks = useMemo(() => {
+    const m = new Map<AssetRow, string>();
+    for (const r of result?.rows ?? []) {
+      m.set(
+        r,
+        [r.name, r.category, r.group, r.owner]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase(),
+      );
+    }
+    return m;
+  }, [result]);
+  const debouncedSearch = useDebouncedValue(search);
   const rows = useMemo(() => {
-    const q = search.trim();
+    const q = debouncedSearch.trim().toLowerCase();
     let all = result?.rows ?? [];
     if (owners.size > 0) all = all.filter((r) => owners.has(r.owner));
     if (!q) return all;
-    return all.filter((r) =>
-      fuzzy([r.name, r.category, r.group, r.owner].filter(Boolean).join(" "), q),
-    );
-  }, [result, search, owners]);
+    return all.filter((r) => subsequence(haystacks.get(r) ?? "", q));
+  }, [result, debouncedSearch, owners, haystacks]);
+  // Same precompute for the tree: one lowercased haystack per node, cached
+  // for the life of the tree, so filtering only scans.
+  const treeHay = useMemo(() => {
+    const m = new WeakMap<AssetNode, string>();
+    const walk = (ns: AssetNode[]) => {
+      for (const n of ns) {
+        m.set(
+          n,
+          [n.name, n.category, n.group, n.metaGroup, n.owner]
+            .filter(Boolean)
+            .join(" ")
+            .toLowerCase(),
+        );
+        walk(n.children);
+      }
+    };
+    if (tree) walk(tree.roots);
+    return m;
+  }, [tree]);
+  const debouncedTreeSearch = useDebouncedValue(treeSearch);
+  const treeSearching = debouncedTreeSearch.trim().length > 0;
+  const treeRoots = useMemo(() => {
+    if (!tree) return [];
+    const q = debouncedTreeSearch.trim().toLowerCase();
+    return q ? filterTree(tree.roots, q, treeHay) : tree.roots;
+  }, [tree, debouncedTreeSearch, treeHay]);
 
   return (
     <Page>
@@ -161,27 +203,16 @@ function Workbench() {
             placeholder="Fuzzy search tree: name / category / group / metatype / owner…"
             className="mt-3 w-96 max-w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
           />
-          {(() => {
-            const q = treeSearch.trim();
-            const roots = q ? filterTree(tree.roots, q) : tree.roots;
-            return (
-              <div className="mt-2 rounded border border-zinc-800">
-                {roots.map((n) => (
-                  <TreeRow
-                    key={n.isOwner ? `owner:${n.owner}` : n.id}
-                    node={n}
-                    depth={0}
-                    forceOpen={q.length > 0}
-                  />
-                ))}
-                {roots.length === 0 && (
-                  <div className="px-3 py-6 text-center text-sm text-zinc-500">
-                    {q ? "No matches." : "No assets."}
-                  </div>
-                )}
+          <div className="mt-2 rounded border border-zinc-800">
+            {treeRoots.map((n) => (
+              <TreeRow key={n.id} node={n} depth={0} forceOpen={treeSearching} />
+            ))}
+            {treeRoots.length === 0 && (
+              <div className="px-3 py-6 text-center text-sm text-zinc-500">
+                {treeSearching ? "No matches." : "No assets."}
               </div>
-            );
-          })()}
+            )}
+          </div>
         </>
       )}
 
@@ -421,27 +452,30 @@ function Row({ r }: { r: AssetRow }) {
   );
 }
 
-/** Prune the tree to nodes matching `q`: a matching node (by its own
- *  name/classifiers/owner, fuzzy) keeps its whole subtree; a non-match
- *  survives only to carry a matching descendant. */
-function filterTree(nodes: AssetNode[], q: string): AssetNode[] {
+/** Prune the tree to nodes matching `q` (already lowercased): a matching node
+ *  keeps its whole subtree; a non-match survives only to carry a matching
+ *  descendant. Uses the precomputed per-node haystack cache so filtering only
+ *  scans. */
+function filterTree(
+  nodes: AssetNode[],
+  q: string,
+  hay: WeakMap<AssetNode, string>,
+): AssetNode[] {
   const out: AssetNode[] = [];
   for (const n of nodes) {
-    const hay = [n.name, n.category, n.group, n.metaGroup, n.owner]
-      .filter(Boolean)
-      .join(" ");
-    if (fuzzy(hay, q)) {
+    if (subsequence(hay.get(n) ?? "", q)) {
       out.push(n);
       continue;
     }
-    const kids = filterTree(n.children, q);
+    const kids = filterTree(n.children, q, hay);
     if (kids.length > 0) out.push({ ...n, children: kids });
   }
   return out;
 }
 
 /** A collapsible row in the asset location tree (locations expanded by default;
- *  everything forced open while a search is active). */
+ *  everything forced open while a search is active). Top-level items (direct
+ *  children of a location) carry an owner badge; nested contents inherit it. */
 function TreeRow({
   node,
   depth,
@@ -454,6 +488,7 @@ function TreeRow({
   const [open, setOpen] = useState(depth === 0);
   const hasChildren = node.children.length > 0;
   const expanded = forceOpen || open;
+  const showOwner = depth === 1 && !node.isLocation && node.owner;
   return (
     <>
       <div
@@ -471,32 +506,29 @@ function TreeRow({
           ) : (
             <span className="w-4" />
           )}
-          {node.isOwner ? (
+          <span
+            className={
+              node.isLocation ? "font-medium text-zinc-100" : "text-zinc-300"
+            }
+          >
+            {node.name}
+          </span>
+          {node.quantity > 1 && !node.isLocation && (
+            <span className="text-xs text-zinc-500">
+              ×{formatInt(node.quantity)}
+            </span>
+          )}
+          {showOwner && (
             <span
-              className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium ${
+              className={`ml-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] ${
                 node.isCorp
                   ? "bg-sky-950 text-sky-300"
-                  : "bg-zinc-800 text-zinc-200"
+                  : "bg-zinc-800 text-zinc-400"
               }`}
               title={node.isCorp ? "Corporation hangar" : "Personal hangar"}
             >
-              {node.isCorp ? <Building2 size={11} /> : <User size={11} />}
-              {node.name}
-            </span>
-          ) : (
-            <span
-              className={
-                node.isLocation
-                  ? "font-medium text-zinc-100"
-                  : "text-zinc-300"
-              }
-            >
-              {node.name}
-            </span>
-          )}
-          {node.quantity > 1 && !node.isLocation && !node.isOwner && (
-            <span className="text-xs text-zinc-500">
-              ×{formatInt(node.quantity)}
+              {node.isCorp ? <Building2 size={10} /> : <User size={10} />}
+              {node.owner}
             </span>
           )}
           {node.bestHub && (
@@ -512,7 +544,7 @@ function TreeRow({
       {expanded &&
         node.children.map((c) => (
           <TreeRow
-            key={c.isOwner ? `owner:${c.owner}` : c.id}
+            key={c.id}
             node={c}
             depth={depth + 1}
             forceOpen={forceOpen}

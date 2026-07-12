@@ -45,9 +45,8 @@ export interface AssetNode {
   volume: number;
   bestHub: string | null;
   isLocation: boolean;
-  /** Synthetic owner-grouping node (its `owner` names the character/corp). */
-  isOwner: boolean;
-  /** Owning character or corp (set on owner buckets and their descendants). */
+  /** Owning character or corp (set on item nodes; used for the per-item
+   *  owner badge and owner search — the tree is not grouped by owner). */
   owner: string | null;
   isCorp: boolean;
   /** Classifiers for item nodes, for tree search. */
