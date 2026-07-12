@@ -23,7 +23,6 @@ import {
   type SortColumn,
 } from "../../components/SortHeaderCell";
 import { Page, PageHeader, Centered } from "../../components/page";
-import { subsequence } from "../../lib/fuzzy";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { Building2, User } from "lucide-react";
 
@@ -123,7 +122,7 @@ function Workbench() {
     let all = result?.rows ?? [];
     if (owners.size > 0) all = all.filter((r) => owners.has(r.owner));
     if (!q) return all;
-    return all.filter((r) => subsequence(haystacks.get(r) ?? "", q));
+    return all.filter((r) => (haystacks.get(r) ?? "").includes(q));
   }, [result, debouncedSearch, owners, haystacks]);
   // Same precompute for the tree: one lowercased haystack per node, cached
   // for the life of the tree, so filtering only scans.
@@ -200,7 +199,7 @@ function Workbench() {
           <input
             value={treeSearch}
             onChange={(e) => setTreeSearch(e.currentTarget.value)}
-            placeholder="Fuzzy search tree: name / category / group / metatype / owner…"
+            placeholder="Search tree: name / category / group / metatype / owner…"
             className="mt-3 w-96 max-w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
           />
           <div className="mt-2 rounded border border-zinc-800">
@@ -313,7 +312,7 @@ function Workbench() {
           <input
             value={search}
             onChange={(e) => setSearch(e.currentTarget.value)}
-            placeholder="Fuzzy search: name / category / group / owner…"
+            placeholder="Search: name / category / group / owner…"
             className="mt-3 w-72 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
           />
           <AssetTable rows={rows} />
@@ -463,7 +462,7 @@ function filterTree(
 ): AssetNode[] {
   const out: AssetNode[] = [];
   for (const n of nodes) {
-    if (subsequence(hay.get(n) ?? "", q)) {
+    if ((hay.get(n) ?? "").includes(q)) {
       out.push(n);
       continue;
     }
