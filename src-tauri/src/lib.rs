@@ -20,6 +20,7 @@ mod esi;
 mod evescout;
 mod lists;
 mod market;
+mod mcp;
 mod model;
 mod modules;
 mod plugins;
@@ -45,6 +46,7 @@ pub fn run() {
             app.manage(plugins::PluginManager::new());
             app.manage(esi::AuthState::with_cache(dir));
             app.manage(modules::dpsmeter::commands::DpsState::default());
+            app.manage(mcp::McpState::default());
 
             // Fetch key data early, in the background — never block launch. Keeps
             // the SDE current (daily, md5-gated) and primes the active
@@ -61,6 +63,9 @@ pub fn run() {
             plugins::plugins_list,
             plugins::manager::plugin_invoke,
             plugins::manager::plugin_set_active,
+            mcp::mcp_start,
+            mcp::mcp_stop,
+            mcp::mcp_status,
             commands::eve_default_log_dir,
             esi::commands::auth_login,
             esi::commands::auth_characters,
