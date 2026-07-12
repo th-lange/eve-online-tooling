@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { Heart, type LucideIcon } from "lucide-react";
+import { Heart, Puzzle, type LucideIcon } from "lucide-react";
 import { ProductionPage } from "./production/ProductionPage";
 import { TradingPage } from "./trading/TradingPage";
 import { DaytradingPage } from "./daytrading/DaytradingPage";
@@ -28,6 +28,7 @@ import { FittingPage } from "./fitting/FittingPage";
 import { ShoppingPage } from "./shopping/ShoppingPage";
 import { DpsPage } from "./dpsmeter/DpsPage";
 import { SupportPage } from "./support/SupportPage";
+import { PluginsPage } from "./plugins/PluginsPage";
 
 /** Sidebar section a module belongs to (the nav's information architecture). */
 export type ModuleGroup =
@@ -262,6 +263,14 @@ export const modules: ModuleDef[] = [
       "Live combat meter from your gamelog — DPS, logi and cap, graphed.",
     group: "combat",
     Component: DpsPage,
+  },
+  {
+    id: "plugins",
+    title: "Plugins",
+    description: "Activate or deactivate installed third-party plugins.",
+    group: "support",
+    icon: Puzzle,
+    Component: PluginsPage,
   },
   {
     id: "support",
