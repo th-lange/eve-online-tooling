@@ -75,8 +75,7 @@ pub async fn market_orders(
     for character_id in character_ids {
         let character_name = names.get(&character_id).cloned().unwrap_or_default();
         if let Ok(mut character_rows) =
-            fetch_character_orders(&auth_state, &market, &dir, character_id, &character_name)
-                .await
+            fetch_character_orders(&auth_state, &market, &dir, character_id, &character_name).await
         {
             rows.append(&mut character_rows);
         }

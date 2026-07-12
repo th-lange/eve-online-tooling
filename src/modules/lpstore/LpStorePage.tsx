@@ -16,6 +16,7 @@ import {
   SortHeaderCell,
   type SortColumn,
 } from "../../components/SortHeaderCell";
+import { Page, PageHeader, Centered } from "../../components/page";
 
 type OfferSortKey =
   "name" | "lpCost" | "iskCost" | "sellValue" | "profit" | "iskPerLp";
@@ -59,11 +60,26 @@ const OFFER_COLUMNS: SortColumn<OfferSortKey>[] = [
 ];
 const OFFER_KEYS = OFFER_COLUMNS.map((c) => c.key);
 
+const TITLE = "LP store";
+const SUBTITLE = "Loyalty-store offers ranked by ISK per LP, valued at Jita.";
+
 export function LpStorePage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) return <Centered>Checking static data…</Centered>;
+  if (status.isLoading) {
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <Centered>Checking static data…</Centered>
+      </Page>
+    );
+  }
   if (!status.data?.installed) {
-    return <SdeSetup onInstalled={() => status.refetch()} />;
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <SdeSetup onInstalled={() => status.refetch()} />
+      </Page>
+    );
   }
   return <Workbench />;
 }
@@ -93,42 +109,47 @@ function Workbench() {
   }, [balances.data, corpId]);
 
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">LP store</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Loyalty-store offers ranked by ISK per LP, valued at Jita.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {fetchedAt != null && (
-            <span className="text-xs text-zinc-500">
-              Offers pulled {ago(fetchedAt)}
-            </span>
-          )}
-          <button
-            onClick={() =>
-              corpId != null && run.mutate({ corporationId: corpId, iskPerLp })
-            }
-            disabled={run.isPending || corpId == null}
-            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-          >
-            {run.isPending ? "Pricing…" : "Calculate"}
-          </button>
-          <button
-            onClick={() =>
-              corpId != null &&
-              run.mutate({ corporationId: corpId, iskPerLp, refresh: true })
-            }
-            disabled={run.isPending || corpId == null}
-            title="Re-pull the offers from ESI (ignore the local cache)"
-            className="rounded border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-          >
-            Refresh
-          </button>
-        </div>
-      </div>
+    <Page>
+      <PageHeader
+        title={TITLE}
+        subtitle={SUBTITLE}
+        actions={
+          <>
+            {fetchedAt != null && (
+              <span className="text-xs text-zinc-500">
+                Offers pulled {ago(fetchedAt)}
+              </span>
+            )}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() =>
+                  corpId != null &&
+                  run.mutate({ corporationId: corpId, iskPerLp })
+                }
+                disabled={run.isPending || corpId == null}
+                className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              >
+                {run.isPending ? "Pricing…" : "Calculate"}
+              </button>
+              <button
+                onClick={() =>
+                  corpId != null &&
+                  run.mutate({
+                    corporationId: corpId,
+                    iskPerLp,
+                    refresh: true,
+                  })
+                }
+                disabled={run.isPending || corpId == null}
+                title="Re-pull the offers from ESI (ignore the local cache)"
+                className="rounded border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+              >
+                Refresh
+              </button>
+            </div>
+          </>
+        }
+      />
 
       {balances.isError &&
         (isAuthRequired(balances.error) ? (
@@ -172,7 +193,7 @@ function Workbench() {
       )}
 
       <OfferTable rows={rows} />
-    </div>
+    </Page>
   );
 }
 
@@ -268,10 +289,4 @@ function ago(epochSecs: number): string {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
   return `${Math.floor(s / 86400)}d ago`;
-}
-
-function Centered({ children }: { children: ReactNode }) {
-  return (
-    <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
-  );
 }

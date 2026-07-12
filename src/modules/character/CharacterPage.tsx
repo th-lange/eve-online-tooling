@@ -10,20 +10,19 @@ import {
   isAuthRequired,
 } from "../../lib/api";
 import { formatInt, formatIsk } from "../../lib/format";
+import { Page, PageHeader } from "../../components/page";
 
 type Tab = "skills" | "standings" | "research" | "mining" | "fleet";
+
+const TITLE = "Character";
+const SUBTITLE =
+  "Skills, standings and R&D research for your first logged-in character.";
 
 export function CharacterPage() {
   const [tab, setTab] = useState<Tab>("skills");
   return (
-    <div className="p-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-zinc-100">Character</h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          Skills, standings and R&amp;D research for your first logged-in
-          character.
-        </p>
-      </div>
+    <Page>
+      <PageHeader title={TITLE} subtitle={SUBTITLE} />
       <Tabs tab={tab} onChange={setTab} />
       <div className="mt-3">
         {tab === "skills" && <Skills />}
@@ -32,7 +31,7 @@ export function CharacterPage() {
         {tab === "mining" && <Mining />}
         {tab === "fleet" && <Fleet />}
       </div>
-    </div>
+    </Page>
   );
 }
 

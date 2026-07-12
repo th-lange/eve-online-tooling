@@ -14,8 +14,13 @@ import {
   SortHeaderCell,
   type SortColumn,
 } from "../../components/SortHeaderCell";
+import { Page, PageHeader } from "../../components/page";
 
 type Tab = "wallet" | "profit";
+
+const TITLE = "Accounting";
+const SUBTITLE =
+  "Wallet journal (accumulated beyond ESI's window) and FIFO realized profit, for your first logged-in character.";
 
 export function AccountingPage() {
   const [tab, setTab] = useState<Tab>("wallet");
@@ -23,23 +28,22 @@ export function AccountingPage() {
   const profit = useMutation({ mutationFn: profitFifo });
 
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Accounting</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Wallet journal (accumulated beyond ESI's window) and FIFO realized
-            profit, for your first logged-in character.
-          </p>
-        </div>
-        <button
-          onClick={() => (tab === "wallet" ? wallet.mutate() : profit.mutate())}
-          disabled={wallet.isPending || profit.isPending}
-          className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-        >
-          {wallet.isPending || profit.isPending ? "Syncing…" : "Sync"}
-        </button>
-      </div>
+    <Page>
+      <PageHeader
+        title={TITLE}
+        subtitle={SUBTITLE}
+        actions={
+          <button
+            onClick={() =>
+              tab === "wallet" ? wallet.mutate() : profit.mutate()
+            }
+            disabled={wallet.isPending || profit.isPending}
+            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+          >
+            {wallet.isPending || profit.isPending ? "Syncing…" : "Sync"}
+          </button>
+        }
+      />
 
       <div className="mt-4 inline-flex rounded border border-zinc-800 bg-zinc-900 p-0.5">
         {(["wallet", "profit"] as Tab[]).map((t) => (
@@ -77,7 +81,7 @@ export function AccountingPage() {
           </Hint>
         )}
       </div>
-    </div>
+    </Page>
   );
 }
 

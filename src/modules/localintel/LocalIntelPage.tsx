@@ -22,6 +22,7 @@ import {
 import { formatInt } from "../../lib/format";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { usePersistentState } from "../../lib/usePersistentState";
+import { Page, PageHeader } from "../../components/page";
 
 /** Best-effort desktop notification — requests permission, never throws. */
 async function notify(title: string, body: string) {
@@ -238,148 +239,144 @@ export function LocalIntelPage() {
 
   return (
     <div className="flex h-full">
-      <div className="min-w-0 flex-1 overflow-auto p-6">
-        <div className="flex items-start justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold text-zinc-100">
-              Local Intel
-            </h1>
-            <p className="mt-1 text-sm text-zinc-400">
-              Select-all in the in-game Local member list, copy, and paste it
-              here to classify every pilot by corp/alliance against your
-              character's contacts (blue/red) and standings.
-            </p>
-          </div>
-          <button
-            onClick={() => scan.mutate(text)}
-            disabled={scan.isPending || text.trim() === ""}
-            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-          >
-            {scan.isPending ? "Scanning…" : "Scan local"}
-          </button>
-        </div>
-
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.currentTarget.value)}
-          placeholder="Paste the Local member list (one pilot name per line)…"
-          rows={5}
-          className="mt-4 w-full rounded border border-zinc-800 bg-zinc-900 px-3 py-2 font-mono text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
-        />
-
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-400">
-          <input
-            value={logsDir}
-            onChange={(e) => setLogsDir(e.currentTarget.value)}
-            placeholder="EVE Chatlogs folder…"
-            className="w-72 rounded bg-zinc-800 px-2 py-1 text-zinc-100 outline-none placeholder:text-zinc-600"
-            title="e.g. …/ProtonPrefix/drive_c/users/steamuser/Documents/EVE/logs/Chatlogs"
+      <div className="min-w-0 flex-1 overflow-auto">
+        <Page>
+          <PageHeader
+            title="Local Intel"
+            subtitle="Select-all in the in-game Local member list, copy, and paste it here to classify every pilot by corp/alliance against your character's contacts (blue/red) and standings."
+            actions={
+              <button
+                onClick={() => scan.mutate(text)}
+                disabled={scan.isPending || text.trim() === ""}
+                className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              >
+                {scan.isPending ? "Scanning…" : "Scan local"}
+              </button>
+            }
           />
-          <button
-            onClick={() => loadLog.mutate()}
-            disabled={logsDir.trim() === "" || loadLog.isPending}
-            className="rounded border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-          >
-            Load from latest Local log
-          </button>
-          {loadLog.isError && (
-            <span className="text-rose-400">{String(loadLog.error)}</span>
-          )}
-          {loadLog.data && (
-            <span className="text-zinc-500">
-              {loadLog.data.senders.length > 0
-                ? `${loadLog.data.senders.length} speaker(s) from ${loadLog.data.file}`
-                : "no chat found (only pilots who spoke are logged)"}
-            </span>
-          )}
-        </div>
 
-        <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-zinc-400">
-          <label
-            className="flex cursor-pointer items-center gap-2"
-            title="Alarm when a red enters Local"
-          >
-            <input
-              type="checkbox"
-              checked={alertAnyRed}
-              onChange={(e) => setAlertAnyRed(e.currentTarget.checked)}
-            />
-            Alert on any red
-          </label>
-          <label
-            className="flex cursor-pointer items-center gap-2"
-            title="Also alarm when any neutral/unknown pilot enters Local"
-          >
-            <input
-              type="checkbox"
-              checked={alertNeutrals}
-              onChange={(e) => {
-                setAlertNeutrals(e.currentTarget.checked);
-                localStorage.setItem(
-                  STORAGE_KEYS.localintelAlertNeutrals,
-                  e.currentTarget.checked ? "on" : "off",
-                );
-              }}
-            />
-            Alert on neutrals
-          </label>
-          <label className="flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              checked={soundOn}
-              onChange={(e) => {
-                setSoundOn(e.currentTarget.checked);
-                localStorage.setItem(
-                  STORAGE_KEYS.localintelSound,
-                  e.currentTarget.checked ? "on" : "off",
-                );
-                if (e.currentTarget.checked) playAlarm(); // confirm it's audible
-              }}
-            />
-            Sound alarm
-          </label>
-          {(watchlist.data ?? []).length > 0 && (
-            <span>
-              Watching:{" "}
-              {(watchlist.data ?? []).map((w) => (
-                <button
-                  key={w.id}
-                  onClick={() =>
-                    setWatch.mutate({ id: w.id, name: w.name, add: false })
-                  }
-                  title="Remove from watchlist"
-                  className="mr-1 rounded bg-amber-900/40 px-1.5 py-0.5 text-amber-300 hover:bg-amber-900/70"
-                >
-                  {w.name} ✕
-                </button>
-              ))}
-            </span>
-          )}
-        </div>
-
-        {scan.isError && (
-          <div className="mt-3 text-sm text-rose-400">
-            Failed: {String(scan.error)}
-          </div>
-        )}
-
-        {result && <Summary result={result} />}
-        {result && (
-          <PilotTable
-            pilots={result.pilots}
-            zkill={zkill}
-            zkillLoading={zkillRun.isPending}
-            isWatched={isWatched}
-            newIds={newIds}
-            onWatch={(id, name) => setWatch.mutate({ id, name, add: true })}
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.currentTarget.value)}
+            placeholder="Paste the Local member list (one pilot name per line)…"
+            rows={5}
+            className="mt-4 w-full rounded border border-zinc-800 bg-zinc-900 px-3 py-2 font-mono text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
           />
-        )}
-        {result && result.unresolved.length > 0 && (
-          <div className="mt-2 text-xs text-zinc-500">
-            Unresolved ({result.unresolved.length}):{" "}
-            {result.unresolved.join(", ")}
+
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-400">
+            <input
+              value={logsDir}
+              onChange={(e) => setLogsDir(e.currentTarget.value)}
+              placeholder="EVE Chatlogs folder…"
+              className="w-72 rounded bg-zinc-800 px-2 py-1 text-zinc-100 outline-none placeholder:text-zinc-600"
+              title="e.g. …/ProtonPrefix/drive_c/users/steamuser/Documents/EVE/logs/Chatlogs"
+            />
+            <button
+              onClick={() => loadLog.mutate()}
+              disabled={logsDir.trim() === "" || loadLog.isPending}
+              className="rounded border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+            >
+              Load from latest Local log
+            </button>
+            {loadLog.isError && (
+              <span className="text-rose-400">{String(loadLog.error)}</span>
+            )}
+            {loadLog.data && (
+              <span className="text-zinc-500">
+                {loadLog.data.senders.length > 0
+                  ? `${loadLog.data.senders.length} speaker(s) from ${loadLog.data.file}`
+                  : "no chat found (only pilots who spoke are logged)"}
+              </span>
+            )}
           </div>
-        )}
+
+          <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-zinc-400">
+            <label
+              className="flex cursor-pointer items-center gap-2"
+              title="Alarm when a red enters Local"
+            >
+              <input
+                type="checkbox"
+                checked={alertAnyRed}
+                onChange={(e) => setAlertAnyRed(e.currentTarget.checked)}
+              />
+              Alert on any red
+            </label>
+            <label
+              className="flex cursor-pointer items-center gap-2"
+              title="Also alarm when any neutral/unknown pilot enters Local"
+            >
+              <input
+                type="checkbox"
+                checked={alertNeutrals}
+                onChange={(e) => {
+                  setAlertNeutrals(e.currentTarget.checked);
+                  localStorage.setItem(
+                    STORAGE_KEYS.localintelAlertNeutrals,
+                    e.currentTarget.checked ? "on" : "off",
+                  );
+                }}
+              />
+              Alert on neutrals
+            </label>
+            <label className="flex cursor-pointer items-center gap-2">
+              <input
+                type="checkbox"
+                checked={soundOn}
+                onChange={(e) => {
+                  setSoundOn(e.currentTarget.checked);
+                  localStorage.setItem(
+                    STORAGE_KEYS.localintelSound,
+                    e.currentTarget.checked ? "on" : "off",
+                  );
+                  if (e.currentTarget.checked) playAlarm(); // confirm it's audible
+                }}
+              />
+              Sound alarm
+            </label>
+            {(watchlist.data ?? []).length > 0 && (
+              <span>
+                Watching:{" "}
+                {(watchlist.data ?? []).map((w) => (
+                  <button
+                    key={w.id}
+                    onClick={() =>
+                      setWatch.mutate({ id: w.id, name: w.name, add: false })
+                    }
+                    title="Remove from watchlist"
+                    className="mr-1 rounded bg-amber-900/40 px-1.5 py-0.5 text-amber-300 hover:bg-amber-900/70"
+                  >
+                    {w.name} ✕
+                  </button>
+                ))}
+              </span>
+            )}
+          </div>
+
+          {scan.isError && (
+            <div className="mt-3 text-sm text-rose-400">
+              Failed: {String(scan.error)}
+            </div>
+          )}
+
+          {result && <Summary result={result} />}
+          {result && (
+            <PilotTable
+              pilots={result.pilots}
+              zkill={zkill}
+              zkillLoading={zkillRun.isPending}
+              isWatched={isWatched}
+              newIds={newIds}
+              onWatch={(id, name) => setWatch.mutate({ id, name, add: true })}
+            />
+          )}
+          {result && result.unresolved.length > 0 && (
+            <div className="mt-2 text-xs text-zinc-500">
+              Unresolved ({result.unresolved.length}):{" "}
+              {result.unresolved.join(", ")}
+            </div>
+          )}
+        </Page>
       </div>
       <aside className="flex w-64 shrink-0 flex-col overflow-auto border-l border-zinc-800 bg-zinc-900/40">
         <HostileCorpsPanel

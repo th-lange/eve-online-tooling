@@ -1,4 +1,5 @@
 import { memo, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Page, PageHeader } from "../../components/page";
 import { Play, Square } from "lucide-react";
 import { ModuleActiveContext } from "../../components/moduleActiveContext";
 import {
@@ -188,13 +189,11 @@ export function DpsPage() {
   const latest = ticks[ticks.length - 1];
 
   return (
-    <div className="mx-auto max-w-5xl px-6 py-6">
-      <h1 className="text-2xl font-semibold text-zinc-100">DPS Meter</h1>
-      <p className="mt-1 text-sm text-zinc-400">
-        Live combat readout from your EVE gamelog — damage, logistics and
-        capacitor warfare as a moving average. Reads only the logs the client
-        writes (EULA-safe).
-      </p>
+    <Page>
+      <PageHeader
+        title="DPS Meter"
+        subtitle="Live combat readout from your EVE gamelog — damage, logistics and capacitor warfare as a moving average. Reads only the logs the client writes (EULA-safe)."
+      />
 
       {/* Mode tabs */}
       <div className="mt-5 flex gap-1 border-b border-zinc-800">
@@ -372,7 +371,7 @@ export function DpsPage() {
           combat logged after you start is counted.
         </p>
       )}
-    </div>
+    </Page>
   );
 }
 

@@ -14,6 +14,7 @@ import {
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
 import { formatInt } from "../../lib/format";
+import { Page, PageHeader, Centered } from "../../components/page";
 import {
   EPS,
   extractionAdvice,
@@ -22,11 +23,28 @@ import {
   stockMaps,
 } from "./balance";
 
+const TITLE = "Planetary Interaction";
+const SUBTITLE =
+  "Your colonies — what's extracting/producing, when extractors need a restart, storage usage, and where inputs fall short.";
+
 export function PIPage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) return <Centered>Checking static data…</Centered>;
-  if (!status.data?.installed)
-    return <SdeSetup onInstalled={() => status.refetch()} />;
+  if (status.isLoading) {
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <Centered>Checking static data…</Centered>
+      </Page>
+    );
+  }
+  if (!status.data?.installed) {
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <SdeSetup onInstalled={() => status.refetch()} />
+      </Page>
+    );
+  }
   return <Workbench />;
 }
 
@@ -76,40 +94,35 @@ function Workbench() {
   );
 
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">
-            Planetary Interaction
-          </h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Your colonies — what's extracting/producing, when extractors need a
-            restart, storage usage, and where inputs fall short.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="flex items-center gap-1 text-xs text-zinc-400">
-            Sort
-            <select
-              value={sort}
-              onChange={(e) =>
-                setSort(e.currentTarget.value as "default" | "restart")
-              }
-              className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-100 outline-none"
+    <Page>
+      <PageHeader
+        title={TITLE}
+        subtitle={SUBTITLE}
+        actions={
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1 text-xs text-zinc-400">
+              Sort
+              <select
+                value={sort}
+                onChange={(e) =>
+                  setSort(e.currentTarget.value as "default" | "restart")
+                }
+                className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-100 outline-none"
+              >
+                <option value="default">Default</option>
+                <option value="restart">Restart required</option>
+              </select>
+            </label>
+            <button
+              onClick={() => colonies.refetch()}
+              disabled={colonies.isFetching}
+              className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
             >
-              <option value="default">Default</option>
-              <option value="restart">Restart required</option>
-            </select>
-          </label>
-          <button
-            onClick={() => colonies.refetch()}
-            disabled={colonies.isFetching}
-            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-          >
-            {colonies.isFetching ? "Loading…" : "Refresh"}
-          </button>
-        </div>
-      </div>
+              {colonies.isFetching ? "Loading…" : "Refresh"}
+            </button>
+          </div>
+        }
+      />
 
       {colonies.isError &&
         (isAuthRequired(colonies.error) ? (
@@ -142,7 +155,7 @@ function Workbench() {
           />
         ))}
       </div>
-    </div>
+    </Page>
   );
 }
 
@@ -472,11 +485,5 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       </div>
       {children}
     </div>
-  );
-}
-
-function Centered({ children }: { children: ReactNode }) {
-  return (
-    <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
   );
 }

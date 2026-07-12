@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   sdeStatus,
@@ -22,15 +22,33 @@ import { Signatures } from "./Signatures";
 import { TripwirePanel } from "./TripwirePanel";
 import { Field, SystemPicker } from "./shared";
 import { MASS, fmtHours, fmtMkg, massColor } from "./helpers";
+import { Page, PageHeader, Centered } from "../../components/page";
 
 const JUMP = ["s", "m", "l", "xl"];
 const SCOPES = ["wormhole", "stargate", "jumpbridge"];
 
+const TITLE = "Wormholes";
+const SUBTITLE =
+  "Map your chain by hand, or import live Thera/Turnur holes from EVE-Scout. Dead holes (past life / EOL) are pruned automatically.";
+
 export function WormholesPage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) return <Centered>Checking static data…</Centered>;
-  if (!status.data?.installed)
-    return <SdeSetup onInstalled={() => status.refetch()} />;
+  if (status.isLoading) {
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <Centered>Checking static data…</Centered>
+      </Page>
+    );
+  }
+  if (!status.data?.installed) {
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <SdeSetup onInstalled={() => status.refetch()} />
+      </Page>
+    );
+  }
   return <Workbench />;
 }
 
@@ -107,37 +125,34 @@ function Workbench() {
   const importedCount = rows.filter((c) => c.source === "evescout").length;
 
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Wormholes</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Map your chain by hand, or import live Thera/Turnur holes from
-            EVE-Scout. Dead holes (past life / EOL) are pruned automatically.
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <button
-            onClick={() => importEvescout.mutate()}
-            disabled={importEvescout.isPending}
-            title="Fetch the live public Thera & Turnur connections from EVE-Scout"
-            className="whitespace-nowrap rounded bg-teal-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-600 disabled:opacity-50"
-          >
-            {importEvescout.isPending ? "Importing…" : "Import Thera/Turnur"}
-          </button>
-          {importEvescout.isError ? (
-            <span className="max-w-56 text-right text-[11px] text-rose-400">
-              {String(importEvescout.error)}
-            </span>
-          ) : (
-            <span className="text-[11px] text-zinc-500">
-              {importedCount > 0
-                ? `${importedCount} imported hole(s)`
-                : "EVE-Scout · free, no login"}
-            </span>
-          )}
-        </div>
-      </div>
+    <Page>
+      <PageHeader
+        title={TITLE}
+        subtitle={SUBTITLE}
+        actions={
+          <>
+            <button
+              onClick={() => importEvescout.mutate()}
+              disabled={importEvescout.isPending}
+              title="Fetch the live public Thera & Turnur connections from EVE-Scout"
+              className="whitespace-nowrap rounded bg-teal-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-600 disabled:opacity-50"
+            >
+              {importEvescout.isPending ? "Importing…" : "Import Thera/Turnur"}
+            </button>
+            {importEvescout.isError ? (
+              <span className="max-w-56 text-right text-[11px] text-rose-400">
+                {String(importEvescout.error)}
+              </span>
+            ) : (
+              <span className="text-[11px] text-zinc-500">
+                {importedCount > 0
+                  ? `${importedCount} imported hole(s)`
+                  : "EVE-Scout · free, no login"}
+              </span>
+            )}
+          </>
+        }
+      />
 
       <div className="mt-4 flex flex-wrap items-end gap-3 rounded border border-zinc-800 bg-zinc-900 p-3">
         <Field label="From">
@@ -320,7 +335,7 @@ function Workbench() {
       </div>
 
       <WhTypeTable types={types} />
-    </div>
+    </Page>
   );
 }
 
@@ -400,11 +415,5 @@ function SystemTag({
       {name}
       {sig && <span className="ml-1 text-[10px] text-zinc-500">{sig}</span>}
     </span>
-  );
-}
-
-function Centered({ children }: { children: ReactNode }) {
-  return (
-    <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
   );
 }

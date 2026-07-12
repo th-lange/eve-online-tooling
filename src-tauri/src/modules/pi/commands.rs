@@ -290,6 +290,7 @@ pub async fn pi_overview(
 }
 
 /// Assemble one colony's view (splits ESI + SDE joins from the async fetch).
+#[allow(clippy::too_many_arguments)]
 fn build_colony(
     colony: &EsiColony,
     planet: &EsiPlanet,
@@ -476,8 +477,8 @@ pub async fn pi_show_in_game(
     system_id: i64,
 ) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let character_id = storage::primary_character(&dir)
-        .ok_or_else(|| "Log in a character first".to_string())?;
+    let character_id =
+        storage::primary_character(&dir).ok_or_else(|| "Log in a character first".to_string())?;
     crate::esi::set_autopilot_waypoint(&auth_state, character_id, system_id)
         .await
         .map_err(|e| e.to_string())

@@ -1,20 +1,23 @@
+import { Page, PageHeader } from "../../components/page";
 import { C729 } from "./data";
 import { EntryFinder } from "./EntryFinder";
 import { PochvenSystemsPopover } from "./SystemsPopover";
 import { Logistics } from "./Logistics";
 import { FilamentGuide } from "./FilamentGuide";
 
+const SUBTITLE = (
+  <>
+    Pochven has no gates to k-space — you get in via a <strong>C729</strong>{" "}
+    wormhole or a filament. Enter your current system and it'll route you to the
+    nearest C729 spawn candidate and list the systems to jump &amp; scan.
+  </>
+);
+
 // Pochven "get me in" tools + reference (epic #417).
 export function PochvenPage() {
   return (
-    <div className="mx-auto max-w-4xl p-6">
-      <h1 className="text-2xl font-semibold text-zinc-100">Pochven entry</h1>
-      <p className="mt-1 max-w-2xl text-sm text-zinc-400">
-        Pochven has no gates to k-space — you get in via a <strong>C729</strong>{" "}
-        wormhole or a filament. Enter your current system and it'll route you to
-        the nearest C729 spawn candidate and list the systems to jump &amp;
-        scan.
-      </p>
+    <Page>
+      <PageHeader title="Pochven entry" subtitle={SUBTITLE} />
 
       <EntryFinder />
 
@@ -40,6 +43,6 @@ export function PochvenPage() {
         Entry data: Electus Matari Pochven entry manual. Hub distances computed
         live over the stargate graph.
       </p>
-    </div>
+    </Page>
   );
 }

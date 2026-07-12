@@ -687,7 +687,11 @@ pub fn shopping_chat_sync(
         .cooldown
         .retain(|_, ts| *ts >= now_secs - 24 * 60 * 60);
 
-    let kept = apply_cooldown(candidates, &mut store.chat.cooldown, CHAT_DEDUP_COOLDOWN_SECS);
+    let kept = apply_cooldown(
+        candidates,
+        &mut store.chat.cooldown,
+        CHAT_DEDUP_COOLDOWN_SECS,
+    );
 
     let mut added = Vec::with_capacity(kept.len());
     {

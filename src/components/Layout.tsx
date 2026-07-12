@@ -1,18 +1,11 @@
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useState, type ReactNode } from "react";
 import { ModuleActiveContext } from "./moduleActiveContext";
+import { ModuleChromeContext } from "./moduleChromeContext";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   ChevronDown,
   ChevronRight,
   Eye,
-  EyeOff,
   GripVertical,
   Search,
   Star,
@@ -306,46 +299,9 @@ function ModuleHost({ onHide }: { onHide: (id: string) => void }) {
     );
   }, [activeId]);
 
-  // The hide icon renders *inside* the active page's <h1>: a <span> slot is
-  // appended to the title element and the button is portalled into it, so it
-  // flows with the text (no measuring, nothing to drift). Pages own their
-  // titles, so a MutationObserver re-attaches the slot when a page swaps its
-  // header in late (e.g. after an SDE check).
-  const activeRef = useRef<HTMLDivElement | null>(null);
-  const [hideSlot, setHideSlot] = useState<HTMLElement | null>(null);
-  useLayoutEffect(() => {
-    const el = activeRef.current;
-    if (!el) return;
-    let slot: HTMLSpanElement | null = null;
-    const attach = () => {
-      const h1 = el.querySelector("h1");
-      if (!h1) {
-        if (slot) {
-          slot.remove();
-          slot = null;
-          setHideSlot(null);
-        }
-        return;
-      }
-      if (slot && slot.parentElement === h1) return;
-      slot?.remove();
-      slot = document.createElement("span");
-      slot.className = "ml-2 inline-flex align-middle";
-      h1.appendChild(slot);
-      setHideSlot(slot);
-    };
-    attach();
-    const mo =
-      typeof MutationObserver !== "undefined"
-        ? new MutationObserver(attach)
-        : null;
-    mo?.observe(el, { childList: true, subtree: true });
-    return () => {
-      mo?.disconnect();
-      slot?.remove();
-      setHideSlot(null);
-    };
-  }, [activeId]);
+  // Page chrome (title + hide callback) flows to pages via context; the shared
+  // `PageHeader` template renders the hide control inline next to the title in
+  // every page state (loading gate, setup, ready), so it never relocates.
 
   return (
     <>
@@ -356,34 +312,16 @@ function ModuleHost({ onHide }: { onHide: (id: string) => void }) {
           return (
             <div
               key={m.id}
-              ref={active ? activeRef : undefined}
               className="relative h-full overflow-auto"
               style={{ display: active ? "block" : "none" }}
             >
-              {/* Per-module hide control, portalled into the page title so it
-                  sits right behind the header text. Pages without an <h1>
-                  (e.g. still on a setup/loading screen) fall back to the page
-                  corner. Hiding only removes the module from the nav (restore
-                  from Hidden). */}
-              {active &&
-                (() => {
-                  const btn = (
-                    <button
-                      onClick={() => onHide(m.id)}
-                      title="Hide this module from the sidebar"
-                      aria-label={`Hide ${m.title} from sidebar`}
-                      className={`rounded p-1 text-zinc-600 opacity-60 transition hover:bg-zinc-800 hover:text-zinc-300 hover:opacity-100 ${
-                        hideSlot ? "" : "absolute right-2 top-2 z-30"
-                      }`}
-                    >
-                      <EyeOff size={16} />
-                    </button>
-                  );
-                  return hideSlot ? createPortal(btn, hideSlot) : btn;
-                })()}
-              <ModuleActiveContext.Provider value={active}>
-                <m.Component />
-              </ModuleActiveContext.Provider>
+              <ModuleChromeContext.Provider
+                value={{ title: m.title, hide: () => onHide(m.id) }}
+              >
+                <ModuleActiveContext.Provider value={active}>
+                  <m.Component />
+                </ModuleActiveContext.Provider>
+              </ModuleChromeContext.Provider>
             </div>
           );
         })}

@@ -22,6 +22,7 @@ import {
 } from "../../lib/api";
 import { formatInt } from "../../lib/format";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
+import { Page, PageHeader } from "../../components/page";
 
 /**
  * Shopping Lists — a group of named lists you fill while browsing other modules.
@@ -111,15 +112,17 @@ export function ShoppingPage() {
   }
 
   return (
-    <div className="p-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-zinc-100">Shopping Lists</h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          Build named lists of items to buy. Add from here, or with the “add to
-          list” buttons on Market Search, Production, Station Trading and
-          Daytrading.
-        </p>
-      </div>
+    <Page>
+      <PageHeader
+        title="Shopping Lists"
+        subtitle={
+          <>
+            Build named lists of items to buy. Add from here, or with the “add
+            to list” buttons on Market Search, Production, Station Trading and
+            Daytrading.
+          </>
+        }
+      />
 
       <ChatCapture onSync={refresh} lists={data ?? []} />
 
@@ -195,7 +198,7 @@ export function ShoppingPage() {
           )}
         </div>
       </div>
-    </div>
+    </Page>
   );
 }
 
@@ -310,9 +313,9 @@ function ChatCapture({
           an optional quantity after the name (
           <span className="text-zinc-300">Tritanium 100</span>, Multibuy
           tab-format works too). Anything that isn't a known item name is
-          ignored, and only messages after you press Start are captured. The same
-          item re-posted by the same person within a few seconds is treated as a
-          duplicate and skipped.
+          ignored, and only messages after you press Start are captured. The
+          same item re-posted by the same person within a few seconds is treated
+          as a duplicate and skipped.
         </p>
         <div className="flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-1 text-xs text-zinc-400">

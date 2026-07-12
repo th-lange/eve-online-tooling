@@ -22,16 +22,33 @@ import {
   SortHeaderCell,
   type SortColumn,
 } from "../../components/SortHeaderCell";
+import { Page, PageHeader, Centered } from "../../components/page";
 
 const FORGE = 10000002;
 const JITA = 60003760;
 type Tab = "opportunities" | "favorites" | "blacklist";
 
+const TITLE = "Reprocessing";
+const SUBTITLE =
+  "Ores ranked by reprocess-vs-sell — refine value per unit vs the ore's own market price.";
+
 export function ReprocessingPage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) return <Centered>Checking static data…</Centered>;
+  if (status.isLoading) {
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <Centered>Checking static data…</Centered>
+      </Page>
+    );
+  }
   if (!status.data?.installed) {
-    return <SdeSetup onInstalled={() => status.refetch()} />;
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <SdeSetup onInstalled={() => status.refetch()} />
+      </Page>
+    );
   }
   return <Workbench />;
 }
@@ -128,23 +145,20 @@ function Workbench() {
   }, [rows, search]);
 
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Reprocessing</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Ores ranked by reprocess-vs-sell — refine value per unit vs the
-            ore's own market price.
-          </p>
-        </div>
-        <button
-          onClick={() => run.mutate(params)}
-          disabled={run.isPending}
-          className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-        >
-          {run.isPending ? "Pricing…" : "Calculate"}
-        </button>
-      </div>
+    <Page>
+      <PageHeader
+        title={TITLE}
+        subtitle={SUBTITLE}
+        actions={
+          <button
+            onClick={() => run.mutate(params)}
+            disabled={run.isPending}
+            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+          >
+            {run.isPending ? "Pricing…" : "Calculate"}
+          </button>
+        }
+      />
 
       <div className="mt-4 grid grid-cols-2 gap-3 rounded border border-zinc-800 bg-zinc-900 p-3 md:grid-cols-4">
         <Field label="Region">
@@ -290,7 +304,7 @@ function Workbench() {
           />
         )}
       </div>
-    </div>
+    </Page>
   );
 }
 
@@ -614,11 +628,5 @@ function Num({
         className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
       />
     </Field>
-  );
-}
-
-function Centered({ children }: { children: ReactNode }) {
-  return (
-    <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
   );
 }

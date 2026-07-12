@@ -12,6 +12,9 @@ export interface AssetRow {
   volume: number;
   category: string | null;
   group: string | null;
+  /** Character name, or the corporation name for corp-hangar stock. */
+  owner: string;
+  isCorp: boolean;
 }
 
 export interface AssetsResult {
@@ -42,6 +45,14 @@ export interface AssetNode {
   volume: number;
   bestHub: string | null;
   isLocation: boolean;
+  /** Owning character or corp (set on item nodes; used for the per-item
+   *  owner badge and owner search — the tree is not grouped by owner). */
+  owner: string | null;
+  isCorp: boolean;
+  /** Classifiers for item nodes, for tree search. */
+  category: string | null;
+  group: string | null;
+  metaGroup: string | null;
   children: AssetNode[];
 }
 export interface AssetsTreeResult {

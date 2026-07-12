@@ -5,24 +5,12 @@ import { CornerDownLeft, Package, Search } from "lucide-react";
 import { modules } from "../modules/registry";
 import { sdeSearch } from "../lib/api";
 import { openItemInMarketSearch } from "../lib/deepLink";
+import { fuzzy } from "../lib/fuzzy";
 
 // A flat row in the result list — either a module jump or an item lookup.
 type Entry =
   | { kind: "module"; id: string; title: string; subtitle: string }
   | { kind: "item"; id: number; title: string; subtitle: string };
-
-/** Case-insensitive subsequence match — "stra" matches "Station Trading". */
-function fuzzy(haystack: string, needle: string): boolean {
-  if (!needle) return true;
-  const h = haystack.toLowerCase();
-  let i = 0;
-  for (const ch of needle.toLowerCase()) {
-    i = h.indexOf(ch, i);
-    if (i === -1) return false;
-    i += 1;
-  }
-  return true;
-}
 
 /**
  * ⌘K / Ctrl+K command palette: fuzzy-jump to any module (off the registry) and
