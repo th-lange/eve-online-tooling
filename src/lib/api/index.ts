@@ -28,3 +28,4 @@ export * from "./fitting";
 export * from "./shopping";
 export * from "./dpsmeter";
 export * from "./plugins";
+export * from "./mcp";
