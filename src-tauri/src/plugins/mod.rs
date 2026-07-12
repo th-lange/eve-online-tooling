@@ -7,6 +7,7 @@
 //! separate tickets. A plugin with an invalid manifest is skipped (logged),
 //! never fatal, so a single bad drop-in can't stop the app from booting.
 
+pub mod broker;
 pub mod manager;
 pub mod manifest;
 

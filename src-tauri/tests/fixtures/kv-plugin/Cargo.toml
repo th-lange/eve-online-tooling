@@ -1,0 +1,22 @@
+# Test fixture only — NOT part of the app build. Imports the broker's
+# `storage_get`/`storage_set` host functions to exercise capability gating.
+# Rebuild with:
+#   cargo build --release --target wasm32-unknown-unknown \
+#     --manifest-path tests/fixtures/kv-plugin/Cargo.toml
+#   cp tests/fixtures/kv-plugin/target/wasm32-unknown-unknown/release/kv_plugin.wasm \
+#      src/plugins/testdata/kv.wasm
+[package]
+name = "kv-plugin"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+extism-pdk = "1"
+
+[profile.release]
+opt-level = "s"
+strip = true
