@@ -42,6 +42,7 @@ pub fn run() {
                 .expect("could not resolve the app data directory");
             app.manage(market::MarketService::with_cache(dir.clone()));
             app.manage(plugins::PluginRegistry::load(&dir));
+            app.manage(plugins::PluginManager::new());
             app.manage(esi::AuthState::with_cache(dir));
             app.manage(modules::dpsmeter::commands::DpsState::default());
 
@@ -58,6 +59,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::ping,
             plugins::plugins_list,
+            plugins::manager::plugin_invoke,
             commands::eve_default_log_dir,
             esi::commands::auth_login,
             esi::commands::auth_characters,
