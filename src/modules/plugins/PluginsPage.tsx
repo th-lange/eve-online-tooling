@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Radio } from "lucide-react";
 import {
@@ -6,6 +7,8 @@ import {
   mcpStatus,
   mcpStart,
   mcpStop,
+  mcpConfig,
+  mcpSetPort,
   PERMISSION_LABELS,
   type PluginEntry,
 } from "../../lib/api";
@@ -125,12 +128,37 @@ function McpBridgeCard() {
   const qc = useQueryClient();
   const { copied, copy } = useCopyToClipboard();
   const status = useQuery({ queryKey: ["mcp"], queryFn: mcpStatus });
+  const config = useQuery({ queryKey: ["mcp", "config"], queryFn: mcpConfig });
+  const [portInput, setPortInput] = useState("");
   const toggle = useMutation({
     mutationFn: (next: boolean) => (next ? mcpStart() : mcpStop()),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["mcp"] }),
   });
+  const setPort = useMutation({
+    mutationFn: (port: number) => mcpSetPort(port),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mcp"] }),
+  });
   const data = status.data;
   const running = data?.running ?? false;
+  const configuredPort = config.data?.port ?? 0;
+  // Seed the input from the saved port; blank / 0 means "auto".
+  const portValue =
+    portInput !== "" ? portInput : configuredPort ? String(configuredPort) : "";
+
+  const snippet = data?.url
+    ? JSON.stringify(
+        {
+          mcpServers: {
+            "eve-online-tooling": {
+              url: data.url,
+              headers: { Authorization: `Bearer ${data.token ?? ""}` },
+            },
+          },
+        },
+        null,
+        2,
+      )
+    : "";
 
   return (
     <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
@@ -170,6 +198,28 @@ function McpBridgeCard() {
           {running ? "Deactivate" : "Activate"}
         </button>
       </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-zinc-500">Port</span>
+        <input
+          type="number"
+          value={portValue}
+          placeholder="auto"
+          onChange={(e) => setPortInput(e.currentTarget.value)}
+          className="w-24 rounded bg-zinc-800 px-2 py-1 text-zinc-100 outline-none placeholder:text-zinc-500"
+        />
+        <button
+          onClick={() => setPort.mutate(Number(portValue) || 0)}
+          disabled={setPort.isPending}
+          className="rounded border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+        >
+          Set
+        </button>
+        <span className="text-zinc-500">
+          0 / blank = auto. Changing it restarts a running bridge.
+        </span>
+      </div>
+
       {running && data?.url && (
         <div className="mt-3 flex flex-col gap-2 border-t border-zinc-800 pt-3">
           <ConnRow
@@ -184,6 +234,22 @@ function McpBridgeCard() {
             onCopy={() => copy(data.token ?? "", "token")}
             copied={copied === "token"}
           />
+          <div className="mt-1">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-xs text-zinc-500">
+                MCP client config — paste into your agent
+              </span>
+              <button
+                onClick={() => copy(snippet, "snippet")}
+                className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
+              >
+                {copied === "snippet" ? "Copied" : "Copy"}
+              </button>
+            </div>
+            <pre className="overflow-auto rounded bg-zinc-800 p-2 text-[11px] leading-relaxed text-zinc-300">
+              {snippet}
+            </pre>
+          </div>
         </div>
       )}
     </div>

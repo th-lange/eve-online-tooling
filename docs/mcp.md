@@ -13,7 +13,12 @@ information ever leaves the app, and no tool can change anything in-game.
 
 1. Open the **Plugins** page.
 2. On the **MCP bridge** card, click **Activate**.
-3. Copy the **URL** and **Token** shown on the card into your MCP client.
+3. Copy the **URL** and **Token** shown on the card into your MCP client — or
+   copy the ready-made **MCP client config** snippet shown right there.
+
+Optionally set a fixed **Port** on the card first (blank / `0` = an
+OS-assigned port). A fixed port keeps your client config stable across
+restarts; changing it while the bridge is running restarts it on the new port.
 
 Deactivate any time from the same card; the server stops immediately.
 
@@ -54,8 +59,9 @@ the token as a bearer header. A generic MCP HTTP-client entry looks like:
 }
 ```
 
-Use the exact URL + token shown on the MCP bridge card (the port and token are
-assigned per session — they change each time you activate the bridge). Refer to
+Use the exact URL + token shown on the MCP bridge card. The **token** is
+assigned per session (it changes each time you activate the bridge); the
+**port** is whatever you set, or an OS-assigned one when left on auto. Refer to
 your client's docs for where its MCP-server config lives.
 
 ## A note on "local"

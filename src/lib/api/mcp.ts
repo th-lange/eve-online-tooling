@@ -23,3 +23,19 @@ export function mcpStart(): Promise<McpStatus> {
 export function mcpStop(): Promise<McpStatus> {
   return invoke<McpStatus>("mcp_stop");
 }
+
+/** User-configurable MCP settings. */
+export interface McpConfig {
+  /** Preferred port (0 = OS-assigned / auto). */
+  port: number;
+}
+
+/** The current MCP configuration. */
+export function mcpConfig(): Promise<McpConfig> {
+  return invoke<McpConfig>("mcp_config");
+}
+
+/** Set the preferred port (0 = auto); restarts the bridge if running. */
+export function mcpSetPort(port: number): Promise<McpStatus> {
+  return invoke<McpStatus>("mcp_set_port", { port });
+}

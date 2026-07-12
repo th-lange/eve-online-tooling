@@ -38,7 +38,7 @@ const STOPPED: McpStatus = { running: false, url: null, token: null };
 function renderPage(entries: PluginEntry[], mcpStart: McpStatus = STOPPED) {
   // Stateful MCP mock: start/stop flip what status returns next.
   let mcp: McpStatus = mcpStart;
-  invokeMock.mockImplementation((cmd: string) => {
+  invokeMock.mockImplementation((cmd: string, args?: { port?: number }) => {
     switch (cmd) {
       case "plugins_list":
         return Promise.resolve(entries);
@@ -46,14 +46,20 @@ function renderPage(entries: PluginEntry[], mcpStart: McpStatus = STOPPED) {
         return Promise.resolve();
       case "mcp_status":
         return Promise.resolve(mcp);
+      case "mcp_config":
+        return Promise.resolve({ port: 0 });
       case "mcp_start":
         mcp = RUNNING;
         return Promise.resolve(mcp);
       case "mcp_stop":
         mcp = STOPPED;
         return Promise.resolve(mcp);
+      case "mcp_set_port":
+        return Promise.resolve(mcp);
       default:
-        return Promise.reject(new Error(`unexpected command ${cmd}`));
+        return Promise.reject(
+          new Error(`unexpected command ${cmd} ${JSON.stringify(args)}`),
+        );
     }
   });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -123,5 +129,17 @@ describe("PluginsPage", () => {
     // After activation the connection details appear.
     expect(await screen.findByText(RUNNING.url as string)).toBeInTheDocument();
     expect(screen.getByText(RUNNING.token as string)).toBeInTheDocument();
+  });
+
+  it("setting a port calls mcp_set_port", async () => {
+    renderPage([]);
+    await screen.findByText("MCP bridge");
+    const card = pluginCard("MCP bridge");
+    const input = within(card).getByPlaceholderText("auto");
+    fireEvent.change(input, { target: { value: "8477" } });
+    fireEvent.click(within(card).getByRole("button", { name: "Set" }));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("mcp_set_port", { port: 8477 }),
+    );
   });
 });
