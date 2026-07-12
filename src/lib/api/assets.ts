@@ -12,6 +12,9 @@ export interface AssetRow {
   volume: number;
   category: string | null;
   group: string | null;
+  /** Character name, or the corporation name for corp-hangar stock. */
+  owner: string;
+  isCorp: boolean;
 }
 
 export interface AssetsResult {

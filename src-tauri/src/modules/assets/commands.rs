@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
-use crate::esi::{fetch_assets, AuthState};
+use crate::esi::{corporation_id, fetch_assets, fetch_corp_assets, resolve_names, AuthState};
 use crate::market::{default_region_id, resolve_location, MarketService, PriceModel};
 use crate::sde::{Sde, SdePaths};
 use crate::storage;
@@ -23,7 +23,8 @@ pub struct AssetsParams {
     pub best_hub: bool,
 }
 
-/// One owned item type, aggregated across the roster and valued.
+/// One owned item type for one owner (a character, or a corporation hangar),
+/// aggregated and valued.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetRow {
@@ -38,6 +39,9 @@ pub struct AssetRow {
     pub volume: f64,
     pub category: Option<String>,
     pub group: Option<String>,
+    /// Character name, or the corporation name for corp-hangar stock.
+    pub owner: String,
+    pub is_corp: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -60,23 +64,60 @@ pub async fn assets_value(
 ) -> Result<AssetsResult, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
-
-    // Quantity per type across the roster (reuses the durable roster-stock cache).
-    let stock: HashMap<i64, i64> = match storage::cache_get(&dir, "roster_stock") {
-        Some(s) => s,
-        None => {
-            let mut s: HashMap<i64, i64> = HashMap::new();
-            for c in storage::load_roster(&dir) {
-                if let Ok(assets) = fetch_assets(&auth_state, c.character_id).await {
-                    for a in assets {
-                        *s.entry(a.type_id).or_default() += a.quantity;
+    // Quantity per (type, owner) across the roster — personal hangars plus,
+    // for each distinct corp represented in the roster, that corp's hangar
+    // (fetched once per corp, not once per character in it, so multiple
+    // roster alts in the same corp don't double-count its assets). Reuses the
+    // durable roster-stock cache.
+    let stock: HashMap<i64, HashMap<String, (bool, i64)>> =
+        match storage::cache_get(&dir, "roster_stock_v2") {
+            Some(s) => s,
+            None => {
+                let mut s: HashMap<i64, HashMap<String, (bool, i64)>> = HashMap::new();
+                let mut seen_corps: HashSet<i64> = HashSet::new();
+                for c in storage::load_roster(&dir) {
+                    if let Ok(assets) = fetch_assets(&auth_state, c.character_id).await {
+                        for a in assets {
+                            let entry = s
+                                .entry(a.type_id)
+                                .or_default()
+                                .entry(c.name.clone())
+                                .or_insert((false, 0));
+                            entry.1 += a.quantity;
+                        }
+                    }
+                    let Ok(corp_id) = corporation_id(&auth_state, c.character_id).await else {
+                        continue;
+                    };
+                    if !seen_corps.insert(corp_id) {
+                        continue;
+                    }
+                    let Ok(corp_assets) =
+                        fetch_corp_assets(&auth_state, c.character_id, corp_id).await
+                    else {
+                        continue;
+                    };
+                    if corp_assets.is_empty() {
+                        continue;
+                    }
+                    let corp_name = resolve_names(&auth_state, &[corp_id])
+                        .await
+                        .get(&corp_id)
+                        .cloned()
+                        .unwrap_or_else(|| format!("Corporation #{corp_id}"));
+                    for a in corp_assets {
+                        let entry = s
+                            .entry(a.type_id)
+                            .or_default()
+                            .entry(corp_name.clone())
+                            .or_insert((true, 0));
+                        entry.1 += a.quantity;
                     }
                 }
+                let _ = storage::cache_put(&dir, "roster_stock_v2", &s, 600);
+                s
             }
-            let _ = storage::cache_put(&dir, "roster_stock", &s, 600);
-            s
-        }
-    };
+        };
     if stock.is_empty() {
         return Ok(AssetsResult {
             rows: Vec::new(),
@@ -112,19 +153,21 @@ pub async fn assets_value(
     let groups = sde.group_names().map_err(|e| e.to_string())?;
 
     let (mut sell_total, mut buy_total, mut volume_total) = (0.0, 0.0, 0.0);
-    let mut rows: Vec<AssetRow> = stock
-        .into_iter()
-        .map(|(type_id, quantity)| {
-            let model = prices.get(&type_id);
-            let buy_price = model.and_then(|m| m.buy_percentile);
-            let (sell_price, sell_hub) = match best.get(&type_id) {
-                Some(b) => (Some(b.price), Some(b.hub.clone())),
-                None => (model.and_then(|m| m.sell_percentile), None),
-            };
-            let (name, vol_each) = name_vol
-                .get(&type_id)
-                .cloned()
-                .unwrap_or_else(|| (format!("Type {type_id}"), 0.0));
+    let mut rows: Vec<AssetRow> = Vec::new();
+    for (type_id, owners) in stock.into_iter() {
+        let model = prices.get(&type_id);
+        let buy_price = model.and_then(|m| m.buy_percentile);
+        let (sell_price, sell_hub) = match best.get(&type_id) {
+            Some(b) => (Some(b.price), Some(b.hub.clone())),
+            None => (model.and_then(|m| m.sell_percentile), None),
+        };
+        let (name, vol_each) = name_vol
+            .get(&type_id)
+            .cloned()
+            .unwrap_or_else(|| (format!("Type {type_id}"), 0.0));
+        let category = categories.get(&type_id).cloned();
+        let group = groups.get(&type_id).cloned();
+        for (owner, (is_corp, quantity)) in owners {
             let q = quantity as f64;
             let sell_value = sell_price.unwrap_or(0.0) * q;
             let buy_value = buy_price.unwrap_or(0.0) * q;
@@ -132,21 +175,23 @@ pub async fn assets_value(
             sell_total += sell_value;
             buy_total += buy_value;
             volume_total += volume;
-            AssetRow {
+            rows.push(AssetRow {
                 type_id,
-                name,
+                name: name.clone(),
                 quantity,
                 sell_price,
                 buy_price,
                 sell_value,
                 buy_value,
-                sell_hub,
+                sell_hub: sell_hub.clone(),
                 volume,
-                category: categories.get(&type_id).cloned(),
-                group: groups.get(&type_id).cloned(),
-            }
-        })
-        .collect();
+                category: category.clone(),
+                group: group.clone(),
+                owner,
+                is_corp,
+            });
+        }
+    }
     rows.sort_by(|a, b| {
         b.sell_value
             .partial_cmp(&a.sell_value)

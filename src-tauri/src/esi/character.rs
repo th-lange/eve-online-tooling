@@ -262,6 +262,42 @@ pub async fn fetch_corp_blueprints(
     Ok(out)
 }
 
+/// Corporation hangar/vault assets, using the character's token. Requires the
+/// `esi-assets.read_assets.v1` scope and a role with asset-hangar access; if
+/// the character lacks either, ESI returns 403 and we treat it as "none".
+pub async fn fetch_corp_assets(
+    auth: &AuthState,
+    character_id: i64,
+    corporation_id: i64,
+) -> Result<Vec<RawAsset>, AuthError> {
+    let token = auth.access_token_for(character_id).await?;
+    let url = format!("{ESI_BASE}/latest/corporations/{corporation_id}/assets/");
+    let resp = auth.http().get(&url).bearer_auth(&token).send().await?;
+    if resp.status() == reqwest::StatusCode::FORBIDDEN {
+        return Ok(Vec::new());
+    }
+    let resp = resp.error_for_status()?;
+    let pages: u32 = resp
+        .headers()
+        .get("x-pages")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+    let mut out: Vec<RawAsset> = resp.json().await?;
+    for page in 2..=pages {
+        let resp = auth
+            .http()
+            .get(&url)
+            .query(&[("page", page.to_string())])
+            .bearer_auth(&token)
+            .send()
+            .await?
+            .error_for_status()?;
+        out.extend(resp.json::<Vec<RawAsset>>().await?);
+    }
+    Ok(out)
+}
+
 /// An in-game saved fitting from ESI (`/characters|corporations/{id}/fittings/`).
 #[derive(Debug, Clone, Deserialize)]
 pub struct EsiFitting {

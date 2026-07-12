@@ -22,15 +22,34 @@ import {
   SortHeaderCell,
   type SortColumn,
 } from "../../components/SortHeaderCell";
+import { Page, PageHeader, Centered } from "../../components/page";
+import { fuzzy } from "../../lib/fuzzy";
+import { Building2, User } from "lucide-react";
 
 const FORGE = 10000002;
 const JITA = 60003760;
 
+const TITLE = "Assets";
+const SUBTITLE =
+  "Your roster's holdings, valued at a market — and where each stack is worth the most.";
+
 export function AssetsPage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) return <Centered>Checking static data…</Centered>;
+  if (status.isLoading) {
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <Centered>Checking static data…</Centered>
+      </Page>
+    );
+  }
   if (!status.data?.installed) {
-    return <SdeSetup onInstalled={() => status.refetch()} />;
+    return (
+      <Page>
+        <PageHeader title={TITLE} subtitle={SUBTITLE} />
+        <SdeSetup onInstalled={() => status.refetch()} />
+      </Page>
+    );
   }
   return <Workbench />;
 }
@@ -65,46 +84,39 @@ function Workbench() {
 
   const stations = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
   const rows = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const q = search.trim();
     const all = result?.rows ?? [];
     if (!q) return all;
     return all.filter((r) =>
-      [r.name, r.category, r.group]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(q),
+      fuzzy([r.name, r.category, r.group, r.owner].filter(Boolean).join(" "), q),
     );
   }, [result, search]);
 
   return (
-    <div className="p-6">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-100">Assets</h1>
-          <p className="mt-1 text-sm text-zinc-400">
-            Your roster's holdings, valued at a market — and where each stack is
-            worth the most.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => treeRun.mutate()}
-            disabled={treeRun.isPending}
-            className="rounded border border-zinc-700 px-4 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
-            title="Nested location tree, valued at the best hub"
-          >
-            {treeRun.isPending ? "Loading…" : "Location tree"}
-          </button>
-          <button
-            onClick={() => run.mutate({ regionId, stationId, bestHub })}
-            disabled={run.isPending}
-            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-          >
-            {run.isPending ? "Valuing…" : "Value assets"}
-          </button>
-        </div>
-      </div>
+    <Page>
+      <PageHeader
+        title={TITLE}
+        subtitle={SUBTITLE}
+        actions={
+          <div className="flex gap-2">
+            <button
+              onClick={() => treeRun.mutate()}
+              disabled={treeRun.isPending}
+              className="rounded border border-zinc-700 px-4 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+              title="Nested location tree, valued at the best hub"
+            >
+              {treeRun.isPending ? "Loading…" : "Location tree"}
+            </button>
+            <button
+              onClick={() => run.mutate({ regionId, stationId, bestHub })}
+              disabled={run.isPending}
+              className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+            >
+              {run.isPending ? "Valuing…" : "Value assets"}
+            </button>
+          </div>
+        }
+      />
 
       {treeRun.isError && (
         <div className="mt-3 text-sm text-rose-400">
@@ -191,23 +203,35 @@ function Workbench() {
           <input
             value={search}
             onChange={(e) => setSearch(e.currentTarget.value)}
-            placeholder="Search name / category / group…"
+            placeholder="Fuzzy search: name / category / group / owner…"
             className="mt-3 w-72 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
           />
           <AssetTable rows={rows} />
         </>
       )}
-    </div>
+    </Page>
   );
 }
 
-type AssetSortKey = "name" | "quantity" | "sellPrice" | "sellValue" | "volume";
+type AssetSortKey =
+  | "name"
+  | "owner"
+  | "quantity"
+  | "sellPrice"
+  | "sellValue"
+  | "volume";
 const ASSET_COLUMNS: SortColumn<AssetSortKey>[] = [
   {
     key: "name",
     label: "Item",
     numeric: false,
     description: "The item (+ best sell hub).",
+  },
+  {
+    key: "owner",
+    label: "Owner",
+    numeric: false,
+    description: "The character, or corporation, holding this stack.",
   },
   {
     key: "quantity",
@@ -263,7 +287,7 @@ function AssetTable({ rows }: { rows: AssetRow[] }) {
         </thead>
         <tbody>
           {sorted.map((r) => (
-            <Row key={r.typeId} r={r} />
+            <Row key={`${r.typeId}-${r.owner}`} r={r} />
           ))}
         </tbody>
       </table>
@@ -288,6 +312,19 @@ function Row({ r }: { r: AssetRow }) {
             {[r.category, r.group].filter(Boolean).join(" · ")}
           </div>
         )}
+      </td>
+      <td className="px-3 py-1.5">
+        <span
+          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs ${
+            r.isCorp
+              ? "bg-sky-950 text-sky-300"
+              : "bg-zinc-800 text-zinc-300"
+          }`}
+          title={r.isCorp ? "Corporation hangar" : "Personal hangar"}
+        >
+          {r.isCorp ? <Building2 size={11} /> : <User size={11} />}
+          {r.owner}
+        </span>
       </td>
       <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
         {formatInt(r.quantity)}
@@ -386,8 +423,3 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function Centered({ children }: { children: ReactNode }) {
-  return (
-    <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
-  );
-}
