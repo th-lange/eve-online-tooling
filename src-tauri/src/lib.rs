@@ -22,6 +22,7 @@ mod lists;
 mod market;
 mod model;
 mod modules;
+mod plugins;
 mod sde;
 mod storage;
 
@@ -40,6 +41,7 @@ pub fn run() {
                 .app_data_dir()
                 .expect("could not resolve the app data directory");
             app.manage(market::MarketService::with_cache(dir.clone()));
+            app.manage(plugins::PluginRegistry::load(&dir));
             app.manage(esi::AuthState::with_cache(dir));
             app.manage(modules::dpsmeter::commands::DpsState::default());
 
@@ -55,6 +57,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::ping,
+            plugins::plugins_list,
             commands::eve_default_log_dir,
             esi::commands::auth_login,
             esi::commands::auth_characters,

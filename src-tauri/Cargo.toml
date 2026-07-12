@@ -39,4 +39,5 @@ base64 = "0.22"
 httpdate = "1"
 rand = "0.8"
 tiny_http = "0.12"
+semver = "1.0.28"
 
