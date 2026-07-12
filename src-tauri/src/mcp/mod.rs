@@ -77,14 +77,15 @@ pub struct McpStatus {
 }
 
 impl McpState {
-    /// Start the server (idempotent) with the given read-only tool context.
-    pub fn start(&self, ctx: Arc<ToolCtx>) -> Result<McpStatus, String> {
+    /// Start the server (idempotent) with the given read-only tool context,
+    /// bound to `port` (`0` = an OS-assigned ephemeral port).
+    pub fn start(&self, ctx: Arc<ToolCtx>, port: u16) -> Result<McpStatus, String> {
         let mut guard = self.running.lock();
         if let Some(r) = guard.as_ref() {
             return Ok(status_of(Some(r)));
         }
-        let server = tiny_http::Server::http(("127.0.0.1", 0))
-            .map_err(|e| format!("could not start MCP server: {e}"))?;
+        let server = tiny_http::Server::http(("127.0.0.1", port))
+            .map_err(|e| format!("could not start MCP server on port {port}: {e}"))?;
         let addr = server
             .server_addr()
             .to_ip()
@@ -539,16 +540,36 @@ fn text_response(status: u16, body: &str) -> tiny_http::Response<std::io::Cursor
     tiny_http::Response::from_string(body).with_status_code(status)
 }
 
-/// Start the MCP bridge; returns its status (URL + token). The tool context is
-/// built here from read-only handles only.
+/// Persisted MCP config key: the configured port (`0` = auto).
+const PORT_KEY: &str = "mcp_port";
+
+/// User-configurable MCP settings.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpConfig {
+    /// Preferred port (`0` = OS-assigned ephemeral).
+    pub port: u16,
+}
+
+fn configured_port(dir: &std::path::Path) -> u16 {
+    crate::storage::load_data::<u16>(dir, PORT_KEY).unwrap_or(0)
+}
+
+fn build_ctx(dir: &std::path::Path) -> Arc<ToolCtx> {
+    Arc::new(ToolCtx {
+        app_data_dir: dir.to_path_buf(),
+        market: MarketService::with_cache(dir.to_path_buf()),
+    })
+}
+
+/// Start the MCP bridge on the configured port; returns its status. The tool
+/// context is built here from read-only handles only.
 #[tauri::command]
 pub fn mcp_start(app: AppHandle, state: State<'_, McpState>) -> Result<McpStatus, AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let ctx = Arc::new(ToolCtx {
-        app_data_dir: dir.clone(),
-        market: MarketService::with_cache(dir),
-    });
-    state.start(ctx).map_err(AppError::from)
+    state
+        .start(build_ctx(&dir), configured_port(&dir))
+        .map_err(AppError::from)
 }
 
 /// Stop the MCP bridge.
@@ -561,6 +582,32 @@ pub fn mcp_stop(state: State<'_, McpState>) -> McpStatus {
 #[tauri::command]
 pub fn mcp_status(state: State<'_, McpState>) -> McpStatus {
     state.status()
+}
+
+/// The current MCP configuration (preferred port).
+#[tauri::command]
+pub fn mcp_config(app: AppHandle) -> Result<McpConfig, AppError> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(McpConfig {
+        port: configured_port(&dir),
+    })
+}
+
+/// Set the preferred port (`0` = auto). If the bridge is running, it restarts
+/// on the new port so the change takes effect immediately.
+#[tauri::command]
+pub fn mcp_set_port(
+    app: AppHandle,
+    state: State<'_, McpState>,
+    port: u16,
+) -> Result<McpStatus, AppError> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    crate::storage::save_data(&dir, PORT_KEY, &port).map_err(AppError::from)?;
+    if state.status().running {
+        state.stop();
+        state.start(build_ctx(&dir), port).map_err(AppError::from)?;
+    }
+    Ok(state.status())
 }
 
 #[cfg(test)]
@@ -716,6 +763,16 @@ mod tests {
     }
 
     #[test]
+    fn configured_port_persists_and_defaults_to_auto() {
+        let dir = tmp("port");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(configured_port(&dir), 0); // default = ephemeral
+        crate::storage::save_data(&dir, PORT_KEY, &8477u16).unwrap();
+        assert_eq!(configured_port(&dir), 8477);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_notification_gets_no_response() {
         let (_d, ctx) = ctx_with_sde("note");
         let note = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
@@ -761,7 +818,7 @@ mod tests {
             market: MarketService::with_cache(dir.clone()),
         });
         let state = McpState::default();
-        let started = state.start(ctx).unwrap();
+        let started = state.start(ctx, 0).unwrap();
         let url = started.url.clone().unwrap();
         let token = started.token.clone().unwrap();
         let addr: SocketAddr = url

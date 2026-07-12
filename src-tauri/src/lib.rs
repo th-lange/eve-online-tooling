@@ -66,6 +66,8 @@ pub fn run() {
             mcp::mcp_start,
             mcp::mcp_stop,
             mcp::mcp_status,
+            mcp::mcp_config,
+            mcp::mcp_set_port,
             commands::eve_default_log_dir,
             esi::commands::auth_login,
             esi::commands::auth_characters,
