@@ -1,9 +1,15 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { PluginsPage } from "./PluginsPage";
-import type { PluginEntry } from "../../lib/api";
+import type { McpStatus, PluginEntry } from "../../lib/api";
 
 const invokeMock = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
@@ -22,11 +28,33 @@ const PLUGIN: PluginEntry = {
   active: false,
 };
 
-function renderPage(entries: PluginEntry[]) {
+const RUNNING: McpStatus = {
+  running: true,
+  url: "http://127.0.0.1:54321/mcp",
+  token: "test-token-abc",
+};
+const STOPPED: McpStatus = { running: false, url: null, token: null };
+
+function renderPage(entries: PluginEntry[], mcpStart: McpStatus = STOPPED) {
+  // Stateful MCP mock: start/stop flip what status returns next.
+  let mcp: McpStatus = mcpStart;
   invokeMock.mockImplementation((cmd: string) => {
-    if (cmd === "plugins_list") return Promise.resolve(entries);
-    if (cmd === "plugin_set_active") return Promise.resolve();
-    return Promise.reject(new Error(`unexpected command ${cmd}`));
+    switch (cmd) {
+      case "plugins_list":
+        return Promise.resolve(entries);
+      case "plugin_set_active":
+        return Promise.resolve();
+      case "mcp_status":
+        return Promise.resolve(mcp);
+      case "mcp_start":
+        mcp = RUNNING;
+        return Promise.resolve(mcp);
+      case "mcp_stop":
+        mcp = STOPPED;
+        return Promise.resolve(mcp);
+      default:
+        return Promise.reject(new Error(`unexpected command ${cmd}`));
+    }
   });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
@@ -35,10 +63,12 @@ function renderPage(entries: PluginEntry[]) {
   return render(<PluginsPage />, { wrapper });
 }
 
+/** The plugin's card (scoped so its button doesn't collide with the bridge). */
+function pluginCard(name: string): HTMLElement {
+  return screen.getByText(name).closest("div.rounded-lg") as HTMLElement;
+}
+
 describe("PluginsPage", () => {
-  // NB: brace the body — a bare `() => invokeMock.mockReset()` returns the mock
-  // fn, which Vitest would treat as a teardown callback and *call* (a spurious
-  // zero-arg invoke).
   beforeEach(() => {
     invokeMock.mockReset();
   });
@@ -46,17 +76,18 @@ describe("PluginsPage", () => {
   it("lists an installed plugin and the capabilities it declares", async () => {
     renderPage([PLUGIN]);
     expect(await screen.findByText("Pricing Model")).toBeInTheDocument();
-    // Declared permissions are shown (human-readable) so the user sees them.
     expect(
       screen.getByText("Read static game data (items, blueprints)"),
     ).toBeInTheDocument();
     expect(screen.getByText("Store its own private data")).toBeInTheDocument();
-    expect(screen.getByText("Inactive")).toBeInTheDocument();
   });
 
   it("activating a plugin calls plugin_set_active(id, true)", async () => {
     renderPage([PLUGIN]);
-    const button = await screen.findByRole("button", { name: "Activate" });
+    const card = await screen.findByText("Pricing Model");
+    const button = within(
+      card.closest("div.rounded-lg") as HTMLElement,
+    ).getByRole("button", { name: "Activate" });
     fireEvent.click(button);
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("plugin_set_active", {
@@ -71,5 +102,26 @@ describe("PluginsPage", () => {
     expect(
       await screen.findByText(/No plugins installed/i),
     ).toBeInTheDocument();
+  });
+
+  it("shows the MCP bridge inactive by default with no token", async () => {
+    renderPage([]);
+    expect(await screen.findByText("MCP bridge")).toBeInTheDocument();
+    const card = pluginCard("MCP bridge");
+    expect(within(card).getByText("Inactive")).toBeInTheDocument();
+    // No token/url surfaced while inactive.
+    expect(screen.queryByText("Token")).toBeNull();
+    expect(screen.queryByText("URL")).toBeNull();
+  });
+
+  it("activating the MCP bridge calls mcp_start and reveals url + token", async () => {
+    renderPage([]);
+    await screen.findByText("MCP bridge");
+    const card = pluginCard("MCP bridge");
+    fireEvent.click(within(card).getByRole("button", { name: "Activate" }));
+    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("mcp_start"));
+    // After activation the connection details appear.
+    expect(await screen.findByText(RUNNING.url as string)).toBeInTheDocument();
+    expect(screen.getByText(RUNNING.token as string)).toBeInTheDocument();
   });
 });
