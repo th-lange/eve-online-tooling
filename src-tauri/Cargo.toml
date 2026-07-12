@@ -41,4 +41,5 @@ rand = "0.8"
 tiny_http = "0.12"
 semver = "1.0.28"
 extism = "1.30.0"
+parking_lot = "0.12.5"
 

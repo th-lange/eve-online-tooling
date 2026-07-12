@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// writes in `plugin.json` (e.g. `"market:read"`); serde rejects any unknown
 /// string, which is exactly how "reject unknown permission strings" is
 /// enforced — the deserialize fails before validation even runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Permission {
     /// Read market prices via the capability broker.
     #[serde(rename = "market:read")]

@@ -2,24 +2,24 @@
 //! into it at runtime through one generic `plugin_invoke` command — the way
 //! around `tauri::generate_handler!` being fixed at compile time.
 //!
-//! This ticket wires the plumbing only. A plugin runs sandboxed with **no**
-//! host functions, so even a plugin that was granted nothing still executes —
-//! it just can't reach any host service. Capability enforcement (host
-//! functions gated by granted permissions) is a separate ticket.
-//!
-//! Every instance is capped: a memory ceiling and a per-call timeout (Extism's
-//! epoch interruption) so a runaway or memory-hungry plugin is terminated with
-//! an error rather than hanging or exhausting the app.
+//! Each plugin is instantiated with exactly the host functions its granted
+//! permissions entitle it to (see [`crate::plugins::broker`]) and nothing
+//! else, under a memory cap and a per-call timeout (Extism epoch
+//! interruption) so a runaway or memory-hungry plugin is terminated with an
+//! error rather than hanging.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::Arc;
 use std::time::Duration;
 
-use extism::{Manifest as ExtismManifest, Plugin, PluginBuilder, Wasm};
+use extism::{Function, Manifest as ExtismManifest, Plugin, PluginBuilder, Wasm};
+use parking_lot::Mutex;
 use serde_json::Value;
 use tauri::{AppHandle, Manager as _, State};
 
+use super::broker::{host_functions, BrokerCtx};
+use super::manifest::Permission;
 use super::PluginRegistry;
 use crate::model::AppError;
 
@@ -41,13 +41,15 @@ impl Default for Limits {
     }
 }
 
-/// Build a sandboxed Extism plugin from raw wasm bytes under `limits`.
-fn build_plugin(wasm: &[u8], limits: &Limits) -> Result<Plugin, String> {
+/// Build a sandboxed Extism plugin from raw wasm bytes under `limits`, exposing
+/// only `functions` (the broker-gated host functions this plugin was granted).
+fn build_plugin(wasm: &[u8], limits: &Limits, functions: Vec<Function>) -> Result<Plugin, String> {
     let manifest = ExtismManifest::new([Wasm::data(wasm.to_vec())])
         .with_memory_max(limits.max_pages)
         .with_timeout(limits.timeout);
     PluginBuilder::new(manifest)
         .with_wasi(true)
+        .with_functions(functions)
         .build()
         .map_err(|e| format!("failed to instantiate plugin: {e}"))
 }
@@ -65,25 +67,29 @@ impl PluginManager {
         Self::default()
     }
 
-    /// Call `func` on the plugin `id`, loading it from `wasm_path` on first use.
-    /// Input/output are opaque bytes (the command layer speaks JSON). A failed
-    /// call evicts the cached instance — an interrupted (timed-out) Extism
-    /// instance can't be reused, so the next call rebuilds it fresh.
-    fn call_raw(
+    /// Call `func` on plugin `id`, building it on first use with the host
+    /// functions its `granted` permissions allow. Input/output are opaque bytes
+    /// (the command layer speaks JSON). A failed call evicts the cached
+    /// instance — an interrupted (timed-out) Extism instance can't be reused.
+    fn invoke(
         &self,
-        wasm_path: &Path,
+        app_data_dir: &Path,
         id: &str,
+        granted: &HashSet<Permission>,
+        wasm_path: &Path,
         func: &str,
         args: &[u8],
     ) -> Result<Vec<u8>, String> {
-        let mut loaded = self
-            .loaded
-            .lock()
-            .map_err(|_| "plugin manager lock poisoned".to_string())?;
+        let mut loaded = self.loaded.lock();
         if !loaded.contains_key(id) {
             let bytes = std::fs::read(wasm_path)
                 .map_err(|e| format!("cannot read plugin wasm {wasm_path:?}: {e}"))?;
-            loaded.insert(id.to_string(), build_plugin(&bytes, &self.limits)?);
+            let ctx = Arc::new(BrokerCtx::new(app_data_dir.to_path_buf(), id.to_string()));
+            let functions = host_functions(granted, ctx);
+            loaded.insert(
+                id.to_string(),
+                build_plugin(&bytes, &self.limits, functions)?,
+            );
         }
         let plugin = loaded.get_mut(id).expect("present: just inserted");
         let result = plugin
@@ -124,11 +130,12 @@ pub fn plugin_invoke(
             "plugin {plugin_id:?} wasm path {wasm_rel:?} must be relative to its dir"
         )));
     }
+    let granted: HashSet<Permission> = entry.granted.iter().copied().collect();
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let wasm_path = dir.join("plugins").join(&plugin_id).join(wasm_rel);
 
     let input = serde_json::to_vec(&args).map_err(|e| e.to_string())?;
-    let out = manager.call_raw(&wasm_path, &plugin_id, &r#fn, &input)?;
+    let out = manager.invoke(&dir, &plugin_id, &granted, &wasm_path, &r#fn, &input)?;
     let value = serde_json::from_slice::<Value>(&out)
         .map_err(|e| AppError::from(format!("plugin {plugin_id:?} returned non-JSON: {e}")))?;
     Ok(value)
@@ -137,17 +144,24 @@ pub fn plugin_invoke(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     const ECHO_WASM: &[u8] = include_bytes!("testdata/echo.wasm");
 
-    fn testdata_wasm() -> std::path::PathBuf {
+    fn echo_path() -> std::path::PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("src/plugins/testdata/echo.wasm")
+    }
+    fn kv_path() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/plugins/testdata/kv.wasm")
+    }
+    fn tmp(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("eve-mgr-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
     }
 
     #[test]
     fn echo_round_trips_a_json_payload() {
-        let mut plugin = build_plugin(ECHO_WASM, &Limits::default()).unwrap();
+        let mut plugin = build_plugin(ECHO_WASM, &Limits::default(), Vec::new()).unwrap();
         let out = plugin
             .call::<&[u8], Vec<u8>>("echo", br#"{"hello":"world","n":42}"#)
             .unwrap();
@@ -161,18 +175,23 @@ mod tests {
             max_pages: 1024,
             timeout: Duration::from_millis(200),
         };
-        let mut plugin = build_plugin(ECHO_WASM, &limits).unwrap();
-        // `spin` loops forever; epoch interruption must kill it -> Err, no hang.
-        let result = plugin.call::<&[u8], Vec<u8>>("spin", b"{}");
-        assert!(result.is_err());
+        let mut plugin = build_plugin(ECHO_WASM, &limits, Vec::new()).unwrap();
+        assert!(plugin.call::<&[u8], Vec<u8>>("spin", b"{}").is_err());
     }
 
     #[test]
     fn manager_loads_caches_and_dispatches() {
         let manager = PluginManager::new();
-        let path = testdata_wasm();
+        let dir = tmp("dispatch");
         let out = manager
-            .call_raw(&path, "echo-fixture", "echo", br#"{"a":1}"#)
+            .invoke(
+                &dir,
+                "echo",
+                &HashSet::new(),
+                &echo_path(),
+                "echo",
+                br#"{"a":1}"#,
+            )
             .unwrap();
         assert_eq!(
             serde_json::from_slice::<Value>(&out).unwrap(),
@@ -180,7 +199,14 @@ mod tests {
         );
         // Second call reuses the cached instance.
         let out2 = manager
-            .call_raw(&path, "echo-fixture", "echo", br#"{"a":2}"#)
+            .invoke(
+                &dir,
+                "echo",
+                &HashSet::new(),
+                &echo_path(),
+                "echo",
+                br#"{"a":2}"#,
+            )
             .unwrap();
         assert_eq!(
             serde_json::from_slice::<Value>(&out2).unwrap(),
@@ -189,9 +215,60 @@ mod tests {
     }
 
     #[test]
-    fn unknown_function_is_an_error_not_a_panic() {
+    fn granted_plugin_can_use_its_storage() {
         let manager = PluginManager::new();
-        let result = manager.call_raw(&testdata_wasm(), "echo-fixture", "nope", b"{}");
-        assert!(result.is_err());
+        let dir = tmp("granted");
+        let granted = HashSet::from([Permission::StorageOwn]);
+        manager
+            .invoke(&dir, "acme", &granted, &kv_path(), "kv_set", br#""hello""#)
+            .unwrap();
+        let got = manager
+            .invoke(&dir, "acme", &granted, &kv_path(), "kv_get", br#""""#)
+            .unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&got).unwrap(), "hello");
+        // Persisted inside the plugin's own namespaced dir.
+        assert!(dir.join("plugins/acme/kv/shared").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ungranted_plugin_fails_to_instantiate() {
+        let manager = PluginManager::new();
+        let dir = tmp("ungranted");
+        // No StorageOwn grant -> storage host fns absent -> unresolved import.
+        let err = manager
+            .invoke(
+                &dir,
+                "acme",
+                &HashSet::new(),
+                &kv_path(),
+                "kv_get",
+                br#""""#,
+            )
+            .unwrap_err();
+        assert!(!err.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn storage_is_namespaced_per_plugin() {
+        let manager = PluginManager::new();
+        let dir = tmp("namespace");
+        let granted = HashSet::from([Permission::StorageOwn]);
+        // Plugin A stores a value.
+        manager
+            .invoke(&dir, "a", &granted, &kv_path(), "kv_set", br#""from-a""#)
+            .unwrap();
+        // Plugin B reads its own (empty) storage — cannot see A's.
+        let b = manager
+            .invoke(&dir, "b", &granted, &kv_path(), "kv_get", br#""""#)
+            .unwrap();
+        assert!(b.is_empty(), "plugin B must not see plugin A's data");
+        // A still sees its own value.
+        let a = manager
+            .invoke(&dir, "a", &granted, &kv_path(), "kv_get", br#""""#)
+            .unwrap();
+        assert_eq!(serde_json::from_slice::<Value>(&a).unwrap(), "from-a");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
