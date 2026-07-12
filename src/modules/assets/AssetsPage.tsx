@@ -225,7 +225,7 @@ function Workbench() {
           />
           <div className="mt-2 rounded border border-zinc-800">
             {treeRoots.map((n) => (
-              <TreeRow key={n.id} node={n} depth={0} forceOpen={treeSearching} />
+              <TreeRow key={n.id} node={n} depth={0} />
             ))}
             {treeRoots.length === 0 && (
               <div className="px-3 py-6 text-center text-sm text-zinc-500">
@@ -493,21 +493,13 @@ function filterTree(
   return out;
 }
 
-/** A collapsible row in the asset location tree (locations expanded by default;
- *  everything forced open while a search is active). Top-level items (direct
- *  children of a location) carry an owner badge; nested contents inherit it. */
-function TreeRow({
-  node,
-  depth,
-  forceOpen,
-}: {
-  node: AssetNode;
-  depth: number;
-  forceOpen: boolean;
-}) {
+/** A collapsible row in the asset location tree (locations open by default,
+ *  everything else collapsed — searching filters but never auto-expands, so
+ *  matches inside a container stay tucked until you open it). Top-level items
+ *  (direct children of a location) carry an owner badge; contents inherit it. */
+function TreeRow({ node, depth }: { node: AssetNode; depth: number }) {
   const [open, setOpen] = useState(depth === 0);
   const hasChildren = node.children.length > 0;
-  const expanded = forceOpen || open;
   const showOwner = depth === 1 && !node.isLocation && node.owner;
   return (
     <>
@@ -521,7 +513,7 @@ function TreeRow({
               onClick={() => setOpen(!open)}
               className="w-4 text-zinc-500"
             >
-              {expanded ? "▾" : "▸"}
+              {open ? "▾" : "▸"}
             </button>
           ) : (
             <span className="w-4" />
@@ -561,14 +553,9 @@ function TreeRow({
           {formatIsk(node.sellValue)}
         </span>
       </div>
-      {expanded &&
+      {open &&
         node.children.map((c) => (
-          <TreeRow
-            key={c.id}
-            node={c}
-            depth={depth + 1}
-            forceOpen={forceOpen}
-          />
+          <TreeRow key={c.id} node={c} depth={depth + 1} />
         ))}
     </>
   );
