@@ -290,6 +290,7 @@ pub async fn pi_overview(
 }
 
 /// Assemble one colony's view (splits ESI + SDE joins from the async fetch).
+#[allow(clippy::too_many_arguments)]
 fn build_colony(
     colony: &EsiColony,
     planet: &EsiPlanet,
