@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 /** A capability a plugin can declare in its manifest. */
 export type PluginPermission =
-  "market:read" | "sde:read" | "assets:read" | "storage:own";
+  "market:read" | "sde:read" | "assets:read" | "storage:own" | "net:fetch";
 
 /** Human-readable description of what each permission grants — shown on the
  *  Plugins page so the user sees what activating a plugin allows. */
@@ -11,6 +11,7 @@ export const PERMISSION_LABELS: Record<PluginPermission, string> = {
   "sde:read": "Read static game data (items, blueprints)",
   "assets:read": "Read your assets",
   "storage:own": "Store its own private data",
+  "net:fetch": "Make network requests to specific sites",
 };
 
 /** A plugin's `plugin.json`, as parsed by the host. */
@@ -22,6 +23,8 @@ export interface PluginManifest {
   wasm?: string;
   ui?: string;
   permissions: PluginPermission[];
+  /** Hosts the plugin may contact (only when it requests net:fetch). */
+  allowedHosts?: string[];
 }
 
 /** An installed plugin plus whether it is currently activated. */
