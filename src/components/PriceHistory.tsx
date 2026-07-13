@@ -1,17 +1,33 @@
-import { useState, type MouseEvent } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import type { HistoryPoint } from "../lib/api";
 import { formatInt, formatIsk } from "../lib/format";
 
 // Price/volume history charts (Donchian channel, moving average, daily median)
 // + the summary/table, shared by Market Search and the production history popover.
 
-const MA_PERIODS = [7, 20, 50, 90] as const;
+const WINDOWS = [7, 30, 90, 180, 400] as const;
+// MA/Donchian look-back, derived from the visible range so the overlays stay
+// proportional to the window instead of needing a separate control.
+const PERIOD_FOR: Record<number, number> = {
+  7: 3,
+  30: 7,
+  90: 20,
+  180: 50,
+  400: 90,
+};
 
-export function PriceHistoryView({ series }: { series: HistoryPoint[] }) {
-  const [period, setPeriod] = useState(20);
+export function PriceHistoryView({ history }: { history: HistoryPoint[] }) {
+  const [windowDays, setWindowDays] = useState(90);
+  const period =
+    PERIOD_FOR[windowDays] ?? Math.max(2, Math.round(windowDays / 4));
   const [showChannel, setShowChannel] = useState(true);
   const [showMa, setShowMa] = useState(true);
   const [showMedian, setShowMedian] = useState(true);
+
+  const series = useMemo(
+    () => history.slice(-windowDays),
+    [history, windowDays],
+  );
 
   const last = series[series.length - 1];
   const avgVol = Math.round(
@@ -26,15 +42,15 @@ export function PriceHistoryView({ series }: { series: HistoryPoint[] }) {
         <Stat label="Avg volume/day" value={formatInt(avgVol)} />
         <div className="ml-auto flex items-center gap-3 text-xs text-zinc-400">
           <label className="flex items-center gap-1">
-            Period
+            Range
             <select
-              value={period}
-              onChange={(e) => setPeriod(Number(e.currentTarget.value))}
+              value={windowDays}
+              onChange={(e) => setWindowDays(Number(e.currentTarget.value))}
               className="rounded bg-zinc-800 px-2 py-1 text-zinc-100 outline-none"
             >
-              {MA_PERIODS.map((p) => (
-                <option key={p} value={p}>
-                  {p}d
+              {WINDOWS.map((d) => (
+                <option key={d} value={d}>
+                  {d >= 400 ? "All" : `${d} days`}
                 </option>
               ))}
             </select>
@@ -187,6 +203,7 @@ function PriceChart({
   showMedian: boolean;
 }) {
   const [hover, setHover] = useState<number | null>(null);
+  const [hoverY, setHoverY] = useState<number | null>(null);
   const w = 960;
   const h = 320;
   const padX = 8;
@@ -214,6 +231,9 @@ function PriceChart({
   const x = (i: number) =>
     padX + (i / Math.max(series.length - 1, 1)) * (w - 2 * padX);
   const y = (v: number) => padY + (1 - (v - min) / span) * (h - 2 * padY);
+  // Invert the y-scale so the cursor's vertical position reads as a price.
+  const priceAtY = (yy: number) =>
+    min + span * (1 - (yy - padY) / (h - 2 * padY));
   const line = (vals: number[]) =>
     vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
   const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => padY + f * (h - 2 * padY));
@@ -227,10 +247,12 @@ function PriceChart({
   function onMove(e: MouseEvent<SVGSVGElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
     const rx = ((e.clientX - rect.left) / rect.width) * w;
+    const ry = ((e.clientY - rect.top) / rect.height) * h;
     const i = Math.round(
       ((rx - padX) / (w - 2 * padX)) * Math.max(series.length - 1, 1),
     );
     setHover(Math.max(0, Math.min(series.length - 1, i)));
+    setHoverY(Math.max(padY, Math.min(h - padY, ry)));
   }
 
   return (
@@ -252,88 +274,111 @@ function PriceChart({
             : `${formatIsk(min)} – ${formatIsk(max)}`}
         </span>
       </div>
-      <svg
-        viewBox={`0 0 ${w} ${h}`}
-        preserveAspectRatio="none"
-        className="w-full"
-        style={{ height: h }}
-        onMouseMove={onMove}
-        onMouseLeave={() => setHover(null)}
-      >
-        {grid.map((gy, i) => (
-          <line
-            key={i}
-            x1={padX}
-            x2={w - padX}
-            y1={gy}
-            y2={gy}
-            stroke="#27272a"
-            strokeWidth="0.75"
-          />
-        ))}
-        {showChannel && (
-          <>
-            <polygon
-              points={band}
-              fill="#38bdf8"
-              fillOpacity="0.08"
-              stroke="none"
-            />
-            <polyline
-              points={line(upper)}
-              fill="none"
-              stroke="#38bdf8"
-              strokeWidth="1"
-              strokeDasharray="3 3"
-              strokeOpacity="0.8"
-            />
-            <polyline
-              points={line(lower)}
-              fill="none"
-              stroke="#38bdf8"
-              strokeWidth="1"
-              strokeDasharray="3 3"
-              strokeOpacity="0.8"
-            />
-          </>
-        )}
-        {showMedian && (
-          <polyline
-            points={line(med)}
-            fill="none"
-            stroke="#a78bfa"
-            strokeWidth="1.5"
-            strokeDasharray="5 4"
-          />
-        )}
-        <polyline
-          points={line(avg)}
-          fill="none"
-          stroke="#34d399"
-          strokeWidth="1.5"
-        />
-        {showMa && (
-          <polyline
-            points={line(ma)}
-            fill="none"
-            stroke="#f59e0b"
-            strokeWidth="1.5"
-          />
-        )}
-        {hover != null && (
-          <g>
+      <div className="relative">
+        <svg
+          viewBox={`0 0 ${w} ${h}`}
+          preserveAspectRatio="none"
+          className="w-full"
+          style={{ height: h }}
+          onMouseMove={onMove}
+          onMouseLeave={() => {
+            setHover(null);
+            setHoverY(null);
+          }}
+        >
+          {grid.map((gy, i) => (
             <line
-              x1={x(hover)}
-              x2={x(hover)}
-              y1={padY}
-              y2={h - padY}
-              stroke="#52525b"
+              key={i}
+              x1={padX}
+              x2={w - padX}
+              y1={gy}
+              y2={gy}
+              stroke="#27272a"
               strokeWidth="0.75"
             />
-            <circle cx={x(hover)} cy={y(avg[hover])} r="3" fill="#34d399" />
-          </g>
+          ))}
+          {showChannel && (
+            <>
+              <polygon
+                points={band}
+                fill="#38bdf8"
+                fillOpacity="0.08"
+                stroke="none"
+              />
+              <polyline
+                points={line(upper)}
+                fill="none"
+                stroke="#38bdf8"
+                strokeWidth="1"
+                strokeDasharray="3 3"
+                strokeOpacity="0.8"
+              />
+              <polyline
+                points={line(lower)}
+                fill="none"
+                stroke="#38bdf8"
+                strokeWidth="1"
+                strokeDasharray="3 3"
+                strokeOpacity="0.8"
+              />
+            </>
+          )}
+          {showMedian && (
+            <polyline
+              points={line(med)}
+              fill="none"
+              stroke="#a78bfa"
+              strokeWidth="1.5"
+              strokeDasharray="5 4"
+            />
+          )}
+          <polyline
+            points={line(avg)}
+            fill="none"
+            stroke="#34d399"
+            strokeWidth="1.5"
+          />
+          {showMa && (
+            <polyline
+              points={line(ma)}
+              fill="none"
+              stroke="#f59e0b"
+              strokeWidth="1.5"
+            />
+          )}
+          {hover != null && hoverY != null && (
+            <g>
+              <line
+                x1={x(hover)}
+                x2={x(hover)}
+                y1={padY}
+                y2={h - padY}
+                stroke="#52525b"
+                strokeWidth="0.75"
+              />
+              <line
+                x1={padX}
+                x2={w - padX}
+                y1={hoverY}
+                y2={hoverY}
+                stroke="#52525b"
+                strokeWidth="0.75"
+                strokeDasharray="2 2"
+              />
+              <circle cx={x(hover)} cy={y(avg[hover])} r="3" fill="#34d399" />
+            </g>
+          )}
+        </svg>
+        {hoverY != null && (
+          <div
+            data-testid="price-cursor"
+            className="pointer-events-none absolute right-1 -translate-y-1/2 rounded bg-zinc-800 px-1 text-[10px] tabular-nums text-zinc-100 ring-1 ring-zinc-600"
+            style={{ top: hoverY }}
+          >
+            {formatIsk(priceAtY(hoverY))}
+          </div>
         )}
-      </svg>
+      </div>
     </div>
   );
 }

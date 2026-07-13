@@ -13,6 +13,7 @@ import {
   systemSearch,
   type HistoryPoint,
   type IdName,
+  type PriceModel,
   type SellOrder,
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
@@ -75,8 +76,6 @@ function Workbench() {
   // Jumps origin + routing preference (search tab).
   const [origin, setOrigin] = useState<Picked>(null);
   const [highSecOnly, setHighSecOnly] = useState(false);
-
-  const [days, setDays] = useState(90);
 
   const regions = useQuery({
     queryKey: ["market", "all-regions"],
@@ -147,11 +146,6 @@ function Workbench() {
       }),
     enabled: tab === "search" && picked != null,
   });
-
-  const series = useMemo(
-    () => (history.data ?? []).slice(-days),
-    [history.data, days],
-  );
 
   return (
     <Page>
@@ -245,10 +239,8 @@ function Workbench() {
           regions={regions.data ?? []}
           regionId={historyRegionId}
           setRegionId={setRegionId}
-          days={days}
-          setDays={setDays}
           price={price.data}
-          series={series}
+          history={history.data ?? []}
           loading={history.isLoading}
         />
       )}
@@ -529,20 +521,16 @@ function HistoryTab({
   regions,
   regionId,
   setRegionId,
-  days,
-  setDays,
   price,
-  series,
+  history,
   loading,
 }: {
   picked: Picked;
   regions: IdName[];
   regionId: number;
   setRegionId: (id: number | null) => void;
-  days: number;
-  setDays: (d: number) => void;
-  price: import("../../lib/api").PriceModel | undefined;
-  series: HistoryPoint[];
+  price: PriceModel | undefined;
+  history: HistoryPoint[];
   loading: boolean;
 }) {
   return (
@@ -560,19 +548,6 @@ function HistoryTab({
                 {r.name}
               </option>
             ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-zinc-400">
-          Window
-          <select
-            value={days}
-            onChange={(e) => setDays(Number(e.currentTarget.value))}
-            className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
-          >
-            <option value={30}>30 days</option>
-            <option value={90}>90 days</option>
-            <option value={180}>180 days</option>
-            <option value={400}>All</option>
           </select>
         </label>
       </div>
@@ -599,10 +574,10 @@ function HistoryTab({
           <Centered>Search for an item to see its prices and history.</Centered>
         ) : loading ? (
           <Centered>Loading history…</Centered>
-        ) : series.length === 0 ? (
+        ) : history.length === 0 ? (
           <Centered>No history for this item in this region.</Centered>
         ) : (
-          <PriceHistoryView series={series} />
+          <PriceHistoryView history={history} />
         )}
       </div>
     </div>
