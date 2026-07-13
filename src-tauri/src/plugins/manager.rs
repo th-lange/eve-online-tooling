@@ -108,57 +108,65 @@ impl PluginManager {
     }
 }
 
-/// Invoke an exported function of an **activated** plugin with a JSON argument,
-/// returning its JSON result. The single runtime dispatch point for logic
-/// plugins. An unknown, inactive, or wasm-less plugin, a non-JSON result, or a
-/// resource-limit termination all surface as `AppError`. An inactive plugin is
-/// inert — it is refused before any code runs.
-#[tauri::command]
-pub fn plugin_invoke(
-    app: AppHandle,
-    registry: State<'_, PluginRegistry>,
-    manager: State<'_, PluginManager>,
-    plugin_id: String,
-    r#fn: String,
-    args: Value,
-) -> Result<Value, AppError> {
+/// Core plugin dispatch, shared by the `plugin_invoke` command and the MCP
+/// bridge. Runs `func` on an **active** plugin with a JSON argument, returning
+/// its JSON result. Unknown/inactive/wasm-less plugin, a wasm path escaping the
+/// plugin dir, a non-JSON result, or a resource-limit kill all return an error.
+/// An inactive plugin is inert — refused before any code runs.
+pub fn run_plugin(
+    registry: &PluginRegistry,
+    manager: &PluginManager,
+    app_data_dir: &Path,
+    plugin_id: &str,
+    func: &str,
+    args: &Value,
+) -> Result<Value, String> {
     let manifest = registry
-        .manifest(&plugin_id)
-        .ok_or_else(|| AppError::from(format!("unknown plugin {plugin_id:?}")))?;
-    if !registry.is_active(&plugin_id) {
-        return Err(AppError::from(format!(
-            "plugin {plugin_id:?} is not active"
-        )));
+        .manifest(plugin_id)
+        .ok_or_else(|| format!("unknown plugin {plugin_id:?}"))?;
+    if !registry.is_active(plugin_id) {
+        return Err(format!("plugin {plugin_id:?} is not active"));
     }
     let wasm_rel = manifest
         .wasm
         .as_deref()
-        .ok_or_else(|| AppError::from(format!("plugin {plugin_id:?} has no wasm entry point")))?;
+        .ok_or_else(|| format!("plugin {plugin_id:?} has no wasm entry point"))?;
     // The wasm path is author-controlled; keep it inside the plugin's own dir.
     if wasm_rel.contains("..") || Path::new(wasm_rel).is_absolute() {
-        return Err(AppError::from(format!(
+        return Err(format!(
             "plugin {plugin_id:?} wasm path {wasm_rel:?} must be relative to its dir"
-        )));
+        ));
     }
     // An active plugin is granted exactly the permissions it declared.
     let granted: HashSet<Permission> = manifest.permissions.iter().copied().collect();
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let wasm_path = dir.join("plugins").join(&plugin_id).join(wasm_rel);
+    let wasm_path = app_data_dir.join("plugins").join(plugin_id).join(wasm_rel);
+    let input = serde_json::to_vec(args).map_err(|e| e.to_string())?;
+    let out = manager.invoke(app_data_dir, plugin_id, &granted, &wasm_path, func, &input)?;
+    serde_json::from_slice::<Value>(&out)
+        .map_err(|e| format!("plugin {plugin_id:?} returned non-JSON: {e}"))
+}
 
-    let input = serde_json::to_vec(&args).map_err(|e| e.to_string())?;
-    let out = manager.invoke(&dir, &plugin_id, &granted, &wasm_path, &r#fn, &input)?;
-    let value = serde_json::from_slice::<Value>(&out)
-        .map_err(|e| AppError::from(format!("plugin {plugin_id:?} returned non-JSON: {e}")))?;
-    Ok(value)
+/// Invoke an exported function of an activated plugin — the runtime dispatch
+/// point for logic plugins. Thin wrapper over [`run_plugin`].
+#[tauri::command]
+pub fn plugin_invoke(
+    app: AppHandle,
+    registry: State<'_, Arc<PluginRegistry>>,
+    manager: State<'_, Arc<PluginManager>>,
+    plugin_id: String,
+    r#fn: String,
+    args: Value,
+) -> Result<Value, AppError> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    run_plugin(&registry, &manager, &dir, &plugin_id, &r#fn, &args).map_err(AppError::from)
 }
 
 /// Activate or deactivate an installed plugin. Deactivating evicts any cached
-/// instance so it stops running immediately; activating lets the next
-/// `plugin_invoke` build it fresh with its declared permissions.
+/// instance so it stops running immediately.
 #[tauri::command]
 pub fn plugin_set_active(
-    registry: State<'_, PluginRegistry>,
-    manager: State<'_, PluginManager>,
+    registry: State<'_, Arc<PluginRegistry>>,
+    manager: State<'_, Arc<PluginManager>>,
     plugin_id: String,
     active: bool,
 ) -> Result<(), AppError> {

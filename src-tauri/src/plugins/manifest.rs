@@ -28,6 +28,24 @@ pub enum Permission {
     StorageOwn,
 }
 
+/// One MCP tool a plugin declares it backs. The host advertises it (namespaced
+/// as `<pluginId>.<name>`) while the plugin is active, and routes a call to the
+/// plugin's exported `function` via the normal sandboxed plugin path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpToolDef {
+    /// Tool name (namespaced by the host); `[A-Za-z0-9_-]`.
+    pub name: String,
+    /// Human-readable description shown to the agent.
+    #[serde(default)]
+    pub description: String,
+    /// JSON-Schema for the tool's arguments (opaque, advertised as-is).
+    #[serde(default)]
+    pub input_schema: serde_json::Value,
+    /// The plugin's exported WASM function that implements this tool.
+    pub function: String,
+}
+
 /// A parsed, validated `plugin.json`. Construct only via
 /// [`Manifest::parse_and_validate`] — the fields are public for read-out but a
 /// value only exists once every invariant below holds.
@@ -52,6 +70,9 @@ pub struct Manifest {
     /// Capabilities the plugin requests. Empty = a pure, powerless plugin.
     #[serde(default)]
     pub permissions: Vec<Permission>,
+    /// MCP tools this plugin backs (empty = none). Each needs a `wasm` entry.
+    #[serde(default)]
+    pub mcp_tools: Vec<McpToolDef>,
 }
 
 /// Why a manifest was rejected. Each variant maps to a distinct validation
@@ -70,6 +91,9 @@ pub enum ManifestError {
     NoEntryPoint,
     /// The manifest `id` does not match the directory it was loaded from.
     IdMismatch { manifest: String, dir: String },
+    /// An `mcpTools` entry is malformed (bad name, empty function, or declared
+    /// without a `wasm` entry point to back it).
+    BadMcpTool(String),
 }
 
 impl std::fmt::Display for ManifestError {
@@ -89,6 +113,7 @@ impl std::fmt::Display for ManifestError {
             ManifestError::IdMismatch { manifest, dir } => {
                 write!(f, "manifest id {manifest:?} != plugin dir {dir:?}")
             }
+            ManifestError::BadMcpTool(msg) => write!(f, "invalid mcpTools entry: {msg}"),
         }
     }
 }
@@ -130,6 +155,26 @@ impl Manifest {
         }
         if manifest.wasm.is_none() && manifest.ui.is_none() {
             return Err(ManifestError::NoEntryPoint);
+        }
+        for tool in &manifest.mcp_tools {
+            if !id_is_safe(&tool.name) {
+                return Err(ManifestError::BadMcpTool(format!(
+                    "tool name {:?}: use only [A-Za-z0-9_-]",
+                    tool.name
+                )));
+            }
+            if tool.function.trim().is_empty() {
+                return Err(ManifestError::BadMcpTool(format!(
+                    "tool {:?} has no backing function",
+                    tool.name
+                )));
+            }
+            if manifest.wasm.is_none() {
+                return Err(ManifestError::BadMcpTool(format!(
+                    "tool {:?} needs a wasm entry point",
+                    tool.name
+                )));
+            }
         }
         Ok(manifest)
     }
@@ -243,5 +288,43 @@ mod tests {
         }"#;
         let err = Manifest::parse_and_validate(json, "x").unwrap_err();
         assert_eq!(err, ManifestError::NoEntryPoint);
+    }
+
+    #[test]
+    fn parses_mcp_tools() {
+        let json = r#"{
+            "id": "x", "name": "X", "version": "1.0.0", "minAppVersion": "0.33.0",
+            "wasm": "a.wasm",
+            "mcpTools": [
+                { "name": "price_vector", "description": "d",
+                  "inputSchema": {"type":"object"}, "function": "run_price" }
+            ]
+        }"#;
+        let m = Manifest::parse_and_validate(json, "x").unwrap();
+        assert_eq!(m.mcp_tools.len(), 1);
+        assert_eq!(m.mcp_tools[0].name, "price_vector");
+        assert_eq!(m.mcp_tools[0].function, "run_price");
+    }
+
+    #[test]
+    fn rejects_mcp_tool_without_wasm() {
+        let json = r#"{
+            "id": "x", "name": "X", "version": "1.0.0", "minAppVersion": "0.33.0",
+            "ui": "index.html",
+            "mcpTools": [{ "name": "t", "function": "f" }]
+        }"#;
+        let err = Manifest::parse_and_validate(json, "x").unwrap_err();
+        assert!(matches!(err, ManifestError::BadMcpTool(_)));
+    }
+
+    #[test]
+    fn rejects_mcp_tool_with_empty_function() {
+        let json = r#"{
+            "id": "x", "name": "X", "version": "1.0.0", "minAppVersion": "0.33.0",
+            "wasm": "a.wasm",
+            "mcpTools": [{ "name": "t", "function": "" }]
+        }"#;
+        let err = Manifest::parse_and_validate(json, "x").unwrap_err();
+        assert!(matches!(err, ManifestError::BadMcpTool(_)));
     }
 }

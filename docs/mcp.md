@@ -38,6 +38,15 @@ All tools are read-only and operate on public data:
 Prices come through the app's cached market service, so repeated lookups mostly
 hit cache rather than hammering EVE's servers.
 
+### Plugin-contributed tools
+
+An **active** plugin (see [`plugins.md`](./plugins.md)) can declare its own MCP
+tools in its `plugin.json`. They appear here namespaced as `<pluginId>.<tool>`,
+but only while that plugin is active, and a call routes through the same
+sandboxed plugin path — so the plugin still can't touch the network, and every
+data access stays behind its granted capabilities. Deactivate the plugin (or
+the bridge) and its tools vanish.
+
 > Not exposed — by design: character/ESI data (assets, wallet, orders, skills,
 > industry jobs, contracts, notifications), anything requiring a login token,
 > and any in-game action. The bridge is built so a tool physically cannot reach

@@ -50,6 +50,7 @@ logged — it never stops the app from booting.
 | `wasm`          | one of   | Path to the WASM entry point (relative to the plugin folder).      |
 | `ui`            | one of   | Path to the UI HTML entry point (Phase 2).                         |
 | `permissions`   | no       | Capabilities requested (see below). Empty = a powerless plugin.    |
+| `mcpTools`      | no       | MCP tools this plugin backs (see below). Each needs a `wasm` entry. |
 
 At least one of `wasm` / `ui` must be present. Unknown permission strings,
 non-semver versions, an id that doesn't match the folder, or a `wasm` path that
@@ -127,6 +128,28 @@ permissions when prompted.
 > separately; until it lands, grants are empty, so a plugin that needs a
 > capability (like this one) can be exercised through the test suite but not
 > yet granted live in the running app.
+
+## Exposing MCP tools
+
+A plugin can offer tools to an external AI agent through the app's [MCP
+bridge](./mcp.md). Declare them in `plugin.json`:
+
+```json
+"mcpTools": [
+  {
+    "name": "price_vector",
+    "description": "Custom price model for a type.",
+    "inputSchema": { "type": "object", "properties": { "typeId": { "type": "integer" } } },
+    "function": "price_vector"
+  }
+]
+```
+
+`function` is the exported WASM function that implements the tool; it's called
+exactly like `plugin_invoke` (JSON in, JSON out) with your granted
+capabilities. The host advertises the tool as `<pluginId>.<name>` — but only
+while your plugin **and** the MCP bridge are active. Your plugin never touches
+the network; the native bridge proxies the call.
 
 ## Other languages
 
