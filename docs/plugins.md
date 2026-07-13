@@ -151,6 +151,36 @@ capabilities. The host advertises the tool as `<pluginId>.<name>` — but only
 while your plugin **and** the MCP bridge are active. Your plugin never touches
 the network; the native bridge proxies the call.
 
+## UI plugins
+
+A plugin can ship an HTML/JS UI that appears as its own page. Point `ui` at the
+entry document (relative to the plugin folder):
+
+```json
+"ui": "index.html"
+```
+
+The UI is served from a distinct `plugin://` origin and rendered in a
+`sandbox="allow-scripts"` iframe with **no `allow-same-origin`** — so it is a
+unique opaque origin that cannot read the app's DOM or `localStorage`, call
+`invoke`, or reach the network (`connect-src 'none'`). Its only channel is a
+`postMessage` bridge to the host.
+
+Copy [`examples/plugins/plugin-ui-sdk.js`](../examples/plugins/plugin-ui-sdk.js)
+into your UI and call your own logic through it:
+
+```html
+<script type="module">
+  import { invoke } from "./plugin-ui-sdk.js";
+  const result = await invoke("appraise", { items: [/* … */] });
+</script>
+```
+
+`invoke(fn, args)` runs one of **your own** plugin's exported functions through
+the host (`plugin_invoke`) — the broker still enforces the capabilities your
+manifest was granted. A UI can drive nothing but its own logic; to pull foreign
+data, that logic uses `net:fetch` in the WASM layer, never the iframe.
+
 ## Other languages
 
 Rust is the reference, but a logic plugin can be written in **any
