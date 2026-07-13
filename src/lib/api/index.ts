@@ -29,3 +29,5 @@ export * from "./shopping";
 export * from "./dpsmeter";
 export * from "./plugins";
 export * from "./mcp";
+export * from "./scripts";
+export * from "./info";

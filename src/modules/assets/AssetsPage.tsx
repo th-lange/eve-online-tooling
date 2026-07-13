@@ -1,22 +1,16 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   activeCharacter,
   assetsTree,
   assetsValue,
-  marketRegions,
   sdeStatus,
   type AssetNode,
   type AssetRow,
-  type AssetsParams,
   type AssetsResult,
   type AssetsTreeResult,
 } from "../../lib/api";
 import { SdeSetup } from "../production/SdeSetup";
-import {
-  RegionSelect,
-  StationSelect,
-} from "../../components/RegionStationPicker";
 import { formatInt, formatIsk, sortRows } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import {
@@ -27,12 +21,9 @@ import { Page, PageHeader, Centered } from "../../components/page";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { Building2, User } from "lucide-react";
 
-const FORGE = 10000002;
-const JITA = 60003760;
-
 const TITLE = "Assets";
 const SUBTITLE =
-  "Your roster's holdings, valued at a market — and where each stack is worth the most.";
+  "Your roster's holdings, valued at Jita — and where each stack is worth the most.";
 
 export function AssetsPage() {
   const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
@@ -56,9 +47,6 @@ export function AssetsPage() {
 }
 
 function Workbench() {
-  const [regionId, setRegionId] = useState(FORGE);
-  const [stationId, setStationId] = useState<number | null>(JITA);
-  const [bestHub, setBestHub] = useState(false);
   const [search, setSearch] = useState("");
   const [treeSearch, setTreeSearch] = useState("");
   const [owners, setOwners] = useState<Set<string>>(new Set());
@@ -66,12 +54,8 @@ function Workbench() {
 
   const [tree, setTree] = useState<AssetsTreeResult | null>(null);
 
-  const regions = useQuery({
-    queryKey: ["market", "regions"],
-    queryFn: marketRegions,
-  });
   const run = useMutation({
-    mutationFn: (p: AssetsParams) => assetsValue(p),
+    mutationFn: () => assetsValue(),
     onSuccess: (r) => {
       setResult(r);
       setTree(null);
@@ -95,6 +79,12 @@ function Workbench() {
     queryFn: activeCharacter,
   });
   const prevActive = useRef<number | null | undefined>(undefined);
+  const inited = useRef(false);
+  useEffect(() => {
+    if (inited.current) return;
+    inited.current = true;
+    run.mutate();
+  }, [run]);
   useEffect(() => {
     if (prevActive.current === undefined) {
       prevActive.current = active.data;
@@ -103,10 +93,9 @@ function Workbench() {
     if (active.data === prevActive.current) return;
     prevActive.current = active.data;
     if (tree) treeRun.mutate();
-    else if (result) run.mutate({ regionId, stationId, bestHub });
-  }, [active.data, tree, result, regionId, stationId, bestHub, run, treeRun]);
+    else run.mutate();
+  }, [active.data, tree, run, treeRun]);
 
-  const stations = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
   // Distinct owners present in the current result, characters first then
   // corps, each alphabetical — drives the source filter chips.
   const ownerList = useMemo(() => {
@@ -178,23 +167,18 @@ function Workbench() {
         title={TITLE}
         subtitle={SUBTITLE}
         actions={
-          <div className="flex gap-2">
-            <button
-              onClick={() => treeRun.mutate()}
-              disabled={treeRun.isPending}
-              className="rounded border border-zinc-700 px-4 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
-              title="Nested location tree, valued at the best hub"
-            >
-              {treeRun.isPending ? "Loading…" : "Location tree"}
-            </button>
-            <button
-              onClick={() => run.mutate({ regionId, stationId, bestHub })}
-              disabled={run.isPending}
-              className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
-            >
-              {run.isPending ? "Valuing…" : "Value assets"}
-            </button>
-          </div>
+          <button
+            onClick={() => (tree ? run.mutate() : treeRun.mutate())}
+            disabled={run.isPending || treeRun.isPending}
+            className="rounded border border-zinc-700 px-4 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+            title="Toggle between a flat valued list and the nested location tree (both valued at Jita)"
+          >
+            {tree
+              ? "Flat list"
+              : treeRun.isPending
+                ? "Loading…"
+                : "Location tree"}
+          </button>
         }
       />
 
@@ -206,11 +190,7 @@ function Workbench() {
       {tree && (
         <>
           <div className="mt-4 flex flex-wrap gap-6 text-sm">
-            <Stat
-              label="Sell value (best hub)"
-              value={formatIsk(tree.sellTotal)}
-              accent
-            />
+            <Stat label="Sell value" value={formatIsk(tree.sellTotal)} accent />
             <Stat
               label="Volume"
               value={`${formatInt(Math.round(tree.volumeTotal))} m³`}
@@ -235,34 +215,6 @@ function Workbench() {
           </div>
         </>
       )}
-
-      <div className="mt-4 grid grid-cols-2 gap-3 rounded border border-zinc-800 bg-zinc-900 p-3 md:grid-cols-4">
-        <Field label="Region">
-          <RegionSelect
-            regions={regions.data}
-            value={regionId}
-            onChange={(id) => {
-              setRegionId(id);
-              setStationId(null);
-            }}
-          />
-        </Field>
-        <Field label="Market">
-          <StationSelect
-            stations={stations}
-            value={stationId}
-            onChange={setStationId}
-          />
-        </Field>
-        <label className="col-span-2 flex items-end gap-1 text-xs text-zinc-300">
-          <input
-            type="checkbox"
-            checked={bestHub}
-            onChange={(e) => setBestHub(e.currentTarget.checked)}
-          />
-          Value at the best-paying hub (slower)
-        </label>
-      </div>
 
       {run.isError && (
         <div className="mt-3 text-sm text-rose-400">
@@ -424,14 +376,7 @@ function Row({ r }: { r: AssetRow }) {
   return (
     <tr className="border-t border-zinc-800">
       <td className="px-3 py-1.5">
-        <div className="text-zinc-200">
-          {r.name}
-          {r.sellHub && (
-            <span className="ml-1 text-[10px] text-emerald-400">
-              ↗ {r.sellHub}
-            </span>
-          )}
-        </div>
+        <div className="text-zinc-200">{r.name}</div>
         {(r.category || r.group) && (
           <div className="text-xs text-zinc-500">
             {[r.category, r.group].filter(Boolean).join(" · ")}
@@ -536,11 +481,6 @@ function TreeRow({ node, depth }: { node: AssetNode; depth: number }) {
               {node.owner}
             </span>
           )}
-          {node.bestHub && (
-            <span className="ml-1 text-[10px] text-sky-400/70">
-              {node.bestHub}
-            </span>
-          )}
         </span>
         <span className="tabular-nums text-zinc-400">
           {formatIsk(node.sellValue)}
@@ -572,14 +512,5 @@ function Stat({
         {value}
       </div>
     </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1 text-xs text-zinc-400">
-      {label}
-      {children}
-    </label>
   );
 }

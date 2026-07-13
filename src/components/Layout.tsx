@@ -17,6 +17,7 @@ import { Characters } from "./Characters";
 import { CommandPalette } from "./CommandPalette";
 import { SupportModal } from "./SupportMyWork";
 import { STORAGE_KEYS } from "../lib/storageKeys";
+import { useInfoAlerts } from "../modules/info/infoContext";
 import appIcon from "../assets/app-icon.png";
 
 const PINS_KEY = STORAGE_KEYS.sidebarPins;
@@ -385,6 +386,7 @@ function NavRow({
   onDropRow: () => void;
 }) {
   const hex = color ? COLOR_HEX.get(color) : undefined;
+  const { unseen } = useInfoAlerts();
   return (
     <div
       onDragOver={
@@ -455,6 +457,14 @@ function NavRow({
       >
         {module.icon && <module.icon size={14} className="shrink-0" />}
         {module.title}
+        {module.id === "info" && unseen > 0 && (
+          <span
+            title={`${unseen} new alert${unseen === 1 ? "" : "s"}`}
+            className="ml-auto min-w-4 rounded-full bg-red-600 px-1.5 text-center text-[10px] font-semibold leading-4 text-white"
+          >
+            {unseen}
+          </span>
+        )}
       </NavLink>
       <ColorPicker
         title={module.title}

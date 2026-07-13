@@ -5,6 +5,7 @@
 //! the EVE app + a re-login before this returns data).
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -65,17 +66,27 @@ pub async fn market_orders(
     market: State<'_, MarketService>,
 ) -> Result<Vec<OrderRow>, AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let character_ids = storage::target_characters(&dir);
+    collect_orders(&dir, &auth_state, &market).await
+}
+
+/// Open orders across the target characters — the app-free core, shared by the
+/// command and the capability registry.
+pub(crate) async fn collect_orders(
+    dir: &Path,
+    auth: &AuthState,
+    market: &MarketService,
+) -> Result<Vec<OrderRow>, AppError> {
+    let character_ids = storage::target_characters(dir);
     if character_ids.is_empty() {
         return Err(AppError::auth_required());
     }
-    let names = storage::character_names(&dir);
+    let names = storage::character_names(dir);
 
     let mut rows = Vec::new();
     for character_id in character_ids {
         let character_name = names.get(&character_id).cloned().unwrap_or_default();
         if let Ok(mut character_rows) =
-            fetch_character_orders(&auth_state, &market, &dir, character_id, &character_name).await
+            fetch_character_orders(auth, market, dir, character_id, &character_name).await
         {
             rows.append(&mut character_rows);
         }
@@ -85,8 +96,8 @@ pub async fn market_orders(
 
 /// One character's open orders, priced and flagged for undercut.
 async fn fetch_character_orders(
-    auth_state: &State<'_, AuthState>,
-    market: &State<'_, MarketService>,
+    auth_state: &AuthState,
+    market: &MarketService,
     dir: &std::path::Path,
     character_id: i64,
     character_name: &str,

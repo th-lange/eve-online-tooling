@@ -21,6 +21,9 @@ use std::sync::Arc;
 use extism::{CurrentPlugin, Error, Function, UserData, Val, PTR};
 
 use super::manifest::Permission;
+use crate::capabilities;
+use crate::esi::AuthState;
+use crate::market::MarketService;
 use crate::sde::{Sde, SdePaths};
 
 /// Everything a plugin's host functions are allowed to know about it: where its
@@ -138,6 +141,97 @@ pub fn host_functions(granted: &HashSet<Permission>, ctx: Arc<BrokerCtx>) -> Vec
             },
         ));
     }
+    if granted.contains(&Permission::InfoWrite) {
+        let alarm_ctx = ctx.clone();
+        functions.push(Function::new(
+            "send_alarm",
+            [PTR],
+            [],
+            UserData::new(()),
+            move |plugin: &mut CurrentPlugin,
+                  inputs: &[Val],
+                  _outputs: &mut [Val],
+                  _ud: UserData<()>|
+                  -> Result<(), Error> {
+                let text: String = plugin.memory_get_val(&inputs[0])?;
+                let source = format!("plugin:{}", alarm_ctx.plugin_id);
+                crate::info::push(
+                    &alarm_ctx.app_data_dir,
+                    crate::info::Kind::Alarm,
+                    &text,
+                    None,
+                    &source,
+                );
+                Ok(())
+            },
+        ));
+
+        let msg_ctx = ctx.clone();
+        functions.push(Function::new(
+            "write_message",
+            [PTR],
+            [],
+            UserData::new(()),
+            move |plugin: &mut CurrentPlugin,
+                  inputs: &[Val],
+                  _outputs: &mut [Val],
+                  _ud: UserData<()>|
+                  -> Result<(), Error> {
+                let text: String = plugin.memory_get_val(&inputs[0])?;
+                let source = format!("plugin:{}", msg_ctx.plugin_id);
+                crate::info::push(
+                    &msg_ctx.app_data_dir,
+                    crate::info::Kind::Message,
+                    &text,
+                    None,
+                    &source,
+                );
+                Ok(())
+            },
+        ));
+    }
+
+    // `host_call(name, argsJson) -> resultJson` — the generic gateway to the
+    // capability registry. Always linked; each call is gated at runtime against
+    // the plugin's grants (a generic dispatcher can't be gated at load time).
+    let call_granted = granted.clone();
+    let call_ctx = ctx.clone();
+    functions.push(Function::new(
+        "host_call",
+        [PTR, PTR],
+        [PTR],
+        UserData::new(()),
+        move |plugin: &mut CurrentPlugin,
+              inputs: &[Val],
+              outputs: &mut [Val],
+              _ud: UserData<()>|
+              -> Result<(), Error> {
+            let name: String = plugin.memory_get_val(&inputs[0])?;
+            let args_json: String = plugin.memory_get_val(&inputs[1])?;
+            let args: serde_json::Value =
+                serde_json::from_str(&args_json).unwrap_or(serde_json::Value::Null);
+            let cap = capabilities::find(&name)
+                .ok_or_else(|| Error::msg(format!("unknown capability {name:?}")))?;
+            if !call_granted.contains(&cap.permission) {
+                return Err(Error::msg(format!(
+                    "capability {name:?} requires a permission this plugin wasn't granted"
+                )));
+            }
+            // Transient services (share the on-disk cache); no auth is available
+            // for a plugin unless a character is logged in on the host side.
+            let market = MarketService::with_cache(call_ctx.app_data_dir.clone());
+            let auth = AuthState::with_cache(call_ctx.app_data_dir.clone());
+            let hctx = capabilities::HostCtx {
+                app_data_dir: &call_ctx.app_data_dir,
+                market: &market,
+                auth: &auth,
+            };
+            let result = capabilities::invoke(&hctx, &name, &args).map_err(Error::msg)?;
+            let out = serde_json::to_string(&result).map_err(|e| Error::msg(e.to_string()))?;
+            plugin.memory_set_val(&mut outputs[0], out)?;
+            Ok(())
+        },
+    ));
 
     functions
 }
@@ -164,15 +258,20 @@ mod tests {
     #[test]
     fn host_functions_track_grants() {
         let ctx = Arc::new(BrokerCtx::new(PathBuf::from("/data"), "acme".into()));
-        assert!(host_functions(&HashSet::new(), ctx.clone()).is_empty());
-        // storage:own -> storage_get + storage_set.
+        // `host_call` (the generic gateway) is always linked, so every count
+        // includes it.
+        assert_eq!(host_functions(&HashSet::new(), ctx.clone()).len(), 1);
+        // storage:own -> storage_get + storage_set (+ host_call).
         let storage = HashSet::from([Permission::StorageOwn]);
-        assert_eq!(host_functions(&storage, ctx.clone()).len(), 2);
-        // sde:read -> sde_type_info.
+        assert_eq!(host_functions(&storage, ctx.clone()).len(), 3);
+        // sde:read -> sde_type_info (+ host_call).
         let sde = HashSet::from([Permission::SdeRead]);
-        assert_eq!(host_functions(&sde, ctx.clone()).len(), 1);
-        // Both -> all three.
+        assert_eq!(host_functions(&sde, ctx.clone()).len(), 2);
+        // info:write -> send_alarm + write_message (+ host_call).
+        let info = HashSet::from([Permission::InfoWrite]);
+        assert_eq!(host_functions(&info, ctx.clone()).len(), 3);
+        // Both storage + sde (+ host_call).
         let both = HashSet::from([Permission::StorageOwn, Permission::SdeRead]);
-        assert_eq!(host_functions(&both, ctx).len(), 3);
+        assert_eq!(host_functions(&both, ctx).len(), 4);
     }
 }

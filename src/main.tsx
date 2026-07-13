@@ -9,6 +9,8 @@ import {
 import { queryClient } from "./lib/queryClient";
 import { Layout } from "./components/Layout";
 import { modules } from "./modules/registry";
+import { ScriptsRunnerProvider } from "./modules/scripts/runner";
+import { InfoAlertsProvider } from "./modules/info/InfoAlertsProvider";
 import "./index.css";
 
 // Routes are generated from the module registry: "/" redirects to the first
@@ -29,7 +31,11 @@ const router = createBrowserRouter([
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <ScriptsRunnerProvider>
+        <InfoAlertsProvider>
+          <RouterProvider router={router} />
+        </InfoAlertsProvider>
+      </ScriptsRunnerProvider>
     </QueryClientProvider>
   </React.StrictMode>,
 );

@@ -47,6 +47,14 @@ export function PluginsPage() {
     <Page>
       <PageHeader title="Plugins" subtitle={SUBTITLE} />
       <McpBridgeCard />
+      {entries.length > 0 && (
+        <div className="mt-4 rounded-lg border border-amber-900 bg-amber-950/30 p-3 text-sm text-amber-200">
+          Plugins are third-party code. Activating one grants it exactly the
+          capabilities listed on its card — which can include reading your
+          market data, assets and market orders. Only activate plugins you
+          trust.
+        </div>
+      )}
       {entries.length === 0 ? (
         <Centered>
           No plugins installed. Drop a plugin folder into the app's{" "}

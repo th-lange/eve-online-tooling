@@ -13,7 +13,6 @@
 //! mutate anything, by construction. Market lookups reuse `MarketService` and
 //! therefore its caches (so a looping agent mostly hits cache, not ESI).
 
-use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,18 +27,15 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, State};
 
-use crate::market::{default_region_id, resolve_location, MarketService};
+use crate::capabilities;
+use crate::esi::AuthState;
+use crate::market::MarketService;
 use crate::model::AppError;
 use crate::plugins::manager::run_plugin;
 use crate::plugins::{PluginManager, PluginRegistry};
-use crate::sde::{Sde, SdePaths};
 
 /// MCP protocol revision this server implements.
 const PROTOCOL_VERSION: &str = "2024-11-05";
-/// Hard cap on `sde_search` results, whatever the caller asks for.
-const SEARCH_LIMIT_MAX: i64 = 50;
-/// Reject absurdly long search queries (an LLM could send anything).
-const QUERY_MAX_LEN: usize = 200;
 
 /// The **only** capabilities MCP tools may reach: read-only game data. No auth
 /// state, no ESI token, no keychain, no filesystem beyond the SDE db, no write
@@ -51,13 +47,6 @@ pub struct ToolCtx {
     /// route through the sandboxed plugin path. Shared with the Tauri commands.
     registry: Arc<PluginRegistry>,
     manager: Arc<PluginManager>,
-}
-
-impl ToolCtx {
-    fn open_sde(&self) -> Result<Sde, (i64, String)> {
-        Sde::open(&SdePaths::new(self.app_data_dir.clone()).db)
-            .map_err(|e| (-32603, format!("static data unavailable: {e}")))
-    }
 }
 
 struct Running {
@@ -228,82 +217,19 @@ fn dispatch(req: &Value, ctx: &ToolCtx) -> Option<Value> {
 /// The tools this server advertises: the built-in read-only tools plus any
 /// declared by currently-active plugins (namespaced `<pluginId>.<tool>`).
 fn tool_list(ctx: &ToolCtx) -> Value {
-    let native = json!([
-        {
-            "name": "ping",
-            "description": "Health check — returns \"pong\".",
-            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
-        },
-        {
-            "name": "sde_search",
-            "description": "Search EVE item types by name. Returns matching type ids + names.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "query": { "type": "string", "description": "Name substring(s) to match." },
-                    "limit": { "type": "integer", "description": "Max results (capped at 50)." },
-                },
-                "required": ["query"],
-            },
-        },
-        {
-            "name": "sde_type",
-            "description": "Look up an item type by id: name, group, and packaged volume.",
-            "inputSchema": {
-                "type": "object",
-                "properties": { "typeId": { "type": "integer" } },
-                "required": ["typeId"],
-            },
-        },
-        {
-            "name": "market_price",
-            "description": "Market price vectors (sell/buy percentile, adjusted, average) for a type, at a region (default The Forge / Jita).",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "typeId": { "type": "integer" },
-                    "regionId": { "type": "integer", "description": "Optional; defaults to The Forge." },
-                },
-                "required": ["typeId"],
-            },
-        },
-        {
-            "name": "appraise",
-            "description": "Value a list of items at market: total buy/sell ISK and cargo volume.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "items": {
-                        "type": "array",
-                        "description": "Items to value.",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "name": { "type": "string" },
-                                "quantity": { "type": "integer" },
-                            },
-                            "required": ["name"],
-                        },
-                    },
-                    "regionId": { "type": "integer", "description": "Optional; defaults to The Forge." },
-                },
-                "required": ["items"],
-            },
-        },
-        {
-            "name": "route",
-            "description": "Shortest stargate route between two solar systems (by name). Returns the jump count.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "from": { "type": "string", "description": "Origin system name." },
-                    "to": { "type": "string", "description": "Destination system name." },
-                },
-                "required": ["from", "to"],
-            },
-        },
-    ]);
-    let mut tools = native.as_array().cloned().unwrap_or_default();
+    let mut tools = vec![json!({
+        "name": "ping",
+        "description": "Health check — returns \"pong\".",
+        "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+    })];
+    // Built-in tools are the MCP-exposed capabilities from the shared registry.
+    for cap in capabilities::registry().iter().filter(|c| c.mcp) {
+        tools.push(json!({
+            "name": cap.name,
+            "description": cap.description,
+            "inputSchema": capabilities::input_schema(cap),
+        }));
+    }
     for (plugin_id, def) in ctx.registry.active_mcp_tools() {
         tools.push(json!({
             "name": format!("{plugin_id}.{}", def.name),
@@ -325,11 +251,17 @@ fn call_tool(params: Option<&Value>, ctx: &ToolCtx) -> Result<Value, (i64, Strin
 
     match name {
         "ping" => text_content("pong"),
-        "sde_search" => tool_sde_search(args, ctx),
-        "sde_type" => tool_sde_type(args, ctx),
-        "market_price" => tool_market_price(args, ctx),
-        "appraise" => tool_appraise(args, ctx),
-        "route" => tool_route(args, ctx),
+        // A built-in capability (read-only, MCP-exposed) from the registry.
+        other if capabilities::find(other).is_some_and(|c| c.mcp) => {
+            let auth = AuthState::with_cache(ctx.app_data_dir.clone());
+            let hctx = capabilities::HostCtx {
+                app_data_dir: &ctx.app_data_dir,
+                market: &ctx.market,
+                auth: &auth,
+            };
+            let value = capabilities::invoke(&hctx, other, args).map_err(|e| (-32602, e))?;
+            json_content(&value)
+        }
         // Namespaced `<pluginId>.<tool>` -> a plugin-contributed tool.
         other => route_plugin_tool(other, args, ctx),
     }
@@ -356,201 +288,6 @@ fn route_plugin_tool(name: &str, args: &Value, ctx: &ToolCtx) -> Result<Value, (
     )
     .map_err(|e| (-32603, e))?;
     json_content(&value)
-}
-
-fn tool_sde_search(args: &Value, ctx: &ToolCtx) -> Result<Value, (i64, String)> {
-    let query = args
-        .get("query")
-        .and_then(Value::as_str)
-        .ok_or((-32602, "sde_search requires a string \"query\"".to_string()))?;
-    if query.trim().is_empty() || query.len() > QUERY_MAX_LEN {
-        return Err((-32602, "query must be 1..=200 chars".to_string()));
-    }
-    let limit = args
-        .get("limit")
-        .and_then(Value::as_i64)
-        .unwrap_or(SEARCH_LIMIT_MAX)
-        .clamp(1, SEARCH_LIMIT_MAX);
-    let sde = ctx.open_sde()?;
-    let hits = sde
-        .search_types(query, limit)
-        .map_err(|e| (-32603, format!("search failed: {e}")))?;
-    let results: Vec<Value> = hits
-        .into_iter()
-        .map(|(type_id, name)| json!({ "typeId": type_id, "name": name }))
-        .collect();
-    json_content(&json!({ "results": results }))
-}
-
-fn tool_sde_type(args: &Value, ctx: &ToolCtx) -> Result<Value, (i64, String)> {
-    let type_id = args.get("typeId").and_then(Value::as_i64).ok_or((
-        -32602,
-        "sde_type requires an integer \"typeId\"".to_string(),
-    ))?;
-    let sde = ctx.open_sde()?;
-    let info = sde
-        .type_info(type_id)
-        .map_err(|e| (-32603, format!("lookup failed: {e}")))?;
-    // `null` when unknown — a clean, parseable answer.
-    json_content(&json!(info))
-}
-
-fn tool_market_price(args: &Value, ctx: &ToolCtx) -> Result<Value, (i64, String)> {
-    let type_id = args.get("typeId").and_then(Value::as_i64).ok_or((
-        -32602,
-        "market_price requires an integer \"typeId\"".to_string(),
-    ))?;
-    let region_id = args
-        .get("regionId")
-        .and_then(Value::as_i64)
-        .unwrap_or_else(default_region_id);
-    let location = resolve_location(region_id, None);
-    // Reuses MarketService (and its caches); runs the async fetch on the app's
-    // runtime, blocking this MCP worker thread until it resolves.
-    let model = tauri::async_runtime::block_on(ctx.market.price_model(location, type_id))
-        .map_err(|e| (-32603, format!("market lookup failed: {e}")))?;
-    json_content(&json!(model))
-}
-
-/// Value a list of `{name, quantity}` items at market. Read-only: resolves
-/// names via the SDE, prices via the cached `MarketService`, sums buy/sell/vol.
-fn tool_appraise(args: &Value, ctx: &ToolCtx) -> Result<Value, (i64, String)> {
-    let items = args
-        .get("items")
-        .and_then(Value::as_array)
-        .ok_or((-32602, "appraise requires an \"items\" array".to_string()))?;
-    if items.is_empty() || items.len() > 500 {
-        return Err((-32602, "items must be 1..=500 entries".to_string()));
-    }
-    let region_id = args
-        .get("regionId")
-        .and_then(Value::as_i64)
-        .unwrap_or_else(default_region_id);
-    let sde = ctx.open_sde()?;
-
-    struct Line {
-        name: String,
-        quantity: i64,
-        type_id: Option<i64>,
-        volume_each: f64,
-    }
-    let mut lines = Vec::with_capacity(items.len());
-    for it in items {
-        let name = it
-            .get("name")
-            .and_then(Value::as_str)
-            .ok_or((-32602, "each item needs a string \"name\"".to_string()))?;
-        let quantity = it
-            .get("quantity")
-            .and_then(Value::as_i64)
-            .unwrap_or(1)
-            .max(0);
-        let lookup = sde
-            .type_by_name(name.trim())
-            .map_err(|e| (-32603, format!("lookup failed: {e}")))?;
-        lines.push(Line {
-            name: name.to_string(),
-            quantity,
-            type_id: lookup.map(|(id, _)| id),
-            volume_each: lookup.and_then(|(_, v)| v).unwrap_or(0.0),
-        });
-    }
-
-    let ids: Vec<i64> = lines.iter().filter_map(|l| l.type_id).collect();
-    let location = resolve_location(region_id, None);
-    let prices: HashMap<i64, _> =
-        tauri::async_runtime::block_on(ctx.market.price_models_at(location, &ids))
-            .map_err(|e| (-32603, format!("market lookup failed: {e}")))?
-            .into_iter()
-            .map(|m| (m.type_id, m))
-            .collect();
-
-    let (mut buy_total, mut sell_total, mut volume_total) = (0.0, 0.0, 0.0);
-    let out_lines: Vec<Value> = lines
-        .iter()
-        .map(|l| {
-            let model = l.type_id.and_then(|id| prices.get(&id));
-            let buy = model.and_then(|m| m.buy_percentile);
-            let sell = model.and_then(|m| m.sell_percentile);
-            let q = l.quantity as f64;
-            buy_total += buy.unwrap_or(0.0) * q;
-            sell_total += sell.unwrap_or(0.0) * q;
-            volume_total += l.volume_each * q;
-            json!({
-                "name": l.name, "quantity": l.quantity, "typeId": l.type_id,
-                "buyPrice": buy, "sellPrice": sell,
-            })
-        })
-        .collect();
-
-    json_content(&json!({
-        "buyTotal": buy_total, "sellTotal": sell_total, "volume": volume_total,
-        "lines": out_lines,
-    }))
-}
-
-/// Shortest stargate route (jump count) between two systems, by name.
-fn tool_route(args: &Value, ctx: &ToolCtx) -> Result<Value, (i64, String)> {
-    let from_name = args
-        .get("from")
-        .and_then(Value::as_str)
-        .ok_or((-32602, "route requires a \"from\" system name".to_string()))?;
-    let to_name = args
-        .get("to")
-        .and_then(Value::as_str)
-        .ok_or((-32602, "route requires a \"to\" system name".to_string()))?;
-    let sde = ctx.open_sde()?;
-    let from = resolve_system(&sde, from_name)?;
-    let to = resolve_system(&sde, to_name)?;
-    let edges = sde
-        .all_stargate_edges()
-        .map_err(|e| (-32603, format!("route data unavailable: {e}")))?;
-    let jumps = shortest_path(&edges, from.0, to.0);
-    json_content(&json!({
-        "from": from.1, "to": to.1,
-        "jumps": jumps,
-        "reachable": jumps.is_some(),
-    }))
-}
-
-/// Resolve a solar-system name to `(id, canonical name)`, requiring an exact
-/// (case-insensitive) match so an ambiguous prefix never routes the wrong way.
-fn resolve_system(sde: &Sde, name: &str) -> Result<(i64, String), (i64, String)> {
-    let hits = sde
-        .search_systems(name.trim(), 25)
-        .map_err(|e| (-32603, format!("system lookup failed: {e}")))?;
-    hits.into_iter()
-        .find(|(_, n)| n.eq_ignore_ascii_case(name.trim()))
-        .ok_or((-32602, format!("unknown system: {name:?}")))
-}
-
-/// BFS shortest path (jump count) over an undirected stargate edge list.
-/// `None` when unreachable. Pure — unit-tested.
-fn shortest_path(edges: &[(i64, i64)], from: i64, to: i64) -> Option<i64> {
-    if from == to {
-        return Some(0);
-    }
-    let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
-    for &(a, b) in edges {
-        adj.entry(a).or_default().push(b);
-        adj.entry(b).or_default().push(a);
-    }
-    let mut dist: HashMap<i64, i64> = HashMap::from([(from, 0)]);
-    let mut queue = VecDeque::from([from]);
-    while let Some(system) = queue.pop_front() {
-        let d = dist[&system];
-        for &next in adj.get(&system).into_iter().flatten() {
-            if dist.contains_key(&next) {
-                continue;
-            }
-            if next == to {
-                return Some(d + 1);
-            }
-            dist.insert(next, d + 1);
-            queue.push_back(next);
-        }
-    }
-    None
 }
 
 /// MCP tool result carrying a plain-text payload.
@@ -740,21 +477,21 @@ mod tests {
             .map(|t| t["name"].as_str().unwrap())
             .collect();
         assert!(names.contains(&"sde_search"));
-        assert!(names.contains(&"sde_type"));
+        assert!(names.contains(&"sde_type_info"));
         assert!(names.contains(&"market_price"));
     }
 
     #[test]
     fn sde_type_returns_type_info() {
         let (_d, ctx) = ctx_with_sde("type");
-        let resp = call(&ctx, "sde_type", json!({ "typeId": 34 }));
+        let resp = call(&ctx, "sde_type_info", json!({ "typeId": 34 }));
         assert_eq!(payload(&resp)["name"], "Tritanium");
     }
 
     #[test]
     fn sde_type_unknown_is_null_not_error() {
         let (_d, ctx) = ctx_with_sde("type-null");
-        let resp = call(&ctx, "sde_type", json!({ "typeId": 999999 }));
+        let resp = call(&ctx, "sde_type_info", json!({ "typeId": 999999 }));
         assert!(payload(&resp).is_null());
     }
 
@@ -770,7 +507,7 @@ mod tests {
     fn bad_arguments_are_clean_errors() {
         let (_d, ctx) = ctx_with_sde("bad");
         // Missing/!integer typeId -> validation error, no panic, no network.
-        let e1 = call(&ctx, "sde_type", json!({ "typeId": "not-a-number" }));
+        let e1 = call(&ctx, "sde_type_info", json!({ "typeId": "not-a-number" }));
         assert_eq!(e1["error"]["code"], -32602);
         let e2 = call(&ctx, "market_price", json!({}));
         assert_eq!(e2["error"]["code"], -32602);
@@ -811,16 +548,6 @@ mod tests {
             call(&ctx, "appraise", json!({ "items": [] }))["error"]["code"],
             -32602
         );
-    }
-
-    #[test]
-    fn shortest_path_bfs() {
-        // 1-2-3-4 chain plus a 1-4 shortcut.
-        let edges = [(1, 2), (2, 3), (3, 4), (1, 4)];
-        assert_eq!(shortest_path(&edges, 1, 4), Some(1)); // via the shortcut
-        assert_eq!(shortest_path(&edges, 1, 3), Some(2));
-        assert_eq!(shortest_path(&edges, 2, 2), Some(0));
-        assert_eq!(shortest_path(&edges, 1, 99), None); // unreachable
     }
 
     #[test]

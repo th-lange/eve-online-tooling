@@ -1,9 +1,9 @@
-//! Assets module — value the roster's holdings at a market (and where each
-//! stack is worth the most).
+//! Assets module — value the roster's holdings against Jita (ESI's global
+//! average price when available, else the Jita order book).
 
 use std::collections::{HashMap, HashSet};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
 use crate::esi::{corporation_id, fetch_assets, fetch_corp_assets, resolve_names, AuthState};
@@ -11,16 +11,13 @@ use crate::market::{default_region_id, resolve_location, MarketService, PriceMod
 use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AssetsParams {
-    #[serde(default = "default_region_id")]
-    pub region_id: i64,
-    #[serde(default)]
-    pub station_id: Option<i64>,
-    /// Value each stack at the best-paying hub instead of the chosen market.
-    #[serde(default)]
-    pub best_hub: bool,
+/// Jita IV-4 in The Forge — the reference market all valuation prices against.
+const JITA_STATION_ID: i64 = 60003760;
+
+/// Valuation basis for one type: ESI's global average price when it supplies
+/// one, else the Jita sell price (realistic percentile, then order-book min).
+fn basis_price(m: &PriceModel) -> Option<f64> {
+    m.average_price.or(m.sell_percentile).or(m.sell_min)
 }
 
 /// One owned item type for one owner (a character, or a corporation hangar),
@@ -35,7 +32,6 @@ pub struct AssetRow {
     pub buy_price: Option<f64>,
     pub sell_value: f64,
     pub buy_value: f64,
-    pub sell_hub: Option<String>,
     pub volume: f64,
     pub category: Option<String>,
     pub group: Option<String>,
@@ -53,14 +49,13 @@ pub struct AssetsResult {
     pub volume_total: f64,
 }
 
-/// Aggregate the roster's personal assets by type, value each at the chosen
-/// market (or best hub), and total the net worth + cargo volume.
+/// Aggregate the roster's assets by type, value each against the Jita basis,
+/// and total the net worth + cargo volume.
 #[tauri::command]
 pub async fn assets_value(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
     market: State<'_, MarketService>,
-    params: AssetsParams,
 ) -> Result<AssetsResult, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
@@ -132,7 +127,7 @@ pub async fn assets_value(
     }
 
     let ids: Vec<i64> = stock.keys().copied().collect();
-    let location = resolve_location(params.region_id, params.station_id);
+    let location = resolve_location(default_region_id(), Some(JITA_STATION_ID));
     let prices: HashMap<i64, PriceModel> = market
         .price_models_at(location, &ids)
         .await
@@ -140,14 +135,6 @@ pub async fn assets_value(
         .into_iter()
         .map(|m| (m.type_id, m))
         .collect();
-    let best = if params.best_hub {
-        market
-            .best_sell_hubs(&ids)
-            .await
-            .map_err(|e| e.to_string())?
-    } else {
-        HashMap::new()
-    };
     let names = sde.market_items().map_err(|e| e.to_string())?;
     let name_vol: HashMap<i64, (String, f64)> = names
         .into_iter()
@@ -161,10 +148,7 @@ pub async fn assets_value(
     for (type_id, owners) in stock.into_iter() {
         let model = prices.get(&type_id);
         let buy_price = model.and_then(|m| m.buy_percentile);
-        let (sell_price, sell_hub) = match best.get(&type_id) {
-            Some(b) => (Some(b.price), Some(b.hub.clone())),
-            None => (model.and_then(|m| m.sell_percentile), None),
-        };
+        let sell_price = model.and_then(basis_price);
         let (name, vol_each) = name_vol
             .get(&type_id)
             .cloned()
@@ -187,7 +171,6 @@ pub async fn assets_value(
                 buy_price,
                 sell_value,
                 buy_value,
-                sell_hub: sell_hub.clone(),
                 volume,
                 category: category.clone(),
                 group: group.clone(),
@@ -308,8 +291,6 @@ pub struct AssetNode {
     pub sell_value: f64,
     /// Rolled-up packaged volume.
     pub volume: f64,
-    /// Best hub for a leaf stack (when "best hub" pricing is on), else null.
-    pub best_hub: Option<String>,
     pub is_location: bool,
     /// Owning character or corp (set on item nodes; used for the per-item
     /// owner badge and owner search — the tree is not grouped by owner).
@@ -331,7 +312,7 @@ pub struct AssetsTreeResult {
 }
 
 /// The roster's assets as a nested location tree (item → container → ship →
-/// station/structure), each stack valued at the best-paying hub and rolled up.
+/// station/structure), each stack valued against the Jita basis and rolled up.
 #[tauri::command]
 pub async fn assets_tree(
     app: AppHandle,
@@ -402,17 +383,23 @@ pub async fn assets_tree(
         });
     }
 
-    // Price every type at its best hub; names + packaged volume from the SDE.
+    // Price every type against the Jita basis (ESI average, else Jita sell).
     let type_ids: Vec<i64> = assets
         .iter()
         .map(|a| a.type_id)
         .collect::<HashSet<_>>()
         .into_iter()
         .collect();
-    let best = market
-        .best_sell_hubs(&type_ids)
+    let prices: HashMap<i64, f64> = market
+        .price_models_at(
+            resolve_location(default_region_id(), Some(JITA_STATION_ID)),
+            &type_ids,
+        )
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter_map(|m| basis_price(&m).map(|p| (m.type_id, p)))
+        .collect();
     let name_vol: HashMap<i64, (String, f64)> = sde
         .market_items()
         .map_err(|e| e.to_string())?
@@ -453,16 +440,8 @@ pub async fn assets_tree(
             })
     };
 
-    // Flatten best-hub to (hub name, price) so the valuation layer needn't name
-    // the market's internal type.
-    let best_simple: HashMap<i64, (String, f64)> = best
-        .into_iter()
-        .map(|(id, b)| (id, (b.hub, b.price)))
-        .collect();
-
     let bare = build_asset_tree(&assets);
-    let (roots, sell_total, volume_total) =
-        value_nodes(bare, &best_simple, &name_vol, &loc_name, &cls);
+    let (roots, sell_total, volume_total) = value_nodes(bare, &prices, &name_vol, &loc_name, &cls);
     Ok(AssetsTreeResult {
         roots,
         sell_total,
@@ -482,7 +461,7 @@ struct Classifiers {
 /// Returns the valued nodes plus the total value/volume across them.
 fn value_nodes(
     nodes: Vec<TreeNode>,
-    best: &HashMap<i64, (String, f64)>,
+    prices: &HashMap<i64, f64>,
     name_vol: &HashMap<i64, (String, f64)>,
     loc_name: &dyn Fn(i64) -> String,
     cls: &Classifiers,
@@ -491,23 +470,17 @@ fn value_nodes(
     let (mut total_value, mut total_volume) = (0.0, 0.0);
     for n in nodes {
         let (children, child_value, child_volume) =
-            value_nodes(n.children, best, name_vol, loc_name, cls);
-        let (name, mut value, mut volume, best_hub) = if n.is_location {
-            (loc_name(n.id), 0.0, 0.0, None)
+            value_nodes(n.children, prices, name_vol, loc_name, cls);
+        let (name, mut value, mut volume) = if n.is_location {
+            (loc_name(n.id), 0.0, 0.0)
         } else {
             let tid = n.type_id.unwrap_or(0);
             let (nm, vol_each) = name_vol
                 .get(&tid)
                 .cloned()
                 .unwrap_or_else(|| (format!("Type {tid}"), 0.0));
-            let b = best.get(&tid);
-            let unit = b.map(|(_, p)| *p).unwrap_or(0.0);
-            (
-                nm,
-                unit * n.quantity as f64,
-                vol_each * n.quantity as f64,
-                b.map(|(hub, _)| hub.clone()),
-            )
+            let unit = prices.get(&tid).copied().unwrap_or(0.0);
+            (nm, unit * n.quantity as f64, vol_each * n.quantity as f64)
         };
         value += child_value;
         volume += child_volume;
@@ -521,7 +494,6 @@ fn value_nodes(
             quantity: n.quantity,
             sell_value: value,
             volume,
-            best_hub,
             is_location: n.is_location,
             owner: n.owner.clone(),
             is_corp: n.is_corp,

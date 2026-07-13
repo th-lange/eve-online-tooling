@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { Heart, Puzzle, type LucideIcon } from "lucide-react";
+import { Heart, Puzzle, Terminal, Bell, type LucideIcon } from "lucide-react";
 import { ProductionPage } from "./production/ProductionPage";
 import { TradingPage } from "./trading/TradingPage";
 import { DaytradingPage } from "./daytrading/DaytradingPage";
@@ -29,6 +29,8 @@ import { ShoppingPage } from "./shopping/ShoppingPage";
 import { DpsPage } from "./dpsmeter/DpsPage";
 import { SupportPage } from "./support/SupportPage";
 import { PluginsPage } from "./plugins/PluginsPage";
+import { ScriptsPage } from "./scripts/ScriptsPage";
+import { InfoPanel } from "./info/InfoPanel";
 
 /** Sidebar section a module belongs to (the nav's information architecture). */
 export type ModuleGroup =
@@ -263,6 +265,23 @@ export const modules: ModuleDef[] = [
       "Live combat meter from your gamelog — DPS, logi and cap, graphed.",
     group: "combat",
     Component: DpsPage,
+  },
+  {
+    id: "scripts",
+    title: "Scripts",
+    description:
+      "Write small Rhai/JS snippets and run them once or on a timed loop.",
+    group: "support",
+    icon: Terminal,
+    Component: ScriptsPage,
+  },
+  {
+    id: "info",
+    title: "Info Panel",
+    description: "Alarms and messages posted by your scripts and plugins.",
+    group: "support",
+    icon: Bell,
+    Component: InfoPanel,
   },
   {
     id: "plugins",

@@ -19,7 +19,7 @@ pub struct RawBlueprint {
 }
 
 /// An asset as returned by `/characters/{id}/assets/`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
 pub struct RawAsset {
     pub type_id: i64,
     pub quantity: i64,
@@ -262,8 +262,9 @@ pub async fn fetch_corp_blueprints(
 }
 
 /// Corporation hangar/vault assets, using the character's token. Requires the
-/// `esi-assets.read_assets.v1` scope and a role with asset-hangar access; if
-/// the character lacks either, ESI returns 403 and we treat it as "none".
+/// `esi-assets.read_corporation_assets.v1` scope and a corp role with
+/// asset-hangar access (e.g. Director); if the character lacks either, ESI
+/// returns 403 and we treat it as "none".
 pub async fn fetch_corp_assets(
     auth: &AuthState,
     character_id: i64,

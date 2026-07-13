@@ -66,9 +66,11 @@ functions; nothing else is reachable.
 | -------------- | -------------------------------------------------------------- | ----------- |
 | `storage:own`  | `storage_get` / `storage_set` — a private key/value store      | available   |
 | `sde:read`     | `sde_type_info` — read the Static Data Export                  | available   |
-| `market:read`  | live market prices                                             | planned     |
-| `assets:read`  | the user's assets                                              | planned     |
+| `market:read`  | `market_price` / `appraise` via `host_call`                    | available   |
+| `assets:read`  | `assets` / `corp_assets` via `host_call`                       | available   |
+| `orders:read`  | `my_orders` via `host_call`                                    | available   |
 | `net:fetch`    | outbound HTTP, but only to the manifest's `allowedHosts`       | available   |
+| `info:write`   | `send_alarm` / `write_message` — post to the Info Panel        | available   |
 
 Enforcement is **load-time**: the host only links the host functions your
 granted permissions cover. A plugin that imports an un-granted host function
@@ -93,8 +95,35 @@ extern "ExtismHost" {
 
     // sde:read — returns the item's TypeInfo as JSON, or "null" if unknown.
     fn sde_type_info(type_id: String) -> String;
+
+    // info:write — post an alarm / message to the app's Info Panel (under
+    // Support). Tagged as coming from your plugin.
+    fn send_alarm(text: String);
+    fn write_message(text: String);
 }
 ```
+
+### The capability registry (`host_call`)
+
+Beyond the specific functions above, a plugin can reach the app's shared
+**capability registry** — the same read/compute operations scripts and the MCP
+bridge use, so data is fetched and cached once — through one generic gateway:
+
+```rust
+#[host_fn("extism:host/user")]
+extern "ExtismHost" {
+    // Call a registry capability by name; args + result are JSON strings.
+    // e.g. host_call("market_price", "{\"typeId\":34}")
+    fn host_call(name: String, args_json: String) -> String;
+}
+```
+
+Unlike the specific host functions (gated at load time), `host_call` is always
+linked and gated **per call**: each capability declares the permission it
+needs, and a call is refused unless your manifest was granted it. Capabilities
+today: `market_price`, `sde_type_info`, `sde_search`, `appraise`, `route`
+(read-only) and `assets`, `corp_assets`, `my_orders` (need the matching
+`assets:read` / `orders:read` grant + a logged-in character).
 
 ## Being called
 

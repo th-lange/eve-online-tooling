@@ -57,6 +57,14 @@ built as a set of feature **modules** over a shared service layer.
 - **DPS Meter** — a live combat readout from your gamelog (à la PyEveLiveDPS): damage in/out, remote
   reps, cap warfare and mining as a moving-average graph, with per-pilot / per-weapon breakdowns and
   N× log playback. EULA-safe — it only reads the logs the client already writes.
+- **Scripts** — write small **Rhai** or **JavaScript** snippets and run them once or on a **timed
+  loop**. Each script gets a curated, trusted API — read `market_price(typeId)` / `sde_type_info(typeId)`
+  / `assets()`, fire a desktop `notify(title, body)`, keep state in a private `kv_get`/`kv_set` store,
+  and `log()` for output — and every run is resource-bounded so a runaway loop can't hang the app. See
+  [`docs/scripts.md`](docs/scripts.md).
+- **Info Panel** — a shared feed of alarms and text messages that your **scripts and plugins** post to
+  (`send_alarm` / `write_message`), so an in-app producer can raise a visible alert or note. Alarms are
+  highlighted; the feed is capped and clearable.
 - **Mission-running** and more — planned.
 
 Built with **Tauri 2** (Rust core) + **React / TypeScript** (Vite). Market and character data come
@@ -107,6 +115,14 @@ npm run tauri dev      # launches the desktop app with hot reload
 
 The first time you open the Production module it downloads the EVE **SDE** (a few hundred MB,
 Fuzzwork's SQLite build) into your app data dir; that's a one-off.
+
+> **No audio / `GStreamer element appsink not found` on Linux?** The WebView plays
+> audio (the Scripts `play_sound`) through GStreamer. A **snap** terminal (e.g.
+> Alacritty-as-snap) exports `GST_PLUGIN_SYSTEM_PATH` / `GST_PLUGIN_SCANNER` /
+> `LD_LIBRARY_PATH` pointing at its own sandbox, which lacks those plugins. The app
+> now strips those snap paths at startup so audio works regardless; if you still
+> hit it (an unusual snap layout), launch from a non-snap terminal or run:
+> `env -u GST_PLUGIN_SYSTEM_PATH -u GST_PLUGIN_SCANNER -u GST_PLUGIN_PATH_1_0 -u LD_LIBRARY_PATH npm run tauri dev`.
 
 ### 4. (Later) EVE SSO
 

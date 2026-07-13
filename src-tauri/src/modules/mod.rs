@@ -20,6 +20,7 @@ pub mod pochven;
 pub mod production;
 pub mod reprocessing;
 pub mod route;
+pub mod scripts;
 pub mod shopping;
 pub mod trading;
 pub mod wormholes;

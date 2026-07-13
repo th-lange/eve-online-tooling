@@ -32,6 +32,7 @@ const TOKEN_URL: &str = "https://login.eveonline.com/v2/oauth/token";
 const SCOPES: &[&str] = &[
     "publicData",
     "esi-assets.read_assets.v1",
+    "esi-assets.read_corporation_assets.v1",
     "esi-characters.read_blueprints.v1",
     "esi-corporations.read_blueprints.v1",
     // Character-data features. NOTE: these must also be enabled on the EVE

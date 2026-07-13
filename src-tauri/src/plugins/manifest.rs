@@ -20,15 +20,21 @@ pub enum Permission {
     /// Read Static Data Export (types, blueprints, materials).
     #[serde(rename = "sde:read")]
     SdeRead,
-    /// Read the user's assets.
+    /// Read the user's assets (personal + corporation).
     #[serde(rename = "assets:read")]
     AssetsRead,
+    /// Read the user's open market orders.
+    #[serde(rename = "orders:read")]
+    OrdersRead,
     /// Read/write the plugin's *own* isolated storage namespace.
     #[serde(rename = "storage:own")]
     StorageOwn,
     /// Make outbound HTTP requests, but only to the manifest's `allowedHosts`.
     #[serde(rename = "net:fetch")]
     NetFetch,
+    /// Post alarms / messages to the Info Panel.
+    #[serde(rename = "info:write")]
+    InfoWrite,
 }
 
 /// One MCP tool a plugin declares it backs. The host advertises it (namespaced

@@ -14,10 +14,12 @@
 //!
 //! Feature modules live under [`modules`] (production first).
 
+mod capabilities;
 mod chatlog;
 mod commands;
 mod esi;
 mod evescout;
+mod info;
 mod lists;
 mod market;
 mod mcp;
@@ -27,8 +29,70 @@ mod plugins;
 mod sde;
 mod storage;
 
+/// A snap-packaged terminal (e.g. Alacritty) exports GStreamer paths into the
+/// shell pointing at its own sandbox, which lacks `appsink`/`autoaudiosink`.
+/// The WebView (WebKitGTK) then can't play audio (`play_sound`). When those
+/// vars point into `/snap/`, drop them so GStreamer falls back to the system
+/// plugins; the spawned `WebKitWebProcess` inherits this cleaned environment.
+#[cfg(target_os = "linux")]
+fn sanitize_snap_gstreamer_env() {
+    for var in [
+        "GST_PLUGIN_SYSTEM_PATH",
+        "GST_PLUGIN_SYSTEM_PATH_1_0",
+        "GST_PLUGIN_PATH",
+        "GST_PLUGIN_PATH_1_0",
+        "GST_PLUGIN_SCANNER",
+        "GST_PLUGIN_SCANNER_1_0",
+    ] {
+        if std::env::var_os(var).is_some_and(|v| v.to_string_lossy().contains("/snap/")) {
+            std::env::remove_var(var);
+        }
+    }
+    // Keep only non-snap entries on the library path (the snap sets it to its
+    // own dirs, unrelated to us).
+    if let Some(val) = std::env::var_os("LD_LIBRARY_PATH") {
+        match clean_library_path(&val.to_string_lossy()) {
+            Some(cleaned) => std::env::set_var("LD_LIBRARY_PATH", cleaned),
+            None => std::env::remove_var("LD_LIBRARY_PATH"),
+        }
+    }
+}
+
+/// Drop `/snap/` entries from a `PATH`-style value. `None` means the whole
+/// value was snap entries (unset it); otherwise the kept `:`-joined entries.
+#[cfg(target_os = "linux")]
+fn clean_library_path(value: &str) -> Option<String> {
+    let kept: Vec<&str> = value
+        .split(':')
+        .filter(|p| !p.is_empty() && !p.contains("/snap/"))
+        .collect();
+    if kept.is_empty() {
+        None
+    } else {
+        Some(kept.join(":"))
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod env_tests {
+    use super::clean_library_path;
+
+    #[test]
+    fn strips_only_snap_entries() {
+        assert_eq!(
+            clean_library_path("/usr/lib:/snap/alacritty/160/x/dri:/opt/lib"),
+            Some("/usr/lib:/opt/lib".to_string()),
+        );
+        assert_eq!(clean_library_path("/snap/alacritty/160/x/dri"), None);
+        assert_eq!(clean_library_path("/usr/lib"), Some("/usr/lib".to_string()),);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    sanitize_snap_gstreamer_env();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
@@ -88,6 +152,10 @@ pub fn run() {
                 sde::commands::auto_refresh(&handle).await;
                 esi::commands::warm_active_character(&handle).await;
             });
+
+            // The script loop: one background timeline that re-runs every
+            // Run-state script on its minute interval (see scripts::scheduler).
+            modules::scripts::scheduler::spawn(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -239,6 +307,13 @@ pub fn run() {
             modules::dpsmeter::commands::dps_stop,
             modules::dpsmeter::commands::dps_list_logs,
             modules::dpsmeter::commands::dps_playback,
+            modules::scripts::commands::scripts_list,
+            modules::scripts::commands::scripts_save,
+            modules::scripts::commands::scripts_delete,
+            modules::scripts::commands::scripts_run,
+            modules::scripts::commands::scripts_examples,
+            info::info_list,
+            info::info_clear,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

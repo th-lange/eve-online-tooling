@@ -8,7 +8,6 @@ export interface AssetRow {
   buyPrice: number | null;
   sellValue: number;
   buyValue: number;
-  sellHub: string | null;
   volume: number;
   category: string | null;
   group: string | null;
@@ -24,15 +23,9 @@ export interface AssetsResult {
   volumeTotal: number;
 }
 
-export interface AssetsParams {
-  regionId?: number;
-  stationId?: number | null;
-  bestHub?: boolean;
-}
-
-/** Value the roster's holdings at a market (or best hub). */
-export function assetsValue(params: AssetsParams): Promise<AssetsResult> {
-  return invoke<AssetsResult>("assets_value", { params });
+/** Value the roster's holdings against Jita (ESI average price, else Jita sell). */
+export function assetsValue(): Promise<AssetsResult> {
+  return invoke<AssetsResult>("assets_value");
 }
 
 export interface AssetNode {
@@ -40,10 +33,9 @@ export interface AssetNode {
   name: string;
   typeId: number | null;
   quantity: number;
-  /** Rolled-up best-hub sell value of this node and everything under it. */
+  /** Rolled-up sell value of this node and everything under it. */
   sellValue: number;
   volume: number;
-  bestHub: string | null;
   isLocation: boolean;
   /** Owning character or corp (set on item nodes; used for the per-item
    *  owner badge and owner search — the tree is not grouped by owner). */
@@ -61,7 +53,7 @@ export interface AssetsTreeResult {
   volumeTotal: number;
 }
 
-/** The roster's assets as a nested location tree, valued at the best hub. */
+/** The roster's assets as a nested location tree, valued against Jita. */
 export function assetsTree(): Promise<AssetsTreeResult> {
   return invoke<AssetsTreeResult>("assets_tree");
 }
