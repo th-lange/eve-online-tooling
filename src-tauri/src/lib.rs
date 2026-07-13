@@ -32,6 +32,38 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        // Serve plugin UIs from a distinct, sandboxed `plugin://` origin so their
+        // code can never reach the app document or `invoke` (issue #500). Assets
+        // resolve under `app_data_dir/plugins/<id>/`, traversal-guarded, and are
+        // served with a no-network CSP.
+        .register_uri_scheme_protocol("plugin", |ctx, request| {
+            use tauri::Manager;
+            let deny = |status: u16| {
+                tauri::http::Response::builder()
+                    .status(status)
+                    .body(Vec::new())
+                    .unwrap()
+            };
+            let Ok(dir) = ctx.app_handle().path().app_data_dir() else {
+                return deny(500);
+            };
+            let root = dir.join("plugins");
+            match plugins::protocol::resolve_asset(&root, request.uri().path()) {
+                Ok(file) => match std::fs::read(&file) {
+                    Ok(bytes) => tauri::http::Response::builder()
+                        .status(200)
+                        .header("Content-Type", plugins::protocol::content_type(&file))
+                        .header(
+                            "Content-Security-Policy",
+                            plugins::protocol::PLUGIN_FRAME_CSP,
+                        )
+                        .body(bytes)
+                        .unwrap(),
+                    Err(_) => deny(404),
+                },
+                Err(_) => deny(403),
+            }
+        })
         .setup(|app| {
             // Resolve the app data dir once and give the shared services a
             // disk-backed conditional cache rooted there, so ESI reads survive
