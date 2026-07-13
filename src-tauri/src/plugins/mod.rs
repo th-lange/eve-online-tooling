@@ -13,6 +13,7 @@
 pub mod broker;
 pub mod manager;
 pub mod manifest;
+pub mod protocol;
 
 pub use manager::PluginManager;
 

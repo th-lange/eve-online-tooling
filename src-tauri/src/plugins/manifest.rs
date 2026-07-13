@@ -133,7 +133,7 @@ impl std::error::Error for ManifestError {}
 /// A plugin id is safe iff it's non-empty and every char is alphanumeric, `-`
 /// or `_` — the same shape the storage layer allows in a path segment, so an
 /// id can never escape `plugins/<id>/`.
-fn id_is_safe(id: &str) -> bool {
+pub(crate) fn id_is_safe(id: &str) -> bool {
     !id.is_empty()
         && id
             .chars()
