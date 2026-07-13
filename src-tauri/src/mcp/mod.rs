@@ -30,6 +30,8 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::market::{default_region_id, resolve_location, MarketService};
 use crate::model::AppError;
+use crate::plugins::manager::run_plugin;
+use crate::plugins::{PluginManager, PluginRegistry};
 use crate::sde::{Sde, SdePaths};
 
 /// MCP protocol revision this server implements.
@@ -45,6 +47,10 @@ const QUERY_MAX_LEN: usize = 200;
 pub struct ToolCtx {
     app_data_dir: PathBuf,
     market: MarketService,
+    /// Live plugin state, so plugin-contributed tools reflect activation and
+    /// route through the sandboxed plugin path. Shared with the Tauri commands.
+    registry: Arc<PluginRegistry>,
+    manager: Arc<PluginManager>,
 }
 
 impl ToolCtx {
@@ -208,7 +214,7 @@ fn dispatch(req: &Value, ctx: &ToolCtx) -> Option<Value> {
             "capabilities": { "tools": {} },
             "serverInfo": { "name": "eve-online-tooling", "version": env!("CARGO_PKG_VERSION") },
         })),
-        "tools/list" => Ok(json!({ "tools": tool_list() })),
+        "tools/list" => Ok(json!({ "tools": tool_list(ctx) })),
         "tools/call" => call_tool(req.get("params"), ctx),
         other => Err((-32601, format!("method not found: {other}"))),
     };
@@ -219,9 +225,10 @@ fn dispatch(req: &Value, ctx: &ToolCtx) -> Option<Value> {
     })
 }
 
-/// The read-only tools this server advertises.
-fn tool_list() -> Value {
-    json!([
+/// The tools this server advertises: the built-in read-only tools plus any
+/// declared by currently-active plugins (namespaced `<pluginId>.<tool>`).
+fn tool_list(ctx: &ToolCtx) -> Value {
+    let native = json!([
         {
             "name": "ping",
             "description": "Health check — returns \"pong\".",
@@ -295,7 +302,16 @@ fn tool_list() -> Value {
                 "required": ["from", "to"],
             },
         },
-    ])
+    ]);
+    let mut tools = native.as_array().cloned().unwrap_or_default();
+    for (plugin_id, def) in ctx.registry.active_mcp_tools() {
+        tools.push(json!({
+            "name": format!("{plugin_id}.{}", def.name),
+            "description": def.description,
+            "inputSchema": def.input_schema,
+        }));
+    }
+    Value::Array(tools)
 }
 
 /// Handle `tools/call`.
@@ -314,8 +330,32 @@ fn call_tool(params: Option<&Value>, ctx: &ToolCtx) -> Result<Value, (i64, Strin
         "market_price" => tool_market_price(args, ctx),
         "appraise" => tool_appraise(args, ctx),
         "route" => tool_route(args, ctx),
-        other => Err((-32602, format!("unknown tool: {other}"))),
+        // Namespaced `<pluginId>.<tool>` -> a plugin-contributed tool.
+        other => route_plugin_tool(other, args, ctx),
     }
+}
+
+/// Route a `<pluginId>.<tool>` call to the plugin that backs it, via the
+/// sandboxed plugin path (which enforces active state + granted capabilities).
+fn route_plugin_tool(name: &str, args: &Value, ctx: &ToolCtx) -> Result<Value, (i64, String)> {
+    let unknown = || (-32602, format!("unknown tool: {name}"));
+    let (plugin_id, tool) = name.split_once('.').ok_or_else(unknown)?;
+    let manifest = ctx.registry.manifest(plugin_id).ok_or_else(unknown)?;
+    let def = manifest
+        .mcp_tools
+        .iter()
+        .find(|t| t.name == tool)
+        .ok_or_else(unknown)?;
+    let value = run_plugin(
+        &ctx.registry,
+        &ctx.manager,
+        &ctx.app_data_dir,
+        plugin_id,
+        &def.function,
+        args,
+    )
+    .map_err(|e| (-32603, e))?;
+    json_content(&value)
 }
 
 fn tool_sde_search(args: &Value, ctx: &ToolCtx) -> Result<Value, (i64, String)> {
@@ -555,20 +595,32 @@ fn configured_port(dir: &std::path::Path) -> u16 {
     crate::storage::load_data::<u16>(dir, PORT_KEY).unwrap_or(0)
 }
 
-fn build_ctx(dir: &std::path::Path) -> Arc<ToolCtx> {
+fn build_ctx(
+    dir: &std::path::Path,
+    registry: Arc<PluginRegistry>,
+    manager: Arc<PluginManager>,
+) -> Arc<ToolCtx> {
     Arc::new(ToolCtx {
         app_data_dir: dir.to_path_buf(),
         market: MarketService::with_cache(dir.to_path_buf()),
+        registry,
+        manager,
     })
 }
 
 /// Start the MCP bridge on the configured port; returns its status. The tool
 /// context is built here from read-only handles only.
 #[tauri::command]
-pub fn mcp_start(app: AppHandle, state: State<'_, McpState>) -> Result<McpStatus, AppError> {
+pub fn mcp_start(
+    app: AppHandle,
+    state: State<'_, McpState>,
+    registry: State<'_, Arc<PluginRegistry>>,
+    manager: State<'_, Arc<PluginManager>>,
+) -> Result<McpStatus, AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let ctx = build_ctx(&dir, registry.inner().clone(), manager.inner().clone());
     state
-        .start(build_ctx(&dir), configured_port(&dir))
+        .start(ctx, configured_port(&dir))
         .map_err(AppError::from)
 }
 
@@ -599,13 +651,16 @@ pub fn mcp_config(app: AppHandle) -> Result<McpConfig, AppError> {
 pub fn mcp_set_port(
     app: AppHandle,
     state: State<'_, McpState>,
+    registry: State<'_, Arc<PluginRegistry>>,
+    manager: State<'_, Arc<PluginManager>>,
     port: u16,
 ) -> Result<McpStatus, AppError> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     crate::storage::save_data(&dir, PORT_KEY, &port).map_err(AppError::from)?;
     if state.status().running {
         state.stop();
-        state.start(build_ctx(&dir), port).map_err(AppError::from)?;
+        let ctx = build_ctx(&dir, registry.inner().clone(), manager.inner().clone());
+        state.start(ctx, port).map_err(AppError::from)?;
     }
     Ok(state.status())
 }
@@ -639,11 +694,17 @@ mod tests {
              INSERT INTO mapSolarSystemJumps VALUES (30000001, 30000002), (30000002, 30000001), (30000002, 30000003), (30000003, 30000002);",
         )
         .unwrap();
-        let ctx = ToolCtx {
-            app_data_dir: dir.clone(),
-            market: MarketService::with_cache(dir.clone()),
-        };
-        (dir, ctx)
+        (dir.clone(), ctx_for(&dir))
+    }
+
+    /// Build a ToolCtx over an existing dir (registry loaded live from it).
+    fn ctx_for(dir: &std::path::Path) -> ToolCtx {
+        ToolCtx {
+            app_data_dir: dir.to_path_buf(),
+            market: MarketService::with_cache(dir.to_path_buf()),
+            registry: Arc::new(PluginRegistry::load(dir)),
+            manager: Arc::new(PluginManager::new()),
+        }
     }
 
     fn call(ctx: &ToolCtx, name: &str, args: Value) -> Value {
@@ -790,6 +851,56 @@ mod tests {
         assert!(!authorized(&[], "secret"));
     }
 
+    #[test]
+    fn plugin_tool_appears_only_while_active_and_routes() {
+        let dir = tmp("plugin-tool");
+        let pdir = dir.join("plugins").join("echo-plugin");
+        std::fs::create_dir_all(&pdir).unwrap();
+        std::fs::write(
+            pdir.join("plugin.json"),
+            r#"{"id":"echo-plugin","name":"Echo","version":"0.1.0","minAppVersion":"0.33.0","wasm":"echo.wasm","mcpTools":[{"name":"echo","description":"echoes input","inputSchema":{"type":"object"},"function":"echo"}]}"#,
+        )
+        .unwrap();
+        std::fs::copy(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/plugins/testdata/echo.wasm"),
+            pdir.join("echo.wasm"),
+        )
+        .unwrap();
+        let ctx = ctx_for(&dir);
+
+        let names = |ctx: &ToolCtx| -> Vec<String> {
+            let list = dispatch(
+                &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+                ctx,
+            )
+            .unwrap();
+            list["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|t| t["name"].as_str().unwrap().to_string())
+                .collect()
+        };
+
+        // Inactive: not advertised, not callable.
+        assert!(!names(&ctx).contains(&"echo-plugin.echo".to_string()));
+        assert!(call(&ctx, "echo-plugin.echo", json!({ "a": 1 }))
+            .get("error")
+            .is_some());
+
+        // Active: advertised, and a call routes through the plugin (echo returns
+        // its input verbatim).
+        ctx.registry.set_active("echo-plugin", true).unwrap();
+        assert!(names(&ctx).contains(&"echo-plugin.echo".to_string()));
+        let r = call(&ctx, "echo-plugin.echo", json!({ "a": 1 }));
+        assert_eq!(payload(&r), json!({ "a": 1 }));
+
+        // Deactivated: gone again.
+        ctx.registry.set_active("echo-plugin", false).unwrap();
+        assert!(!names(&ctx).contains(&"echo-plugin.echo".to_string()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn post(addr: SocketAddr, token: &str, body: &str) -> (u16, String) {
         let mut stream = TcpStream::connect(addr).unwrap();
         let req = format!(
@@ -813,10 +924,7 @@ mod tests {
     fn server_binds_loopback_and_enforces_token_over_http() {
         let dir = tmp("http");
         std::fs::create_dir_all(&dir).unwrap();
-        let ctx = Arc::new(ToolCtx {
-            app_data_dir: dir.clone(),
-            market: MarketService::with_cache(dir.clone()),
-        });
+        let ctx = Arc::new(ctx_for(&dir));
         let state = McpState::default();
         let started = state.start(ctx, 0).unwrap();
         let url = started.url.clone().unwrap();

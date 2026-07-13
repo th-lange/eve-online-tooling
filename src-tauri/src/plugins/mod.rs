@@ -108,6 +108,17 @@ impl PluginRegistry {
         };
         storage::save_data(&self.app_data_dir, ACTIVE_KEY, &ids)
     }
+
+    /// `(pluginId, tool)` for every MCP tool declared by a currently-active
+    /// plugin. Drives the MCP bridge's plugin-contributed tool surface.
+    pub fn active_mcp_tools(&self) -> Vec<(String, manifest::McpToolDef)> {
+        let active = self.active.lock();
+        self.manifests
+            .iter()
+            .filter(|m| active.contains(&m.id))
+            .flat_map(|m| m.mcp_tools.iter().map(|t| (m.id.clone(), t.clone())))
+            .collect()
+    }
 }
 
 /// Enumerate `<plugins_dir>/<id>/plugin.json`, parse + validate each against
@@ -140,7 +151,7 @@ fn discover(plugins_dir: &Path) -> Vec<Manifest> {
 
 /// List installed plugins with their manifest metadata and activation state.
 #[tauri::command]
-pub fn plugins_list(registry: State<'_, PluginRegistry>) -> Vec<PluginEntry> {
+pub fn plugins_list(registry: State<'_, std::sync::Arc<PluginRegistry>>) -> Vec<PluginEntry> {
     registry.list()
 }
 

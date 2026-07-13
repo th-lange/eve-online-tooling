@@ -42,8 +42,8 @@ pub fn run() {
                 .app_data_dir()
                 .expect("could not resolve the app data directory");
             app.manage(market::MarketService::with_cache(dir.clone()));
-            app.manage(plugins::PluginRegistry::load(&dir));
-            app.manage(plugins::PluginManager::new());
+            app.manage(std::sync::Arc::new(plugins::PluginRegistry::load(&dir)));
+            app.manage(std::sync::Arc::new(plugins::PluginManager::new()));
             app.manage(esi::AuthState::with_cache(dir));
             app.manage(modules::dpsmeter::commands::DpsState::default());
             app.manage(mcp::McpState::default());
