@@ -42,11 +42,20 @@ impl Default for Limits {
 }
 
 /// Build a sandboxed Extism plugin from raw wasm bytes under `limits`, exposing
-/// only `functions` (the broker-gated host functions this plugin was granted).
-fn build_plugin(wasm: &[u8], limits: &Limits, functions: Vec<Function>) -> Result<Plugin, String> {
-    let manifest = ExtismManifest::new([Wasm::data(wasm.to_vec())])
+/// only `functions` (the broker-gated host functions this plugin was granted)
+/// and permitting outbound HTTP only to `allowed_hosts` (empty = no network).
+fn build_plugin(
+    wasm: &[u8],
+    limits: &Limits,
+    functions: Vec<Function>,
+    allowed_hosts: &[String],
+) -> Result<Plugin, String> {
+    let mut manifest = ExtismManifest::new([Wasm::data(wasm.to_vec())])
         .with_memory_max(limits.max_pages)
         .with_timeout(limits.timeout);
+    for host in allowed_hosts {
+        manifest = manifest.with_allowed_host(host);
+    }
     PluginBuilder::new(manifest)
         .with_wasi(true)
         .with_functions(functions)
@@ -71,11 +80,13 @@ impl PluginManager {
     /// functions its `granted` permissions allow. Input/output are opaque bytes
     /// (the command layer speaks JSON). A failed call evicts the cached
     /// instance — an interrupted (timed-out) Extism instance can't be reused.
+    #[allow(clippy::too_many_arguments)]
     fn invoke(
         &self,
         app_data_dir: &Path,
         id: &str,
         granted: &HashSet<Permission>,
+        allowed_hosts: &[String],
         wasm_path: &Path,
         func: &str,
         args: &[u8],
@@ -88,7 +99,7 @@ impl PluginManager {
             let functions = host_functions(granted, ctx);
             loaded.insert(
                 id.to_string(),
-                build_plugin(&bytes, &self.limits, functions)?,
+                build_plugin(&bytes, &self.limits, functions, allowed_hosts)?,
             );
         }
         let plugin = loaded.get_mut(id).expect("present: just inserted");
@@ -139,9 +150,24 @@ pub fn run_plugin(
     }
     // An active plugin is granted exactly the permissions it declared.
     let granted: HashSet<Permission> = manifest.permissions.iter().copied().collect();
+    // Outbound HTTP is limited to the declared hosts, and only when net:fetch
+    // was granted; otherwise no network at all.
+    let allowed_hosts: &[String] = if granted.contains(&Permission::NetFetch) {
+        &manifest.allowed_hosts
+    } else {
+        &[]
+    };
     let wasm_path = app_data_dir.join("plugins").join(plugin_id).join(wasm_rel);
     let input = serde_json::to_vec(args).map_err(|e| e.to_string())?;
-    let out = manager.invoke(app_data_dir, plugin_id, &granted, &wasm_path, func, &input)?;
+    let out = manager.invoke(
+        app_data_dir,
+        plugin_id,
+        &granted,
+        allowed_hosts,
+        &wasm_path,
+        func,
+        &input,
+    )?;
     serde_json::from_slice::<Value>(&out)
         .map_err(|e| format!("plugin {plugin_id:?} returned non-JSON: {e}"))
 }
@@ -217,7 +243,7 @@ mod tests {
 
     #[test]
     fn echo_round_trips_a_json_payload() {
-        let mut plugin = build_plugin(ECHO_WASM, &Limits::default(), Vec::new()).unwrap();
+        let mut plugin = build_plugin(ECHO_WASM, &Limits::default(), Vec::new(), &[]).unwrap();
         let out = plugin
             .call::<&[u8], Vec<u8>>("echo", br#"{"hello":"world","n":42}"#)
             .unwrap();
@@ -231,8 +257,16 @@ mod tests {
             max_pages: 1024,
             timeout: Duration::from_millis(200),
         };
-        let mut plugin = build_plugin(ECHO_WASM, &limits, Vec::new()).unwrap();
+        let mut plugin = build_plugin(ECHO_WASM, &limits, Vec::new(), &[]).unwrap();
         assert!(plugin.call::<&[u8], Vec<u8>>("spin", b"{}").is_err());
+    }
+
+    #[test]
+    fn builds_with_allowed_hosts() {
+        // net:fetch plugins are built with an allowed-hosts list; building with
+        // one set must succeed (no request is made at build time).
+        let hosts = vec!["api.example.com".to_string()];
+        assert!(build_plugin(ECHO_WASM, &Limits::default(), Vec::new(), &hosts).is_ok());
     }
 
     #[test]
@@ -244,6 +278,7 @@ mod tests {
                 &dir,
                 "echo",
                 &HashSet::new(),
+                &[],
                 &echo_path(),
                 "echo",
                 br#"{"a":1}"#,
@@ -259,6 +294,7 @@ mod tests {
                 &dir,
                 "echo",
                 &HashSet::new(),
+                &[],
                 &echo_path(),
                 "echo",
                 br#"{"a":2}"#,
@@ -276,10 +312,18 @@ mod tests {
         let dir = tmp("granted");
         let granted = HashSet::from([Permission::StorageOwn]);
         manager
-            .invoke(&dir, "acme", &granted, &kv_path(), "kv_set", br#""hello""#)
+            .invoke(
+                &dir,
+                "acme",
+                &granted,
+                &[],
+                &kv_path(),
+                "kv_set",
+                br#""hello""#,
+            )
             .unwrap();
         let got = manager
-            .invoke(&dir, "acme", &granted, &kv_path(), "kv_get", br#""""#)
+            .invoke(&dir, "acme", &granted, &[], &kv_path(), "kv_get", br#""""#)
             .unwrap();
         assert_eq!(serde_json::from_slice::<Value>(&got).unwrap(), "hello");
         // Persisted inside the plugin's own namespaced dir.
@@ -297,6 +341,7 @@ mod tests {
                 &dir,
                 "acme",
                 &HashSet::new(),
+                &[],
                 &kv_path(),
                 "kv_get",
                 br#""""#,
@@ -313,16 +358,24 @@ mod tests {
         let granted = HashSet::from([Permission::StorageOwn]);
         // Plugin A stores a value.
         manager
-            .invoke(&dir, "a", &granted, &kv_path(), "kv_set", br#""from-a""#)
+            .invoke(
+                &dir,
+                "a",
+                &granted,
+                &[],
+                &kv_path(),
+                "kv_set",
+                br#""from-a""#,
+            )
             .unwrap();
         // Plugin B reads its own (empty) storage — cannot see A's.
         let b = manager
-            .invoke(&dir, "b", &granted, &kv_path(), "kv_get", br#""""#)
+            .invoke(&dir, "b", &granted, &[], &kv_path(), "kv_get", br#""""#)
             .unwrap();
         assert!(b.is_empty(), "plugin B must not see plugin A's data");
         // A still sees its own value.
         let a = manager
-            .invoke(&dir, "a", &granted, &kv_path(), "kv_get", br#""""#)
+            .invoke(&dir, "a", &granted, &[], &kv_path(), "kv_get", br#""""#)
             .unwrap();
         assert_eq!(serde_json::from_slice::<Value>(&a).unwrap(), "from-a");
         let _ = std::fs::remove_dir_all(&dir);
@@ -340,6 +393,7 @@ mod tests {
                 &dir,
                 "pricing-model",
                 &granted,
+                &[],
                 &example_wasm(),
                 "evaluate",
                 b"34",
@@ -355,6 +409,7 @@ mod tests {
                 &dir,
                 "pricing-model",
                 &granted,
+                &[],
                 &example_wasm(),
                 "evaluate",
                 b"34",
@@ -379,6 +434,7 @@ mod tests {
                 &dir,
                 "pricing-model",
                 &storage_only,
+                &[],
                 &example_wasm(),
                 "evaluate",
                 b"34",

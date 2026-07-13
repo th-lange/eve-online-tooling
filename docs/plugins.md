@@ -51,6 +51,7 @@ logged — it never stops the app from booting.
 | `ui`            | one of   | Path to the UI HTML entry point (Phase 2).                         |
 | `permissions`   | no       | Capabilities requested (see below). Empty = a powerless plugin.    |
 | `mcpTools`      | no       | MCP tools this plugin backs (see below). Each needs a `wasm` entry. |
+| `allowedHosts`  | no       | Hosts the plugin may contact; required (and only valid) with `net:fetch`. |
 
 At least one of `wasm` / `ui` must be present. Unknown permission strings,
 non-semver versions, an id that doesn't match the folder, or a `wasm` path that
@@ -67,10 +68,16 @@ functions; nothing else is reachable.
 | `sde:read`     | `sde_type_info` — read the Static Data Export                  | available   |
 | `market:read`  | live market prices                                             | planned     |
 | `assets:read`  | the user's assets                                              | planned     |
+| `net:fetch`    | outbound HTTP, but only to the manifest's `allowedHosts`       | available   |
 
 Enforcement is **load-time**: the host only links the host functions your
 granted permissions cover. A plugin that imports an un-granted host function
 fails to instantiate — there is no runtime path that could slip through.
+
+`net:fetch` is enforced differently: rather than linking a host function, the
+host builds the sandbox with an outbound-HTTP allow-list set to exactly the
+plugin's `allowedHosts`. A request to any other host is refused by the runtime,
+and a plugin without `net:fetch` has an empty allow-list — no network at all.
 
 ## Host functions
 

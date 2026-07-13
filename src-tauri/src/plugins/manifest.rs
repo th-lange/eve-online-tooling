@@ -26,6 +26,9 @@ pub enum Permission {
     /// Read/write the plugin's *own* isolated storage namespace.
     #[serde(rename = "storage:own")]
     StorageOwn,
+    /// Make outbound HTTP requests, but only to the manifest's `allowedHosts`.
+    #[serde(rename = "net:fetch")]
+    NetFetch,
 }
 
 /// One MCP tool a plugin declares it backs. The host advertises it (namespaced
@@ -73,6 +76,10 @@ pub struct Manifest {
     /// MCP tools this plugin backs (empty = none). Each needs a `wasm` entry.
     #[serde(default)]
     pub mcp_tools: Vec<McpToolDef>,
+    /// Hosts the plugin may contact when `net:fetch` is granted (bare
+    /// hostnames, no scheme/path). Empty unless `net:fetch` is requested.
+    #[serde(default)]
+    pub allowed_hosts: Vec<String>,
 }
 
 /// Why a manifest was rejected. Each variant maps to a distinct validation
@@ -94,6 +101,8 @@ pub enum ManifestError {
     /// An `mcpTools` entry is malformed (bad name, empty function, or declared
     /// without a `wasm` entry point to back it).
     BadMcpTool(String),
+    /// `net:fetch` / `allowedHosts` are inconsistent or a host is malformed.
+    BadNetFetch(String),
 }
 
 impl std::fmt::Display for ManifestError {
@@ -114,6 +123,7 @@ impl std::fmt::Display for ManifestError {
                 write!(f, "manifest id {manifest:?} != plugin dir {dir:?}")
             }
             ManifestError::BadMcpTool(msg) => write!(f, "invalid mcpTools entry: {msg}"),
+            ManifestError::BadNetFetch(msg) => write!(f, "invalid net:fetch config: {msg}"),
         }
     }
 }
@@ -173,6 +183,28 @@ impl Manifest {
                 return Err(ManifestError::BadMcpTool(format!(
                     "tool {:?} needs a wasm entry point",
                     tool.name
+                )));
+            }
+        }
+        let wants_net = manifest.permissions.contains(&Permission::NetFetch);
+        if wants_net && manifest.allowed_hosts.is_empty() {
+            return Err(ManifestError::BadNetFetch(
+                "net:fetch granted but allowedHosts is empty".to_string(),
+            ));
+        }
+        if !manifest.allowed_hosts.is_empty() && !wants_net {
+            return Err(ManifestError::BadNetFetch(
+                "allowedHosts set without requesting net:fetch".to_string(),
+            ));
+        }
+        for host in &manifest.allowed_hosts {
+            let bad = host.is_empty()
+                || host.contains("://")
+                || host.contains('/')
+                || host.chars().any(char::is_whitespace);
+            if bad {
+                return Err(ManifestError::BadNetFetch(format!(
+                    "host {host:?} must be a bare hostname (no scheme, path, or spaces)"
                 )));
             }
         }
@@ -326,5 +358,54 @@ mod tests {
         }"#;
         let err = Manifest::parse_and_validate(json, "x").unwrap_err();
         assert!(matches!(err, ManifestError::BadMcpTool(_)));
+    }
+
+    #[test]
+    fn parses_net_fetch_with_allowed_hosts() {
+        let json = r#"{
+            "id": "x", "name": "X", "version": "1.0.0", "minAppVersion": "0.33.0",
+            "wasm": "a.wasm", "permissions": ["net:fetch"],
+            "allowedHosts": ["api.example.com", "zkillboard.com"]
+        }"#;
+        let m = Manifest::parse_and_validate(json, "x").unwrap();
+        assert!(m.permissions.contains(&Permission::NetFetch));
+        assert_eq!(m.allowed_hosts, vec!["api.example.com", "zkillboard.com"]);
+    }
+
+    #[test]
+    fn rejects_net_fetch_without_hosts() {
+        let json = r#"{
+            "id": "x", "name": "X", "version": "1.0.0", "minAppVersion": "0.33.0",
+            "wasm": "a.wasm", "permissions": ["net:fetch"]
+        }"#;
+        assert!(matches!(
+            Manifest::parse_and_validate(json, "x").unwrap_err(),
+            ManifestError::BadNetFetch(_)
+        ));
+    }
+
+    #[test]
+    fn rejects_hosts_without_net_fetch() {
+        let json = r#"{
+            "id": "x", "name": "X", "version": "1.0.0", "minAppVersion": "0.33.0",
+            "wasm": "a.wasm", "allowedHosts": ["api.example.com"]
+        }"#;
+        assert!(matches!(
+            Manifest::parse_and_validate(json, "x").unwrap_err(),
+            ManifestError::BadNetFetch(_)
+        ));
+    }
+
+    #[test]
+    fn rejects_host_with_scheme_or_path() {
+        let json = r#"{
+            "id": "x", "name": "X", "version": "1.0.0", "minAppVersion": "0.33.0",
+            "wasm": "a.wasm", "permissions": ["net:fetch"],
+            "allowedHosts": ["https://api.example.com/v2"]
+        }"#;
+        assert!(matches!(
+            Manifest::parse_and_validate(json, "x").unwrap_err(),
+            ManifestError::BadNetFetch(_)
+        ));
     }
 }
