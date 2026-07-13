@@ -40,4 +40,29 @@ describe("PriceHistoryView", () => {
     expect(screen.getByText("MA 3d")).toBeInTheDocument(); // 7d range -> 3
     expect(screen.getByText("Donchian 3d")).toBeInTheDocument();
   });
+
+  it("shows a price tag that follows the cursor's vertical position", () => {
+    const { container } = render(<PriceHistoryView history={history(100)} />);
+    const svg = container.querySelector("svg")!;
+    // jsdom has no layout; give the svg a known box so the y->price math runs.
+    svg.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 960,
+        height: 320,
+        right: 960,
+        bottom: 320,
+      }) as DOMRect;
+
+    expect(screen.queryByTestId("price-cursor")).toBeNull();
+    fireEvent.mouseMove(svg, { clientX: 480, clientY: 160 });
+
+    const tag = screen.getByTestId("price-cursor");
+    expect(tag.style.top).toBe("160px"); // tracks cursor y
+    expect(tag.textContent).toMatch(/\d/); // shows a price
+
+    fireEvent.mouseLeave(svg);
+    expect(screen.queryByTestId("price-cursor")).toBeNull();
+  });
 });
