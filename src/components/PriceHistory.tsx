@@ -5,12 +5,21 @@ import { formatInt, formatIsk } from "../lib/format";
 // Price/volume history charts (Donchian channel, moving average, daily median)
 // + the summary/table, shared by Market Search and the production history popover.
 
-const MA_PERIODS = [7, 20, 50, 90] as const;
-const WINDOWS = [30, 90, 180, 400] as const;
+const WINDOWS = [7, 30, 90, 180, 400] as const;
+// MA/Donchian look-back, derived from the visible range so the overlays stay
+// proportional to the window instead of needing a separate control.
+const PERIOD_FOR: Record<number, number> = {
+  7: 3,
+  30: 7,
+  90: 20,
+  180: 50,
+  400: 90,
+};
 
 export function PriceHistoryView({ history }: { history: HistoryPoint[] }) {
   const [windowDays, setWindowDays] = useState(90);
-  const [period, setPeriod] = useState(20);
+  const period =
+    PERIOD_FOR[windowDays] ?? Math.max(2, Math.round(windowDays / 4));
   const [showChannel, setShowChannel] = useState(true);
   const [showMa, setShowMa] = useState(true);
   const [showMedian, setShowMedian] = useState(true);
@@ -42,20 +51,6 @@ export function PriceHistoryView({ history }: { history: HistoryPoint[] }) {
               {WINDOWS.map((d) => (
                 <option key={d} value={d}>
                   {d >= 400 ? "All" : `${d} days`}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex items-center gap-1">
-            MA/channel
-            <select
-              value={period}
-              onChange={(e) => setPeriod(Number(e.currentTarget.value))}
-              className="rounded bg-zinc-800 px-2 py-1 text-zinc-100 outline-none"
-            >
-              {MA_PERIODS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
                 </option>
               ))}
             </select>
