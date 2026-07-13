@@ -105,6 +105,14 @@ function PluginCard({ entry }: { entry: PluginEntry }) {
             Requests no capabilities.
           </div>
         )}
+        {manifest.allowedHosts && manifest.allowedHosts.length > 0 ? (
+          <div className="mt-1.5 text-xs text-zinc-500">
+            Network:{" "}
+            <span className="text-zinc-400">
+              {manifest.allowedHosts.join(", ")}
+            </span>
+          </div>
+        ) : null}
       </div>
       <button
         onClick={() => toggle.mutate(!active)}
