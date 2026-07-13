@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import type { HistoryPoint } from "../lib/api";
 import { formatInt, formatIsk } from "../lib/format";
 
@@ -6,12 +6,19 @@ import { formatInt, formatIsk } from "../lib/format";
 // + the summary/table, shared by Market Search and the production history popover.
 
 const MA_PERIODS = [7, 20, 50, 90] as const;
+const WINDOWS = [30, 90, 180, 400] as const;
 
-export function PriceHistoryView({ series }: { series: HistoryPoint[] }) {
+export function PriceHistoryView({ history }: { history: HistoryPoint[] }) {
+  const [windowDays, setWindowDays] = useState(90);
   const [period, setPeriod] = useState(20);
   const [showChannel, setShowChannel] = useState(true);
   const [showMa, setShowMa] = useState(true);
   const [showMedian, setShowMedian] = useState(true);
+
+  const series = useMemo(
+    () => history.slice(-windowDays),
+    [history, windowDays],
+  );
 
   const last = series[series.length - 1];
   const avgVol = Math.round(
@@ -26,7 +33,21 @@ export function PriceHistoryView({ series }: { series: HistoryPoint[] }) {
         <Stat label="Avg volume/day" value={formatInt(avgVol)} />
         <div className="ml-auto flex items-center gap-3 text-xs text-zinc-400">
           <label className="flex items-center gap-1">
-            Period
+            Range
+            <select
+              value={windowDays}
+              onChange={(e) => setWindowDays(Number(e.currentTarget.value))}
+              className="rounded bg-zinc-800 px-2 py-1 text-zinc-100 outline-none"
+            >
+              {WINDOWS.map((d) => (
+                <option key={d} value={d}>
+                  {d >= 400 ? "All" : `${d} days`}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-1">
+            MA/channel
             <select
               value={period}
               onChange={(e) => setPeriod(Number(e.currentTarget.value))}
@@ -34,7 +55,7 @@ export function PriceHistoryView({ series }: { series: HistoryPoint[] }) {
             >
               {MA_PERIODS.map((p) => (
                 <option key={p} value={p}>
-                  {p}d
+                  {p}
                 </option>
               ))}
             </select>

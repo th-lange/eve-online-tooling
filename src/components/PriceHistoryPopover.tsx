@@ -114,7 +114,7 @@ export function PriceHistoryPopover({
                     No market history for this item in the selected region.
                   </div>
                 ) : (
-                  <PriceHistoryView series={history.data!} />
+                  <PriceHistoryView history={history.data!} />
                 )}
               </div>
             </div>
