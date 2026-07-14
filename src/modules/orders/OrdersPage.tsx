@@ -39,18 +39,34 @@ export function OrdersPage() {
   const costs = useQuery({
     queryKey: ["production", "buildCosts"],
     queryFn: async () => {
-      const breakdowns = await productionProfit({});
-      const m = new Map<number, number>();
-      for (const b of breakdowns) {
-        if (b.unitsProduced > 0) {
-          m.set(
-            b.productTypeId,
-            (b.materialCost + b.jobFee + b.blueprintCost + b.inventionCost) /
-              b.unitsProduced,
-          );
-        }
-      }
-      return m;
+      // Price each order's build cost at *its own region* (a Jita order → The
+      // Forge, an Amarr order → Domain), not one global default. Materials are
+      // bought at the region's hub, so region is the right basis, with the
+      // region average standing in when a specific station has no market.
+      const regions = [
+        ...new Set(rows.filter((r) => !r.isBuy).map((r) => r.regionId)),
+      ];
+      const perRegion = new Map<number, Map<number, number>>();
+      await Promise.all(
+        regions.map(async (regionId) => {
+          const breakdowns = await productionProfit({ regionId });
+          const m = new Map<number, number>();
+          for (const b of breakdowns) {
+            if (b.unitsProduced > 0) {
+              m.set(
+                b.productTypeId,
+                (b.materialCost +
+                  b.jobFee +
+                  b.blueprintCost +
+                  b.inventionCost) /
+                  b.unitsProduced,
+              );
+            }
+          }
+          perRegion.set(regionId, m);
+        }),
+      );
+      return perRegion;
     },
     enabled: checkCost,
     staleTime: Infinity,
@@ -196,7 +212,7 @@ function OrdersTable({
 }: {
   rows: OrderRow[];
   showCharacter: boolean;
-  buildCost?: Map<number, number>;
+  buildCost?: Map<number, Map<number, number>>;
 }) {
   const { sortKey, sortDir, toggleSort } = usePersistentSort<OrderSortKey>(
     "sort.orders",
@@ -273,7 +289,9 @@ function OrdersTable({
               <td className="px-3 py-1.5">
                 <div className="flex items-center justify-end gap-2">
                   {(() => {
-                    const cost = r.isBuy ? undefined : buildCost?.get(r.typeId);
+                    const cost = r.isBuy
+                      ? undefined
+                      : buildCost?.get(r.regionId)?.get(r.typeId);
                     if (cost != null && undercutPrice(r) < cost) {
                       return (
                         <span
@@ -336,10 +354,10 @@ function undercutPrice(r: OrderRow): number {
  * chasing the market means selling at a loss, so don't adjust. */
 function isBelowBuildCost(
   r: OrderRow,
-  buildCost: Map<number, number>,
+  buildCost: Map<number, Map<number, number>>,
 ): boolean {
   if (r.isBuy) return false;
-  const cost = buildCost.get(r.typeId);
+  const cost = buildCost.get(r.regionId)?.get(r.typeId);
   return cost != null && undercutPrice(r) < cost;
 }
 

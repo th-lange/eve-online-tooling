@@ -95,14 +95,14 @@ describe("OrdersPage build-cost check", () => {
 
     // Build cost isn't pulled until the button is pressed.
     expect(invokeMock).not.toHaveBeenCalledWith("production_profit", {
-      params: {},
+      params: { regionId: 10000002 },
     });
     expect(screen.queryByText(/below build cost/)).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: /check build cost/i }));
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("production_profit", {
-        params: {},
+        params: { regionId: 10000002 },
       }),
     );
 
