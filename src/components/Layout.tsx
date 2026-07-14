@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ModuleActiveContext } from "./moduleActiveContext";
 import { ModuleChromeContext } from "./moduleChromeContext";
 import { NavLink, useLocation } from "react-router-dom";
@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { modules, MODULE_GROUPS, type ModuleDef } from "../modules/registry";
+import { usePluginModules } from "../modules/plugins/pluginModules";
 import { BridgeStatus } from "./BridgeStatus";
 import { Characters } from "./Characters";
 import { CommandPalette } from "./CommandPalette";
@@ -70,9 +71,9 @@ function loadColors(): Record<string, string> {
  * (newly-added modules) fall back to their registry position, appended in a
  * stable way so adding a module doesn't shuffle an existing saved order.
  */
-function applyOrder(order: string[]): ModuleDef[] {
+function applyOrder(list: ModuleDef[], order: string[]): ModuleDef[] {
   const rank = new Map(order.map((id, i) => [id, i]));
-  return modules
+  return list
     .map((m, i) => ({ m, i }))
     .sort((a, b) => {
       const ra = rank.has(a.m.id) ? rank.get(a.m.id)! : Number.MAX_SAFE_INTEGER;
@@ -99,7 +100,15 @@ export function Layout() {
   const [pins, setPins] = useState<string[]>(() => loadIds(PINS_KEY));
   // Custom order over all modules; defaults to registry order until dragged.
   const [order, setOrder] = useState<string[]>(() =>
-    applyOrder(loadIds(ORDER_KEY)).map((m) => m.id),
+    applyOrder(modules, loadIds(ORDER_KEY)).map((m) => m.id),
+  );
+  // Active plugins that ship a UI become first-class nav modules, merged after
+  // the built-ins. Everything below (ordering, pin/hide, the host) treats them
+  // like any other module.
+  const pluginModules = usePluginModules();
+  const allModules = useMemo(
+    () => [...modules, ...pluginModules],
+    [pluginModules],
   );
   const [colors, setColors] = useState<Record<string, string>>(loadColors);
   // Collapsed section ids (sections default to open — only collapsed ones persist).
@@ -170,7 +179,7 @@ export function Layout() {
     setDrag(null);
   };
 
-  const ordered = applyOrder(order);
+  const ordered = applyOrder(allModules, order);
   // Pinned modules mirror into a Pinned section on top; every module also stays
   // in its own group section (so pinning doesn't remove it from the group).
   // Hidden modules drop out of both and collect in the Hidden section instead.
@@ -231,7 +240,7 @@ export function Layout() {
           )}
           {MODULE_GROUPS.map((g) => {
             // Group sections keep a fixed (registry) order — only Pinned sorts.
-            const items = modules.filter(
+            const items = allModules.filter(
               (m) => m.group === g.key && !hidden.includes(m.id),
             );
             if (items.length === 0) return null;
@@ -271,7 +280,7 @@ export function Layout() {
         </div>
       </aside>
       <main className="flex-1 overflow-hidden">
-        <ModuleHost onHide={toggleHidden} />
+        <ModuleHost onHide={toggleHidden} mods={allModules} />
       </main>
       <CommandPalette />
       <SupportModal />
@@ -286,10 +295,16 @@ export function Layout() {
  * scroll position are all preserved, and its data revalidates in the background.
  * Pages are mounted lazily (only once visited), so nothing fetches up front.
  */
-function ModuleHost({ onHide }: { onHide: (id: string) => void }) {
+function ModuleHost({
+  onHide,
+  mods,
+}: {
+  onHide: (id: string) => void;
+  mods: ModuleDef[];
+}) {
   const location = useLocation();
   const seg = location.pathname.split("/").filter(Boolean)[0];
-  const activeId = modules.some((m) => m.id === seg) ? seg : modules[0].id;
+  const activeId = mods.some((m) => m.id === seg) ? seg : mods[0].id;
 
   const [visited, setVisited] = useState<Set<string>>(
     () => new Set([activeId]),
@@ -306,7 +321,7 @@ function ModuleHost({ onHide }: { onHide: (id: string) => void }) {
 
   return (
     <>
-      {modules
+      {mods
         .filter((m) => visited.has(m.id))
         .map((m) => {
           const active = m.id === activeId;

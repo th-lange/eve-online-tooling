@@ -1,0 +1,7 @@
+{
+  "id": "hello-ui",
+  "name": "Hello UI (example)",
+  "version": "0.1.0",
+  "minAppVersion": "0.36.0",
+  "ui": "index.html"
+}

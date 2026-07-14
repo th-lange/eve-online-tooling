@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Hello UI</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        font:
+          14px/1.5 system-ui,
+          sans-serif;
+        color: #e4e4e7;
+        background: #18181b;
+        display: grid;
+        place-items: center;
+        height: 100vh;
+      }
+      .card {
+        max-width: 32rem;
+        padding: 2rem;
+        border: 1px solid #27272a;
+        border-radius: 0.75rem;
+        background: #09090b;
+        text-align: center;
+      }
+      h1 {
+        margin: 0 0 0.5rem;
+        font-size: 1.5rem;
+      }
+      p {
+        margin: 0.5rem 0;
+        color: #a1a1aa;
+      }
+      code {
+        color: #818cf8;
+      }
+      .clock {
+        margin-top: 1rem;
+        font-variant-numeric: tabular-nums;
+        font-size: 2rem;
+        color: #34d399;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Hello from a plugin UI 👋</h1>
+      <p>
+        This page is a third-party plugin, rendered as its own sidebar module.
+        It loads from the sandboxed <code>plugin://</code> origin — no access to
+        the app, no network of its own.
+      </p>
+      <p>The live clock proves the plugin's own JavaScript is running:</p>
+      <div class="clock" id="clock">--:--:--</div>
+    </div>
+    <script>
+      // Inline script runs under the plugin CSP (script-src 'unsafe-inline').
+      const el = document.getElementById("clock");
+      const tick = () => {
+        el.textContent = new Date().toLocaleTimeString();
+      };
+      tick();
+      setInterval(tick, 1000);
+    </script>
+  </body>
+</html>

@@ -40,7 +40,8 @@ export type ModuleGroup =
   | "character"
   | "combat"
   | "intel"
-  | "support";
+  | "support"
+  | "plugins";
 
 /** Section labels + display order, driving the grouped sidebar nav (#224). */
 export const MODULE_GROUPS: { key: ModuleGroup; label: string }[] = [
@@ -51,6 +52,7 @@ export const MODULE_GROUPS: { key: ModuleGroup; label: string }[] = [
   { key: "combat", label: "Combat" },
   { key: "intel", label: "Intel / Space" },
   { key: "support", label: "Support" },
+  { key: "plugins", label: "Plugins" },
 ];
 
 // A feature module = a nav entry + the page rendered at `/{id}`. Adding a new

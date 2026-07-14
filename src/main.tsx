@@ -23,7 +23,9 @@ const router = createBrowserRouter([
     element: <Layout />,
     children: [
       { index: true, element: <Navigate to={`/${modules[0].id}`} replace /> },
-      ...modules.map((m) => ({ path: m.id })),
+      // One catch-all segment; the active module (built-in or an active plugin
+      // UI) is chosen from the URL by Layout's ModuleHost, not enumerated here.
+      { path: ":moduleId" },
     ],
   },
 ]);
