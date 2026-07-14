@@ -46,7 +46,6 @@ export type ModuleGroup =
   | "trading"
   | "market"
   | "character"
-  | "combat"
   | "intel"
   | "support"
   | "plugins";
@@ -57,8 +56,7 @@ export const MODULE_GROUPS: { key: ModuleGroup; label: string }[] = [
   { key: "trading", label: "Trading" },
   { key: "market", label: "Market" },
   { key: "character", label: "Characters" },
-  { key: "combat", label: "Combat" },
-  { key: "intel", label: "Intel / Space" },
+  { key: "intel", label: "Combat / Intel" },
   { key: "support", label: "Support" },
   { key: "plugins", label: "Plugins" },
 ];
@@ -273,7 +271,7 @@ export const modules: ModuleDef[] = [
     title: "DPS Meter",
     description:
       "Live combat meter from your gamelog — DPS, logi and cap, graphed.",
-    group: "combat",
+    group: "intel",
     Component: DpsPage,
   },
   {
@@ -281,7 +279,7 @@ export const modules: ModuleDef[] = [
     title: "PVP",
     description:
       "Paste pilot names → their kills, losses and the fits they fly.",
-    group: "combat",
+    group: "intel",
     icon: Crosshair,
     Component: PvpPage,
   },

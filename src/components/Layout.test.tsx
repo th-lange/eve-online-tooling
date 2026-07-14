@@ -59,7 +59,7 @@ describe("Layout sidebar", () => {
     renderLayout();
     const nav = screen.getByRole("navigation");
     // (Labels chosen to not collide with any module's own title text.)
-    for (const label of ["Industry", "Trading", "Intel / Space"]) {
+    for (const label of ["Industry", "Trading", "Combat / Intel"]) {
       expect(within(nav).getByText(label)).toBeInTheDocument();
     }
     // Industry is the first section, so its members lead the list.
