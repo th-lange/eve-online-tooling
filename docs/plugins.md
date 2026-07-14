@@ -21,12 +21,24 @@ This page documents Phase 1 — **logic plugins** (WASM).
   <id>.wasm          # the compiled logic (for a logic plugin)
 ```
 
-`<app_data_dir>` is the standard per-OS app data directory. `<id>` is the
-plugin's id and **must** match the folder name.
+`<app_data_dir>` is the standard per-OS app data directory. For this app it is:
+
+| OS | `<app_data_dir>` |
+| --- | --- |
+| Linux | `~/.local/share/com.thlange.eve-online-tooling` (or `$XDG_DATA_HOME/com.thlange.eve-online-tooling`) |
+| macOS | `~/Library/Application Support/com.thlange.eve-online-tooling` |
+| Windows | `%APPDATA%\com.thlange.eve-online-tooling` (i.e. `C:\Users\<you>\AppData\Roaming\com.thlange.eve-online-tooling`) |
+
+So plugins go in `<app_data_dir>/plugins/<id>/`. The **Plugins** page shows the
+exact resolved path for your machine. `<id>` is the plugin's id and **must**
+match the folder name.
 
 The app enumerates this folder on startup, validates each `plugin.json`, and
 lists the valid ones (`plugins_list`). An invalid manifest is skipped and
-logged — it never stops the app from booting.
+logged — it never stops the app from booting. Added or removed a plugin while
+the app is running? Click **Rescan** on the Plugins page to pick it up without
+a restart. On first run the app also seeds a bundled `hello-ui` example here so
+there's something to try; delete it and it stays gone.
 
 ## The manifest: `plugin.json`
 

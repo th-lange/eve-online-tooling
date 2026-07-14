@@ -20,7 +20,7 @@ use tauri::{AppHandle, Manager as _, State};
 
 use super::broker::{host_functions, BrokerCtx};
 use super::manifest::Permission;
-use super::PluginRegistry;
+use super::{PluginEntry, PluginRegistry};
 use crate::model::AppError;
 
 /// Resource ceilings applied to every plugin instance.
@@ -203,6 +203,20 @@ pub fn plugin_set_active(
         manager.evict(&plugin_id);
     }
     Ok(())
+}
+
+/// Re-scan the plugins folder at runtime so a plugin added or removed since
+/// launch is picked up without restarting the app. Evicts the cached instance
+/// of any plugin that vanished, then returns the fresh list.
+#[tauri::command]
+pub fn plugins_rescan(
+    registry: State<'_, Arc<PluginRegistry>>,
+    manager: State<'_, Arc<PluginManager>>,
+) -> Vec<PluginEntry> {
+    for id in registry.rescan() {
+        manager.evict(&id);
+    }
+    registry.list()
 }
 
 #[cfg(test)]

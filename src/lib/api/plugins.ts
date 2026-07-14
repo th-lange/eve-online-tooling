@@ -46,6 +46,18 @@ export function pluginsList(): Promise<PluginEntry[]> {
   return invoke<PluginEntry[]>("plugins_list");
 }
 
+/** Re-scan the plugins folder so a plugin added or removed since launch is
+ *  picked up without restarting the app. Returns the fresh list. */
+export function pluginsRescan(): Promise<PluginEntry[]> {
+  return invoke<PluginEntry[]>("plugins_rescan");
+}
+
+/** The absolute path plugins install into (differs per OS), for showing the
+ *  user where to drop a plugin folder. */
+export function pluginsDir(): Promise<string> {
+  return invoke<string>("plugins_dir");
+}
+
 /** Call an exported function of an activated plugin. Inactive → rejects. */
 export function pluginInvoke<T = unknown>(
   pluginId: string,

@@ -56,6 +56,10 @@ function renderPage(entries: PluginEntry[], mcpStart: McpStatus = STOPPED) {
         return Promise.resolve(mcp);
       case "mcp_set_port":
         return Promise.resolve(mcp);
+      case "plugins_dir":
+        return Promise.resolve("/tmp/app/plugins");
+      case "plugins_rescan":
+        return Promise.resolve(entries);
       default:
         return Promise.reject(
           new Error(`unexpected command ${cmd} ${JSON.stringify(args)}`),
@@ -140,6 +144,15 @@ describe("PluginsPage", () => {
     fireEvent.click(within(card).getByRole("button", { name: "Set" }));
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("mcp_set_port", { port: 8477 }),
+    );
+  });
+
+  it("shows the plugins folder path and Rescan calls plugins_rescan", async () => {
+    renderPage([]);
+    expect(await screen.findByText("/tmp/app/plugins")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /rescan/i }));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("plugins_rescan"),
     );
   });
 });

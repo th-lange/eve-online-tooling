@@ -44,7 +44,7 @@ pub struct PluginEntry {
 /// without a restart. Held in Tauri managed state.
 #[derive(Debug)]
 pub struct PluginRegistry {
-    manifests: Vec<Manifest>,
+    manifests: Mutex<Vec<Manifest>>,
     active: Mutex<HashSet<String>>,
     app_data_dir: PathBuf,
 }
@@ -62,7 +62,7 @@ impl PluginRegistry {
             .filter(|id| installed.contains(id.as_str()))
             .collect();
         Self {
-            manifests,
+            manifests: Mutex::new(manifests),
             active: Mutex::new(active),
             app_data_dir: app_data_dir.to_path_buf(),
         }
@@ -70,8 +70,9 @@ impl PluginRegistry {
 
     /// Every installed plugin with its current activation state, id-sorted.
     pub fn list(&self) -> Vec<PluginEntry> {
+        let manifests = self.manifests.lock();
         let active = self.active.lock();
-        self.manifests
+        manifests
             .iter()
             .map(|m| PluginEntry {
                 manifest: m.clone(),
@@ -87,13 +88,13 @@ impl PluginRegistry {
 
     /// The manifest for `id`, if installed.
     pub fn manifest(&self, id: &str) -> Option<Manifest> {
-        self.manifests.iter().find(|m| m.id == id).cloned()
+        self.manifests.lock().iter().find(|m| m.id == id).cloned()
     }
 
     /// Activate or deactivate plugin `id`, persisting the new set. Errors if the
     /// id isn't installed.
     pub fn set_active(&self, id: &str, active: bool) -> Result<(), String> {
-        if !self.manifests.iter().any(|m| m.id == id) {
+        if !self.manifests.lock().iter().any(|m| m.id == id) {
             return Err(format!("unknown plugin {id:?}"));
         }
         let mut set = self.active.lock();
@@ -113,12 +114,46 @@ impl PluginRegistry {
     /// `(pluginId, tool)` for every MCP tool declared by a currently-active
     /// plugin. Drives the MCP bridge's plugin-contributed tool surface.
     pub fn active_mcp_tools(&self) -> Vec<(String, manifest::McpToolDef)> {
+        let manifests = self.manifests.lock();
         let active = self.active.lock();
-        self.manifests
+        manifests
             .iter()
             .filter(|m| active.contains(&m.id))
             .flat_map(|m| m.mcp_tools.iter().map(|t| (m.id.clone(), t.clone())))
             .collect()
+    }
+
+    /// Re-scan `plugins/` at runtime (a folder was added or removed without a
+    /// restart). Swaps in the freshly discovered manifests and prunes the active
+    /// set to what's still installed, persisting it. Returns the ids that were
+    /// active but have now vanished, so the caller can evict their instances.
+    pub fn rescan(&self) -> Vec<String> {
+        let fresh = discover(&self.app_data_dir.join("plugins"));
+        let installed: HashSet<String> = fresh.iter().map(|m| m.id.clone()).collect();
+        let mut manifests = self.manifests.lock();
+        let mut active = self.active.lock();
+        *manifests = fresh;
+        let removed: Vec<String> = active
+            .iter()
+            .filter(|id| !installed.contains(*id))
+            .cloned()
+            .collect();
+        for id in &removed {
+            active.remove(id);
+        }
+        let ids: Vec<String> = {
+            let mut v: Vec<String> = active.iter().cloned().collect();
+            v.sort();
+            v
+        };
+        let _ = storage::save_data(&self.app_data_dir, ACTIVE_KEY, &ids);
+        removed
+    }
+
+    /// Absolute path of the folder plugins install into
+    /// (`<app_data_dir>/plugins`), for showing the user where to drop them.
+    pub fn plugins_dir(&self) -> PathBuf {
+        self.app_data_dir.join("plugins")
     }
 }
 
@@ -154,6 +189,36 @@ fn discover(plugins_dir: &Path) -> Vec<Manifest> {
 #[tauri::command]
 pub fn plugins_list(registry: State<'_, std::sync::Arc<PluginRegistry>>) -> Vec<PluginEntry> {
     registry.list()
+}
+
+/// The absolute path plugins install into, so the UI can show the user exactly
+/// where to drop a plugin folder (the location differs per OS).
+#[tauri::command]
+pub fn plugins_dir(registry: State<'_, std::sync::Arc<PluginRegistry>>) -> String {
+    registry.plugins_dir().to_string_lossy().into_owned()
+}
+
+/// On first run — before any `plugins/` folder exists — drop the bundled
+/// example UI plugin in, so there's something to activate out of the box. Once
+/// `plugins/` exists we never touch it again: deleting the example keeps it
+/// gone, and we never fight a user's own plugins.
+pub fn seed_example_plugin(app_data_dir: &Path) {
+    let plugins = app_data_dir.join("plugins");
+    if plugins.exists() {
+        return;
+    }
+    let dir = plugins.join("hello-ui");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let _ = std::fs::write(
+        dir.join("plugin.json"),
+        include_str!("../../../examples/plugins/hello-ui/plugin.json"),
+    );
+    let _ = std::fs::write(
+        dir.join("index.html"),
+        include_str!("../../../examples/plugins/hello-ui/index.html"),
+    );
 }
 
 #[cfg(test)]
@@ -255,6 +320,31 @@ mod tests {
         let reloaded = PluginRegistry::load(&root);
         assert!(reloaded.is_active("acme"));
         assert!(!reloaded.is_active("gone"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rescan_picks_up_added_and_drops_removed() {
+        let root = tmp("rescan");
+        write_plugin(&root, "acme", &manifest_json("acme"));
+        let reg = PluginRegistry::load(&root);
+        reg.set_active("acme", true).unwrap();
+        assert!(reg.is_active("acme"));
+
+        // Add a second plugin, remove the first, then rescan at runtime.
+        write_plugin(&root, "beta", &manifest_json("beta"));
+        std::fs::remove_dir_all(root.join("plugins").join("acme")).unwrap();
+        let removed = reg.rescan();
+
+        // The vanished-but-active plugin is reported (so its instance is evicted).
+        assert_eq!(removed, vec!["acme".to_string()]);
+        // The list reflects the freshly discovered folders.
+        let ids: Vec<_> = reg.list().iter().map(|e| e.manifest.id.clone()).collect();
+        assert_eq!(ids, vec!["beta".to_string()]);
+        // The removed plugin is deactivated, and the prune persisted — a fresh
+        // load agrees.
+        assert!(!reg.is_active("acme"));
+        assert!(!PluginRegistry::load(&root).is_active("acme"));
         let _ = std::fs::remove_dir_all(&root);
     }
 }

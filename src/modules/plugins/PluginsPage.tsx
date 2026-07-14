@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Radio } from "lucide-react";
+import { FolderOpen, Radio, RefreshCw } from "lucide-react";
 import {
   pluginsList,
+  pluginsRescan,
+  pluginsDir,
   pluginSetActive,
   mcpStatus,
   mcpStart,
@@ -20,6 +22,12 @@ const SUBTITLE =
 
 export function PluginsPage() {
   const plugins = useQuery({ queryKey: ["plugins"], queryFn: pluginsList });
+  const qc = useQueryClient();
+  const dir = useQuery({ queryKey: ["plugins", "dir"], queryFn: pluginsDir });
+  const rescan = useMutation({
+    mutationFn: pluginsRescan,
+    onSuccess: (list) => qc.setQueryData(["plugins"], list),
+  });
 
   if (plugins.isLoading) {
     return (
@@ -45,8 +53,36 @@ export function PluginsPage() {
   const entries = plugins.data ?? [];
   return (
     <Page>
-      <PageHeader title="Plugins" subtitle={SUBTITLE} />
+      <PageHeader
+        title="Plugins"
+        subtitle={SUBTITLE}
+        actions={
+          <button
+            onClick={() => rescan.mutate()}
+            disabled={rescan.isPending}
+            className="flex items-center gap-1.5 rounded-md border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+          >
+            <RefreshCw
+              size={13}
+              className={rescan.isPending ? "animate-spin" : ""}
+            />
+            Rescan
+          </button>
+        }
+      />
       <McpBridgeCard />
+      {dir.data ? (
+        <div className="mt-4 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-xs text-zinc-400">
+          <FolderOpen size={14} className="mt-0.5 shrink-0 text-zinc-500" />
+          <span>
+            Install plugins into{" "}
+            <code className="text-zinc-300">{dir.data}</code> — one folder per
+            plugin, named after its id. Then click{" "}
+            <strong className="text-zinc-300">Rescan</strong> (or restart the
+            app) to pick up changes.
+          </span>
+        </div>
+      ) : null}
       {entries.length > 0 && (
         <div className="mt-4 rounded-lg border border-amber-900 bg-amber-950/30 p-3 text-sm text-amber-200">
           Plugins are third-party code. Activating one grants it exactly the
@@ -57,8 +93,8 @@ export function PluginsPage() {
       )}
       {entries.length === 0 ? (
         <Centered>
-          No plugins installed. Drop a plugin folder into the app's{" "}
-          <code>plugins/</code> directory, then reopen this page.
+          No plugins installed yet. Drop a plugin folder into the directory
+          shown above, then Rescan.
         </Centered>
       ) : (
         <div className="mt-4 flex flex-col gap-3">

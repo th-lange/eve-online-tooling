@@ -137,6 +137,9 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .expect("could not resolve the app data directory");
+            // First run: seed the bundled example plugin so there's something to
+            // activate out of the box (no-op once `plugins/` exists).
+            plugins::seed_example_plugin(&dir);
             app.manage(market::MarketService::with_cache(dir.clone()));
             app.manage(std::sync::Arc::new(plugins::PluginRegistry::load(&dir)));
             app.manage(std::sync::Arc::new(plugins::PluginManager::new()));
@@ -161,6 +164,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::ping,
             plugins::plugins_list,
+            plugins::plugins_dir,
+            plugins::manager::plugins_rescan,
             plugins::manager::plugin_invoke,
             plugins::manager::plugin_set_active,
             mcp::mcp_start,
