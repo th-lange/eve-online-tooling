@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import {
@@ -6,6 +6,7 @@ import {
   isAuthRequired,
   marketOrders,
   openMarketWindow,
+  productionProfit,
   type OrderRow,
 } from "../../lib/api";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
@@ -32,6 +33,34 @@ export function OrdersPage() {
     () => new Set(rows.map((r) => r.characterId)).size > 1,
     [rows],
   );
+  const [checkCost, setCheckCost] = useState(false);
+  // Build cost per product from the Production engine — pulled only when the
+  // user asks (it computes the whole manufacturable set). Cached for the session.
+  const costs = useQuery({
+    queryKey: ["production", "buildCosts"],
+    queryFn: async () => {
+      const breakdowns = await productionProfit({});
+      const m = new Map<number, number>();
+      for (const b of breakdowns) {
+        if (b.unitsProduced > 0) {
+          m.set(
+            b.productTypeId,
+            (b.materialCost + b.jobFee + b.blueprintCost + b.inventionCost) /
+              b.unitsProduced,
+          );
+        }
+      }
+      return m;
+    },
+    enabled: checkCost,
+    staleTime: Infinity,
+  });
+  const buildCost = costs.data;
+  const belowCost = useMemo(
+    () =>
+      buildCost ? rows.filter((r) => isBelowBuildCost(r, buildCost)).length : 0,
+    [rows, buildCost],
+  );
 
   return (
     <Page>
@@ -40,6 +69,18 @@ export function OrdersPage() {
         subtitle="Your open buy/sell orders, flagged when undercut at the order's own station's current best price."
         actions={
           <>
+            <button
+              onClick={() => setCheckCost(true)}
+              disabled={costs.isFetching}
+              title="Flag sell orders whose undercut price would fall below the item's build cost (from Production)"
+              className="rounded border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+            >
+              {costs.isFetching
+                ? "Checking…"
+                : buildCost
+                  ? "Re-check cost"
+                  : "Check build cost"}
+            </button>
             <button
               onClick={() => orders.refetch()}
               disabled={orders.isFetching}
@@ -76,10 +117,30 @@ export function OrdersPage() {
           <span className={undercut > 0 ? "text-rose-400" : "text-emerald-400"}>
             {formatInt(undercut)} undercut
           </span>
+          {buildCost && (
+            <>
+              {" · "}
+              <span
+                className={belowCost > 0 ? "text-amber-400" : "text-zinc-500"}
+              >
+                {formatInt(belowCost)} below build cost
+              </span>
+            </>
+          )}
+        </div>
+      )}
+      {costs.isError && (
+        <div className="mt-2 text-xs text-amber-500">
+          Couldn't compute build costs — the Production static data may not be
+          installed.
         </div>
       )}
 
-      <OrdersTable rows={rows} showCharacter={multiCharacter} />
+      <OrdersTable
+        rows={rows}
+        showCharacter={multiCharacter}
+        buildCost={buildCost}
+      />
     </Page>
   );
 }
@@ -131,9 +192,11 @@ const KEYS = COLUMNS.map((c) => c.key);
 function OrdersTable({
   rows,
   showCharacter,
+  buildCost,
 }: {
   rows: OrderRow[];
   showCharacter: boolean;
+  buildCost?: Map<number, number>;
 }) {
   const { sortKey, sortDir, toggleSort } = usePersistentSort<OrderSortKey>(
     "sort.orders",
@@ -209,17 +272,30 @@ function OrdersTable({
               </td>
               <td className="px-3 py-1.5">
                 <div className="flex items-center justify-end gap-2">
-                  {r.undercut && r.bestPrice != null ? (
-                    <button
-                      onClick={() => copyUndercut(r)}
-                      title="Copy a price one tick better than the current best"
-                      className="rounded border border-rose-700 px-1.5 py-0.5 text-xs text-rose-300 hover:bg-rose-900/40"
-                    >
-                      copy {formatIsk(undercutPrice(r))}
-                    </button>
-                  ) : (
-                    <span className="text-xs text-emerald-500">top</span>
-                  )}
+                  {(() => {
+                    const cost = r.isBuy ? undefined : buildCost?.get(r.typeId);
+                    if (cost != null && undercutPrice(r) < cost) {
+                      return (
+                        <span
+                          title={`Build cost ≈ ${formatIsk(cost)}/unit — undercutting sells at a loss`}
+                          className="rounded border border-amber-700 px-1.5 py-0.5 text-xs text-amber-300"
+                        >
+                          below cost
+                        </span>
+                      );
+                    }
+                    return r.undercut && r.bestPrice != null ? (
+                      <button
+                        onClick={() => copyUndercut(r)}
+                        title="Copy a price one tick better than the current best"
+                        className="rounded border border-rose-700 px-1.5 py-0.5 text-xs text-rose-300 hover:bg-rose-900/40"
+                      >
+                        copy {formatIsk(undercutPrice(r))}
+                      </button>
+                    ) : (
+                      <span className="text-xs text-emerald-500">top</span>
+                    );
+                  })()}
                   <button
                     onClick={() =>
                       openMarketWindow(r.typeId).catch((e) => alert(String(e)))
@@ -254,6 +330,17 @@ function OrdersTable({
 function undercutPrice(r: OrderRow): number {
   const best = r.bestPrice ?? r.price;
   return r.isBuy ? best + 0.01 : best - 0.01;
+}
+
+/** A sell order whose undercut price would drop below the item's build cost —
+ * chasing the market means selling at a loss, so don't adjust. */
+function isBelowBuildCost(
+  r: OrderRow,
+  buildCost: Map<number, number>,
+): boolean {
+  if (r.isBuy) return false;
+  const cost = buildCost.get(r.typeId);
+  return cost != null && undercutPrice(r) < cost;
 }
 
 function copyUndercut(r: OrderRow) {
