@@ -32,6 +32,7 @@ const FITS: LostFit[] = [
     hullName: "Rifter",
     lostCount: 3,
     killmailId: 111,
+    lastLost: "2026-07-10T14:00:00Z",
     modules: [
       { typeId: 100, name: "200mm AutoCannon II", slot: "high", quantity: 1 },
       { typeId: 200, name: "Warp Scrambler II", slot: "mid", quantity: 1 },

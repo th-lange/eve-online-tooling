@@ -53,6 +53,8 @@ export interface LostFit {
   hullName: string;
   lostCount: number;
   killmailId: number;
+  /** ISO timestamp of the most-recent loss — when they last flew this hull. */
+  lastLost: string;
   modules: FitModule[];
 }
 

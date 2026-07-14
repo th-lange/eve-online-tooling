@@ -124,6 +124,13 @@ fn parse_names(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Pods and shuttles aren't real PvP hulls — drop them from every hull list.
+/// Matches by name (English, as zKill/SDE return it): covers "Capsule",
+/// the Genolution capsule variants, and every faction shuttle.
+fn is_junk_hull(name: &str) -> bool {
+    name.contains("Capsule") || name.contains("Shuttle")
+}
+
 /// Map one raw zKill stats doc onto our surface for `character_id`/`name`.
 fn stats_from_raw(character_id: i64, name: String, r: ZkillStatsRaw) -> PvpStats {
     // The `shipType` top-list is the hulls the pilot flew to get kills, already
@@ -135,7 +142,7 @@ fn stats_from_raw(character_id: i64, name: String, r: ZkillStatsRaw) -> PvpStats
         .map(|t| {
             t.values
                 .iter()
-                .filter(|s| s.ship_type_id > 0)
+                .filter(|s| s.ship_type_id > 0 && !is_junk_hull(&s.ship_name))
                 .take(MAX_HULLS)
                 .map(|s| HullUsage {
                     type_id: s.ship_type_id,
@@ -272,6 +279,8 @@ struct ZkillZkb {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Killmail {
     killmail_id: i64,
+    #[serde(default)]
+    killmail_time: String,
     victim: Victim,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -310,6 +319,9 @@ pub struct LostFit {
     pub hull_name: String,
     pub lost_count: i64,
     pub killmail_id: i64,
+    /// ISO-8601 timestamp of the representative (most-recent) loss — when the
+    /// pilot last flew this hull.
+    pub last_lost: String,
     pub modules: Vec<FitModule>,
 }
 
@@ -427,16 +439,13 @@ pub async fn pvp_pilot_fits(
         }
     }
 
-    // Rank hulls by loss count (desc), keep the top few.
-    order.sort_by(|a, b| count[b].cmp(&count[a]));
-    order.truncate(LOST_HULL_CAP);
-
     // Resolve hull + module names in one SDE pass (opened after every await —
-    // the handle isn't Send).
+    // the handle isn't Send). Resolve for *all* grouped hulls so junk hulls can
+    // be dropped by name before ranking.
     let mut ids: HashSet<i64> = HashSet::new();
-    for h in &order {
-        ids.insert(*h);
-        for it in &rep[h].victim.items {
+    for (hull, km) in &rep {
+        ids.insert(*hull);
+        for it in &km.victim.items {
             if slot_of(it.flag).is_some() {
                 ids.insert(it.item_type_id);
             }
@@ -457,6 +466,11 @@ pub async fn pvp_pilot_fits(
             .unwrap_or_else(|| format!("Type {id}"))
     };
 
+    // Drop pods/shuttles, then rank the rest by loss count and keep the top few.
+    order.retain(|h| !is_junk_hull(&name_of(*h)));
+    order.sort_by(|a, b| count[b].cmp(&count[a]));
+    order.truncate(LOST_HULL_CAP);
+
     let fits: Vec<LostFit> = order
         .iter()
         .map(|h| {
@@ -475,6 +489,7 @@ pub async fn pvp_pilot_fits(
                 hull_name: name_of(*h),
                 lost_count: count[h],
                 killmail_id: km.killmail_id,
+                last_lost: km.killmail_time.clone(),
                 modules,
             }
         })
@@ -525,16 +540,18 @@ mod tests {
     }
 
     #[test]
-    fn top_ship_list_becomes_flown_hulls_capped_and_ordered() {
-        // zKill returns the shipType top-list already sorted by kills desc,
-        // alongside other lists we ignore. Rows without a shipTypeID are skipped.
+    fn flown_hulls_drop_pods_shuttles_and_idless_rows() {
+        // zKill returns the shipType list sorted by kills desc, alongside other
+        // lists we ignore. Capsules, shuttles and id-less rows all drop.
         let raw: ZkillStatsRaw = serde_json::from_str(
             r#"{
                 "topLists": [
                     { "type": "solarSystem", "values": [ { "solarSystemID": 1, "kills": 99 } ] },
                     { "type": "shipType", "values": [
-                        { "shipTypeID": 670, "shipName": "Capsule", "kills": 50 },
-                        { "shipTypeID": 11567, "shipName": "Avatar", "kills": 20 },
+                        { "shipTypeID": 670, "shipName": "Capsule", "kills": 90 },
+                        { "shipTypeID": 587, "shipName": "Rifter", "kills": 50 },
+                        { "shipTypeID": 11129, "shipName": "Gallente Shuttle", "kills": 12 },
+                        { "shipTypeID": 621, "shipName": "Caracal", "kills": 8 },
                         { "shipName": "Ghost", "kills": 5 }
                     ] }
                 ]
@@ -542,12 +559,21 @@ mod tests {
         )
         .unwrap();
         let s = stats_from_raw(1, "Ace".into(), raw);
-        // The zero-typeId row is dropped; order preserved.
-        assert_eq!(s.hulls.len(), 2);
-        assert_eq!(s.hulls[0].type_id, 670);
-        assert_eq!(s.hulls[0].name, "Capsule");
+        // Capsule + Shuttle + id-less rows gone; real hulls kept in order.
+        assert_eq!(
+            s.hulls.iter().map(|h| h.name.as_str()).collect::<Vec<_>>(),
+            vec!["Rifter", "Caracal"]
+        );
         assert_eq!(s.hulls[0].kills, 50);
-        assert_eq!(s.hulls[1].name, "Avatar");
+    }
+
+    #[test]
+    fn is_junk_hull_matches_pods_and_shuttles() {
+        assert!(is_junk_hull("Capsule"));
+        assert!(is_junk_hull("Capsule - Genolution 'Auroral' 197-variant"));
+        assert!(is_junk_hull("Gallente Shuttle"));
+        assert!(!is_junk_hull("Rifter"));
+        assert!(!is_junk_hull("Ares"));
     }
 
     #[test]

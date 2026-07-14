@@ -60,8 +60,15 @@ const SLOT_LABEL: Record<string, string> = {
   drone: "Drones",
 };
 
+/** ISO timestamp → local date string, or "" when absent/invalid. */
+function fmtDate(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString();
+}
+
 /** A single lost fit: hull header (links to the kill) + modules by slot. */
 function FitView({ fit }: { fit: LostFit }) {
+  const last = fmtDate(fit.lastLost);
   return (
     <div className="rounded border border-zinc-800 bg-zinc-950/60 p-2">
       <div className="flex items-center justify-between gap-2">
@@ -74,7 +81,7 @@ function FitView({ fit }: { fit: LostFit }) {
           {fit.hullName}
         </a>
         <span className="text-[10px] text-zinc-500">
-          lost ×{formatInt(fit.lostCount)}
+          {last ? `last ${last} · ` : ""}lost ×{formatInt(fit.lostCount)}
         </span>
       </div>
       <div className="mt-1 flex flex-col gap-0.5">
