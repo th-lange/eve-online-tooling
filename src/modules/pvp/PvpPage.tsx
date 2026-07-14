@@ -1,6 +1,11 @@
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { pvpProfiles, type PvpStats } from "../../lib/api";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+  pvpProfiles,
+  pvpPilotFits,
+  type PvpStats,
+  type LostFit,
+} from "../../lib/api";
 import { formatInt } from "../../lib/format";
 import { Page, PageHeader } from "../../components/page";
 
@@ -41,6 +46,97 @@ function Stat({
         {label}
       </span>
       <span className={`text-sm ${color}`}>{value}</span>
+    </div>
+  );
+}
+
+const SLOT_ORDER = ["high", "mid", "low", "rig", "subsystem", "drone"] as const;
+const SLOT_LABEL: Record<string, string> = {
+  high: "High",
+  mid: "Mid",
+  low: "Low",
+  rig: "Rig",
+  subsystem: "Sub",
+  drone: "Drones",
+};
+
+/** A single lost fit: hull header (links to the kill) + modules by slot. */
+function FitView({ fit }: { fit: LostFit }) {
+  return (
+    <div className="rounded border border-zinc-800 bg-zinc-950/60 p-2">
+      <div className="flex items-center justify-between gap-2">
+        <a
+          href={`https://zkillboard.com/kill/${fit.killmailId}/`}
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs font-medium text-zinc-200 hover:text-indigo-300"
+        >
+          {fit.hullName}
+        </a>
+        <span className="text-[10px] text-zinc-500">
+          lost ×{formatInt(fit.lostCount)}
+        </span>
+      </div>
+      <div className="mt-1 flex flex-col gap-0.5">
+        {SLOT_ORDER.map((slot) => {
+          const mods = fit.modules.filter((m) => m.slot === slot);
+          if (mods.length === 0) return null;
+          return (
+            <div key={slot} className="flex gap-2 text-[11px]">
+              <span className="w-12 shrink-0 text-zinc-600">
+                {SLOT_LABEL[slot]}
+              </span>
+              <span className="text-zinc-300">
+                {mods
+                  .map((m) =>
+                    m.quantity > 1 ? `${m.name} ×${m.quantity}` : m.name,
+                  )
+                  .join(", ")}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Lazy "lost fits" section — fetches the pilot's killmail fits only when the
+ * user expands it, so pasting many pilots stays cheap. */
+function LostFits({ p }: { p: PvpStats }) {
+  const [open, setOpen] = useState(false);
+  const fits = useQuery({
+    queryKey: ["pvp", "fits", p.characterId],
+    queryFn: () => pvpPilotFits(p.characterId),
+    enabled: open,
+    staleTime: Infinity,
+  });
+  return (
+    <div className="mt-3 border-t border-zinc-800 pt-3">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="text-xs text-indigo-400 hover:text-indigo-300"
+      >
+        {open ? "Hide lost fits" : "Show lost fits"}
+      </button>
+      {open && (
+        <div className="mt-2 flex flex-col gap-2">
+          {fits.isLoading && (
+            <span className="text-xs text-zinc-500">Loading fits…</span>
+          )}
+          {fits.isError && (
+            <span className="text-xs text-red-400">
+              Couldn&apos;t load fits.
+            </span>
+          )}
+          {fits.data && fits.data.length === 0 && (
+            <span className="text-xs text-zinc-500">No recent losses.</span>
+          )}
+          {fits.data?.map((f) => (
+            <FitView key={f.killmailId} fit={f} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -111,6 +207,7 @@ function PilotCard({ p, topN }: { p: PvpStats; topN: number }) {
           </div>
         </div>
       )}
+      <LostFits p={p} />
     </div>
   );
 }

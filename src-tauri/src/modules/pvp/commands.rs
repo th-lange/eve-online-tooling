@@ -6,7 +6,8 @@ use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
-use crate::esi::{resolve_character_ids, AuthState};
+use crate::esi::{resolve_character_ids, AuthState, ESI_BASE};
+use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
 /// Cap on pasted names per lookup.
@@ -247,6 +248,241 @@ pub async fn pvp_profiles(
     Ok(PvpProfilesResult { pilots, unresolved })
 }
 
+// --- Slice 3 (#534): the pilot's lost fits, reconstructed from killmails. ---
+
+/// Recent losses to pull per pilot before grouping by hull.
+const LOSS_CAP: usize = 60;
+/// Distinct lost hulls to surface per pilot.
+const LOST_HULL_CAP: usize = 10;
+/// Killmails are immutable, so cache them effectively forever (~10y).
+const KILLMAIL_TTL_SECS: u64 = 60 * 60 * 24 * 3650;
+
+/// A zKill loss-list entry: a killmail id + the hash needed to fetch it.
+#[derive(Deserialize)]
+struct ZkillRef {
+    killmail_id: i64,
+    zkb: ZkillZkb,
+}
+#[derive(Deserialize)]
+struct ZkillZkb {
+    hash: String,
+}
+
+/// The parts of an ESI killmail we use (cached verbatim — killmails never change).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Killmail {
+    killmail_id: i64,
+    victim: Victim,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Victim {
+    #[serde(default)]
+    ship_type_id: i64,
+    #[serde(default)]
+    items: Vec<KmItem>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct KmItem {
+    item_type_id: i64,
+    flag: i64,
+    #[serde(default)]
+    quantity_destroyed: i64,
+    #[serde(default)]
+    quantity_dropped: i64,
+}
+
+/// One fitted module on a lost fit, with the slot it sat in.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FitModule {
+    pub type_id: i64,
+    pub name: String,
+    /// "high" | "mid" | "low" | "rig" | "subsystem" | "drone".
+    pub slot: String,
+    pub quantity: i64,
+}
+
+/// A hull the pilot has lost, with a representative (most-recent) fit.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LostFit {
+    pub hull_type_id: i64,
+    pub hull_name: String,
+    pub lost_count: i64,
+    pub killmail_id: i64,
+    pub modules: Vec<FitModule>,
+}
+
+/// The fit slot an EVE inventory `flag` denotes, or `None` for non-fit items
+/// (cargo, implants, …). Hi/Mid/Lo are the 8-slot ranges; rigs, subsystems and
+/// the drone bay follow.
+fn slot_of(flag: i64) -> Option<&'static str> {
+    match flag {
+        27..=34 => Some("high"),
+        19..=26 => Some("mid"),
+        11..=18 => Some("low"),
+        92..=99 => Some("rig"),
+        125..=132 => Some("subsystem"),
+        87 => Some("drone"),
+        _ => None,
+    }
+}
+
+/// Aggregate a killmail's items into fitted modules `(type_id, slot, quantity)`,
+/// summing identical (type, slot) entries (a drone stack, or several of one
+/// module) and dropping non-fit items. Ordered hi→mid→low→rig→subsystem→drone.
+fn modules_of(items: &[KmItem]) -> Vec<(i64, &'static str, i64)> {
+    let mut agg: HashMap<(i64, &'static str), i64> = HashMap::new();
+    for it in items {
+        if let Some(slot) = slot_of(it.flag) {
+            let qty = (it.quantity_destroyed + it.quantity_dropped).max(1);
+            *agg.entry((it.item_type_id, slot)).or_default() += qty;
+        }
+    }
+    let rank = |s: &str| match s {
+        "high" => 0,
+        "mid" => 1,
+        "low" => 2,
+        "rig" => 3,
+        "subsystem" => 4,
+        "drone" => 5,
+        _ => 6,
+    };
+    let mut out: Vec<(i64, &'static str, i64)> =
+        agg.into_iter().map(|((t, s), q)| (t, s, q)).collect();
+    out.sort_by(|a, b| rank(a.1).cmp(&rank(b.1)).then(a.0.cmp(&b.0)));
+    out
+}
+
+/// One pilot's lost fits: pull recent losses from zKill, fetch each killmail
+/// from public ESI (cached permanently), group by hull, and return a
+/// representative (most-recent) fit per hull with its modules by slot — ranked
+/// by how often the hull was lost. Fetched lazily (only when a card is
+/// expanded) so pasting many pilots stays cheap.
+#[tauri::command]
+pub async fn pvp_pilot_fits(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+    character_id: i64,
+) -> Result<Vec<LostFit>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let http = auth_state.http();
+
+    // Recent losses, newest first.
+    let losses: Vec<ZkillRef> = async {
+        http.get(format!(
+            "https://zkillboard.com/api/losses/characterID/{character_id}/"
+        ))
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()
+    }
+    .await
+    .unwrap_or_default();
+
+    // Fetch each killmail from public ESI (permanent cache), preserving order.
+    let refs: Vec<ZkillRef> = losses.into_iter().take(LOSS_CAP).collect();
+    let client = http.clone();
+    let kms: Vec<Option<Killmail>> = stream::iter(refs)
+        .map(|r| {
+            let client = client.clone();
+            let dir = dir.clone();
+            async move {
+                let key = format!("pvp_km_{}", r.killmail_id);
+                if let Some(km) = storage::cache_get::<Killmail>(&dir, &key) {
+                    return Some(km);
+                }
+                let url = format!(
+                    "{ESI_BASE}/latest/killmails/{}/{}/",
+                    r.killmail_id, r.zkb.hash
+                );
+                let km: Option<Killmail> =
+                    async { client.get(&url).send().await.ok()?.json().await.ok() }.await;
+                if let Some(k) = &km {
+                    let _ = storage::cache_put(&dir, &key, k, KILLMAIL_TTL_SECS);
+                }
+                km
+            }
+        })
+        .buffered(ZKILL_CONCURRENCY)
+        .collect()
+        .await;
+
+    // Group by hull; the first (newest) killmail of each hull is its rep fit.
+    let mut order: Vec<i64> = Vec::new();
+    let mut rep: HashMap<i64, Killmail> = HashMap::new();
+    let mut count: HashMap<i64, i64> = HashMap::new();
+    for km in kms.into_iter().flatten() {
+        let hull = km.victim.ship_type_id;
+        if hull <= 0 {
+            continue;
+        }
+        *count.entry(hull).or_default() += 1;
+        if !rep.contains_key(&hull) {
+            order.push(hull);
+            rep.insert(hull, km);
+        }
+    }
+
+    // Rank hulls by loss count (desc), keep the top few.
+    order.sort_by(|a, b| count[b].cmp(&count[a]));
+    order.truncate(LOST_HULL_CAP);
+
+    // Resolve hull + module names in one SDE pass (opened after every await —
+    // the handle isn't Send).
+    let mut ids: HashSet<i64> = HashSet::new();
+    for h in &order {
+        ids.insert(*h);
+        for it in &rep[h].victim.items {
+            if slot_of(it.flag).is_some() {
+                ids.insert(it.item_type_id);
+            }
+        }
+    }
+    let names: HashMap<i64, String> = {
+        let ids: Vec<i64> = ids.into_iter().collect();
+        let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+        sde.type_names(&ids)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .collect()
+    };
+    let name_of = |id: i64| {
+        names
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| format!("Type {id}"))
+    };
+
+    let fits: Vec<LostFit> = order
+        .iter()
+        .map(|h| {
+            let km = &rep[h];
+            let modules = modules_of(&km.victim.items)
+                .into_iter()
+                .map(|(tid, slot, qty)| FitModule {
+                    type_id: tid,
+                    name: name_of(tid),
+                    slot: slot.to_string(),
+                    quantity: qty,
+                })
+                .collect();
+            LostFit {
+                hull_type_id: *h,
+                hull_name: name_of(*h),
+                lost_count: count[h],
+                killmail_id: km.killmail_id,
+                modules,
+            }
+        })
+        .collect();
+
+    Ok(fits)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,5 +554,41 @@ mod tests {
     fn no_top_lists_yields_no_hulls() {
         let raw: ZkillStatsRaw = serde_json::from_str("{}").unwrap();
         assert!(stats_from_raw(1, "x".into(), raw).hulls.is_empty());
+    }
+
+    #[test]
+    fn slot_mapping_covers_fit_slots_only() {
+        assert_eq!(slot_of(28), Some("high"));
+        assert_eq!(slot_of(20), Some("mid"));
+        assert_eq!(slot_of(12), Some("low"));
+        assert_eq!(slot_of(93), Some("rig"));
+        assert_eq!(slot_of(125), Some("subsystem"));
+        assert_eq!(slot_of(87), Some("drone"));
+        assert_eq!(slot_of(5), None); // cargo is not part of the fit
+    }
+
+    #[test]
+    fn modules_reconstruct_by_slot_and_aggregate_stacks() {
+        let km: Killmail = serde_json::from_str(
+            r#"{
+                "killmail_id": 1,
+                "victim": {
+                    "ship_type_id": 587,
+                    "items": [
+                        { "item_type_id": 100, "flag": 27, "quantity_destroyed": 1 },
+                        { "item_type_id": 200, "flag": 19, "quantity_dropped": 1 },
+                        { "item_type_id": 300, "flag": 87, "quantity_destroyed": 3, "quantity_dropped": 2 },
+                        { "item_type_id": 999, "flag": 5, "quantity_dropped": 100 }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap();
+        let mods = modules_of(&km.victim.items);
+        // Cargo (flag 5) dropped; the drone stack sums to 5; order hi, mid, drone.
+        assert_eq!(mods.len(), 3);
+        assert_eq!(mods[0], (100, "high", 1));
+        assert_eq!(mods[1], (200, "mid", 1));
+        assert_eq!(mods[2], (300, "drone", 5));
     }
 }

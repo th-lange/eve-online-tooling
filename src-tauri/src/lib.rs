@@ -297,6 +297,7 @@ pub fn run() {
             modules::localintel::commands::localintel_get_watchlist,
             modules::localintel::commands::localintel_set_watchlist,
             modules::pvp::commands::pvp_profiles,
+            modules::pvp::commands::pvp_pilot_fits,
             modules::lpstore::commands::lp_balances,
             modules::lpstore::commands::lp_offers,
             modules::character::commands::character_skills,

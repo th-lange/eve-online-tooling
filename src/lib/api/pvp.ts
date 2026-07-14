@@ -37,3 +37,26 @@ export interface PvpProfilesResult {
 export function pvpProfiles(text: string): Promise<PvpProfilesResult> {
   return invoke<PvpProfilesResult>("pvp_profiles", { text });
 }
+
+/** One fitted module on a lost fit, with the slot it sat in. */
+export interface FitModule {
+  typeId: number;
+  name: string;
+  /** "high" | "mid" | "low" | "rig" | "subsystem" | "drone". */
+  slot: string;
+  quantity: number;
+}
+
+/** A hull the pilot has lost, with a representative (most-recent) fit. */
+export interface LostFit {
+  hullTypeId: number;
+  hullName: string;
+  lostCount: number;
+  killmailId: number;
+  modules: FitModule[];
+}
+
+/** A pilot's lost fits (by hull), reconstructed from recent loss killmails. */
+export function pvpPilotFits(characterId: number): Promise<LostFit[]> {
+  return invoke<LostFit[]>("pvp_pilot_fits", { characterId });
+}
