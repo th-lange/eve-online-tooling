@@ -582,6 +582,17 @@ pub async fn fitting_simulate(
     };
 
     let sde = open_sde(&app)?;
+    simulate_fit(&sde, &fit, &skill_level_for)
+}
+
+/// Core simulation shared by `fitting_simulate` and the PVP fit analysis: given
+/// an open SDE, a fit and a skill-level lookup, resolve the dogma engine and
+/// assemble [`FitStats`]. Kept engine-identical so both surfaces agree.
+pub(crate) fn simulate_fit(
+    sde: &Sde,
+    fit: &Fit,
+    skill_level_for: &dyn Fn(i64) -> f64,
+) -> Result<FitStats, String> {
     let Some(ship) = sde
         .ship_layout(fit.ship_type_id)
         .map_err(|e| e.to_string())?
@@ -638,10 +649,10 @@ pub async fn fitting_simulate(
 
     // Dogma engine: resolve finalized attributes and derive stats (incl. the
     // skill-adjusted resources/validation). Best-effort.
-    let dogma = run_dogma(&sde, &fit, &ship, &skill_level_for).ok();
+    let dogma = run_dogma(sde, fit, &ship, skill_level_for).ok();
 
     // Classify any EW projected onto the fit (#265) — presence only.
-    let projected_ew = classify_projected_ew(&sde, &fit);
+    let projected_ew = classify_projected_ew(sde, fit);
 
     Ok(FitStats {
         resources: dogma

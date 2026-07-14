@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
 use crate::esi::{resolve_character_ids, AuthState, ESI_BASE};
+use crate::modules::fitting::commands::simulate_fit;
+use crate::modules::fitting::types::{Fit, FitItem, FitStats, ModuleState, SlotKind};
 use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
@@ -323,6 +325,35 @@ pub struct LostFit {
     /// pilot last flew this hull.
     pub last_lost: String,
     pub modules: Vec<FitModule>,
+    /// All-V dogma analysis of this fit (`None` if the engine couldn't run).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis: Option<FitAnalysis>,
+}
+
+/// One weapon's engagement envelope from the dogma engine.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WeaponLine {
+    pub name: String,
+    /// Optimal range (m); for missiles this is flight range (falloff 0).
+    pub optimal: f64,
+    pub falloff: f64,
+}
+
+/// Dogma-engine read of a reconstructed fit, at all-V (skills unknown), so
+/// ranges and damage are an upper-bound estimate.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FitAnalysis {
+    pub ehp: f64,
+    pub dps_total: f64,
+    pub dps_turret: f64,
+    pub dps_missile: f64,
+    pub dps_drone: f64,
+    /// Max warp scramble/disruption range (m) across the fit's tackle, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scram_range: Option<f64>,
+    pub weapons: Vec<WeaponLine>,
 }
 
 /// The fit slot an EVE inventory `flag` denotes, or `None` for non-fit items
@@ -364,6 +395,129 @@ fn modules_of(items: &[KmItem]) -> Vec<(i64, &'static str, i64)> {
         agg.into_iter().map(|((t, s), q)| (t, s, q)).collect();
     out.sort_by(|a, b| rank(a.1).cmp(&rank(b.1)).then(a.0.cmp(&b.0)));
     out
+}
+
+/// The fit slot + 0-based index within it for an inventory `flag`, or `None`
+/// for non-fit items. Unlike [`slot_of`], this keeps each physical slot distinct
+/// (so the engine sees 8 separate highs, not one aggregate).
+fn slot_index(flag: i64) -> Option<(SlotKind, i32)> {
+    match flag {
+        27..=34 => Some((SlotKind::High, (flag - 27) as i32)),
+        19..=26 => Some((SlotKind::Mid, (flag - 19) as i32)),
+        11..=18 => Some((SlotKind::Low, (flag - 11) as i32)),
+        92..=99 => Some((SlotKind::Rig, (flag - 92) as i32)),
+        125..=132 => Some((SlotKind::Subsystem, (flag - 125) as i32)),
+        87 => Some((SlotKind::Drone, 0)),
+        _ => None,
+    }
+}
+
+/// Build the dogma-engine input from a killmail's items: one `FitItem` per
+/// physical slot, pairing a loaded charge (category 8) to the weapon sharing its
+/// slot flag, and expanding drone stacks. `cat_of` gives a type's category id.
+fn build_engine_fit(hull: i64, items: &[KmItem], cat_of: &dyn Fn(i64) -> i64) -> Fit {
+    use std::collections::BTreeMap;
+    let mut by_flag: BTreeMap<i64, Vec<&KmItem>> = BTreeMap::new();
+    for it in items {
+        if slot_index(it.flag).is_some() {
+            by_flag.entry(it.flag).or_default().push(it);
+        }
+    }
+    let mut fit_items: Vec<FitItem> = Vec::new();
+    let mut drone_idx = 0i32;
+    for (flag, group) in &by_flag {
+        let Some((kind, index)) = slot_index(*flag) else {
+            continue;
+        };
+        if kind == SlotKind::Drone {
+            for it in group {
+                fit_items.push(FitItem {
+                    type_id: it.item_type_id,
+                    slot: SlotKind::Drone,
+                    index: drone_idx,
+                    state: ModuleState::Active,
+                    charge_type_id: None,
+                    quantity: (it.quantity_destroyed + it.quantity_dropped).max(1) as i32,
+                });
+                drone_idx += 1;
+            }
+            continue;
+        }
+        // A single slot: one module, optionally with its loaded charge (cat 8).
+        let mut module: Option<i64> = None;
+        let mut charge: Option<i64> = None;
+        for it in group {
+            if cat_of(it.item_type_id) == 8 {
+                charge = Some(it.item_type_id);
+            } else if module.is_none() {
+                module = Some(it.item_type_id);
+            }
+        }
+        if let Some(m) = module {
+            fit_items.push(FitItem {
+                type_id: m,
+                slot: kind,
+                index,
+                state: ModuleState::Active,
+                charge_type_id: charge,
+                quantity: 1,
+            });
+        }
+    }
+    Fit {
+        id: String::new(),
+        name: String::new(),
+        ship_type_id: hull,
+        items: fit_items,
+        projected: Vec::new(),
+    }
+}
+
+/// Warp scramble/disruption range = dogma attribute 103 (`warpScrambleRange`),
+/// a static module attribute skills don't change.
+const ATTR_WARP_SCRAMBLE_RANGE: i64 = 103;
+
+/// Assemble the PVP fit analysis from the engine's [`FitStats`] plus the scram
+/// range (read from raw attributes — the engine doesn't surface tackle range).
+fn analysis_from_stats(
+    stats: &FitStats,
+    attrs: &HashMap<i64, Vec<(i64, f64)>>,
+    fit: &Fit,
+    name_of: &dyn Fn(i64) -> String,
+) -> FitAnalysis {
+    let scram_range = fit
+        .items
+        .iter()
+        .filter_map(|it| {
+            attrs.get(&it.type_id).and_then(|a| {
+                a.iter()
+                    .find(|(id, _)| *id == ATTR_WARP_SCRAMBLE_RANGE)
+                    .map(|(_, v)| *v)
+            })
+        })
+        .filter(|v| *v > 0.0)
+        .fold(None, |acc: Option<f64>, v| {
+            Some(acc.map_or(v, |m| m.max(v)))
+        });
+    let weapons = stats
+        .weapon_ranges
+        .iter()
+        .map(|w| WeaponLine {
+            name: name_of(w.type_id),
+            optimal: w.optimal,
+            falloff: w.falloff,
+        })
+        .collect();
+    let dps = stats.dps.as_ref();
+    FitAnalysis {
+        ehp: stats.tank.as_ref().map(|t| t.ehp).unwrap_or(0.0),
+        dps_total: dps.map(|d| d.total).unwrap_or(0.0),
+        dps_turret: dps.map(|d| d.turret).unwrap_or(0.0),
+        dps_missile: dps.map(|d| d.missile).unwrap_or(0.0),
+        dps_drone: dps.map(|d| d.drone).unwrap_or(0.0),
+        scram_range,
+        weapons,
+    }
 }
 
 /// One pilot's lost fits: pull recent losses from zKill, fetch each killmail
@@ -439,26 +593,26 @@ pub async fn pvp_pilot_fits(
         }
     }
 
-    // Resolve hull + module names in one SDE pass (opened after every await —
-    // the handle isn't Send). Resolve for *all* grouped hulls so junk hulls can
-    // be dropped by name before ranking.
-    let mut ids: HashSet<i64> = HashSet::new();
+    // One SDE pass for the whole tail (kept open — everything below is sync, no
+    // awaits): resolve names, drop pods/shuttles, then analyse each kept fit.
+    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+
+    // Names for every grouped hull + module, so junk hulls drop by name.
+    let mut name_ids: HashSet<i64> = HashSet::new();
     for (hull, km) in &rep {
-        ids.insert(*hull);
+        name_ids.insert(*hull);
         for it in &km.victim.items {
             if slot_of(it.flag).is_some() {
-                ids.insert(it.item_type_id);
+                name_ids.insert(it.item_type_id);
             }
         }
     }
-    let names: HashMap<i64, String> = {
-        let ids: Vec<i64> = ids.into_iter().collect();
-        let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
-        sde.type_names(&ids)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .collect()
-    };
+    let name_ids: Vec<i64> = name_ids.into_iter().collect();
+    let names: HashMap<i64, String> = sde
+        .type_names(&name_ids)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .collect();
     let name_of = |id: i64| {
         names
             .get(&id)
@@ -466,10 +620,30 @@ pub async fn pvp_pilot_fits(
             .unwrap_or_else(|| format!("Type {id}"))
     };
 
-    // Drop pods/shuttles, then rank the rest by loss count and keep the top few.
+    // Drop pods/shuttles, rank by loss count, keep the top few.
     order.retain(|h| !is_junk_hull(&name_of(*h)));
     order.sort_by(|a, b| count[b].cmp(&count[a]));
     order.truncate(LOST_HULL_CAP);
+
+    // Raw attributes (for scram range) + categories (to pair charges) for the
+    // kept fits' items.
+    let mut kept_ids: HashSet<i64> = HashSet::new();
+    for h in &order {
+        for it in &rep[h].victim.items {
+            if slot_of(it.flag).is_some() {
+                kept_ids.insert(it.item_type_id);
+            }
+        }
+    }
+    let kept_ids: Vec<i64> = kept_ids.into_iter().collect();
+    let attrs = sde
+        .types_attributes_raw(&kept_ids)
+        .map_err(|e| e.to_string())?;
+    let mut cats: HashMap<i64, i64> = HashMap::new();
+    for id in &kept_ids {
+        cats.insert(*id, sde.type_category(*id).ok().flatten().unwrap_or(0));
+    }
+    let cat_of = |id: i64| cats.get(&id).copied().unwrap_or(0);
 
     let fits: Vec<LostFit> = order
         .iter()
@@ -484,6 +658,11 @@ pub async fn pvp_pilot_fits(
                     quantity: qty,
                 })
                 .collect();
+            // All-V dogma analysis of the reconstructed fit (skills unknown).
+            let fit = build_engine_fit(*h, &km.victim.items, &cat_of);
+            let analysis = simulate_fit(&sde, &fit, &|_| 5.0)
+                .ok()
+                .map(|s| analysis_from_stats(&s, &attrs, &fit, &name_of));
             LostFit {
                 hull_type_id: *h,
                 hull_name: name_of(*h),
@@ -491,6 +670,7 @@ pub async fn pvp_pilot_fits(
                 killmail_id: km.killmail_id,
                 last_lost: km.killmail_time.clone(),
                 modules,
+                analysis,
             }
         })
         .collect();
@@ -616,5 +796,90 @@ mod tests {
         assert_eq!(mods[0], (100, "high", 1));
         assert_eq!(mods[1], (200, "mid", 1));
         assert_eq!(mods[2], (300, "drone", 5));
+    }
+
+    #[test]
+    fn engine_fit_pairs_charges_indexes_slots_and_expands_drones() {
+        let items = vec![
+            KmItem {
+                item_type_id: 100,
+                flag: 27,
+                quantity_destroyed: 1,
+                quantity_dropped: 0,
+            },
+            KmItem {
+                item_type_id: 200,
+                flag: 27,
+                quantity_destroyed: 0,
+                quantity_dropped: 50,
+            },
+            KmItem {
+                item_type_id: 300,
+                flag: 11,
+                quantity_destroyed: 1,
+                quantity_dropped: 0,
+            },
+            KmItem {
+                item_type_id: 400,
+                flag: 87,
+                quantity_destroyed: 3,
+                quantity_dropped: 2,
+            },
+            KmItem {
+                item_type_id: 999,
+                flag: 5,
+                quantity_destroyed: 0,
+                quantity_dropped: 1,
+            },
+        ];
+        // Type 200 is the loaded charge (category 8); everything else a module.
+        let cat_of = |id: i64| if id == 200 { 8 } else { 0 };
+        let fit = build_engine_fit(587, &items, &cat_of);
+        assert_eq!(fit.ship_type_id, 587);
+        // Launcher in hi0 with the missiles paired as its charge.
+        let hi = fit.items.iter().find(|i| i.slot == SlotKind::High).unwrap();
+        assert_eq!(hi.type_id, 100);
+        assert_eq!(hi.index, 0);
+        assert_eq!(hi.charge_type_id, Some(200));
+        // Low module kept; drone stack expanded to a single 5-count entry.
+        assert!(fit
+            .items
+            .iter()
+            .any(|i| i.slot == SlotKind::Low && i.type_id == 300));
+        let drones: Vec<_> = fit
+            .items
+            .iter()
+            .filter(|i| i.slot == SlotKind::Drone)
+            .collect();
+        assert_eq!(drones.len(), 1);
+        assert_eq!(drones[0].quantity, 5);
+        // Cargo (flag 5) never enters the fit.
+        assert!(!fit.items.iter().any(|i| i.type_id == 999));
+    }
+
+    #[test]
+    fn analysis_reads_scram_range_from_attributes() {
+        let fit = Fit {
+            id: String::new(),
+            name: String::new(),
+            ship_type_id: 587,
+            items: vec![FitItem {
+                type_id: 5,
+                slot: SlotKind::Mid,
+                index: 0,
+                state: ModuleState::Active,
+                charge_type_id: None,
+                quantity: 1,
+            }],
+            projected: vec![],
+        };
+        // A warp scrambler: dogma attr 103 = 9000m point range.
+        let mut attrs: HashMap<i64, Vec<(i64, f64)>> = HashMap::new();
+        attrs.insert(5, vec![(103, 9000.0)]);
+        let name_of = |_id: i64| "x".to_string();
+        let a = analysis_from_stats(&FitStats::default(), &attrs, &fit, &name_of);
+        assert_eq!(a.scram_range, Some(9000.0));
+        assert_eq!(a.ehp, 0.0);
+        assert!(a.weapons.is_empty());
     }
 }

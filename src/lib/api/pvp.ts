@@ -56,6 +56,28 @@ export interface LostFit {
   /** ISO timestamp of the most-recent loss — when they last flew this hull. */
   lastLost: string;
   modules: FitModule[];
+  /** All-V dogma analysis of the fit (absent if the engine couldn't run). */
+  analysis?: FitAnalysis;
+}
+
+/** One weapon's engagement envelope from the dogma engine. */
+export interface WeaponLine {
+  name: string;
+  /** Optimal range (m); for missiles this is flight range (falloff 0). */
+  optimal: number;
+  falloff: number;
+}
+
+/** All-V dogma read of a fit: tank, damage, tackle range. Upper-bound estimate. */
+export interface FitAnalysis {
+  ehp: number;
+  dpsTotal: number;
+  dpsTurret: number;
+  dpsMissile: number;
+  dpsDrone: number;
+  /** Max warp scramble/disruption range (m), if the fit has tackle. */
+  scramRange?: number;
+  weapons: WeaponLine[];
 }
 
 /** A pilot's lost fits (by hull), reconstructed from recent loss killmails. */

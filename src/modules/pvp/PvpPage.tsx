@@ -66,6 +66,11 @@ function fmtDate(iso: string): string {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString();
 }
 
+/** Metres → a compact km/m string. */
+function km(m: number): string {
+  return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
+}
+
 /** A single lost fit: hull header (links to the kill) + modules by slot. */
 function FitView({ fit }: { fit: LostFit }) {
   const last = fmtDate(fit.lastLost);
@@ -104,6 +109,51 @@ function FitView({ fit }: { fit: LostFit }) {
           );
         })}
       </div>
+      {fit.analysis && (
+        <div className="mt-2 border-t border-zinc-800/70 pt-2 text-[11px]">
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-zinc-400">
+            <span>
+              EHP{" "}
+              <span className="text-zinc-200">
+                {formatInt(fit.analysis.ehp)}
+              </span>
+            </span>
+            <span>
+              DPS{" "}
+              <span className="text-zinc-200">
+                {formatInt(fit.analysis.dpsTotal)}
+              </span>{" "}
+              <span className="text-zinc-600">
+                (t{formatInt(fit.analysis.dpsTurret)}/m
+                {formatInt(fit.analysis.dpsMissile)}/d
+                {formatInt(fit.analysis.dpsDrone)})
+              </span>
+            </span>
+            {fit.analysis.scramRange != null && (
+              <span>
+                Scram{" "}
+                <span className="text-amber-300">
+                  {km(fit.analysis.scramRange)}
+                </span>
+              </span>
+            )}
+          </div>
+          {fit.analysis.weapons.length > 0 && (
+            <div className="mt-1 flex flex-col gap-0.5">
+              {fit.analysis.weapons.map((w, i) => (
+                <div key={`${w.name}-${i}`} className="flex gap-2">
+                  <span className="w-12 shrink-0 text-zinc-600">Range</span>
+                  <span className="text-zinc-300">
+                    {w.name}: {km(w.optimal)}
+                    {w.falloff > 0 ? ` +${km(w.falloff)} falloff` : ""}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mt-1 text-[10px] text-zinc-600">all-V estimate</div>
+        </div>
+      )}
     </div>
   );
 }

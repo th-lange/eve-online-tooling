@@ -37,6 +37,15 @@ const FITS: LostFit[] = [
       { typeId: 100, name: "200mm AutoCannon II", slot: "high", quantity: 1 },
       { typeId: 200, name: "Warp Scrambler II", slot: "mid", quantity: 1 },
     ],
+    analysis: {
+      ehp: 12000,
+      dpsTotal: 180,
+      dpsTurret: 150,
+      dpsMissile: 0,
+      dpsDrone: 30,
+      scramRange: 9000,
+      weapons: [{ name: "200mm AutoCannon II", optimal: 2000, falloff: 6000 }],
+    },
   },
 ];
 
@@ -110,5 +119,8 @@ describe("PvpPage", () => {
     );
     // A module from the reconstructed fit renders.
     expect(await screen.findByText(/Warp Scrambler II/)).toBeInTheDocument();
+    // The all-V analysis renders (scram range + EHP).
+    expect(screen.getByText(/9\.0 km/)).toBeInTheDocument();
+    expect(screen.getByText(/12,000/)).toBeInTheDocument();
   });
 });
