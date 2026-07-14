@@ -8,6 +8,7 @@ import {
   openMarketWindow,
   productionProfit,
   type OrderRow,
+  type ProfitBreakdown,
 } from "../../lib/api";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
 import { formatInt, formatIsk } from "../../lib/format";
@@ -38,35 +39,34 @@ export function OrdersPage() {
   // user asks (it computes the whole manufacturable set). Cached for the session.
   const costs = useQuery({
     queryKey: ["production", "buildCosts"],
-    queryFn: async () => {
-      // Price each order's build cost at *its own region* (a Jita order → The
-      // Forge, an Amarr order → Domain), not one global default. Materials are
-      // bought at the region's hub, so region is the right basis, with the
-      // region average standing in when a specific station has no market.
-      const regions = [
-        ...new Set(rows.filter((r) => !r.isBuy).map((r) => r.regionId)),
+    queryFn: async (): Promise<BuildCosts> => {
+      // Price each order's build cost at *its own station* when that station has
+      // a full market, else the order's region average (a Jita order → Jita, an
+      // Amarr order → Amarr). Region maps are the fallback; station maps keep
+      // only items the station could fully price.
+      const sells = rows.filter((r) => !r.isBuy);
+      const regionIds = [...new Set(sells.map((r) => r.regionId))];
+      const stations = [
+        ...new Map(
+          sells.map((r) => [
+            `${r.regionId}:${r.locationId}`,
+            { regionId: r.regionId, locationId: r.locationId },
+          ]),
+        ).values(),
       ];
-      const perRegion = new Map<number, Map<number, number>>();
-      await Promise.all(
-        regions.map(async (regionId) => {
-          const breakdowns = await productionProfit({ regionId });
-          const m = new Map<number, number>();
-          for (const b of breakdowns) {
-            if (b.unitsProduced > 0) {
-              m.set(
-                b.productTypeId,
-                (b.materialCost +
-                  b.jobFee +
-                  b.blueprintCost +
-                  b.inventionCost) /
-                  b.unitsProduced,
-              );
-            }
-          }
-          perRegion.set(regionId, m);
+      const region = new Map<number, Map<number, number>>();
+      const station = new Map<string, Map<number, number>>();
+      await Promise.all([
+        ...regionIds.map(async (regionId) => {
+          const b = await productionProfit({ regionId });
+          region.set(regionId, buildCostMap(b, false));
         }),
-      );
-      return perRegion;
+        ...stations.map(async ({ regionId, locationId }) => {
+          const b = await productionProfit({ regionId, stationId: locationId });
+          station.set(`${regionId}:${locationId}`, buildCostMap(b, true));
+        }),
+      ]);
+      return { region, station };
     },
     enabled: checkCost,
     staleTime: Infinity,
@@ -212,7 +212,7 @@ function OrdersTable({
 }: {
   rows: OrderRow[];
   showCharacter: boolean;
-  buildCost?: Map<number, Map<number, number>>;
+  buildCost?: BuildCosts;
 }) {
   const { sortKey, sortDir, toggleSort } = usePersistentSort<OrderSortKey>(
     "sort.orders",
@@ -289,9 +289,8 @@ function OrdersTable({
               <td className="px-3 py-1.5">
                 <div className="flex items-center justify-end gap-2">
                   {(() => {
-                    const cost = r.isBuy
-                      ? undefined
-                      : buildCost?.get(r.regionId)?.get(r.typeId);
+                    const cost =
+                      !r.isBuy && buildCost ? costOf(r, buildCost) : undefined;
                     if (cost != null && undercutPrice(r) < cost) {
                       return (
                         <span
@@ -350,14 +349,54 @@ function undercutPrice(r: OrderRow): number {
   return r.isBuy ? best + 0.01 : best - 0.01;
 }
 
+interface BuildCosts {
+  /** regionId → (productTypeId → per-unit build cost); the fallback basis. */
+  region: Map<number, Map<number, number>>;
+  /** `${regionId}:${locationId}` → costs priced at that station (only items the
+   * station has a full market for, so callers fall back to the region). */
+  station: Map<string, Map<number, number>>;
+}
+
+/** Per-unit build cost of a manufacturing breakdown. */
+function unitCost(b: ProfitBreakdown): number {
+  return (
+    (b.materialCost + b.jobFee + b.blueprintCost + b.inventionCost) /
+    b.unitsProduced
+  );
+}
+
+/** productTypeId → per-unit cost. With `completeOnly`, drop items that had any
+ * unpriced material (a station lacking a full market) so the region fills in. */
+function buildCostMap(
+  breakdowns: ProfitBreakdown[],
+  completeOnly: boolean,
+): Map<number, number> {
+  const m = new Map<number, number>();
+  for (const b of breakdowns) {
+    if (
+      b.unitsProduced > 0 &&
+      (!completeOnly || b.missingPrices.length === 0)
+    ) {
+      m.set(b.productTypeId, unitCost(b));
+    }
+  }
+  return m;
+}
+
+/** An order's build cost: its own station when that station fully prices the
+ * item, else the region average. `undefined` if the item isn't manufacturable. */
+function costOf(r: OrderRow, bc: BuildCosts): number | undefined {
+  return (
+    bc.station.get(`${r.regionId}:${r.locationId}`)?.get(r.typeId) ??
+    bc.region.get(r.regionId)?.get(r.typeId)
+  );
+}
+
 /** A sell order whose undercut price would drop below the item's build cost —
  * chasing the market means selling at a loss, so don't adjust. */
-function isBelowBuildCost(
-  r: OrderRow,
-  buildCost: Map<number, Map<number, number>>,
-): boolean {
+function isBelowBuildCost(r: OrderRow, bc: BuildCosts): boolean {
   if (r.isBuy) return false;
-  const cost = buildCost.get(r.regionId)?.get(r.typeId);
+  const cost = costOf(r, bc);
   return cost != null && undercutPrice(r) < cost;
 }
 

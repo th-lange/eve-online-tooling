@@ -20,6 +20,7 @@ const sell = (
   volumeTotal: 10,
   location: "Jita IV - Moon 4",
   regionId: 10000002,
+  locationId: 60003760, // Jita IV-4
   bestPrice: price, // undercutPrice = price - 0.01
   undercut: true,
   issued: "2026-07-01T00:00:00Z",
@@ -105,6 +106,9 @@ describe("OrdersPage build-cost check", () => {
         params: { regionId: 10000002 },
       }),
     );
+    expect(invokeMock).toHaveBeenCalledWith("production_profit", {
+      params: { regionId: 10000002, stationId: 60003760 },
+    });
 
     // Only Widget (899.99 < 1000) is flagged; Gadget (4999.99) is fine.
     expect(await screen.findByText(/1 below build cost/)).toBeInTheDocument();

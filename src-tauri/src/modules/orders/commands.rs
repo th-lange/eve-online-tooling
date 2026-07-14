@@ -45,6 +45,8 @@ pub struct OrderRow {
     pub volume_total: i64,
     pub location: String,
     pub region_id: i64,
+    /// The station/structure the order sits in (ESI `location_id`).
+    pub location_id: i64,
     /// Current best competing price at the order's **station** (sell-min for a
     /// sell order, buy-max for a buy order), or null if unpriced (e.g. a private
     /// structure with no public market data).
@@ -171,6 +173,7 @@ async fn fetch_character_orders(
                     .cloned()
                     .unwrap_or_else(|| format!("Location {}", o.location_id)),
                 region_id: o.region_id,
+                location_id: o.location_id,
                 best_price,
                 undercut,
                 issued: o.issued,

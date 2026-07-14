@@ -12,6 +12,8 @@ export interface OrderRow {
   volumeTotal: number;
   location: string;
   regionId: number;
+  /** The station/structure the order sits in (ESI location_id). */
+  locationId: number;
   /** Best competing price at the order's region (sell-min / buy-max), or null. */
   bestPrice: number | null;
   /** True when someone is beating this order. */
