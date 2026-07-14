@@ -16,6 +16,18 @@ const ZKILL_CONCURRENCY: usize = 4;
 /// Killboard stats change slowly — cache each pilot for 6h.
 const ZKILL_TTL_SECS: u64 = 21_600;
 
+/// How many top hulls to surface per pilot (the UI shows the first 5 or 10).
+const MAX_HULLS: usize = 10;
+
+/// One hull the pilot uses, with how many kills they got in it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HullUsage {
+    pub type_id: i64,
+    pub name: String,
+    pub kills: i64,
+}
+
 /// General PvP stats for one pilot, from zKillboard `/stats/`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +47,10 @@ pub struct PvpStats {
     pub gang_ratio: i64,
     /// True when there's PvP activity in the last months (recently active).
     pub active: bool,
+    /// The hulls the pilot flies most, by kills (from zKill `topLists`), up to
+    /// `MAX_HULLS`, highest kills first. Per-hull *loss* counts aren't in the
+    /// stats doc — they arrive with the loss killmails in a later slice.
+    pub hulls: Vec<HullUsage>,
 }
 
 #[derive(Debug, Serialize)]
@@ -68,6 +84,30 @@ struct ZkillStatsRaw {
     /// Present (with counts) only for pilots with recent PvP.
     #[serde(default, rename = "activepvp")]
     activepvp: Option<serde_json::Value>,
+    #[serde(default)]
+    top_lists: Vec<TopListRaw>,
+}
+
+/// A row in a zKill `topLists` entry. Only the `shipType` list carries
+/// `shipTypeID`/`shipName`; rows in the other lists leave them defaulted.
+/// zKill uses `shipTypeID` (capital ID) and `shipName`, so the fields are
+/// renamed explicitly rather than via `camelCase` (which yields `shipTypeId`).
+#[derive(Deserialize, Default)]
+struct ShipRow {
+    #[serde(default, rename = "shipTypeID")]
+    ship_type_id: i64,
+    #[serde(default, rename = "shipName")]
+    ship_name: String,
+    #[serde(default)]
+    kills: i64,
+}
+
+#[derive(Deserialize, Default)]
+struct TopListRaw {
+    #[serde(default, rename = "type")]
+    kind: String,
+    #[serde(default)]
+    values: Vec<ShipRow>,
 }
 
 /// Pasted names: one per line, trimmed, blanks dropped, deduped (order kept,
@@ -85,6 +125,25 @@ fn parse_names(text: &str) -> Vec<String> {
 
 /// Map one raw zKill stats doc onto our surface for `character_id`/`name`.
 fn stats_from_raw(character_id: i64, name: String, r: ZkillStatsRaw) -> PvpStats {
+    // The `shipType` top-list is the hulls the pilot flew to get kills, already
+    // sorted by kills desc; take the top few.
+    let hulls = r
+        .top_lists
+        .iter()
+        .find(|t| t.kind == "shipType")
+        .map(|t| {
+            t.values
+                .iter()
+                .filter(|s| s.ship_type_id > 0)
+                .take(MAX_HULLS)
+                .map(|s| HullUsage {
+                    type_id: s.ship_type_id,
+                    name: s.ship_name.clone(),
+                    kills: s.kills,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     PvpStats {
         character_id,
         name,
@@ -97,6 +156,7 @@ fn stats_from_raw(character_id: i64, name: String, r: ZkillStatsRaw) -> PvpStats
         danger_ratio: r.danger_ratio,
         gang_ratio: r.gang_ratio,
         active: r.activepvp.is_some(),
+        hulls,
     }
 }
 
@@ -226,5 +286,37 @@ mod tests {
         assert_eq!(s.ships_destroyed, 0);
         assert_eq!(s.isk_destroyed, 0.0);
         assert!(!s.active);
+    }
+
+    #[test]
+    fn top_ship_list_becomes_flown_hulls_capped_and_ordered() {
+        // zKill returns the shipType top-list already sorted by kills desc,
+        // alongside other lists we ignore. Rows without a shipTypeID are skipped.
+        let raw: ZkillStatsRaw = serde_json::from_str(
+            r#"{
+                "topLists": [
+                    { "type": "solarSystem", "values": [ { "solarSystemID": 1, "kills": 99 } ] },
+                    { "type": "shipType", "values": [
+                        { "shipTypeID": 670, "shipName": "Capsule", "kills": 50 },
+                        { "shipTypeID": 11567, "shipName": "Avatar", "kills": 20 },
+                        { "shipName": "Ghost", "kills": 5 }
+                    ] }
+                ]
+            }"#,
+        )
+        .unwrap();
+        let s = stats_from_raw(1, "Ace".into(), raw);
+        // The zero-typeId row is dropped; order preserved.
+        assert_eq!(s.hulls.len(), 2);
+        assert_eq!(s.hulls[0].type_id, 670);
+        assert_eq!(s.hulls[0].name, "Capsule");
+        assert_eq!(s.hulls[0].kills, 50);
+        assert_eq!(s.hulls[1].name, "Avatar");
+    }
+
+    #[test]
+    fn no_top_lists_yields_no_hulls() {
+        let raw: ZkillStatsRaw = serde_json::from_str("{}").unwrap();
+        assert!(stats_from_raw(1, "x".into(), raw).hulls.is_empty());
     }
 }

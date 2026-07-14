@@ -1,5 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 
+/** One hull the pilot uses, with how many kills they got in it. */
+export interface HullUsage {
+  typeId: number;
+  name: string;
+  kills: number;
+}
+
 /** General PvP stats for one pilot, from zKillboard. */
 export interface PvpStats {
   characterId: number;
@@ -16,6 +23,8 @@ export interface PvpStats {
   gangRatio: number;
   /** Recently active in PvP (kills in the last months). */
   active: boolean;
+  /** Most-flown hulls (by kills), highest first. */
+  hulls: HullUsage[];
 }
 
 export interface PvpProfilesResult {

@@ -17,6 +17,10 @@ const RESULT: PvpProfilesResult = {
       dangerRatio: 88,
       gangRatio: 40,
       active: true,
+      hulls: [
+        { typeId: 587, name: "Rifter", kills: 40 },
+        { typeId: 621, name: "Caracal", kills: 12 },
+      ],
     },
   ],
   unresolved: ["Nobody"],
@@ -59,6 +63,8 @@ describe("PvpPage", () => {
     expect(await screen.findByText("Hunter")).toBeInTheDocument();
     expect(screen.getByText(/danger 88%/i)).toBeInTheDocument();
     expect(screen.getByText("52.0B")).toBeInTheDocument(); // 5.2e10 → 52.0B
+    // "Flies" hull chip from the topLists data.
+    expect(await screen.findByText("Rifter")).toBeInTheDocument();
   });
 
   it("disables the button until names are entered", () => {

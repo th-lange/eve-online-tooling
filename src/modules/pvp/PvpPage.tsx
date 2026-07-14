@@ -45,7 +45,7 @@ function Stat({
   );
 }
 
-function PilotCard({ p }: { p: PvpStats }) {
+function PilotCard({ p, topN }: { p: PvpStats; topN: number }) {
   const eff = efficiency(p.iskDestroyed, p.iskLost);
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
@@ -93,12 +93,31 @@ function PilotCard({ p }: { p: PvpStats }) {
         <Stat label="Gang ratio" value={`${p.gangRatio}%`} />
         <Stat label="Solo losses" value={formatInt(p.soloLosses)} />
       </div>
+      {p.hulls.length > 0 && (
+        <div className="mt-3 border-t border-zinc-800 pt-3">
+          <span className="text-[10px] uppercase tracking-wide text-zinc-500">
+            Flies (top {Math.min(topN, p.hulls.length)} by kills)
+          </span>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {p.hulls.slice(0, topN).map((h) => (
+              <span
+                key={h.typeId}
+                className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-200"
+              >
+                {h.name}{" "}
+                <span className="text-zinc-500">{formatInt(h.kills)}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 export function PvpPage() {
   const [text, setText] = useState("");
+  const [topN, setTopN] = useState(5);
   const scan = useMutation({ mutationFn: () => pvpProfiles(text) });
   const result = scan.data;
 
@@ -134,10 +153,30 @@ export function PvpPage() {
 
       {result && (
         <div className="mt-4 flex flex-col gap-3">
+          {result.pilots.length > 0 && (
+            <div className="flex items-center gap-2 text-xs text-zinc-400">
+              <span>Top hulls:</span>
+              {[5, 10].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setTopN(n)}
+                  className={`rounded px-2 py-0.5 ${
+                    topN === n
+                      ? "bg-indigo-600 text-white"
+                      : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          )}
           {result.pilots.length === 0 ? (
             <p className="text-sm text-zinc-500">No pilots resolved.</p>
           ) : (
-            result.pilots.map((p) => <PilotCard key={p.characterId} p={p} />)
+            result.pilots.map((p) => (
+              <PilotCard key={p.characterId} p={p} topN={topN} />
+            ))
           )}
           {result.unresolved.length > 0 && (
             <p className="text-xs text-zinc-500">
