@@ -1,5 +1,12 @@
 import type { ComponentType } from "react";
-import { Heart, Puzzle, Terminal, Bell, type LucideIcon } from "lucide-react";
+import {
+  Crosshair,
+  Heart,
+  Puzzle,
+  Terminal,
+  Bell,
+  type LucideIcon,
+} from "lucide-react";
 import { ProductionPage } from "./production/ProductionPage";
 import { TradingPage } from "./trading/TradingPage";
 import { DaytradingPage } from "./daytrading/DaytradingPage";
@@ -27,6 +34,7 @@ import { NotificationsPage } from "./notifications/NotificationsPage";
 import { FittingPage } from "./fitting/FittingPage";
 import { ShoppingPage } from "./shopping/ShoppingPage";
 import { DpsPage } from "./dpsmeter/DpsPage";
+import { PvpPage } from "./pvp/PvpPage";
 import { SupportPage } from "./support/SupportPage";
 import { PluginsPage } from "./plugins/PluginsPage";
 import { ScriptsPage } from "./scripts/ScriptsPage";
@@ -267,6 +275,15 @@ export const modules: ModuleDef[] = [
       "Live combat meter from your gamelog — DPS, logi and cap, graphed.",
     group: "combat",
     Component: DpsPage,
+  },
+  {
+    id: "pvp",
+    title: "PVP",
+    description:
+      "Paste pilot names → their kills, losses and the fits they fly.",
+    group: "combat",
+    icon: Crosshair,
+    Component: PvpPage,
   },
   {
     id: "scripts",

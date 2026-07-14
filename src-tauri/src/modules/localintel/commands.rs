@@ -14,8 +14,8 @@ use tauri::{AppHandle, Manager, State};
 use futures_util::stream::{self, StreamExt};
 
 use crate::esi::{
-    authed_get, authed_get_paged_pub, corporation_id, resolve_names, AuthState, ESI_BASE,
-    USER_AGENT,
+    authed_get, authed_get_paged_pub, corporation_id, resolve_character_ids, resolve_names,
+    AuthState, ESI_BASE, USER_AGENT,
 };
 use crate::storage;
 
@@ -77,11 +77,6 @@ struct IdName {
     id: i64,
     name: String,
 }
-#[derive(Deserialize, Default)]
-struct UniverseIds {
-    #[serde(default)]
-    characters: Vec<IdName>,
-}
 #[derive(Deserialize)]
 struct Affiliation {
     character_id: i64,
@@ -112,7 +107,6 @@ struct CachedAff {
 // Cache keys (under the app data dir) + TTLs. name↔id never change, so those
 // caches are durable; affiliations (corp moves) and standings (contact edits)
 // can change, so they carry a TTL.
-const CACHE_CHAR_IDS: &str = "esi_char_ids"; // lowercased name → character id
 const CACHE_NAMES: &str = "esi_names"; // entity id → name
 const CACHE_AFFILIATIONS: &str = "esi_affiliations"; // character id → CachedAff
 const AFFILIATION_TTL: u64 = 60 * 60; // 1 hour
@@ -173,41 +167,9 @@ pub async fn local_scan(
     let dir = app.path().app_data_dir().ok();
     let lower = |n: &str| n.to_lowercase();
 
-    // 1. names → character ids — cached (a character's name→id never changes), so
-    //    only names we haven't seen before hit /universe/ids/.
-    let mut id_cache: HashMap<String, i64> = dir
-        .as_ref()
-        .and_then(|d| storage::load_data(d, CACHE_CHAR_IDS))
-        .unwrap_or_default();
-    let missing: Vec<String> = names
-        .iter()
-        .filter(|n| !id_cache.contains_key(&lower(n)))
-        .cloned()
-        .collect();
-    if !missing.is_empty() {
-        if let Ok(ids) = (async {
-            http.post(format!("{ESI_BASE}/latest/universe/ids/"))
-                .json(&missing)
-                .send()
-                .await
-                .ok()?
-                .error_for_status()
-                .ok()?
-                .json::<UniverseIds>()
-                .await
-                .ok()
-        })
-        .await
-        .ok_or(())
-        {
-            for c in ids.characters {
-                id_cache.insert(lower(&c.name), c.id);
-            }
-            if let Some(d) = &dir {
-                let _ = storage::save_data(d, CACHE_CHAR_IDS, &id_cache);
-            }
-        }
-    }
+    // 1. names → character ids — shared resolver, cached forever (a name→id
+    //    mapping never changes).
+    let id_cache = resolve_character_ids(&http, dir.as_deref(), &names).await;
     // Resolved pilots (deduped by id), and the names we still couldn't resolve.
     let mut seen = HashSet::new();
     let characters: Vec<IdName> = names

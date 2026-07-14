@@ -18,6 +18,7 @@ pub mod orders;
 pub mod pi;
 pub mod pochven;
 pub mod production;
+pub mod pvp;
 pub mod reprocessing;
 pub mod route;
 pub mod scripts;

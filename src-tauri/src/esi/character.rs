@@ -5,6 +5,10 @@ use serde::Deserialize;
 
 use super::auth::{AuthError, AuthState};
 use super::ESI_BASE;
+use std::collections::HashMap;
+use std::path::Path;
+
+use crate::storage;
 
 /// A blueprint as returned by `/characters/{id}/blueprints/`.
 #[derive(Debug, Clone, Deserialize)]
@@ -143,6 +147,66 @@ pub async fn resolve_names(
         }
     }
     out
+}
+
+/// Cache of lowercased character name → id. A name→id mapping is permanent, so
+/// this never expires.
+const CHAR_IDS_CACHE: &str = "esi_char_ids";
+
+/// Resolve character **names → ids** via the public `POST /universe/ids/`,
+/// cached forever (case-insensitive). Returns a `lowercased-name → id` map
+/// covering every name that resolves (cached + freshly fetched); names that
+/// don't resolve are simply absent, so the caller derives its own "unresolved"
+/// set. Shared by Local Intel and PVP. `http` only needs the app User-Agent;
+/// `cache_dir` is optional (skips the on-disk cache when absent).
+pub async fn resolve_character_ids(
+    http: &reqwest::Client,
+    cache_dir: Option<&Path>,
+    names: &[String],
+) -> HashMap<String, i64> {
+    #[derive(Deserialize)]
+    struct IdName {
+        id: i64,
+        name: String,
+    }
+    #[derive(Deserialize, Default)]
+    struct UniverseIds {
+        #[serde(default)]
+        characters: Vec<IdName>,
+    }
+    let lower = |n: &str| n.to_lowercase();
+    let mut id_cache: HashMap<String, i64> = cache_dir
+        .and_then(|d| storage::load_data(d, CHAR_IDS_CACHE))
+        .unwrap_or_default();
+    let missing: Vec<String> = names
+        .iter()
+        .filter(|n| !id_cache.contains_key(&lower(n)))
+        .cloned()
+        .collect();
+    if !missing.is_empty() {
+        if let Some(ids) = (async {
+            http.post(format!("{ESI_BASE}/latest/universe/ids/"))
+                .json(&missing)
+                .send()
+                .await
+                .ok()?
+                .error_for_status()
+                .ok()?
+                .json::<UniverseIds>()
+                .await
+                .ok()
+        })
+        .await
+        {
+            for c in ids.characters {
+                id_cache.insert(lower(&c.name), c.id);
+            }
+            if let Some(d) = cache_dir {
+                let _ = storage::save_data(d, CHAR_IDS_CACHE, &id_cache);
+            }
+        }
+    }
+    id_cache
 }
 
 /// Open the in-game market details window for a type (ESI UI write).
