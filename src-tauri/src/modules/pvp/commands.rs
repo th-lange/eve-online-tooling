@@ -520,6 +520,99 @@ fn analysis_from_stats(
     }
 }
 
+/// Reconstruct one killmail into a displayable + analysed lost fit: names,
+/// module list by slot, and the all-V dogma analysis. `lost_count` is how many
+/// times the hull was seen (or a community sample size, for typical fits).
+fn build_lost_fit(sde: &Sde, km: &Killmail, lost_count: i64) -> LostFit {
+    let mut ids: Vec<i64> = vec![km.victim.ship_type_id];
+    for it in &km.victim.items {
+        if slot_of(it.flag).is_some() {
+            ids.push(it.item_type_id);
+        }
+    }
+    let names: HashMap<i64, String> = sde
+        .type_names(&ids)
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let name_of = |id: i64| {
+        names
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| format!("Type {id}"))
+    };
+    let attrs = sde.types_attributes_raw(&ids).unwrap_or_default();
+    let mut cats: HashMap<i64, i64> = HashMap::new();
+    for id in &ids {
+        cats.insert(*id, sde.type_category(*id).ok().flatten().unwrap_or(0));
+    }
+    let cat_of = |id: i64| cats.get(&id).copied().unwrap_or(0);
+
+    let modules = modules_of(&km.victim.items)
+        .into_iter()
+        .map(|(tid, slot, qty)| FitModule {
+            type_id: tid,
+            name: name_of(tid),
+            slot: slot.to_string(),
+            quantity: qty,
+        })
+        .collect();
+    let fit = build_engine_fit(km.victim.ship_type_id, &km.victim.items, &cat_of);
+    let analysis = simulate_fit(sde, &fit, &|_| 5.0)
+        .ok()
+        .map(|s| analysis_from_stats(&s, &attrs, &fit, &name_of));
+    LostFit {
+        hull_type_id: km.victim.ship_type_id,
+        hull_name: name_of(km.victim.ship_type_id),
+        lost_count,
+        killmail_id: km.killmail_id,
+        last_lost: km.killmail_time.clone(),
+        modules,
+        analysis,
+    }
+}
+
+/// Community losses to sample when guessing a hull's typical fit.
+const TYPICAL_SAMPLE: usize = 25;
+
+/// Fetch each referenced killmail from public ESI (permanent cache), in input
+/// order, dropping any that fail. Low concurrency for zKill/ESI etiquette.
+async fn fetch_killmails(
+    http: &reqwest::Client,
+    dir: &std::path::Path,
+    refs: Vec<ZkillRef>,
+) -> Vec<Killmail> {
+    let client = http.clone();
+    let dir = dir.to_path_buf();
+    stream::iter(refs)
+        .map(|r| {
+            let client = client.clone();
+            let dir = dir.clone();
+            async move {
+                let key = format!("pvp_km_{}", r.killmail_id);
+                if let Some(km) = storage::cache_get::<Killmail>(&dir, &key) {
+                    return Some(km);
+                }
+                let url = format!(
+                    "{ESI_BASE}/latest/killmails/{}/{}/",
+                    r.killmail_id, r.zkb.hash
+                );
+                let km: Option<Killmail> =
+                    async { client.get(&url).send().await.ok()?.json().await.ok() }.await;
+                if let Some(k) = &km {
+                    let _ = storage::cache_put(&dir, &key, k, KILLMAIL_TTL_SECS);
+                }
+                km
+            }
+        })
+        .buffered(ZKILL_CONCURRENCY)
+        .collect::<Vec<Option<Killmail>>>()
+        .await
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
 /// One pilot's lost fits: pull recent losses from zKill, fetch each killmail
 /// from public ESI (cached permanently), group by hull, and return a
 /// representative (most-recent) fit per hull with its modules by slot — ranked
@@ -549,39 +642,15 @@ pub async fn pvp_pilot_fits(
     .await
     .unwrap_or_default();
 
-    // Fetch each killmail from public ESI (permanent cache), preserving order.
+    // Fetch each killmail from public ESI (permanent cache), newest first.
     let refs: Vec<ZkillRef> = losses.into_iter().take(LOSS_CAP).collect();
-    let client = http.clone();
-    let kms: Vec<Option<Killmail>> = stream::iter(refs)
-        .map(|r| {
-            let client = client.clone();
-            let dir = dir.clone();
-            async move {
-                let key = format!("pvp_km_{}", r.killmail_id);
-                if let Some(km) = storage::cache_get::<Killmail>(&dir, &key) {
-                    return Some(km);
-                }
-                let url = format!(
-                    "{ESI_BASE}/latest/killmails/{}/{}/",
-                    r.killmail_id, r.zkb.hash
-                );
-                let km: Option<Killmail> =
-                    async { client.get(&url).send().await.ok()?.json().await.ok() }.await;
-                if let Some(k) = &km {
-                    let _ = storage::cache_put(&dir, &key, k, KILLMAIL_TTL_SECS);
-                }
-                km
-            }
-        })
-        .buffered(ZKILL_CONCURRENCY)
-        .collect()
-        .await;
+    let kms = fetch_killmails(&http, &dir, refs).await;
 
     // Group by hull; the first (newest) killmail of each hull is its rep fit.
     let mut order: Vec<i64> = Vec::new();
     let mut rep: HashMap<i64, Killmail> = HashMap::new();
     let mut count: HashMap<i64, i64> = HashMap::new();
-    for km in kms.into_iter().flatten() {
+    for km in kms {
         let hull = km.victim.ship_type_id;
         if hull <= 0 {
             continue;
@@ -593,89 +662,71 @@ pub async fn pvp_pilot_fits(
         }
     }
 
-    // One SDE pass for the whole tail (kept open — everything below is sync, no
-    // awaits): resolve names, drop pods/shuttles, then analyse each kept fit.
+    // One SDE pass (kept open — everything below is sync). Hull names first, to
+    // drop pods/shuttles before ranking; per-fit detail is built per killmail.
     let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
-
-    // Names for every grouped hull + module, so junk hulls drop by name.
-    let mut name_ids: HashSet<i64> = HashSet::new();
-    for (hull, km) in &rep {
-        name_ids.insert(*hull);
-        for it in &km.victim.items {
-            if slot_of(it.flag).is_some() {
-                name_ids.insert(it.item_type_id);
-            }
-        }
-    }
-    let name_ids: Vec<i64> = name_ids.into_iter().collect();
-    let names: HashMap<i64, String> = sde
-        .type_names(&name_ids)
+    let hull_ids: Vec<i64> = rep.keys().copied().collect();
+    let hull_names: HashMap<i64, String> = sde
+        .type_names(&hull_ids)
         .map_err(|e| e.to_string())?
         .into_iter()
         .collect();
-    let name_of = |id: i64| {
-        names
-            .get(&id)
-            .cloned()
-            .unwrap_or_else(|| format!("Type {id}"))
-    };
 
     // Drop pods/shuttles, rank by loss count, keep the top few.
-    order.retain(|h| !is_junk_hull(&name_of(*h)));
+    order.retain(|h| !is_junk_hull(hull_names.get(h).map(String::as_str).unwrap_or("")));
     order.sort_by(|a, b| count[b].cmp(&count[a]));
     order.truncate(LOST_HULL_CAP);
 
-    // Raw attributes (for scram range) + categories (to pair charges) for the
-    // kept fits' items.
-    let mut kept_ids: HashSet<i64> = HashSet::new();
-    for h in &order {
-        for it in &rep[h].victim.items {
-            if slot_of(it.flag).is_some() {
-                kept_ids.insert(it.item_type_id);
-            }
-        }
-    }
-    let kept_ids: Vec<i64> = kept_ids.into_iter().collect();
-    let attrs = sde
-        .types_attributes_raw(&kept_ids)
-        .map_err(|e| e.to_string())?;
-    let mut cats: HashMap<i64, i64> = HashMap::new();
-    for id in &kept_ids {
-        cats.insert(*id, sde.type_category(*id).ok().flatten().unwrap_or(0));
-    }
-    let cat_of = |id: i64| cats.get(&id).copied().unwrap_or(0);
-
     let fits: Vec<LostFit> = order
         .iter()
-        .map(|h| {
-            let km = &rep[h];
-            let modules = modules_of(&km.victim.items)
-                .into_iter()
-                .map(|(tid, slot, qty)| FitModule {
-                    type_id: tid,
-                    name: name_of(tid),
-                    slot: slot.to_string(),
-                    quantity: qty,
-                })
-                .collect();
-            // All-V dogma analysis of the reconstructed fit (skills unknown).
-            let fit = build_engine_fit(*h, &km.victim.items, &cat_of);
-            let analysis = simulate_fit(&sde, &fit, &|_| 5.0)
-                .ok()
-                .map(|s| analysis_from_stats(&s, &attrs, &fit, &name_of));
-            LostFit {
-                hull_type_id: *h,
-                hull_name: name_of(*h),
-                lost_count: count[h],
-                killmail_id: km.killmail_id,
-                last_lost: km.killmail_time.clone(),
-                modules,
-                analysis,
-            }
-        })
+        .map(|h| build_lost_fit(&sde, &rep[h], count[h]))
         .collect();
 
     Ok(fits)
+}
+
+/// A typical (community) fit for a hull: sample recent zKill losses of the ship
+/// type, reconstruct the most-recent one and analyse it (all-V). For hulls a
+/// pilot flies but we've never seen them lose — clearly a community fit, not
+/// theirs. `None` when the hull has no recent public losses.
+#[tauri::command]
+pub async fn pvp_typical_fit(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+    hull_type_id: i64,
+) -> Result<Option<LostFit>, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let http = auth_state.http();
+
+    // Recent community losses of this hull, newest first.
+    let losses: Vec<ZkillRef> = async {
+        http.get(format!(
+            "https://zkillboard.com/api/losses/shipTypeID/{hull_type_id}/"
+        ))
+        .send()
+        .await
+        .ok()?
+        .json()
+        .await
+        .ok()
+    }
+    .await
+    .unwrap_or_default();
+
+    let refs: Vec<ZkillRef> = losses.into_iter().take(TYPICAL_SAMPLE).collect();
+    let sampled = refs.len() as i64;
+    let kms = fetch_killmails(&http, &dir, refs).await;
+
+    // The most-recent sampled loss that is actually this hull and carries a fit.
+    let Some(km) = kms
+        .into_iter()
+        .find(|k| k.victim.ship_type_id == hull_type_id && !k.victim.items.is_empty())
+    else {
+        return Ok(None);
+    };
+
+    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    Ok(Some(build_lost_fit(&sde, &km, sampled)))
 }
 
 #[cfg(test)]

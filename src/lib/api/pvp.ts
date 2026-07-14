@@ -84,3 +84,9 @@ export interface FitAnalysis {
 export function pvpPilotFits(characterId: number): Promise<LostFit[]> {
   return invoke<LostFit[]>("pvp_pilot_fits", { characterId });
 }
+
+/** A typical (community) fit for a hull the pilot flies but hasn't been seen to
+ *  lose — sampled from recent public losses of that ship type. `null` if none. */
+export function pvpTypicalFit(hullTypeId: number): Promise<LostFit | null> {
+  return invoke<LostFit | null>("pvp_typical_fit", { hullTypeId });
+}

@@ -3,8 +3,10 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   pvpProfiles,
   pvpPilotFits,
+  pvpTypicalFit,
   type PvpStats,
   type LostFit,
+  type HullUsage,
 } from "../../lib/api";
 import { formatInt } from "../../lib/format";
 import { Page, PageHeader } from "../../components/page";
@@ -72,7 +74,7 @@ function km(m: number): string {
 }
 
 /** A single lost fit: hull header (links to the kill) + modules by slot. */
-function FitView({ fit }: { fit: LostFit }) {
+function FitView({ fit, community }: { fit: LostFit; community?: boolean }) {
   const last = fmtDate(fit.lastLost);
   return (
     <div className="rounded border border-zinc-800 bg-zinc-950/60 p-2">
@@ -86,7 +88,9 @@ function FitView({ fit }: { fit: LostFit }) {
           {fit.hullName}
         </a>
         <span className="text-[10px] text-zinc-500">
-          {last ? `last ${last} · ` : ""}lost ×{formatInt(fit.lostCount)}
+          {community
+            ? "typical · community"
+            : `${last ? `last ${last} · ` : ""}lost ×${formatInt(fit.lostCount)}`}
         </span>
       </div>
       <div className="mt-1 flex flex-col gap-0.5">
@@ -158,6 +162,37 @@ function FitView({ fit }: { fit: LostFit }) {
   );
 }
 
+/** A hull the pilot flies but we've not seen them lose: lazily loads a typical
+ * (community) fit for that ship type. */
+function TypicalFit({ hull }: { hull: HullUsage }) {
+  const [open, setOpen] = useState(false);
+  const q = useQuery({
+    queryKey: ["pvp", "typical", hull.typeId],
+    queryFn: () => pvpTypicalFit(hull.typeId),
+    enabled: open,
+    staleTime: Infinity,
+  });
+  return (
+    <div className="flex flex-col gap-1">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="self-start text-xs text-zinc-400 hover:text-zinc-200"
+      >
+        {open ? "−" : "+"} {hull.name}{" "}
+        <span className="text-zinc-600">typical fit</span>
+      </button>
+      {open &&
+        (q.isLoading ? (
+          <span className="text-xs text-zinc-500">Loading…</span>
+        ) : q.data ? (
+          <FitView fit={q.data} community />
+        ) : (
+          <span className="text-xs text-zinc-500">No community fit found.</span>
+        ))}
+    </div>
+  );
+}
+
 /** Lazy "lost fits" section — fetches the pilot's killmail fits only when the
  * user expands it, so pasting many pilots stays cheap. */
 function LostFits({ p }: { p: PvpStats }) {
@@ -168,6 +203,12 @@ function LostFits({ p }: { p: PvpStats }) {
     enabled: open,
     staleTime: Infinity,
   });
+  const flownNotLost: HullUsage[] = fits.data
+    ? (() => {
+        const lost = new Set(fits.data.map((f) => f.hullTypeId));
+        return p.hulls.filter((h) => !lost.has(h.typeId));
+      })()
+    : [];
   return (
     <div className="mt-3 border-t border-zinc-800 pt-3">
       <button
@@ -192,6 +233,16 @@ function LostFits({ p }: { p: PvpStats }) {
           {fits.data?.map((f) => (
             <FitView key={f.killmailId} fit={f} />
           ))}
+          {flownNotLost.length > 0 && (
+            <div className="mt-1 flex flex-col gap-1 border-t border-zinc-800/60 pt-2">
+              <span className="text-[10px] uppercase tracking-wide text-zinc-500">
+                Flies but no loss seen — typical (community) fits
+              </span>
+              {flownNotLost.map((h) => (
+                <TypicalFit key={h.typeId} hull={h} />
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

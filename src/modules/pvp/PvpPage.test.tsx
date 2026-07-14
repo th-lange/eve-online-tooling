@@ -123,4 +123,49 @@ describe("PvpPage", () => {
     expect(screen.getByText(/9\.0 km/)).toBeInTheDocument();
     expect(screen.getByText(/12,000/)).toBeInTheDocument();
   });
+
+  it("offers a community typical fit for a flown-but-not-lost hull", async () => {
+    const TYPICAL: LostFit = {
+      hullTypeId: 621,
+      hullName: "Caracal",
+      lostCount: 25,
+      killmailId: 222,
+      lastLost: "2026-07-01T00:00:00Z",
+      modules: [
+        {
+          typeId: 300,
+          name: "Caldari Navy Ballistic Control System",
+          slot: "low",
+          quantity: 1,
+        },
+      ],
+    };
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "pvp_pilot_fits") return Promise.resolve(FITS); // lost: Rifter
+      if (cmd === "pvp_typical_fit") return Promise.resolve(TYPICAL);
+      return Promise.resolve(RESULT); // flies Rifter + Caracal
+    });
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText(/paste pilot names/i), {
+      target: { value: "Hunter" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /profile pilots/i }));
+    await screen.findByText("Hunter");
+    fireEvent.click(screen.getByRole("button", { name: /show lost fits/i }));
+
+    // Caracal is flown but not among the losses → offered as a typical fit.
+    const btn = await screen.findByRole("button", {
+      name: /Caracal typical fit/i,
+    });
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("pvp_typical_fit", {
+        hullTypeId: 621,
+      }),
+    );
+    expect(
+      await screen.findByText(/Caldari Navy Ballistic Control System/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/typical · community/)).toBeInTheDocument();
+  });
 });
