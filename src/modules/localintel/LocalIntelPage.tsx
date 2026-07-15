@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ExternalLink } from "lucide-react";
 import {
   isPermissionGranted,
   requestPermission,
@@ -555,7 +556,17 @@ function NeighbourhoodPanel({
       ) : (
         <>
           <div className="mb-1 text-xs text-zinc-400">
-            You: <span className="text-zinc-200">{here.name}</span>{" "}
+            You:{" "}
+            <a
+              href={`https://zkillboard.com/system/${here.systemId}/`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-zinc-200 hover:text-indigo-300"
+              title="Recent kills in this system on zKillboard"
+            >
+              {here.name}
+              <ExternalLink size={10} className="opacity-60" />
+            </a>{" "}
             <span className={`tabular-nums ${secColor(here.security)}`}>
               {here.security.toFixed(1)}
             </span>
@@ -575,7 +586,15 @@ function NeighbourhoodPanel({
                     className="min-w-0 truncate text-zinc-300"
                     title={`${n.name} · ${n.region}`}
                   >
-                    <span className={secColor(n.security)}>•</span> {n.name}{" "}
+                    <span className={secColor(n.security)}>•</span>{" "}
+                    <a
+                      href={`https://zkillboard.com/system/${n.systemId}/`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="hover:text-indigo-300"
+                    >
+                      {n.name}
+                    </a>{" "}
                     <span className="text-zinc-600">{n.distance}j</span>
                   </span>
                   <span className="shrink-0 tabular-nums">
@@ -657,7 +676,14 @@ function PilotTable({
               >
                 <td className="px-3 py-1.5">
                   <span className={dot(p.threat)}>●</span>{" "}
-                  <span className="text-zinc-200">{p.name}</span>
+                  <a
+                    href={`https://zkillboard.com/character/${p.characterId}/`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-zinc-200 hover:text-indigo-300"
+                  >
+                    {p.name}
+                  </a>
                   {newIds.has(p.characterId) && (
                     <span
                       className="ml-2 rounded bg-amber-500/20 px-1 text-[10px] font-medium text-amber-300"

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { ExternalLink } from "lucide-react";
 import {
   pvpProfiles,
   pvpPilotFits,
@@ -258,9 +259,11 @@ function PilotCard({ p, topN }: { p: PvpStats; topN: number }) {
           href={`https://zkillboard.com/character/${p.characterId}/`}
           target="_blank"
           rel="noreferrer"
-          className="text-sm font-medium text-zinc-100 hover:text-indigo-300"
+          className="flex items-center gap-1 text-sm font-medium text-zinc-100 hover:text-indigo-300"
+          title="Open on zKillboard"
         >
           {p.name}
+          <ExternalLink size={11} className="opacity-60" />
         </a>
         <div className="flex items-center gap-2 text-[11px]">
           {!p.active && (

@@ -83,7 +83,12 @@ describe("PvpPage", () => {
     );
 
     expect(screen.getByText(/resolve: Nobody/i)).toBeInTheDocument(); // unresolved
-    expect(await screen.findByText("Hunter")).toBeInTheDocument();
+    // The pilot name links to their zKillboard character page.
+    const link = await screen.findByRole("link", { name: /Hunter/ });
+    expect(link).toHaveAttribute(
+      "href",
+      "https://zkillboard.com/character/42/",
+    );
     expect(screen.getByText(/danger 88%/i)).toBeInTheDocument();
     expect(screen.getByText("52.0B")).toBeInTheDocument(); // 5.2e10 → 52.0B
     // "Flies" hull chip from the topLists data.
