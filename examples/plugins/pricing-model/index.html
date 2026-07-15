@@ -38,6 +38,10 @@
         color: #e4e4e7;
         padding: 0.4rem 0.6rem;
       }
+      input {
+        flex: 1;
+        min-width: 0;
+      }
       button {
         background: #4f46e5;
         border-color: #4f46e5;
@@ -46,7 +50,18 @@
       }
       #out {
         min-height: 1.5rem;
+        font-size: 1.05rem;
         color: #34d399;
+      }
+      .note {
+        margin-top: 1.25rem;
+        border-top: 1px solid #27272a;
+        padding-top: 0.75rem;
+        font-size: 12px;
+        color: #71717a;
+      }
+      .note strong {
+        color: #a1a1aa;
       }
       code {
         color: #818cf8;
@@ -55,22 +70,32 @@
   </head>
   <body>
     <h1>Cargo efficiency</h1>
-    <p>
-      Enter an item <code>typeID</code>; the plugin's own WASM scores it through
-      the host bridge (needs the <code>sde:read</code> capability).
-    </p>
+    <p>Type an item name, pick it, and the plugin scores its cargo density.</p>
     <form id="eval">
-      <input id="typeId" type="number" value="34" min="1" />
+      <input
+        id="q"
+        list="items"
+        placeholder="e.g. Tritanium…"
+        autocomplete="off"
+      />
+      <datalist id="items"></datalist>
       <button type="submit">Evaluate</button>
     </form>
     <div id="out"></div>
 
+    <p class="note">
+      <strong>How it's scored.</strong> Cargo efficiency =
+      <code>round(1000 ÷ packaged volume in m³)</code>. A smaller item scores
+      higher — more units fit per m³ of cargo hold (e.g. a 0.01 m³ item scores
+      100 000; a 10 m³ item scores 100). It's a deterministic density proxy, not
+      an ISK figure. The <em>evaluated N×</em> counter is how many times this
+      plugin has scored anything, kept in its own sandboxed storage.
+    </p>
+
     <!--
-      The invoke bridge, inlined so this UI is a single self-contained file.
-      A sandboxed iframe has an opaque origin, so it can only *import* a separate
-      module when the host sends CORS on plugin:// — inlining avoids that
-      entirely and works on any build. For a multi-file / TypeScript UI, use
-      plugin-ui-sdk.js instead (see docs/plugins.md).
+      Inlined bridge, so this UI is a single self-contained file (a sandboxed
+      iframe can only import a separate module when the host sends CORS on
+      plugin://). For a multi-file / TypeScript UI, use plugin-ui-sdk.js.
     -->
     <script>
       const CHANNEL = "eve-plugin";
@@ -100,18 +125,44 @@
         });
       }
 
-      const form = document.querySelector("#eval");
-      const input = document.querySelector("#typeId");
+      const q = document.querySelector("#q");
+      const items = document.querySelector("#items");
       const out = document.querySelector("#out");
+      const form = document.querySelector("#eval");
+      const byName = new Map(); // lowercased name → typeId
+
+      // Debounced name search → the plugin's `search` export → sde_search.
+      let timer;
+      q.addEventListener("input", () => {
+        clearTimeout(timer);
+        const query = q.value.trim();
+        if (query.length < 2) return;
+        timer = setTimeout(async () => {
+          try {
+            const res = await invoke("search", { query });
+            byName.clear();
+            items.replaceChildren();
+            for (const r of res.results ?? []) {
+              byName.set(r.name.toLowerCase(), r.typeId);
+              const opt = document.createElement("option");
+              opt.value = r.name;
+              items.appendChild(opt);
+            }
+          } catch {
+            /* transient search errors are non-fatal */
+          }
+        }, 200);
+      });
 
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
-        const typeId = Number(input.value);
-        if (!Number.isFinite(typeId)) return;
+        const typeId = byName.get(q.value.trim().toLowerCase());
+        if (typeId == null) {
+          out.textContent = "Pick an item from the list.";
+          return;
+        }
         out.textContent = "Evaluating…";
         try {
-          // The type id goes as a number: the host serialises it to the bare
-          // bytes the WASM `evaluate(type_id: String)` reads.
           const r = await invoke("evaluate", typeId);
           out.innerHTML =
             `<strong>${r.name}</strong> — ${r.volume} m³ · ` +

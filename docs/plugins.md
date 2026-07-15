@@ -276,11 +276,11 @@ its own assets (app builds from v0.40).
 ### Reference
 
 [`examples/plugins/pricing-model/`](https://github.com/th-lange/eve-online-tooling/tree/main/examples/plugins/pricing-model)
-is a complete logic **+** UI plugin: its Rust WASM scores an item, and
-`index.html` drives it through the bridge as a self-contained single-file UI
-(the bridge inlined). The same UI as a typed ES module lives in `ui/main.ts`
-(using the SDK + `.d.ts`). Drop the folder into your plugins dir, activate it,
-and it shows up as a **Pricing Model** page.
+is a complete logic **+** UI plugin: its Rust WASM scores an item by name
+(`search` resolves the name to a type id via `sde_search`, `evaluate` scores
+it), and `index.html` drives it through the bridge as a self-contained
+single-file UI. Drop the folder into your plugins dir, activate it, and it
+shows up as a **Pricing Model** page.
 
 ## Other languages
 

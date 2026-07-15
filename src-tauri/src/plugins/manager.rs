@@ -248,9 +248,9 @@ mod tests {
         let conn = rusqlite::Connection::open(sde_dir.join("sde.sqlite")).unwrap();
         conn.execute_batch(
             "CREATE TABLE invGroups(groupID INT, categoryID INT, groupName TEXT);
-             CREATE TABLE invTypes(typeID INT, groupID INT, typeName TEXT, volume REAL);
+             CREATE TABLE invTypes(typeID INT, groupID INT, typeName TEXT, volume REAL, published INT, marketGroupID INT);
              INSERT INTO invGroups VALUES (18, 4, 'Mineral');
-             INSERT INTO invTypes VALUES (34, 18, 'Tritanium', 0.01);",
+             INSERT INTO invTypes VALUES (34, 18, 'Tritanium', 0.01, 1, 1);",
         )
         .unwrap();
     }
@@ -431,6 +431,37 @@ mod tests {
             .unwrap();
         let v2: Value = serde_json::from_slice(&out2).unwrap();
         assert_eq!(v2["evaluations"].as_u64(), Some(2));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn example_plugin_searches_types_by_name() {
+        // The `search` export routes through the generic `host_call` gateway to
+        // the `sde_search` capability (reached via sde:read), turning a typed
+        // name into matching type ids for the UI's autocomplete.
+        let manager = PluginManager::new();
+        let dir = tmp("search");
+        write_sde(&dir);
+        let granted = HashSet::from([Permission::SdeRead, Permission::StorageOwn]);
+        let out = manager
+            .invoke(
+                &dir,
+                "pricing-model",
+                &granted,
+                &[],
+                &example_wasm(),
+                "search",
+                br#"{"query":"trit"}"#,
+            )
+            .unwrap();
+        let v: Value = serde_json::from_slice(&out).unwrap();
+        let results = v["results"].as_array().expect("results array");
+        assert!(
+            results
+                .iter()
+                .any(|r| r["typeId"] == 34 && r["name"] == "Tritanium"),
+            "search must resolve Tritanium: {v}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

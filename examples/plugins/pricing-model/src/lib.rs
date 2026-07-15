@@ -21,6 +21,7 @@ extern "ExtismHost" {
     fn sde_type_info(type_id: String) -> String;
     fn storage_get(key: String) -> String;
     fn storage_set(key: String, value: String);
+    fn host_call(name: String, args_json: String) -> String;
 }
 
 /// The subset of the host's SDE `TypeInfo` we care about (camelCase on the wire).
@@ -67,4 +68,22 @@ pub unsafe fn evaluate(type_id: String) -> FnResult<Evaluation> {
         score,
         evaluations,
     })
+}
+
+/// Arguments for [`search`].
+#[derive(Deserialize)]
+struct SearchArgs {
+    query: String,
+}
+
+/// Search item types by name via the host capability registry (needs the
+/// `sde:read` capability, reached through the generic `host_call` gateway).
+/// Returns `{ "results": [ { "typeId", "name" }, … ] }`, which the UI uses to
+/// turn a typed name into a type id.
+#[plugin_fn]
+pub unsafe fn search(Json(args): Json<SearchArgs>) -> FnResult<Json<serde_json::Value>> {
+    let call_args = serde_json::json!({ "query": args.query, "limit": 20 }).to_string();
+    let out = host_call("sde_search".to_string(), call_args)?;
+    let value: serde_json::Value = serde_json::from_str(&out)?;
+    Ok(Json(value))
 }
