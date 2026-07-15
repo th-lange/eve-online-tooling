@@ -1,5 +1,7 @@
 # EVE Online Tooling
 
+[![Download latest release](https://img.shields.io/github/v/release/th-lange/eve-online-tooling?label=download&sort=semver&color=success)](https://github.com/th-lange/eve-online-tooling/releases/latest) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
 A **free, open-source** desktop app (Linux · macOS · Windows) for
 [EVE Online](https://www.eveonline.com/) — a bundle of industry, market,
 character and intel tools over one shared data layer. Built with **Tauri 2**
@@ -7,6 +9,8 @@ character and intel tools over one shared data layer. Built with **Tauri 2**
 **SDE** (static data export).
 
 ![EVE Online Tooling — the Production module ranking every manufacturable item by build-vs-buy profit, with the grouped module sidebar on the left](docs/img/overview.png)
+
+**[⬇ Download the latest release](https://github.com/th-lange/eve-online-tooling/releases/latest)** for Linux, macOS or Windows — or [build from source](docs/development.md).
 
 ## What it is
 
@@ -91,7 +95,9 @@ warn on first launch. That's expected and safe to bypass:
 - **Linux** — no prompt.
 
 Signing a Windows Public-Trust cert (the only kind that suppresses SmartScreen)
-requires identity validation available only to developers in the US/CA/EU/UK, and
+requires identity validation available only to companies in the US/CA/EU/UK - 
+and to individuals in US / CA. As I am not a company - I simply can not sign it
+until I am willing to pay roughly 250$ a year... Apple is a similar story:
 Apple's Developer ID is a recurring fee — neither is worth it to dodge a dialog on
 a free tool. The full reasoning is in [`SIGNING.md`](SIGNING.md); it's a
 deliberate, closed decision, not a TODO.
