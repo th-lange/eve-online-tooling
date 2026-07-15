@@ -40,7 +40,7 @@ fn is_due(script: &Script, minute: u64) -> bool {
     script.enabled
         && script
             .interval_min
-            .is_some_and(|m| m > 0 && minute % m == 0)
+            .is_some_and(|m| m > 0 && minute.is_multiple_of(m))
 }
 
 /// Start the background loop for the app's lifetime. Idempotent per app —

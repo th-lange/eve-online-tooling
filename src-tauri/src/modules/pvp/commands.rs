@@ -190,7 +190,7 @@ pub async fn pvp_profiles(
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let lower = |n: &str| n.to_lowercase();
 
-    let id_cache = resolve_character_ids(&http, Some(&dir), &names).await;
+    let id_cache = resolve_character_ids(http, Some(&dir), &names).await;
 
     // Resolved (id, name) in pasted order, deduped by id; plus the misses.
     let mut seen = HashSet::new();
@@ -644,7 +644,7 @@ pub async fn pvp_pilot_fits(
 
     // Fetch each killmail from public ESI (permanent cache), newest first.
     let refs: Vec<ZkillRef> = losses.into_iter().take(LOSS_CAP).collect();
-    let kms = fetch_killmails(&http, &dir, refs).await;
+    let kms = fetch_killmails(http, &dir, refs).await;
 
     // Group by hull; the first (newest) killmail of each hull is its rep fit.
     let mut order: Vec<i64> = Vec::new();
@@ -656,9 +656,9 @@ pub async fn pvp_pilot_fits(
             continue;
         }
         *count.entry(hull).or_default() += 1;
-        if !rep.contains_key(&hull) {
+        if let std::collections::hash_map::Entry::Vacant(e) = rep.entry(hull) {
             order.push(hull);
-            rep.insert(hull, km);
+            e.insert(km);
         }
     }
 
@@ -715,7 +715,7 @@ pub async fn pvp_typical_fit(
 
     let refs: Vec<ZkillRef> = losses.into_iter().take(TYPICAL_SAMPLE).collect();
     let sampled = refs.len() as i64;
-    let kms = fetch_killmails(&http, &dir, refs).await;
+    let kms = fetch_killmails(http, &dir, refs).await;
 
     // The most-recent sampled loss that is actually this hull and carries a fit.
     let Some(km) = kms

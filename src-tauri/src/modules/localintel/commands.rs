@@ -169,7 +169,7 @@ pub async fn local_scan(
 
     // 1. names → character ids — shared resolver, cached forever (a name→id
     //    mapping never changes).
-    let id_cache = resolve_character_ids(&http, dir.as_deref(), &names).await;
+    let id_cache = resolve_character_ids(http, dir.as_deref(), &names).await;
     // Resolved pilots (deduped by id), and the names we still couldn't resolve.
     let mut seen = HashSet::new();
     let characters: Vec<IdName> = names
