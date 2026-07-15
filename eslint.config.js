@@ -7,7 +7,7 @@ import prettier from "eslint-config-prettier";
 // Flat config for the React/TS frontend. `prettier` last disables any
 // formatting rules that would fight Prettier (formatting is Prettier's job).
 export default tseslint.config(
-  { ignores: ["dist", "src-tauri", "node_modules"] },
+  { ignores: ["dist", "src-tauri", "node_modules", "examples"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

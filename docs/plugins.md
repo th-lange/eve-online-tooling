@@ -201,33 +201,63 @@ the network; the native bridge proxies the call.
 
 ## UI plugins
 
-A plugin can ship an HTML/JS UI that appears as its own page. Point `ui` at the
-entry document (relative to the plugin folder):
+A plugin can ship an HTML/JS UI that appears as its own **sidebar page** once
+the plugin is activated. Declare it in the manifest and name the entry document
+`index.html` at your plugin's root:
 
 ```json
 "ui": "index.html"
 ```
 
-The UI is served from a distinct `plugin://` origin and rendered in a
-`sandbox="allow-scripts"` iframe with **no `allow-same-origin`** — so it is a
-unique opaque origin that cannot read the app's DOM or `localStorage`, call
-`invoke`, or reach the network (`connect-src 'none'`). Its only channel is a
-`postMessage` bridge to the host.
+The UI loads from a distinct `plugin://` origin in a `sandbox="allow-scripts"`
+iframe with **no `allow-same-origin`** — a unique opaque origin that can't read
+the app's DOM or `localStorage`, call `invoke`, or reach the network
+(`connect-src 'none'`). Its only channel to the app is a `postMessage` bridge.
 
-Copy [`examples/plugins/plugin-ui-sdk.js`](https://github.com/th-lange/eve-online-tooling/blob/main/examples/plugins/plugin-ui-sdk.js)
-into your UI and call your own logic through it:
+### The bridge
+
+Copy [`plugin-ui-sdk.js`](https://github.com/th-lange/eve-online-tooling/blob/main/examples/plugins/plugin-ui-sdk.js)
+(and, for TypeScript, [`plugin-ui-sdk.d.ts`](https://github.com/th-lange/eve-online-tooling/blob/main/examples/plugins/plugin-ui-sdk.d.ts))
+into your UI folder and call your own logic through it:
 
 ```html
 <script type="module">
   import { invoke } from "./plugin-ui-sdk.js";
-  const result = await invoke("appraise", { items: [/* … */] });
+  const result = await invoke("evaluate", 34); // a WASM export + its argument
 </script>
 ```
 
-`invoke(fn, args)` runs one of **your own** plugin's exported functions through
-the host (`plugin_invoke`) — the broker still enforces the capabilities your
-manifest was granted. A UI can drive nothing but its own logic; to pull foreign
-data, that logic uses `net:fetch` in the WASM layer, never the iframe.
+`invoke(fn, args)` runs one of **your own** plugin's exported WASM functions
+through the host (`plugin_invoke`) and resolves with its JSON return value. The
+broker still enforces the capabilities your manifest was granted, and the host
+only ever dispatches to _your_ plugin — a UI can drive nothing but its own
+logic. To pull foreign data, that logic uses `net:fetch` in the WASM layer,
+never the iframe.
+
+`args` reaches your export exactly as `plugin_invoke` sends it: the
+JSON-serialised value. A function taking a bare `String` (like the reference's
+`evaluate(type_id: String)`) wants a JSON **number** / unquoted value, not a
+quoted string; a function taking a struct wants an object.
+
+The SDK is a thin wrapper over `postMessage`. To skip it, post to `parent` and
+listen for the reply on the same `channel`:
+
+```js
+// your window → parent
+{ channel: "eve-plugin", kind: "invoke", id: 1, fn: "evaluate", args: 34 }
+// parent → your window
+{ channel: "eve-plugin", kind: "result", id: 1, ok: true, result: {} }
+// or, on failure
+{ channel: "eve-plugin", kind: "result", id: 1, ok: false, error: "…" }
+```
+
+### Reference
+
+[`examples/plugins/pricing-model/`](https://github.com/th-lange/eve-online-tooling/tree/main/examples/plugins/pricing-model)
+is a complete logic **+** UI plugin: its Rust WASM scores an item, and
+`index.html` + `ui/main.ts` drive it through the bridge (typed via
+`ui/plugin-ui-sdk.d.ts`). Drop the folder into your plugins dir, activate it,
+and it shows up as a **Pricing Model** page.
 
 ## Other languages
 
