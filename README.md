@@ -1,6 +1,6 @@
 # EVE Online Tooling
 
-[![Download latest release](https://img.shields.io/github/v/release/th-lange/eve-online-tooling?label=download&sort=semver&color=success)](https://github.com/th-lange/eve-online-tooling/releases/latest) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Download latest release](https://img.shields.io/github/v/release/th-lange/eve-online-tooling?label=download&sort=semver&color=success)](https://github.com/th-lange/eve-online-tooling/releases/latest) [![Website](https://img.shields.io/badge/website-th--lange.github.io-informational)](https://th-lange.github.io/eve-online-tooling/) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 A **free, open-source** desktop app (Linux · macOS · Windows) for
 [EVE Online](https://www.eveonline.com/) — a bundle of industry, market,

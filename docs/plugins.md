@@ -152,7 +152,7 @@ memory cap (~64 MiB) and a per-call timeout.
 ## The reference plugin
 
 A complete, buildable example lives in
-[`examples/plugins/pricing-model/`](../examples/plugins/pricing-model/). It reads
+[`examples/plugins/pricing-model/`](https://github.com/th-lange/eve-online-tooling/tree/main/examples/plugins/pricing-model). It reads
 an item's volume via `sde:read`, derives a deterministic score, and keeps a call
 counter in `storage:own`.
 
@@ -214,7 +214,7 @@ unique opaque origin that cannot read the app's DOM or `localStorage`, call
 `invoke`, or reach the network (`connect-src 'none'`). Its only channel is a
 `postMessage` bridge to the host.
 
-Copy [`examples/plugins/plugin-ui-sdk.js`](../examples/plugins/plugin-ui-sdk.js)
+Copy [`examples/plugins/plugin-ui-sdk.js`](https://github.com/th-lange/eve-online-tooling/blob/main/examples/plugins/plugin-ui-sdk.js)
 into your UI and call your own logic through it:
 
 ```html

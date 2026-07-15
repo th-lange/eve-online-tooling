@@ -2,7 +2,7 @@
 
 Everything you need to build, run and release **eve-online-tooling** from
 source. For what the app *is* and how to install a prebuilt binary, see the
-[README](../README.md).
+[README](https://github.com/th-lange/eve-online-tooling/blob/main/README.md).
 
 Built with **Tauri 2** (Rust core) + **React / TypeScript** (Vite). Market and
 character data come from EVE's **ESI** API; blueprint/material data from the
@@ -65,7 +65,7 @@ the market/production calculations, which use public data.
 | `npm run test` | Frontend unit tests (Vitest) |
 | `cd src-tauri && cargo test` | Rust unit tests |
 
-See [`CLAUDE.md`](../CLAUDE.md) for architecture and EVE domain notes, and the
+See [`CLAUDE.md`](https://github.com/th-lange/eve-online-tooling/blob/main/CLAUDE.md) for architecture and EVE domain notes, and the
 other docs for subsystems: [plugins](plugins.md), [scripts](scripts.md),
 [MCP](mcp.md).
 
@@ -110,7 +110,7 @@ The workflow builds **Windows** installers on every tag; **macOS** (universal)
 and **Linux** join in on minor releases (`vX.Y.0`) or a manual run with
 `all_platforms`. It attaches the installers to the GitHub Release for that tag,
 then fills in the release notes with the changelog and the unsigned-build note
-(see [`SIGNING.md`](../SIGNING.md)).
+(see [`SIGNING.md`](https://github.com/th-lange/eve-online-tooling/blob/main/SIGNING.md)).
 
 ## Status & tracking
 
