@@ -64,6 +64,63 @@
       <button type="submit">Evaluate</button>
     </form>
     <div id="out"></div>
-    <script type="module" src="./ui/main.js"></script>
+
+    <!--
+      The invoke bridge, inlined so this UI is a single self-contained file.
+      A sandboxed iframe has an opaque origin, so it can only *import* a separate
+      module when the host sends CORS on plugin:// — inlining avoids that
+      entirely and works on any build. For a multi-file / TypeScript UI, use
+      plugin-ui-sdk.js instead (see docs/plugins.md).
+    -->
+    <script>
+      const CHANNEL = "eve-plugin";
+      let nextId = 1;
+      const pending = new Map();
+
+      window.addEventListener("message", (event) => {
+        const m = event.data;
+        if (!m || m.channel !== CHANNEL || m.kind !== "result") return;
+        const entry = pending.get(m.id);
+        if (!entry) return;
+        pending.delete(m.id);
+        if (m.ok) entry.resolve(m.result);
+        else entry.reject(new Error(m.error));
+      });
+
+      // Run one of THIS plugin's own WASM exports through the host; the broker
+      // still enforces the capabilities the manifest was granted.
+      function invoke(fn, args) {
+        const id = nextId++;
+        return new Promise((resolve, reject) => {
+          pending.set(id, { resolve, reject });
+          parent.postMessage(
+            { channel: CHANNEL, kind: "invoke", id, fn, args },
+            "*",
+          );
+        });
+      }
+
+      const form = document.querySelector("#eval");
+      const input = document.querySelector("#typeId");
+      const out = document.querySelector("#out");
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const typeId = Number(input.value);
+        if (!Number.isFinite(typeId)) return;
+        out.textContent = "Evaluating…";
+        try {
+          // The type id goes as a number: the host serialises it to the bare
+          // bytes the WASM `evaluate(type_id: String)` reads.
+          const r = await invoke("evaluate", typeId);
+          out.innerHTML =
+            `<strong>${r.name}</strong> — ${r.volume} m³ · ` +
+            `score ${r.score} · evaluated ${r.evaluations}×`;
+        } catch (err) {
+          out.textContent =
+            "Error: " + (err instanceof Error ? err.message : String(err));
+        }
+      });
+    </script>
   </body>
 </html>

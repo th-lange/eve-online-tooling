@@ -121,6 +121,10 @@ pub fn run() {
                             "Content-Security-Policy",
                             plugins::protocol::PLUGIN_FRAME_CSP,
                         )
+                        // Let a sandboxed (opaque-origin) plugin UI ES-module
+                        // import its own assets over plugin://; the CSP already
+                        // pins the frame to this scheme and forbids network.
+                        .header("Access-Control-Allow-Origin", "*")
                         .body(bytes)
                         .unwrap(),
                     Err(_) => deny(404),

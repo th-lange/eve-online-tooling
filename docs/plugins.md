@@ -216,31 +216,46 @@ the app's DOM or `localStorage`, call `invoke`, or reach the network
 
 ### The bridge
 
-Copy [`plugin-ui-sdk.js`](https://github.com/th-lange/eve-online-tooling/blob/main/examples/plugins/plugin-ui-sdk.js)
-(and, for TypeScript, [`plugin-ui-sdk.d.ts`](https://github.com/th-lange/eve-online-tooling/blob/main/examples/plugins/plugin-ui-sdk.d.ts))
-into your UI folder and call your own logic through it:
-
-```html
-<script type="module">
-  import { invoke } from "./plugin-ui-sdk.js";
-  const result = await invoke("evaluate", 34); // a WASM export + its argument
-</script>
-```
-
-`invoke(fn, args)` runs one of **your own** plugin's exported WASM functions
-through the host (`plugin_invoke`) and resolves with its JSON return value. The
-broker still enforces the capabilities your manifest was granted, and the host
-only ever dispatches to _your_ plugin — a UI can drive nothing but its own
-logic. To pull foreign data, that logic uses `net:fetch` in the WASM layer,
-never the iframe.
+Your UI reaches its own logic through one call, `invoke(fn, args)`: it runs one
+of **your own** plugin's exported WASM functions through the host
+(`plugin_invoke`) and resolves with the JSON return value. The broker still
+enforces the capabilities your manifest was granted, and the host only ever
+dispatches to _your_ plugin — a UI can drive nothing but its own logic. To pull
+foreign data, that logic uses `net:fetch` in the WASM layer, never the iframe.
 
 `args` reaches your export exactly as `plugin_invoke` sends it: the
 JSON-serialised value. A function taking a bare `String` (like the reference's
 `evaluate(type_id: String)`) wants a JSON **number** / unquoted value, not a
 quoted string; a function taking a struct wants an object.
 
-The SDK is a thin wrapper over `postMessage`. To skip it, post to `parent` and
-listen for the reply on the same `channel`:
+`invoke` is a thin wrapper over `postMessage`. For a **single-file UI** the
+simplest thing is to inline it — no import, works on any build:
+
+```html
+<script>
+  const CHANNEL = "eve-plugin";
+  const pending = new Map();
+  let nextId = 1;
+  window.addEventListener("message", (e) => {
+    const m = e.data;
+    if (!m || m.channel !== CHANNEL || m.kind !== "result") return;
+    const p = pending.get(m.id);
+    if (!p) return;
+    pending.delete(m.id);
+    m.ok ? p.resolve(m.result) : p.reject(new Error(m.error));
+  });
+  function invoke(fn, args) {
+    const id = nextId++;
+    return new Promise((resolve, reject) => {
+      pending.set(id, { resolve, reject });
+      parent.postMessage({ channel: CHANNEL, kind: "invoke", id, fn, args }, "*");
+    });
+  }
+  // const r = await invoke("evaluate", 34);
+</script>
+```
+
+Under the hood that's this wire protocol, if you'd rather implement it yourself:
 
 ```js
 // your window → parent
@@ -251,12 +266,20 @@ listen for the reply on the same `channel`:
 { channel: "eve-plugin", kind: "result", id: 1, ok: false, error: "…" }
 ```
 
+For a **multi-file / TypeScript UI**, copy
+[`plugin-ui-sdk.js`](https://github.com/th-lange/eve-online-tooling/blob/main/examples/plugins/plugin-ui-sdk.js)
+(and [`plugin-ui-sdk.d.ts`](https://github.com/th-lange/eve-online-tooling/blob/main/examples/plugins/plugin-ui-sdk.d.ts)
+for types) into your UI and `import { invoke }` from it. The `plugin://` host
+sends `Access-Control-Allow-Origin`, so a sandboxed frame can ES-module-import
+its own assets (app builds from v0.40).
+
 ### Reference
 
 [`examples/plugins/pricing-model/`](https://github.com/th-lange/eve-online-tooling/tree/main/examples/plugins/pricing-model)
 is a complete logic **+** UI plugin: its Rust WASM scores an item, and
-`index.html` + `ui/main.ts` drive it through the bridge (typed via
-`ui/plugin-ui-sdk.d.ts`). Drop the folder into your plugins dir, activate it,
+`index.html` drives it through the bridge as a self-contained single-file UI
+(the bridge inlined). The same UI as a typed ES module lives in `ui/main.ts`
+(using the SDK + `.d.ts`). Drop the folder into your plugins dir, activate it,
 and it shows up as a **Pricing Model** page.
 
 ## Other languages
