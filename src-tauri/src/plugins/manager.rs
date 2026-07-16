@@ -466,6 +466,31 @@ mod tests {
     }
 
     #[test]
+    fn example_plugin_price_requires_market_read() {
+        // `price` calls market_price through host_call; without market:read the
+        // gateway rejects it and the guest call errors — the UI layers price on
+        // top of `evaluate` as optional exactly because of this.
+        let manager = PluginManager::new();
+        let dir = tmp("price");
+        write_sde(&dir);
+        let granted = HashSet::from([Permission::SdeRead, Permission::StorageOwn]);
+        let result = manager.invoke(
+            &dir,
+            "pricing-model",
+            &granted,
+            &[],
+            &example_wasm(),
+            "price",
+            b"34",
+        );
+        assert!(
+            result.is_err(),
+            "price without market:read must fail, got {result:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn plugin_cannot_reach_an_ungranted_capability() {
         // The example imports sde_type_info; granting only storage:own leaves
         // that import unsatisfied, so it can't even instantiate — the sandbox +

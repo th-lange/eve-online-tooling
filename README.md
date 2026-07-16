@@ -68,7 +68,10 @@ character and intel tools over one shared data layer. Built with **Tauri 2**
 - **Scripts** — small **Rhai**/**JavaScript** snippets, run once or on a timer,
   with a curated trusted API and resource limits. See [`docs/scripts.md`](docs/scripts.md).
 - **Plugins** — sandboxed third-party **WASM** logic and iframe UI pages, gated
-  by explicit capabilities. See [`docs/plugins.md`](docs/plugins.md).
+  by explicit capabilities. Grab a ready-to-drop
+  [example plugin](https://github.com/th-lange/eve-online-tooling/releases/latest)
+  from the latest release, or build your own — see
+  [`docs/plugins.md`](docs/plugins.md).
 - **MCP** — expose read-only tools to an AI client over a local MCP bridge. See
   [`docs/mcp.md`](docs/mcp.md).
 

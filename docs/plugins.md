@@ -40,6 +40,24 @@ the app is running? Click **Rescan** on the Plugins page to pick it up without
 a restart. On first run the app also seeds a bundled `hello-ui` example here so
 there's something to try; delete it and it stays gone.
 
+## Try a ready-made one
+
+Don't want to build anything? Grab a prebuilt example from the
+[latest release](https://github.com/th-lange/eve-online-tooling/releases/latest)
+and unzip it into your `plugins/` folder:
+
+- **[pricing-model-plugin.zip](https://github.com/th-lange/eve-online-tooling/releases/latest/download/pricing-model-plugin.zip)**
+  — the logic **+** UI reference documented below (needs the SDE: open the
+  Production module once so it downloads).
+- **[hello-ui-plugin.zip](https://github.com/th-lange/eve-online-tooling/releases/latest/download/hello-ui-plugin.zip)**
+  — a minimal UI-only plugin.
+
+Each zip already contains the `<id>/` folder, so unzip it _inside_
+`<app_data_dir>/plugins/` and you'll get `plugins/pricing-model/`. Then
+**Rescan** on the Plugins page and activate it. To build one yourself instead,
+read on — the full source is in
+[`examples/plugins/`](https://github.com/th-lange/eve-online-tooling/tree/main/examples/plugins).
+
 ## The manifest: `plugin.json`
 
 ```json
@@ -49,7 +67,7 @@ there's something to try; delete it and it stays gone.
   "version": "0.1.0",
   "minAppVersion": "0.33.0",
   "wasm": "pricing_model.wasm",
-  "permissions": ["sde:read", "storage:own"]
+  "permissions": ["sde:read", "market:read", "storage:own"]
 }
 ```
 
@@ -153,7 +171,8 @@ memory cap (~64 MiB) and a per-call timeout.
 
 A complete, buildable example lives in
 [`examples/plugins/pricing-model/`](https://github.com/th-lange/eve-online-tooling/tree/main/examples/plugins/pricing-model). It reads
-an item's volume via `sde:read`, derives a deterministic score, and keeps a call
+an item's volume via `sde:read` and its Jita price via `market:read`, derives a
+volume-only density plus a price-aware ISK-per-m³ score, and keeps a call
 counter in `storage:own`.
 
 ### Build it
@@ -277,8 +296,9 @@ its own assets (app builds from v0.40).
 
 [`examples/plugins/pricing-model/`](https://github.com/th-lange/eve-online-tooling/tree/main/examples/plugins/pricing-model)
 is a complete logic **+** UI plugin: its Rust WASM scores an item by name
-(`search` resolves the name to a type id via `sde_search`, `evaluate` scores
-it), and `index.html` drives it through the bridge as a self-contained
+(`search` resolves the name via `sde_search`, `evaluate` scores its cargo
+density and price-aware ISK/m³ via `sde_type_info` + `market_price`),
+and `index.html` drives it through the bridge as a self-contained
 single-file UI. Drop the folder into your plugins dir, activate it, and it
 shows up as a **Pricing Model** page.
 

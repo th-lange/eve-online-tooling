@@ -70,7 +70,10 @@
   </head>
   <body>
     <h1>Cargo efficiency</h1>
-    <p>Type an item name, pick it, and the plugin scores its cargo density.</p>
+    <p>
+      Type an item name, pick it, and the plugin scores its cargo density and
+      ISK-per-m³ value.
+    </p>
     <form id="eval">
       <input
         id="q"
@@ -84,12 +87,16 @@
     <div id="out"></div>
 
     <p class="note">
-      <strong>How it's scored.</strong> Cargo efficiency =
-      <code>round(1000 ÷ packaged volume in m³)</code>. A smaller item scores
-      higher — more units fit per m³ of cargo hold (e.g. a 0.01 m³ item scores
-      100 000; a 10 m³ item scores 100). It's a deterministic density proxy, not
-      an ISK figure. The <em>evaluated N×</em> counter is how many times this
-      plugin has scored anything, kept in its own sandboxed storage.
+      <strong>How it's scored.</strong> Two cargo-efficiency figures:
+      <code>density = round(1000 ÷ volume m³)</code> (volume only — a smaller
+      item packs tighter) and the price-aware
+      <code>ISK/m³ = Jita sell price ÷ volume</code> — how much ISK of value
+      each m³ of cargo carries, so the higher it is the more an item is worth
+      hauling. Density comes from the <code>evaluate</code> export; the price
+      side is a separate <code>price</code> export needing the
+      <code>market:read</code> grant and live data, so you still get density
+      without it. The <em>evaluated N×</em> counter is kept in the plugin's own
+      sandboxed storage.
     </p>
 
     <!--
@@ -130,6 +137,8 @@
       const out = document.querySelector("#out");
       const form = document.querySelector("#eval");
       const byName = new Map(); // lowercased name → typeId
+      const isk = (n) =>
+        n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 
       // Debounced name search → the plugin's `search` export → sde_search.
       let timer;
@@ -163,10 +172,25 @@
         }
         out.textContent = "Evaluating…";
         try {
+          // Density is always available; price is best-effort (needs
+          // market:read + live data), so a rejected `price` call just omits it.
           const r = await invoke("evaluate", typeId);
+          let price = null;
+          let iskPerM3 = null;
+          try {
+            const p = await invoke("price", typeId);
+            price = p.price;
+            iskPerM3 = p.iskPerM3;
+          } catch {
+            /* no market grant/data — density only */
+          }
+          const parts = [`${r.volume} m³`];
+          if (price != null) parts.push(`${isk(price)} ISK`);
+          parts.push(`density ${r.score}`);
+          if (iskPerM3 != null) parts.push(`${isk(iskPerM3)} ISK/m³`);
           out.innerHTML =
-            `<strong>${r.name}</strong> — ${r.volume} m³ · ` +
-            `score ${r.score} · evaluated ${r.evaluations}×`;
+            `<strong>${r.name}</strong> — ${parts.join(" · ")} ` +
+            `<span style="color:#71717a">· evaluated ${r.evaluations}×</span>`;
         } catch (err) {
           out.textContent =
             "Error: " + (err instanceof Error ? err.message : String(err));
