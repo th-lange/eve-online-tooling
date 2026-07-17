@@ -14,6 +14,9 @@
 //!   `Retry-After` when present;
 //! - returns every other response (2xx/3xx/4xx incl. 304/404) unchanged for the
 //!   caller to interpret.
+//!
+//! Non-idempotent writes that must not risk a duplicate on a lost 5xx use
+//! [`send_once`] instead — same budget tracking, no retry.
 
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
@@ -117,7 +120,11 @@ fn retry_after(headers: &HeaderMap) -> Option<Duration> {
 }
 
 /// Send a request with error-budget throttling + transient retry. `build`
-/// produces a fresh request each attempt (GETs only — no consumed body).
+/// produces a fresh request each attempt — not just GETs: since `build` is
+/// called anew per attempt, it can rebuild a JSON body just as cheaply as a
+/// bare GET, so POSTs retry safely too as long as the write is idempotent.
+/// Non-idempotent writes (e.g. creating a fitting) that must not risk a
+/// duplicate after a 5xx should use [`send_once`] instead.
 pub async fn send_retrying<F>(build: F) -> Result<Response, reqwest::Error>
 where
     F: Fn() -> RequestBuilder,
@@ -148,6 +155,23 @@ where
             }
         }
     }
+}
+
+/// Send a request **exactly once** — no status-based or transient retry — but
+/// still throttles on and observes the error-budget headers, same as
+/// [`send_retrying`]. For non-idempotent writes where a lost response after a
+/// 5xx can't be told apart from a lost request: the write may already have
+/// committed server-side, so blindly retrying risks doing it twice. Callers
+/// get the raw result back and decide themselves whether it's safe to retry.
+pub async fn send_once<F>(build: F) -> Result<Response, reqwest::Error>
+where
+    F: FnOnce() -> RequestBuilder,
+{
+    let budget = ErrorBudget::global();
+    budget.throttle().await;
+    let resp = build().send().await?;
+    budget.observe(resp.headers());
+    Ok(resp)
 }
 
 #[cfg(test)]
