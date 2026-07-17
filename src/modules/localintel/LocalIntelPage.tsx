@@ -281,7 +281,9 @@ export function LocalIntelPage() {
               Load from latest Local log
             </button>
             {loadLog.isError && (
-              <span className="text-rose-400">{errorMessage(loadLog.error)}</span>
+              <span className="text-rose-400">
+                {errorMessage(loadLog.error)}
+              </span>
             )}
             {loadLog.data && (
               <span className="text-zinc-500">

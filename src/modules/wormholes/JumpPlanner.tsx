@@ -61,7 +61,9 @@ export function JumpPlanner() {
       </div>
 
       {plan.isError && (
-        <div className="mt-2 text-xs text-rose-400">{errorMessage(plan.error)}</div>
+        <div className="mt-2 text-xs text-rose-400">
+          {errorMessage(plan.error)}
+        </div>
       )}
 
       {r && !r.found && (

@@ -65,7 +65,9 @@ export function Logistics() {
       {q.isLoading ? (
         <div className="mt-3 text-sm text-zinc-500">Computing routes…</div>
       ) : q.isError ? (
-        <div className="mt-3 text-sm text-rose-400">{errorMessage(q.error)}</div>
+        <div className="mt-3 text-sm text-rose-400">
+          {errorMessage(q.error)}
+        </div>
       ) : (
         <div className="mt-3 overflow-auto rounded-lg border border-zinc-800">
           <table className="w-full border-collapse text-sm">

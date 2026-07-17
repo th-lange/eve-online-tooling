@@ -209,7 +209,9 @@ export function FactionWarfarePage() {
         <div className="mt-5 text-sm text-zinc-500">Loading warzone map…</div>
       )}
       {map.isError && (
-        <div className="mt-5 text-sm text-rose-400">{errorMessage(map.error)}</div>
+        <div className="mt-5 text-sm text-rose-400">
+          {errorMessage(map.error)}
+        </div>
       )}
 
       {map.data && activeZone && <Warzone data={map.data} zone={activeZone} />}

@@ -1,5 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { errorMessage, intelIncursions, type IncursionRow } from "../../lib/api";
+import {
+  errorMessage,
+  intelIncursions,
+  type IncursionRow,
+} from "../../lib/api";
 import { Page, PageHeader } from "../../components/page";
 
 const STATE_STYLE: Record<string, string> = {
