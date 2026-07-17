@@ -1,13 +1,10 @@
 import { Fragment, useMemo, useState, type ReactNode } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   errorMessage,
   marketRegions,
   reprocessingEfficiency,
-  reprocessingGetList,
   reprocessingScan,
-  reprocessingSetList,
-  type ListName,
   type ReprocessParams,
   type ReprocessRow,
 } from "../../lib/api";
@@ -23,10 +20,17 @@ import {
 } from "../../components/SortHeaderCell";
 import { Page, PageHeader, Centered } from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
+import { useTypeIdLists } from "../../lib/useSavedLists";
+import {
+  ListTabs,
+  SavedListView,
+  RowActionsCell,
+  type ListTab,
+} from "../../components/typeIdLists";
 
 const FORGE = 10000002;
 const JITA = 60003760;
-type Tab = "opportunities" | "favorites" | "blacklist";
+type Tab = ListTab;
 
 const TITLE = "Reprocessing";
 const SUBTITLE =
@@ -41,7 +45,6 @@ export function ReprocessingPage() {
 }
 
 function Workbench() {
-  const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("opportunities");
   const [regionId, setRegionId] = useState(FORGE);
   const [stationId, setStationId] = useState<number | null>(JITA);
@@ -85,38 +88,13 @@ function Workbench() {
     ],
     queryFn: () => reprocessingEfficiency(params),
   });
-  const favorites = useQuery({
-    queryKey: ["reprocessing", "favorites"],
-    queryFn: () => reprocessingGetList("favorites"),
-  });
-  const blacklist = useQuery({
-    queryKey: ["reprocessing", "blacklist"],
-    queryFn: () => reprocessingGetList("blacklist"),
-  });
+  const { favorites, blacklist, toggleFavorite, blacklistRow, remove } =
+    useTypeIdLists("reprocessing", setRows, (r) => r.typeId);
 
   const run = useMutation({
     mutationFn: (p: ReprocessParams) => reprocessingScan(p),
     onSuccess: setRows,
   });
-  const setList = useMutation({
-    mutationFn: (v: { list: ListName; typeId: number; add: boolean }) =>
-      reprocessingSetList(v.list, v.typeId, v.add),
-    onSuccess: (_d, v) =>
-      qc.invalidateQueries({ queryKey: ["reprocessing", v.list] }),
-  });
-
-  function toggleFavorite(r: ReprocessRow) {
-    setList.mutate({ list: "favorites", typeId: r.typeId, add: !r.favorite });
-    setRows((prev) =>
-      prev.map((x) =>
-        x.typeId === r.typeId ? { ...x, favorite: !x.favorite } : x,
-      ),
-    );
-  }
-  function blacklistRow(r: ReprocessRow) {
-    setList.mutate({ list: "blacklist", typeId: r.typeId, add: true });
-    setRows((prev) => prev.filter((x) => x.typeId !== r.typeId));
-  }
 
   const stations = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
   const rowsByType = useMemo(
@@ -235,7 +213,7 @@ function Workbench() {
         </div>
       </div>
 
-      <Tabs
+      <ListTabs
         tab={tab}
         onChange={setTab}
         counts={{
@@ -271,23 +249,21 @@ function Workbench() {
           ))}
 
         {tab === "favorites" && (
-          <ListView
+          <SavedListView
             items={favorites.data ?? []}
-            rowsByType={rowsByType}
+            rowsById={rowsByType}
             removeLabel="Unfavorite"
-            onRemove={(id) =>
-              setList.mutate({ list: "favorites", typeId: id, add: false })
-            }
+            onRemove={(id) => remove("favorites", id)}
+            detail={(r: ReprocessRow) => `${formatIsk(r.delta)}/unit`}
           />
         )}
         {tab === "blacklist" && (
-          <ListView
+          <SavedListView
             items={blacklist.data ?? []}
-            rowsByType={rowsByType}
+            rowsById={rowsByType}
             removeLabel="Remove"
-            onRemove={(id) =>
-              setList.mutate({ list: "blacklist", typeId: id, add: false })
-            }
+            onRemove={(id) => remove("blacklist", id)}
+            detail={(r: ReprocessRow) => `${formatIsk(r.delta)}/unit`}
           />
         )}
       </div>
@@ -393,32 +369,12 @@ function ReprocessTable({
                   <td className="px-2 text-center text-zinc-500">
                     {open ? "▾" : "▸"}
                   </td>
-                  <td className="px-2 whitespace-nowrap">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onFavorite(r);
-                      }}
-                      title="Favorite"
-                      className={
-                        r.favorite
-                          ? "text-amber-400"
-                          : "text-zinc-600 hover:text-amber-400"
-                      }
-                    >
-                      ★
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onBlacklist(r);
-                      }}
-                      title="Blacklist"
-                      className="ml-2 text-zinc-600 hover:text-rose-400"
-                    >
-                      ✕
-                    </button>
-                  </td>
+                  <RowActionsCell
+                    row={r}
+                    onFavorite={onFavorite}
+                    onBlacklist={onBlacklist}
+                    className="px-2 whitespace-nowrap"
+                  />
                   <td className="px-3 py-1.5">
                     <div className="text-zinc-200">
                       {r.name}
@@ -504,80 +460,6 @@ function ReprocessTable({
           )}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-function ListView({
-  items,
-  rowsByType,
-  removeLabel,
-  onRemove,
-}: {
-  items: { typeId: number; name: string }[];
-  rowsByType: Map<number, ReprocessRow>;
-  removeLabel: string;
-  onRemove: (typeId: number) => void;
-}) {
-  if (items.length === 0) return <Centered>Nothing here yet.</Centered>;
-  return (
-    <div className="overflow-auto rounded border border-zinc-800">
-      <table className="w-full border-collapse text-sm">
-        <tbody>
-          {items.map((it) => {
-            const r = rowsByType.get(it.typeId);
-            return (
-              <tr key={it.typeId} className="border-t border-zinc-800">
-                <td className="px-3 py-1.5 text-zinc-200">{it.name}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                  {r ? `${formatIsk(r.delta)}/unit` : ""}
-                </td>
-                <td className="px-3 py-1.5 text-right">
-                  <button
-                    onClick={() => onRemove(it.typeId)}
-                    className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
-                  >
-                    {removeLabel}
-                  </button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function Tabs({
-  tab,
-  onChange,
-  counts,
-}: {
-  tab: Tab;
-  onChange: (t: Tab) => void;
-  counts: { favorites: number; blacklist: number };
-}) {
-  const tabs: { value: Tab; label: string }[] = [
-    { value: "opportunities", label: "Opportunities" },
-    { value: "favorites", label: `Favorites (${counts.favorites})` },
-    { value: "blacklist", label: `Blacklist (${counts.blacklist})` },
-  ];
-  return (
-    <div className="mt-4 inline-flex rounded border border-zinc-800 bg-zinc-900 p-0.5">
-      {tabs.map((t) => (
-        <button
-          key={t.value}
-          onClick={() => onChange(t.value)}
-          className={`rounded px-3 py-1.5 text-sm ${
-            tab === t.value
-              ? "bg-zinc-700 text-zinc-100"
-              : "text-zinc-400 hover:text-zinc-200"
-          }`}
-        >
-          {t.label}
-        </button>
-      ))}
     </div>
   );
 }

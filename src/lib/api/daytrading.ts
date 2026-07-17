@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ListName, ListItem } from "./common";
 
 export interface DayTradeRow {
   typeId: number;
@@ -64,18 +63,4 @@ export interface DayTradeParams {
 /** Rank items by inter-station arbitrage (buy source → sell destination). */
 export function daytradingScan(params: DayTradeParams): Promise<DayTradeRow[]> {
   return invoke<DayTradeRow[]>("daytrading_scan", { params });
-}
-
-/** Contents of a daytrading saved list (blacklist/favorites), with names. */
-export function daytradingGetList(list: ListName): Promise<ListItem[]> {
-  return invoke<ListItem[]>("daytrading_get_list", { list });
-}
-
-/** Add/remove a type from a daytrading saved list. */
-export function daytradingSetList(
-  list: ListName,
-  typeId: number,
-  add: boolean,
-): Promise<void> {
-  return invoke<void>("daytrading_set_list", { list, typeId, add });
 }

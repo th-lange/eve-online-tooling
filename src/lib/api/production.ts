@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ListName, ListItem } from "./common";
 
 export interface MaterialLine {
   typeId: number;
@@ -148,20 +147,6 @@ export interface Decryptor {
 /** The invention decryptors, for the production decryptor dropdown. */
 export function productionDecryptors(): Promise<Decryptor[]> {
   return invoke<Decryptor[]>("production_decryptors");
-}
-
-/** Contents of a production saved list (blacklist/favorites), by blueprint id. */
-export function productionGetList(list: ListName): Promise<ListItem[]> {
-  return invoke<ListItem[]>("production_get_list", { list });
-}
-
-/** Add/remove a blueprint type from a production saved list. */
-export function productionSetList(
-  list: ListName,
-  typeId: number,
-  add: boolean,
-): Promise<void> {
-  return invoke<void>("production_set_list", { list, typeId, add });
 }
 
 /** The live manufacturing cost index for a solar system (ESI /industry/systems/,
