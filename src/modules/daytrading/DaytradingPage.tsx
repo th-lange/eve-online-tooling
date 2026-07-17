@@ -10,12 +10,10 @@ import {
   marketRegions,
   rosterStock,
   sdeMarketCategories,
-  sdeStatus,
   type DayTradeParams,
   type DayTradeRow,
   type ListName,
 } from "../../lib/api";
-import { SdeSetup } from "../production/SdeSetup";
 import {
   formatInt,
   formatIsk,
@@ -29,6 +27,7 @@ import {
   type SortColumn,
 } from "../../components/SortHeaderCell";
 import { Page, PageHeader, SplitPane, Centered } from "../../components/page";
+import { SdeGate } from "../../components/SdeGate";
 
 type Tab = "opportunities" | "favorites" | "blacklist";
 
@@ -40,24 +39,11 @@ const SUBTITLE =
   "Short-term flips across regions — scans hubs for price gaps on the same item, ranked by ISK/m³.";
 
 export function DaytradingPage() {
-  const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <Centered>Checking static data…</Centered>
-      </Page>
-    );
-  }
-  if (!status.data?.installed) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <SdeSetup onInstalled={() => status.refetch()} />
-      </Page>
-    );
-  }
-  return <Workbench />;
+  return (
+    <SdeGate title={TITLE} subtitle={SUBTITLE}>
+      <Workbench />
+    </SdeGate>
+  );
 }
 
 function Workbench() {

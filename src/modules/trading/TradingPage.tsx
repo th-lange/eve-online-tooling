@@ -4,7 +4,6 @@ import { DataAge } from "../../components/DataAge";
 import { AddToListButton } from "../../components/AddToListButton";
 import {
   marketRegions,
-  sdeStatus,
   stationTrading,
   tradingGetList,
   tradingSetList,
@@ -17,7 +16,6 @@ import {
   RegionSelect,
   StationSelect,
 } from "../../components/RegionStationPicker";
-import { SdeSetup } from "../production/SdeSetup";
 import {
   formatInt,
   formatIsk,
@@ -31,6 +29,7 @@ import {
   type SortColumn,
 } from "../../components/SortHeaderCell";
 import { Page, PageHeader, Centered } from "../../components/page";
+import { SdeGate } from "../../components/SdeGate";
 
 const FORGE = 10000002;
 type Tab = "opportunities" | "favorites" | "blacklist";
@@ -39,24 +38,11 @@ const TITLE = "Station Trading";
 const SUBTITLE = "Buy→sell margins at a hub, after broker fee & sales tax.";
 
 export function TradingPage() {
-  const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <Centered>Checking static data…</Centered>
-      </Page>
-    );
-  }
-  if (!status.data?.installed) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <SdeSetup onInstalled={() => status.refetch()} />
-      </Page>
-    );
-  }
-  return <Workbench />;
+  return (
+    <SdeGate title={TITLE} subtitle={SUBTITLE}>
+      <Workbench />
+    </SdeGate>
+  );
 }
 
 function Workbench() {

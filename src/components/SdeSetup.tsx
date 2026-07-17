@@ -5,7 +5,7 @@ import {
   onSdeProgress,
   sdeUpdate,
   type SdeProgress,
-} from "../../lib/api";
+} from "../lib/api";
 
 // Shown when the SDE isn't installed yet: a one-click download with live
 // progress. Rendered as a body section under the page's `PageHeader` (it must

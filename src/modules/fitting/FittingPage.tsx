@@ -16,7 +16,6 @@ import {
   fittingSimulate,
   marketRegions,
   sdeSearchShips,
-  sdeStatus,
   sdeTypeInfos,
   sdeTypeNames,
   type Fit,
@@ -27,8 +26,8 @@ import {
   type SlotKind,
   type WeaponRange,
 } from "../../lib/api";
-import { SdeSetup } from "../production/SdeSetup";
 import { Page, PageHeader } from "../../components/page";
+import { SdeGate } from "../../components/SdeGate";
 import { formatInt, formatIsk } from "../../lib/format";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
 import {
@@ -52,24 +51,11 @@ const SUBTITLE =
 
 /** Gate the editor on the SDE being installed (like the other SDE-backed pages). */
 export function FittingPage() {
-  const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <Centered>Checking static data…</Centered>
-      </Page>
-    );
-  }
-  if (!status.data?.installed) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <SdeSetup onInstalled={() => status.refetch()} />
-      </Page>
-    );
-  }
-  return <Workbench />;
+  return (
+    <SdeGate title={TITLE} subtitle={SUBTITLE}>
+      <Workbench />
+    </SdeGate>
+  );
 }
 
 function Workbench() {

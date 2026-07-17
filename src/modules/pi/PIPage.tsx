@@ -7,14 +7,13 @@ import {
   piLockedSet,
   piOverview,
   piShowInGame,
-  sdeStatus,
   type ColonyView,
   type ExtractorView,
   type StorageView,
 } from "../../lib/api";
-import { SdeSetup } from "../production/SdeSetup";
 import { formatInt } from "../../lib/format";
 import { Page, PageHeader, Centered } from "../../components/page";
+import { SdeGate } from "../../components/SdeGate";
 import {
   EPS,
   extractionAdvice,
@@ -28,24 +27,11 @@ const SUBTITLE =
   "Your colonies — what's extracting/producing, when extractors need a restart, storage usage, and where inputs fall short.";
 
 export function PIPage() {
-  const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <Centered>Checking static data…</Centered>
-      </Page>
-    );
-  }
-  if (!status.data?.installed) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <SdeSetup onInstalled={() => status.refetch()} />
-      </Page>
-    );
-  }
-  return <Workbench />;
+  return (
+    <SdeGate title={TITLE} subtitle={SUBTITLE}>
+      <Workbench />
+    </SdeGate>
+  );
 }
 
 function Workbench() {

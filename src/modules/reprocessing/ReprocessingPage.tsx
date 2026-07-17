@@ -7,12 +7,10 @@ import {
   reprocessingGetList,
   reprocessingScan,
   reprocessingSetList,
-  sdeStatus,
   type ListName,
   type ReprocessParams,
   type ReprocessRow,
 } from "../../lib/api";
-import { SdeSetup } from "../production/SdeSetup";
 import {
   RegionSelect,
   StationSelect,
@@ -24,6 +22,7 @@ import {
   type SortColumn,
 } from "../../components/SortHeaderCell";
 import { Page, PageHeader, Centered } from "../../components/page";
+import { SdeGate } from "../../components/SdeGate";
 
 const FORGE = 10000002;
 const JITA = 60003760;
@@ -34,24 +33,11 @@ const SUBTITLE =
   "Ores ranked by reprocess-vs-sell — refine value per unit vs the ore's own market price.";
 
 export function ReprocessingPage() {
-  const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <Centered>Checking static data…</Centered>
-      </Page>
-    );
-  }
-  if (!status.data?.installed) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <SdeSetup onInstalled={() => status.refetch()} />
-      </Page>
-    );
-  }
-  return <Workbench />;
+  return (
+    <SdeGate title={TITLE} subtitle={SUBTITLE}>
+      <Workbench />
+    </SdeGate>
+  );
 }
 
 function Workbench() {
