@@ -267,9 +267,8 @@ function McpBridgeCard() {
         />
         Start MCP bridge on launch
         <span className="text-zinc-500">
-          — also writes a discovery file (URL + token) to the app data
-          directory so a local agent can self-configure without copying
-          anything by hand.
+          — also writes a discovery file (URL + token) to the app data directory
+          so a local agent can self-configure without copying anything by hand.
         </span>
       </label>
 
