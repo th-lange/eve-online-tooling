@@ -4,9 +4,9 @@ import { Plus } from "lucide-react";
 
 import { SHOPPING_LISTS_KEY } from "../../lib/queryKeys";
 import { useCopyToClipboard } from "../../lib/useCopyToClipboard";
+import { useEveLogDir } from "../../lib/useEveLogDir";
 import { parseItems, parseLine } from "./parse";
 import {
-  eveDefaultLogDir,
   sdeSearch,
   shoppingAddItem,
   shoppingAddText,
@@ -212,9 +212,7 @@ function ChatCapture({
   lists: ShoppingList[];
 }) {
   const [channel, setChannel] = useState("");
-  const [logsDir, setLogsDir] = useState(
-    () => localStorage.getItem(STORAGE_KEYS.eveChatlogsDir) ?? "",
-  );
+  const [logsDir, setLogsDir, persistLogsDir] = useEveLogDir("chatlogs");
   const [listening, setListening] = useState(false);
   const [status, setStatus] = useState("");
   const [total, setTotal] = useState(0);
@@ -243,11 +241,6 @@ function ChatCapture({
     targetRef.current = targetId;
     localStorage.setItem(STORAGE_KEYS.shoppingChatTarget, targetId);
   }, [targetId]);
-
-  // Suggest the Chatlogs folder if we don't have one saved.
-  useEffect(() => {
-    if (!logsDir) eveDefaultLogDir("chatlogs").then((d) => d && setLogsDir(d));
-  }, [logsDir]);
 
   // Poll the channel's log while listening.
   useEffect(() => {
@@ -290,7 +283,7 @@ function ChatCapture({
   }
   function toggle() {
     if (!listening) {
-      localStorage.setItem(STORAGE_KEYS.eveChatlogsDir, logsDir.trim());
+      persistLogsDir();
       setTotal(0);
       fromNow.current = true;
     }
