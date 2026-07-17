@@ -6,12 +6,9 @@ use tauri::{AppHandle, State};
 use crate::lists::{self, ListItem};
 use crate::market::{default_region_id, resolve_location, MarketService};
 
-use super::engine::{evaluate, TradeConfig, TradeRow};
+use super::engine::{enrich, evaluate, TradeConfig, TradeRow, TRADED_VOLUME_DAYS};
 
 const RESULT_CAP: usize = 500;
-
-/// History window (days) averaged for the daily-traded volume column.
-const TRADED_VOLUME_DAYS: usize = 7;
 
 /// Only these named lists are persisted (guards the filename).
 fn list_key(list: &str) -> Result<&'static str, String> {
@@ -107,17 +104,9 @@ pub async fn station_trading(
     for row in &mut out {
         let s = stats.get(&row.type_id).cloned().unwrap_or_default();
         row.daily_traded = s.volume;
-        row.days_of_supply = if s.volume > 0 {
-            row.volume as f64 / s.volume as f64
-        } else {
-            0.0
-        };
-        // Flag a current sell price sitting at a recent extreme (mean-reversion risk).
-        if s.high > 0.0 && row.sell > s.high {
-            row.price_flag = Some(format!("above {TRADED_VOLUME_DAYS}d high"));
-        } else if s.low > 0.0 && row.sell < s.low {
-            row.price_flag = Some(format!("below {TRADED_VOLUME_DAYS}d low"));
-        }
+        let (days_of_supply, price_flag) = enrich(row.volume, row.sell, &s);
+        row.days_of_supply = days_of_supply;
+        row.price_flag = price_flag;
     }
 
     Ok(out)

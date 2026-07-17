@@ -6,7 +6,10 @@
 
 use serde::Serialize;
 
-use crate::market::PriceModel;
+use crate::market::{PriceModel, TradedStats};
+
+/// History window (days) averaged for the daily-traded volume column.
+pub const TRADED_VOLUME_DAYS: usize = 7;
 
 /// Fee inputs for a station-trade calculation.
 #[derive(Debug, Clone, Copy)]
@@ -100,6 +103,33 @@ pub fn evaluate(
     })
 }
 
+/// Fold market history into a row's supply/risk fields. `book_volume` is the
+/// sell-side order-book depth (units currently listed for sale); `sell` is
+/// the current sell-order price; `stats` is the recent daily-traded volume +
+/// price band from history.
+///
+/// Returns `(days_of_supply, price_flag)`:
+/// - `days_of_supply` — how many days the book would take to clear at the
+///   recent trade rate (0 when there's no traded-volume history, to avoid a
+///   divide-by-zero).
+/// - `price_flag` — set when the current sell price sits at a recent extreme
+///   (mean-reversion risk).
+pub fn enrich(book_volume: i64, sell: f64, stats: &TradedStats) -> (f64, Option<String>) {
+    let days_of_supply = if stats.volume > 0 {
+        book_volume as f64 / stats.volume as f64
+    } else {
+        0.0
+    };
+    let price_flag = if stats.high > 0.0 && sell > stats.high {
+        Some(format!("above {TRADED_VOLUME_DAYS}d high"))
+    } else if stats.low > 0.0 && sell < stats.low {
+        Some(format!("below {TRADED_VOLUME_DAYS}d low"))
+    } else {
+        None
+    };
+    (days_of_supply, price_flag)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,5 +171,45 @@ mod tests {
             ..Default::default()
         };
         assert!(evaluate(1, "x", &m, &config, false).is_none());
+    }
+
+    fn stats(volume: i64, low: f64, high: f64) -> TradedStats {
+        TradedStats { volume, low, high }
+    }
+
+    #[test]
+    fn enrich_zero_traded_volume_avoids_divide_by_zero() {
+        let (days_of_supply, flag) = enrich(1000, 50.0, &stats(0, 40.0, 60.0));
+        assert_eq!(days_of_supply, 0.0);
+        assert!(flag.is_none());
+    }
+
+    #[test]
+    fn enrich_sell_equal_to_high_does_not_flag() {
+        // Strict `>` semantics: sitting exactly at the high is not "above" it.
+        let (_, flag) = enrich(1000, 60.0, &stats(100, 40.0, 60.0));
+        assert!(flag.is_none());
+    }
+
+    #[test]
+    fn enrich_sell_above_high_flags() {
+        let (days_of_supply, flag) = enrich(1000, 60.01, &stats(100, 40.0, 60.0));
+        assert_eq!(days_of_supply, 10.0);
+        assert_eq!(flag, Some(format!("above {TRADED_VOLUME_DAYS}d high")));
+    }
+
+    #[test]
+    fn enrich_sell_below_low_flags() {
+        let (_, flag) = enrich(1000, 39.99, &stats(100, 40.0, 60.0));
+        assert_eq!(flag, Some(format!("below {TRADED_VOLUME_DAYS}d low")));
+    }
+
+    #[test]
+    fn enrich_default_stats_never_flags() {
+        // Missing history (zeroed/default TradedStats) must not spuriously flag,
+        // regardless of the sell price.
+        let (days_of_supply, flag) = enrich(1000, 999.0, &TradedStats::default());
+        assert_eq!(days_of_supply, 0.0);
+        assert!(flag.is_none());
     }
 }
