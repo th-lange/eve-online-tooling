@@ -5,26 +5,15 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-use crate::esi::{authed_get, authed_get_paged_pub, resolve_names, AuthState};
+use crate::esi::{
+    authed_get, authed_get_paged_pub, character_skill_levels, resolve_names, AuthState,
+};
 use crate::market::{jita_location, MarketService};
 use crate::model::AppError;
 use crate::storage;
 
 // --- Skills (#55) ---
 
-#[derive(Deserialize)]
-struct EsiSkills {
-    skills: Vec<EsiSkill>,
-    total_sp: i64,
-    #[serde(default)]
-    unallocated_sp: i64,
-}
-#[derive(Deserialize)]
-struct EsiSkill {
-    skill_id: i64,
-    #[serde(default)]
-    active_skill_level: i64,
-}
 #[derive(Deserialize)]
 struct EsiQueueItem {
     skill_id: i64,
@@ -58,13 +47,9 @@ pub async fn character_skills(
     let (_, character_id) = storage::dir_and_primary_character(&app)?;
     let sde = crate::sde::open_from_app(&app)?;
 
-    let skills: EsiSkills = authed_get(
-        &auth_state,
-        character_id,
-        &format!("/latest/characters/{character_id}/skills/"),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
+    let skills = character_skill_levels(&auth_state, character_id)
+        .await
+        .map_err(|e| e.to_string())?;
     let queue: Vec<EsiQueueItem> = authed_get(
         &auth_state,
         character_id,
@@ -83,11 +68,7 @@ pub async fn character_skills(
     Ok(SkillsView {
         total_sp: skills.total_sp,
         unallocated_sp: skills.unallocated_sp,
-        trained_count: skills
-            .skills
-            .iter()
-            .filter(|s| s.active_skill_level > 0)
-            .count() as i64,
+        trained_count: skills.trained_count() as i64,
         queue: queue
             .into_iter()
             .map(|q| QueueRow {
@@ -142,21 +123,10 @@ pub async fn character_standings(
     .map_err(|e| e.to_string())?;
 
     // Social-skill levels for the effective-standing bonus.
-    let skills: EsiSkills = authed_get(
-        &auth_state,
-        character_id,
-        &format!("/latest/characters/{character_id}/skills/"),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-    let level = |skill_id: i64| {
-        skills
-            .skills
-            .iter()
-            .find(|s| s.skill_id == skill_id)
-            .map(|s| s.active_skill_level)
-            .unwrap_or(0)
-    };
+    let skills = character_skill_levels(&auth_state, character_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let level = |skill_id: i64| skills.level(skill_id);
     let (connections, diplomacy, criminal) = (level(3359), level(3357), level(3361));
 
     let ids: Vec<i64> = standings.iter().map(|s| s.from_id).collect();
@@ -254,21 +224,10 @@ pub async fn character_trade_fees(
 ) -> Result<TradeFees, AppError> {
     let (_, character_id) = storage::dir_and_primary_character(&app)?;
 
-    let skills: EsiSkills = authed_get(
-        &auth_state,
-        character_id,
-        &format!("/latest/characters/{character_id}/skills/"),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-    let level = |id: i64| {
-        skills
-            .skills
-            .iter()
-            .find(|s| s.skill_id == id)
-            .map(|s| s.active_skill_level)
-            .unwrap_or(0)
-    };
+    let skills = character_skill_levels(&auth_state, character_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let level = |id: i64| skills.level(id);
     let accounting = level(16622);
     let broker_relations = level(3446);
     let connections = level(3359);

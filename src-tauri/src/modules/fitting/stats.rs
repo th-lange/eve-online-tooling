@@ -5,8 +5,6 @@
 
 use std::collections::HashMap;
 
-use tauri::AppHandle;
-
 use super::engine::attr::AttrStore;
 use super::engine::capacitor::capacitor;
 use super::engine::damage::{damage, Weapon};
@@ -21,9 +19,7 @@ use super::types::{
     CapStats, DpsBreakdown, Fit, FitItem, FitProblem, ModuleState, NavStats, ResourceUsage,
     SlotKind, TankStats, TargetStats, WeaponRange,
 };
-use crate::esi::{authed_get, AuthState};
 use crate::sde::{Sde, ShipLayout};
-use crate::storage;
 
 /// Dogma-engine stats derived from one resolution pass.
 pub(super) struct DogmaStats {
@@ -402,38 +398,6 @@ pub(super) fn resolved_feasibility(
     (resources, validation, resolved_layout)
 }
 
-/// The active character's actual skill levels (`skillTypeId → level`), via ESI
-/// `/characters/{id}/skills/` (#177). Reuses the existing `esi-skills` scope.
-pub(super) async fn character_skill_levels(
-    app: &AppHandle,
-    auth_state: &AuthState,
-) -> Result<HashMap<i64, i64>, crate::model::AppError> {
-    let (_, character_id) = storage::dir_and_primary_character(app)?;
-
-    #[derive(serde::Deserialize)]
-    struct Skills {
-        skills: Vec<Skill>,
-    }
-    #[derive(serde::Deserialize)]
-    struct Skill {
-        skill_id: i64,
-        #[serde(default)]
-        active_skill_level: i64,
-    }
-
-    let skills: Skills = authed_get(
-        auth_state,
-        character_id,
-        &format!("/latest/characters/{character_id}/skills/"),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-    Ok(skills
-        .skills
-        .into_iter()
-        .map(|s| (s.skill_id, s.active_skill_level))
-        .collect())
-}
 
 /// Sum the four base damage types (em 114 / explosive 116 / kinetic 117 /
 /// thermal 118) for a type id from the batched attributes.
