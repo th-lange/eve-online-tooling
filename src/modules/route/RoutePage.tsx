@@ -31,7 +31,12 @@ import {
 } from "../../components/SystemGraph";
 import { kindFromSecurity } from "../../components/systemGraphLayout";
 import { ZkillSystemLink } from "../../components/ZkillLink";
-import { Page, PageHeader, Centered } from "../../components/page";
+import {
+  Page,
+  PageHeader,
+  Centered,
+  PrimaryButton,
+} from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
 
 const TITLE = "Route";
@@ -163,13 +168,14 @@ function Workbench() {
         subtitle={SUBTITLE}
         actions={
           <>
-            <button
+            <PrimaryButton
               onClick={() => activity.refetch()}
               disabled={activity.isFetching}
-              className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              pending={activity.isFetching}
+              pendingLabel="Loading…"
             >
-              {activity.isFetching ? "Loading…" : "Refresh"}
-            </button>
+              Refresh
+            </PrimaryButton>
             <DataAge
               updatedAt={activity.dataUpdatedAt}
               fetching={activity.isFetching}

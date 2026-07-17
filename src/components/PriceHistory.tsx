@@ -1,6 +1,7 @@
 import { useMemo, useState, type MouseEvent } from "react";
 import type { HistoryPoint } from "../lib/api";
 import { formatInt, formatIsk } from "../lib/format";
+import { Stat } from "./Stat";
 
 // Price/volume history charts (Donchian channel, moving average, daily median)
 // + the summary/table, shared by Market Search and the production history popover.
@@ -520,23 +521,6 @@ function Chart({
           </g>
         )}
       </svg>
-    </div>
-  );
-}
-
-export function Stat({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: string;
-  accent?: string;
-}) {
-  return (
-    <div>
-      <div className="text-xs text-zinc-500">{label}</div>
-      <div className={`tabular-nums ${accent ?? "text-zinc-200"}`}>{value}</div>
     </div>
   );
 }

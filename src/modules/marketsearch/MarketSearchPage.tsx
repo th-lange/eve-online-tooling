@@ -21,7 +21,8 @@ import {
 } from "../../lib/deepLink";
 import { AddToListButton } from "../../components/AddToListButton";
 import { Combo } from "../../components/Combo";
-import { PriceHistoryView, Stat } from "../../components/PriceHistory";
+import { PriceHistoryView } from "../../components/PriceHistory";
+import { Stat } from "../../components/Stat";
 import {
   formatInt,
   formatIsk,

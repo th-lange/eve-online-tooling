@@ -12,7 +12,7 @@ import {
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { formatInt, formatIsk } from "../../lib/format";
 import { DataAge } from "../../components/DataAge";
-import { Page, PageHeader } from "../../components/page";
+import { Page, PageHeader, PrimaryButton } from "../../components/page";
 
 const TITLE = "Industry Jobs";
 const SUBTITLE =
@@ -95,13 +95,14 @@ export function IndustryJobsPage() {
         subtitle={SUBTITLE}
         actions={
           <>
-            <button
+            <PrimaryButton
               onClick={() => jobs.refetch()}
               disabled={jobs.isFetching}
-              className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              pending={jobs.isFetching}
+              pendingLabel="Loading…"
             >
-              {jobs.isFetching ? "Loading…" : "Refresh"}
-            </button>
+              Refresh
+            </PrimaryButton>
             <DataAge
               updatedAt={jobs.dataUpdatedAt}
               fetching={jobs.isFetching}

@@ -11,7 +11,12 @@ import {
 } from "../../lib/api";
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { formatInt } from "../../lib/format";
-import { Page, PageHeader, Centered } from "../../components/page";
+import {
+  Page,
+  PageHeader,
+  Centered,
+  PrimaryButton,
+} from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
 import {
   EPS,
@@ -98,13 +103,14 @@ function Workbench() {
                 <option value="restart">Restart required</option>
               </select>
             </label>
-            <button
+            <PrimaryButton
               onClick={() => colonies.refetch()}
               disabled={colonies.isFetching}
-              className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              pending={colonies.isFetching}
+              pendingLabel="Loading…"
             >
-              {colonies.isFetching ? "Loading…" : "Refresh"}
-            </button>
+              Refresh
+            </PrimaryButton>
           </div>
         }
       />

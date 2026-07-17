@@ -13,7 +13,8 @@ import {
   SortHeaderCell,
   type SortColumn,
 } from "../../components/SortHeaderCell";
-import { Page, PageHeader } from "../../components/page";
+import { Page, PageHeader, PrimaryButton } from "../../components/page";
+import { Stat } from "../../components/Stat";
 
 type Tab = "wallet" | "profit";
 
@@ -32,15 +33,16 @@ export function AccountingPage() {
         title={TITLE}
         subtitle={SUBTITLE}
         actions={
-          <button
+          <PrimaryButton
             onClick={() =>
               tab === "wallet" ? wallet.mutate() : profit.mutate()
             }
             disabled={wallet.isPending || profit.isPending}
-            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+            pending={wallet.isPending || profit.isPending}
+            pendingLabel="Syncing…"
           >
-            {wallet.isPending || profit.isPending ? "Syncing…" : "Sync"}
-          </button>
+            Sync
+          </PrimaryButton>
         }
       />
 
@@ -175,7 +177,7 @@ function Wallet({ d }: { d: WalletView }) {
         <Stat
           label="Income (all time)"
           value={formatIsk(d.incomeTotal)}
-          accent
+          accent="text-emerald-400"
         />
         <Stat label="Expense (all time)" value={formatIsk(d.expenseTotal)} />
         <Stat label="Journal entries" value={formatInt(d.entryCount)} />
@@ -292,7 +294,7 @@ function Profit({ d }: { d: ProfitView }) {
         <Stat
           label="Total realized profit"
           value={formatIsk(d.totalProfit)}
-          accent
+          accent="text-emerald-400"
         />
       </div>
       <div className="overflow-auto rounded border border-zinc-800">
@@ -380,26 +382,6 @@ function fmtDate(iso: string): string {
   return d.toISOString().slice(0, 16).replace("T", " ");
 }
 
-function Stat({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: string;
-  accent?: boolean;
-}) {
-  return (
-    <div>
-      <div className="text-xs text-zinc-500">{label}</div>
-      <div
-        className={`tabular-nums ${accent ? "text-emerald-400" : "text-zinc-200"}`}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
 function Hint({ children }: { children: React.ReactNode }) {
   return (
     <div className="p-8 text-center text-sm text-zinc-500">{children}</div>
