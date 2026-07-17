@@ -52,13 +52,14 @@ pub struct IncursionRow {
 pub async fn intel_incursions(
     app: AppHandle,
     auth: State<'_, AuthState>,
+    esi: State<'_, EsiClient>,
 ) -> Result<Vec<IncursionRow>, String> {
     let dir = crate::storage::app_data_dir(&app)?;
     if let Some(cached) = storage::cache_get::<Vec<IncursionRow>>(&dir, "intel_incursions") {
         return Ok(cached);
     }
 
-    let raw: Vec<EsiIncursion> = EsiClient::new()
+    let raw: Vec<EsiIncursion> = esi
         .get_json("/latest/incursions/", &[])
         .await
         .map_err(|e| e.to_string())?;
@@ -152,13 +153,14 @@ pub struct FwRow {
 pub async fn intel_fw_stats(
     app: AppHandle,
     auth: State<'_, AuthState>,
+    esi: State<'_, EsiClient>,
 ) -> Result<Vec<FwRow>, String> {
     let dir = crate::storage::app_data_dir(&app)?;
     if let Some(cached) = storage::cache_get::<Vec<FwRow>>(&dir, "intel_fw_stats") {
         return Ok(cached);
     }
 
-    let raw: Vec<EsiFwStat> = EsiClient::new()
+    let raw: Vec<EsiFwStat> = esi
         .get_json("/latest/fw/stats/", &[])
         .await
         .map_err(|e| e.to_string())?;
@@ -270,13 +272,12 @@ pub struct FwMap {
 /// capture progress, plus last-hour kills and jumps, and the stargate edges
 /// between the systems (for the warzone map). Public data, cached ~5 min.
 #[tauri::command]
-pub async fn fw_systems(app: AppHandle) -> Result<FwMap, String> {
+pub async fn fw_systems(app: AppHandle, esi: State<'_, EsiClient>) -> Result<FwMap, String> {
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     if let Some(cached) = storage::cache_get::<FwMap>(&dir, "intel_fw_systems") {
         return Ok(cached);
     }
 
-    let esi = EsiClient::new();
     let systems: Vec<EsiFwSystem> = esi
         .get_json("/latest/fw/systems/", &[])
         .await
