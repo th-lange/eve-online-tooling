@@ -103,8 +103,7 @@ impl McpState {
             .collect();
 
         let app_data_dir = ctx.app_data_dir.clone();
-        if let Err(e) = write_discovery_file(&app_data_dir, &format!("http://{addr}/mcp"), &token)
-        {
+        if let Err(e) = write_discovery_file(&app_data_dir, &format!("http://{addr}/mcp"), &token) {
             eprintln!("mcp: failed to write discovery file: {e}");
         }
 

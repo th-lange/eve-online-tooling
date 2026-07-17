@@ -109,5 +109,8 @@ export function systemNeighbourhood(
   systemId: number,
   depth: number,
 ): Promise<Neighbourhood> {
-  return invoke<Neighbourhood>("route_system_neighbourhood", { systemId, depth });
+  return invoke<Neighbourhood>("route_system_neighbourhood", {
+    systemId,
+    depth,
+  });
 }
