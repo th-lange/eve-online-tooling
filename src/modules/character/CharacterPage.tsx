@@ -6,9 +6,8 @@ import {
   characterResearch,
   characterSkills,
   characterStandings,
-  errorMessage,
-  isAuthRequired,
 } from "../../lib/api";
+import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { formatInt, formatIsk } from "../../lib/format";
 import { Page, PageHeader } from "../../components/page";
 
@@ -40,7 +39,15 @@ function Skills() {
     queryKey: ["char", "skills"],
     queryFn: characterSkills,
   });
-  if (q.isError) return <Err e={q.error} />;
+  if (q.isError)
+    return (
+      <QueryErrorNotice
+        error={q.error}
+        loginMessage="Log in a character first to view this."
+        scopeHint="check the required scope is enabled on your EVE app."
+        className="p-6 text-sm"
+      />
+    );
   if (!q.data) return <Loading />;
   const d = q.data;
   return (
@@ -91,7 +98,15 @@ function Standings() {
     queryKey: ["char", "standings"],
     queryFn: characterStandings,
   });
-  if (q.isError) return <Err e={q.error} />;
+  if (q.isError)
+    return (
+      <QueryErrorNotice
+        error={q.error}
+        loginMessage="Log in a character first to view this."
+        scopeHint="check the required scope is enabled on your EVE app."
+        className="p-6 text-sm"
+      />
+    );
   if (!q.data) return <Loading />;
   return (
     <div className="overflow-auto rounded border border-zinc-800">
@@ -141,7 +156,15 @@ function Research() {
     queryKey: ["char", "research"],
     queryFn: characterResearch,
   });
-  if (q.isError) return <Err e={q.error} />;
+  if (q.isError)
+    return (
+      <QueryErrorNotice
+        error={q.error}
+        loginMessage="Log in a character first to view this."
+        scopeHint="check the required scope is enabled on your EVE app."
+        className="p-6 text-sm"
+      />
+    );
   if (!q.data) return <Loading />;
   const d = q.data;
   return (
@@ -192,7 +215,15 @@ function Mining() {
     queryKey: ["char", "mining"],
     queryFn: characterMining,
   });
-  if (q.isError) return <Err e={q.error} />;
+  if (q.isError)
+    return (
+      <QueryErrorNotice
+        error={q.error}
+        loginMessage="Log in a character first to view this."
+        scopeHint="check the required scope is enabled on your EVE app."
+        className="p-6 text-sm"
+      />
+    );
   if (!q.data) return <Loading />;
   const d = q.data;
   return (
@@ -246,7 +277,15 @@ function Mining() {
 
 function Fleet() {
   const q = useQuery({ queryKey: ["char", "fleet"], queryFn: characterFleet });
-  if (q.isError) return <Err e={q.error} />;
+  if (q.isError)
+    return (
+      <QueryErrorNotice
+        error={q.error}
+        loginMessage="Log in a character first to view this."
+        scopeHint="check the required scope is enabled on your EVE app."
+        className="p-6 text-sm"
+      />
+    );
   if (!q.data) return <Loading />;
   if (!q.data.inFleet) {
     return (
@@ -345,20 +384,4 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 function Loading() {
   return <div className="p-8 text-center text-sm text-zinc-500">Loading…</div>;
-}
-function Err({ e }: { e: unknown }) {
-  // Auth-required is a normal empty state, not a failure — show a calm prompt
-  // rather than a red error string (#337).
-  if (isAuthRequired(e)) {
-    return (
-      <div className="p-6 text-sm text-zinc-400">
-        Log in a character first to view this.
-      </div>
-    );
-  }
-  return (
-    <div className="p-6 text-sm text-rose-400">
-      {errorMessage(e)} — check the required scope is enabled on your EVE app.
-    </div>
-  );
 }

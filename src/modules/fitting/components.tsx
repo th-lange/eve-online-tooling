@@ -4,7 +4,8 @@
 // sites working unchanged.
 
 import type { ReactNode } from "react";
-import { errorMessage, isAuthRequired, type Fit } from "../../lib/api";
+import { isAuthRequired, type Fit } from "../../lib/api";
+import { queryErrorText } from "../../components/QueryErrorNotice";
 
 export { BrowseTree, ModuleBrowser } from "./ModuleBrowser";
 export { ProjectedPanel } from "./ProjectedPanel";
@@ -34,9 +35,10 @@ export function EsiFitStatus({
           isAuthRequired(err) ? "text-zinc-500" : "text-rose-400"
         }`}
       >
-        {isAuthRequired(err)
-          ? "Log in a character first to load in-game fittings."
-          : errorMessage(err)}
+        {queryErrorText(
+          err,
+          "Log in a character first to load in-game fittings.",
+        )}
       </span>
     );
   }

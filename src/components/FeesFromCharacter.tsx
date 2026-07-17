@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { UserCog } from "lucide-react";
-import { characterTradeFees, isAuthRequired } from "../lib/api";
+import { characterTradeFees } from "../lib/api";
+import { queryErrorText } from "./QueryErrorNotice";
 
 const round2 = (x: number) => Math.round(x * 100) / 100;
 
@@ -26,9 +27,12 @@ export function FeesFromCharacter({
 
   const disabled = q.isLoading || q.isError || !q.data;
   const title =
-    q.isError && isAuthRequired(q.error)
-      ? "Log in a character to auto-fill fees from skills + standings"
-      : "Fill broker fee + sales tax from your character (per hub)";
+    (q.isError &&
+      queryErrorText(
+        q.error,
+        "Log in a character to auto-fill fees from skills + standings",
+      )) ||
+    "Fill broker fee + sales tax from your character (per hub)";
 
   return (
     <div className="relative">

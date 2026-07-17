@@ -6,10 +6,10 @@ import {
   authCharacters,
   errorMessage,
   industryJobs,
-  isAuthRequired,
   type JobRow,
   type Slot,
 } from "../../lib/api";
+import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { formatInt, formatIsk } from "../../lib/format";
 import { DataAge } from "../../components/DataAge";
 import { Page, PageHeader } from "../../components/page";
@@ -110,19 +110,11 @@ export function IndustryJobsPage() {
         }
       />
 
-      {jobs.isError &&
-        (isAuthRequired(jobs.error) ? (
-          <div className="mt-3 text-sm text-zinc-400">
-            Log in a character first to view industry jobs.
-          </div>
-        ) : (
-          <div className="mt-3 text-sm text-rose-400">
-            Failed: {errorMessage(jobs.error)}
-            <div className="mt-1 text-xs text-zinc-500">
-              {errorHint(errorMessage(jobs.error))}
-            </div>
-          </div>
-        ))}
+      <QueryErrorNotice
+        error={jobs.error}
+        loginMessage="Log in a character first to view industry jobs."
+        scopeHint={jobs.error && errorHint(errorMessage(jobs.error))}
+      />
 
       {slots && (
         <div className="mt-4 flex flex-wrap gap-3">

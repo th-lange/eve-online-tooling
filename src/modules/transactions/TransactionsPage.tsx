@@ -1,11 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  errorMessage,
-  isAuthRequired,
-  transactionLedger,
-  type LedgerRow,
-} from "../../lib/api";
+import { transactionLedger, type LedgerRow } from "../../lib/api";
+import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { formatInt, formatIsk } from "../../lib/format";
 import { Page, PageHeader } from "../../components/page";
 
@@ -49,16 +45,11 @@ export function TransactionsPage() {
           </button>
         }
       />
-      {q.isError &&
-        (isAuthRequired(q.error) ? (
-          <div className="mt-3 text-sm text-zinc-400">
-            Log in a character first to view their transaction history.
-          </div>
-        ) : (
-          <div className="mt-3 text-sm text-rose-400">
-            {errorMessage(q.error)} — check the wallet scope is enabled.
-          </div>
-        ))}
+      <QueryErrorNotice
+        error={q.error}
+        loginMessage="Log in a character first to view their transaction history."
+        scopeHint="check the wallet scope is enabled."
+      />
 
       {q.data && (
         <div className="mt-4 flex flex-wrap gap-3">
