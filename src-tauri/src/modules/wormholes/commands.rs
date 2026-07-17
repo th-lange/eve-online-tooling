@@ -874,7 +874,12 @@ pub async fn wh_tripwire_import(app: AppHandle) -> Result<Vec<ConnectionView>, S
         .collect();
 
     let (_dir, existing) = load(&app)?;
-    let imported = tripwire_connections(&sigs, &whs, &jump_mass_by_code, crate::util::time::now_secs());
+    let imported = tripwire_connections(
+        &sigs,
+        &whs,
+        &jump_mass_by_code,
+        crate::util::time::now_secs(),
+    );
     let merged = merge_by_source(existing, imported, "tripwire");
     save_and_view(&dir, &merged)
 }

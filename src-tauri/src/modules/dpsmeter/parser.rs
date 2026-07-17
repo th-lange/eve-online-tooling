@@ -309,7 +309,12 @@ fn parse_ts(line: &str) -> Option<i64> {
     if !(1..=12).contains(&mo) || !(1..=31).contains(&da) {
         return None;
     }
-    Some(crate::util::time::days_from_civil(y as i32, mo as u32, da as u32) * 86_400 + h * 3_600 + mi * 60 + s)
+    Some(
+        crate::util::time::days_from_civil(y as i32, mo as u32, da as u32) * 86_400
+            + h * 3_600
+            + mi * 60
+            + s,
+    )
 }
 
 #[cfg(test)]

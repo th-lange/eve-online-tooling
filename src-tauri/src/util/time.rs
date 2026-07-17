@@ -115,10 +115,7 @@ mod tests {
     #[test]
     fn parses_known_utc_timestamps() {
         assert_eq!(parse_rfc3339_epoch("1970-01-01T00:00:00Z"), Ok(0));
-        assert_eq!(
-            parse_rfc3339_epoch("2000-01-01T00:00:00Z"),
-            Ok(946_684_800)
-        );
+        assert_eq!(parse_rfc3339_epoch("2000-01-01T00:00:00Z"), Ok(946_684_800));
         // Leap day plus a time-of-day, exercising the civil-days algorithm.
         assert_eq!(
             parse_rfc3339_epoch("2024-02-29T12:34:56Z"),

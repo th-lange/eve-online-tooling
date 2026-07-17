@@ -585,8 +585,8 @@ pub async fn character_fleet(
 /// Falls back to "now" on a parse failure so a bad/missing timestamp reads as
 /// zero elapsed time rather than propagating an error into a display calc.
 fn parse_epoch(s: &str) -> f64 {
-    crate::util::time::parse_rfc3339_epoch(s)
-        .unwrap_or_else(|_| crate::util::time::now_secs()) as f64
+    crate::util::time::parse_rfc3339_epoch(s).unwrap_or_else(|_| crate::util::time::now_secs())
+        as f64
 }
 
 #[cfg(test)]

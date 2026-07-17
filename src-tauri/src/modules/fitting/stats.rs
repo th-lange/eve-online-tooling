@@ -398,7 +398,6 @@ pub(super) fn resolved_feasibility(
     (resources, validation, resolved_layout)
 }
 
-
 /// Sum the four base damage types (em 114 / explosive 116 / kinetic 117 /
 /// thermal 118) for a type id from the batched attributes.
 pub(super) fn base_damage(attrs: &HashMap<i64, Vec<(i64, f64)>>, type_id: i64) -> f64 {

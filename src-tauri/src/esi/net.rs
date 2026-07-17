@@ -55,8 +55,10 @@ impl ErrorBudget {
         }
         if let Some(reset) = header_i64(headers, "x-esi-error-limit-reset") {
             // `reset` is seconds until the window resets.
-            self.reset_at
-                .store(crate::util::time::now_secs() + reset.max(0) as u64, Ordering::Relaxed);
+            self.reset_at.store(
+                crate::util::time::now_secs() + reset.max(0) as u64,
+                Ordering::Relaxed,
+            );
         }
     }
 

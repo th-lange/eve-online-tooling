@@ -307,7 +307,9 @@ impl MarketService {
         type_ids: &[i64],
     ) -> Result<PriceMap, EsiError> {
         let models = self.price_models_at(location, type_ids).await?;
-        Ok(PriceMap(models.into_iter().map(|m| (m.type_id, m)).collect()))
+        Ok(PriceMap(
+            models.into_iter().map(|m| (m.type_id, m)).collect(),
+        ))
     }
 
     /// For each type, the hub with the **highest realistic sell price** — "where
