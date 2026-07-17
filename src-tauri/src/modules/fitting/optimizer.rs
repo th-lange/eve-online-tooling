@@ -465,37 +465,377 @@ pub async fn fitting_optimize(
     )
 }
 
-/// Core of [`fitting_optimize`], taking the SDE directly so it's testable. `mode` is
-/// `"all"` (rework every relevant slot) or `"empty"` (fill only empty slots). `prices`
-/// supplies unit costs for the budget constraint (empty ⇒ cost unused); `constraints`
-/// are kept as hard limits on the returned fit (cap-stable / ISK budget).
-pub(super) fn optimize_fit(
-    sde: &Sde,
-    fit: Fit,
-    objective: &str,
-    meta_groups: Vec<i64>,
-    mode: &str,
-    prices: &HashMap<i64, f64>,
+/// Preloaded, read-only state threaded through the optimizer's search phases:
+/// [`DogmaContext`]'s bulk-loaded attrs/effects/groups/effect_meta/defaults, the
+/// ship layout, all-V skill entities, prices and this pass's objective/mode/
+/// constraints — plus the running best fully-constraint-satisfying trial.
+struct SearchCtx<'a> {
+    ctx: &'a DogmaContext,
+    layout: ShipLayout,
+    skills: &'a [EntityInput],
+    prices: &'a HashMap<i64, f64>,
     constraints: Constraints,
-) -> Result<OptimizeResult, String> {
-    let obj = parse_objective(objective)?;
-    let Some(layout) = sde
-        .ship_layout(fit.ship_type_id)
-        .map_err(|e| e.to_string())?
-    else {
-        return Err(format!("unknown ship: {}", fit.ship_type_id));
-    };
-    let meta = if meta_groups.is_empty() {
-        vec![1, 2] // Tech I (incl. named/meta) + Tech II
-    } else {
-        meta_groups
-    };
+    objective: Objective,
+    mode: &'a str,
+    /// Best fully-constraint-satisfying config seen (by true objective). The
+    /// penalized hill-climb can end on a violating config when none is nearby,
+    /// so this lets the pipeline fall back to guarantee the constraints
+    /// whenever a satisfying fit was reachable.
+    best_feasible: Option<(Fit, f64)>,
+}
 
+impl<'a> SearchCtx<'a> {
+    fn new(
+        ctx: &'a DogmaContext,
+        layout: ShipLayout,
+        skills: &'a [EntityInput],
+        prices: &'a HashMap<i64, f64>,
+        constraints: Constraints,
+        objective: Objective,
+        mode: &'a str,
+    ) -> Self {
+        Self {
+            ctx,
+            layout,
+            skills,
+            prices,
+            constraints,
+            objective,
+            mode,
+            best_feasible: None,
+        }
+    }
+
+    /// Whether either soft constraint (cap-stable / budget) is active — the
+    /// feasible fallback is only worth tracking when one is.
+    fn has_soft_constraints(&self) -> bool {
+        self.constraints.cap_stable || self.constraints.max_cost.is_some()
+    }
+
+    /// The optimizer's per-trial evaluation: the objective metric plus the
+    /// constraint inputs, using this pass's preloaded maps/skills/prices.
+    fn eval(&self, fit: &Fit) -> Option<Eval> {
+        evaluate(
+            self.objective,
+            fit,
+            &self.layout,
+            &self.ctx.attrs,
+            &self.ctx.effects,
+            &self.ctx.groups,
+            self.skills,
+            &self.ctx.effect_meta,
+            &|a: i64| self.ctx.is_stackable(a),
+            &|a: i64| self.ctx.default_of(a),
+            self.prices,
+        )
+    }
+
+    /// Whether placing `tid` is allowed under the one-per-fit rule
+    /// ([`UNIQUE_GROUPS`]), ignoring the item at `skip` (so a swap can replace a
+    /// unique module with itself's kind).
+    fn unique_ok(&self, fit: &Fit, tid: i64, skip: Option<usize>) -> bool {
+        let group = self.ctx.groups.get(&tid).copied().unwrap_or(0);
+        if !UNIQUE_GROUPS.contains(&group) {
+            return true;
+        }
+        !fit.items.iter().enumerate().any(|(j, i)| {
+            Some(j) != skip && self.ctx.groups.get(&i.type_id).copied() == Some(group)
+        })
+    }
+
+    /// Record a trial that satisfies every active constraint, keeping the
+    /// highest-objective one (only worth tracking when there are soft
+    /// constraints to honor).
+    fn note_feasible(&mut self, trial: &Fit, e: &Eval) {
+        if self.has_soft_constraints()
+            && meets(e, &self.constraints)
+            && self
+                .best_feasible
+                .as_ref()
+                .is_none_or(|(_, o)| e.objective > *o)
+        {
+            self.best_feasible = Some((trial.clone(), e.objective));
+        }
+    }
+
+    /// 1a) Damage: homogeneous weapon racks — one weapon type per hardpoint class
+    /// (turret/launcher), filling as many hardpoints as the CPU/PG budget allows.
+    /// This beats the generic per-slot greedy, which is biggest-first and
+    /// underfills the rack (a hungry weapon in the first slots starves later
+    /// hardpoints). Real fits also run a uniform rack per class — never a mix of
+    /// e.g. blasters and railguns — so we pick a single best (count, type) for
+    /// the whole class by penalized score.
+    fn seed_weapon_racks(
+        &mut self,
+        fit: &mut Fit,
+        cands_for: &HashMap<SlotKind, Vec<i64>>,
+        mut current: f64,
+    ) -> f64 {
+        if self.objective != Objective::Damage {
+            return current;
+        }
+        let Some(high_cands) = cands_for.get(&SlotKind::High).cloned() else {
+            return current;
+        };
+        let mut remaining = (self.layout.high_slots
+            - fit
+                .items
+                .iter()
+                .filter(|i| i.slot == SlotKind::High)
+                .count() as i64)
+            .max(0);
+        for &(effect_id, hardpoints) in &[
+            (42i64, self.layout.turret_hardpoints),
+            (40, self.layout.launcher_hardpoints),
+        ] {
+            if remaining <= 0 {
+                break;
+            }
+            let cap = hardpoints.min(remaining);
+            if cap <= 0 {
+                continue;
+            }
+            // In "empty" mode, match any weapon already in this class so the rack
+            // stays uniform with the user's existing modules.
+            let existing = if self.mode == "empty" {
+                fit.items
+                    .iter()
+                    .find(|i| {
+                        i.slot == SlotKind::High
+                            && self
+                                .ctx
+                                .effects
+                                .get(&i.type_id)
+                                .is_some_and(|e| e.contains(&effect_id))
+                    })
+                    .map(|i| i.type_id)
+            } else {
+                None
+            };
+            let class_cands: Vec<i64> = match existing {
+                Some(t) => vec![t],
+                None => high_cands
+                    .iter()
+                    .copied()
+                    .filter(|t| {
+                        self.ctx
+                            .effects
+                            .get(t)
+                            .is_some_and(|e| e.contains(&effect_id))
+                    })
+                    .collect(),
+            };
+            if class_cands.is_empty() {
+                continue;
+            }
+            // Best (count, type) for the class by penalized score. With no soft
+            // constraints, more weapons strictly raises the objective so the full
+            // rack wins; cap-stable can instead favour a smaller, stable rack.
+            let mut best: Option<(i64, i64, f64)> = None;
+            for count in 1..=cap {
+                for &tid in &class_cands {
+                    let mut trial = fit.clone();
+                    add_weapons(&mut trial, tid, count);
+                    if let Some(e) = self.eval(&trial) {
+                        let v = constraint_score(&e, &self.constraints);
+                        self.note_feasible(&trial, &e);
+                        if best.is_none_or(|(_, _, bv)| v > bv + 1e-6) {
+                            best = Some((count, tid, v));
+                        }
+                    }
+                }
+            }
+            if let Some((count, tid, v)) = best {
+                add_weapons(fit, tid, count);
+                remaining -= count;
+                current = v;
+            }
+        }
+        current
+    }
+
+    /// 1b) Generic greedy for the remaining slot kinds (and every slot for
+    /// non-damage objectives): fill each with the single best valid candidate,
+    /// one at a time.
+    fn greedy_fill(
+        &mut self,
+        fit: &mut Fit,
+        slot_candidates: &[(SlotKind, Vec<i64>)],
+        mut current: f64,
+    ) -> f64 {
+        for (slot, cands) in slot_candidates {
+            if self.objective == Objective::Damage && *slot == SlotKind::High {
+                continue; // weapons handled by seed_weapon_racks
+            }
+            let cap = slot_capacity(&self.layout, *slot);
+            while (fit.items.iter().filter(|i| i.slot == *slot).count() as i64) < cap {
+                let index = fit.items.iter().filter(|i| i.slot == *slot).count() as i32;
+                let mut best: Option<(i64, f64)> = None;
+                for &tid in cands {
+                    if !self.unique_ok(fit, tid, None) {
+                        continue;
+                    }
+                    let mut trial = fit.clone();
+                    trial.items.push(new_module(tid, *slot, index));
+                    if let Some(e) = self.eval(&trial) {
+                        let v = constraint_score(&e, &self.constraints);
+                        self.note_feasible(&trial, &e);
+                        if v > current + 1e-6 && best.is_none_or(|(_, bv)| v > bv) {
+                            best = Some((tid, v));
+                        }
+                    }
+                }
+                match best {
+                    Some((tid, v)) => {
+                        fit.items.push(new_module(tid, *slot, index));
+                        current = v;
+                    }
+                    None => break, // nothing further improves this slot kind
+                }
+            }
+        }
+        current
+    }
+
+    /// 2) Local search — re-pick each relevant slot given the final mix (stacking
+    /// penalties make the best choice interdependent), iterating to a local
+    /// optimum. Weapon slots are swapped as a whole class (the sub-pass below),
+    /// never per-slot, so the rack stays uniform. Seed + local search is a
+    /// strong, near-global result over the curated candidate pool (a true global
+    /// optimum is combinatorially intractable for the full module catalogue).
+    fn local_search(
+        &mut self,
+        fit: &mut Fit,
+        cands_for: &HashMap<SlotKind, Vec<i64>>,
+        added_start: usize,
+        mut current: f64,
+    ) {
+        loop {
+            let mut improved = false;
+            let n = fit.items.len();
+            for idx in added_start..n {
+                let slot = fit.items[idx].slot;
+                if self.objective == Objective::Damage && slot == SlotKind::High {
+                    continue; // weapon racks are swapped as a unit, below
+                }
+                let Some(cands) = cands_for.get(&slot) else {
+                    continue; // not a relevant (optimized) slot
+                };
+                let orig = fit.items[idx].type_id;
+                let (mut best_tid, mut best_val) = (orig, current);
+                for &tid in cands {
+                    if tid == orig || !self.unique_ok(fit, tid, Some(idx)) {
+                        continue;
+                    }
+                    let mut trial = fit.clone();
+                    trial.items[idx].type_id = tid;
+                    if let Some(e) = self.eval(&trial) {
+                        let v = constraint_score(&e, &self.constraints);
+                        self.note_feasible(&trial, &e);
+                        if v > best_val + 1e-6 {
+                            best_val = v;
+                            best_tid = tid;
+                        }
+                    }
+                }
+                if best_tid != orig {
+                    fit.items[idx].type_id = best_tid;
+                    current = best_val;
+                    improved = true;
+                }
+            }
+
+            // Whole-class weapon swaps (damage): re-pick a single type for each
+            // hardpoint class together, so an upgrade applies to the entire rack
+            // and it never goes heterogeneous.
+            if self.objective == Objective::Damage {
+                if let Some(high_cands) = cands_for.get(&SlotKind::High).cloned() {
+                    for &effect_id in &[42i64, 40] {
+                        let idxs: Vec<usize> = (added_start..fit.items.len())
+                            .filter(|&i| {
+                                fit.items[i].slot == SlotKind::High
+                                    && self
+                                        .ctx
+                                        .effects
+                                        .get(&fit.items[i].type_id)
+                                        .is_some_and(|e| e.contains(&effect_id))
+                            })
+                            .collect();
+                        if idxs.is_empty() {
+                            continue;
+                        }
+                        let orig = fit.items[idxs[0]].type_id;
+                        let (mut best_tid, mut best_val) = (orig, current);
+                        for &tid in high_cands.iter().filter(|t| {
+                            self.ctx
+                                .effects
+                                .get(t)
+                                .is_some_and(|e| e.contains(&effect_id))
+                        }) {
+                            if tid == orig {
+                                continue;
+                            }
+                            let mut trial = fit.clone();
+                            for &i in &idxs {
+                                trial.items[i].type_id = tid;
+                            }
+                            if let Some(e) = self.eval(&trial) {
+                                let v = constraint_score(&e, &self.constraints);
+                                self.note_feasible(&trial, &e);
+                                if v > best_val + 1e-6 {
+                                    best_val = v;
+                                    best_tid = tid;
+                                }
+                            }
+                        }
+                        if best_tid != orig {
+                            for &i in &idxs {
+                                fit.items[i].type_id = best_tid;
+                            }
+                            current = best_val;
+                            improved = true;
+                        }
+                    }
+                }
+            }
+
+            if !improved {
+                break;
+            }
+        }
+    }
+
+    /// Guarantee the requested hard constraints: if the hill-climb ended on a
+    /// config that violates one, fall back to the best fully-feasible config
+    /// seen (if any).
+    fn enforce_feasible(&mut self, fit: &mut Fit) {
+        if self.has_soft_constraints()
+            && !self.eval(fit).is_some_and(|e| meets(&e, &self.constraints))
+        {
+            if let Some((bf, _)) = self.best_feasible.take() {
+                *fit = bf;
+            }
+        }
+    }
+}
+
+/// Candidate module type ids per slot kind, filtered to the allowed meta
+/// groups, with "Polarized" weapons dropped and — for a damage objective —
+/// restricted to the hull's bonused weapon groups/skills. Also preloads the
+/// [`DogmaContext`] the rest of the search needs: the bonus-steering filter
+/// already needs the SDE's effects/groups/attrs, so the context is loaded here
+/// rather than a second time by the caller.
+fn build_candidates(
+    sde: &Sde,
+    fit: &Fit,
+    obj: Objective,
+    meta: &[i64],
+) -> Result<(Vec<(SlotKind, Vec<i64>)>, DogmaContext), String> {
     // Candidate type ids per slot kind, filtered to the allowed meta groups.
     let mut slot_candidates: Vec<(SlotKind, Vec<i64>)> = Vec::new();
     for (slot, group_ids) in opt_config(obj) {
         let mods = sde
-            .modules_in_groups(&group_ids, &meta)
+            .modules_in_groups(&group_ids, meta)
             .map_err(|e| e.to_string())?;
         slot_candidates.push((slot, mods.into_iter().map(|(t, _)| t).collect()));
     }
@@ -526,12 +866,6 @@ pub(super) fn optimize_fit(
         extra_ids.extend(ts);
     }
     let ctx = DogmaContext::load(sde, &extra_ids)?;
-    let attrs = &ctx.attrs;
-    let effects = &ctx.effects;
-    let groups = &ctx.groups;
-    let effect_meta = &ctx.effect_meta;
-    let is_stackable = |a: i64| ctx.is_stackable(a);
-    let default_of = |a: i64| ctx.default_of(a);
 
     // Steer the damage optimizer to the hull's *bonused* weapons. Without this it
     // maximizes raw paper-DPS and fits, say, hybrid blasters on an Amarr laser
@@ -539,7 +873,8 @@ pub(super) fn optimize_fit(
     // bonuses — but only per slot where that leaves at least one weapon, so a hull
     // with no turret/launcher bonus (e.g. a drone boat) still gets armed.
     if matches!(obj, Objective::Damage) {
-        let (bgroups, bskills) = ship_weapon_bonus(fit.ship_type_id, effects, effect_meta);
+        let (bgroups, bskills) =
+            ship_weapon_bonus(fit.ship_type_id, &ctx.effects, &ctx.effect_meta);
         if !(bgroups.is_empty() && bskills.is_empty()) {
             for (slot, cands) in &mut slot_candidates {
                 if *slot != SlotKind::High {
@@ -549,9 +884,9 @@ pub(super) fn optimize_fit(
                     .iter()
                     .copied()
                     .filter(|tid| {
-                        let g = groups.get(tid).copied().unwrap_or(0);
+                        let g = ctx.groups.get(tid).copied().unwrap_or(0);
                         bgroups.contains(&g)
-                            || required_skills_of(attrs, *tid)
+                            || required_skills_of(&ctx.attrs, *tid)
                                 .iter()
                                 .any(|s| bskills.contains(s))
                     })
@@ -563,29 +898,175 @@ pub(super) fn optimize_fit(
         }
     }
 
+    Ok((slot_candidates, ctx))
+}
+
+/// Arm the drone bay for a damage objective: drones aren't slots — the number
+/// flying is capped by the ship's bandwidth (1271) divided by each drone's
+/// bandwidth use (1272) and the 5-in-space limit (Drones V), not a slot count —
+/// so they get their own pass. Picks the combat drone (from `drone_ids`/
+/// `drone_attrs`, group 100) whose full flight does the most damage — bigger
+/// drones hit harder but fewer fit the bandwidth (e.g. a Vexor's 75 fields 5
+/// medium or 3 heavy). Honors `mode`: "all" refits the bay, "empty" only arms
+/// an empty bay.
+fn fit_drone_bay(
+    fit: &mut Fit,
+    mode: &str,
+    attrs: &AttrMap,
+    drone_ids: &[i64],
+    drone_attrs: &AttrMap,
+) {
+    let has_drones = fit.items.iter().any(|i| i.slot == SlotKind::Drone);
+    if mode == "empty" && has_drones {
+        return;
+    }
+    let bandwidth = attrs
+        .get(&fit.ship_type_id)
+        .and_then(|a| a.iter().find(|(k, _)| *k == 1271).map(|(_, v)| *v))
+        .unwrap_or(0.0);
+    if bandwidth <= 0.0 {
+        return;
+    }
+    // (type id, flight size, total flight damage proxy).
+    let mut best: Option<(i64, i64, f64)> = None;
+    for tid in drone_ids {
+        let get = |id: i64| {
+            drone_attrs
+                .get(tid)
+                .and_then(|a| a.iter().find(|(k, _)| *k == id).map(|(_, v)| *v))
+                .unwrap_or(0.0)
+        };
+        let bw = get(1272);
+        let rof = get(51) / 1000.0;
+        if bw <= 0.0 || rof <= 0.0 {
+            continue;
+        }
+        let per = get(64) * base_damage(drone_attrs, *tid) / rof;
+        let count = (bandwidth / bw).floor().min(5.0) as i64;
+        if per <= 0.0 || count <= 0 {
+            continue;
+        }
+        let total = per * count as f64;
+        if best.is_none_or(|(_, _, bt)| total > bt) {
+            best = Some((*tid, count, total));
+        }
+    }
+    if let Some((tid, count, _)) = best {
+        fit.items.retain(|i| i.slot != SlotKind::Drone);
+        fit.items.push(FitItem {
+            type_id: tid,
+            slot: SlotKind::Drone,
+            index: 0,
+            state: ModuleState::Active,
+            charge_type_id: None,
+            quantity: count as i32,
+        });
+    }
+}
+
+/// Every charge group a fitted-but-unloaded high-slot weapon in `fit` accepts
+/// (604/605/606/609/610), gathered once so [`load_ammo`]'s SDE candidate query
+/// only fetches the charge groups actually needed.
+fn needed_charge_groups(fit: &Fit, attrs: &AttrMap) -> Vec<i64> {
+    let attr_of = |tid: i64, aid: i64| -> Option<f64> {
+        attrs
+            .get(&tid)
+            .and_then(|a| a.iter().find(|(k, _)| *k == aid).map(|(_, v)| *v))
+    };
+    let mut groups: Vec<i64> = fit
+        .items
+        .iter()
+        .filter(|i| i.slot == SlotKind::High && i.charge_type_id.is_none())
+        .flat_map(|i| {
+            [604, 605, 606, 609, 610]
+                .iter()
+                .filter_map(|g| attr_of(i.type_id, *g))
+        })
+        .map(|v| v as i64)
+        .collect();
+    groups.sort_unstable();
+    groups.dedup();
+    groups
+}
+
+/// Load ammo into each empty high-slot weapon for a damage objective: a
+/// turret/launcher with no charge does **zero** damage, so an unarmed
+/// "optimize for damage" result reads as 0 DPS (and the UI hides the panel).
+/// Loads each empty weapon with the highest-damage compatible charge from
+/// `charge_cands`/`charge_attrs`: matching charge size (128) and one of the
+/// weapon's allowed charge groups (604/605/606/609/610).
+fn load_ammo(fit: &mut Fit, attrs: &AttrMap, charge_cands: &[(i64, i64)], charge_attrs: &AttrMap) {
+    let attr_of = |tid: i64, aid: i64| -> Option<f64> {
+        attrs
+            .get(&tid)
+            .and_then(|a| a.iter().find(|(k, _)| *k == aid).map(|(_, v)| *v))
+    };
+    let charge_size_of = |tid: i64| -> Option<f64> {
+        charge_attrs
+            .get(&tid)
+            .and_then(|a| a.iter().find(|(k, _)| *k == 128).map(|(_, v)| *v))
+    };
+    for item in fit.items.iter_mut() {
+        if item.slot != SlotKind::High || item.charge_type_id.is_some() {
+            continue;
+        }
+        let groups: Vec<i64> = [604, 605, 606, 609, 610]
+            .iter()
+            .filter_map(|g| attr_of(item.type_id, *g))
+            .map(|v| v as i64)
+            .collect();
+        if groups.is_empty() {
+            continue; // not a charged weapon (e.g. smartbomb)
+        }
+        let size = attr_of(item.type_id, 128);
+        let best = charge_cands
+            .iter()
+            .filter(|(_, g)| groups.contains(g))
+            // Match charge size when both sides declare one.
+            .filter(|(c, _)| match (size, charge_size_of(*c)) {
+                (Some(w), Some(cs)) => (w - cs).abs() < 0.5,
+                _ => true,
+            })
+            .map(|(c, _)| (*c, base_damage(charge_attrs, *c)))
+            .filter(|(_, d)| *d > 0.0)
+            .max_by(|a, b| a.1.total_cmp(&b.1));
+        if let Some((charge, _)) = best {
+            item.charge_type_id = Some(charge);
+        }
+    }
+}
+
+/// Core of [`fitting_optimize`], taking the SDE directly so it's testable. `mode` is
+/// `"all"` (rework every relevant slot) or `"empty"` (fill only empty slots). `prices`
+/// supplies unit costs for the budget constraint (empty ⇒ cost unused); `constraints`
+/// are kept as hard limits on the returned fit (cap-stable / ISK budget).
+pub(super) fn optimize_fit(
+    sde: &Sde,
+    fit: Fit,
+    objective: &str,
+    meta_groups: Vec<i64>,
+    mode: &str,
+    prices: &HashMap<i64, f64>,
+    constraints: Constraints,
+) -> Result<OptimizeResult, String> {
+    let obj = parse_objective(objective)?;
+    let Some(layout) = sde
+        .ship_layout(fit.ship_type_id)
+        .map_err(|e| e.to_string())?
+    else {
+        return Err(format!("unknown ship: {}", fit.ship_type_id));
+    };
+    let meta = if meta_groups.is_empty() {
+        vec![1, 2] // Tech I (incl. named/meta) + Tech II
+    } else {
+        meta_groups
+    };
+
+    let (slot_candidates, ctx) = build_candidates(sde, &fit, obj, &meta)?;
+
     // The optimizer doesn't have real character skills, so it scores at all-V.
     let skills: Vec<EntityInput> = ctx.skill_entities(|_| 5.0);
-
-    let eval = |f: &Fit| {
-        evaluate(
-            obj,
-            f,
-            &layout,
-            attrs,
-            effects,
-            groups,
-            &skills,
-            effect_meta,
-            &is_stackable,
-            &default_of,
-            prices,
-        )
-    };
-    let has_soft = constraints.cap_stable || constraints.max_cost.is_some();
-    // Best fully-constraint-satisfying config seen (by true objective). The penalized
-    // hill-climb can end on a violating config when none is nearby, so we fall back to
-    // this to guarantee the constraints whenever a satisfying fit was reachable.
-    let mut best_feasible: Option<(Fit, f64)> = None;
+    let mut search = SearchCtx::new(&ctx, layout, &skills, prices, constraints, obj, mode);
 
     let mut fit = fit;
 
@@ -606,382 +1087,51 @@ pub(super) fn optimize_fit(
     // swaps, so "empty" mode never rewrites your existing choices.
     let added_start = fit.items.len();
 
-    // Whether placing `tid` is allowed under the one-per-fit rule, ignoring the
-    // item at `skip` (so a swap can replace a unique module with itself's kind).
-    let unique_ok = |fit: &Fit, tid: i64, skip: Option<usize>| -> bool {
-        let group = groups.get(&tid).copied().unwrap_or(0);
-        if !UNIQUE_GROUPS.contains(&group) {
-            return true;
-        }
-        !fit.items
-            .iter()
-            .enumerate()
-            .any(|(j, i)| Some(j) != skip && groups.get(&i.type_id).copied() == Some(group))
-    };
-
-    // Record a trial that satisfies every active constraint, keeping the highest-
-    // objective one (only worth tracking when there are soft constraints to honor).
-    let note_feasible = |trial: &Fit, e: &Eval, best_feasible: &mut Option<(Fit, f64)>| {
-        if has_soft
-            && meets(e, &constraints)
-            && best_feasible.as_ref().is_none_or(|(_, o)| e.objective > *o)
-        {
-            *best_feasible = Some((trial.clone(), e.objective));
-        }
-    };
-
     // 1) Seed.
-    let mut current = eval(&fit)
+    let current = search
+        .eval(&fit)
         .map(|e| constraint_score(&e, &constraints))
         .unwrap_or(0.0);
 
-    // 1a) Damage: homogeneous weapon racks — one weapon type per hardpoint class
-    // (turret/launcher), filling as many hardpoints as the CPU/PG budget allows. This
-    // beats the generic per-slot greedy, which is biggest-first and underfills the
-    // rack (a hungry weapon in the first slots starves later hardpoints). Real fits
-    // also run a uniform rack per class — never a mix of e.g. blasters and railguns —
-    // so we pick a single best (count, type) for the whole class by penalized score.
-    if obj == Objective::Damage {
-        if let Some(high_cands) = cands_for.get(&SlotKind::High).cloned() {
-            let mut remaining = (layout.high_slots
-                - fit
-                    .items
-                    .iter()
-                    .filter(|i| i.slot == SlotKind::High)
-                    .count() as i64)
-                .max(0);
-            for &(effect_id, hardpoints) in &[
-                (42i64, layout.turret_hardpoints),
-                (40, layout.launcher_hardpoints),
-            ] {
-                if remaining <= 0 {
-                    break;
-                }
-                let cap = hardpoints.min(remaining);
-                if cap <= 0 {
-                    continue;
-                }
-                // In "empty" mode, match any weapon already in this class so the rack
-                // stays uniform with the user's existing modules.
-                let existing = if mode == "empty" {
-                    fit.items
-                        .iter()
-                        .find(|i| {
-                            i.slot == SlotKind::High
-                                && effects
-                                    .get(&i.type_id)
-                                    .is_some_and(|e| e.contains(&effect_id))
-                        })
-                        .map(|i| i.type_id)
-                } else {
-                    None
-                };
-                let class_cands: Vec<i64> = match existing {
-                    Some(t) => vec![t],
-                    None => high_cands
-                        .iter()
-                        .copied()
-                        .filter(|t| effects.get(t).is_some_and(|e| e.contains(&effect_id)))
-                        .collect(),
-                };
-                if class_cands.is_empty() {
-                    continue;
-                }
-                // Best (count, type) for the class by penalized score. With no soft
-                // constraints, more weapons strictly raises the objective so the full
-                // rack wins; cap-stable can instead favour a smaller, stable rack.
-                let mut best: Option<(i64, i64, f64)> = None;
-                for count in 1..=cap {
-                    for &tid in &class_cands {
-                        let mut trial = fit.clone();
-                        add_weapons(&mut trial, tid, count);
-                        if let Some(e) = eval(&trial) {
-                            let v = constraint_score(&e, &constraints);
-                            note_feasible(&trial, &e, &mut best_feasible);
-                            if best.is_none_or(|(_, _, bv)| v > bv + 1e-6) {
-                                best = Some((count, tid, v));
-                            }
-                        }
-                    }
-                }
-                if let Some((count, tid, v)) = best {
-                    add_weapons(&mut fit, tid, count);
-                    remaining -= count;
-                    current = v;
-                }
-            }
-        }
-    }
+    // 1a) Homogeneous weapon racks, then 1b) generic greedy for the rest.
+    let current = search.seed_weapon_racks(&mut fit, &cands_for, current);
+    let current = search.greedy_fill(&mut fit, &slot_candidates, current);
 
-    // 1b) Generic greedy for the remaining slot kinds (and every slot for non-damage
-    // objectives): fill each with the single best valid candidate, one at a time.
-    for (slot, cands) in &slot_candidates {
-        if obj == Objective::Damage && *slot == SlotKind::High {
-            continue; // weapons handled above
-        }
-        let cap = slot_capacity(&layout, *slot);
-        while (fit.items.iter().filter(|i| i.slot == *slot).count() as i64) < cap {
-            let index = fit.items.iter().filter(|i| i.slot == *slot).count() as i32;
-            let mut best: Option<(i64, f64)> = None;
-            for &tid in cands {
-                if !unique_ok(&fit, tid, None) {
-                    continue;
-                }
-                let mut trial = fit.clone();
-                trial.items.push(new_module(tid, *slot, index));
-                if let Some(e) = eval(&trial) {
-                    let v = constraint_score(&e, &constraints);
-                    note_feasible(&trial, &e, &mut best_feasible);
-                    if v > current + 1e-6 && best.is_none_or(|(_, bv)| v > bv) {
-                        best = Some((tid, v));
-                    }
-                }
-            }
-            match best {
-                Some((tid, v)) => {
-                    fit.items.push(new_module(tid, *slot, index));
-                    current = v;
-                }
-                None => break, // nothing further improves this slot kind
-            }
-        }
-    }
+    // 2) Local search to a local optimum over the seeded mix.
+    search.local_search(&mut fit, &cands_for, added_start, current);
 
-    // 2) Local search — re-pick each relevant slot given the final mix (stacking
-    // penalties make the best choice interdependent), iterating to a local optimum.
-    // Weapon slots are swapped as a whole class (below), never per-slot, so the rack
-    // stays uniform. Seed + local search is a strong, near-global result over the
-    // curated candidate pool (a true global optimum is combinatorially intractable
-    // for the full module catalogue).
-    loop {
-        let mut improved = false;
-        let n = fit.items.len();
-        for idx in added_start..n {
-            let slot = fit.items[idx].slot;
-            if obj == Objective::Damage && slot == SlotKind::High {
-                continue; // weapon racks are swapped as a unit, below
-            }
-            let Some(cands) = cands_for.get(&slot) else {
-                continue; // not a relevant (optimized) slot
-            };
-            let orig = fit.items[idx].type_id;
-            let (mut best_tid, mut best_val) = (orig, current);
-            for &tid in cands {
-                if tid == orig || !unique_ok(&fit, tid, Some(idx)) {
-                    continue;
-                }
-                let mut trial = fit.clone();
-                trial.items[idx].type_id = tid;
-                if let Some(e) = eval(&trial) {
-                    let v = constraint_score(&e, &constraints);
-                    note_feasible(&trial, &e, &mut best_feasible);
-                    if v > best_val + 1e-6 {
-                        best_val = v;
-                        best_tid = tid;
-                    }
-                }
-            }
-            if best_tid != orig {
-                fit.items[idx].type_id = best_tid;
-                current = best_val;
-                improved = true;
-            }
-        }
+    // Guarantee the requested hard constraints: if the hill-climb ended on a
+    // config that violates one, fall back to the best fully-feasible config seen.
+    search.enforce_feasible(&mut fit);
 
-        // Whole-class weapon swaps (damage): re-pick a single type for each hardpoint
-        // class together, so an upgrade applies to the entire rack and it never goes
-        // heterogeneous.
-        if obj == Objective::Damage {
-            if let Some(high_cands) = cands_for.get(&SlotKind::High).cloned() {
-                for &effect_id in &[42i64, 40] {
-                    let idxs: Vec<usize> = (added_start..fit.items.len())
-                        .filter(|&i| {
-                            fit.items[i].slot == SlotKind::High
-                                && effects
-                                    .get(&fit.items[i].type_id)
-                                    .is_some_and(|e| e.contains(&effect_id))
-                        })
-                        .collect();
-                    if idxs.is_empty() {
-                        continue;
-                    }
-                    let orig = fit.items[idxs[0]].type_id;
-                    let (mut best_tid, mut best_val) = (orig, current);
-                    for &tid in high_cands
-                        .iter()
-                        .filter(|t| effects.get(t).is_some_and(|e| e.contains(&effect_id)))
-                    {
-                        if tid == orig {
-                            continue;
-                        }
-                        let mut trial = fit.clone();
-                        for &i in &idxs {
-                            trial.items[i].type_id = tid;
-                        }
-                        if let Some(e) = eval(&trial) {
-                            let v = constraint_score(&e, &constraints);
-                            note_feasible(&trial, &e, &mut best_feasible);
-                            if v > best_val + 1e-6 {
-                                best_val = v;
-                                best_tid = tid;
-                            }
-                        }
-                    }
-                    if best_tid != orig {
-                        for &i in &idxs {
-                            fit.items[i].type_id = best_tid;
-                        }
-                        current = best_val;
-                        improved = true;
-                    }
-                }
-            }
-        }
-
-        if !improved {
-            break;
-        }
-    }
-
-    // Guarantee the requested hard constraints: if the hill-climb ended on a config
-    // that violates one, fall back to the best fully-feasible config seen (if any).
-    if has_soft && !eval(&fit).is_some_and(|e| meets(&e, &constraints)) {
-        if let Some((bf, _)) = best_feasible.take() {
-            fit = bf;
-        }
-    }
-
-    // 3) Drones — for a damage objective, arm the drone bay. Drones aren't slots:
-    // the number flying is capped by the ship's bandwidth (1271) divided by each
-    // drone's bandwidth use (1272) and the 5-in-space limit (Drones V), not a slot
-    // count, so they get their own pass. Pick the combat drone (group 100) whose
-    // full flight does the most damage — bigger drones hit harder but fewer fit
-    // the bandwidth (e.g. a Vexor's 75 fields 5 medium or 3 heavy). Honors `mode`:
-    // "all" refits the bay, "empty" only arms an empty bay.
     if matches!(obj, Objective::Damage) {
-        let has_drones = fit.items.iter().any(|i| i.slot == SlotKind::Drone);
-        if mode != "empty" || !has_drones {
-            let bandwidth = attrs
-                .get(&fit.ship_type_id)
-                .and_then(|a| a.iter().find(|(k, _)| *k == 1271).map(|(_, v)| *v))
-                .unwrap_or(0.0);
-            if bandwidth > 0.0 {
-                let drone_cands = sde
-                    .modules_in_groups(&[100], &meta)
-                    .map_err(|e| e.to_string())?;
-                let drone_ids: Vec<i64> = drone_cands.iter().map(|(t, _)| *t).collect();
-                let drone_attrs = sde
-                    .types_attributes_raw(&drone_ids)
-                    .map_err(|e| e.to_string())?;
-                // (type id, flight size, total flight damage proxy).
-                let mut best: Option<(i64, i64, f64)> = None;
-                for tid in &drone_ids {
-                    let get = |id: i64| {
-                        drone_attrs
-                            .get(tid)
-                            .and_then(|a| a.iter().find(|(k, _)| *k == id).map(|(_, v)| *v))
-                            .unwrap_or(0.0)
-                    };
-                    let bw = get(1272);
-                    let rof = get(51) / 1000.0;
-                    if bw <= 0.0 || rof <= 0.0 {
-                        continue;
-                    }
-                    let per = get(64) * base_damage(&drone_attrs, *tid) / rof;
-                    let count = (bandwidth / bw).floor().min(5.0) as i64;
-                    if per <= 0.0 || count <= 0 {
-                        continue;
-                    }
-                    let total = per * count as f64;
-                    if best.is_none_or(|(_, _, bt)| total > bt) {
-                        best = Some((*tid, count, total));
-                    }
-                }
-                if let Some((tid, count, _)) = best {
-                    fit.items.retain(|i| i.slot != SlotKind::Drone);
-                    fit.items.push(FitItem {
-                        type_id: tid,
-                        slot: SlotKind::Drone,
-                        index: 0,
-                        state: ModuleState::Active,
-                        charge_type_id: None,
-                        quantity: count as i32,
-                    });
-                }
-            }
-        }
+        // 3) Drones — arm the drone bay (not slots — bandwidth/5-in-space capped).
+        let drone_cands = sde
+            .modules_in_groups(&[100], &meta)
+            .map_err(|e| e.to_string())?;
+        let drone_ids: Vec<i64> = drone_cands.iter().map(|(t, _)| *t).collect();
+        let drone_attrs = sde
+            .types_attributes_raw(&drone_ids)
+            .map_err(|e| e.to_string())?;
+        fit_drone_bay(&mut fit, mode, &ctx.attrs, &drone_ids, &drone_attrs);
 
-        // 4) Ammo — a turret/launcher with no charge does **zero** damage, so an
-        // unarmed "optimize for damage" result reads as 0 DPS (and the UI hides the
-        // panel). Load each empty weapon with the highest-damage compatible charge:
-        // matching charge size (128) and one of the weapon's allowed charge groups
-        // (604/605/606/609/610), in the allowed meta.
-        let attr_of = |tid: i64, aid: i64| -> Option<f64> {
-            attrs
-                .get(&tid)
-                .and_then(|a| a.iter().find(|(k, _)| *k == aid).map(|(_, v)| *v))
-        };
-        // Every charge group any fitted weapon accepts, gathered once.
-        let mut all_charge_groups: Vec<i64> = fit
-            .items
-            .iter()
-            .filter(|i| i.slot == SlotKind::High && i.charge_type_id.is_none())
-            .flat_map(|i| {
-                [604, 605, 606, 609, 610]
-                    .iter()
-                    .filter_map(|g| attr_of(i.type_id, *g))
-            })
-            .map(|v| v as i64)
-            .collect();
-        all_charge_groups.sort_unstable();
-        all_charge_groups.dedup();
-        if !all_charge_groups.is_empty() {
+        // 4) Ammo — load each empty weapon with its best compatible charge.
+        let charge_groups = needed_charge_groups(&fit, &ctx.attrs);
+        if !charge_groups.is_empty() {
             let charge_cands = sde
-                .modules_in_groups(&all_charge_groups, &meta)
+                .modules_in_groups(&charge_groups, &meta)
                 .map_err(|e| e.to_string())?;
             let charge_ids: Vec<i64> = charge_cands.iter().map(|(t, _)| *t).collect();
             let charge_attrs = sde
                 .types_attributes_raw(&charge_ids)
                 .map_err(|e| e.to_string())?;
-            let charge_size_of = |tid: i64| -> Option<f64> {
-                charge_attrs
-                    .get(&tid)
-                    .and_then(|a| a.iter().find(|(k, _)| *k == 128).map(|(_, v)| *v))
-            };
-            for item in fit.items.iter_mut() {
-                if item.slot != SlotKind::High || item.charge_type_id.is_some() {
-                    continue;
-                }
-                let groups: Vec<i64> = [604, 605, 606, 609, 610]
-                    .iter()
-                    .filter_map(|g| attr_of(item.type_id, *g))
-                    .map(|v| v as i64)
-                    .collect();
-                if groups.is_empty() {
-                    continue; // not a charged weapon (e.g. smartbomb)
-                }
-                let size = attr_of(item.type_id, 128);
-                let best = charge_cands
-                    .iter()
-                    .filter(|(_, g)| groups.contains(g))
-                    // Match charge size when both sides declare one.
-                    .filter(|(c, _)| match (size, charge_size_of(*c)) {
-                        (Some(w), Some(cs)) => (w - cs).abs() < 0.5,
-                        _ => true,
-                    })
-                    .map(|(c, _)| (*c, base_damage(&charge_attrs, *c)))
-                    .filter(|(_, d)| *d > 0.0)
-                    .max_by(|a, b| a.1.total_cmp(&b.1));
-                if let Some((charge, _)) = best {
-                    item.charge_type_id = Some(charge);
-                }
-            }
+            load_ammo(&mut fit, &ctx.attrs, &charge_cands, &charge_attrs);
         }
     }
 
     // Report whether the final fit (after the drone/ammo passes) meets the requested
     // constraints, so the UI can warn when a target couldn't be reached.
-    let report = eval(&fit);
+    let report = search.eval(&fit);
     let cap_stable = report.as_ref().is_some_and(|e| e.cap_stable);
     let within_budget = report
         .as_ref()
@@ -1007,6 +1157,94 @@ mod tests {
             charge_type_id: charge,
             quantity: qty,
         }
+    }
+
+    /// `load_ammo` picks the highest-damage compatible charge matching both the
+    /// weapon's charge group (604/605/606/609/610) and charge size (128),
+    /// leaves an already-loaded weapon untouched, and skips a module with no
+    /// charge group (e.g. a smartbomb).
+    #[test]
+    fn load_ammo_picks_highest_damage_matching_charge() {
+        let mut fit = Fit {
+            id: "x".into(),
+            name: "n".into(),
+            ship_type_id: 1,
+            items: vec![
+                item(10, SlotKind::High, None, 1), // empty turret, charge group 1
+                item(11, SlotKind::High, Some(99), 1), // already loaded — left alone
+                item(12, SlotKind::High, None, 1), // no charge group — e.g. smartbomb
+            ],
+            projected: Vec::new(),
+        };
+        let attrs: AttrMap = HashMap::from([
+            (10, vec![(604, 1.0), (128, 3.0)]),
+            (11, vec![(604, 1.0), (128, 3.0)]),
+            (12, vec![]),
+        ]);
+        // Group-1 candidates: one right-sized weaker charge, one right-sized
+        // stronger charge (should win), one wrong-sized but strongest overall
+        // (must be skipped on size mismatch).
+        let charge_cands: Vec<(i64, i64)> = vec![(20, 1), (21, 1), (22, 1)];
+        let charge_attrs: AttrMap = HashMap::from([
+            (20, vec![(128, 3.0), (114, 10.0)]),
+            (21, vec![(128, 3.0), (114, 50.0)]),
+            (22, vec![(128, 5.0), (114, 999.0)]),
+        ]);
+
+        load_ammo(&mut fit, &attrs, &charge_cands, &charge_attrs);
+
+        assert_eq!(fit.items[0].charge_type_id, Some(21));
+        assert_eq!(fit.items[1].charge_type_id, Some(99));
+        assert_eq!(fit.items[2].charge_type_id, None);
+    }
+
+    /// `fit_drone_bay` picks the drone whose full flight (bandwidth-capped, 5
+    /// in space max) does the most total damage, replacing any stale bay
+    /// contents; "empty" mode with drones already present leaves the bay as-is.
+    #[test]
+    fn fit_drone_bay_picks_best_flight_within_bandwidth() {
+        let mut fit = Fit {
+            id: "x".into(),
+            name: "n".into(),
+            ship_type_id: 1,
+            items: vec![item(999, SlotKind::Drone, None, 3)], // stale — "all" clears this
+            projected: Vec::new(),
+        };
+        let attrs: AttrMap = HashMap::from([(1, vec![(1271, 75.0)])]); // 75 Mbit bandwidth
+        let drone_ids = vec![10, 20];
+        let drone_attrs: AttrMap = HashMap::from([
+            // Medium: 10 bandwidth/drone -> 5 fit (bandwidth-capped).
+            (10, vec![(1272, 10.0), (64, 2.0), (51, 1000.0), (114, 5.0)]),
+            // Heavy: 25 bandwidth/drone -> only 3 fit, same per-shot damage.
+            (20, vec![(1272, 25.0), (64, 2.0), (51, 1000.0), (114, 5.0)]),
+        ]);
+
+        fit_drone_bay(&mut fit, "all", &attrs, &drone_ids, &drone_attrs);
+
+        let drones: Vec<_> = fit
+            .items
+            .iter()
+            .filter(|i| i.slot == SlotKind::Drone)
+            .collect();
+        assert_eq!(drones.len(), 1);
+        assert_eq!(drones[0].type_id, 10); // 5 mediums outdamage 3 heavies
+        assert_eq!(drones[0].quantity, 5);
+
+        // "empty" mode with drones already present leaves the bay untouched.
+        let mut fit2 = fit.clone();
+        fit_drone_bay(&mut fit2, "empty", &attrs, &drone_ids, &drone_attrs);
+        assert_eq!(fit2.items, fit.items);
+
+        // No bandwidth ⇒ no drones armed.
+        let mut unarmed = Fit {
+            id: "y".into(),
+            name: "n".into(),
+            ship_type_id: 2,
+            items: Vec::new(),
+            projected: Vec::new(),
+        };
+        fit_drone_bay(&mut unarmed, "all", &attrs, &drone_ids, &drone_attrs);
+        assert!(unarmed.items.is_empty());
     }
 
     /// `fit_cost` sums hull + modules×qty + charges; a missing price counts as 0.
