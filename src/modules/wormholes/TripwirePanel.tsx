@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  errorMessage,
   whTripwireConnect,
   whTripwireDisconnect,
   whTripwireImport,
@@ -106,7 +107,7 @@ export function TripwirePanel({
           </button>
           {connect.isError && (
             <span className="text-[11px] text-rose-400">
-              {String(connect.error)}
+              {errorMessage(connect.error)}
             </span>
           )}
         </div>
@@ -137,7 +138,7 @@ export function TripwirePanel({
           </button>
           {importChain.isError && (
             <span className="max-w-sm text-[11px] text-rose-400">
-              {String(importChain.error)}
+              {errorMessage(importChain.error)}
             </span>
           )}
         </div>

@@ -6,6 +6,7 @@ import {
   authCharacters,
   authLogin,
   authLogout,
+  errorMessage,
   setActiveCharacter,
 } from "../lib/api";
 
@@ -93,7 +94,7 @@ export function Characters() {
 
       {login.isError && (
         <p className="mt-1 text-xs text-rose-400">
-          Login failed: {String(login.error)}
+          Login failed: {errorMessage(login.error)}
         </p>
       )}
     </div>

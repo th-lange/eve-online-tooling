@@ -188,7 +188,7 @@ function Workbench() {
 
       {run.isError && (
         <div className="mt-3 text-sm text-rose-400">
-          Failed: {String(run.error)}
+          Failed: {errorMessage(run.error)}
         </div>
       )}
 

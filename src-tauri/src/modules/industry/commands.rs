@@ -183,8 +183,7 @@ async fn character_industry_jobs(
         character_id,
         &format!("/latest/characters/{character_id}/industry/jobs/?include_completed=true"),
     )
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
     // Merge into the durable store, keyed by job id (delivered jobs persist).
     let key = format!("industry_jobs_{character_id}");

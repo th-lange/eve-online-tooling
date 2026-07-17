@@ -710,7 +710,7 @@ function Workbench() {
               {stats.isError && (
                 <p className="text-xs text-red-400">
                   Eval failed:{" "}
-                  {(stats.error as Error)?.message ?? String(stats.error)}
+                  {(stats.error as Error)?.message ?? errorMessage(stats.error)}
                 </p>
               )}
               {!stats.data && !stats.isFetching && !stats.isError && (

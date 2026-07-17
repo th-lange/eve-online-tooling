@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { intelIncursions, type IncursionRow } from "../../lib/api";
+import { errorMessage, intelIncursions, type IncursionRow } from "../../lib/api";
 import { Page, PageHeader } from "../../components/page";
 
 const STATE_STYLE: Record<string, string> = {
@@ -36,7 +36,7 @@ export function IncursionsPage() {
         {q.isLoading ? (
           <div className="text-sm text-zinc-500">Loading…</div>
         ) : q.isError ? (
-          <div className="text-sm text-rose-400">{String(q.error)}</div>
+          <div className="text-sm text-rose-400">{errorMessage(q.error)}</div>
         ) : q.data?.length === 0 ? (
           <div className="text-sm text-zinc-500">
             No active incursions right now.

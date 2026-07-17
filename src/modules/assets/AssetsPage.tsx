@@ -4,6 +4,7 @@ import {
   activeCharacter,
   assetsTree,
   assetsValue,
+  errorMessage,
   sdeStatus,
   type AssetNode,
   type AssetRow,
@@ -184,7 +185,7 @@ function Workbench() {
 
       {treeRun.isError && (
         <div className="mt-3 text-sm text-rose-400">
-          Failed: {String(treeRun.error)}
+          Failed: {errorMessage(treeRun.error)}
         </div>
       )}
       {tree && (
@@ -218,7 +219,7 @@ function Workbench() {
 
       {run.isError && (
         <div className="mt-3 text-sm text-rose-400">
-          Failed: {String(run.error)} — log in a character with the assets
+          Failed: {errorMessage(run.error)} — log in a character with the assets
           scope.
         </div>
       )}

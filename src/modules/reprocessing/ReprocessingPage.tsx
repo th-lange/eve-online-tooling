@@ -1,6 +1,7 @@
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  errorMessage,
   marketRegions,
   reprocessingEfficiency,
   reprocessingGetList,
@@ -261,7 +262,7 @@ function Workbench() {
         {tab === "opportunities" &&
           (run.isError ? (
             <div className="text-sm text-rose-400">
-              Failed: {String(run.error)}
+              Failed: {errorMessage(run.error)}
             </div>
           ) : run.isPending ? (
             <Centered>Pricing ores and their refine outputs…</Centered>

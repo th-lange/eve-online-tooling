@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderOpen, Radio, RefreshCw } from "lucide-react";
 import {
+  errorMessage,
   pluginsList,
   pluginsRescan,
   pluginsDir,
@@ -43,7 +44,7 @@ export function PluginsPage() {
         <PageHeader title="Plugins" subtitle={SUBTITLE} />
         <Centered>
           <span className="text-rose-400">
-            Couldn't read plugins: {String(plugins.error)}
+            Couldn't read plugins: {errorMessage(plugins.error)}
           </span>
         </Centered>
       </Page>

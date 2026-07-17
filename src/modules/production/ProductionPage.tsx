@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { DataAge } from "../../components/DataAge";
-import { sdeStatus } from "../../lib/api";
+import { errorMessage, sdeStatus } from "../../lib/api";
 import { Page, PageHeader } from "../../components/page";
 import { SdeSetup } from "./SdeSetup";
 import { Centered } from "./components";
@@ -29,7 +29,7 @@ export function ProductionPage() {
         <PageHeader title={TITLE} subtitle={SUBTITLE} />
         <Centered>
           <span className="text-rose-400">
-            Couldn't reach the backend: {String(status.error)}
+            Couldn't reach the backend: {errorMessage(status.error)}
           </span>
         </Centered>
       </Page>
