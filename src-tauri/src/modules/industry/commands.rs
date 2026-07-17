@@ -264,18 +264,11 @@ async fn character_industry_jobs(
         .filter_map(|(j, _)| j.facility_id.or(j.station_id))
         .collect();
     let facilities = resolve_names(auth_state, &facility_ids).await;
-    let type_name = |id: i64| {
-        sde.type_info(id)
-            .ok()
-            .flatten()
-            .map(|t| t.name)
-            .unwrap_or_else(|| format!("Type {id}"))
-    };
 
     let rows: Vec<JobRow> = combined
         .into_iter()
         .map(|(j, owner)| {
-            let product = type_name(j.product_type_id.unwrap_or(j.blueprint_type_id));
+            let product = sde.type_name_or_id(j.product_type_id.unwrap_or(j.blueprint_type_id));
             let facility = j
                 .facility_id
                 .or(j.station_id)

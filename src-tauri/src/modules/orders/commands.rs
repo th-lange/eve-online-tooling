@@ -141,6 +141,8 @@ async fn fetch_character_orders(
     let loc_ids: Vec<i64> = orders.iter().map(|o| o.location_id).collect();
     let loc_names = resolve_names(auth_state, &loc_ids).await;
     let sde = Sde::open(&SdePaths::new(dir.to_path_buf()).db).map_err(|e| e.to_string())?;
+    let type_ids: Vec<i64> = orders.iter().map(|o| o.type_id).collect();
+    let type_names = sde.type_name_map(&type_ids).map_err(|e| e.to_string())?;
 
     let rows = orders
         .into_iter()
@@ -152,12 +154,7 @@ async fn fetch_character_orders(
                 model.and_then(|m| m.sell_min)
             };
             let undercut = is_undercut(best_price, o.price, o.is_buy_order);
-            let name = sde
-                .type_info(o.type_id)
-                .ok()
-                .flatten()
-                .map(|t| t.name)
-                .unwrap_or_else(|| format!("Type {}", o.type_id));
+            let name = type_names.get(o.type_id);
             OrderRow {
                 character_id,
                 character_name: character_name.to_string(),

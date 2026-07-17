@@ -510,12 +510,7 @@ pub async fn character_mining(
     let mut rows: Vec<MiningRow> = by_type
         .into_iter()
         .map(|(type_id, quantity)| MiningRow {
-            name: sde
-                .type_info(type_id)
-                .ok()
-                .flatten()
-                .map(|t| t.name)
-                .unwrap_or_else(|| format!("Type {type_id}")),
+            name: sde.type_name_or_id(type_id),
             quantity,
             value: quantity as f64 * prices.get(&type_id).copied().unwrap_or(0.0),
         })

@@ -338,18 +338,9 @@ fn build_colony(
         }
     }
     let ids: Vec<i64> = needed.iter().copied().collect();
-    let names: HashMap<i64, String> = sde
-        .type_names(&ids)
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .collect();
+    let names = sde.type_name_map(&ids).map_err(|e| e.to_string())?;
     let dims = sde.types_dims(&ids).map_err(|e| e.to_string())?;
-    let name_of = |id: i64| {
-        names
-            .get(&id)
-            .cloned()
-            .unwrap_or_else(|| format!("Type {id}"))
-    };
+    let name_of = |id: i64| names.get(id);
     let volume_of = |id: i64| dims.get(&id).map(|(v, _)| *v).unwrap_or(0.0);
 
     // Extractors (with restart timers).

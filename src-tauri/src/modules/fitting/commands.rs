@@ -367,15 +367,8 @@ pub fn fitting_add_item(
 #[tauri::command]
 pub fn fitting_export_eft(app: AppHandle, fit: Fit) -> Result<String, String> {
     let sde = crate::sde::open_from_app(&app)?;
-    let name_of = |id: i64| -> Result<String, String> {
-        Ok(sde
-            .type_info(id)
-            .map_err(|e| e.to_string())?
-            .map(|t| t.name)
-            .unwrap_or_else(|| format!("Type {id}")))
-    };
 
-    let ship_name = name_of(fit.ship_type_id)?;
+    let ship_name = sde.type_name_or_id(fit.ship_type_id);
 
     let mut modules = Vec::new();
     for slot in [
@@ -388,12 +381,9 @@ pub fn fitting_export_eft(app: AppHandle, fit: Fit) -> Result<String, String> {
         let mut in_slot: Vec<&FitItem> = fit.items.iter().filter(|i| i.slot == slot).collect();
         in_slot.sort_by_key(|i| i.index);
         for i in in_slot {
-            let charge = match i.charge_type_id {
-                Some(c) => Some(name_of(c)?),
-                None => None,
-            };
+            let charge = i.charge_type_id.map(|c| sde.type_name_or_id(c));
             modules.push(ParsedModule {
-                name: name_of(i.type_id)?,
+                name: sde.type_name_or_id(i.type_id),
                 charge,
                 empty_slot: None,
             });
@@ -407,7 +397,7 @@ pub fn fitting_export_eft(app: AppHandle, fit: Fit) -> Result<String, String> {
         .filter(|i| matches!(i.slot, SlotKind::Drone | SlotKind::Cargo))
     {
         extras.push(ParsedExtra {
-            name: name_of(i.type_id)?,
+            name: sde.type_name_or_id(i.type_id),
             quantity: i.quantity,
         });
     }
@@ -791,11 +781,7 @@ pub async fn fitting_price(
         let sell_unit = model.and_then(|m| m.buy_max);
         buy_total += buy_unit.unwrap_or(0.0) * quantity as f64;
         sell_total += sell_unit.unwrap_or(0.0) * quantity as f64;
-        let name = sde
-            .type_info(type_id)
-            .map_err(|e| e.to_string())?
-            .map(|t| t.name)
-            .unwrap_or_else(|| format!("Type {type_id}"));
+        let name = sde.type_name_or_id(type_id);
         lines.push(FitPriceLine {
             type_id,
             name,

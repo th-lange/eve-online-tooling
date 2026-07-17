@@ -27,6 +27,21 @@ pub struct TypeInfo {
     pub volume: Option<f64>,
 }
 
+/// Bulk-resolved type names for a set of ids, from one `type_names` query.
+/// Unknown ids fall back to `Type <id>`, matching [`super::Sde::type_name_or_id`].
+#[derive(Debug, Clone, Default)]
+pub struct TypeNameMap(pub(super) std::collections::HashMap<i64, String>);
+
+impl TypeNameMap {
+    /// The resolved name for `id`, or `Type <id>` if it wasn't found.
+    pub fn get(&self, id: i64) -> String {
+        self.0
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| format!("Type {id}"))
+    }
+}
+
 /// One manufacturing input of a blueprint.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
