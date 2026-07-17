@@ -12,3 +12,9 @@
 pub mod aggregate;
 pub mod commands;
 pub mod parser;
+
+/// Register this module's managed state with the app.
+pub fn init(app: &tauri::App) {
+    use tauri::Manager;
+    app.manage(commands::DpsState::default());
+}

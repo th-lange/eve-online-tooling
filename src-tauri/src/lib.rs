@@ -150,8 +150,8 @@ pub fn run() {
             app.manage(std::sync::Arc::new(plugins::PluginRegistry::load(&dir)));
             app.manage(std::sync::Arc::new(plugins::PluginManager::new()));
             app.manage(esi::AuthState::with_cache(dir));
-            app.manage(modules::dpsmeter::commands::DpsState::default());
-            app.manage(mcp::McpState::default());
+            modules::dpsmeter::init(app);
+            mcp::init(app);
 
             // Fetch key data early, in the background — never block launch. Keeps
             // the SDE current (daily, md5-gated) and primes the active

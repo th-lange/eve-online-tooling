@@ -62,6 +62,12 @@ pub struct McpState {
     running: Mutex<Option<Running>>,
 }
 
+/// Register this module's managed state with the app.
+pub fn init(app: &tauri::App) {
+    use tauri::Manager;
+    app.manage(McpState::default());
+}
+
 /// What the UI needs to show + configure a client.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
