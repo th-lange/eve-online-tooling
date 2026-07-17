@@ -527,7 +527,7 @@ pub async fn route_nearest_wormhole(app: AppHandle) -> Result<NearestWormhole, A
     if current.wspace {
         // w-space: no public feed applies; point at the nearest scanned k-space
         // exit over the hand-mapped chain.
-        let edges = crate::modules::wormholes::commands::connection_edges(&app)?;
+        let edges = crate::modules::wormholes::store::connection_edges(&app)?;
         let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
         for (a, b, _eol) in &edges {
             adj.entry(*a).or_default().push(*b);

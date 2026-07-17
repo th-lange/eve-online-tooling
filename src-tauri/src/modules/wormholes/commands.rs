@@ -8,49 +8,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
+use super::store::{self, Connection, ConnectionView};
 use super::tripwire;
-
-const STORE_KEY: &str = "wh_connections";
-/// J-space (wormhole) solar systems start at this id.
-const WSPACE_MIN_SYSTEM_ID: i64 = 31_000_000;
-/// Drop a wormhole this many hours after creation (max life is ~24h + jitter).
-const WH_MAX_AGE_HOURS: u64 = 48;
-/// Drop an EOL-flagged wormhole this many hours after it was marked (EOL holes
-/// collapse within ~4h).
-const EOL_GRACE_HOURS: u64 = 4;
-
-/// A stored connection between two systems.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Connection {
-    id: i64,
-    source_system_id: i64,
-    target_system_id: i64,
-    /// "wormhole" | "stargate" | "jumpbridge".
-    scope: String,
-    /// Wormhole mass status: "fresh" | "reduced" | "critical".
-    mass_status: String,
-    /// Largest ship that can jump it: "s" | "m" | "l" | "xl".
-    jump_mass: String,
-    /// End-of-life flagged.
-    eol: bool,
-    /// Endpoint signature codes (e.g. "K162" ↔ a specific WH code).
-    source_sig: Option<String>,
-    target_sig: Option<String>,
-    /// Where this row came from: "manual" (hand-entered) or "evescout"
-    /// (auto-imported from the EVE-Scout Thera/Turnur feed). Defaulted so
-    /// connections stored before this field existed still load.
-    #[serde(default = "default_source")]
-    source: String,
-    created_at: u64,
-    eol_updated_at: Option<u64>,
-}
-
-fn default_source() -> String {
-    "manual".to_string()
-}
 
 /// What the frontend sends to create a connection.
 #[derive(Debug, Deserialize)]
@@ -69,100 +30,11 @@ fn default_scope() -> String {
     "wormhole".to_string()
 }
 
-/// A connection enriched with system names for display.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConnectionView {
-    pub id: i64,
-    pub source_system_id: i64,
-    pub source_name: String,
-    pub source_wspace: bool,
-    pub target_system_id: i64,
-    pub target_name: String,
-    pub target_wspace: bool,
-    pub scope: String,
-    pub mass_status: String,
-    pub jump_mass: String,
-    pub eol: bool,
-    pub source_sig: Option<String>,
-    pub target_sig: Option<String>,
-    /// "manual" | "evescout" — lets the UI badge auto-imported rows.
-    pub source: String,
-    pub created_at: u64,
-}
-
-/// Drop dead wormholes: past max age, or EOL beyond the grace window. Stargate /
-/// jumpbridge links are permanent and never pruned. Pure for testability.
-fn prune(mut conns: Vec<Connection>, now: u64) -> Vec<Connection> {
-    conns.retain(|c| {
-        if c.scope != "wormhole" {
-            return true; // permanent connections
-        }
-        let age_h = now.saturating_sub(c.created_at) / 3600;
-        if age_h >= WH_MAX_AGE_HOURS {
-            return false;
-        }
-        if c.eol {
-            if let Some(t) = c.eol_updated_at {
-                if now.saturating_sub(t) / 3600 >= EOL_GRACE_HOURS {
-                    return false;
-                }
-            }
-        }
-        true
-    });
-    conns
-}
-
-fn load(app: &AppHandle) -> Result<(std::path::PathBuf, Vec<Connection>), String> {
-    let dir = crate::storage::app_data_dir(app)?;
-    let conns: Vec<Connection> = storage::load_data(&dir, STORE_KEY).unwrap_or_default();
-    Ok((dir, prune(conns, crate::util::time::now_secs())))
-}
-
-fn views(dir: &std::path::Path, conns: &[Connection]) -> Result<Vec<ConnectionView>, String> {
-    let sde = Sde::open(&SdePaths::new(dir.to_path_buf()).db).map_err(|e| e.to_string())?;
-    let info = sde.solar_system_info().map_err(|e| e.to_string())?;
-    let name = |id: i64| {
-        info.get(&id)
-            .map(|(n, _, _)| n.clone())
-            .unwrap_or_else(|| format!("J{id}"))
-    };
-    Ok(conns
-        .iter()
-        .map(|c| ConnectionView {
-            id: c.id,
-            source_system_id: c.source_system_id,
-            source_name: name(c.source_system_id),
-            source_wspace: c.source_system_id >= WSPACE_MIN_SYSTEM_ID,
-            target_system_id: c.target_system_id,
-            target_name: name(c.target_system_id),
-            target_wspace: c.target_system_id >= WSPACE_MIN_SYSTEM_ID,
-            scope: c.scope.clone(),
-            mass_status: c.mass_status.clone(),
-            jump_mass: c.jump_mass.clone(),
-            eol: c.eol,
-            source_sig: c.source_sig.clone(),
-            target_sig: c.target_sig.clone(),
-            source: c.source.clone(),
-            created_at: c.created_at,
-        })
-        .collect())
-}
-
-fn save_and_view(
-    dir: &std::path::Path,
-    conns: &[Connection],
-) -> Result<Vec<ConnectionView>, String> {
-    storage::save_data(dir, STORE_KEY, &conns.to_vec())?;
-    views(dir, conns)
-}
-
 /// Current connections (auto-pruned of dead wormholes), with system names.
 #[tauri::command]
 pub fn wh_connections(app: AppHandle) -> Result<Vec<ConnectionView>, String> {
-    let (dir, conns) = load(&app)?;
-    save_and_view(&dir, &conns)
+    let (dir, conns) = store::load(&app)?;
+    store::save_and_view(&dir, &conns)
 }
 
 /// Add a connection. New wormholes start fresh, full mass, not EOL.
@@ -171,7 +43,7 @@ pub fn wh_add_connection(
     app: AppHandle,
     connection: NewConnection,
 ) -> Result<Vec<ConnectionView>, String> {
-    let (dir, mut conns) = load(&app)?;
+    let (dir, mut conns) = store::load(&app)?;
     let id = conns.iter().map(|c| c.id).max().unwrap_or(0) + 1;
     conns.push(Connection {
         id,
@@ -187,7 +59,7 @@ pub fn wh_add_connection(
         created_at: crate::util::time::now_secs(),
         eol_updated_at: None,
     });
-    save_and_view(&dir, &conns)
+    store::save_and_view(&dir, &conns)
 }
 
 /// Update a connection's mass/jump-mass/EOL/signatures. Setting EOL stamps the
@@ -203,7 +75,7 @@ pub fn wh_update_connection(
     source_sig: Option<String>,
     target_sig: Option<String>,
 ) -> Result<Vec<ConnectionView>, String> {
-    let (dir, mut conns) = load(&app)?;
+    let (dir, mut conns) = store::load(&app)?;
     if let Some(c) = conns.iter_mut().find(|c| c.id == id) {
         if eol && !c.eol {
             c.eol_updated_at = Some(crate::util::time::now_secs());
@@ -216,15 +88,15 @@ pub fn wh_update_connection(
         c.source_sig = source_sig;
         c.target_sig = target_sig;
     }
-    save_and_view(&dir, &conns)
+    store::save_and_view(&dir, &conns)
 }
 
 /// Delete a connection.
 #[tauri::command]
 pub fn wh_delete_connection(app: AppHandle, id: i64) -> Result<Vec<ConnectionView>, String> {
-    let (dir, mut conns) = load(&app)?;
+    let (dir, mut conns) = store::load(&app)?;
     conns.retain(|c| c.id != id);
-    save_and_view(&dir, &conns)
+    store::save_and_view(&dir, &conns)
 }
 
 // --- Signature paste (#104) ---
@@ -399,7 +271,7 @@ pub fn wh_route(
     destination_system_id: i64,
     avoid_eol: bool,
 ) -> Result<RouteResult, String> {
-    let (_dir, conns) = load(&app)?;
+    let (_dir, conns) = store::load(&app)?;
     let sde = crate::sde::open_from_app(&app)?;
 
     // Build the unioned adjacency: stargates ∪ wormhole/jumpbridge connections.
@@ -439,7 +311,7 @@ pub fn wh_route(
                         system_id: sid,
                         name,
                         security,
-                        wspace: sid >= WSPACE_MIN_SYSTEM_ID,
+                        wspace: sid >= store::WSPACE_MIN_SYSTEM_ID,
                         via: via.to_string(),
                     }
                 })
@@ -526,7 +398,7 @@ fn merge_by_source(
 /// the merged, name-enriched connection set (same shape as `wh_connections`).
 #[tauri::command]
 pub async fn wh_import_evescout(app: AppHandle) -> Result<Vec<ConnectionView>, String> {
-    let (dir, existing) = load(&app)?;
+    let (dir, existing) = store::load(&app)?;
     let sigs = crate::evescout::fetch_signatures(&dir).await?;
     let now = crate::util::time::now_secs();
     let imported: Vec<Connection> = sigs
@@ -534,18 +406,7 @@ pub async fn wh_import_evescout(app: AppHandle) -> Result<Vec<ConnectionView>, S
         .filter_map(|s| imported_connection(s, now))
         .collect();
     let merged = merge_by_source(existing, imported, "evescout");
-    save_and_view(&dir, &merged)
-}
-
-/// Undirected wormhole/stargate edges from the stored map, for cross-module
-/// routing (the Route module's "nearest wormhole"). Returns `(a, b, eol)` per
-/// mapped connection, already auto-pruned of dead holes.
-pub(crate) fn connection_edges(app: &AppHandle) -> Result<Vec<(i64, i64, bool)>, String> {
-    let (_dir, conns) = load(app)?;
-    Ok(conns
-        .iter()
-        .map(|c| (c.source_system_id, c.target_system_id, c.eol))
-        .collect())
+    store::save_and_view(&dir, &merged)
 }
 
 // --- Ship-mass jump planner (#303) ---
@@ -873,7 +734,7 @@ pub async fn wh_tripwire_import(app: AppHandle) -> Result<Vec<ConnectionView>, S
         })
         .collect();
 
-    let (_dir, existing) = load(&app)?;
+    let (_dir, existing) = store::load(&app)?;
     let imported = tripwire_connections(
         &sigs,
         &whs,
@@ -881,7 +742,7 @@ pub async fn wh_tripwire_import(app: AppHandle) -> Result<Vec<ConnectionView>, S
         crate::util::time::now_secs(),
     );
     let merged = merge_by_source(existing, imported, "tripwire");
-    save_and_view(&dir, &merged)
+    store::save_and_view(&dir, &merged)
 }
 
 #[cfg(test)]
@@ -1102,23 +963,5 @@ mod tests {
             created_at: now - age_h * 3600,
             eol_updated_at: eol.then(|| now - eol_age_h * 3600),
         }
-    }
-
-    #[test]
-    fn prunes_dead_wormholes_keeps_permanent() {
-        let now = 1_000_000;
-        let conns = vec![
-            wh(1, 1, false, 0, now),  // fresh wormhole → keep
-            wh(2, 60, false, 0, now), // 60h old → drop (past max age)
-            wh(3, 2, true, 5, now),   // EOL 5h ago → drop (past grace)
-            wh(4, 2, true, 1, now),   // EOL 1h ago → keep (within grace)
-            Connection {
-                scope: "stargate".into(),
-                created_at: now - 100 * 3600,
-                ..wh(5, 0, false, 0, now)
-            }, // permanent → keep
-        ];
-        let kept: Vec<i64> = prune(conns, now).into_iter().map(|c| c.id).collect();
-        assert_eq!(kept, vec![1, 4, 5]);
     }
 }
