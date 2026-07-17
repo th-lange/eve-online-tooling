@@ -11,7 +11,7 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
+use tauri::{AppHandle, State};
 
 use super::candidates::{HUBS, POCHVEN_CANDIDATES};
 use crate::storage;
@@ -216,11 +216,11 @@ struct EsiKills {
 
 /// Ship + pod kills per system (last hour), from public ESI. Cached ~5 min;
 /// best-effort (empty on failure — the search still works).
-async fn system_kills(dir: &std::path::Path) -> HashMap<i64, i64> {
+async fn system_kills(dir: &std::path::Path, esi: &crate::esi::EsiClient) -> HashMap<i64, i64> {
     if let Some(c) = storage::cache_get::<HashMap<i64, i64>>(dir, "pochven_kills") {
         return c;
     }
-    let rows: Vec<EsiKills> = crate::esi::EsiClient::new()
+    let rows: Vec<EsiKills> = esi
         .get_json("/latest/universe/system_kills/", &[])
         .await
         .unwrap_or_default();
@@ -500,11 +500,12 @@ pub struct EntrySearch {
 #[tauri::command]
 pub async fn pochven_search(
     app: AppHandle,
+    esi: State<'_, crate::esi::EsiClient>,
     system_id: i64,
     max_jumps: Option<i64>,
 ) -> Result<EntrySearch, String> {
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
-    let kills = system_kills(&dir).await;
+    let kills = system_kills(&dir, &esi).await;
 
     let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
     for (a, b) in sde.all_stargate_edges().map_err(|e| e.to_string())? {

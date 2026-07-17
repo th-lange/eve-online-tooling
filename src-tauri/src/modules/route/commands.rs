@@ -79,14 +79,17 @@ fn merge_activity(jumps: &[EsiJumps], kills: &[EsiKills]) -> HashMap<i64, System
 /// Build the system-id → activity map: serve the ~30-min cache, else fetch the
 /// jumps + kills aggregates, enrich with SDE name/security/region, and cache.
 /// Shared by the activity table and the neighbourhood view.
-async fn activity_map(dir: &Path, refresh: bool) -> Result<HashMap<i64, SystemActivity>, String> {
+async fn activity_map(
+    dir: &Path,
+    esi: &EsiClient,
+    refresh: bool,
+) -> Result<HashMap<i64, SystemActivity>, String> {
     if !refresh {
         if let Some(cached) = storage::cache_get::<Vec<SystemActivity>>(dir, "system_activity") {
             return Ok(cached.into_iter().map(|r| (r.system_id, r)).collect());
         }
     }
 
-    let esi = EsiClient::new();
     let jumps: Vec<EsiJumps> = esi
         .get_json("/latest/universe/system_jumps/", &[])
         .await
@@ -117,9 +120,16 @@ async fn activity_map(dir: &Path, refresh: bool) -> Result<HashMap<i64, SystemAc
 /// Per-system jumps + kills over the last hour, enriched with SDE names. Cached
 /// (~30 min) to match CCP's hourly refresh; `refresh = true` bypasses the cache.
 #[tauri::command]
-pub async fn system_activity(app: AppHandle, refresh: bool) -> Result<Vec<SystemActivity>, String> {
+pub async fn system_activity(
+    app: AppHandle,
+    esi: State<'_, EsiClient>,
+    refresh: bool,
+) -> Result<Vec<SystemActivity>, String> {
     let dir = crate::storage::app_data_dir(&app)?;
-    let mut rows: Vec<SystemActivity> = activity_map(&dir, refresh).await?.into_values().collect();
+    let mut rows: Vec<SystemActivity> = activity_map(&dir, &esi, refresh)
+        .await?
+        .into_values()
+        .collect();
     // Default ordering: busiest first (the UI re-sorts).
     rows.sort_by_key(|r| std::cmp::Reverse(r.jumps));
     Ok(rows)
@@ -173,6 +183,7 @@ pub struct Neighbourhood {
 #[tauri::command]
 pub async fn system_neighbourhood(
     app: AppHandle,
+    esi: State<'_, EsiClient>,
     system_id: i64,
     depth: i64,
 ) -> Result<Neighbourhood, String> {
@@ -202,7 +213,7 @@ pub async fn system_neighbourhood(
     }
 
     // Heat + names for every system in the neighbourhood.
-    let activity = activity_map(&dir, false).await.unwrap_or_default();
+    let activity = activity_map(&dir, &esi, false).await.unwrap_or_default();
     let info = sde.solar_system_info().map_err(|e| e.to_string())?;
     let mut nodes: Vec<NeighbourNode> = distance
         .iter()

@@ -146,6 +146,7 @@ pub fn run() {
             // activate out of the box (no-op once `plugins/` exists).
             plugins::seed_example_plugin(&dir);
             app.manage(market::MarketService::with_cache(dir.clone()));
+            app.manage(esi::EsiClient::with_cache(dir.clone()));
             app.manage(std::sync::Arc::new(plugins::PluginRegistry::load(&dir)));
             app.manage(std::sync::Arc::new(plugins::PluginManager::new()));
             app.manage(esi::AuthState::with_cache(dir));

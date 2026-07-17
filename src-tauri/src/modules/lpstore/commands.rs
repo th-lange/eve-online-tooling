@@ -128,10 +128,10 @@ pub struct OfferRow {
 pub async fn lp_offers(
     app: AppHandle,
     market: State<'_, MarketService>,
+    esi: State<'_, EsiClient>,
     params: LpParams,
 ) -> Result<OffersResult, String> {
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
-    let esi = EsiClient::new();
 
     // Offers change rarely — serve them from the local cache unless refreshing.
     let key = format!("lp_offers_{}", params.corporation_id);

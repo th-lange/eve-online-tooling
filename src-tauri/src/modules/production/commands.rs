@@ -500,13 +500,14 @@ struct EsiCostIndex {
 #[tauri::command]
 pub async fn production_system_cost_index(
     app: AppHandle,
+    esi: State<'_, EsiClient>,
     system_id: i64,
 ) -> Result<Option<f64>, String> {
     let dir = crate::storage::app_data_dir(&app)?;
     let map: HashMap<i64, f64> = match storage::cache_get(&dir, "industry_cost_indices") {
         Some(cached) => cached,
         None => {
-            let systems: Vec<EsiIndustrySystem> = EsiClient::new()
+            let systems: Vec<EsiIndustrySystem> = esi
                 .get_json("/latest/industry/systems/", &[])
                 .await
                 .map_err(|e| e.to_string())?;

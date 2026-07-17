@@ -75,9 +75,10 @@ pub struct ContractRow {
 #[tauri::command]
 pub async fn contracts_scan(
     market: State<'_, MarketService>,
+    esi: State<'_, EsiClient>,
     params: ContractParams,
 ) -> Result<Vec<ContractRow>, String> {
-    let esi = EsiClient::new();
+    let esi = esi.inner().clone();
 
     let contracts: Vec<EsiContract> = esi
         .get_paged(
