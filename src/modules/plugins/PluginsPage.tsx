@@ -288,8 +288,8 @@ function McpBridgeCard() {
         Expose compute engines to MCP
         <span className="text-zinc-500">
           — adds dev-tier tools (production profit, fitting stats, …) for an
-          agent to verify the app's calculations. Still read-only and
-          auth-free; off by default.
+          agent to verify the app's calculations. Still read-only and auth-free;
+          off by default.
         </span>
       </label>
 

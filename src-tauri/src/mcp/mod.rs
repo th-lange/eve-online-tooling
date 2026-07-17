@@ -305,8 +305,9 @@ fn call_tool(params: Option<&Value>, ctx: &ToolCtx) -> Result<Value, (i64, Strin
     match name {
         "ping" => text_content("pong"),
         // A built-in capability (read-only, MCP-exposed) from the registry.
-        other if capabilities::find(other)
-            .is_some_and(|c| c.mcp || (c.mcp_dev && dev_tier_enabled(&ctx.app_data_dir))) =>
+        other
+            if capabilities::find(other)
+                .is_some_and(|c| c.mcp || (c.mcp_dev && dev_tier_enabled(&ctx.app_data_dir))) =>
         {
             let auth = AuthState::with_cache(ctx.app_data_dir.clone());
             let hctx = capabilities::HostCtx {
@@ -699,8 +700,15 @@ mod tests {
         assert!(on_names.contains(&"production_profit".to_string()));
         assert!(on_names.contains(&"fitting_stats".to_string()));
 
-        let resp = call(&ctx, "fitting_stats", json!({ "eft": "[Rifter, Test Fit]" }));
-        assert!(resp.get("error").is_none(), "expected success, got {resp:?}");
+        let resp = call(
+            &ctx,
+            "fitting_stats",
+            json!({ "eft": "[Rifter, Test Fit]" }),
+        );
+        assert!(
+            resp.get("error").is_none(),
+            "expected success, got {resp:?}"
+        );
         let stats = payload(&resp);
         assert_eq!(stats["resources"]["cpuUsed"], json!(0.0));
         let _ = std::fs::remove_dir_all(&dir);

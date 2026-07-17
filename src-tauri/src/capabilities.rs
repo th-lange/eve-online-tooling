@@ -471,7 +471,8 @@ fn cap_reprocessing_yield(ctx: &HostCtx, args: &Value) -> Result<Value, String> 
         .get("regionId")
         .and_then(Value::as_i64)
         .unwrap_or_else(default_region_id);
-    let f64_arg = |key: &str, default: f64| args.get(key).and_then(Value::as_f64).unwrap_or(default);
+    let f64_arg =
+        |key: &str, default: f64| args.get(key).and_then(Value::as_f64).unwrap_or(default);
     let i64_arg = |key: &str| args.get(key).and_then(Value::as_i64).unwrap_or(0);
 
     let sde = open_sde(ctx.app_data_dir)?;
@@ -592,9 +593,8 @@ mod tests {
     /// and this test fails.
     #[test]
     fn mcp_never_reaches_auth_gated_data() {
-        let auth_gated = |p: Permission| {
-            matches!(p, Permission::AssetsRead | Permission::OrdersRead)
-        };
+        let auth_gated =
+            |p: Permission| matches!(p, Permission::AssetsRead | Permission::OrdersRead);
         for cap in registry() {
             if cap.mcp || cap.mcp_dev {
                 assert!(
