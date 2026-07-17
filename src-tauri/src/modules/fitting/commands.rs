@@ -539,15 +539,12 @@ pub async fn fitting_esi_list(
 
     // Classify charges (SDE category 8 = Charge) and convert each fitting.
     let sde = crate::sde::open_from_app(&app)?;
-    let mut charge: HashMap<i64, bool> = HashMap::new();
-    for f in &esi {
-        for it in &f.items {
-            charge
-                .entry(it.type_id)
-                .or_insert_with(|| sde.type_category(it.type_id).ok().flatten() == Some(8));
-        }
-    }
-    let is_charge = |tid: i64| charge.get(&tid).copied().unwrap_or(false);
+    let ids: Vec<i64> = esi
+        .iter()
+        .flat_map(|f| f.items.iter().map(|it| it.type_id))
+        .collect();
+    let cats = sde.types_categories(&ids).unwrap_or_default();
+    let is_charge = |tid: i64| cats.get(&tid).copied() == Some(8);
     let fits: Vec<Fit> = esi
         .iter()
         .map(|f| super::esi_fittings::esi_fitting_to_fit(f, &is_charge))

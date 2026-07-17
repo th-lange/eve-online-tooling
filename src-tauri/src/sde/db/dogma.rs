@@ -188,6 +188,27 @@ impl Sde {
             .map_err(Into::into)
     }
 
+    /// Map of typeID → categoryID for the given types (bulk; avoids per-id
+    /// `type_category` round-trips in loops like the pvp report and fitting
+    /// charge classifier).
+    pub fn types_categories(&self, type_ids: &[i64]) -> Result<HashMap<i64, i64>, SdeError> {
+        if type_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let placeholders = vec!["?"; type_ids.len()].join(", ");
+        let sql = format!(
+            "SELECT t.typeID, g.categoryID FROM invTypes t
+             JOIN invGroups g ON g.groupID = t.groupID
+             WHERE t.typeID IN ({placeholders})"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(type_ids.iter()), |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        rows.collect::<Result<HashMap<_, _>, _>>()
+            .map_err(Into::into)
+    }
+
     /// Published Skill (category 16) type ids — the "all V" skill set the
     /// fitting engine applies (#172).
     pub fn skill_type_ids(&self) -> Result<Vec<i64>, SdeError> {
