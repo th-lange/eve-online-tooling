@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::esi::EsiClient;
-use crate::market::{resolve_location, MarketService, PriceModel};
+use crate::market::{jita_location, MarketService};
 
 /// How many item-exchange contracts to fetch items for (each is one ESI call).
 const CONTRACT_CAP: usize = 150;
@@ -118,19 +118,11 @@ pub async fn contracts_scan(
         }
     }
     let ids: Vec<i64> = ids.into_iter().collect();
-    let prices: HashMap<i64, PriceModel> = market
-        .price_models_at(resolve_location(10_000_002, None), &ids)
+    let prices = market
+        .price_map_at(jita_location(), &ids)
         .await
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(|m| (m.type_id, m))
-        .collect();
-    let sell = |type_id: i64| {
-        prices
-            .get(&type_id)
-            .and_then(|m| m.sell_percentile)
-            .unwrap_or(0.0)
-    };
+        .map_err(|e| e.to_string())?;
+    let sell = |type_id: i64| prices.sell_or_zero(type_id);
 
     let mut rows: Vec<ContractRow> = candidates
         .into_iter()

@@ -258,18 +258,14 @@ fn cap_appraise(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
 
     let ids: Vec<i64> = lines.iter().filter_map(|l| l.type_id).collect();
     let location = resolve_location(region_id, None);
-    let prices: HashMap<i64, _> =
-        tauri::async_runtime::block_on(ctx.market.price_models_at(location, &ids))
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|m| (m.type_id, m))
-            .collect();
+    let prices = tauri::async_runtime::block_on(ctx.market.price_map_at(location, &ids))
+        .map_err(|e| e.to_string())?;
 
     let (mut buy_total, mut sell_total, mut volume_total) = (0.0, 0.0, 0.0);
     let out_lines: Vec<Value> = lines
         .iter()
         .map(|l| {
-            let model = l.type_id.and_then(|id| prices.get(&id));
+            let model = l.type_id.and_then(|id| prices.get(id));
             let buy = model.and_then(|m| m.buy_percentile);
             let sell = model.and_then(|m| m.sell_percentile);
             let q = l.quantity as f64;

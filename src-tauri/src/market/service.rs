@@ -320,6 +320,19 @@ impl MarketService {
             .collect())
     }
 
+    /// Like [`price_models_at`](Self::price_models_at), collected into a
+    /// [`PriceMap`] keyed by type id — the shape most bulk-pricing call sites
+    /// actually want, instead of hand-assembling a `HashMap` plus a
+    /// `sell_percentile` accessor closure at every call site.
+    pub async fn price_map_at(
+        &self,
+        location: Location,
+        type_ids: &[i64],
+    ) -> Result<PriceMap, EsiError> {
+        let models = self.price_models_at(location, type_ids).await?;
+        Ok(PriceMap(models.into_iter().map(|m| (m.type_id, m)).collect()))
+    }
+
     /// For each type, the hub with the **highest realistic sell price** — "where
     /// is this worth the most to sell". Prices every known hub (Fuzzwork
     /// aggregates per hub station) and keeps the max `sell_percentile`. Types
@@ -367,6 +380,30 @@ pub struct BestSell {
     pub region_id: i64,
     pub hub: String,
     pub price: f64,
+}
+
+/// A lookup table of [`PriceModel`]s by type id, built by
+/// [`MarketService::price_map_at`]. Replaces the hand-assembled
+/// `HashMap<i64, PriceModel>` + `sell_percentile` accessor closure that used
+/// to be repeated at every bulk-pricing call site.
+#[derive(Debug, Clone, Default)]
+pub struct PriceMap(HashMap<i64, PriceModel>);
+
+impl PriceMap {
+    /// The full price model for a type, if it was priced.
+    pub fn get(&self, type_id: i64) -> Option<&PriceModel> {
+        self.0.get(&type_id)
+    }
+
+    /// Realistic sell price (percentile), if the type has sell orders.
+    pub fn sell(&self, type_id: i64) -> Option<f64> {
+        self.get(type_id).and_then(|m| m.sell_percentile)
+    }
+
+    /// Realistic sell price, or `0.0` if the type is unpriced.
+    pub fn sell_or_zero(&self, type_id: i64) -> f64 {
+        self.sell(type_id).unwrap_or(0.0)
+    }
 }
 
 /// Recent traded volume + price band over the last `days` of history.

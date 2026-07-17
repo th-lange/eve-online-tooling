@@ -117,6 +117,13 @@ pub fn default_region_id() -> i64 {
     10000002
 }
 
+/// The default location (Jita region average, The Forge) — the reference
+/// market most valuation call sites price against unless the caller picked a
+/// different hub.
+pub fn jita_location() -> Location {
+    Location::Region(default_region_id())
+}
+
 /// Build a [`Location`] from a region and optional station.
 pub fn resolve_location(region_id: i64, station_id: Option<i64>) -> Location {
     match station_id {

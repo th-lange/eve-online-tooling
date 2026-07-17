@@ -1,12 +1,12 @@
 //! Tauri command surface for the station-trading module.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use serde::Deserialize;
 use tauri::{AppHandle, State};
 
 use crate::lists::{self, ListItem};
-use crate::market::{default_region_id, resolve_location, MarketService, PriceModel};
+use crate::market::{default_region_id, resolve_location, MarketService};
 use crate::storage;
 
 use super::engine::{evaluate, TradeConfig, TradeRow};
@@ -53,13 +53,10 @@ pub async fn station_trading(
     let ids: Vec<i64> = items.iter().map(|i| i.type_id).collect();
 
     let location = resolve_location(params.region_id, params.station_id);
-    let prices: HashMap<i64, PriceModel> = market
-        .price_models_at(location, &ids)
+    let prices = market
+        .price_map_at(location, &ids)
         .await
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(|m| (m.type_id, m))
-        .collect();
+        .map_err(|e| e.to_string())?;
 
     let blacklist: HashSet<i64> = storage::load_id_list(&dir, "blacklist")
         .into_iter()
@@ -79,7 +76,7 @@ pub async fn station_trading(
         .iter()
         .filter(|item| !blacklist.contains(&item.type_id))
         .filter_map(|item| {
-            let model = prices.get(&item.type_id)?;
+            let model = prices.get(item.type_id)?;
             let mut row = evaluate(
                 item.type_id,
                 &item.name,
