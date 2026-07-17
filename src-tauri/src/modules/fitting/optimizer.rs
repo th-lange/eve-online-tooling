@@ -1152,6 +1152,47 @@ pub(super) fn optimize_fit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::modules::fitting::engine::attr::AttrStore;
+
+    /// Seed a bare `AttrStore` from base attributes, the idiom `engine::resolve`'s
+    /// own tests use (no modifiers applied — just base values for `get` to read).
+    fn store(attrs: &[(i64, f64)]) -> AttrStore {
+        let mut s = AttrStore::new();
+        s.seed(attrs);
+        s
+    }
+
+    /// A minimal `ResolvedFit` with only `modules` populated — `damage_score`
+    /// never touches `ship`/`drones`/`charges` (drone damage reads straight off
+    /// the batched `AttrMap`, and charge damage comes from `FitItem::charge_type_id`).
+    fn resolved(modules: Vec<AttrStore>) -> ResolvedFit {
+        ResolvedFit {
+            ship: AttrStore::new(),
+            modules,
+            drones: Vec::new(),
+            charges: Vec::new(),
+            unresolved: 0,
+        }
+    }
+
+    fn layout() -> ShipLayout {
+        ShipLayout {
+            type_id: 1,
+            name: "Test Hull".into(),
+            high_slots: 4,
+            mid_slots: 3,
+            low_slots: 2,
+            rig_slots: 1,
+            subsystem_slots: 0,
+            turret_hardpoints: 4,
+            launcher_hardpoints: 0,
+            cpu_output: 100.0,
+            powergrid_output: 50.0,
+            calibration: 400.0,
+            drone_bay: 0.0,
+            drone_bandwidth: 0.0,
+        }
+    }
 
     fn item(type_id: i64, slot: SlotKind, charge: Option<i64>, qty: i32) -> FitItem {
         FitItem {
@@ -1333,5 +1374,148 @@ mod tests {
                 < 1e-9
         );
         assert!(!meets(&e, &both));
+    }
+
+    /// An unloaded turret (a `damageMultiplier` present) contributes `mult ×
+    /// 1.0 / rof` — a unit shot; an unloaded launcher (no multiplier) instead
+    /// contributes `1.0 / rof`, so both rank without ammo loaded.
+    #[test]
+    fn damage_score_unloaded_weapons_count_unit_shot() {
+        let modules = vec![
+            store(&[(51, 1000.0), (64, 5.0)]), // turret: 1s RoF, ×5 mult
+            store(&[(51, 500.0)]),             // launcher: 0.5s RoF, no mult
+        ];
+        let resolved = resolved(modules);
+        let turret = item(10, SlotKind::High, None, 1);
+        let launcher = item(11, SlotKind::High, None, 1);
+        let module_items = vec![&turret, &launcher];
+        let attrs: AttrMap = HashMap::new();
+
+        let score = damage_score(&resolved, &module_items, &[], &attrs);
+        assert_eq!(score, 5.0 * 1.0 / 1.0 + 1.0 / 0.5);
+    }
+
+    /// A loaded charge's own base damage (em/explosive/kinetic/thermal, summed
+    /// by `base_damage`) replaces the unit-shot fallback.
+    #[test]
+    fn damage_score_loaded_charge_uses_charge_base_damage() {
+        let modules = vec![store(&[(51, 1000.0), (64, 2.0)])];
+        let resolved = resolved(modules);
+        let loaded = item(10, SlotKind::High, Some(50), 1);
+        let module_items = vec![&loaded];
+        let attrs: AttrMap = HashMap::from([(50, vec![(114, 10.0), (117, 5.0)])]); // 15 base dmg
+
+        let score = damage_score(&resolved, &module_items, &[], &attrs);
+        assert_eq!(score, 2.0 * 15.0 / 1.0);
+    }
+
+    /// A weapon with no (or zero) rate of fire contributes nothing — guards the
+    /// `/ rof` divide-by-zero rather than blowing up on an incomplete fixture.
+    #[test]
+    fn damage_score_zero_rof_contributes_nothing() {
+        let modules = vec![store(&[(64, 5.0)])]; // no attr 51 -> get(51) == 0.0
+        let resolved = resolved(modules);
+        let weapon = item(10, SlotKind::High, None, 1);
+        let module_items = vec![&weapon];
+        let attrs: AttrMap = HashMap::new();
+
+        assert_eq!(damage_score(&resolved, &module_items, &[], &attrs), 0.0);
+    }
+
+    /// A drone's damage contribution scales by `quantity.max(1)` — an empty/
+    /// zero-quantity drone entry still counts as one drone, not zero.
+    #[test]
+    fn damage_score_drone_quantity_zero_counts_as_one() {
+        let resolved = resolved(Vec::new());
+        let attrs: AttrMap = HashMap::from([(77, vec![(51, 1000.0), (64, 3.0), (114, 10.0)])]);
+        let zero_qty = item(77, SlotKind::Drone, None, 0);
+        let one_qty = item(77, SlotKind::Drone, None, 1);
+        let five_qty = item(77, SlotKind::Drone, None, 5);
+
+        let zero = damage_score(&resolved, &[], &[&zero_qty], &attrs);
+        let one = damage_score(&resolved, &[], &[&one_qty], &attrs);
+        let five = damage_score(&resolved, &[], &[&five_qty], &attrs);
+
+        assert_eq!(zero, one); // quantity=0 behaves like quantity=1, not 0
+        assert_eq!(zero, 3.0 * 10.0 / 1.0);
+        assert_eq!(five, 5.0 * zero);
+    }
+
+    /// `parse_objective` round-trips every known string to its enum variant.
+    #[test]
+    fn parse_objective_round_trips_known_strings() {
+        assert!(matches!(parse_objective("tank"), Ok(Objective::Tank)));
+        assert!(matches!(parse_objective("damage"), Ok(Objective::Damage)));
+        assert!(matches!(parse_objective("repair"), Ok(Objective::Repair)));
+        assert!(matches!(parse_objective("yield"), Ok(Objective::Yield)));
+    }
+
+    /// Anything else is a descriptive error, not a silent default.
+    #[test]
+    fn parse_objective_errors_on_unknown_string() {
+        assert_eq!(
+            parse_objective("dps").err(),
+            Some("unknown objective: dps".to_string())
+        );
+    }
+
+    /// Every `opt_config` entry uses a real fittable slot kind with a non-empty
+    /// group list, and the damage objective always offers a High-slot weapon
+    /// group so an empty hull can still be armed.
+    #[test]
+    fn opt_config_slot_kinds_and_group_lists_are_valid() {
+        for obj in [
+            Objective::Tank,
+            Objective::Damage,
+            Objective::Repair,
+            Objective::Yield,
+        ] {
+            let config = opt_config(obj);
+            assert!(!config.is_empty());
+            for (slot, groups) in &config {
+                assert!(
+                    matches!(
+                        slot,
+                        SlotKind::High | SlotKind::Mid | SlotKind::Low | SlotKind::Rig
+                    ),
+                    "unexpected slot kind in opt_config"
+                );
+                assert!(!groups.is_empty(), "empty group list for a configured slot");
+            }
+        }
+
+        let damage = opt_config(Objective::Damage);
+        assert!(damage
+            .iter()
+            .any(|(slot, groups)| *slot == SlotKind::High && !groups.is_empty()));
+    }
+
+    /// `slot_capacity` reads the matching `ShipLayout` field for the four
+    /// fittable kinds and returns 0 for anything else (drones/implants/
+    /// boosters/cargo have no slot count).
+    #[test]
+    fn slot_capacity_per_kind() {
+        let l = layout();
+        assert_eq!(slot_capacity(&l, SlotKind::High), 4);
+        assert_eq!(slot_capacity(&l, SlotKind::Mid), 3);
+        assert_eq!(slot_capacity(&l, SlotKind::Low), 2);
+        assert_eq!(slot_capacity(&l, SlotKind::Rig), 1);
+        assert_eq!(slot_capacity(&l, SlotKind::Subsystem), 0);
+        assert_eq!(slot_capacity(&l, SlotKind::Drone), 0);
+        assert_eq!(slot_capacity(&l, SlotKind::Implant), 0);
+        assert_eq!(slot_capacity(&l, SlotKind::Booster), 0);
+        assert_eq!(slot_capacity(&l, SlotKind::Cargo), 0);
+    }
+
+    /// A freshly-added optimizer module is active with no charge loaded.
+    #[test]
+    fn new_module_is_active_with_no_charge() {
+        let m = new_module(123, SlotKind::Low, 2);
+        assert_eq!(m.type_id, 123);
+        assert_eq!(m.slot, SlotKind::Low);
+        assert_eq!(m.index, 2);
+        assert_eq!(m.state, ModuleState::Active);
+        assert_eq!(m.charge_type_id, None);
+        assert_eq!(m.quantity, 1);
     }
 }
