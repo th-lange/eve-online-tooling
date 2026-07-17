@@ -697,12 +697,13 @@ impl<'a> SearchCtx<'a> {
         current
     }
 
-    /// 2) Local search — re-pick each relevant slot given the final mix (stacking
-    /// penalties make the best choice interdependent), iterating to a local
-    /// optimum. Weapon slots are swapped as a whole class (the sub-pass below),
-    /// never per-slot, so the rack stays uniform. Seed + local search is a
-    /// strong, near-global result over the curated candidate pool (a true global
-    /// optimum is combinatorially intractable for the full module catalogue).
+    /// 2) Local search — re-pick each relevant slot given the final mix
+    ///    (stacking penalties make the best choice interdependent), iterating
+    ///    to a local optimum. Weapon slots are swapped as a whole class (the
+    ///    sub-pass below), never per-slot, so the rack stays uniform. Seed +
+    ///    local search is a strong, near-global result over the curated
+    ///    candidate pool (a true global optimum is combinatorially
+    ///    intractable for the full module catalogue).
     fn local_search(
         &mut self,
         fit: &mut Fit,
@@ -819,6 +820,10 @@ impl<'a> SearchCtx<'a> {
     }
 }
 
+/// Per-slot-kind candidate module ids, plus the preloaded [`DogmaContext`]
+/// the rest of the search needs.
+type Candidates = (Vec<(SlotKind, Vec<i64>)>, DogmaContext);
+
 /// Candidate module type ids per slot kind, filtered to the allowed meta
 /// groups, with "Polarized" weapons dropped and — for a damage objective —
 /// restricted to the hull's bonused weapon groups/skills. Also preloads the
@@ -830,7 +835,7 @@ fn build_candidates(
     fit: &Fit,
     obj: Objective,
     meta: &[i64],
-) -> Result<(Vec<(SlotKind, Vec<i64>)>, DogmaContext), String> {
+) -> Result<Candidates, String> {
     // Candidate type ids per slot kind, filtered to the allowed meta groups.
     let mut slot_candidates: Vec<(SlotKind, Vec<i64>)> = Vec::new();
     for (slot, group_ids) in opt_config(obj) {
