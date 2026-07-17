@@ -798,4 +798,173 @@ mod tests {
         assert_eq!(ew_label("ecm"), "ECM");
         assert_eq!(ew_label("weaponDisruption"), "Tracking/Guidance Disruption");
     }
+
+    fn store(attrs: &[(i64, f64)]) -> AttrStore {
+        let mut s = AttrStore::new();
+        for &(id, v) in attrs {
+            s.set_base(id, v);
+        }
+        s
+    }
+
+    fn item(type_id: i64, charge: Option<i64>, state: ModuleState, qty: i32) -> FitItem {
+        FitItem {
+            type_id,
+            slot: SlotKind::High,
+            index: 0,
+            state,
+            charge_type_id: charge,
+            quantity: qty,
+        }
+    }
+
+    fn resolved_fit(
+        modules: Vec<AttrStore>,
+        charges: Vec<Option<AttrStore>>,
+        drones: Vec<AttrStore>,
+    ) -> ResolvedFit {
+        ResolvedFit {
+            ship: AttrStore::new(),
+            modules,
+            drones,
+            charges,
+            unresolved: 0,
+        }
+    }
+
+    /// Offline/online modules never fire; an otherwise-identical active one
+    /// does. An active turret with no charge loaded is excluded entirely —
+    /// unlike `optimizer::damage_score`, which deliberately counts an unloaded
+    /// turret as a unit shot so the optimizer can rank/fit unammoed weapons.
+    /// Don't "fix" one to match the other: `dps_of` feeds the stats panel
+    /// (real DPS), `damage_score` feeds the search objective (potential DPS).
+    #[test]
+    fn dps_of_module_state_and_charge_gating() {
+        let turret = store(&[(64, 5.0), (51, 2000.0)]); // mult 5, 2s RoF
+        let charge = store(&[(114, 25.0), (116, 25.0), (117, 25.0), (118, 25.0)]); // 100 dmg
+
+        let resolved = resolved_fit(
+            vec![
+                turret.clone(),
+                turret.clone(),
+                turret.clone(),
+                turret.clone(),
+            ],
+            vec![
+                Some(charge.clone()), // offline: contributes 0
+                Some(charge.clone()), // online: contributes 0
+                Some(charge.clone()), // active: contributes damage
+                None,                 // active but unloaded: excluded
+            ],
+            vec![store(&[
+                (64, 2.0),
+                (51, 1000.0),
+                (114, 10.0),
+                (116, 10.0),
+                (117, 10.0),
+                (118, 10.0),
+            ])], // drone: mult 2, 1s RoF, 40 dmg/shot
+        );
+        let items = vec![
+            item(100, Some(200), ModuleState::Offline, 1),
+            item(100, Some(200), ModuleState::Online, 1),
+            item(100, Some(200), ModuleState::Active, 1),
+            item(100, None, ModuleState::Active, 1),
+        ];
+        let module_items: Vec<&FitItem> = items.iter().collect();
+        // Drone state is irrelevant to dps_of — only quantity scales it.
+        let drone_item = item(300, None, ModuleState::Offline, 3);
+        let drone_items = vec![&drone_item];
+
+        let dps = dps_of(&resolved, &module_items, &drone_items);
+        assert_eq!(dps.turret, 100.0 * 5.0 / 2.0); // only the active module counts
+        assert_eq!(dps.missile, 0.0);
+        assert_eq!(dps.drone, 2.0 * 40.0 * 3.0 / 1.0); // scaled by quantity, regardless of state
+        assert_eq!(dps.total, dps.turret + dps.drone);
+    }
+
+    /// Turret range from maxRange(54)/falloff(158); a launcher with no
+    /// maxRange falls back to the loaded missile's velocity(37) ×
+    /// flightTime(281)/1000; identical (type, charge) pairs dedupe; Offline
+    /// is skipped but Online still yields a range entry.
+    #[test]
+    fn weapon_ranges_of_dedup_fallback_and_state_gating() {
+        let turret = store(&[(54, 5000.0), (158, 2000.0)]);
+        let launcher = store(&[(54, 0.0), (158, 0.0)]);
+        let missile = store(&[(37, 250.0), (281, 8000.0)]); // 250 m/s * 8s = 2000m
+        let offline_turret = store(&[(54, 9999.0), (158, 0.0)]);
+        let online_turret = store(&[(54, 3000.0), (158, 1000.0)]);
+
+        let resolved = resolved_fit(
+            vec![
+                turret.clone(), // 0: active turret
+                turret,         // 1: identical -> dedupes with 0
+                launcher,       // 2: launcher, falls back to missile flight range
+                offline_turret, // 3: offline -> skipped
+                online_turret,  // 4: online -> still yields a range
+            ],
+            vec![None, None, Some(missile), None, None],
+            Vec::new(),
+        );
+        let items = vec![
+            item(100, Some(200), ModuleState::Active, 1),
+            item(100, Some(200), ModuleState::Active, 1), // same (type, charge) as 0
+            item(300, Some(400), ModuleState::Active, 1),
+            item(500, None, ModuleState::Offline, 1),
+            item(600, None, ModuleState::Online, 1),
+        ];
+        let module_items: Vec<&FitItem> = items.iter().collect();
+
+        let ranges = weapon_ranges_of(&resolved, &module_items);
+        assert_eq!(
+            ranges,
+            vec![
+                WeaponRange {
+                    type_id: 100,
+                    charge_type_id: Some(200),
+                    optimal: 5000.0,
+                    falloff: 2000.0,
+                },
+                WeaponRange {
+                    type_id: 300,
+                    charge_type_id: Some(400),
+                    optimal: 2000.0,
+                    falloff: 0.0,
+                },
+                WeaponRange {
+                    type_id: 600,
+                    charge_type_id: None,
+                    optimal: 3000.0,
+                    falloff: 1000.0,
+                },
+            ]
+        );
+    }
+
+    /// No capacitorNeed(6), or a zero duration, means no drain. Duration
+    /// falls back to speed(51) for weapons lacking an explicit duration(73).
+    /// A non-Active module never drains capacitor.
+    #[test]
+    fn capacitor_of_need_duration_and_state_gating() {
+        let no_need = store(&[(73, 5000.0)]); // no attr 6 at all
+        let zero_duration = store(&[(6, 10.0), (73, 0.0), (51, 0.0)]);
+        let weapon_fallback = store(&[(6, 20.0), (51, 4000.0)]); // no 73 -> falls back to speed
+        let online_module = store(&[(6, 100.0), (73, 1000.0)]);
+
+        let resolved = resolved_fit(
+            vec![no_need, zero_duration, weapon_fallback, online_module],
+            vec![None, None, None, None],
+            Vec::new(),
+        );
+        let items = vec![
+            item(100, None, ModuleState::Active, 1),
+            item(200, None, ModuleState::Active, 1),
+            item(300, None, ModuleState::Active, 1),
+            item(400, None, ModuleState::Online, 1),
+        ];
+        let module_items: Vec<&FitItem> = items.iter().collect();
+
+        let cap = capacitor_of(&resolved, &module_items);
+        assert_eq!(cap.drain, 20.0 / (4000.0 / 1000.0));
+    }
 }
