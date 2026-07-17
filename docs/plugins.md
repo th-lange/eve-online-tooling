@@ -31,20 +31,41 @@ This page documents Phase 1 — **logic plugins** (WASM).
 
 So plugins go in `<app_data_dir>/plugins/<id>/`. The **Plugins** page shows the
 exact resolved path for your machine. `<id>` is the plugin's id and **must**
-match the folder name.
+match the folder name — you never have to get this right by hand, though: the
+easiest way in is drag-and-drop.
 
-The app enumerates this folder on startup, validates each `plugin.json`, and
-lists the valid ones (`plugins_list`). An invalid manifest is skipped and
-logged — it never stops the app from booting. Added or removed a plugin while
-the app is running? Click **Rescan** on the Plugins page to pick it up without
-a restart. On first run the app also seeds a bundled `hello-ui` example here so
-there's something to try; delete it and it stays gone.
+### Installing: drag-and-drop
+
+Drag a plugin's folder, or a `.zip` of one, onto the app window (anywhere —
+not just the Plugins page) and it's copied into `plugins/<id>/` automatically,
+using the `id` from its `plugin.json` regardless of what the dropped
+folder/zip was named. A `.zip` may have the plugin's files at its root, or
+wrapped one level deep in a single folder — both work, matching the shape of
+the release zips linked below. Dropping a plugin whose `id` you already have
+installed **replaces** it — that's also how you update one. A malformed
+manifest is rejected before anything is published; nothing changes.
+
+Prefer doing it by hand? Copy the folder straight into the path shown on the
+Plugins page, then click **Rescan** (or restart the app) to pick it up.
+
+### Removing
+
+Each installed plugin's card has a **Remove** button (a confirm step guards
+against a stray click) that deactivates it, evicts its running instance, and
+deletes its folder from disk — gone for good, not just deactivated.
+
+The app enumerates the plugins folder on startup, validates each
+`plugin.json`, and lists the valid ones (`plugins_list`). An invalid manifest
+is skipped and logged — it never stops the app from booting. Added or removed
+a plugin outside the app (e.g. editing files directly) while it's running?
+Click **Rescan** to pick it up without a restart. On first run the app also
+seeds a bundled `hello-ui` example here so there's something to try; delete
+it and it stays gone.
 
 ## Try a ready-made one
 
 Don't want to build anything? Grab a prebuilt example from the
-[latest release](https://github.com/th-lange/eve-online-tooling/releases/latest)
-and unzip it into your `plugins/` folder:
+[latest release](https://github.com/th-lange/eve-online-tooling/releases/latest):
 
 - **[pricing-model-plugin.zip](https://github.com/th-lange/eve-online-tooling/releases/latest/download/pricing-model-plugin.zip)**
   — the logic **+** UI reference documented below (needs the SDE: open the
@@ -52,10 +73,9 @@ and unzip it into your `plugins/` folder:
 - **[hello-ui-plugin.zip](https://github.com/th-lange/eve-online-tooling/releases/latest/download/hello-ui-plugin.zip)**
   — a minimal UI-only plugin.
 
-Each zip already contains the `<id>/` folder, so unzip it _inside_
-`<app_data_dir>/plugins/` and you'll get `plugins/pricing-model/`. Then
-**Rescan** on the Plugins page and activate it. To build one yourself instead,
-read on — the full source is in
+Drag the downloaded `.zip` onto the app window and it's installed — no need
+to unzip it yourself first. Then activate it from the Plugins page. To build
+one yourself instead, read on — the full source is in
 [`examples/plugins/`](https://github.com/th-lange/eve-online-tooling/tree/main/examples/plugins).
 
 ## The manifest: `plugin.json`
@@ -187,9 +207,9 @@ cp examples/plugins/pricing-model/target/wasm32-unknown-unknown/release/pricing_
 
 ### Install it
 
-Copy the `pricing-model/` folder (its `plugin.json` + `pricing_model.wasm`) into
-`<app_data_dir>/plugins/`, restart the app, and approve the requested
-permissions when prompted.
+Drag the `pricing-model/` folder (its `plugin.json` + `pricing_model.wasm`)
+onto the app window, or copy it into `<app_data_dir>/plugins/` and click
+**Rescan**. Then approve the requested permissions when prompted.
 
 > The install-time **consent** prompt that grants permissions is tracked
 > separately; until it lands, grants are empty, so a plugin that needs a

@@ -52,6 +52,20 @@ export function pluginsRescan(): Promise<PluginEntry[]> {
   return invoke<PluginEntry[]>("plugins_rescan");
 }
 
+/** Install a plugin dropped onto the Plugins page: `path` is an absolute
+ *  path to either a plugin folder or a `.zip` of one. Replaces any existing
+ *  install of the same id (also how a reinstall/update works). Returns the
+ *  fresh installed list. */
+export function pluginsInstall(path: string): Promise<PluginEntry[]> {
+  return invoke<PluginEntry[]>("plugins_install", { path });
+}
+
+/** Uninstall a plugin: deactivate it, remove it from the list, and delete
+ *  its folder on disk. Returns the fresh installed list. */
+export function pluginsRemove(pluginId: string): Promise<PluginEntry[]> {
+  return invoke<PluginEntry[]>("plugins_remove", { pluginId });
+}
+
 /** The absolute path plugins install into (differs per OS), for showing the
  *  user where to drop a plugin folder. */
 export function pluginsDir(): Promise<string> {

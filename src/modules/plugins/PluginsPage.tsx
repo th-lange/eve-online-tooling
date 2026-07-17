@@ -1,11 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderOpen, Radio, RefreshCw } from "lucide-react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { FolderOpen, Radio, RefreshCw, Trash2, Upload } from "lucide-react";
 import {
   errorMessage,
   pluginsList,
   pluginsRescan,
   pluginsDir,
+  pluginsInstall,
+  pluginsRemove,
   pluginSetActive,
   mcpStatus,
   mcpStart,
@@ -31,6 +34,40 @@ export function PluginsPage() {
     mutationFn: pluginsRescan,
     onSuccess: (list) => qc.setQueryData(["plugins"], list),
   });
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
+  const install = useMutation({
+    mutationFn: pluginsInstall,
+    onSuccess: (list) => {
+      qc.setQueryData(["plugins"], list);
+      setInstallError(null);
+    },
+    onError: (err) => setInstallError(errorMessage(err)),
+  });
+
+  // Native OS drag-and-drop: dropped paths (a plugin folder or a .zip) are
+  // installed in order. HTML5 drag events don't fire alongside this — Tauri
+  // intercepts the drop at the webview level and hands us real filesystem
+  // paths instead of browser File objects.
+  useEffect(() => {
+    const unlisten = getCurrentWebview().onDragDropEvent((event) => {
+      const { payload } = event;
+      if (payload.type === "enter" || payload.type === "over") {
+        setIsDragOver(true);
+      } else if (payload.type === "leave") {
+        setIsDragOver(false);
+      } else if (payload.type === "drop") {
+        setIsDragOver(false);
+        for (const path of payload.paths) {
+          install.mutate(path);
+        }
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- install.mutate identity is stable across renders (react-query)
+  }, []);
 
   if (plugins.isLoading) {
     return (
@@ -74,18 +111,43 @@ export function PluginsPage() {
         }
       />
       <McpBridgeCard />
-      {dir.data ? (
-        <div className="mt-4 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-xs text-zinc-400">
+      <div
+        className={`mt-4 flex items-start gap-2 rounded-lg border p-3 text-xs transition-colors ${
+          isDragOver
+            ? "border-indigo-500 bg-indigo-950/40 text-indigo-200"
+            : "border-zinc-800 bg-zinc-900/40 text-zinc-400"
+        }`}
+      >
+        {isDragOver ? (
+          <Upload size={14} className="mt-0.5 shrink-0 text-indigo-300" />
+        ) : (
           <FolderOpen size={14} className="mt-0.5 shrink-0 text-zinc-500" />
-          <span>
-            Install plugins into{" "}
-            <code className="text-zinc-300">{dir.data}</code> — one folder per
-            plugin, named after its id. Then click{" "}
-            <strong className="text-zinc-300">Rescan</strong> (or restart the
-            app) to pick up changes.
-          </span>
+        )}
+        <span>
+          {isDragOver ? (
+            "Drop to install…"
+          ) : (
+            <>
+              Drag a plugin folder or a <code>.zip</code> anywhere onto this
+              window to install it — or copy it manually into{" "}
+              {dir.data ? (
+                <code className="text-zinc-300">{dir.data}</code>
+              ) : (
+                "the plugins folder"
+              )}{" "}
+              and click <strong className="text-zinc-300">Rescan</strong>.
+            </>
+          )}
+        </span>
+      </div>
+      {install.isPending && (
+        <div className="mt-3 text-xs text-zinc-500">Installing…</div>
+      )}
+      {installError && (
+        <div className="mt-3 rounded-lg border border-rose-900 bg-rose-950/30 p-3 text-sm text-rose-300">
+          Couldn't install: {installError}
         </div>
-      ) : null}
+      )}
       {entries.length > 0 && (
         <div className="mt-4 rounded-lg border border-amber-900 bg-amber-950/30 p-3 text-sm text-amber-200">
           Plugins are third-party code. Activating one grants it exactly the
@@ -96,8 +158,8 @@ export function PluginsPage() {
       )}
       {entries.length === 0 ? (
         <Centered>
-          No plugins installed yet. Drop a plugin folder into the directory
-          shown above, then Rescan.
+          No plugins installed yet. Drag a plugin folder or zip onto this window
+          to install it.
         </Centered>
       ) : (
         <div className="mt-4 flex flex-col gap-3">
@@ -113,9 +175,14 @@ export function PluginsPage() {
 function PluginCard({ entry }: { entry: PluginEntry }) {
   const qc = useQueryClient();
   const { manifest, active } = entry;
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const toggle = useMutation({
     mutationFn: (next: boolean) => pluginSetActive(manifest.id, next),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["plugins"] }),
+  });
+  const remove = useMutation({
+    mutationFn: () => pluginsRemove(manifest.id),
+    onSuccess: (list) => qc.setQueryData(["plugins"], list),
   });
 
   return (
@@ -161,17 +228,45 @@ function PluginCard({ entry }: { entry: PluginEntry }) {
           </div>
         ) : null}
       </div>
-      <button
-        onClick={() => toggle.mutate(!active)}
-        disabled={toggle.isPending}
-        className={`shrink-0 rounded px-3 py-1.5 text-sm font-medium transition disabled:opacity-50 ${
-          active
-            ? "border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-            : "bg-indigo-600 text-white hover:bg-indigo-500"
-        }`}
-      >
-        {active ? "Deactivate" : "Activate"}
-      </button>
+      <div className="flex shrink-0 flex-col items-end gap-2">
+        <button
+          onClick={() => toggle.mutate(!active)}
+          disabled={toggle.isPending}
+          className={`rounded px-3 py-1.5 text-sm font-medium transition disabled:opacity-50 ${
+            active
+              ? "border border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+              : "bg-indigo-600 text-white hover:bg-indigo-500"
+          }`}
+        >
+          {active ? "Deactivate" : "Activate"}
+        </button>
+        {confirmRemove ? (
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-zinc-500">Remove for good?</span>
+            <button
+              onClick={() => remove.mutate()}
+              disabled={remove.isPending}
+              className="rounded border border-rose-800 px-2 py-0.5 text-xs text-rose-300 hover:bg-rose-950 disabled:opacity-50"
+            >
+              Confirm
+            </button>
+            <button
+              onClick={() => setConfirmRemove(false)}
+              className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirmRemove(true)}
+            className="flex items-center gap-1 text-xs text-zinc-500 hover:text-rose-300"
+          >
+            <Trash2 size={12} />
+            Remove
+          </button>
+        )}
+      </div>
     </div>
   );
 }

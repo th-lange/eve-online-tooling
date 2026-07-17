@@ -219,6 +219,20 @@ pub fn plugins_rescan(
     registry.list()
 }
 
+/// Uninstall an installed plugin: evict its cached instance (if any),
+/// deactivate it, remove it from the registry, and delete its folder on
+/// disk. Returns the fresh installed list.
+#[tauri::command]
+pub fn plugins_remove(
+    registry: State<'_, Arc<PluginRegistry>>,
+    manager: State<'_, Arc<PluginManager>>,
+    plugin_id: String,
+) -> Result<Vec<PluginEntry>, AppError> {
+    manager.evict(&plugin_id);
+    registry.remove(&plugin_id).map_err(AppError::from)?;
+    Ok(registry.list())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

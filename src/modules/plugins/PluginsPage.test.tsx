@@ -5,6 +5,7 @@ import {
   fireEvent,
   waitFor,
   within,
+  act,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -14,6 +15,19 @@ import type { McpStatus, PluginEntry } from "../../lib/api";
 const invokeMock = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
+}));
+
+// Capture the registered drag-drop handler so tests can fire synthetic
+// enter/drop/leave events, the same shape Tauri's native webview sends.
+let dragDropHandler: ((event: { payload: unknown }) => void) | null = null;
+const unlistenMock = vi.fn();
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({
+    onDragDropEvent: (handler: (event: { payload: unknown }) => void) => {
+      dragDropHandler = handler;
+      return Promise.resolve(unlistenMock);
+    },
+  }),
 }));
 
 const PLUGIN: PluginEntry = {
@@ -72,6 +86,10 @@ function renderPage(entries: PluginEntry[], mcpStart: McpStatus = STOPPED) {
           return Promise.resolve("/tmp/app/plugins");
         case "plugins_rescan":
           return Promise.resolve(entries);
+        case "plugins_install":
+          return Promise.resolve(entries);
+        case "plugins_remove":
+          return Promise.resolve(entries.filter((e) => e !== PLUGIN));
         default:
           return Promise.reject(
             new Error(`unexpected command ${cmd} ${JSON.stringify(args)}`),
@@ -94,6 +112,8 @@ function pluginCard(name: string): HTMLElement {
 describe("PluginsPage", () => {
   beforeEach(() => {
     invokeMock.mockReset();
+    dragDropHandler = null;
+    unlistenMock.mockReset();
   });
 
   it("lists an installed plugin and the capabilities it declares", async () => {
@@ -201,5 +221,73 @@ describe("PluginsPage", () => {
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("plugins_rescan"),
     );
+  });
+
+  it("dropping a path installs it and shows the fresh list", async () => {
+    renderPage([]);
+    await screen.findByText("/tmp/app/plugins");
+    expect(dragDropHandler).not.toBeNull();
+    act(() => {
+      dragDropHandler?.({
+        payload: {
+          type: "drop",
+          paths: ["/home/user/Downloads/pricing-model"],
+        },
+      });
+    });
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("plugins_install", {
+        path: "/home/user/Downloads/pricing-model",
+      }),
+    );
+  });
+
+  it("hovering a drag shows the drop hint, leaving clears it", async () => {
+    renderPage([]);
+    await screen.findByText("/tmp/app/plugins");
+    expect(dragDropHandler).not.toBeNull();
+    act(() => {
+      dragDropHandler?.({
+        payload: { type: "enter", paths: [], position: {} },
+      });
+    });
+    expect(await screen.findByText("Drop to install…")).toBeInTheDocument();
+    act(() => {
+      dragDropHandler?.({ payload: { type: "leave" } });
+    });
+    await waitFor(() =>
+      expect(screen.queryByText("Drop to install…")).toBeNull(),
+    );
+  });
+
+  it("removing a plugin requires confirmation before calling plugins_remove", async () => {
+    renderPage([PLUGIN]);
+    await screen.findByText("Pricing Model");
+    const card = pluginCard("Pricing Model");
+    fireEvent.click(within(card).getByRole("button", { name: /remove/i }));
+    // Not called yet — the first click only asks for confirmation.
+    expect(invokeMock).not.toHaveBeenCalledWith(
+      "plugins_remove",
+      expect.anything(),
+    );
+    fireEvent.click(within(card).getByRole("button", { name: "Confirm" }));
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("plugins_remove", {
+        pluginId: "pricing-model",
+      }),
+    );
+  });
+
+  it("cancelling a remove leaves the plugin installed", async () => {
+    renderPage([PLUGIN]);
+    await screen.findByText("Pricing Model");
+    const card = pluginCard("Pricing Model");
+    fireEvent.click(within(card).getByRole("button", { name: /remove/i }));
+    fireEvent.click(within(card).getByRole("button", { name: "Cancel" }));
+    expect(invokeMock).not.toHaveBeenCalledWith(
+      "plugins_remove",
+      expect.anything(),
+    );
+    expect(screen.getByText("Pricing Model")).toBeInTheDocument();
   });
 });
