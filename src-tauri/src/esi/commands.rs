@@ -137,13 +137,9 @@ pub async fn owned_blueprints(
     if let Ok(sde) = crate::sde::Sde::open(&crate::sde::SdePaths::new(dir).db) {
         let mut names: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
         for bp in &mut out {
-            let name = names.entry(bp.type_id).or_insert_with(|| {
-                sde.type_info(bp.type_id)
-                    .ok()
-                    .flatten()
-                    .map(|t| t.name)
-                    .unwrap_or_else(|| format!("Type {}", bp.type_id))
-            });
+            let name = names
+                .entry(bp.type_id)
+                .or_insert_with(|| sde.type_name_or_id(bp.type_id));
             bp.name = name.clone();
         }
     }

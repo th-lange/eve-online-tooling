@@ -236,11 +236,7 @@ pub async fn transaction_ledger(
 
     // Resolve item names from the SDE in one batch.
     let type_ids: Vec<i64> = transactions.iter().map(|t| t.type_id).collect();
-    let names: HashMap<i64, String> = sde
-        .type_names(&type_ids)
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .collect();
+    let names = sde.type_name_map(&type_ids).map_err(|e| e.to_string())?;
 
     let (mut total_buy, mut total_sell) = (0.0, 0.0);
     let mut rows: Vec<LedgerRow> = transactions
@@ -254,10 +250,7 @@ pub async fn transaction_ledger(
             }
             LedgerRow {
                 date: t.date.clone(),
-                name: names
-                    .get(&t.type_id)
-                    .cloned()
-                    .unwrap_or_else(|| format!("Type {}", t.type_id)),
+                name: names.get(t.type_id),
                 type_id: t.type_id,
                 is_buy: t.is_buy,
                 quantity: t.quantity,
@@ -458,15 +451,12 @@ pub async fn profit_fifo(
 
     let (agg, total_profit) = run_fifo(events);
 
+    let ids: Vec<i64> = agg.keys().copied().collect();
+    let names = sde.type_name_map(&ids).map_err(|e| e.to_string())?;
     let mut rows: Vec<ProfitRow> = agg
         .into_iter()
         .map(|(type_id, mut row)| {
-            row.name = sde
-                .type_info(type_id)
-                .ok()
-                .flatten()
-                .map(|t| t.name)
-                .unwrap_or_else(|| format!("Type {type_id}"));
+            row.name = names.get(type_id);
             row
         })
         .collect();

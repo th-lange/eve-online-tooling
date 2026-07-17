@@ -27,14 +27,9 @@ pub struct ListItem {
 pub fn get(sde: &Sde, dir: &Path, key: &str) -> Vec<ListItem> {
     storage::load_id_list(dir, key)
         .into_iter()
-        .map(|type_id| {
-            let name = sde
-                .type_info(type_id)
-                .ok()
-                .flatten()
-                .map(|t| t.name)
-                .unwrap_or_else(|| format!("Type {type_id}"));
-            ListItem { type_id, name }
+        .map(|type_id| ListItem {
+            type_id,
+            name: sde.type_name_or_id(type_id),
         })
         .collect()
 }

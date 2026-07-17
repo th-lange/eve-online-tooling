@@ -7,7 +7,7 @@ use std::path::Path;
 use super::types::{
     activity, AttrMeta, BlueprintMaterial, BlueprintProduct, Decryptor, EffectMeta, InventionData,
     ManufacturableBlueprint, MarketItem, ModifierInfo, PlanetSchematic, Recipe, ReprocessRecipe,
-    ShipLayout, TypeDetail, TypeInfo, WormholeType,
+    ShipLayout, TypeDetail, TypeInfo, TypeNameMap, WormholeType,
 };
 use super::SdeError;
 
@@ -139,6 +139,16 @@ impl Sde {
             )
             .optional()?;
         Ok(info)
+    }
+
+    /// A type's display name, or `Type <id>` if it's unknown. For the many
+    /// call sites that just need a one-off name lookup with a safe fallback.
+    pub fn type_name_or_id(&self, id: i64) -> String {
+        self.type_info(id)
+            .ok()
+            .flatten()
+            .map(|t| t.name)
+            .unwrap_or_else(|| format!("Type {id}"))
     }
 
     /// Every blueprint that has a manufacturing product (activity 1).
@@ -527,6 +537,14 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Bulk name resolution for the given type ids in ONE query, wrapped in a
+    /// map that falls back to `Type <id>` for unknown ids. For the N+1 sites
+    /// that resolve names in a row-mapping loop — collect every id needed
+    /// first, then call this once before mapping rows.
+    pub fn type_name_map(&self, ids: &[i64]) -> Result<TypeNameMap, SdeError> {
+        Ok(TypeNameMap(self.type_names(ids)?.into_iter().collect()))
+    }
+
     /// `(type_id, name, group_name)` for the given type ids (bulk) — for grouping
     /// fits by their hull's ship group.
     pub fn type_infos(&self, type_ids: &[i64]) -> Result<Vec<(i64, String, String)>, SdeError> {
@@ -560,10 +578,7 @@ impl Sde {
         let Some(portion_size) = portion else {
             return Ok(None);
         };
-        let name = self
-            .type_info(type_id)?
-            .map(|t| t.name)
-            .unwrap_or_else(|| format!("Type {type_id}"));
+        let name = self.type_name_or_id(type_id);
         let mut stmt = self.conn.prepare(
             "SELECT m.materialTypeID, t.typeName, m.quantity
              FROM invTypeMaterials m JOIN invTypes t ON t.typeID = m.materialTypeID

@@ -530,17 +530,8 @@ fn build_lost_fit(sde: &Sde, km: &Killmail, lost_count: i64) -> LostFit {
             ids.push(it.item_type_id);
         }
     }
-    let names: HashMap<i64, String> = sde
-        .type_names(&ids)
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
-    let name_of = |id: i64| {
-        names
-            .get(&id)
-            .cloned()
-            .unwrap_or_else(|| format!("Type {id}"))
-    };
+    let names = sde.type_name_map(&ids).unwrap_or_default();
+    let name_of = |id: i64| names.get(id);
     let attrs = sde.types_attributes_raw(&ids).unwrap_or_default();
     let mut cats: HashMap<i64, i64> = HashMap::new();
     for id in &ids {

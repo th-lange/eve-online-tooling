@@ -183,6 +183,7 @@ pub async fn lp_offers(
         .await
         .map_err(|e| e.to_string())?;
     let sell = |id: i64| prices.sell_or_zero(id);
+    let names = sde.type_name_map(&ids).map_err(|e| e.to_string())?;
 
     let mut rows: Vec<OfferRow> = offers
         .into_iter()
@@ -202,12 +203,7 @@ pub async fn lp_offers(
                 params.isk_per_lp,
             );
             OfferRow {
-                name: sde
-                    .type_info(o.type_id)
-                    .ok()
-                    .flatten()
-                    .map(|t| t.name)
-                    .unwrap_or_else(|| format!("Type {}", o.type_id)),
+                name: names.get(o.type_id),
                 quantity: o.quantity,
                 lp_cost: o.lp_cost,
                 isk_cost: o.isk_cost,

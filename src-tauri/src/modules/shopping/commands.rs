@@ -124,21 +124,15 @@ fn list_mut<'a>(store: &'a mut Store, id: &str) -> Result<&'a mut StoredList, St
 
 /// Resolve a stored list's item names from the SDE.
 fn resolve(sde: &Sde, list: &StoredList) -> ShoppingList {
+    let ids: Vec<i64> = list.items.iter().map(|e| e.type_id).collect();
+    let names = sde.type_name_map(&ids).unwrap_or_default();
     let items = list
         .items
         .iter()
-        .map(|e| {
-            let name = sde
-                .type_info(e.type_id)
-                .ok()
-                .flatten()
-                .map(|t| t.name)
-                .unwrap_or_else(|| format!("Type {}", e.type_id));
-            ShoppingItem {
-                type_id: e.type_id,
-                name,
-                quantity: e.quantity,
-            }
+        .map(|e| ShoppingItem {
+            type_id: e.type_id,
+            name: names.get(e.type_id),
+            quantity: e.quantity,
         })
         .collect();
     ShoppingList {
