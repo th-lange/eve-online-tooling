@@ -8,12 +8,13 @@
 //! **computed live** over the SDE stargate graph (no ESI, no stale numbers).
 
 use std::cmp::Reverse;
-use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use super::candidates::{HUBS, POCHVEN_CANDIDATES};
+use crate::sde::graph;
 use crate::storage;
 
 /// Highsec threshold: security ≥ 0.45 rounds to 0.5 in-game.
@@ -136,11 +137,7 @@ pub async fn pochven_routes(app: AppHandle) -> Result<PochvenRoutes, String> {
     }
 
     // k-space stargate adjacency (undirected) + security per system.
-    let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
-    for (a, b) in sde.all_stargate_edges().map_err(|e| e.to_string())? {
-        adj.entry(a).or_default().push(b);
-        adj.entry(b).or_default().push(a);
-    }
+    let adj = sde.stargate_adjacency().map_err(|e| e.to_string())?;
     let sec: HashMap<i64, f64> = sde
         .solar_system_info()
         .map_err(|e| e.to_string())?
@@ -232,41 +229,6 @@ async fn system_kills(dir: &std::path::Path, esi: &crate::esi::EsiClient) -> Has
     map
 }
 
-/// Shortest-jump BFS from `start`: distance + predecessor per reachable system.
-fn bfs(adj: &HashMap<i64, Vec<i64>>, start: i64) -> Bfs {
-    let mut dist: HashMap<i64, i64> = HashMap::from([(start, 0)]);
-    let mut pred: HashMap<i64, i64> = HashMap::new();
-    let mut q = VecDeque::from([start]);
-    while let Some(u) = q.pop_front() {
-        let du = dist[&u];
-        for &v in adj.get(&u).into_iter().flatten() {
-            if let std::collections::hash_map::Entry::Vacant(e) = dist.entry(v) {
-                e.insert(du + 1);
-                pred.insert(v, u);
-                q.push_back(v);
-            }
-        }
-    }
-    (dist, pred)
-}
-
-/// Reconstruct the jump path `from` → `to` (inclusive) via the predecessor map.
-fn path_ids(pred: &HashMap<i64, i64>, from: i64, to: i64) -> Vec<i64> {
-    let mut ids = vec![to];
-    let mut cur = to;
-    while cur != from {
-        match pred.get(&cur) {
-            Some(&p) => {
-                ids.push(p);
-                cur = p;
-            }
-            None => break,
-        }
-    }
-    ids.reverse();
-    ids
-}
-
 /// How a `dp[mask][v]` cell was reached, for Steiner-tree reconstruction.
 #[derive(Clone, Copy)]
 enum Back {
@@ -294,14 +256,17 @@ fn steiner_tree(adj: &HashMap<i64, Vec<i64>>, terminals: &[i64]) -> Vec<(i64, i6
         return Vec::new();
     }
     // Per-terminal BFS, then W = union of the terminal-to-terminal shortest paths.
-    let bfss: Vec<Bfs> = terminals.iter().map(|&t| bfs(adj, t)).collect();
+    let bfss: Vec<Bfs> = terminals
+        .iter()
+        .map(|&t| graph::bfs(adj, t, None))
+        .collect();
     let mut wset: HashSet<i64> = terminals.iter().copied().collect();
     for i in 0..k {
         let (di, pi) = &bfss[i];
         for (j, &tj) in terminals.iter().enumerate().skip(i + 1) {
             let _ = j;
             if di.contains_key(&tj) {
-                wset.extend(path_ids(pi, terminals[i], tj));
+                wset.extend(graph::path_ids(pi, terminals[i], tj));
             }
         }
     }
@@ -397,11 +362,7 @@ fn steiner_tree(adj: &HashMap<i64, Vec<i64>>, terminals: &[i64]) -> Vec<(i64, i6
 /// Depth-first visit order of a tree from `root`. At each node, nearer branches
 /// (by `dist` from the origin) are taken first, so the numbering fans outward.
 fn tree_preorder(edges: &[(i64, i64)], root: i64, dist: &HashMap<i64, i64>) -> Vec<i64> {
-    let mut tadj: HashMap<i64, Vec<i64>> = HashMap::new();
-    for &(a, b) in edges {
-        tadj.entry(a).or_default().push(b);
-        tadj.entry(b).or_default().push(a);
-    }
+    let mut tadj = graph::undirected_adjacency(edges);
     for ch in tadj.values_mut() {
         ch.sort_by_key(|c| (dist.get(c).copied().unwrap_or(i64::MAX), *c));
     }
@@ -507,12 +468,8 @@ pub async fn pochven_search(
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     let kills = system_kills(&dir, &esi).await;
 
-    let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
-    for (a, b) in sde.all_stargate_edges().map_err(|e| e.to_string())? {
-        adj.entry(a).or_default().push(b);
-        adj.entry(b).or_default().push(a);
-    }
-    let (dist, pred) = bfs(&adj, system_id);
+    let adj = sde.stargate_adjacency().map_err(|e| e.to_string())?;
+    let (dist, pred) = graph::bfs(&adj, system_id, None);
     let info = sde.solar_system_info().map_err(|e| e.to_string())?;
     let name = |id: i64| {
         info.get(&id)
@@ -591,7 +548,7 @@ pub async fn pochven_search(
     let mut edge_set: HashSet<(i64, i64)> = HashSet::new();
     let norm = |a: i64, b: i64| if a <= b { (a, b) } else { (b, a) };
     for &(cid, _) in in_range.iter().take(MAP_CAP) {
-        let path = path_ids(&pred, system_id, cid);
+        let path = graph::path_ids(&pred, system_id, cid);
         for w in path.windows(2) {
             edge_set.insert(norm(w[0], w[1]));
         }
@@ -634,7 +591,7 @@ pub async fn pochven_search(
     let route = in_range
         .first()
         .map(|&(first, _)| {
-            path_ids(&pred, system_id, first)
+            graph::path_ids(&pred, system_id, first)
                 .iter()
                 .map(|&id| name(id))
                 .collect()
@@ -846,22 +803,6 @@ pub async fn pochven_map(app: AppHandle) -> Result<PochvenTopology, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn bfs_finds_shortest_distance_and_path() {
-        // 1 - 2 - 3 - 4 and a shortcut 1 - 5 - 4
-        let adj = HashMap::from([
-            (1, vec![2, 5]),
-            (2, vec![1, 3]),
-            (3, vec![2, 4]),
-            (4, vec![3, 5]),
-            (5, vec![1, 4]),
-        ]);
-        let (dist, pred) = bfs(&adj, 1);
-        assert_eq!(dist[&4], 2); // 1-5-4
-        assert_eq!(path_ids(&pred, 1, 4), vec![1, 5, 4]);
-        assert_eq!(dist[&3], 2);
-    }
 
     #[test]
     fn stat_aggregates() {

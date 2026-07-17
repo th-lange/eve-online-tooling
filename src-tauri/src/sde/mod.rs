@@ -15,6 +15,7 @@ pub mod commands;
 mod db;
 mod download;
 mod error;
+pub mod graph;
 mod types;
 
 pub use db::{wormhole_class_label, Sde};

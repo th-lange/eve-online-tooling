@@ -13,7 +13,7 @@ use tauri::{AppHandle, State};
 
 use crate::esi::{authed_get, AuthState, EsiClient};
 use crate::model::AppError;
-use crate::sde::{Sde, SdePaths};
+use crate::sde::{graph, Sde, SdePaths};
 use crate::storage;
 
 /// J-space (wormhole) solar systems start at this id.
@@ -190,25 +190,17 @@ pub async fn system_neighbourhood(
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     let depth = depth.clamp(1, MAX_DEPTH);
 
-    // BFS over stargate edges, recording distance and deduped edges.
-    let mut distance: HashMap<i64, i64> = HashMap::from([(system_id, 0)]);
-    let mut frontier = vec![system_id];
+    // BFS over the full stargate graph, capped at `depth`; the edges output
+    // is every gate link sourced from a system within that radius (mirrors
+    // the level-by-level frontier this used to walk one DB query at a time).
+    let adj = sde.stargate_adjacency().map_err(|e| e.to_string())?;
+    let (distance, _) = graph::bfs(&adj, system_id, Some(depth));
     let mut edges: HashSet<(i64, i64)> = HashSet::new();
-    for level in 1..=depth {
-        let mut next = Vec::new();
-        for (a, b) in sde
-            .stargate_edges_from(&frontier)
-            .map_err(|e| e.to_string())?
-        {
-            edges.insert(if a <= b { (a, b) } else { (b, a) });
-            if let std::collections::hash_map::Entry::Vacant(e) = distance.entry(b) {
-                e.insert(level);
-                next.push(b);
+    for (&s, &d) in &distance {
+        if d < depth {
+            for &n in adj.get(&s).into_iter().flatten() {
+                edges.insert(if s <= n { (s, n) } else { (n, s) });
             }
-        }
-        frontier = next;
-        if frontier.is_empty() {
-            break;
         }
     }
 
@@ -274,48 +266,20 @@ pub struct BreadcrumbEntry {
     pub gap_jumps: i64,
 }
 
-/// Undirected stargate adjacency for gate-distance checks.
-fn gate_adjacency(sde: &Sde) -> Result<HashMap<i64, Vec<i64>>, String> {
-    let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
-    for (a, b) in sde.all_stargate_edges().map_err(|e| e.to_string())? {
-        adj.entry(a).or_default().push(b);
-        adj.entry(b).or_default().push(a);
-    }
-    Ok(adj)
-}
-
-/// Gate distance between two systems (BFS over `adj`), or -1 when unreachable
-/// by gates. Capped: anything beyond `cap` also reports -1, so a runaway search
-/// on disconnected inputs stays cheap.
-fn gate_distance_over(adj: &HashMap<i64, Vec<i64>>, from: i64, to: i64, cap: i64) -> i64 {
+/// Gate distance between two systems (BFS over the stargate graph, capped at
+/// `cap` jumps so a runaway search on disconnected inputs stays cheap), or -1
+/// when unreachable by gates within that cap. Returns 0 ("unknown") on SDE
+/// trouble rather than inventing a gap.
+fn gate_distance(sde: &Sde, from: i64, to: i64, cap: i64) -> i64 {
     if from == to {
         return 0;
     }
-    let mut dist: HashMap<i64, i64> = HashMap::from([(from, 0)]);
-    let mut queue = std::collections::VecDeque::from([from]);
-    while let Some(u) = queue.pop_front() {
-        let du = dist[&u];
-        if du >= cap {
-            continue;
-        }
-        for &v in adj.get(&u).into_iter().flatten() {
-            if v == to {
-                return du + 1;
-            }
-            if let std::collections::hash_map::Entry::Vacant(e) = dist.entry(v) {
-                e.insert(du + 1);
-                queue.push_back(v);
-            }
-        }
-    }
-    -1
-}
-
-/// [`gate_distance_over`] with a one-shot adjacency build. Returns 0
-/// ("unknown") on SDE trouble rather than inventing a gap.
-fn gate_distance(sde: &Sde, from: i64, to: i64, cap: i64) -> i64 {
-    match gate_adjacency(sde) {
-        Ok(adj) => gate_distance_over(&adj, from, to, cap),
+    match sde.stargate_adjacency() {
+        Ok(adj) => graph::bfs(&adj, from, Some(cap))
+            .0
+            .get(&to)
+            .copied()
+            .unwrap_or(-1),
         Err(_) => 0,
     }
 }
@@ -391,7 +355,7 @@ pub fn route_breadcrumb(app: AppHandle) -> Result<Vec<BreadcrumbEntry>, AppError
     let mut trail: Vec<BreadcrumbEntry> = storage::load_data(&dir, &key).unwrap_or_default();
     if trail.iter().skip(1).any(|e| e.gap_jumps == 0) {
         if let Ok(sde) = crate::sde::open_from_app(&app) {
-            if let Ok(adj) = gate_adjacency(&sde) {
+            if let Ok(adj) = sde.stargate_adjacency() {
                 for i in 1..trail.len() {
                     if trail[i].gap_jumps != 0 {
                         continue;
@@ -400,8 +364,14 @@ pub fn route_breadcrumb(app: AppHandle) -> Result<Vec<BreadcrumbEntry>, AppError
                     let cur = &mut trail[i];
                     cur.gap_jumps = if prev.wspace || cur.wspace {
                         -1
+                    } else if prev.system_id == cur.system_id {
+                        0
                     } else {
-                        gate_distance_over(&adj, prev.system_id, cur.system_id, 30)
+                        graph::bfs(&adj, prev.system_id, Some(30))
+                            .0
+                            .get(&cur.system_id)
+                            .copied()
+                            .unwrap_or(-1)
                     };
                 }
                 let _ = storage::save_data(&dir, &key, &trail);
@@ -528,11 +498,8 @@ pub async fn route_nearest_wormhole(app: AppHandle) -> Result<NearestWormhole, A
         // w-space: no public feed applies; point at the nearest scanned k-space
         // exit over the hand-mapped chain.
         let edges = crate::modules::wormholes::store::connection_edges(&app)?;
-        let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
-        for (a, b, _eol) in &edges {
-            adj.entry(*a).or_default().push(*b);
-            adj.entry(*b).or_default().push(*a);
-        }
+        let pairs: Vec<(i64, i64)> = edges.iter().map(|&(a, b, _eol)| (a, b)).collect();
+        let adj = graph::undirected_adjacency(&pairs);
         let exits: HashSet<i64> = adj
             .keys()
             .copied()
@@ -581,11 +548,7 @@ pub async fn route_nearest_wormhole(app: AppHandle) -> Result<NearestWormhole, A
         ));
     }
 
-    let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
-    for (a, b) in sde.all_stargate_edges().map_err(|e| e.to_string())? {
-        adj.entry(a).or_default().push(b);
-        adj.entry(b).or_default().push(a);
-    }
+    let adj = sde.stargate_adjacency().map_err(|e| e.to_string())?;
     let targets: HashSet<i64> = cand.keys().copied().collect();
     Ok(match nearest_of(&adj, current.system_id, &targets) {
         Some((entrance, jumps)) => {
