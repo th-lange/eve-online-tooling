@@ -2,4 +2,5 @@
 
 pub mod commands;
 pub mod reference;
+pub(crate) mod store;
 pub mod tripwire;
