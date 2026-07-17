@@ -26,7 +26,7 @@ vi.mock("@tauri-apps/api/core", () => ({
  * call site:
  *
  *   mockInvoke({
- *     market_orders: () => ORDERS,
+ *     orders_list: () => ORDERS,
  *     production_profit: () => { throw appError; },
  *   });
  */

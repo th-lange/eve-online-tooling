@@ -31,7 +31,7 @@ beforeEach(() => {
 describe("LocalIntelPage", () => {
   it("scans pasted names and renders a classified pilot", async () => {
     mockInvoke({
-      local_scan: () => RESULT,
+      localintel_scan: () => RESULT,
       localintel_zkill: () => [],
     });
     renderWithQuery(<LocalIntelPage />);
@@ -48,7 +48,7 @@ describe("LocalIntelPage", () => {
   it("shows the scan failure message", async () => {
     const error: AppError = { kind: "message", message: "ESI unreachable" };
     mockInvoke({
-      local_scan: () => {
+      localintel_scan: () => {
         throw error;
       },
     });

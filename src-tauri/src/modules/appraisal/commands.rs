@@ -58,7 +58,7 @@ pub struct AppraisalResult {
 /// Resolve each pasted line to a type, price it at the chosen market (buy & sell),
 /// and total the buy value, sell value, and cargo volume.
 #[tauri::command]
-pub async fn appraisal(
+pub async fn appraisal_run(
     app: AppHandle,
     market: State<'_, MarketService>,
     params: AppraisalParams,

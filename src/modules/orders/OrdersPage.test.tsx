@@ -87,7 +87,7 @@ function renderPage() {
 describe("OrdersPage build-cost check", () => {
   it("flags sell orders whose undercut price falls below build cost", async () => {
     invokeMock.mockImplementation((cmd: string) => {
-      if (cmd === "market_orders") return Promise.resolve(ORDERS);
+      if (cmd === "orders_list") return Promise.resolve(ORDERS);
       if (cmd === "production_profit") return Promise.resolve(COSTS);
       return Promise.resolve(undefined);
     });

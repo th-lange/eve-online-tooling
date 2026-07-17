@@ -272,7 +272,7 @@ pub struct FwMap {
 /// capture progress, plus last-hour kills and jumps, and the stargate edges
 /// between the systems (for the warzone map). Public data, cached ~5 min.
 #[tauri::command]
-pub async fn fw_systems(app: AppHandle, esi: State<'_, EsiClient>) -> Result<FwMap, String> {
+pub async fn intel_fw_systems(app: AppHandle, esi: State<'_, EsiClient>) -> Result<FwMap, String> {
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     if let Some(cached) = storage::cache_get::<FwMap>(&dir, "intel_fw_systems") {
         return Ok(cached);

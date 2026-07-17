@@ -36,5 +36,5 @@ export interface TradeParams {
 
 /** Rank tradeable items by buy→sell margin at a market. */
 export function stationTrading(params: TradeParams): Promise<TradeRow[]> {
-  return invoke<TradeRow[]>("station_trading", { params });
+  return invoke<TradeRow[]>("trading_scan", { params });
 }

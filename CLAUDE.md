@@ -126,3 +126,9 @@ Vitest (jsdom), config in `vite.config.ts`, setup in `src/test/setup.ts`. To tes
 - New cross-cutting capability → a shared service; feature-specific logic → a module. Don't reach
   around the service layer from a module.
 - Expose frontend↔Rust calls through `lib/api.ts`, not inline `invoke("name")`.
+- Tauri command naming: every command a module exposes uses one stable prefix unique to that
+  module (e.g. `orders_*`, `trading_*`, `accounting_*`, `localintel_*`, `intel_*`, `route_*`,
+  `appraisal_*`, `notifications_*`). Shared-service prefixes (`market_`, `sde_`, `auth_`) are
+  reserved for services, not feature modules — a module never claims a service's prefix even if
+  it only calls that service. `wh_`, `lp_`, `dps_`, and `pi_` are exempted as already-established
+  module abbreviations predating this policy; leave them as-is.

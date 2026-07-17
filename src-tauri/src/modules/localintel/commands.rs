@@ -131,7 +131,7 @@ struct CorpInfo {
 /// affiliation use public ESI POST endpoints; standings use the logged-in
 /// character (`esi-characters.read_standings.v1`, already granted).
 #[tauri::command]
-pub async fn local_scan(
+pub async fn localintel_scan(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
     text: String,
@@ -450,7 +450,7 @@ pub struct LocalLogResult {
 /// logs the Local member list, so this only sees pilots who chatted. The path
 /// is user-configured (it lives inside the Proton/Wine prefix on Linux).
 #[tauri::command]
-pub fn local_log_names(logs_dir: String) -> Result<LocalLogResult, String> {
+pub fn localintel_log_names(logs_dir: String) -> Result<LocalLogResult, String> {
     let dir = std::path::Path::new(&logs_dir);
     if !dir.is_dir() {
         return Err(format!("not a folder: {logs_dir}"));

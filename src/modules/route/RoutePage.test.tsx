@@ -26,7 +26,7 @@ describe("RoutePage", () => {
   it("renders per-system activity", async () => {
     mockInvoke({
       sde_status: () => SDE_OK,
-      system_activity: () => [SYSTEM],
+      route_system_activity: () => [SYSTEM],
       route_breadcrumb: () => [],
     });
     renderWithQuery(<RoutePage />);
@@ -41,7 +41,7 @@ describe("RoutePage", () => {
     };
     mockInvoke({
       sde_status: () => SDE_OK,
-      system_activity: () => {
+      route_system_activity: () => {
         throw error;
       },
       route_breadcrumb: () => [],
@@ -55,7 +55,7 @@ describe("RoutePage", () => {
     const error: AppError = { kind: "authRequired", message: "no character" };
     mockInvoke({
       sde_status: () => SDE_OK,
-      system_activity: () => [],
+      route_system_activity: () => [],
       route_breadcrumb: () => [],
       route_location: () => {
         throw error;

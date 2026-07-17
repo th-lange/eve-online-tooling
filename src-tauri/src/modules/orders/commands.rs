@@ -16,7 +16,7 @@ use crate::model::AppError;
 /// own station**. A character whose orders can't be fetched is skipped
 /// rather than failing the whole call.
 #[tauri::command]
-pub async fn market_orders(
+pub async fn orders_list(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
     market: State<'_, MarketService>,

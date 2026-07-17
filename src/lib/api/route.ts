@@ -17,7 +17,7 @@ export interface SystemActivity {
  * aggregates, k-space only). Cached ~30 min; `refresh` bypasses the cache.
  */
 export function systemActivity(refresh = false): Promise<SystemActivity[]> {
-  return invoke<SystemActivity[]>("system_activity", { refresh });
+  return invoke<SystemActivity[]>("route_system_activity", { refresh });
 }
 
 export interface SystemMatch {
@@ -40,7 +40,7 @@ export interface Neighbourhood {
 
 /** Search solar systems by name (for the neighbourhood picker). */
 export function systemSearch(query: string): Promise<SystemMatch[]> {
-  return invoke<SystemMatch[]>("system_search", { query });
+  return invoke<SystemMatch[]>("route_system_search", { query });
 }
 
 export interface BreadcrumbEntry {
@@ -109,5 +109,5 @@ export function systemNeighbourhood(
   systemId: number,
   depth: number,
 ): Promise<Neighbourhood> {
-  return invoke<Neighbourhood>("system_neighbourhood", { systemId, depth });
+  return invoke<Neighbourhood>("route_system_neighbourhood", { systemId, depth });
 }
