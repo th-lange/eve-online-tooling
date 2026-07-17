@@ -16,9 +16,9 @@
 //! within a session. A cache with no directory (`disabled`) is a transparent
 //! pass-through — every call hits the network — used where no data dir is wired.
 
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
 use std::time::SystemTime;
 
 use reqwest::header::{CACHE_CONTROL, DATE, ETAG, EXPIRES, IF_NONE_MATCH};
@@ -135,40 +135,36 @@ impl ConditionalCache {
             .map(|d| d.join("esi-cache").join(format!("{}.json", sanitize(key))))
     }
 
-    fn load(&self, key: &str) -> Option<CachedResponse> {
-        if let Some(hit) = self.mem.lock().unwrap().get(key).cloned() {
+    async fn load(&self, key: &str) -> Option<CachedResponse> {
+        if let Some(hit) = self.mem.lock().get(key).cloned() {
             return Some(hit);
         }
-        let bytes = std::fs::read(self.path(key)?).ok()?;
+        let bytes = tokio::fs::read(self.path(key)?).await.ok()?;
         let entry: CachedResponse = serde_json::from_slice(&bytes).ok()?;
-        self.mem
-            .lock()
-            .unwrap()
-            .insert(key.to_string(), entry.clone());
+        self.mem.lock().insert(key.to_string(), entry.clone());
         Some(entry)
     }
 
-    fn store(&self, key: &str, entry: CachedResponse) {
+    async fn store(&self, key: &str, entry: CachedResponse) {
         if let Some(path) = self.path(key) {
             if let Some(parent) = path.parent() {
-                let _ = std::fs::create_dir_all(parent);
+                let _ = tokio::fs::create_dir_all(parent).await;
             }
             if let Ok(bytes) = serde_json::to_vec(&entry) {
-                let _ = std::fs::write(path, bytes);
+                let _ = tokio::fs::write(path, bytes).await;
             }
         }
-        self.mem.lock().unwrap().insert(key.to_string(), entry);
+        self.mem.lock().insert(key.to_string(), entry);
     }
 
     /// Push a cached entry's freshness deadline forward after a 304, keeping the
     /// body. No-op if the entry has since vanished.
-    fn touch(&self, key: &str, ttl: u64) {
-        if let Some(mut e) = self.load(key) {
+    async fn touch(&self, key: &str, ttl: u64) {
+        if let Some(mut e) = self.load(key).await {
             e.expires = crate::util::time::now_secs() + ttl;
-            self.store(key, e);
+            self.store(key, e).await;
         }
     }
-
     /// Conditional GET of a single JSON document.
     ///
     /// `build` produces the request (URL + query + any auth) and is called once
@@ -187,7 +183,7 @@ impl ConditionalCache {
             return Ok(serde_json::from_slice(&bytes)?);
         }
 
-        let entry = self.load(key);
+        let entry = self.load(key).await;
         if let Some(e) = &entry {
             if e.expires > crate::util::time::now_secs() {
                 return Ok(serde_json::from_str(&e.body)?);
@@ -202,7 +198,7 @@ impl ConditionalCache {
         .await?;
         if resp.status() == StatusCode::NOT_MODIFIED {
             if let Some(e) = &entry {
-                self.touch(key, ttl_from(resp.headers()));
+                self.touch(key, ttl_from(resp.headers())).await;
                 return Ok(serde_json::from_str(&e.body)?);
             }
         }
@@ -210,15 +206,17 @@ impl ConditionalCache {
         let etag = etag_of(resp.headers());
         let ttl = ttl_from(resp.headers());
         let body = resp.text().await?;
+        let value: T = serde_json::from_str(&body)?;
         self.store(
             key,
             CachedResponse {
                 etag,
                 expires: crate::util::time::now_secs() + ttl,
-                body: body.clone(),
+                body,
             },
-        );
-        Ok(serde_json::from_str(&body)?)
+        )
+        .await;
+        Ok(value)
     }
 
     /// Conditional GET of a paginated collection. ETag/Expires apply to page 1
@@ -235,7 +233,7 @@ impl ConditionalCache {
             return Ok(serde_json::from_value(Value::Array(all))?);
         }
 
-        let entry = self.load(key);
+        let entry = self.load(key).await;
         if let Some(e) = &entry {
             if e.expires > crate::util::time::now_secs() {
                 return Ok(serde_json::from_str(&e.body)?);
@@ -250,7 +248,7 @@ impl ConditionalCache {
         .await?;
         if resp.status() == StatusCode::NOT_MODIFIED {
             if let Some(e) = &entry {
-                self.touch(key, ttl_from(resp.headers()));
+                self.touch(key, ttl_from(resp.headers())).await;
                 return Ok(serde_json::from_str(&e.body)?);
             }
         }
@@ -267,16 +265,19 @@ impl ConditionalCache {
                 .await?;
             all.extend(more);
         }
+        let all = Value::Array(all);
         let body = serde_json::to_string(&all)?;
+        let value: Vec<T> = serde_json::from_value(all)?;
         self.store(
             key,
             CachedResponse {
                 etag,
                 expires: crate::util::time::now_secs() + ttl,
-                body: body.clone(),
+                body,
             },
-        );
-        Ok(serde_json::from_str(&body)?)
+        )
+        .await;
+        Ok(value)
     }
 }
 
@@ -350,28 +351,69 @@ mod tests {
 
     #[test]
     fn cache_round_trips_and_gates_on_expiry() {
-        let dir = std::env::temp_dir().join(format!("eve-esi-cache-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let cache = ConditionalCache::on_disk(dir.clone());
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let dir = std::env::temp_dir().join(format!("eve-esi-cache-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let cache = ConditionalCache::on_disk(dir.clone());
 
-        assert!(cache.load("k").is_none());
-        cache.store(
-            "k",
-            CachedResponse {
-                etag: Some("\"abc\"".into()),
-                expires: crate::util::time::now_secs() + 3600,
-                body: "[1,2,3]".into(),
-            },
-        );
-        let e = cache.load("k").expect("present");
-        assert_eq!(e.body, "[1,2,3]");
-        assert!(e.expires > crate::util::time::now_secs());
+            assert!(cache.load("k").await.is_none());
+            cache
+                .store(
+                    "k",
+                    CachedResponse {
+                        etag: Some("\"abc\"".into()),
+                        expires: crate::util::time::now_secs() + 3600,
+                        body: "[1,2,3]".into(),
+                    },
+                )
+                .await;
+            let e = cache.load("k").await.expect("present");
+            assert_eq!(e.body, "[1,2,3]");
+            assert!(e.expires > crate::util::time::now_secs());
 
-        // A fresh process (cold mem) still reads it from disk.
-        let cold = ConditionalCache::on_disk(dir.clone());
-        assert_eq!(cold.load("k").map(|e| e.body), Some("[1,2,3]".into()));
+            // A fresh process (cold mem) still reads it from disk.
+            let cold = ConditionalCache::on_disk(dir.clone());
+            assert_eq!(cold.load("k").await.map(|e| e.body), Some("[1,2,3]".into()));
 
-        let _ = std::fs::remove_dir_all(&dir);
+            let _ = std::fs::remove_dir_all(&dir);
+        });
+    }
+
+    /// A 200 response whose body doesn't deserialize as `T` must not be
+    /// persisted — the parse happens before the store commits.
+    #[test]
+    fn failed_deserialize_does_not_populate_cache() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let server = tiny_http::Server::http("127.0.0.1:0").expect("bind loopback");
+            let addr = server.server_addr().to_ip().expect("ip addr");
+            let server_thread = std::thread::spawn(move || {
+                if let Ok(request) = server.recv() {
+                    let _ = request.respond(tiny_http::Response::from_string("not json"));
+                }
+            });
+
+            let dir =
+                std::env::temp_dir().join(format!("eve-esi-cache-bad-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let cache = ConditionalCache::on_disk(dir.clone());
+            let client = reqwest::Client::new();
+            let url = format!("http://{}/", addr);
+
+            let result: Result<Value, EsiError> =
+                cache.get_json("bad-key", || client.get(&url)).await;
+            assert!(result.is_err());
+            assert!(cache.load("bad-key").await.is_none());
+
+            server_thread.join().expect("server thread");
+            let _ = std::fs::remove_dir_all(&dir);
+        });
     }
 
     #[test]
