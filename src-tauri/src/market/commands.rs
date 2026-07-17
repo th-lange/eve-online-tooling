@@ -12,20 +12,7 @@ use super::markets::{regions, resolve_location, Region};
 use super::service::MarketService;
 use super::types::{Order, PriceModel};
 
-/// An (id, name) option for the region/station pickers (camelCase for the UI).
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IdName {
-    pub id: i64,
-    pub name: String,
-}
-
-fn id_names(pairs: Vec<(i64, String)>) -> Vec<IdName> {
-    pairs
-        .into_iter()
-        .map(|(id, name)| IdName { id, name })
-        .collect()
-}
+pub use crate::model::{id_names, IdName};
 
 /// One day of market history, for the history explorer (camelCase for the UI).
 #[derive(Debug, Clone, Serialize)]

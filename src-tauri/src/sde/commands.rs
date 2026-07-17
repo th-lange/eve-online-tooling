@@ -14,20 +14,7 @@ use super::types::{
 };
 use super::{download_sde, Sde, SdeError, SdePaths};
 
-/// An (id, name) pair for the universe browser tree.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IdName {
-    pub id: i64,
-    pub name: String,
-}
-
-fn id_names(pairs: Vec<(i64, String)>) -> Vec<IdName> {
-    pairs
-        .into_iter()
-        .map(|(id, name)| IdName { id, name })
-        .collect()
-}
+pub use crate::model::{id_names, IdName};
 
 /// A named dogma attribute value.
 #[derive(Debug, Clone, Serialize)]

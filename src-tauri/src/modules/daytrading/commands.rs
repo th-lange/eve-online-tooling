@@ -7,7 +7,6 @@ use tauri::{AppHandle, State};
 
 use crate::lists::{self, ListItem};
 use crate::market::{regions, resolve_location, MarketService, PriceModel};
-use crate::storage;
 
 use super::engine::{evaluate, DayTradeConfig, DayTradeRow, Quote};
 
@@ -134,12 +133,8 @@ pub async fn daytrading_scan(
         });
     }
 
-    let blacklist: HashSet<i64> = storage::load_id_list(&dir, DAYTRADING_BLACKLIST_KEY)
-        .into_iter()
-        .collect();
-    let favorites: HashSet<i64> = storage::load_id_list(&dir, DAYTRADING_FAVORITES_KEY)
-        .into_iter()
-        .collect();
+    let (blacklist, favorites) =
+        lists::load_filter_sets(&dir, DAYTRADING_BLACKLIST_KEY, DAYTRADING_FAVORITES_KEY);
     let categories = sde.category_names().map_err(|e| e.to_string())?;
     let groups = sde.group_names().map_err(|e| e.to_string())?;
     let meta = sde.meta_group_names().map_err(|e| e.to_string())?;

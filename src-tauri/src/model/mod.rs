@@ -12,6 +12,23 @@ pub struct Character {
     pub scopes: Vec<String>,
 }
 
+/// An (id, name) pair used across the SDE and market command surfaces
+/// (camelCase for the UI).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdName {
+    pub id: i64,
+    pub name: String,
+}
+
+/// Converts raw `(id, name)` tuples into the serializable [`IdName`] pairs.
+pub fn id_names(pairs: Vec<(i64, String)>) -> Vec<IdName> {
+    pairs
+        .into_iter()
+        .map(|(id, name)| IdName { id, name })
+        .collect()
+}
+
 /// A structured, serializable command error (#337). Serializes to
 /// `{ "kind": …, "message": … }` so the frontend can tell an auth-required
 /// state apart from a generic failure and show a clearer message, rather than
