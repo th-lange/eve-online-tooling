@@ -1,6 +1,7 @@
 import { useMemo, useState, type MouseEvent } from "react";
 import type { HistoryPoint } from "../lib/api";
 import { formatInt, formatIsk } from "../lib/format";
+import { Stat } from "./Stat";
 
 // Price/volume history charts (Donchian channel, moving average, daily median)
 // + the summary/table, shared by Market Search and the production history popover.
@@ -209,40 +210,73 @@ function PriceChart({
   const padX = 8;
   const padY = 10;
 
-  const avg = series.map((p) => p.average);
-  const med = series.map(dailyMedian);
-  const ma = sma(avg, period);
-  const { upper, lower } = donchian(series, period);
+  const { avg, med, ma, upper, lower } = useMemo(() => {
+    const avg = series.map((p) => p.average);
+    const med = series.map(dailyMedian);
+    const ma = sma(avg, period);
+    const { upper, lower } = donchian(series, period);
+    return { avg, med, ma, upper, lower };
+  }, [series, period]);
 
-  // Scale to fit whatever is shown (the band widens the range when on).
-  const highs = showChannel
-    ? upper
-    : showMedian
-      ? avg.map((v, i) => Math.max(v, med[i]))
-      : avg;
-  const lows = showChannel
-    ? lower
-    : showMedian
-      ? avg.map((v, i) => Math.min(v, med[i]))
-      : avg;
-  const min = Math.min(...lows);
-  const max = Math.max(...highs);
-  const span = max - min || 1;
-  const x = (i: number) =>
-    padX + (i / Math.max(series.length - 1, 1)) * (w - 2 * padX);
-  const y = (v: number) => padY + (1 - (v - min) / span) * (h - 2 * padY);
-  // Invert the y-scale so the cursor's vertical position reads as a price.
-  const priceAtY = (yy: number) =>
-    min + span * (1 - (yy - padY) / (h - 2 * padY));
-  const line = (vals: number[]) =>
-    vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
-  const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => padY + f * (h - 2 * padY));
+  const {
+    min,
+    max,
+    x,
+    y,
+    priceAtY,
+    band,
+    upperLine,
+    lowerLine,
+    medLine,
+    avgLine,
+    maLine,
+    grid,
+  } = useMemo(() => {
+    // Scale to fit whatever is shown (the band widens the range when on).
+    const highs = showChannel
+      ? upper
+      : showMedian
+        ? avg.map((v, i) => Math.max(v, med[i]))
+        : avg;
+    const lows = showChannel
+      ? lower
+      : showMedian
+        ? avg.map((v, i) => Math.min(v, med[i]))
+        : avg;
+    const min = Math.min(...lows);
+    const max = Math.max(...highs);
+    const span = max - min || 1;
+    const x = (i: number) =>
+      padX + (i / Math.max(avg.length - 1, 1)) * (w - 2 * padX);
+    const y = (v: number) => padY + (1 - (v - min) / span) * (h - 2 * padY);
+    // Invert the y-scale so the cursor's vertical position reads as a price.
+    const priceAtY = (yy: number) =>
+      min + span * (1 - (yy - padY) / (h - 2 * padY));
+    const line = (vals: number[]) =>
+      vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+    const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => padY + f * (h - 2 * padY));
 
-  // Band = upper across, then lower back (a closed polygon).
-  const band = [
-    ...upper.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`),
-    ...lower.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).reverse(),
-  ].join(" ");
+    // Band = upper across, then lower back (a closed polygon).
+    const band = [
+      ...upper.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`),
+      ...lower.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).reverse(),
+    ].join(" ");
+
+    return {
+      min,
+      max,
+      x,
+      y,
+      priceAtY,
+      band,
+      upperLine: line(upper),
+      lowerLine: line(lower),
+      medLine: line(med),
+      avgLine: line(avg),
+      maLine: line(ma),
+      grid,
+    };
+  }, [avg, med, ma, upper, lower, showChannel, showMedian]);
 
   function onMove(e: MouseEvent<SVGSVGElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -306,7 +340,7 @@ function PriceChart({
                 stroke="none"
               />
               <polyline
-                points={line(upper)}
+                points={upperLine}
                 fill="none"
                 stroke="#38bdf8"
                 strokeWidth="1"
@@ -314,7 +348,7 @@ function PriceChart({
                 strokeOpacity="0.8"
               />
               <polyline
-                points={line(lower)}
+                points={lowerLine}
                 fill="none"
                 stroke="#38bdf8"
                 strokeWidth="1"
@@ -325,7 +359,7 @@ function PriceChart({
           )}
           {showMedian && (
             <polyline
-              points={line(med)}
+              points={medLine}
               fill="none"
               stroke="#a78bfa"
               strokeWidth="1.5"
@@ -333,14 +367,14 @@ function PriceChart({
             />
           )}
           <polyline
-            points={line(avg)}
+            points={avgLine}
             fill="none"
             stroke="#34d399"
             strokeWidth="1.5"
           />
           {showMa && (
             <polyline
-              points={line(ma)}
+              points={maLine}
               fill="none"
               stroke="#f59e0b"
               strokeWidth="1.5"
@@ -415,17 +449,20 @@ function Chart({
   const h = 200;
   const padX = 8;
   const padY = 10;
-  const vals = series.map(pick);
-  const min = Math.min(...vals);
-  const max = Math.max(...vals);
-  const span = max - min || 1;
-  const x = (i: number) =>
-    padX + (i / Math.max(vals.length - 1, 1)) * (w - 2 * padX);
-  const y = (v: number) => padY + (1 - (v - min) / span) * (h - 2 * padY);
-  const pts = vals
-    .map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`)
-    .join(" ");
-  const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => padY + f * (h - 2 * padY));
+  const vals = useMemo(() => series.map(pick), [series, pick]);
+  const { min, max, x, y, pts, grid } = useMemo(() => {
+    const min = Math.min(...vals);
+    const max = Math.max(...vals);
+    const span = max - min || 1;
+    const x = (i: number) =>
+      padX + (i / Math.max(vals.length - 1, 1)) * (w - 2 * padX);
+    const y = (v: number) => padY + (1 - (v - min) / span) * (h - 2 * padY);
+    const pts = vals
+      .map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`)
+      .join(" ");
+    const grid = [0, 0.25, 0.5, 0.75, 1].map((f) => padY + f * (h - 2 * padY));
+    return { min, max, x, y, pts, grid };
+  }, [vals]);
 
   function onMove(e: MouseEvent<SVGSVGElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -484,23 +521,6 @@ function Chart({
           </g>
         )}
       </svg>
-    </div>
-  );
-}
-
-export function Stat({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: string;
-  accent?: string;
-}) {
-  return (
-    <div>
-      <div className="text-xs text-zinc-500">{label}</div>
-      <div className={`tabular-nums ${accent ?? "text-zinc-200"}`}>{value}</div>
     </div>
   );
 }

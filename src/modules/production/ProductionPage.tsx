@@ -1,5 +1,5 @@
 import { DataAge } from "../../components/DataAge";
-import { Page, PageHeader } from "../../components/page";
+import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
 import { ParamsPanel } from "./ParamsPanel";
 import { Results } from "./Results";
@@ -43,13 +43,14 @@ function Workbench() {
                       : "Up to date ✓"
                     : "Update data"}
               </button>
-              <button
+              <PrimaryButton
                 onClick={calculate}
                 disabled={profit.isPending}
-                className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                pending={profit.isPending}
+                pendingLabel="Calculating…"
               >
-                {profit.isPending ? "Calculating…" : "Calculate"}
-              </button>
+                Calculate
+              </PrimaryButton>
             </div>
             <DataAge
               updatedAt={profit.isSuccess ? profit.submittedAt : undefined}

@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ListName, ListItem } from "./common";
 
 export interface ReprocessOutput {
   typeId: number;
@@ -51,16 +50,4 @@ export function reprocessingEfficiency(
   params: ReprocessParams,
 ): Promise<number> {
   return invoke<number>("reprocessing_efficiency", { params });
-}
-
-export function reprocessingGetList(list: ListName): Promise<ListItem[]> {
-  return invoke<ListItem[]>("reprocessing_get_list", { list });
-}
-
-export function reprocessingSetList(
-  list: ListName,
-  typeId: number,
-  add: boolean,
-): Promise<void> {
-  return invoke<void>("reprocessing_set_list", { list, typeId, add });
 }

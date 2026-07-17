@@ -17,6 +17,7 @@ import {
   type SortColumn,
 } from "../../components/SortHeaderCell";
 import { Page, PageHeader } from "../../components/page";
+import { Stat } from "../../components/Stat";
 import { SdeGate } from "../../components/SdeGate";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { Building2, User } from "lucide-react";
@@ -176,7 +177,11 @@ function Workbench() {
       {tree && (
         <>
           <div className="mt-4 flex flex-wrap gap-6 text-sm">
-            <Stat label="Sell value" value={formatIsk(tree.sellTotal)} accent />
+            <Stat
+              label="Sell value"
+              value={formatIsk(tree.sellTotal)}
+              accent="text-emerald-400"
+            />
             <Stat
               label="Volume"
               value={`${formatInt(Math.round(tree.volumeTotal))} m³`}
@@ -215,7 +220,7 @@ function Workbench() {
             <Stat
               label="Sell value (net worth)"
               value={formatIsk(result.sellTotal)}
-              accent
+              accent="text-emerald-400"
             />
             <Stat label="Buy value" value={formatIsk(result.buyTotal)} />
             <Stat
@@ -477,26 +482,5 @@ function TreeRow({ node, depth }: { node: AssetNode; depth: number }) {
           <TreeRow key={c.id} node={c} depth={depth + 1} />
         ))}
     </>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: string;
-  accent?: boolean;
-}) {
-  return (
-    <div>
-      <div className="text-xs text-zinc-500">{label}</div>
-      <div
-        className={`tabular-nums ${accent ? "text-emerald-400" : "text-zinc-200"}`}
-      >
-        {value}
-      </div>
-    </div>
   );
 }

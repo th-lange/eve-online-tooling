@@ -2,13 +2,12 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import {
-  errorMessage,
-  isAuthRequired,
   notifications,
   notificationDismiss,
   notificationsReset,
   type NotifRow,
 } from "../../lib/api";
+import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { Page, PageHeader } from "../../components/page";
 
 const CATEGORY_STYLE: Record<string, string> = {
@@ -89,17 +88,11 @@ export function NotificationsPage() {
         }
       />
 
-      {q.isError &&
-        (isAuthRequired(q.error) ? (
-          <div className="mt-3 text-sm text-zinc-400">
-            Log in a character first to view their notifications.
-          </div>
-        ) : (
-          <div className="mt-3 text-sm text-rose-400">
-            {errorMessage(q.error)} — check the notifications scope is enabled
-            (a re-login may be needed to grant it).
-          </div>
-        ))}
+      <QueryErrorNotice
+        error={q.error}
+        loginMessage="Log in a character first to view their notifications."
+        scopeHint="check the notifications scope is enabled (a re-login may be needed to grant it)."
+      />
 
       {q.data && q.data.length > 0 && (
         <div className="mt-4 flex flex-wrap gap-1.5">

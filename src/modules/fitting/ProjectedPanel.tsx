@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
-import { sdeSearch, type FitItem } from "../../lib/api";
+import { type FitItem } from "../../lib/api";
+import { sdeKeys } from "../../lib/queryKeys";
 
 /**
  * Add modules projected **onto** this fit (webs/paints/damps/…) — incoming
@@ -21,8 +22,7 @@ export function ProjectedPanel({
 }) {
   const [q, setQ] = useState("");
   const results = useQuery({
-    queryKey: ["fitting", "proj-search", q],
-    queryFn: () => sdeSearch(q),
+    ...sdeKeys.search(q),
     enabled: q.trim().length >= 2,
   });
   return (

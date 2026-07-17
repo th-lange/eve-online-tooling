@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import {
   errorMessage,
   sdeSearchShips,
@@ -7,6 +7,7 @@ import {
   type IdName,
   type JumpPlan,
 } from "../../lib/api";
+import { Combo } from "../../components/Combo";
 import { MASS, fmtMkg, massColor } from "./helpers";
 import { Field } from "./shared";
 
@@ -28,7 +29,13 @@ export function JumpPlanner() {
           Jump planner
         </span>
         <Field label="Ship">
-          <ShipPicker picked={ship} onPick={setShip} />
+          <Combo
+            value={ship}
+            onPick={setShip}
+            search={sdeSearchShips}
+            placeholder="Ship…"
+            width="w-40"
+          />
         </Field>
         <Field label="WH type">
           <input
@@ -116,53 +123,6 @@ export function JumpPlanner() {
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-/** Ship search picker (mirrors SystemPicker, backed by the SDE ship search). */
-function ShipPicker({
-  picked,
-  onPick,
-}: {
-  picked: IdName | null;
-  onPick: (m: IdName | null) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const matches = useQuery({
-    queryKey: ["wh", "shipSearch", query],
-    queryFn: () => sdeSearchShips(query),
-    enabled: query.trim().length >= 2 && !picked,
-  });
-  return (
-    <div className="relative">
-      <input
-        value={picked ? picked.name : query}
-        onChange={(e) => {
-          onPick(null);
-          setQuery(e.currentTarget.value);
-        }}
-        placeholder="Ship…"
-        className="w-40 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
-      />
-      {!picked &&
-        query.trim().length >= 2 &&
-        (matches.data?.length ?? 0) > 0 && (
-          <div className="absolute z-10 mt-1 max-h-48 w-40 overflow-auto rounded border border-zinc-700 bg-zinc-900 shadow-lg">
-            {matches.data!.map((m) => (
-              <button
-                key={m.id}
-                onClick={() => {
-                  onPick(m);
-                  setQuery("");
-                }}
-                className="block w-full px-2 py-1 text-left text-sm text-zinc-200 hover:bg-zinc-800"
-              >
-                {m.name}
-              </button>
-            ))}
-          </div>
-        )}
     </div>
   );
 }

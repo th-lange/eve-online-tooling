@@ -8,7 +8,6 @@ import {
   dpsStart,
   dpsStop,
   errorMessage,
-  eveDefaultLogDir,
   onDpsTick,
   type DpsLogFile,
   type DpsTick,
@@ -18,6 +17,7 @@ import {
 } from "../../lib/api";
 import { formatInt } from "../../lib/format";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
+import { useEveLogDir } from "../../lib/useEveLogDir";
 
 type Mode = "live" | "playback";
 
@@ -61,12 +61,6 @@ const SERIES = [
   primary: boolean;
 }[];
 
-/** Suggest the Gamelogs folder from a previously-entered Chatlogs path. */
-function suggestGamelogs(): string {
-  const chat = localStorage.getItem(STORAGE_KEYS.eveChatlogsDir) ?? "";
-  return chat ? chat.replace(/Chatlogs\/?$/i, "Gamelogs") : "";
-}
-
 /** Append a tick to the rolling buffer, dropping the oldest past `BUFFER`. */
 function appendTick(prev: DpsTick[], t: DpsTick): DpsTick[] {
   const next = prev.length >= BUFFER ? prev.slice(1) : prev.slice();
@@ -75,10 +69,7 @@ function appendTick(prev: DpsTick[], t: DpsTick): DpsTick[] {
 }
 
 export function DpsPage() {
-  const [dir, setDir] = useState(
-    () =>
-      localStorage.getItem(STORAGE_KEYS.eveGamelogsDir) || suggestGamelogs(),
-  );
+  const [dir, setDir, persistDir] = useEveLogDir("gamelogs");
   const [windowSecs, setWindowSecs] = useState(() =>
     Number(localStorage.getItem(STORAGE_KEYS.dpsWindowSecs) ?? 10),
   );
@@ -89,12 +80,6 @@ export function DpsPage() {
   const [logs, setLogs] = useState<DpsLogFile[]>([]);
   const [file, setFile] = useState("");
   const [speed, setSpeed] = useState(4);
-
-  // Prefill the Gamelogs folder from the OS default when we have nothing yet.
-  useEffect(() => {
-    if (dir) return;
-    eveDefaultLogDir("gamelogs").then((d) => d && setDir(d));
-  }, [dir]);
 
   // The page stays mounted while backgrounded (ModuleHost), so without this it
   // would keep re-rendering ~2×/s off the tick feed while invisible. Track the
@@ -142,7 +127,7 @@ export function DpsPage() {
 
   async function start() {
     setError(null);
-    localStorage.setItem(STORAGE_KEYS.eveGamelogsDir, dir);
+    persistDir();
     localStorage.setItem(STORAGE_KEYS.dpsWindowSecs, String(windowSecs));
     peaksRef.current = { out: 0, in: 0 };
     try {

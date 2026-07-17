@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { CornerDownLeft, Package, Search } from "lucide-react";
 import { modules } from "../modules/registry";
-import { sdeSearch } from "../lib/api";
+import { usePluginModules } from "../modules/plugins/pluginModules";
+import { sdeKeys } from "../lib/queryKeys";
 import { openItemInMarketSearch } from "../lib/deepLink";
 import { fuzzy } from "../lib/fuzzy";
 
@@ -53,9 +54,10 @@ export function CommandPalette() {
     }
   }, [open]);
 
+  const pluginModules = usePluginModules();
   const moduleEntries: Entry[] = useMemo(
     () =>
-      modules
+      [...modules, ...pluginModules]
         .filter((m) => fuzzy(m.title, q.trim()))
         .map((m) => ({
           kind: "module",
@@ -63,14 +65,13 @@ export function CommandPalette() {
           title: m.title,
           subtitle: m.description,
         })),
-    [q],
+    [q, pluginModules],
   );
 
   // Item lookup only kicks in once it looks like a real query.
   const trimmed = q.trim();
   const itemQuery = useQuery({
-    queryKey: ["palette", "items", trimmed],
-    queryFn: () => sdeSearch(trimmed),
+    ...sdeKeys.search(trimmed),
     enabled: open && trimmed.length >= 2,
   });
   const itemEntries: Entry[] = useMemo(

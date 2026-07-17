@@ -17,11 +17,12 @@ import {
 } from "../../components/RegionStationPicker";
 import { formatInt, formatIsk, sortRows } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
+import { parseItems } from "../../lib/parseItems";
 import {
   SortHeaderCell,
   type SortColumn,
 } from "../../components/SortHeaderCell";
-import { Page, PageHeader } from "../../components/page";
+import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
 
 const FORGE = 10000002;
@@ -81,15 +82,14 @@ function Workbench() {
         title={TITLE}
         subtitle={SUBTITLE}
         actions={
-          <button
+          <PrimaryButton
             onClick={calculate}
             disabled={run.isPending || runRepro.isPending || items.length === 0}
-            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+            pending={run.isPending || runRepro.isPending}
+            pendingLabel="Pricing…"
           >
-            {run.isPending || runRepro.isPending
-              ? "Pricing…"
-              : `${reprocess ? "Reprocess" : "Appraise"} (${items.length})`}
-          </button>
+            {`${reprocess ? "Reprocess" : "Appraise"} (${items.length})`}
+          </PrimaryButton>
         }
       />
 
@@ -421,28 +421,6 @@ function ReproResult({ d }: { d: ReprocessAppraisalResult }) {
       </div>
     </div>
   );
-}
-
-/** Parse pasted lines: `Name<tab|2+ spaces>Quantity`; qty defaults to 1. */
-function parseItems(text: string): { name: string; quantity: number }[] {
-  const out: { name: string; quantity: number }[] = [];
-  for (const raw of text.split("\n")) {
-    const line = raw.trim();
-    if (!line) continue;
-    // Split on tab, or 2+ spaces, taking a trailing integer as the quantity.
-    let name = line;
-    let qty = 1;
-    const parts = line.split(/\t| {2,}/).filter(Boolean);
-    if (parts.length >= 2) {
-      const last = parts[parts.length - 1].replace(/[.,\s]/g, "");
-      if (/^\d+$/.test(last)) {
-        qty = Number(last);
-        name = parts.slice(0, -1).join(" ").trim();
-      }
-    }
-    if (name) out.push({ name, quantity: qty });
-  }
-  return out;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {

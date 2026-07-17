@@ -104,3 +104,35 @@ export function Centered({ children }: { children: ReactNode }) {
     <div className="p-10 text-center text-sm text-zinc-500">{children}</div>
   );
 }
+
+/**
+ * Primary page action: the indigo "do the thing" button used in a page
+ * header's `actions` (Calculate/Refresh/Scan/Sync/…). `pending`+`pendingLabel`
+ * swap in an in-flight label without the caller re-deriving it inline.
+ */
+export function PrimaryButton({
+  onClick,
+  disabled,
+  pending,
+  pendingLabel,
+  title,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  pending?: boolean;
+  pendingLabel?: ReactNode;
+  title?: string;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+    >
+      {pending ? pendingLabel : children}
+    </button>
+  );
+}

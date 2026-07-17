@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import {
@@ -8,7 +8,6 @@ import {
 } from "@tauri-apps/plugin-notification";
 import {
   errorMessage,
-  eveDefaultLogDir,
   localLogNames,
   localScan,
   localintelGetWatchlist,
@@ -24,7 +23,8 @@ import {
 import { formatInt } from "../../lib/format";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { usePersistentState } from "../../lib/usePersistentState";
-import { Page, PageHeader } from "../../components/page";
+import { useEveLogDir } from "../../lib/useEveLogDir";
+import { Page, PageHeader, PrimaryButton } from "../../components/page";
 
 /** Best-effort desktop notification — requests permission, never throws. */
 async function notify(title: string, body: string) {
@@ -88,18 +88,11 @@ export function LocalIntelPage() {
   const [newIds, setNewIds] = useState<Set<number>>(new Set());
   // EVE logs folder (Chatlogs); persisted. Used to prefill names from the
   // newest Local log — only pilots who chatted (logs lack the member list).
-  const [logsDir, setLogsDir] = useState(
-    () => localStorage.getItem(STORAGE_KEYS.eveChatlogsDir) ?? "",
-  );
-  // Prefill the Chatlogs folder from the OS default when we have nothing yet.
-  useEffect(() => {
-    if (logsDir) return;
-    eveDefaultLogDir("chatlogs").then((d) => d && setLogsDir(d));
-  }, [logsDir]);
+  const [logsDir, setLogsDir, persistLogsDir] = useEveLogDir("chatlogs");
   const loadLog = useMutation({
     mutationFn: () => localLogNames(logsDir),
     onSuccess: (r) => {
-      localStorage.setItem(STORAGE_KEYS.eveChatlogsDir, logsDir);
+      persistLogsDir();
       if (r.senders.length > 0) setText(r.senders.join("\n"));
     },
   });
@@ -247,13 +240,14 @@ export function LocalIntelPage() {
             title="Local Intel"
             subtitle="Select-all in the in-game Local member list, copy, and paste it here to classify every pilot by corp/alliance against your character's contacts (blue/red) and standings."
             actions={
-              <button
+              <PrimaryButton
                 onClick={() => scan.mutate(text)}
                 disabled={scan.isPending || text.trim() === ""}
-                className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                pending={scan.isPending}
+                pendingLabel="Scanning…"
               >
-                {scan.isPending ? "Scanning…" : "Scan local"}
-              </button>
+                Scan local
+              </PrimaryButton>
             }
           />
 

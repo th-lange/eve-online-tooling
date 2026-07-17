@@ -2,19 +2,19 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   errorMessage,
-  isAuthRequired,
   lpBalances,
   lpOffers,
   type LpParams,
   type OfferRow,
 } from "../../lib/api";
+import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { formatInt, formatIsk, sortRows } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import {
   SortHeaderCell,
   type SortColumn,
 } from "../../components/SortHeaderCell";
-import { Page, PageHeader } from "../../components/page";
+import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
 
 type OfferSortKey =
@@ -107,16 +107,17 @@ function Workbench() {
               </span>
             )}
             <div className="flex items-center gap-2">
-              <button
+              <PrimaryButton
                 onClick={() =>
                   corpId != null &&
                   run.mutate({ corporationId: corpId, iskPerLp })
                 }
                 disabled={run.isPending || corpId == null}
-                className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                pending={run.isPending}
+                pendingLabel="Pricing…"
               >
-                {run.isPending ? "Pricing…" : "Calculate"}
-              </button>
+                Calculate
+              </PrimaryButton>
               <button
                 onClick={() =>
                   corpId != null &&
@@ -137,16 +138,11 @@ function Workbench() {
         }
       />
 
-      {balances.isError &&
-        (isAuthRequired(balances.error) ? (
-          <div className="mt-3 text-sm text-zinc-400">
-            Log in a character first to view loyalty-point balances.
-          </div>
-        ) : (
-          <div className="mt-3 text-sm text-rose-400">
-            {errorMessage(balances.error)} — check the loyalty scope is enabled.
-          </div>
-        ))}
+      <QueryErrorNotice
+        error={balances.error}
+        loginMessage="Log in a character first to view loyalty-point balances."
+        scopeHint="check the loyalty scope is enabled."
+      />
 
       <div className="mt-4 flex flex-wrap items-end gap-3">
         <Field label="Corporation (your LP)">

@@ -1,13 +1,10 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  errorMessage,
-  isAuthRequired,
-  transactionLedger,
-  type LedgerRow,
-} from "../../lib/api";
+import { transactionLedger, type LedgerRow } from "../../lib/api";
+import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { formatInt, formatIsk } from "../../lib/format";
 import { Page, PageHeader } from "../../components/page";
+import { Stat } from "../../components/Stat";
 
 type Side = "all" | "buy" | "sell";
 
@@ -49,29 +46,35 @@ export function TransactionsPage() {
           </button>
         }
       />
-      {q.isError &&
-        (isAuthRequired(q.error) ? (
-          <div className="mt-3 text-sm text-zinc-400">
-            Log in a character first to view their transaction history.
-          </div>
-        ) : (
-          <div className="mt-3 text-sm text-rose-400">
-            {errorMessage(q.error)} — check the wallet scope is enabled.
-          </div>
-        ))}
+      <QueryErrorNotice
+        error={q.error}
+        loginMessage="Log in a character first to view their transaction history."
+        scopeHint="check the wallet scope is enabled."
+      />
 
       {q.data && (
         <div className="mt-4 flex flex-wrap gap-3">
-          <Stat label="Bought" value={formatIsk(q.data.totalBuy)} tone="rose" />
+          <Stat
+            label="Bought"
+            value={formatIsk(q.data.totalBuy)}
+            accent="text-rose-400"
+            boxed
+          />
           <Stat
             label="Sold"
             value={formatIsk(q.data.totalSell)}
-            tone="emerald"
+            accent="text-emerald-400"
+            boxed
           />
           <Stat
             label="Net"
             value={formatIsk(q.data.totalSell - q.data.totalBuy)}
-            tone={q.data.totalSell - q.data.totalBuy >= 0 ? "emerald" : "rose"}
+            accent={
+              q.data.totalSell - q.data.totalBuy >= 0
+                ? "text-emerald-400"
+                : "text-rose-400"
+            }
+            boxed
           />
         </div>
       )}
@@ -173,29 +176,6 @@ function Table({ rows, loading }: { rows: LedgerRow[]; loading: boolean }) {
           )}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-function Stat({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone: "rose" | "emerald";
-}) {
-  return (
-    <div className="rounded border border-zinc-800 bg-zinc-900/60 px-3 py-2">
-      <div className="text-xs text-zinc-500">{label}</div>
-      <div
-        className={`tabular-nums ${
-          tone === "emerald" ? "text-emerald-400" : "text-rose-400"
-        }`}
-      >
-        {value}
-      </div>
     </div>
   );
 }

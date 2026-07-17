@@ -26,11 +26,6 @@ export function shoppingCreateList(name: string): Promise<ShoppingList> {
   return invoke<ShoppingList>("shopping_create_list", { name });
 }
 
-/** Rename a list. */
-export function shoppingRenameList(id: string, name: string): Promise<void> {
-  return invoke<void>("shopping_rename_list", { id, name });
-}
-
 /** Delete a list (rejects the built-in default/production lists). */
 export function shoppingDeleteList(id: string): Promise<void> {
   return invoke<void>("shopping_delete_list", { id });

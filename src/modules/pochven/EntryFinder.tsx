@@ -6,23 +6,17 @@ import {
   marketCurrentLocation,
   pochvenSearch,
   systemSearch,
+  type SystemMatch,
 } from "../../lib/api";
+import { Combo } from "../../components/Combo";
 import { EntryResults } from "./EntryResults";
 
 // Active entry search: from your current system, route to the nearest C729
 // candidate and list the systems to jump & scan.
 export function EntryFinder() {
-  const [systemId, setSystemId] = useState<number | null>(null);
-  const [label, setLabel] = useState("");
-  const [query, setQuery] = useState("");
+  const [system, setSystem] = useState<SystemMatch | null>(null);
   const [maxJumps, setMaxJumps] = useState(10);
 
-  const search = useQuery({
-    queryKey: ["system", "search", query],
-    queryFn: () => systemSearch(query),
-    enabled: query.trim().length >= 2,
-    staleTime: 60_000,
-  });
   const location = useQuery({
     queryKey: ["market", "currentLocation"],
     queryFn: marketCurrentLocation,
@@ -30,47 +24,29 @@ export function EntryFinder() {
     enabled: false,
   });
   const result = useQuery({
-    queryKey: ["pochven", "search", systemId, maxJumps],
-    queryFn: () => pochvenSearch(systemId!, maxJumps),
-    enabled: systemId != null,
+    queryKey: ["pochven", "search", system?.id ?? null, maxJumps],
+    queryFn: () => pochvenSearch(system!.id, maxJumps),
+    enabled: system != null,
     staleTime: 5 * 60_000,
   });
-
-  const pick = (id: number, name: string) => {
-    setSystemId(id);
-    setLabel(name);
-    setQuery("");
-  };
 
   return (
     <div className="mt-5">
       <div className="flex flex-wrap items-end gap-3">
-        <label className="relative flex flex-col gap-1 text-xs text-zinc-400">
-          Your current system
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.currentTarget.value)}
-            placeholder={label || "Search a system…"}
-            className="w-64 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
-          />
-          {query.trim().length >= 2 && (search.data?.length ?? 0) > 0 && (
-            <div className="absolute top-full z-20 mt-1 max-h-56 w-64 overflow-auto rounded border border-zinc-700 bg-zinc-800 shadow-lg">
-              {search.data!.slice(0, 25).map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => pick(m.id, m.name)}
-                  className="block w-full px-2 py-1 text-left text-sm text-zinc-200 hover:bg-zinc-700"
-                >
-                  {m.name}
-                </button>
-              ))}
-            </div>
-          )}
-        </label>
+        <Combo
+          label="Your current system"
+          value={system}
+          onPick={setSystem}
+          search={systemSearch}
+          placeholder="Search a system…"
+          width="w-64"
+          maxResults={25}
+        />
         <button
           onClick={async () => {
             const loc = await location.refetch();
-            if (loc.data) pick(loc.data.systemId, loc.data.systemName);
+            if (loc.data)
+              setSystem({ id: loc.data.systemId, name: loc.data.systemName });
           }}
           disabled={location.isFetching}
           title="Use your logged-in character's current system"
@@ -93,14 +69,14 @@ export function EntryFinder() {
             className="w-24 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
           />
         </label>
-        {label && (
+        {system && (
           <span className="pb-1 text-xs text-zinc-500">
-            from <span className="text-zinc-300">{label}</span>
+            from <span className="text-zinc-300">{system.name}</span>
           </span>
         )}
       </div>
 
-      {systemId != null &&
+      {system != null &&
         (result.isLoading ? (
           <div className="mt-4 text-sm text-zinc-500">Finding entries…</div>
         ) : result.isError ? (
@@ -108,7 +84,7 @@ export function EntryFinder() {
             {errorMessage(result.error)}
           </div>
         ) : result.data ? (
-          <EntryResults key={systemId} data={result.data} />
+          <EntryResults key={system.id} data={result.data} />
         ) : null)}
     </div>
   );

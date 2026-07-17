@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   marketAllRegions,
   marketCurrentLocation,
-  marketHistory,
   marketPrice,
   marketSearchStations,
   marketSellOrders,
@@ -19,8 +18,15 @@ import {
   subscribeMarketSearchItem,
   takePendingMarketSearchItem,
 } from "../../lib/deepLink";
+import {
+  SDE_SEARCH_STALE_TIME,
+  marketKeys,
+  sdeKeys,
+} from "../../lib/queryKeys";
 import { AddToListButton } from "../../components/AddToListButton";
-import { PriceHistoryView, Stat } from "../../components/PriceHistory";
+import { Combo } from "../../components/Combo";
+import { PriceHistoryView } from "../../components/PriceHistory";
+import { Stat } from "../../components/Stat";
 import {
   formatInt,
   formatIsk,
@@ -56,7 +62,6 @@ function Workbench() {
   const [tab, setTab] = useState<Tab>("search");
 
   // Shared item selection.
-  const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<Picked>(null);
 
   // Location filters — region is null for "everywhere".
@@ -90,7 +95,6 @@ function Workbench() {
   useEffect(() => {
     const apply = (item: { id: number; name: string }) => {
       setPicked({ id: item.id, name: item.name });
-      setQuery(item.name);
       setTab("search");
     };
     const p = takePendingMarketSearchItem();
@@ -98,16 +102,9 @@ function Workbench() {
     return subscribeMarketSearchItem(apply);
   }, []);
 
-  const results = useQuery({
-    queryKey: ["search", query],
-    queryFn: () => sdeSearch(query),
-    enabled: query.trim().length >= 2 && !picked,
-  });
-
   const historyRegionId = regionId ?? FORGE;
   const history = useQuery({
-    queryKey: ["history", historyRegionId, picked?.id],
-    queryFn: () => marketHistory(historyRegionId, picked!.id),
+    ...marketKeys.history(historyRegionId, picked?.id),
     enabled: tab === "history" && picked != null,
   });
   const price = useQuery({
@@ -144,36 +141,16 @@ function Workbench() {
 
       {/* Item search (shared by both tabs). */}
       <div className="mt-4 flex flex-wrap items-end gap-3">
-        <div className="relative">
-          <label className="flex flex-col gap-1 text-xs text-zinc-400">
-            Item
-            <input
-              value={picked ? picked.name : query}
-              onChange={(e) => {
-                setPicked(null);
-                setQuery(e.currentTarget.value);
-              }}
-              placeholder="search by name…"
-              className="w-64 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
-            />
-          </label>
-          {!picked && (results.data?.length ?? 0) > 0 && (
-            <div className="absolute z-10 mt-1 max-h-60 w-64 overflow-auto rounded border border-zinc-700 bg-zinc-900 text-sm shadow-lg">
-              {results.data!.map((r) => (
-                <button
-                  key={r.id}
-                  onClick={() => {
-                    setPicked({ id: r.id, name: r.name });
-                    setQuery(r.name);
-                  }}
-                  className="block w-full px-2 py-1 text-left text-zinc-300 hover:bg-zinc-800"
-                >
-                  {r.name}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <Combo
+          label="Item"
+          value={picked}
+          onPick={setPicked}
+          search={sdeSearch}
+          queryKey={(text) => sdeKeys.search(text).queryKey}
+          staleTime={SDE_SEARCH_STALE_TIME}
+          placeholder="search by name…"
+          width="w-64"
+        />
         {picked && (
           <button
             onClick={() =>
@@ -569,76 +546,6 @@ function HistoryTab({
           <PriceHistoryView history={history} />
         )}
       </div>
-    </div>
-  );
-}
-
-// --- Shared pieces ---
-
-/** A searchable combobox over an SDE/region search command, clearable. */
-function Combo({
-  label,
-  value,
-  onPick,
-  search,
-  placeholder,
-}: {
-  label: string;
-  value: Picked;
-  onPick: (v: Picked) => void;
-  search: (query: string) => Promise<IdName[]>;
-  placeholder?: string;
-}) {
-  const [text, setText] = useState("");
-  const results = useQuery({
-    queryKey: ["combo", label, text],
-    queryFn: () => search(text),
-    enabled: text.trim().length >= 2 && value == null,
-  });
-  return (
-    <div className="relative">
-      <label className="flex flex-col gap-1 text-xs text-zinc-400">
-        {label}
-        <div className="flex items-center gap-1">
-          <input
-            value={value ? value.name : text}
-            onChange={(e) => {
-              if (value) onPick(null);
-              setText(e.currentTarget.value);
-            }}
-            placeholder={placeholder}
-            className="w-52 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
-          />
-          {value && (
-            <button
-              onClick={() => {
-                onPick(null);
-                setText("");
-              }}
-              title="Clear"
-              className="rounded border border-zinc-700 px-1.5 text-xs text-zinc-400 hover:bg-zinc-800"
-            >
-              ✕
-            </button>
-          )}
-        </div>
-      </label>
-      {!value && (results.data?.length ?? 0) > 0 && (
-        <div className="absolute z-10 mt-1 max-h-60 w-52 overflow-auto rounded border border-zinc-700 bg-zinc-900 text-sm shadow-lg">
-          {results.data!.map((r) => (
-            <button
-              key={r.id}
-              onClick={() => {
-                onPick({ id: r.id, name: r.name });
-                setText(r.name);
-              }}
-              className="block w-full px-2 py-1 text-left text-zinc-300 hover:bg-zinc-800"
-            >
-              {r.name}
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

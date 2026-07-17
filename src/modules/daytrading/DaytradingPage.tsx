@@ -1,18 +1,14 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { DataAge } from "../../components/DataAge";
-import { AddToListButton } from "../../components/AddToListButton";
 import {
-  daytradingGetList,
   daytradingScan,
-  daytradingSetList,
   errorMessage,
   marketRegions,
   rosterStock,
   sdeMarketCategories,
   type DayTradeParams,
   type DayTradeRow,
-  type ListName,
 } from "../../lib/api";
 import {
   formatInt,
@@ -26,10 +22,23 @@ import {
   SortHeaderCell,
   type SortColumn,
 } from "../../components/SortHeaderCell";
-import { Page, PageHeader, SplitPane, Centered } from "../../components/page";
+import {
+  Page,
+  PageHeader,
+  SplitPane,
+  Centered,
+  PrimaryButton,
+} from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
+import { useTypeIdLists } from "../../lib/useSavedLists";
+import {
+  ListTabs,
+  SavedListView,
+  RowActionsCell,
+  type ListTab,
+} from "../../components/typeIdLists";
 
-type Tab = "opportunities" | "favorites" | "blacklist";
+type Tab = ListTab;
 
 /** EVE category ids for the default day-trade set: Ship / Module / Charge. */
 const DEFAULT_CATEGORY_IDS = [6, 7, 8];
@@ -47,7 +56,6 @@ export function DaytradingPage() {
 }
 
 function Workbench() {
-  const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("opportunities");
   // Empty = all hubs; otherwise the explicit subset to compare.
   const [regionIds, setRegionIds] = useState<Set<number>>(new Set());
@@ -83,14 +91,8 @@ function Workbench() {
     queryFn: rosterStock,
     enabled: subtractStock,
   });
-  const favorites = useQuery({
-    queryKey: ["daytrading", "favorites"],
-    queryFn: () => daytradingGetList("favorites"),
-  });
-  const blacklist = useQuery({
-    queryKey: ["daytrading", "blacklist"],
-    queryFn: () => daytradingGetList("blacklist"),
-  });
+  const { favorites, blacklist, toggleFavorite, blacklistRow, remove } =
+    useTypeIdLists("daytrading", setRows, (r) => r.typeId);
 
   const run = useMutation({
     mutationFn: (p: DayTradeParams) => daytradingScan(p),
@@ -109,26 +111,6 @@ function Workbench() {
       categoryIds: [...categoryIds],
       stock: subtractStock ? (stock.data ?? {}) : {},
     });
-  }
-
-  const setList = useMutation({
-    mutationFn: (v: { list: ListName; typeId: number; add: boolean }) =>
-      daytradingSetList(v.list, v.typeId, v.add),
-    onSuccess: (_d, v) =>
-      qc.invalidateQueries({ queryKey: ["daytrading", v.list] }),
-  });
-
-  function toggleFavorite(r: DayTradeRow) {
-    setList.mutate({ list: "favorites", typeId: r.typeId, add: !r.favorite });
-    setRows((prev) =>
-      prev.map((x) =>
-        x.typeId === r.typeId ? { ...x, favorite: !x.favorite } : x,
-      ),
-    );
-  }
-  function blacklistRow(r: DayTradeRow) {
-    setList.mutate({ list: "blacklist", typeId: r.typeId, add: true });
-    setRows((prev) => prev.filter((x) => x.typeId !== r.typeId));
   }
 
   const allRegions = regions.data ?? [];
@@ -183,12 +165,13 @@ function Workbench() {
         subtitle={SUBTITLE}
         actions={
           <>
-            <button
+            <PrimaryButton
               onClick={calculate}
               disabled={
                 run.isPending || selectedCount < 2 || categoryIds.size === 0
               }
-              className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              pending={run.isPending}
+              pendingLabel="Scanning…"
               title={
                 selectedCount < 2
                   ? "Select at least two hubs"
@@ -197,8 +180,8 @@ function Workbench() {
                     : undefined
               }
             >
-              {run.isPending ? "Scanning…" : "Calculate"}
-            </button>
+              Calculate
+            </PrimaryButton>
             <DataAge
               updatedAt={run.isSuccess ? run.submittedAt : undefined}
               fetching={run.isPending}
@@ -353,7 +336,7 @@ function Workbench() {
         }
       />
 
-      <Tabs
+      <ListTabs
         tab={tab}
         onChange={setTab}
         counts={{
@@ -409,22 +392,24 @@ function Workbench() {
           ))}
 
         {tab === "favorites" && (
-          <ListView
+          <SavedListView
             items={favorites.data ?? []}
-            rowsByType={rowsByType}
+            rowsById={rowsByType}
             removeLabel="Unfavorite"
-            onRemove={(id) =>
-              setList.mutate({ list: "favorites", typeId: id, add: false })
+            onRemove={(id) => remove("favorites", id)}
+            detail={(r: DayTradeRow) =>
+              `${r.buyHub} → ${r.sellHub} · ${formatIsk(r.iskPerM3)}/m³`
             }
           />
         )}
         {tab === "blacklist" && (
-          <ListView
+          <SavedListView
             items={blacklist.data ?? []}
-            rowsByType={rowsByType}
+            rowsById={rowsByType}
             removeLabel="Remove"
-            onRemove={(id) =>
-              setList.mutate({ list: "blacklist", typeId: id, add: false })
+            onRemove={(id) => remove("blacklist", id)}
+            detail={(r: DayTradeRow) =>
+              `${r.buyHub} → ${r.sellHub} · ${formatIsk(r.iskPerM3)}/m³`
             }
           />
         )}
@@ -568,33 +553,12 @@ function DayTradeTable({
               key={r.typeId}
               className="border-t border-zinc-800 hover:bg-zinc-800/40"
             >
-              <td className="px-2">
-                <button
-                  onClick={() => onFavorite(r)}
-                  title="Favorite"
-                  className={
-                    r.favorite
-                      ? "text-amber-400"
-                      : "text-zinc-600 hover:text-amber-400"
-                  }
-                >
-                  ★
-                </button>
-                <button
-                  onClick={() => onBlacklist(r)}
-                  title="Blacklist"
-                  className="ml-2 text-zinc-600 hover:text-rose-400"
-                >
-                  ✕
-                </button>
-                <span className="ml-2">
-                  <AddToListButton
-                    typeId={r.typeId}
-                    label="+List"
-                    className="text-zinc-600 hover:text-emerald-400"
-                  />
-                </span>
-              </td>
+              <RowActionsCell
+                row={r}
+                onFavorite={onFavorite}
+                onBlacklist={onBlacklist}
+                showAddToList
+              />
               <td className="px-3 py-1.5">
                 <div className="text-zinc-200">{r.name}</div>
                 <div className="text-xs text-zinc-500">
@@ -702,84 +666,6 @@ function CheckboxGroup({
           />
           {o}
         </label>
-      ))}
-    </div>
-  );
-}
-
-function ListView({
-  items,
-  rowsByType,
-  removeLabel,
-  onRemove,
-}: {
-  items: { typeId: number; name: string }[];
-  rowsByType: Map<number, DayTradeRow>;
-  removeLabel: string;
-  onRemove: (typeId: number) => void;
-}) {
-  if (items.length === 0) {
-    return <Centered>Nothing here yet.</Centered>;
-  }
-  return (
-    <div className="overflow-auto rounded border border-zinc-800">
-      <table className="w-full border-collapse text-sm">
-        <tbody>
-          {items.map((it) => {
-            const r = rowsByType.get(it.typeId);
-            return (
-              <tr key={it.typeId} className="border-t border-zinc-800">
-                <td className="px-3 py-1.5 text-zinc-200">{it.name}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                  {r
-                    ? `${r.buyHub} → ${r.sellHub} · ${formatIsk(r.iskPerM3)}/m³`
-                    : ""}
-                </td>
-                <td className="px-3 py-1.5 text-right">
-                  <button
-                    onClick={() => onRemove(it.typeId)}
-                    className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
-                  >
-                    {removeLabel}
-                  </button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function Tabs({
-  tab,
-  onChange,
-  counts,
-}: {
-  tab: Tab;
-  onChange: (t: Tab) => void;
-  counts: { favorites: number; blacklist: number };
-}) {
-  const tabs: { value: Tab; label: string }[] = [
-    { value: "opportunities", label: "Opportunities" },
-    { value: "favorites", label: `Favorites (${counts.favorites})` },
-    { value: "blacklist", label: `Blacklist (${counts.blacklist})` },
-  ];
-  return (
-    <div className="mt-4 inline-flex rounded border border-zinc-800 bg-zinc-900 p-0.5">
-      {tabs.map((t) => (
-        <button
-          key={t.value}
-          onClick={() => onChange(t.value)}
-          className={`rounded px-3 py-1.5 text-sm ${
-            tab === t.value
-              ? "bg-zinc-700 text-zinc-100"
-              : "text-zinc-400 hover:text-zinc-200"
-          }`}
-        >
-          {t.label}
-        </button>
       ))}
     </div>
   );

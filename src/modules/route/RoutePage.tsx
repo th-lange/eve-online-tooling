@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   errorMessage,
-  isAuthRequired,
   routeBreadcrumb,
   routeClearBreadcrumb,
   routeLocation,
@@ -15,6 +14,7 @@ import {
   type SystemActivity,
   type SystemMatch,
 } from "../../lib/api";
+import { queryErrorText } from "../../components/QueryErrorNotice";
 import { formatInt } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { usePersistentState } from "../../lib/usePersistentState";
@@ -23,6 +23,7 @@ import {
   type SortColumn,
 } from "../../components/SortHeaderCell";
 import { DataAge } from "../../components/DataAge";
+import { Combo } from "../../components/Combo";
 import {
   SystemGraph,
   type SystemGraphEdge,
@@ -30,7 +31,12 @@ import {
 } from "../../components/SystemGraph";
 import { kindFromSecurity } from "../../components/systemGraphLayout";
 import { ZkillSystemLink } from "../../components/ZkillLink";
-import { Page, PageHeader, Centered } from "../../components/page";
+import {
+  Page,
+  PageHeader,
+  Centered,
+  PrimaryButton,
+} from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
 
 const TITLE = "Route";
@@ -62,7 +68,6 @@ function Workbench() {
   );
   const [fromMe, setFromMe] = usePersistentState("route.fromMe", false);
   const [auto, setAuto] = usePersistentState("route.auto", false);
-  const [query, setQuery] = useState("");
   const [locError, setLocError] = useState<string | null>(null);
 
   const activity = useQuery({
@@ -72,11 +77,6 @@ function Workbench() {
   const trail = useQuery({
     queryKey: ["route", "breadcrumb"],
     queryFn: routeBreadcrumb,
-  });
-  const matches = useQuery({
-    queryKey: ["route", "systemSearch", query],
-    queryFn: () => systemSearch(query),
-    enabled: query.trim().length >= 2,
   });
   // Neighbourhood graph as a cached query keyed on (centre, depth): it survives
   // unmount and restores instantly on return, refetching only when stale or on
@@ -92,7 +92,6 @@ function Workbench() {
     setFromMe(false);
     setCentre(m);
     setMode("neighbouring");
-    setQuery("");
   }
   // Focus on the live current location (also records the travel breadcrumb).
   async function focusMyLocation(d = depth) {
@@ -109,9 +108,7 @@ function Workbench() {
       }
     } catch (e) {
       setLocError(
-        isAuthRequired(e)
-          ? "Log in a character first to track your location."
-          : errorMessage(e),
+        queryErrorText(e, "Log in a character first to track your location."),
       );
     }
   }
@@ -162,8 +159,6 @@ function Workbench() {
     [activity.data],
   );
 
-  const showResults =
-    query.trim().length >= 2 && (matches.data?.length ?? 0) > 0;
   const entries = trail.data ?? [];
 
   return (
@@ -173,13 +168,14 @@ function Workbench() {
         subtitle={SUBTITLE}
         actions={
           <>
-            <button
+            <PrimaryButton
               onClick={() => activity.refetch()}
               disabled={activity.isFetching}
-              className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              pending={activity.isFetching}
+              pendingLabel="Loading…"
             >
-              {activity.isFetching ? "Loading…" : "Refresh"}
-            </button>
+              Refresh
+            </PrimaryButton>
             <DataAge
               updatedAt={activity.dataUpdatedAt}
               fetching={activity.isFetching}
@@ -198,27 +194,12 @@ function Workbench() {
       <div className="mt-5 rounded border border-zinc-800 bg-zinc-900/40 p-3">
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm font-semibold text-zinc-300">Focus</span>
-          <div className="relative">
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.currentTarget.value)}
-              placeholder={centre && !fromMe ? centre.name : "Find a system…"}
-              className="w-52 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
-            />
-            {showResults && (
-              <div className="absolute z-10 mt-1 max-h-56 w-52 overflow-auto rounded border border-zinc-700 bg-zinc-900 shadow-lg">
-                {matches.data!.map((m) => (
-                  <button
-                    key={m.id}
-                    onClick={() => focusSystem(m)}
-                    className="block w-full px-2 py-1 text-left text-sm text-zinc-200 hover:bg-zinc-800"
-                  >
-                    {m.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <Combo
+            value={centre}
+            onPick={(m) => (m ? focusSystem(m) : setCentre(null))}
+            search={systemSearch}
+            placeholder="Find a system…"
+          />
           <button
             onClick={() => void focusMyLocation()}
             className={`rounded border px-2 py-1 text-xs ${
@@ -398,9 +379,10 @@ function NearestWormholeCard({
 
       {find.isError && (
         <div className="mt-2 text-xs text-rose-400">
-          {isAuthRequired(find.error)
-            ? "Log in a character first to find the nearest wormhole."
-            : errorMessage(find.error)}
+          {queryErrorText(
+            find.error,
+            "Log in a character first to find the nearest wormhole.",
+          )}
         </div>
       )}
 
