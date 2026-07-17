@@ -11,13 +11,10 @@ use crate::modules::fitting::commands::simulate_fit;
 use crate::modules::fitting::types::{Fit, FitItem, FitStats, ModuleState, SlotKind};
 use crate::sde::Sde;
 use crate::storage;
+use crate::zkill::{self, ZkillStatsRaw};
 
 /// Cap on pasted names per lookup.
 const NAME_CAP: usize = 128;
-/// zKill etiquette: low concurrency behind our contact User-Agent.
-const ZKILL_CONCURRENCY: usize = 4;
-/// Killboard stats change slowly — cache each pilot for 6h.
-const ZKILL_TTL_SECS: u64 = 21_600;
 
 /// How many top hulls to surface per pilot (the UI shows the first 5 or 10).
 const MAX_HULLS: usize = 10;
@@ -62,55 +59,6 @@ pub struct PvpProfilesResult {
     pub pilots: Vec<PvpStats>,
     /// Pasted names that didn't resolve to a character.
     pub unresolved: Vec<String>,
-}
-
-/// zKill `/stats/` document (defensive: pilots with no kills omit fields).
-#[derive(Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct ZkillStatsRaw {
-    #[serde(default)]
-    ships_destroyed: i64,
-    #[serde(default)]
-    ships_lost: i64,
-    #[serde(default)]
-    isk_destroyed: f64,
-    #[serde(default)]
-    isk_lost: f64,
-    #[serde(default)]
-    solo_kills: i64,
-    #[serde(default)]
-    solo_losses: i64,
-    #[serde(default)]
-    danger_ratio: i64,
-    #[serde(default)]
-    gang_ratio: i64,
-    /// Present (with counts) only for pilots with recent PvP.
-    #[serde(default, rename = "activepvp")]
-    activepvp: Option<serde_json::Value>,
-    #[serde(default)]
-    top_lists: Vec<TopListRaw>,
-}
-
-/// A row in a zKill `topLists` entry. Only the `shipType` list carries
-/// `shipTypeID`/`shipName`; rows in the other lists leave them defaulted.
-/// zKill uses `shipTypeID` (capital ID) and `shipName`, so the fields are
-/// renamed explicitly rather than via `camelCase` (which yields `shipTypeId`).
-#[derive(Deserialize, Default)]
-struct ShipRow {
-    #[serde(default, rename = "shipTypeID")]
-    ship_type_id: i64,
-    #[serde(default, rename = "shipName")]
-    ship_name: String,
-    #[serde(default)]
-    kills: i64,
-}
-
-#[derive(Deserialize, Default)]
-struct TopListRaw {
-    #[serde(default, rename = "type")]
-    kind: String,
-    #[serde(default)]
-    values: Vec<ShipRow>,
 }
 
 /// Pasted names: one per line, trimmed, blanks dropped, deduped (order kept,
@@ -165,7 +113,7 @@ fn stats_from_raw(character_id: i64, name: String, r: ZkillStatsRaw) -> PvpStats
         solo_losses: r.solo_losses,
         danger_ratio: r.danger_ratio,
         gang_ratio: r.gang_ratio,
-        active: r.activepvp.is_some(),
+        active: r.active(),
         hulls,
     }
 }
@@ -205,53 +153,16 @@ pub async fn pvp_profiles(
         .cloned()
         .collect();
 
-    let name_by_id: HashMap<i64, String> =
-        resolved.iter().map(|(id, n)| (*id, n.clone())).collect();
-
-    // Cache hits first; the rest fetched concurrently, low concurrency.
-    let mut by_id: HashMap<i64, PvpStats> = HashMap::new();
-    let mut to_fetch: Vec<i64> = Vec::new();
-    for (id, name) in &resolved {
-        match storage::cache_get::<PvpStats>(&dir, &format!("pvp_stats_{id}")) {
-            Some(mut s) => {
-                s.name = name.clone();
-                by_id.insert(*id, s);
-            }
-            None => to_fetch.push(*id),
-        }
-    }
-
-    let client = http.clone();
-    let fetched: Vec<PvpStats> = stream::iter(to_fetch)
-        .map(|id| {
-            let client = client.clone();
-            let name = name_by_id.get(&id).cloned().unwrap_or_default();
-            async move {
-                let url = format!("https://zkillboard.com/api/stats/characterID/{id}/");
-                let raw: Option<ZkillStatsRaw> =
-                    async { client.get(&url).send().await.ok()?.json().await.ok() }.await;
-                raw.map(|r| stats_from_raw(id, name, r))
-            }
-        })
-        .buffer_unordered(ZKILL_CONCURRENCY)
-        .filter_map(|x| async move { x })
-        .collect()
-        .await;
-
-    for s in &fetched {
-        let _ = storage::cache_put(
-            &dir,
-            &format!("pvp_stats_{}", s.character_id),
-            s,
-            ZKILL_TTL_SECS,
-        );
-        by_id.insert(s.character_id, s.clone());
-    }
+    let ids: Vec<i64> = resolved.iter().map(|(id, _)| *id).collect();
+    let mut raw_by_id: HashMap<i64, ZkillStatsRaw> = zkill::stats_for_characters(&dir, &ids)
+        .await?
+        .into_iter()
+        .collect();
 
     // Reassemble in pasted order (dropping pilots whose zKill fetch failed).
     let pilots: Vec<PvpStats> = resolved
-        .iter()
-        .filter_map(|(id, _)| by_id.get(id).cloned())
+        .into_iter()
+        .filter_map(|(id, name)| raw_by_id.remove(&id).map(|r| stats_from_raw(id, name, r)))
         .collect();
 
     Ok(PvpProfilesResult { pilots, unresolved })
@@ -265,17 +176,6 @@ const LOSS_CAP: usize = 60;
 const LOST_HULL_CAP: usize = 10;
 /// Killmails are immutable, so cache them effectively forever (~10y).
 const KILLMAIL_TTL_SECS: u64 = 60 * 60 * 24 * 3650;
-
-/// A zKill loss-list entry: a killmail id + the hash needed to fetch it.
-#[derive(Deserialize)]
-struct ZkillRef {
-    killmail_id: i64,
-    zkb: ZkillZkb,
-}
-#[derive(Deserialize)]
-struct ZkillZkb {
-    hash: String,
-}
 
 /// The parts of an ESI killmail we use (cached verbatim — killmails never change).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -571,7 +471,7 @@ const TYPICAL_SAMPLE: usize = 25;
 async fn fetch_killmails(
     http: &reqwest::Client,
     dir: &std::path::Path,
-    refs: Vec<ZkillRef>,
+    refs: Vec<zkill::ZkillLossRef>,
 ) -> Vec<Killmail> {
     let client = http.clone();
     let dir = dir.to_path_buf();
@@ -596,7 +496,7 @@ async fn fetch_killmails(
                 km
             }
         })
-        .buffered(ZKILL_CONCURRENCY)
+        .buffered(zkill::ZKILL_CONCURRENCY)
         .collect::<Vec<Option<Killmail>>>()
         .await
         .into_iter()
@@ -619,22 +519,10 @@ pub async fn pvp_pilot_fits(
     let http = auth_state.http();
 
     // Recent losses, newest first.
-    let losses: Vec<ZkillRef> = async {
-        http.get(format!(
-            "https://zkillboard.com/api/losses/characterID/{character_id}/"
-        ))
-        .send()
-        .await
-        .ok()?
-        .json()
-        .await
-        .ok()
-    }
-    .await
-    .unwrap_or_default();
+    let losses = zkill::losses_for_character(character_id).await;
 
     // Fetch each killmail from public ESI (permanent cache), newest first.
-    let refs: Vec<ZkillRef> = losses.into_iter().take(LOSS_CAP).collect();
+    let refs: Vec<zkill::ZkillLossRef> = losses.into_iter().take(LOSS_CAP).collect();
     let kms = fetch_killmails(http, &dir, refs).await;
 
     // Group by hull; the first (newest) killmail of each hull is its rep fit.
@@ -690,21 +578,9 @@ pub async fn pvp_typical_fit(
     let http = auth_state.http();
 
     // Recent community losses of this hull, newest first.
-    let losses: Vec<ZkillRef> = async {
-        http.get(format!(
-            "https://zkillboard.com/api/losses/shipTypeID/{hull_type_id}/"
-        ))
-        .send()
-        .await
-        .ok()?
-        .json()
-        .await
-        .ok()
-    }
-    .await
-    .unwrap_or_default();
+    let losses = zkill::losses_for_ship_type(hull_type_id).await;
 
-    let refs: Vec<ZkillRef> = losses.into_iter().take(TYPICAL_SAMPLE).collect();
+    let refs: Vec<zkill::ZkillLossRef> = losses.into_iter().take(TYPICAL_SAMPLE).collect();
     let sampled = refs.len() as i64;
     let kms = fetch_killmails(http, &dir, refs).await;
 

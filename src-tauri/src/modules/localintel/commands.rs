@@ -11,13 +11,12 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-use futures_util::stream::{self, StreamExt};
-
 use crate::esi::{
     authed_get, authed_get_paged_pub, corporation_id, resolve_character_ids, resolve_names,
-    AuthState, ESI_BASE, USER_AGENT,
+    AuthState, ESI_BASE,
 };
 use crate::storage;
+use crate::zkill;
 
 /// Cap on pasted names per scan (Local tops out well below this).
 const NAME_CAP: usize = 256;
@@ -53,11 +52,11 @@ pub struct LocalScanResult {
 /// Parse the in-game Local member-list copy: one character name per line. Trims,
 /// drops blanks, dedupes (preserving order), and caps the count.
 fn parse_names(text: &str) -> Vec<String> {
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = HashSet::new();
     text.lines()
         .map(str::trim)
         .filter(|l| !l.is_empty())
-        .filter(|l| seen.insert(l.to_string()))
+        .filter(|l| seen.insert(l.to_lowercase()))
         .take(NAME_CAP)
         .map(str::to_string)
         .collect()
@@ -422,11 +421,6 @@ async fn load_standings(app: &AppHandle, auth_state: &AuthState) -> HashMap<i64,
     map
 }
 
-/// zKillboard etiquette: a descriptive UA (we have one) and low concurrency.
-const ZKILL_CONCURRENCY: usize = 4;
-/// Killboard stats change slowly — cache each character for 6h.
-const ZKILL_TTL_SECS: u64 = 21_600;
-
 /// zKillboard danger signals for one character (the fields we surface).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -442,22 +436,6 @@ pub struct ZkillStats {
     pub active: bool,
 }
 
-/// Raw zKill stats document (defensive: characters with no kills omit fields).
-#[derive(Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct ZkillRaw {
-    #[serde(default)]
-    danger_ratio: i64,
-    #[serde(default)]
-    gang_ratio: i64,
-    #[serde(default)]
-    ships_destroyed: i64,
-    #[serde(default)]
-    ships_lost: i64,
-    #[serde(default, rename = "activepvp")]
-    active_pvp: serde_json::Value,
-}
-
 /// Enrich resolved characters with zKillboard danger stats. Per-character cached
 /// (~6h); failures are skipped so the base scan (#95) still works if zKill is
 /// down. Low concurrency + our contact UA respect zKill's API etiquette.
@@ -467,54 +445,18 @@ pub async fn localintel_zkill(
     character_ids: Vec<i64>,
 ) -> Result<Vec<ZkillStats>, String> {
     let dir = crate::storage::app_data_dir(&app)?;
-
-    // Serve cache hits first; only fetch the misses.
-    let mut out: Vec<ZkillStats> = Vec::new();
-    let mut to_fetch: Vec<i64> = Vec::new();
-    for id in character_ids {
-        match storage::cache_get::<ZkillStats>(&dir, &format!("zkill_{id}")) {
-            Some(s) => out.push(s),
-            None => to_fetch.push(id),
-        }
-    }
-
-    let client = reqwest::Client::builder()
-        .user_agent(USER_AGENT)
-        .build()
-        .map_err(|e| e.to_string())?;
-    let fetched: Vec<ZkillStats> = stream::iter(to_fetch)
-        .map(|id| {
-            let client = client.clone();
-            async move {
-                let url = format!("https://zkillboard.com/api/stats/characterID/{id}/");
-                let raw: Option<ZkillRaw> =
-                    async { client.get(&url).send().await.ok()?.json().await.ok() }.await;
-                raw.map(|r| ZkillStats {
-                    character_id: id,
-                    danger_ratio: r.danger_ratio,
-                    gang_ratio: r.gang_ratio,
-                    ships_destroyed: r.ships_destroyed,
-                    ships_lost: r.ships_lost,
-                    // `activepvp` is present (with kill counts) for active pilots.
-                    active: r.active_pvp.as_object().is_some_and(|o| !o.is_empty()),
-                })
-            }
+    let stats = zkill::stats_for_characters(&dir, &character_ids).await?;
+    Ok(stats
+        .into_iter()
+        .map(|(id, raw)| ZkillStats {
+            character_id: id,
+            danger_ratio: raw.danger_ratio,
+            gang_ratio: raw.gang_ratio,
+            ships_destroyed: raw.ships_destroyed,
+            ships_lost: raw.ships_lost,
+            active: raw.active(),
         })
-        .buffer_unordered(ZKILL_CONCURRENCY)
-        .filter_map(|s| async move { s })
-        .collect()
-        .await;
-
-    for s in &fetched {
-        let _ = storage::cache_put(
-            &dir,
-            &format!("zkill_{}", s.character_id),
-            s,
-            ZKILL_TTL_SECS,
-        );
-    }
-    out.extend(fetched);
-    Ok(out)
+        .collect())
 }
 
 #[derive(Debug, Serialize)]
@@ -617,31 +559,5 @@ mod tests {
         assert_eq!(threat_of(Some(-2.5)), "red");
         assert_eq!(threat_of(Some(0.0)), "neutral");
         assert_eq!(threat_of(None), "neutral");
-    }
-
-    #[test]
-    fn zkill_raw_maps_camelcase_fields_and_activepvp_sets_active() {
-        let raw: ZkillRaw = serde_json::from_str(
-            r#"{
-                "shipsDestroyed": 120, "shipsLost": 8,
-                "dangerRatio": 88, "gangRatio": 40,
-                "activepvp": { "ships": { "count": 3 } }
-            }"#,
-        )
-        .unwrap();
-        assert_eq!(raw.ships_destroyed, 120);
-        assert_eq!(raw.ships_lost, 8);
-        assert_eq!(raw.danger_ratio, 88);
-        assert_eq!(raw.gang_ratio, 40);
-        assert!(raw.active_pvp.as_object().is_some_and(|o| !o.is_empty()));
-    }
-
-    #[test]
-    fn zkill_raw_missing_fields_default_and_no_activepvp_is_inactive() {
-        // A character with no PvP: zKill omits the fields entirely.
-        let raw: ZkillRaw = serde_json::from_str("{}").unwrap();
-        assert_eq!(raw.ships_destroyed, 0);
-        assert_eq!(raw.danger_ratio, 0);
-        assert!(raw.active_pvp.as_object().is_none_or(|o| o.is_empty()));
     }
 }
