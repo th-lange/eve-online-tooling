@@ -10,33 +10,6 @@ export interface SdeStatus {
   updated: boolean;
 }
 
-export interface BlueprintMaterial {
-  materialTypeId: number;
-  name: string;
-  quantity: number;
-}
-
-export interface BlueprintProduct {
-  productTypeId: number;
-  name: string;
-  quantity: number;
-}
-
-export interface TypeInfo {
-  typeId: number;
-  name: string;
-  groupId: number;
-  groupName: string | null;
-  volume: number | null;
-}
-
-export interface ManufacturableBlueprint {
-  blueprintTypeId: number;
-  productTypeId: number;
-  productName: string;
-  productQuantity: number;
-}
-
 export interface SdeProgress {
   phase: "downloading" | "decompressing" | "verifying" | "done";
   downloaded: number;
@@ -51,32 +24,6 @@ export function sdeStatus(): Promise<SdeStatus> {
 /** Download/refresh the SDE. No-op if installed unless `force` is true. */
 export function sdeUpdate(force = false): Promise<SdeStatus> {
   return invoke<SdeStatus>("sde_update", { force });
-}
-
-export function sdeBlueprintMaterials(
-  blueprintTypeId: number,
-): Promise<BlueprintMaterial[]> {
-  return invoke<BlueprintMaterial[]>("sde_blueprint_materials", {
-    blueprintTypeId,
-  });
-}
-
-export function sdeBlueprintProduct(
-  blueprintTypeId: number,
-): Promise<BlueprintProduct | null> {
-  return invoke<BlueprintProduct | null>("sde_blueprint_product", {
-    blueprintTypeId,
-  });
-}
-
-export function sdeTypeInfo(typeId: number): Promise<TypeInfo | null> {
-  return invoke<TypeInfo | null>("sde_type_info", { typeId });
-}
-
-export function sdeManufacturableBlueprints(): Promise<
-  ManufacturableBlueprint[]
-> {
-  return invoke<ManufacturableBlueprint[]>("sde_manufacturable_blueprints");
 }
 
 export interface TypeDetail {

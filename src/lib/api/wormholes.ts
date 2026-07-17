@@ -202,10 +202,6 @@ export function whPasteSignatures(
 ): Promise<SignatureScan> {
   return invoke<SignatureScan>("wh_paste_signatures", { systemId, text });
 }
-/** Stored signatures for a system. */
-export function whSignatures(systemId: number): Promise<Signature[]> {
-  return invoke<Signature[]>("wh_signatures", { systemId });
-}
 
 export interface RouteHop {
   systemId: number;
