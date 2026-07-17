@@ -38,34 +38,40 @@ const STOPPED: McpStatus = { running: false, url: null, token: null };
 function renderPage(entries: PluginEntry[], mcpStart: McpStatus = STOPPED) {
   // Stateful MCP mock: start/stop flip what status returns next.
   let mcp: McpStatus = mcpStart;
-  invokeMock.mockImplementation((cmd: string, args?: { port?: number }) => {
-    switch (cmd) {
-      case "plugins_list":
-        return Promise.resolve(entries);
-      case "plugin_set_active":
-        return Promise.resolve();
-      case "mcp_status":
-        return Promise.resolve(mcp);
-      case "mcp_config":
-        return Promise.resolve({ port: 0 });
-      case "mcp_start":
-        mcp = RUNNING;
-        return Promise.resolve(mcp);
-      case "mcp_stop":
-        mcp = STOPPED;
-        return Promise.resolve(mcp);
-      case "mcp_set_port":
-        return Promise.resolve(mcp);
-      case "plugins_dir":
-        return Promise.resolve("/tmp/app/plugins");
-      case "plugins_rescan":
-        return Promise.resolve(entries);
-      default:
-        return Promise.reject(
-          new Error(`unexpected command ${cmd} ${JSON.stringify(args)}`),
-        );
-    }
-  });
+  let autostart = false;
+  invokeMock.mockImplementation(
+    (cmd: string, args?: { port?: number; autostart?: boolean }) => {
+      switch (cmd) {
+        case "plugins_list":
+          return Promise.resolve(entries);
+        case "plugin_set_active":
+          return Promise.resolve();
+        case "mcp_status":
+          return Promise.resolve(mcp);
+        case "mcp_config":
+          return Promise.resolve({ port: 0, autostart });
+        case "mcp_start":
+          mcp = RUNNING;
+          return Promise.resolve(mcp);
+        case "mcp_stop":
+          mcp = STOPPED;
+          return Promise.resolve(mcp);
+        case "mcp_set_port":
+          return Promise.resolve(mcp);
+        case "mcp_set_autostart":
+          autostart = args?.autostart ?? false;
+          return Promise.resolve({ port: 0, autostart });
+        case "plugins_dir":
+          return Promise.resolve("/tmp/app/plugins");
+        case "plugins_rescan":
+          return Promise.resolve(entries);
+        default:
+          return Promise.reject(
+            new Error(`unexpected command ${cmd} ${JSON.stringify(args)}`),
+          );
+      }
+    },
+  );
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={qc}>{children}</QueryClientProvider>
@@ -145,6 +151,23 @@ describe("PluginsPage", () => {
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("mcp_set_port", { port: 8477 }),
     );
+  });
+
+  it("toggling autostart calls mcp_set_autostart and persists checked state", async () => {
+    renderPage([]);
+    await screen.findByText("MCP bridge");
+    const card = pluginCard("MCP bridge");
+    const checkbox = within(card).getByRole("checkbox", {
+      name: /start mcp bridge on launch/i,
+    });
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(checkbox);
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("mcp_set_autostart", {
+        autostart: true,
+      }),
+    );
+    await waitFor(() => expect(checkbox).toBeChecked());
   });
 
   it("shows the plugins folder path and Rescan calls plugins_rescan", async () => {

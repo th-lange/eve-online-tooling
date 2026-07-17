@@ -54,6 +54,9 @@ struct Running {
     token: String,
     stop: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
+    /// App data dir the discovery file was written into, so `stop()` can
+    /// remove it without needing an `AppHandle`.
+    app_data_dir: PathBuf,
 }
 
 /// Managed state holding the (optional) running MCP server. Off until started.
@@ -79,7 +82,9 @@ pub struct McpStatus {
 
 impl McpState {
     /// Start the server (idempotent) with the given read-only tool context,
-    /// bound to `port` (`0` = an OS-assigned ephemeral port).
+    /// bound to `port` (`0` = an OS-assigned ephemeral port). Writes the
+    /// discovery file (`<app_data_dir>/mcp.json`, mode 0600) so a local agent
+    /// can self-configure without a human copy-pasting URL/token.
     pub fn start(&self, ctx: Arc<ToolCtx>, port: u16) -> Result<McpStatus, String> {
         let mut guard = self.running.lock();
         if let Some(r) = guard.as_ref() {
@@ -97,6 +102,12 @@ impl McpState {
             .map(char::from)
             .collect();
 
+        let app_data_dir = ctx.app_data_dir.clone();
+        if let Err(e) = write_discovery_file(&app_data_dir, &format!("http://{addr}/mcp"), &token)
+        {
+            eprintln!("mcp: failed to write discovery file: {e}");
+        }
+
         let stop = Arc::new(AtomicBool::new(false));
         let handle = {
             let stop = stop.clone();
@@ -108,11 +119,12 @@ impl McpState {
             token,
             stop,
             handle: Some(handle),
+            app_data_dir,
         });
         Ok(status_of(guard.as_ref()))
     }
 
-    /// Stop the server if running; idempotent.
+    /// Stop the server if running; idempotent. Removes the discovery file.
     pub fn stop(&self) -> McpStatus {
         let mut guard = self.running.lock();
         if let Some(mut r) = guard.take() {
@@ -120,6 +132,7 @@ impl McpState {
             if let Some(handle) = r.handle.take() {
                 let _ = handle.join();
             }
+            remove_discovery_file(&r.app_data_dir);
         }
         status_of(None)
     }
@@ -128,6 +141,34 @@ impl McpState {
     pub fn status(&self) -> McpStatus {
         status_of(self.running.lock().as_ref())
     }
+}
+
+/// Path of the discovery file an external agent polls to self-configure.
+fn discovery_path(dir: &std::path::Path) -> PathBuf {
+    dir.join("mcp.json")
+}
+
+/// Write `{url, token}` to the discovery file, restricted to the owning user
+/// (mode 0600 on Unix; Windows ACLs already default to the owning user for
+/// files under the app data dir).
+fn write_discovery_file(dir: &std::path::Path, url: &str, token: &str) -> std::io::Result<()> {
+    let path = discovery_path(dir);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let body = json!({ "url": url, "token": token });
+    std::fs::write(&path, serde_json::to_vec(&body).unwrap_or_default())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(())
+}
+
+/// Remove the discovery file (idempotent — a missing file is not an error).
+fn remove_discovery_file(dir: &std::path::Path) {
+    let _ = std::fs::remove_file(discovery_path(dir));
 }
 
 fn status_of(running: Option<&Running>) -> McpStatus {
@@ -323,8 +364,10 @@ fn text_response(status: u16, body: &str) -> tiny_http::Response<std::io::Cursor
     tiny_http::Response::from_string(body).with_status_code(status)
 }
 
-/// Persisted MCP config key: the configured port (`0` = auto).
+/// Persisted MCP config keys: the configured port (`0` = auto) and whether to
+/// start the bridge automatically on app launch.
 const PORT_KEY: &str = "mcp_port";
+const AUTOSTART_KEY: &str = "mcp_autostart";
 
 /// User-configurable MCP settings.
 #[derive(Debug, Clone, Serialize)]
@@ -332,13 +375,21 @@ const PORT_KEY: &str = "mcp_port";
 pub struct McpConfig {
     /// Preferred port (`0` = OS-assigned ephemeral).
     pub port: u16,
+    /// Start the bridge automatically on app launch.
+    pub autostart: bool,
 }
 
-fn configured_port(dir: &std::path::Path) -> u16 {
+pub(crate) fn configured_port(dir: &std::path::Path) -> u16 {
     crate::storage::load_data::<u16>(dir, PORT_KEY).unwrap_or(0)
 }
 
-fn build_ctx(
+/// Whether the bridge should start automatically on app launch. Off by
+/// default — an explicit opt-in, same posture as the bridge itself.
+pub(crate) fn autostart_enabled(dir: &std::path::Path) -> bool {
+    crate::storage::load_data::<bool>(dir, AUTOSTART_KEY).unwrap_or(false)
+}
+
+pub(crate) fn build_ctx(
     dir: &std::path::Path,
     registry: Arc<PluginRegistry>,
     manager: Arc<PluginManager>,
@@ -379,12 +430,25 @@ pub fn mcp_status(state: State<'_, McpState>) -> McpStatus {
     state.status()
 }
 
-/// The current MCP configuration (preferred port).
+/// The current MCP configuration (preferred port + autostart).
 #[tauri::command]
 pub fn mcp_config(app: AppHandle) -> Result<McpConfig, AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
     Ok(McpConfig {
         port: configured_port(&dir),
+        autostart: autostart_enabled(&dir),
+    })
+}
+
+/// Set the opt-in "start MCP bridge on launch" flag. Does not itself
+/// start/stop the bridge — takes effect on the next launch.
+#[tauri::command]
+pub fn mcp_set_autostart(app: AppHandle, autostart: bool) -> Result<McpConfig, AppError> {
+    let dir = crate::storage::app_data_dir(&app)?;
+    crate::storage::save_data(&dir, AUTOSTART_KEY, &autostart).map_err(AppError::from)?;
+    Ok(McpConfig {
+        port: configured_port(&dir),
+        autostart,
     })
 }
 
@@ -563,6 +627,43 @@ mod tests {
         assert_eq!(configured_port(&dir), 0); // default = ephemeral
         crate::storage::save_data(&dir, PORT_KEY, &8477u16).unwrap();
         assert_eq!(configured_port(&dir), 8477);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn autostart_persists_and_defaults_to_off() {
+        let dir = tmp("autostart");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(!autostart_enabled(&dir)); // opt-in: off by default
+        crate::storage::save_data(&dir, AUTOSTART_KEY, &true).unwrap();
+        assert!(autostart_enabled(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn discovery_file_written_on_start_and_removed_on_stop() {
+        let dir = tmp("discovery");
+        std::fs::create_dir_all(&dir).unwrap();
+        let registry = Arc::new(PluginRegistry::load(&dir));
+        let manager = Arc::new(PluginManager::new());
+        let ctx = build_ctx(&dir, registry, manager);
+        let state = McpState::default();
+        let status = state.start(ctx, 0).unwrap();
+        assert!(status.running);
+
+        let path = discovery_path(&dir);
+        let body: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(body["url"], status.url.clone().unwrap());
+        assert_eq!(body["token"], status.token.clone().unwrap());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+
+        state.stop();
+        assert!(!path.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -12,6 +12,7 @@ import {
   mcpStop,
   mcpConfig,
   mcpSetPort,
+  mcpSetAutostart,
   PERMISSION_LABELS,
   type PluginEntry,
 } from "../../lib/api";
@@ -191,6 +192,10 @@ function McpBridgeCard() {
     mutationFn: (port: number) => mcpSetPort(port),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["mcp"] }),
   });
+  const setAutostart = useMutation({
+    mutationFn: (autostart: boolean) => mcpSetAutostart(autostart),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mcp", "config"] }),
+  });
   const data = status.data;
   const running = data?.running ?? false;
   const configuredPort = config.data?.port ?? 0;
@@ -251,6 +256,22 @@ function McpBridgeCard() {
           {running ? "Deactivate" : "Activate"}
         </button>
       </div>
+
+      <label className="mt-3 flex items-center gap-2 text-xs text-zinc-400">
+        <input
+          type="checkbox"
+          checked={config.data?.autostart ?? false}
+          disabled={setAutostart.isPending}
+          onChange={(e) => setAutostart.mutate(e.currentTarget.checked)}
+          className="rounded border-zinc-700 bg-zinc-800"
+        />
+        Start MCP bridge on launch
+        <span className="text-zinc-500">
+          — also writes a discovery file (URL + token) to the app data
+          directory so a local agent can self-configure without copying
+          anything by hand.
+        </span>
+      </label>
 
       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
         <span className="text-zinc-500">Port</span>
