@@ -865,7 +865,7 @@ mod tests {
                 (118, 10.0),
             ])], // drone: mult 2, 1s RoF, 40 dmg/shot
         );
-        let items = vec![
+        let items = [
             item(100, Some(200), ModuleState::Offline, 1),
             item(100, Some(200), ModuleState::Online, 1),
             item(100, Some(200), ModuleState::Active, 1),
@@ -906,7 +906,7 @@ mod tests {
             vec![None, None, Some(missile), None, None],
             Vec::new(),
         );
-        let items = vec![
+        let items = [
             item(100, Some(200), ModuleState::Active, 1),
             item(100, Some(200), ModuleState::Active, 1), // same (type, charge) as 0
             item(300, Some(400), ModuleState::Active, 1),
@@ -956,7 +956,7 @@ mod tests {
             vec![None, None, None, None],
             Vec::new(),
         );
-        let items = vec![
+        let items = [
             item(100, None, ModuleState::Active, 1),
             item(200, None, ModuleState::Active, 1),
             item(300, None, ModuleState::Active, 1),
