@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 
+use super::context::DogmaContext;
 use super::engine::attr::AttrStore;
 use super::engine::capacitor::capacitor;
 use super::engine::damage::{damage, Weapon};
@@ -78,41 +79,20 @@ pub(super) fn run_dogma(
         .filter(|i| i.slot == SlotKind::Implant)
         .collect();
 
-    let skill_ids = sde.skill_type_ids().map_err(|e| e.to_string())?;
-    let mut all_ids = Vec::with_capacity(1 + module_items.len() + skill_ids.len());
-    all_ids.push(fit.ship_type_id);
-    all_ids.extend(module_items.iter().map(|i| i.type_id));
-    all_ids.extend(module_items.iter().filter_map(|i| i.charge_type_id));
-    all_ids.extend(drone_items.iter().map(|i| i.type_id));
-    all_ids.extend(implant_items.iter().map(|i| i.type_id));
-    all_ids.extend(fit.projected.iter().map(|i| i.type_id));
-    all_ids.extend(&skill_ids);
+    // Preload every dogma-engine input the resolution pass needs in five bulk
+    // SDE queries — no per-type round-trips inside the loops below.
+    let mut extra_ids = Vec::with_capacity(
+        1 + module_items.len() * 2 + drone_items.len() + implant_items.len() + fit.projected.len(),
+    );
+    extra_ids.push(fit.ship_type_id);
+    extra_ids.extend(module_items.iter().map(|i| i.type_id));
+    extra_ids.extend(module_items.iter().filter_map(|i| i.charge_type_id));
+    extra_ids.extend(drone_items.iter().map(|i| i.type_id));
+    extra_ids.extend(implant_items.iter().map(|i| i.type_id));
+    extra_ids.extend(fit.projected.iter().map(|i| i.type_id));
+    let ctx = DogmaContext::load(sde, &extra_ids)?;
 
-    let attrs = sde
-        .types_attributes_raw(&all_ids)
-        .map_err(|e| e.to_string())?;
-    let effects_by_type = sde.types_effects(&all_ids).map_err(|e| e.to_string())?;
-    let effect_meta = sde.effect_meta().map_err(|e| e.to_string())?;
-    let defaults = sde.attribute_defaults().map_err(|e| e.to_string())?;
-    let is_stackable = |attr: i64| defaults.get(&attr).map(|m| m.stackable).unwrap_or(true);
-    let default_of = |attr: i64| defaults.get(&attr).map(|m| m.default_value).unwrap_or(0.0);
-
-    let entity = |type_id: i64, required_skills: Vec<i64>| -> Result<EntityInput, String> {
-        let group_id = sde
-            .type_info(type_id)
-            .map_err(|e| e.to_string())?
-            .map(|t| t.group_id)
-            .unwrap_or(0);
-        Ok(EntityInput {
-            type_id,
-            attrs: attrs.get(&type_id).cloned().unwrap_or_default(),
-            effect_ids: effects_by_type.get(&type_id).cloned().unwrap_or_default(),
-            group_id,
-            required_skills,
-        })
-    };
-
-    let mut ship = entity(fit.ship_type_id, Vec::new())?;
+    let mut ship = ctx.entity(fit.ship_type_id, Vec::new());
     // Seed the hull's base mass (4) if it's only on the type row, not a dogma
     // attribute — otherwise a mass-adding module (armor plate, AB) modAdds onto
     // a zero base and the align-time calc loses the hull mass.
@@ -130,7 +110,7 @@ pub(super) fn run_dogma(
     let mut modules = Vec::with_capacity(module_items.len());
     for it in &module_items {
         // All required skills (182/183/184) drive *RequiredSkillModifier targeting.
-        let mut e = entity(it.type_id, required_skills_of(&attrs, it.type_id))?;
+        let mut e = ctx.entity(it.type_id, required_skills_of(&ctx.attrs, it.type_id));
         // State gates which effects run. Offline: none (no ship modifiers, no
         // fitting use). Online (not active): only passive effects — drop the
         // activatable ones (those with a duration), so e.g. an *active* hardener
@@ -140,7 +120,7 @@ pub(super) fn run_dogma(
         match it.state {
             ModuleState::Offline => e.effect_ids.clear(),
             ModuleState::Online => e.effect_ids.retain(|eid| {
-                effect_meta
+                ctx.effect_meta
                     .get(eid)
                     .is_none_or(|m| m.duration_attribute_id.is_none())
             }),
@@ -154,41 +134,23 @@ pub(super) fn run_dogma(
     // ship role bonuses reach them (`SkillReqOnShip`).
     let mut charges: Vec<Option<EntityInput>> = Vec::with_capacity(module_items.len());
     for it in &module_items {
-        charges.push(match it.charge_type_id {
-            Some(cid) => Some(entity(cid, required_skills_of(&attrs, cid))?),
-            None => None,
-        });
+        charges.push(
+            it.charge_type_id
+                .map(|cid| ctx.entity(cid, required_skills_of(&ctx.attrs, cid))),
+        );
     }
     let mut drones = Vec::with_capacity(drone_items.len());
     for it in &drone_items {
-        drones.push(entity(it.type_id, required_skills_of(&attrs, it.type_id))?);
+        drones.push(ctx.entity(it.type_id, required_skills_of(&ctx.attrs, it.type_id)));
     }
 
     // Skills at the chosen level (all-V or the character's). skillLevel (280) is
     // forced to that level; untrained (level 0) skills are skipped entirely.
-    let mut skills = Vec::with_capacity(skill_ids.len());
-    for sid in &skill_ids {
-        let level = skill_level_for(*sid);
-        if level <= 0.0 {
-            continue;
-        }
-        let mut a = attrs.get(sid).cloned().unwrap_or_default();
-        match a.iter_mut().find(|(k, _)| *k == 280) {
-            Some(p) => p.1 = level,
-            None => a.push((280, level)),
-        }
-        skills.push(EntityInput {
-            type_id: *sid,
-            attrs: a,
-            effect_ids: effects_by_type.get(sid).cloned().unwrap_or_default(),
-            group_id: 0,
-            required_skills: Vec::new(),
-        });
-    }
+    let mut skills = ctx.skill_entities(skill_level_for);
     // Implants resolve alongside skills — their shipID effects modify the ship,
     // stacking-exempt, which the skills pass already guarantees.
     for it in &implant_items {
-        skills.push(entity(it.type_id, Vec::new())?);
+        skills.push(ctx.entity(it.type_id, Vec::new()));
     }
 
     let mut resolved = resolve(
@@ -199,9 +161,9 @@ pub(super) fn run_dogma(
             drones,
             charges,
         },
-        &effect_meta,
-        &is_stackable,
-        &default_of,
+        &ctx.effect_meta,
+        &|a| ctx.is_stackable(a),
+        &|a| ctx.default_of(a),
     );
 
     // Projected effects (#178): webs/paints/… modify this ship's attributes.
@@ -209,7 +171,8 @@ pub(super) fn run_dogma(
         .projected
         .iter()
         .map(|p| {
-            let a: HashMap<i64, f64> = attrs
+            let a: HashMap<i64, f64> = ctx
+                .attrs
                 .get(&p.type_id)
                 .cloned()
                 .unwrap_or_default()
@@ -247,7 +210,7 @@ pub(super) fn run_dogma(
     // (skills/rigs/modules reflected, not base attributes) — shared with the
     // optimizer's feasibility gate. Drone-bay volume comes from the SDE.
     let (resources, validation, layout) =
-        resolved_feasibility(&resolved, base_layout, &effects_by_type, fit, &|tid| {
+        resolved_feasibility(&resolved, base_layout, &ctx.effects, fit, &|tid| {
             sde.type_info(tid)
                 .ok()
                 .flatten()
@@ -262,9 +225,9 @@ pub(super) fn run_dogma(
         .iter()
         .map(|it| it.type_id)
         .filter(|tid| {
-            effects_by_type.get(tid).is_some_and(|eids| {
+            ctx.effects.get(tid).is_some_and(|eids| {
                 eids.iter().any(|eid| {
-                    effect_meta
+                    ctx.effect_meta
                         .get(eid)
                         .is_some_and(|m| m.duration_attribute_id.is_some())
                 })

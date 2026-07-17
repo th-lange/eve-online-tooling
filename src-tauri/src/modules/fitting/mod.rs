@@ -10,6 +10,7 @@
 //! Tracking: epic #156.
 
 pub mod commands;
+mod context;
 pub mod eft;
 pub mod engine;
 pub mod esi_fittings;

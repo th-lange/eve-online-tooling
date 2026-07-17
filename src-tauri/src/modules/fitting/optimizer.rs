@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use tauri::{AppHandle, State};
 
+use super::context::DogmaContext;
 use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
 use super::stats::{
     base_damage, capacitor_of, is_ship_module, required_skills_of, resolved_feasibility, tank_of,
@@ -518,24 +519,19 @@ pub(super) fn optimize_fit(
     }
 
     // Preload everything the scorer needs in a few bulk queries.
-    let skill_ids = sde.skill_type_ids().map_err(|e| e.to_string())?;
-    let mut all_ids: Vec<i64> = vec![fit.ship_type_id];
-    all_ids.extend(fit.items.iter().map(|i| i.type_id));
-    all_ids.extend(fit.items.iter().filter_map(|i| i.charge_type_id));
+    let mut extra_ids: Vec<i64> = vec![fit.ship_type_id];
+    extra_ids.extend(fit.items.iter().map(|i| i.type_id));
+    extra_ids.extend(fit.items.iter().filter_map(|i| i.charge_type_id));
     for (_, ts) in &slot_candidates {
-        all_ids.extend(ts);
+        extra_ids.extend(ts);
     }
-    all_ids.extend(&skill_ids);
-
-    let attrs = sde
-        .types_attributes_raw(&all_ids)
-        .map_err(|e| e.to_string())?;
-    let effects = sde.types_effects(&all_ids).map_err(|e| e.to_string())?;
-    let groups = sde.types_groups(&all_ids).map_err(|e| e.to_string())?;
-    let effect_meta = sde.effect_meta().map_err(|e| e.to_string())?;
-    let defaults = sde.attribute_defaults().map_err(|e| e.to_string())?;
-    let is_stackable = |attr: i64| defaults.get(&attr).map(|m| m.stackable).unwrap_or(true);
-    let default_of = |attr: i64| defaults.get(&attr).map(|m| m.default_value).unwrap_or(0.0);
+    let ctx = DogmaContext::load(sde, &extra_ids)?;
+    let attrs = &ctx.attrs;
+    let effects = &ctx.effects;
+    let groups = &ctx.groups;
+    let effect_meta = &ctx.effect_meta;
+    let is_stackable = |a: i64| ctx.is_stackable(a);
+    let default_of = |a: i64| ctx.default_of(a);
 
     // Steer the damage optimizer to the hull's *bonused* weapons. Without this it
     // maximizes raw paper-DPS and fits, say, hybrid blasters on an Amarr laser
@@ -543,7 +539,7 @@ pub(super) fn optimize_fit(
     // bonuses — but only per slot where that leaves at least one weapon, so a hull
     // with no turret/launcher bonus (e.g. a drone boat) still gets armed.
     if matches!(obj, Objective::Damage) {
-        let (bgroups, bskills) = ship_weapon_bonus(fit.ship_type_id, &effects, &effect_meta);
+        let (bgroups, bskills) = ship_weapon_bonus(fit.ship_type_id, effects, effect_meta);
         if !(bgroups.is_empty() && bskills.is_empty()) {
             for (slot, cands) in &mut slot_candidates {
                 if *slot != SlotKind::High {
@@ -555,7 +551,7 @@ pub(super) fn optimize_fit(
                     .filter(|tid| {
                         let g = groups.get(tid).copied().unwrap_or(0);
                         bgroups.contains(&g)
-                            || required_skills_of(&attrs, *tid)
+                            || required_skills_of(attrs, *tid)
                                 .iter()
                                 .any(|s| bskills.contains(s))
                     })
@@ -567,34 +563,19 @@ pub(super) fn optimize_fit(
         }
     }
 
-    let skills: Vec<EntityInput> = skill_ids
-        .iter()
-        .map(|sid| {
-            let mut a = attrs.get(sid).cloned().unwrap_or_default();
-            match a.iter_mut().find(|(k, _)| *k == 280) {
-                Some(p) => p.1 = 5.0,
-                None => a.push((280, 5.0)),
-            }
-            EntityInput {
-                type_id: *sid,
-                attrs: a,
-                effect_ids: effects.get(sid).cloned().unwrap_or_default(),
-                group_id: 0,
-                required_skills: Vec::new(),
-            }
-        })
-        .collect();
+    // The optimizer doesn't have real character skills, so it scores at all-V.
+    let skills: Vec<EntityInput> = ctx.skill_entities(|_| 5.0);
 
     let eval = |f: &Fit| {
         evaluate(
             obj,
             f,
             &layout,
-            &attrs,
-            &effects,
-            &groups,
+            attrs,
+            effects,
+            groups,
             &skills,
-            &effect_meta,
+            effect_meta,
             &is_stackable,
             &default_of,
             prices,

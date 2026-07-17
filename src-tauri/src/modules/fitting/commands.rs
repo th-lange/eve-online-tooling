@@ -10,8 +10,9 @@ use std::path::Path;
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
+use super::context::DogmaContext;
 use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule};
-use super::engine::resolve::{resolve, EntityInput, FitInput};
+use super::engine::resolve::{resolve, FitInput};
 use super::types::{Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind};
 use crate::esi::{self, corporation_id, AuthState, SkillLevels};
 use crate::market::{resolve_location, MarketService, PriceModel};
@@ -276,60 +277,17 @@ fn resolve_module_costs(
     skill_level_for: &dyn Fn(i64) -> f64,
     type_ids: &[i64],
 ) -> Result<HashMap<i64, (f64, f64, f64)>, String> {
-    let skill_ids = sde.skill_type_ids().map_err(|e| e.to_string())?;
-    let mut all_ids = Vec::with_capacity(1 + type_ids.len() + skill_ids.len());
-    all_ids.push(ship_type_id);
-    all_ids.extend_from_slice(type_ids);
-    all_ids.extend(&skill_ids);
+    let mut extra_ids = Vec::with_capacity(1 + type_ids.len());
+    extra_ids.push(ship_type_id);
+    extra_ids.extend_from_slice(type_ids);
+    let ctx = DogmaContext::load(sde, &extra_ids)?;
 
-    let attrs = sde
-        .types_attributes_raw(&all_ids)
-        .map_err(|e| e.to_string())?;
-    let effects_by_type = sde.types_effects(&all_ids).map_err(|e| e.to_string())?;
-    let effect_meta = sde.effect_meta().map_err(|e| e.to_string())?;
-    let defaults = sde.attribute_defaults().map_err(|e| e.to_string())?;
-    let is_stackable = |attr: i64| defaults.get(&attr).map(|m| m.stackable).unwrap_or(true);
-    let default_of = |attr: i64| defaults.get(&attr).map(|m| m.default_value).unwrap_or(0.0);
-
-    let entity = |type_id: i64, required_skills: Vec<i64>| -> Result<EntityInput, String> {
-        let group_id = sde
-            .type_info(type_id)
-            .map_err(|e| e.to_string())?
-            .map(|t| t.group_id)
-            .unwrap_or(0);
-        Ok(EntityInput {
-            type_id,
-            attrs: attrs.get(&type_id).cloned().unwrap_or_default(),
-            effect_ids: effects_by_type.get(&type_id).cloned().unwrap_or_default(),
-            group_id,
-            required_skills,
-        })
-    };
-
-    let ship = entity(ship_type_id, Vec::new())?;
+    let ship = ctx.entity(ship_type_id, Vec::new());
     let mut modules = Vec::with_capacity(type_ids.len());
     for id in type_ids {
-        modules.push(entity(*id, required_skills_of(&attrs, *id))?);
+        modules.push(ctx.entity(*id, required_skills_of(&ctx.attrs, *id)));
     }
-    let mut skills = Vec::with_capacity(skill_ids.len());
-    for sid in &skill_ids {
-        let level = skill_level_for(*sid);
-        if level <= 0.0 {
-            continue;
-        }
-        let mut a = attrs.get(sid).cloned().unwrap_or_default();
-        match a.iter_mut().find(|(k, _)| *k == 280) {
-            Some(p) => p.1 = level,
-            None => a.push((280, level)),
-        }
-        skills.push(EntityInput {
-            type_id: *sid,
-            attrs: a,
-            effect_ids: effects_by_type.get(sid).cloned().unwrap_or_default(),
-            group_id: 0,
-            required_skills: Vec::new(),
-        });
-    }
+    let skills = ctx.skill_entities(skill_level_for);
 
     let charges = vec![None; modules.len()];
     let resolved = resolve(
@@ -340,9 +298,9 @@ fn resolve_module_costs(
             drones: Vec::new(),
             charges,
         },
-        &effect_meta,
-        &is_stackable,
-        &default_of,
+        &ctx.effect_meta,
+        &|a| ctx.is_stackable(a),
+        &|a| ctx.default_of(a),
     );
     let mut out = HashMap::new();
     for (id, store) in type_ids.iter().zip(&resolved.modules) {

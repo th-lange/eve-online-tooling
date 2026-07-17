@@ -22,11 +22,9 @@ pub use db::{wormhole_class_label, Sde};
 pub use download::download_sde;
 pub use error::SdeError;
 pub use types::{
-    BlueprintMaterial, BlueprintProduct, Decryptor, EffectMeta, ModifierInfo, PlanetSchematic,
-    Recipe, ReprocessRecipe, ShipLayout, WormholeType,
+    AttrMeta, BlueprintMaterial, BlueprintProduct, Decryptor, EffectMeta, ModifierInfo,
+    PlanetSchematic, Recipe, ReprocessRecipe, ShipLayout, WormholeType,
 };
-// `AttrMeta` is reached through `attribute_defaults`'s return type today; it'll
-// be re-exported when the stat calculators name it (#172).
 
 use std::path::PathBuf;
 
