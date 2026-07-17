@@ -45,11 +45,10 @@ pub fn fitting_ship_layout(app: AppHandle, type_id: i64) -> Result<Option<ShipLa
 /// Parse an EFT clipboard string into a [`Fit`], resolving names → type ids and
 /// classifying each module into its slot from dogma effects (#162). Unknown
 /// module/charge names are skipped rather than failing the whole import; an
-/// unknown ship is an error.
-#[tauri::command]
-pub fn fitting_import_eft(app: AppHandle, text: String) -> Result<Fit, String> {
-    let sde = crate::sde::open_from_app(&app)?;
-    let parsed = eft::parse_eft(&text).map_err(|e| e.to_string())?;
+/// unknown ship is an error. Pure over an already-open SDE — no `AppHandle`,
+/// so the MCP dev-tier `fitting_stats` capability can reuse it directly.
+pub(crate) fn import_eft_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
+    let parsed = eft::parse_eft(text).map_err(|e| e.to_string())?;
 
     let ship_type_id = sde
         .type_by_name(&parsed.ship_name)
@@ -126,6 +125,13 @@ pub fn fitting_import_eft(app: AppHandle, text: String) -> Result<Fit, String> {
         items,
         projected: Vec::new(),
     })
+}
+
+/// Tauri command wrapper: open the SDE for the app, then run the pure parse.
+#[tauri::command]
+pub fn fitting_import_eft(app: AppHandle, text: String) -> Result<Fit, String> {
+    let sde = crate::sde::open_from_app(&app)?;
+    import_eft_to_fit(&sde, &text)
 }
 
 /// Next free 0-based index for `slot`, i.e. one past the highest currently used

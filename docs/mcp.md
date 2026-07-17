@@ -66,6 +66,31 @@ All tools are read-only and operate on public data:
 Prices come through the app's cached market service, so repeated lookups mostly
 hit cache rather than hammering EVE's servers.
 
+### Dev tier (compute engines, off by default)
+
+A second, separately opt-in tier exposes the app's **deterministic compute
+engines** — build-vs-buy production profit, fitting stats from an EFT string,
+and reprocessing yield — so an agent can drive **live regression checks**
+against the app instead of only reading data. Check **Expose compute engines
+to MCP** on the MCP bridge card to turn it on; it only takes effect while the
+bridge is running.
+
+| Tool | Input | Returns |
+| --- | --- | --- |
+| `production_profit` | `blueprintTypeId`, `runs?`, `me?`, `regionId?`, `systemCostIndex?`, `facilityTax?` | required material quantities (ME-adjusted), material cost, job fee, revenue, profit |
+| `fitting_stats` | `eft` (EFT clipboard text) | resources, validation, DPS, tank, capacitor at all-V skills |
+| `reprocessing_yield` | `typeId`, efficiency/region params (see tool schema) | refine-output value vs. sell value at a given efficiency |
+
+These are still **pure and public**: every dev-tier tool takes explicit
+inputs and reads only the SDE + cached market prices — never owned
+blueprints/fits, ESI, or any character/account data. That boundary is
+structural (the capability layer's `HostCtx` is never handed anything else)
+and pinned by a Rust test (`mcp_never_reaches_auth_gated_data`) that fails if
+an auth-gated capability is ever flipped onto either MCP tier. See
+[`testing-mcp.md`](./testing-mcp.md) for a golden-expectation suite an agent
+can run end-to-end to verify the engines against independently-computed
+facts after a change to `sde/`, `market/`, or an exposed engine.
+
 ### Plugin-contributed tools
 
 An **active** plugin (see [`plugins.md`](./plugins.md)) can declare its own MCP

@@ -30,6 +30,9 @@ export interface McpConfig {
   port: number;
   /** Start the bridge automatically on app launch. */
   autostart: boolean;
+  /** Advertise the dev-tier compute-engine tools (production profit, fitting
+   *  stats, …) over MCP. Off by default. */
+  devTier: boolean;
 }
 
 /** The current MCP configuration. */
@@ -46,4 +49,11 @@ export function mcpSetPort(port: number): Promise<McpStatus> {
  *  effect on the next launch; does not itself start/stop the bridge. */
 export function mcpSetAutostart(autostart: boolean): Promise<McpConfig> {
   return invoke<McpConfig>("mcp_set_autostart", { autostart });
+}
+
+/** Opt in/out of advertising the dev-tier compute-engine tools (production
+ *  profit, fitting stats, …) over MCP. Takes effect immediately — no bridge
+ *  restart needed. */
+export function mcpSetDevTier(devTier: boolean): Promise<McpConfig> {
+  return invoke<McpConfig>("mcp_set_dev_tier", { devTier });
 }

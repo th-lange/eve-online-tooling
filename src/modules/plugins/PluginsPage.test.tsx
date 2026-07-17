@@ -39,8 +39,12 @@ function renderPage(entries: PluginEntry[], mcpStart: McpStatus = STOPPED) {
   // Stateful MCP mock: start/stop flip what status returns next.
   let mcp: McpStatus = mcpStart;
   let autostart = false;
+  let devTier = false;
   invokeMock.mockImplementation(
-    (cmd: string, args?: { port?: number; autostart?: boolean }) => {
+    (
+      cmd: string,
+      args?: { port?: number; autostart?: boolean; devTier?: boolean },
+    ) => {
       switch (cmd) {
         case "plugins_list":
           return Promise.resolve(entries);
@@ -49,7 +53,7 @@ function renderPage(entries: PluginEntry[], mcpStart: McpStatus = STOPPED) {
         case "mcp_status":
           return Promise.resolve(mcp);
         case "mcp_config":
-          return Promise.resolve({ port: 0, autostart });
+          return Promise.resolve({ port: 0, autostart, devTier });
         case "mcp_start":
           mcp = RUNNING;
           return Promise.resolve(mcp);
@@ -60,7 +64,10 @@ function renderPage(entries: PluginEntry[], mcpStart: McpStatus = STOPPED) {
           return Promise.resolve(mcp);
         case "mcp_set_autostart":
           autostart = args?.autostart ?? false;
-          return Promise.resolve({ port: 0, autostart });
+          return Promise.resolve({ port: 0, autostart, devTier });
+        case "mcp_set_dev_tier":
+          devTier = args?.devTier ?? false;
+          return Promise.resolve({ port: 0, autostart, devTier });
         case "plugins_dir":
           return Promise.resolve("/tmp/app/plugins");
         case "plugins_rescan":
@@ -165,6 +172,23 @@ describe("PluginsPage", () => {
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("mcp_set_autostart", {
         autostart: true,
+      }),
+    );
+    await waitFor(() => expect(checkbox).toBeChecked());
+  });
+
+  it("toggling the dev-tier checkbox calls mcp_set_dev_tier and persists checked state", async () => {
+    renderPage([]);
+    await screen.findByText("MCP bridge");
+    const card = pluginCard("MCP bridge");
+    const checkbox = within(card).getByRole("checkbox", {
+      name: /expose compute engines to mcp/i,
+    });
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(checkbox);
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("mcp_set_dev_tier", {
+        devTier: true,
       }),
     );
     await waitFor(() => expect(checkbox).toBeChecked());

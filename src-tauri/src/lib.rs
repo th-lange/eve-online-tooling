@@ -193,6 +193,7 @@ pub fn run() {
             mcp::mcp_config,
             mcp::mcp_set_port,
             mcp::mcp_set_autostart,
+            mcp::mcp_set_dev_tier,
             commands::eve_default_log_dir,
             esi::commands::auth_login,
             esi::commands::auth_characters,
