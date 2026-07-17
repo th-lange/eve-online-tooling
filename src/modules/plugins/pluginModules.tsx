@@ -26,7 +26,7 @@ export function usePluginModules(): ModuleDef[] {
       .map((p): ModuleDef => ({
         id: p.manifest.id,
         title: p.manifest.name,
-        description: "Third-party plugin UI.",
+        description: `Third-party plugin UI (${p.manifest.id}).`,
         group: "plugins",
         icon: Puzzle,
         Component: () => (
