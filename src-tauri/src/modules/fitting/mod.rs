@@ -16,3 +16,15 @@ pub mod esi_fittings;
 pub mod optimizer;
 mod stats;
 pub mod types;
+
+/// Curated cross-module surface: the PVP fit analyzer is fitting's only other
+/// consumer, and it should reach the simulation engine through here rather than
+/// poking into `commands` (the Tauri command layer) or `stats`/`engine` directly.
+///
+/// Deferred: if a third consumer shows up, promote `engine/` (12 files),
+/// `stats.rs`, `types.rs` and `simulate_fit` out of `fitting` into a shared
+/// `src-tauri/src/dogma/` service. Mechanical, since `simulate_fit` already
+/// takes only `&Sde` + a skill closure — no Tauri/module-local state to
+/// disentangle.
+pub(crate) use stats::simulate_fit;
+pub use types::{Fit, FitItem, FitStats, ModuleState, SlotKind};

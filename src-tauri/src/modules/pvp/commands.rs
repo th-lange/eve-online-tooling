@@ -7,8 +7,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::esi::{fetch_killmail, resolve_character_ids, AuthState};
-use crate::modules::fitting::commands::simulate_fit;
-use crate::modules::fitting::types::{Fit, FitItem, FitStats, ModuleState, SlotKind};
+use crate::modules::fitting::{simulate_fit, Fit, FitItem, FitStats, ModuleState, SlotKind};
 use crate::sde::Sde;
 use crate::storage;
 use crate::zkill::{self, ZkillStatsRaw};

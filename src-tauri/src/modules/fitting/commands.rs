@@ -12,14 +12,13 @@ use tauri::{AppHandle, State};
 
 use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule};
 use super::engine::resolve::{resolve, EntityInput, FitInput};
-use super::engine::validate::{validate, ValItem};
-use super::types::{EwTag, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind};
+use super::types::{Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind};
 use crate::esi::{self, corporation_id, AuthState, SkillLevels};
 use crate::market::{resolve_location, MarketService, PriceModel};
 use crate::sde::{Sde, ShipLayout};
 use crate::storage;
 
-use super::stats::{required_skills_of, run_dogma};
+use super::stats::{required_skills_of, simulate_fit};
 
 /// Storage key for the local saved-fits document (a `Vec<Fit>`).
 const FITS_KEY: &str = "fitting_fits";
@@ -580,178 +579,6 @@ pub async fn fitting_simulate(
     simulate_fit(&sde, &fit, &lookup)
 }
 
-/// Core simulation shared by `fitting_simulate` and the PVP fit analysis: given
-/// an open SDE, a fit and a skill-level lookup, resolve the dogma engine and
-/// assemble [`FitStats`]. Kept engine-identical so both surfaces agree.
-pub(crate) fn simulate_fit(
-    sde: &Sde,
-    fit: &Fit,
-    skill_level_for: &dyn Fn(i64) -> f64,
-) -> Result<FitStats, String> {
-    let Some(ship) = sde
-        .ship_layout(fit.ship_type_id)
-        .map_err(|e| e.to_string())?
-    else {
-        return Err(format!("unknown ship: {}", fit.ship_type_id));
-    };
-
-    // Batch every fitted item's base attributes in one query.
-    let ids: Vec<i64> = fit.items.iter().map(|i| i.type_id).collect();
-    let attrs = sde.types_attributes_raw(&ids).map_err(|e| e.to_string())?;
-
-    let mut val_items = Vec::with_capacity(fit.items.len());
-    for item in &fit.items {
-        let a: HashMap<i64, f64> = attrs
-            .get(&item.type_id)
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
-        let get = |id: i64| a.get(&id).copied().unwrap_or(0.0);
-        // Turret/launcher only matter for high-slot modules (effects 42/40).
-        let (is_turret, is_launcher) = if item.slot == SlotKind::High {
-            let effects = sde.type_effects(item.type_id).map_err(|e| e.to_string())?;
-            (
-                effects.iter().any(|(e, _)| *e == 42),
-                effects.iter().any(|(e, _)| *e == 40),
-            )
-        } else {
-            (false, false)
-        };
-        let drone_volume = if item.slot == SlotKind::Drone {
-            sde.type_info(item.type_id)
-                .map_err(|e| e.to_string())?
-                .and_then(|t| t.volume)
-                .unwrap_or(0.0)
-        } else {
-            0.0
-        };
-        val_items.push(ValItem {
-            slot: item.slot,
-            cpu: get(50),           // cpu usage
-            powergrid: get(30),     // power usage
-            calibration: get(1153), // rig calibration cost
-            is_turret,
-            is_launcher,
-            drone_volume,
-            quantity: item.quantity.max(1),
-        });
-    }
-
-    // Base-attribute resources/validation — only a fallback for when the dogma
-    // engine can't run; otherwise the finalized (skill-adjusted) ones are used.
-    let (base_resources, base_validation) = validate(&ship, &val_items);
-
-    // Dogma engine: resolve finalized attributes and derive stats (incl. the
-    // skill-adjusted resources/validation). Best-effort.
-    let dogma = run_dogma(sde, fit, &ship, skill_level_for).ok();
-
-    // Classify any EW projected onto the fit (#265) — presence only.
-    let projected_ew = classify_projected_ew(sde, fit);
-
-    Ok(FitStats {
-        resources: dogma
-            .as_ref()
-            .map(|d| d.resources.clone())
-            .unwrap_or(base_resources),
-        validation: dogma
-            .as_ref()
-            .map(|d| d.validation.clone())
-            .unwrap_or(base_validation),
-        capacitor: dogma.as_ref().map(|d| d.capacitor.clone()),
-        tank: dogma.as_ref().map(|d| d.tank.clone()),
-        dps: dogma.as_ref().map(|d| d.dps.clone()),
-        navigation: dogma.as_ref().map(|d| d.navigation.clone()),
-        layout: dogma.as_ref().map(|d| d.layout.clone()),
-        weapon_ranges: dogma
-            .as_ref()
-            .map(|d| d.weapon_ranges.clone())
-            .unwrap_or_default(),
-        activatable_types: dogma
-            .as_ref()
-            .map(|d| d.activatable_types.clone())
-            .unwrap_or_default(),
-        targeting: dogma.map(|d| d.targeting),
-        price: None,
-        projected_ew,
-    })
-}
-
-/// Classify the modules projected **onto** a fit into EW categories by their
-/// inventory group (#265). Presence only — counts, not magnitudes. Web/paint/damp
-/// are flagged `modeled` (their numbers are already in the stats); ECM is flagged
-/// `jam` so the UI shows it as an opt-in jammed scenario, never a passive effect.
-fn classify_projected_ew(sde: &Sde, fit: &Fit) -> Vec<EwTag> {
-    if fit.projected.is_empty() {
-        return Vec::new();
-    }
-    let ids: Vec<i64> = fit.projected.iter().map(|i| i.type_id).collect();
-    let Ok(groups) = sde.types_groups(&ids) else {
-        return Vec::new();
-    };
-    // Tally projected modules per category, preserving a stable display order.
-    let order = [
-        "web",
-        "paint",
-        "damp",
-        "weaponDisruption",
-        "ecm",
-        "neut",
-        "nos",
-    ];
-    let mut counts: HashMap<&'static str, i64> = HashMap::new();
-    for item in &fit.projected {
-        if let Some(cat) = groups.get(&item.type_id).and_then(|g| ew_category(*g)) {
-            *counts.entry(cat).or_default() += item.quantity.max(1) as i64;
-        }
-    }
-    order
-        .iter()
-        .filter_map(|&cat| {
-            let count = *counts.get(cat)?;
-            if count == 0 {
-                return None;
-            }
-            Some(EwTag {
-                category: cat.to_string(),
-                label: ew_label(cat).to_string(),
-                count,
-                modeled: matches!(cat, "web" | "paint" | "damp"),
-                jam: cat == "ecm",
-            })
-        })
-        .collect()
-}
-
-/// Map an inventory group id to an EW category key, or `None` if it isn't EW we
-/// surface. Group ids are stable SDE identifiers (verified against the SDE).
-fn ew_category(group_id: i64) -> Option<&'static str> {
-    match group_id {
-        65 | 1672 => Some("web"),        // Stasis Web / Stasis Grappler
-        379 => Some("paint"),            // Target Painter
-        208 => Some("damp"),             // Sensor Dampener
-        291 => Some("weaponDisruption"), // Weapon Disruptor (tracking/guidance)
-        201 | 80 => Some("ecm"),         // ECM / Burst Jammer
-        71 => Some("neut"),              // Energy Neutralizer
-        68 => Some("nos"),               // Energy Nosferatu
-        _ => None,
-    }
-}
-
-/// Human label for an EW category badge.
-fn ew_label(cat: &str) -> &'static str {
-    match cat {
-        "web" => "Web",
-        "paint" => "Target Painter",
-        "damp" => "Sensor Damp",
-        "weaponDisruption" => "Tracking/Guidance Disruption",
-        "ecm" => "ECM",
-        "neut" => "Energy Neut",
-        "nos" => "Nosferatu",
-        _ => "EW",
-    }
-}
-
 /// Price a whole fit (hull + modules + charges + drones/cargo) at a market
 /// (#163), reusing the shared market service's bulk aggregates.
 #[tauri::command]
@@ -864,6 +691,7 @@ pub fn fitting_delete_local(app: AppHandle, id: String) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::modules::fitting::optimizer::*;
+    use crate::modules::fitting::stats::run_dogma;
 
     fn item(type_id: i64, slot: SlotKind, charge: Option<i64>, qty: i32) -> FitItem {
         FitItem {
@@ -1560,21 +1388,5 @@ mod tests {
                 < 1e-9
         );
         assert!(!meets(&e, &both));
-    }
-
-    #[test]
-    fn classifies_ew_groups_and_flags() {
-        // Modeled vs unmodeled vs jam.
-        assert_eq!(ew_category(65), Some("web")); // Stasis Web
-        assert_eq!(ew_category(1672), Some("web")); // Stasis Grappler
-        assert_eq!(ew_category(208), Some("damp")); // Sensor Dampener
-        assert_eq!(ew_category(291), Some("weaponDisruption"));
-        assert_eq!(ew_category(201), Some("ecm"));
-        assert_eq!(ew_category(80), Some("ecm")); // Burst Jammer
-        assert_eq!(ew_category(68), Some("nos"));
-        assert_eq!(ew_category(587), None); // a Rifter hull, not EW
-                                            // ECM is the jam category; web/paint/damp are the modeled ones.
-        assert_eq!(ew_label("ecm"), "ECM");
-        assert_eq!(ew_label("weaponDisruption"), "Tracking/Guidance Disruption");
     }
 }
