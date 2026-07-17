@@ -12,7 +12,7 @@
 //! plugin broker checks [`Capability::permission`] against the plugin's grants
 //! first.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::path::Path;
 
 use serde_json::{json, Value};
@@ -20,7 +20,7 @@ use serde_json::{json, Value};
 use crate::esi::{self, AuthState};
 use crate::market::{default_region_id, resolve_location, MarketService};
 use crate::plugins::manifest::Permission;
-use crate::sde::{Sde, SdePaths};
+use crate::sde::{graph, Sde, SdePaths};
 use crate::storage;
 
 const QUERY_MAX_LEN: usize = 200;
@@ -297,8 +297,8 @@ fn cap_route(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
     let sde = open_sde(ctx.app_data_dir)?;
     let from = resolve_system(&sde, from_name)?;
     let to = resolve_system(&sde, to_name)?;
-    let edges = sde.all_stargate_edges().map_err(|e| e.to_string())?;
-    let jumps = shortest_path(&edges, from.0, to.0);
+    let adj = sde.stargate_adjacency().map_err(|e| e.to_string())?;
+    let jumps = shortest_path(&adj, from.0, to.0);
     Ok(json!({
         "from": from.1, "to": to.1,
         "jumps": jumps, "reachable": jumps.is_some(),
@@ -349,33 +349,10 @@ fn resolve_system(sde: &Sde, name: &str) -> Result<(i64, String), String> {
         .ok_or_else(|| format!("unknown system: {name:?}"))
 }
 
-/// BFS shortest path (jump count) over an undirected stargate edge list.
-/// `None` when unreachable. Pure — unit-tested.
-fn shortest_path(edges: &[(i64, i64)], from: i64, to: i64) -> Option<i64> {
-    if from == to {
-        return Some(0);
-    }
-    let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
-    for &(a, b) in edges {
-        adj.entry(a).or_default().push(b);
-        adj.entry(b).or_default().push(a);
-    }
-    let mut dist: HashMap<i64, i64> = HashMap::from([(from, 0)]);
-    let mut queue = VecDeque::from([from]);
-    while let Some(system) = queue.pop_front() {
-        let d = dist[&system];
-        for &next in adj.get(&system).into_iter().flatten() {
-            if dist.contains_key(&next) {
-                continue;
-            }
-            if next == to {
-                return Some(d + 1);
-            }
-            dist.insert(next, d + 1);
-            queue.push_back(next);
-        }
-    }
-    None
+/// BFS shortest path (jump count) over an undirected stargate adjacency map.
+/// `None` when unreachable.
+fn shortest_path(adj: &HashMap<i64, Vec<i64>>, from: i64, to: i64) -> Option<i64> {
+    graph::bfs(adj, from, None).0.get(&to).copied()
 }
 
 #[cfg(test)]
@@ -425,14 +402,5 @@ mod tests {
         let schema = input_schema(cap);
         assert_eq!(schema["properties"]["typeId"]["type"], "integer");
         assert_eq!(schema["required"], json!(["typeId"]));
-    }
-
-    #[test]
-    fn shortest_path_bfs() {
-        // 1-2-3-4 chain plus a 2-4 shortcut.
-        let edges = [(1, 2), (2, 3), (3, 4), (2, 4)];
-        assert_eq!(shortest_path(&edges, 1, 1), Some(0));
-        assert_eq!(shortest_path(&edges, 1, 4), Some(2)); // 1-2-4
-        assert_eq!(shortest_path(&edges, 1, 99), None);
     }
 }

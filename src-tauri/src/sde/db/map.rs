@@ -135,6 +135,22 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Undirected stargate adjacency, keyed by solar system id — the
+    /// in-memory graph [`sde::graph`](crate::sde::graph) BFS utilities walk.
+    /// Built from [`all_stargate_edges`](Self::all_stargate_edges), which
+    /// reads `mapSolarSystemJumps`; that table already stores **both**
+    /// directions of every gate connection (a `(from, to)` row and its
+    /// `(to, from)` mirror), so each edge is added to the map twice over —
+    /// once per direction's own `(a, b)` pair. That's harmless for BFS
+    /// correctness (a duplicate neighbour is just visited and skipped a
+    /// second time), so this does **not** deduplicate; doing so would only
+    /// add work for no behavioural change.
+    pub fn stargate_adjacency(&self) -> Result<HashMap<i64, Vec<i64>>, SdeError> {
+        Ok(crate::sde::graph::undirected_adjacency(
+            &self.all_stargate_edges()?,
+        ))
+    }
+
     /// Map of solar system id -> (name, security, region name). For the route /
     /// system-activity view. `security` is the raw SDE float (−1.0 … 1.0).
     pub fn solar_system_info(&self) -> Result<HashMap<i64, (String, f64, String)>, SdeError> {

@@ -1,11 +1,12 @@
 //! Tauri command surface for the market service.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::esi::{authed_get, AuthState};
+use crate::sde::graph;
 use crate::storage;
 
 use super::markets::{regions, resolve_location, Region};
@@ -317,32 +318,18 @@ fn jump_distances(
 ) -> HashMap<i64, i64> {
     let is_highsec = |sid: i64| info.get(&sid).map(|i| i.1 >= 0.45).unwrap_or(false);
 
-    // Undirected adjacency, optionally restricted to high-sec endpoints.
-    let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
-    for &(a, b) in edges {
-        if high_sec_only && (!is_highsec(a) || !is_highsec(b)) {
-            continue;
-        }
-        adj.entry(a).or_default().push(b);
-        adj.entry(b).or_default().push(a);
-    }
-
-    let mut dist: HashMap<i64, i64> = HashMap::new();
-    let mut seen: HashSet<i64> = HashSet::new();
-    let mut queue: VecDeque<i64> = VecDeque::new();
-    dist.insert(origin, 0);
-    seen.insert(origin);
-    queue.push_back(origin);
-    while let Some(sid) = queue.pop_front() {
-        let d = dist[&sid];
-        for &next in adj.get(&sid).map(|v| v.as_slice()).unwrap_or(&[]) {
-            if seen.insert(next) {
-                dist.insert(next, d + 1);
-                queue.push_back(next);
-            }
-        }
-    }
-    dist
+    // Optionally restrict to high-sec-endpoint edges before building adjacency.
+    let filtered: Vec<(i64, i64)> = if high_sec_only {
+        edges
+            .iter()
+            .copied()
+            .filter(|&(a, b)| is_highsec(a) && is_highsec(b))
+            .collect()
+    } else {
+        edges.to_vec()
+    };
+    let adj = graph::undirected_adjacency(&filtered);
+    graph::bfs(&adj, origin, None).0
 }
 
 #[cfg(test)]
