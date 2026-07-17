@@ -8,6 +8,7 @@
 //! Tracking: issue #5. Consumed by the production engine (issue #6).
 
 pub mod commands;
+pub mod orders;
 
 mod aggregate;
 mod cache;
