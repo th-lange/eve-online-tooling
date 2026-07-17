@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::esi::{authed_get_paged_pub, AuthState};
-use crate::market::{resolve_location, MarketService, PriceModel};
+use crate::market::{jita_location, MarketService, PriceMap};
 use crate::model::AppError;
 use crate::storage;
 
@@ -414,24 +414,16 @@ pub async fn profit_fifo(
             }
         }
     }
-    let prices: HashMap<i64, PriceModel> = if mat_ids.is_empty() {
-        HashMap::new()
+    let prices = if mat_ids.is_empty() {
+        PriceMap::default()
     } else {
         let ids: Vec<i64> = mat_ids.into_iter().collect();
         market
-            .price_models_at(resolve_location(10_000_002, None), &ids)
+            .price_map_at(jita_location(), &ids)
             .await
             .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|m| (m.type_id, m))
-            .collect()
     };
-    let mat_price = |id: i64| {
-        prices
-            .get(&id)
-            .and_then(|m| m.sell_percentile)
-            .unwrap_or(0.0)
-    };
+    let mat_price = |id: i64| prices.sell_or_zero(id);
 
     // Build the unified event stream.
     let mut events: Vec<FifoEvent> = Vec::new();

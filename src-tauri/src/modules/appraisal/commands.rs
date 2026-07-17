@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-use crate::market::{default_region_id, resolve_location, MarketService, PriceModel};
+use crate::market::{default_region_id, resolve_location, MarketService};
 
 /// One pasted line: an item name and a quantity (defaults to 1 in the UI).
 #[derive(Debug, Deserialize)]
@@ -87,13 +87,10 @@ pub async fn appraisal(
 
     let ids: Vec<i64> = resolved.iter().filter_map(|r| r.type_id).collect();
     let location = resolve_location(params.region_id, params.station_id);
-    let prices: HashMap<i64, PriceModel> = market
-        .price_models_at(location, &ids)
+    let prices = market
+        .price_map_at(location, &ids)
         .await
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(|m| (m.type_id, m))
-        .collect();
+        .map_err(|e| e.to_string())?;
     let best = if params.best_hub {
         market
             .best_sell_hubs(&ids)
@@ -108,7 +105,7 @@ pub async fn appraisal(
     let items: Vec<PricedItem> = resolved
         .into_iter()
         .map(|r| {
-            let model = r.type_id.and_then(|id| prices.get(&id));
+            let model = r.type_id.and_then(|id| prices.get(id));
             let buy_price = model.and_then(|m| m.buy_percentile);
             let (sell_price, sell_hub) = match r.type_id.and_then(|id| best.get(&id)) {
                 Some(b) => (Some(b.price), Some(b.hub.clone())),
@@ -291,24 +288,16 @@ pub async fn appraisal_reprocess(
         }
     }
     let ids: Vec<i64> = ids.into_iter().collect();
-    let prices: HashMap<i64, PriceModel> = market
-        .price_models_at(resolve_location(params.region_id, params.station_id), &ids)
+    let prices = market
+        .price_map_at(resolve_location(params.region_id, params.station_id), &ids)
         .await
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(|m| (m.type_id, m))
-        .collect();
-    let sell = |id: i64| {
-        prices
-            .get(&id)
-            .and_then(|m| m.sell_percentile)
-            .unwrap_or(0.0)
-    };
+        .map_err(|e| e.to_string())?;
+    let sell = |id: i64| prices.sell_or_zero(id);
 
     let mut minerals: Vec<MineralLine> = mineral_qty
         .into_iter()
         .map(|(type_id, (name, quantity))| {
-            let unit = prices.get(&type_id).and_then(|m| m.sell_percentile);
+            let unit = prices.sell(type_id);
             MineralLine {
                 type_id,
                 name,

@@ -12,7 +12,7 @@ use super::stats::{
     AttrMap, EffectMap, GroupMap,
 };
 use super::types::{Fit, FitItem, ModuleState, Severity, SlotKind};
-use crate::market::{resolve_location, MarketService};
+use crate::market::{default_region_id, resolve_location, MarketService};
 use crate::sde::{Sde, ShipLayout};
 
 /// Damage-objective score for the optimizer. Like DPS, but a turret with **no
@@ -436,7 +436,7 @@ pub async fn fitting_optimize(
             }
             ids
         };
-        let location = resolve_location(region_id.unwrap_or(10000002), station_id);
+        let location = resolve_location(region_id.unwrap_or_else(default_region_id), station_id);
         market
             .price_models_at(location, &ids)
             .await

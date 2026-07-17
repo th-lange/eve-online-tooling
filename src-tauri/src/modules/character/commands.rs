@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::esi::{authed_get, authed_get_paged_pub, resolve_names, AuthState};
-use crate::market::{resolve_location, MarketService};
+use crate::market::{jita_location, MarketService};
 use crate::model::AppError;
 use crate::storage;
 
@@ -466,7 +466,7 @@ pub async fn character_mining(
         s.into_iter().collect()
     };
     let prices: HashMap<i64, f64> = market
-        .price_models_at(resolve_location(10_000_002, None), &type_ids)
+        .price_models_at(jita_location(), &type_ids)
         .await
         .map_err(|e| e.to_string())?
         .into_iter()

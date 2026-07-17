@@ -1,13 +1,13 @@
 //! LP-store browser + calculator — rank an NPC corp's loyalty-store offers by
 //! ISK/LP yield. Offers are public; the character's LP balances need a scope.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::esi::{authed_get, resolve_names, AuthState, EsiClient};
-use crate::market::{resolve_location, MarketService, PriceModel};
+use crate::market::{jita_location, MarketService};
 use crate::model::AppError;
 use crate::storage;
 
@@ -183,19 +183,11 @@ pub async fn lp_offers(
         }
     }
     let ids: Vec<i64> = ids.into_iter().collect();
-    let prices: HashMap<i64, PriceModel> = market
-        .price_models_at(resolve_location(10_000_002, None), &ids)
+    let prices = market
+        .price_map_at(jita_location(), &ids)
         .await
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(|m| (m.type_id, m))
-        .collect();
-    let sell = |id: i64| {
-        prices
-            .get(&id)
-            .and_then(|m| m.sell_percentile)
-            .unwrap_or(0.0)
-    };
+        .map_err(|e| e.to_string())?;
+    let sell = |id: i64| prices.sell_or_zero(id);
 
     let mut rows: Vec<OfferRow> = offers
         .into_iter()
