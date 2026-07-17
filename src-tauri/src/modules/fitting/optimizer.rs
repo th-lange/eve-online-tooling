@@ -993,3 +993,102 @@ pub(super) fn optimize_fit(
         within_budget,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(type_id: i64, slot: SlotKind, charge: Option<i64>, qty: i32) -> FitItem {
+        FitItem {
+            type_id,
+            slot,
+            index: 0,
+            state: ModuleState::Active,
+            charge_type_id: charge,
+            quantity: qty,
+        }
+    }
+
+    /// `fit_cost` sums hull + modules×qty + charges; a missing price counts as 0.
+    #[test]
+    fn fit_cost_sums_hull_modules_charges() {
+        let fit = Fit {
+            id: "x".into(),
+            name: "n".into(),
+            ship_type_id: 100,
+            items: vec![
+                item(10, SlotKind::Low, None, 1),
+                item(20, SlotKind::High, Some(30), 1),
+                item(40, SlotKind::Drone, None, 5),
+            ],
+            projected: Vec::new(),
+        };
+        let prices = HashMap::from([
+            (100, 1000.0),
+            (10, 50.0),
+            (20, 200.0),
+            (30, 5.0),
+            (40, 10.0),
+        ]);
+        // 1000 hull + 50 + 200 + 5 charge + 10×5 drones = 1305.
+        assert_eq!(fit_cost(&fit, &prices), 1305.0);
+        // No prices ⇒ everything counts as free, never blocking.
+        assert_eq!(fit_cost(&fit, &HashMap::new()), 0.0);
+    }
+
+    /// The penalty is multiplicative per violated constraint, and `meets` mirrors it.
+    #[test]
+    fn constraint_score_and_meets() {
+        let e = Eval {
+            objective: 100.0,
+            cap_stable: false,
+            cost: 500.0,
+        };
+
+        // No constraints: full score, satisfied.
+        let none = Constraints::default();
+        assert_eq!(constraint_score(&e, &none), 100.0);
+        assert!(meets(&e, &none));
+
+        // Cap-stable required but the fit is unstable ⇒ penalized + not met.
+        let cap = Constraints {
+            cap_stable: true,
+            max_cost: None,
+        };
+        assert_eq!(constraint_score(&e, &cap), 100.0 * CONSTRAINT_PENALTY);
+        assert!(!meets(&e, &cap));
+        // A stable fit clears it.
+        let stable = Eval {
+            objective: 100.0,
+            cap_stable: true,
+            cost: 500.0,
+        };
+        assert_eq!(constraint_score(&stable, &cap), 100.0);
+        assert!(meets(&stable, &cap));
+
+        // Budget: over ⇒ penalized; within ⇒ full.
+        let tight = Constraints {
+            cap_stable: false,
+            max_cost: Some(400.0),
+        };
+        assert!(!meets(&e, &tight));
+        assert_eq!(constraint_score(&e, &tight), 100.0 * CONSTRAINT_PENALTY);
+        let loose = Constraints {
+            cap_stable: false,
+            max_cost: Some(500.0),
+        };
+        assert!(meets(&e, &loose));
+        assert_eq!(constraint_score(&e, &loose), 100.0);
+
+        // Both violated ⇒ penalty applied twice (scale-invariant, so ordering holds).
+        let both = Constraints {
+            cap_stable: true,
+            max_cost: Some(400.0),
+        };
+        assert!(
+            (constraint_score(&e, &both) - 100.0 * CONSTRAINT_PENALTY * CONSTRAINT_PENALTY).abs()
+                < 1e-9
+        );
+        assert!(!meets(&e, &both));
+    }
+}
