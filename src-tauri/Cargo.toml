@@ -47,4 +47,5 @@ boa_engine = "0.21"
 
 
 [dev-dependencies]
+http = "1"
 tokio = { version = "1", features = ["macros", "rt"] }

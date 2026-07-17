@@ -15,6 +15,8 @@ mod error;
 mod net;
 
 pub use auth::AuthState;
+#[cfg(test)]
+pub(crate) use cache::ConditionalCache;
 pub use character::{
     authed_get, authed_get_paged_pub, character_affiliation, character_skill_levels,
     corporation_id, create_character_fitting, fetch_assets, fetch_character_fittings,

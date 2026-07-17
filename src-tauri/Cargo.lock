@@ -1634,6 +1634,7 @@ dependencies = [
  "extism",
  "flate2",
  "futures-util",
+ "http",
  "httpdate",
  "keyring",
  "parking_lot",
