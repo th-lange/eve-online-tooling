@@ -270,3 +270,14 @@ pub struct ShipLayout {
     pub drone_bay: f64,
     pub drone_bandwidth: f64,
 }
+
+/// A solar system's identity plus the region it belongs to, for point
+/// lookups (e.g. "where is this character right now?") that shouldn't pay
+/// for a full-map load. `security` is the raw SDE float (−1.0 … 1.0).
+#[derive(Debug, Clone)]
+pub struct SystemInfo {
+    pub name: String,
+    pub security: f64,
+    pub region_id: i64,
+    pub region_name: String,
+}
