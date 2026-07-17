@@ -213,8 +213,7 @@ pub async fn open_market_window(
     auth_state: State<'_, AuthState>,
     type_id: i64,
 ) -> Result<(), String> {
-    let dir = crate::storage::app_data_dir(&app)?;
-    let character_id = storage::primary_character(&dir).ok_or("Log in a character first")?;
+    let (_, character_id) = storage::dir_and_primary_character(&app).map_err(|e| e.to_string())?;
     character::open_market_window(&auth_state, character_id, type_id)
         .await
         .map_err(|e| e.to_string())

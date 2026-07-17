@@ -11,14 +11,6 @@ use crate::esi::{authed_get, resolve_names, AuthState};
 use crate::model::AppError;
 use crate::storage;
 
-/// Active character or an auth-required error (used by the per-character
-/// mutations: dismiss/reset act on one concrete character).
-fn primary(app: &AppHandle) -> Result<(std::path::PathBuf, i64), AppError> {
-    let dir = crate::storage::app_data_dir(app)?;
-    let id = storage::primary_character(&dir).ok_or_else(AppError::auth_required)?;
-    Ok((dir, id))
-}
-
 /// Split a PascalCase ESI notification type into words:
 /// `StructureUnderAttack` → `Structure Under Attack`. Pure, so it's unit-tested.
 pub fn humanize(kind: &str) -> String {
@@ -167,7 +159,7 @@ pub async fn notifications(
 /// characters" this applies to the primary (first) character.
 #[tauri::command]
 pub fn notification_dismiss(app: AppHandle, notification_id: i64) -> Result<(), AppError> {
-    let (dir, character_id) = primary(&app)?;
+    let (dir, character_id) = storage::dir_and_primary_character(&app)?;
     let key = format!("notifications_dismissed_{character_id}");
     let mut dismissed: Vec<i64> = storage::load_data(&dir, &key).unwrap_or_default();
     if !dismissed.contains(&notification_id) {
@@ -181,7 +173,7 @@ pub fn notification_dismiss(app: AppHandle, notification_id: i64) -> Result<(), 
 /// Under "all characters" this applies to the primary (first) character.
 #[tauri::command]
 pub fn notifications_reset(app: AppHandle) -> Result<(), AppError> {
-    let (dir, character_id) = primary(&app)?;
+    let (dir, character_id) = storage::dir_and_primary_character(&app)?;
     let key = format!("notifications_dismissed_{character_id}");
     storage::save_data(&dir, &key, &Vec::<i64>::new())?;
     Ok(())

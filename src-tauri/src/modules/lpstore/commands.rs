@@ -11,11 +11,6 @@ use crate::market::{resolve_location, MarketService, PriceModel};
 use crate::model::AppError;
 use crate::storage;
 
-fn first_character(app: &AppHandle) -> Result<i64, AppError> {
-    let dir = crate::storage::app_data_dir(app)?;
-    storage::primary_character(&dir).ok_or_else(AppError::auth_required)
-}
-
 // --- LP balances (corp picker) ---
 
 #[derive(Deserialize)]
@@ -38,7 +33,7 @@ pub async fn lp_balances(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<Vec<LpBalance>, AppError> {
-    let character_id = first_character(&app)?;
+    let (_, character_id) = storage::dir_and_primary_character(&app)?;
     let points: Vec<EsiLoyalty> = authed_get(
         &auth_state,
         character_id,

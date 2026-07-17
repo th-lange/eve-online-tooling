@@ -155,6 +155,25 @@ pub fn primary_character(app_data_dir: &Path) -> Option<i64> {
     }
 }
 
+/// [`primary_character`], or [`AppError::AuthRequired`] when nobody is logged
+/// in — the single call site for the "require a primary character" guard that
+/// was otherwise copy-pasted as a module-local `first_character`/`primary`
+/// helper across every command module.
+pub fn require_primary_character(app_data_dir: &Path) -> Result<i64, crate::model::AppError> {
+    primary_character(app_data_dir).ok_or_else(crate::model::AppError::auth_required)
+}
+
+/// [`app_data_dir`] plus [`require_primary_character`] in one call — the shape
+/// most commands actually want (they need the dir anyway to load/save
+/// per-character state).
+pub fn dir_and_primary_character(
+    app: &tauri::AppHandle,
+) -> Result<(PathBuf, i64), crate::model::AppError> {
+    let dir = app_data_dir(app)?;
+    let character_id = require_primary_character(&dir)?;
+    Ok((dir, character_id))
+}
+
 /// Roster character id → name, for tagging aggregated ("all characters") rows
 /// without an extra ESI lookup (names are already stored on the roster).
 pub fn character_names(app_data_dir: &Path) -> std::collections::HashMap<i64, String> {

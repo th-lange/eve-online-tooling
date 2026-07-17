@@ -11,11 +11,6 @@ use crate::market::{resolve_location, MarketService, PriceModel};
 use crate::model::AppError;
 use crate::storage;
 
-fn first_character(app: &AppHandle) -> Result<i64, AppError> {
-    let dir = crate::storage::app_data_dir(app)?;
-    storage::primary_character(&dir).ok_or_else(AppError::auth_required)
-}
-
 // --- Stored shapes (durable, accumulated) ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,8 +92,7 @@ pub async fn wallet_sync(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<WalletView, AppError> {
-    let character_id = first_character(&app)?;
-    let dir = crate::storage::app_data_dir(&app)?;
+    let (dir, character_id) = storage::dir_and_primary_character(&app)?;
     let jkey = format!("journal_{character_id}");
     let tkey = format!("transactions_{character_id}");
 
@@ -222,8 +216,8 @@ pub async fn transaction_ledger(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<LedgerView, AppError> {
-    let character_id = first_character(&app)?;
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
+    let character_id = storage::require_primary_character(&dir)?;
     let tkey = format!("transactions_{character_id}");
 
     let new_tx: Vec<Transaction> = authed_get_paged_pub(
@@ -391,8 +385,8 @@ pub async fn profit_fifo(
     app: AppHandle,
     market: State<'_, MarketService>,
 ) -> Result<ProfitView, AppError> {
-    let character_id = first_character(&app)?;
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
+    let character_id = storage::require_primary_character(&dir)?;
 
     let transactions: Vec<Transaction> =
         storage::load_data(&dir, &format!("transactions_{character_id}")).unwrap_or_default();

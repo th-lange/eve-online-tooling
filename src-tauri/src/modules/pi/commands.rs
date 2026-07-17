@@ -474,13 +474,12 @@ pub async fn pi_show_in_game(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
     system_id: i64,
-) -> Result<(), String> {
-    let dir = crate::storage::app_data_dir(&app)?;
-    let character_id =
-        storage::primary_character(&dir).ok_or_else(|| "Log in a character first".to_string())?;
+) -> Result<(), crate::model::AppError> {
+    let (_, character_id) = storage::dir_and_primary_character(&app)?;
     crate::esi::set_autopilot_waypoint(&auth_state, character_id, system_id)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// The type ids the user has locked in as "produced by PI".

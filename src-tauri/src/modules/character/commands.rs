@@ -10,13 +10,6 @@ use crate::market::{resolve_location, MarketService};
 use crate::model::AppError;
 use crate::storage;
 
-/// The first logged-in character id, or [`AppError::AuthRequired`] if the roster
-/// is empty — so the UI can show a clear "log in" prompt (#337).
-fn first_character(app: &AppHandle) -> Result<i64, AppError> {
-    let dir = crate::storage::app_data_dir(app)?;
-    storage::primary_character(&dir).ok_or_else(AppError::auth_required)
-}
-
 // --- Skills (#55) ---
 
 #[derive(Deserialize)]
@@ -62,7 +55,7 @@ pub async fn character_skills(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<SkillsView, AppError> {
-    let character_id = first_character(&app)?;
+    let (_, character_id) = storage::dir_and_primary_character(&app)?;
     let sde = crate::sde::open_from_app(&app)?;
 
     let skills: EsiSkills = authed_get(
@@ -139,7 +132,7 @@ pub async fn character_standings(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<Vec<StandingRow>, AppError> {
-    let character_id = first_character(&app)?;
+    let (_, character_id) = storage::dir_and_primary_character(&app)?;
     let standings: Vec<EsiStanding> = authed_get(
         &auth_state,
         character_id,
@@ -259,7 +252,7 @@ pub async fn character_trade_fees(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<TradeFees, AppError> {
-    let character_id = first_character(&app)?;
+    let (_, character_id) = storage::dir_and_primary_character(&app)?;
 
     let skills: EsiSkills = authed_get(
         &auth_state,
@@ -361,7 +354,7 @@ pub async fn character_research(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<ResearchView, AppError> {
-    let character_id = first_character(&app)?;
+    let (_, character_id) = storage::dir_and_primary_character(&app)?;
     let sde = crate::sde::open_from_app(&app)?;
 
     let agents: Vec<EsiResearch> = authed_get(
@@ -446,7 +439,7 @@ pub async fn character_mining(
     auth_state: State<'_, AuthState>,
     market: State<'_, MarketService>,
 ) -> Result<MiningView, AppError> {
-    let character_id = first_character(&app)?;
+    let (_, character_id) = storage::dir_and_primary_character(&app)?;
     let sde = crate::sde::open_from_app(&app)?;
 
     let ledger: Vec<EsiMining> = authed_get_paged_pub(
@@ -576,7 +569,7 @@ pub async fn character_fleet(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<FleetView, AppError> {
-    let character_id = first_character(&app)?;
+    let (_, character_id) = storage::dir_and_primary_character(&app)?;
     let sde = crate::sde::open_from_app(&app)?;
 
     // Not in a fleet → ESI 404; treat as "no fleet" rather than an error.

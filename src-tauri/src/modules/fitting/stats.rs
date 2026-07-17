@@ -408,9 +408,7 @@ pub(super) async fn character_skill_levels(
     app: &AppHandle,
     auth_state: &AuthState,
 ) -> Result<HashMap<i64, i64>, crate::model::AppError> {
-    let dir = storage::app_data_dir(&app)?;
-    let character_id =
-        storage::primary_character(&dir).ok_or_else(crate::model::AppError::auth_required)?;
+    let (_, character_id) = storage::dir_and_primary_character(app)?;
 
     #[derive(serde::Deserialize)]
     struct Skills {
