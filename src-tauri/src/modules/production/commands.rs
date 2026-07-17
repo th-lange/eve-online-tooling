@@ -206,14 +206,8 @@ pub async fn production_profit(
 
     // Saved lists are keyed by blueprint type id (the ranking row's identity):
     // blacklisted blueprints are dropped, favorites are flagged for the UI.
-    let blacklist: std::collections::HashSet<i64> =
-        storage::load_id_list(&dir, PRODUCTION_BLACKLIST_KEY)
-            .into_iter()
-            .collect();
-    let favorites: std::collections::HashSet<i64> =
-        storage::load_id_list(&dir, PRODUCTION_FAVORITES_KEY)
-            .into_iter()
-            .collect();
+    let (blacklist, favorites) =
+        lists::load_filter_sets(&dir, PRODUCTION_BLACKLIST_KEY, PRODUCTION_FAVORITES_KEY);
 
     // Resolve the chosen decryptor (if any) once up front.
     let decryptor = match params.decryptor_type_id {

@@ -6,6 +6,7 @@
 //! consumer (production joins trading), so the storage + name-resolution lives
 //! here rather than being copied per module.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use serde::Serialize;
@@ -64,4 +65,21 @@ pub fn get_from_app(app: &AppHandle, key: &str) -> Result<Vec<ListItem>, String>
 pub fn set_from_app(app: &AppHandle, key: &str, type_id: i64, add: bool) -> Result<(), String> {
     let dir = storage::app_data_dir(app)?;
     set(&dir, key, type_id, add)
+}
+
+/// Loads a module's blacklist and favorites lists as `HashSet`s, ready for
+/// `.contains()` lookups during a scan. Companion to [`get`]/[`set`] for the
+/// scan-time (rather than UI-display-time) consumer of these lists.
+pub fn load_filter_sets(
+    dir: &Path,
+    blacklist_key: &str,
+    favorites_key: &str,
+) -> (HashSet<i64>, HashSet<i64>) {
+    let blacklist = storage::load_id_list(dir, blacklist_key)
+        .into_iter()
+        .collect();
+    let favorites = storage::load_id_list(dir, favorites_key)
+        .into_iter()
+        .collect();
+    (blacklist, favorites)
 }

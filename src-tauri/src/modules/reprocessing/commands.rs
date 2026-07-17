@@ -7,7 +7,6 @@ use tauri::{AppHandle, State};
 
 use crate::lists::{self, ListItem};
 use crate::market::{default_region_id, resolve_location, MarketService, PriceModel};
-use crate::storage;
 
 use super::engine::{evaluate, ore_efficiency, EfficiencyConfig, ReprocessRow};
 
@@ -96,12 +95,8 @@ pub async fn reprocessing_scan(
         security_mult: params.security_mult,
     });
 
-    let blacklist: HashSet<i64> = storage::load_id_list(&dir, REPROCESSING_BLACKLIST_KEY)
-        .into_iter()
-        .collect();
-    let favorites: HashSet<i64> = storage::load_id_list(&dir, REPROCESSING_FAVORITES_KEY)
-        .into_iter()
-        .collect();
+    let (blacklist, favorites) =
+        lists::load_filter_sets(&dir, REPROCESSING_BLACKLIST_KEY, REPROCESSING_FAVORITES_KEY);
     let groups = sde.group_names().map_err(|e| e.to_string())?;
 
     let mut out: Vec<ReprocessRow> = recipes

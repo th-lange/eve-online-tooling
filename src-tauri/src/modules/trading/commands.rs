@@ -1,13 +1,12 @@
 //! Tauri command surface for the station-trading module.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use serde::Deserialize;
 use tauri::{AppHandle, State};
 
 use crate::lists::{self, ListItem};
 use crate::market::{default_region_id, resolve_location, MarketService, PriceModel};
-use crate::storage;
 
 use super::engine::{evaluate, TradeConfig, TradeRow};
 
@@ -61,12 +60,7 @@ pub async fn station_trading(
         .map(|m| (m.type_id, m))
         .collect();
 
-    let blacklist: HashSet<i64> = storage::load_id_list(&dir, "blacklist")
-        .into_iter()
-        .collect();
-    let favorites: HashSet<i64> = storage::load_id_list(&dir, "favorites")
-        .into_iter()
-        .collect();
+    let (blacklist, favorites) = lists::load_filter_sets(&dir, "blacklist", "favorites");
     let categories = sde.category_names().map_err(|e| e.to_string())?;
     let groups = sde.group_names().map_err(|e| e.to_string())?;
     let meta = sde.meta_group_names().map_err(|e| e.to_string())?;
