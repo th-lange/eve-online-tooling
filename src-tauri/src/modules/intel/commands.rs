@@ -9,10 +9,9 @@
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::esi::{resolve_names, AuthState, EsiClient};
-use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
 // ------------------------------------------------------------------ Incursions
@@ -54,7 +53,7 @@ pub async fn intel_incursions(
     app: AppHandle,
     auth: State<'_, AuthState>,
 ) -> Result<Vec<IncursionRow>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     if let Some(cached) = storage::cache_get::<Vec<IncursionRow>>(&dir, "intel_incursions") {
         return Ok(cached);
     }
@@ -154,7 +153,7 @@ pub async fn intel_fw_stats(
     app: AppHandle,
     auth: State<'_, AuthState>,
 ) -> Result<Vec<FwRow>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     if let Some(cached) = storage::cache_get::<Vec<FwRow>>(&dir, "intel_fw_stats") {
         return Ok(cached);
     }
@@ -272,7 +271,7 @@ pub struct FwMap {
 /// between the systems (for the warzone map). Public data, cached ~5 min.
 #[tauri::command]
 pub async fn fw_systems(app: AppHandle) -> Result<FwMap, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     if let Some(cached) = storage::cache_get::<FwMap>(&dir, "intel_fw_systems") {
         return Ok(cached);
     }
@@ -300,7 +299,6 @@ pub async fn fw_systems(app: AppHandle) -> Result<FwMap, String> {
         .map(|j| (j.system_id, j.ship_jumps))
         .collect();
 
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
     let info = sde.solar_system_info().map_err(|e| e.to_string())?;
     let pos = sde.solar_system_positions().map_err(|e| e.to_string())?;
 

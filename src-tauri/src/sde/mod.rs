@@ -29,6 +29,8 @@ pub use types::{
 
 use std::path::PathBuf;
 
+use crate::storage;
+
 /// Fuzzwork's prebuilt, gzip-compressed SQLite conversion of the SDE.
 pub const SDE_URL: &str = "https://www.fuzzwork.co.uk/dump/latest-sqlite.db.gz";
 
@@ -59,4 +61,19 @@ impl SdePaths {
     pub fn is_installed(&self) -> bool {
         self.db.exists()
     }
+}
+
+/// Open the SDE for the app's data dir. The dir/SDE-open plumbing was
+/// otherwise copy-pasted identically across every command module.
+pub fn open_from_app(app: &tauri::AppHandle) -> Result<Sde, String> {
+    let dir = storage::app_data_dir(app)?;
+    Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())
+}
+
+/// Like [`open_from_app`], but also returns the resolved app data dir for
+/// callers that need both (e.g. to load a store alongside the SDE lookups).
+pub fn dir_and_sde(app: &tauri::AppHandle) -> Result<(PathBuf, Sde), String> {
+    let dir = storage::app_data_dir(app)?;
+    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    Ok((dir, sde))
 }

@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use super::engine::attr::AttrStore;
 use super::engine::capacitor::capacitor;
@@ -408,7 +408,7 @@ pub(super) async fn character_skill_levels(
     app: &AppHandle,
     auth_state: &AuthState,
 ) -> Result<HashMap<i64, i64>, crate::model::AppError> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = storage::app_data_dir(&app)?;
     let character_id =
         storage::primary_character(&dir).ok_or_else(crate::model::AppError::auth_required)?;
 

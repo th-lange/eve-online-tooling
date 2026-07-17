@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::model::AppError;
 
@@ -17,7 +17,7 @@ use super::store;
 use super::types::{Language, Script, ScriptRun};
 
 fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path().app_data_dir().map_err(|e| e.to_string())
+    crate::storage::app_data_dir(app)
 }
 
 fn now() -> u64 {

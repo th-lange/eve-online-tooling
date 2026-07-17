@@ -3,10 +3,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::esi::{authed_get, AuthState};
-use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
 use super::markets::{regions, resolve_location, Region};
@@ -26,12 +25,6 @@ fn id_names(pairs: Vec<(i64, String)>) -> Vec<IdName> {
         .into_iter()
         .map(|(id, name)| IdName { id, name })
         .collect()
-}
-
-/// Open the installed SDE, mapping any error to a string for the command layer.
-fn open_sde(app: &AppHandle) -> Result<Sde, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())
 }
 
 /// One day of market history, for the history explorer (camelCase for the UI).
@@ -113,7 +106,7 @@ pub async fn market_prices(
 /// covers all of k-space — not just the five trade hubs in [`regions`].
 #[tauri::command]
 pub fn market_all_regions(app: AppHandle) -> Result<Vec<IdName>, String> {
-    let sde = open_sde(&app)?;
+    let sde = crate::sde::open_from_app(&app)?;
     Ok(id_names(sde.market_regions().map_err(|e| e.to_string())?))
 }
 
@@ -123,7 +116,7 @@ pub fn market_search_stations(app: AppHandle, query: String) -> Result<Vec<IdNam
     if query.trim().len() < 2 {
         return Ok(Vec::new());
     }
-    let sde = open_sde(&app)?;
+    let sde = crate::sde::open_from_app(&app)?;
     Ok(id_names(
         sde.search_stations(&query, 25).map_err(|e| e.to_string())?,
     ))
@@ -154,7 +147,7 @@ pub async fn market_current_location(
     app: AppHandle,
     auth: State<'_, AuthState>,
 ) -> Result<Option<CurrentLocation>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = storage::app_data_dir(&app)?;
     let Some(character_id) = storage::active_character(&dir) else {
         return Ok(None);
     };
@@ -170,7 +163,7 @@ pub async fn market_current_location(
         Err(_) => return Ok(None),
     };
 
-    let sde = open_sde(&app)?;
+    let sde = crate::sde::open_from_app(&app)?;
     let info = sde.solar_system_info().map_err(|e| e.to_string())?;
     let Some((system_name, security, region_name)) = info.get(&loc.solar_system_id).cloned() else {
         return Ok(None);
@@ -234,7 +227,7 @@ pub async fn market_sell_orders(
     service: State<'_, MarketService>,
     params: SellOrdersParams,
 ) -> Result<Vec<SellOrder>, String> {
-    let sde = open_sde(&app)?;
+    let sde = crate::sde::open_from_app(&app)?;
 
     // Resolve the region set + any narrower (system/station) filter.
     let mut system_filter: Option<i64> = params.system_id;

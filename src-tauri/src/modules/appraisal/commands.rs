@@ -3,10 +3,9 @@
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::market::{default_region_id, resolve_location, MarketService, PriceModel};
-use crate::sde::{Sde, SdePaths};
 
 /// One pasted line: an item name and a quantity (defaults to 1 in the UI).
 #[derive(Debug, Deserialize)]
@@ -64,8 +63,7 @@ pub async fn appraisal(
     market: State<'_, MarketService>,
     params: AppraisalParams,
 ) -> Result<AppraisalResult, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+    let sde = crate::sde::open_from_app(&app)?;
 
     // Resolve names → (type id, packaged volume), keeping the original line order.
     struct Resolved {
@@ -237,8 +235,7 @@ pub async fn appraisal_reprocess(
     market: State<'_, MarketService>,
     params: ReprocessAppraisalParams,
 ) -> Result<ReprocessAppraisalResult, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+    let sde = crate::sde::open_from_app(&app)?;
     let eff = params.efficiency.clamp(0.0, 1.0);
 
     // Resolve each line to its reprocess recipe.

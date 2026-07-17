@@ -8,7 +8,7 @@
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::esi::{authed_get, corporation_id, resolve_names, AuthState, ESI_BASE};
 use crate::sde::{Sde, SdePaths};
@@ -312,7 +312,7 @@ pub async fn industry_jobs(
     auth_state: State<'_, AuthState>,
     character_id: Option<i64>,
 ) -> Result<JobsResult, crate::model::AppError> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let roster = storage::load_roster(&dir);
 
     // An explicit, valid roster id always means "just this character". Else

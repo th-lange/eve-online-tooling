@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use futures_util::stream::{self, StreamExt};
 
@@ -122,7 +122,7 @@ fn now_epoch() -> u64 {
 /// The logged-in character's standings, cached for [`STANDINGS_TTL`] so repeated
 /// scans don't re-pull the (3-call) contacts set every time.
 async fn cached_standings(app: &AppHandle, auth_state: &AuthState) -> HashMap<i64, f64> {
-    let Ok(dir) = app.path().app_data_dir() else {
+    let Ok(dir) = crate::storage::app_data_dir(app) else {
         return load_standings(app, auth_state).await;
     };
     let Some(character_id) = storage::primary_character(&dir) else {
@@ -164,7 +164,7 @@ pub async fn local_scan(
         });
     }
     let http = auth_state.http();
-    let dir = app.path().app_data_dir().ok();
+    let dir = crate::storage::app_data_dir(&app).ok();
     let lower = |n: &str| n.to_lowercase();
 
     // 1. names → character ids — shared resolver, cached forever (a name→id
@@ -366,7 +366,7 @@ fn threat_rank(threat: &str) -> u8 {
 /// (everyone neutral) if no character is active or every fetch fails; any layer
 /// whose scope/role isn't granted (403) is simply skipped.
 async fn load_standings(app: &AppHandle, auth_state: &AuthState) -> HashMap<i64, f64> {
-    let Ok(dir) = app.path().app_data_dir() else {
+    let Ok(dir) = crate::storage::app_data_dir(app) else {
         return HashMap::new();
     };
     let Some(character_id) = storage::primary_character(&dir) else {
@@ -473,7 +473,7 @@ pub async fn localintel_zkill(
     app: AppHandle,
     character_ids: Vec<i64>,
 ) -> Result<Vec<ZkillStats>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
 
     // Serve cache hits first; only fetch the misses.
     let mut out: Vec<ZkillStats> = Vec::new();
@@ -585,7 +585,7 @@ pub struct WatchEntry {
 /// The current watchlist (corps/alliances to flag in a scan).
 #[tauri::command]
 pub fn localintel_get_watchlist(app: AppHandle) -> Result<Vec<WatchEntry>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     Ok(storage::load_data(&dir, WATCHLIST_KEY).unwrap_or_default())
 }
 
@@ -597,7 +597,7 @@ pub fn localintel_set_watchlist(
     name: String,
     add: bool,
 ) -> Result<Vec<WatchEntry>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let mut list: Vec<WatchEntry> = storage::load_data(&dir, WATCHLIST_KEY).unwrap_or_default();
     list.retain(|e| e.id != id);
     if add {

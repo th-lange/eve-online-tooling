@@ -4,11 +4,10 @@
 use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::esi::{corporation_id, fetch_assets, fetch_corp_assets, resolve_names, AuthState};
 use crate::market::{default_region_id, resolve_location, MarketService, PriceModel};
-use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
 /// Jita IV-4 in The Forge — the reference market all valuation prices against.
@@ -57,8 +56,7 @@ pub async fn assets_value(
     auth_state: State<'_, AuthState>,
     market: State<'_, MarketService>,
 ) -> Result<AssetsResult, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     // Quantity per (type, owner) for the active selection: a single character
     // (personal hangar + their corp's hangar) when one is picked, or every
     // roster member (each corp fetched once, so alts in the same corp don't
@@ -319,8 +317,7 @@ pub async fn assets_tree(
     auth_state: State<'_, AuthState>,
     market: State<'_, MarketService>,
 ) -> Result<AssetsTreeResult, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
 
     // Gather assets for the active selection (a single character, or the whole
     // roster when "all characters" is active), item-level for nesting, each

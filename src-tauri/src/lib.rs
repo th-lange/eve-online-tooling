@@ -101,14 +101,13 @@ pub fn run() {
         // resolve under `app_data_dir/plugins/<id>/`, traversal-guarded, and are
         // served with a no-network CSP.
         .register_uri_scheme_protocol("plugin", |ctx, request| {
-            use tauri::Manager;
             let deny = |status: u16| {
                 tauri::http::Response::builder()
                     .status(status)
                     .body(Vec::new())
                     .unwrap()
             };
-            let Ok(dir) = ctx.app_handle().path().app_data_dir() else {
+            let Ok(dir) = crate::storage::app_data_dir(ctx.app_handle()) else {
                 return deny(500);
             };
             let root = dir.join("plugins");

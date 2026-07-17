@@ -4,16 +4,15 @@
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::esi::{authed_get, resolve_names, AuthState, EsiClient};
 use crate::market::{resolve_location, MarketService, PriceModel};
 use crate::model::AppError;
-use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
 fn first_character(app: &AppHandle) -> Result<i64, AppError> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(app)?;
     storage::primary_character(&dir).ok_or_else(AppError::auth_required)
 }
 
@@ -143,8 +142,7 @@ pub async fn lp_offers(
     market: State<'_, MarketService>,
     params: LpParams,
 ) -> Result<OffersResult, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     let esi = EsiClient::new();
 
     // Offers change rarely — serve them from the local cache unless refreshing.

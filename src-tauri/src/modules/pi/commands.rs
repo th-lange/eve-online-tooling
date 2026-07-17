@@ -10,10 +10,10 @@
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::esi::{authed_get, AuthState};
-use crate::sde::{PlanetSchematic, Sde, SdePaths};
+use crate::sde::{PlanetSchematic, Sde};
 use crate::storage;
 
 /// Persisted list of "locked in" produced type ids.
@@ -228,13 +228,12 @@ pub async fn pi_overview(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<Vec<ColonyView>, crate::model::AppError> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     let character_ids = storage::target_characters(&dir);
     if character_ids.is_empty() {
         return Err(crate::model::AppError::auth_required());
     }
 
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
     let schematics = sde.planet_schematics().map_err(|e| e.to_string())?;
     let systems = sde.solar_system_info().map_err(|e| e.to_string())?;
     let locked: HashSet<i64> = storage::load_id_list(&dir, LOCKED_LIST)
@@ -476,7 +475,7 @@ pub async fn pi_show_in_game(
     auth_state: State<'_, AuthState>,
     system_id: i64,
 ) -> Result<(), String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let character_id =
         storage::primary_character(&dir).ok_or_else(|| "Log in a character first".to_string())?;
     crate::esi::set_autopilot_waypoint(&auth_state, character_id, system_id)
@@ -487,14 +486,14 @@ pub async fn pi_show_in_game(
 /// The type ids the user has locked in as "produced by PI".
 #[tauri::command]
 pub fn pi_locked_get(app: AppHandle) -> Result<Vec<i64>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     Ok(storage::load_id_list(&dir, LOCKED_LIST))
 }
 
 /// Replace the locked-in produced type ids.
 #[tauri::command]
 pub fn pi_locked_set(app: AppHandle, type_ids: Vec<i64>) -> Result<(), String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     storage::save_id_list(&dir, LOCKED_LIST, &type_ids)
 }
 

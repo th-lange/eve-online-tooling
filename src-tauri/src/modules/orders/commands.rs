@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::esi::{authed_get, resolve_names, AuthState};
 use crate::market::{resolve_location, MarketService, PriceModel};
@@ -67,7 +67,7 @@ pub async fn market_orders(
     auth_state: State<'_, AuthState>,
     market: State<'_, MarketService>,
 ) -> Result<Vec<OrderRow>, AppError> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     collect_orders(&dir, &auth_state, &market).await
 }
 

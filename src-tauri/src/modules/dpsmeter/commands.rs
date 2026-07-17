@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
 
 use super::aggregate::Window;
@@ -97,7 +97,7 @@ pub async fn dps_start(
     let my_gen = generation.fetch_add(1, Ordering::SeqCst) + 1;
 
     // SDE path (for ore → m³); resolved once. Mining lines need a volume lookup.
-    let sde_db = app.path().app_data_dir().ok().map(|d| SdePaths::new(d).db);
+    let sde_db = crate::storage::app_data_dir(&app).ok().map(|d| SdePaths::new(d).db);
 
     tauri::async_runtime::spawn(async move {
         let mut win = Window::new(settings.window_secs);
@@ -182,7 +182,7 @@ pub async fn dps_playback(
     }
 
     // Resolve mining volumes once (same path as the live loop).
-    let sde_db = app.path().app_data_dir().ok().map(|d| SdePaths::new(d).db);
+    let sde_db = crate::storage::app_data_dir(&app).ok().map(|d| SdePaths::new(d).db);
     let mut ore_vol: HashMap<String, f64> = HashMap::new();
     resolve_ore_volumes(&events, &mut ore_vol, sde_db.as_deref());
     for ev in &mut events {

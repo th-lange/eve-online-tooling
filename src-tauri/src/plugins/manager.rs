@@ -16,7 +16,7 @@ use std::time::Duration;
 use extism::{Function, Manifest as ExtismManifest, Plugin, PluginBuilder, Wasm};
 use parking_lot::Mutex;
 use serde_json::Value;
-use tauri::{AppHandle, Manager as _, State};
+use tauri::{AppHandle, State};
 
 use super::broker::{host_functions, BrokerCtx};
 use super::manifest::Permission;
@@ -183,7 +183,7 @@ pub fn plugin_invoke(
     r#fn: String,
     args: Value,
 ) -> Result<Value, AppError> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     run_plugin(&registry, &manager, &dir, &plugin_id, &r#fn, &args).map_err(AppError::from)
 }
 

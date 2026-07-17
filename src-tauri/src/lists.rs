@@ -9,9 +9,9 @@
 use std::path::Path;
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
-use crate::sde::{Sde, SdePaths};
+use crate::sde::Sde;
 use crate::storage;
 
 /// An item on a saved list, resolved to its display name.
@@ -55,14 +55,13 @@ pub fn set(dir: &Path, key: &str, type_id: i64, add: bool) -> Result<(), String>
 /// first (each module owns its valid names) and delegate here — the dir/SDE
 /// plumbing was otherwise copy-pasted identically across every list module.
 pub fn get_from_app(app: &AppHandle, key: &str) -> Result<Vec<ListItem>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    let (dir, sde) = crate::sde::dir_and_sde(app)?;
     Ok(get(&sde, &dir, key))
 }
 
 /// [`set`] from an app handle: resolves the app data dir and adds/removes the
 /// type (no SDE needed). Companion to [`get_from_app`].
 pub fn set_from_app(app: &AppHandle, key: &str, type_id: i64, add: bool) -> Result<(), String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = storage::app_data_dir(app)?;
     set(&dir, key, type_id, add)
 }

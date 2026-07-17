@@ -4,12 +4,12 @@ use std::collections::{HashMap, HashSet};
 
 use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::esi::{resolve_character_ids, AuthState, ESI_BASE};
 use crate::modules::fitting::commands::simulate_fit;
 use crate::modules::fitting::types::{Fit, FitItem, FitStats, ModuleState, SlotKind};
-use crate::sde::{Sde, SdePaths};
+use crate::sde::Sde;
 use crate::storage;
 
 /// Cap on pasted names per lookup.
@@ -187,7 +187,7 @@ pub async fn pvp_profiles(
         });
     }
     let http = auth_state.http();
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let lower = |n: &str| n.to_lowercase();
 
     let id_cache = resolve_character_ids(http, Some(&dir), &names).await;
@@ -624,7 +624,7 @@ pub async fn pvp_pilot_fits(
     auth_state: State<'_, AuthState>,
     character_id: i64,
 ) -> Result<Vec<LostFit>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let http = auth_state.http();
 
     // Recent losses, newest first.
@@ -664,7 +664,7 @@ pub async fn pvp_pilot_fits(
 
     // One SDE pass (kept open — everything below is sync). Hull names first, to
     // drop pods/shuttles before ranking; per-fit detail is built per killmail.
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    let sde = crate::sde::open_from_app(&app)?;
     let hull_ids: Vec<i64> = rep.keys().copied().collect();
     let hull_names: HashMap<i64, String> = sde
         .type_names(&hull_ids)
@@ -695,7 +695,7 @@ pub async fn pvp_typical_fit(
     auth_state: State<'_, AuthState>,
     hull_type_id: i64,
 ) -> Result<Option<LostFit>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let http = auth_state.http();
 
     // Recent community losses of this hull, newest first.
@@ -725,7 +725,7 @@ pub async fn pvp_typical_fit(
         return Ok(None);
     };
 
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    let sde = crate::sde::open_from_app(&app)?;
     Ok(Some(build_lost_fit(&sde, &km, sampled)))
 }
 

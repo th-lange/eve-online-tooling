@@ -41,7 +41,7 @@ pub async fn auth_login(
 
     // Persist the refresh token (keychain) and the roster (json), de-duping.
     storage::store_refresh_token(token_character.character_id, &tokens.refresh_token)?;
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let character = Character {
         character_id: token_character.character_id,
         name: token_character.name,
@@ -59,7 +59,7 @@ pub async fn auth_login(
 /// The current character roster.
 #[tauri::command]
 pub fn auth_characters(app: AppHandle) -> Result<Vec<Character>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     Ok(storage::load_roster(&dir))
 }
 
@@ -67,14 +67,14 @@ pub fn auth_characters(app: AppHandle) -> Result<Vec<Character>, String> {
 /// jobs, route, etc.).
 #[tauri::command]
 pub fn set_active_character(app: AppHandle, character_id: i64) -> Result<(), String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     storage::save_active_character(&dir, character_id)
 }
 
 /// The active character id (bookmarked if set + in roster, else the first).
 #[tauri::command]
 pub fn active_character(app: AppHandle) -> Result<Option<i64>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     Ok(storage::active_character(&dir))
 }
 
@@ -104,7 +104,7 @@ pub async fn owned_blueprints(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<Vec<OwnedBlueprint>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let roster = storage::load_roster(&dir);
     let mut out = Vec::new();
     for c in roster {
@@ -186,7 +186,7 @@ pub async fn roster_stock(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<std::collections::HashMap<i64, i64>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     if let Some(cached) =
         storage::cache_get::<std::collections::HashMap<i64, i64>>(&dir, "roster_stock")
     {
@@ -213,7 +213,7 @@ pub async fn open_market_window(
     auth_state: State<'_, AuthState>,
     type_id: i64,
 ) -> Result<(), String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let character_id = storage::primary_character(&dir).ok_or("Log in a character first")?;
     character::open_market_window(&auth_state, character_id, type_id)
         .await
@@ -224,7 +224,7 @@ pub async fn open_market_window(
 /// ESI conditional cache is primed and Production/Assets open without waiting on
 /// a cold network fetch. Silent on any failure (offline, no character, etc.).
 pub async fn warm_active_character(app: &AppHandle) {
-    let Ok(dir) = app.path().app_data_dir() else {
+    let Ok(dir) = crate::storage::app_data_dir(app) else {
         return;
     };
     let Some(character_id) = storage::primary_character(&dir) else {
@@ -242,7 +242,7 @@ pub fn auth_logout(
     auth_state: State<'_, AuthState>,
     character_id: i64,
 ) -> Result<Vec<Character>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let mut roster = storage::load_roster(&dir);
     roster.retain(|c| c.character_id != character_id);
     storage::save_roster(&dir, &roster)?;

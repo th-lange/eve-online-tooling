@@ -10,7 +10,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::esi::{authed_get, AuthState, EsiClient};
 use crate::model::AppError;
@@ -119,7 +119,7 @@ async fn activity_map(dir: &Path, refresh: bool) -> Result<HashMap<i64, SystemAc
 /// (~30 min) to match CCP's hourly refresh; `refresh = true` bypasses the cache.
 #[tauri::command]
 pub async fn system_activity(app: AppHandle, refresh: bool) -> Result<Vec<SystemActivity>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let mut rows: Vec<SystemActivity> = activity_map(&dir, refresh).await?.into_values().collect();
     // Default ordering: busiest first (the UI re-sorts).
     rows.sort_by_key(|r| std::cmp::Reverse(r.jumps));
@@ -132,8 +132,7 @@ pub fn system_search(app: AppHandle, query: String) -> Result<Vec<SystemMatch>, 
     if query.trim().len() < 2 {
         return Ok(Vec::new());
     }
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+    let sde = crate::sde::open_from_app(&app)?;
     Ok(sde
         .search_systems(&query, 20)
         .map_err(|e| e.to_string())?
@@ -178,9 +177,8 @@ pub async fn system_neighbourhood(
     system_id: i64,
     depth: i64,
 ) -> Result<Neighbourhood, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     let depth = depth.clamp(1, MAX_DEPTH);
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
 
     // BFS over stargate edges, recording distance and deduped edges.
     let mut distance: HashMap<i64, i64> = HashMap::from([(system_id, 0)]);
@@ -320,7 +318,7 @@ fn now_secs() -> u64 {
 }
 
 fn breadcrumb_key(app: &AppHandle) -> Result<(std::path::PathBuf, i64, String), AppError> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(app)?;
     let character_id = storage::primary_character(&dir).ok_or_else(AppError::auth_required)?;
     let key = format!("route_breadcrumb_{character_id}");
     Ok((dir, character_id, key))
@@ -348,7 +346,7 @@ pub async fn route_location(
     let mut trail: Vec<BreadcrumbEntry> = storage::load_data(&dir, &key).unwrap_or_default();
     // Only append when the system actually changed (dedupe rest-in-system polls).
     if trail.last().map(|e| e.system_id) != Some(loc.solar_system_id) {
-        let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+        let sde = crate::sde::open_from_app(&app)?;
         let info = sde.solar_system_info().map_err(|e| e.to_string())?;
         let (name, security, region) = info
             .get(&loc.solar_system_id)
@@ -390,7 +388,7 @@ pub fn route_breadcrumb(app: AppHandle) -> Result<Vec<BreadcrumbEntry>, AppError
     let (dir, _id, key) = breadcrumb_key(&app)?;
     let mut trail: Vec<BreadcrumbEntry> = storage::load_data(&dir, &key).unwrap_or_default();
     if trail.iter().skip(1).any(|e| e.gap_jumps == 0) {
-        if let Ok(sde) = Sde::open(&SdePaths::new(dir.clone()).db) {
+        if let Ok(sde) = crate::sde::open_from_app(&app) {
             if let Ok(adj) = gate_adjacency(&sde) {
                 for i in 1..trail.len() {
                     if trail[i].gap_jumps != 0 {
@@ -502,7 +500,7 @@ fn nearest_none(
 /// breadcrumb for "where am I" (populate it via "My location"); no ESI auth here.
 #[tauri::command]
 pub async fn route_nearest_wormhole(app: AppHandle) -> Result<NearestWormhole, AppError> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     let (_dir, _id, key) = breadcrumb_key(&app)?;
     let trail: Vec<BreadcrumbEntry> = storage::load_data(&dir, &key).unwrap_or_default();
     let current = match trail.last() {
@@ -517,7 +515,6 @@ pub async fn route_nearest_wormhole(app: AppHandle) -> Result<NearestWormhole, A
         }
     };
 
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
     let info = sde.solar_system_info().map_err(|e| e.to_string())?;
     let name_of = |id: i64| {
         info.get(&id)

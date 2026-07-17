@@ -5,7 +5,7 @@
 //! set of hidden notification ids — the feed's "remove from the panel" action.
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::esi::{authed_get, resolve_names, AuthState};
 use crate::model::AppError;
@@ -14,7 +14,7 @@ use crate::storage;
 /// Active character or an auth-required error (used by the per-character
 /// mutations: dismiss/reset act on one concrete character).
 fn primary(app: &AppHandle) -> Result<(std::path::PathBuf, i64), AppError> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(app)?;
     let id = storage::primary_character(&dir).ok_or_else(AppError::auth_required)?;
     Ok((dir, id))
 }
@@ -104,7 +104,7 @@ pub async fn notifications(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<Vec<NotifRow>, AppError> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let targets = storage::target_characters(&dir);
     if targets.is_empty() {
         return Err(AppError::auth_required());

@@ -3,11 +3,10 @@
 use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::lists::{self, ListItem};
 use crate::market::{default_region_id, resolve_location, MarketService, PriceModel};
-use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
 use super::engine::{evaluate, TradeConfig, TradeRow};
@@ -49,8 +48,7 @@ pub async fn station_trading(
     market: State<'_, MarketService>,
     params: TradeParams,
 ) -> Result<Vec<TradeRow>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     let items = sde.market_items().map_err(|e| e.to_string())?;
     let ids: Vec<i64> = items.iter().map(|i| i.type_id).collect();
 

@@ -25,7 +25,7 @@ use rand::distributions::Alphanumeric;
 use rand::Rng;
 use serde::Serialize;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::capabilities;
 use crate::esi::AuthState;
@@ -354,7 +354,7 @@ pub fn mcp_start(
     registry: State<'_, Arc<PluginRegistry>>,
     manager: State<'_, Arc<PluginManager>>,
 ) -> Result<McpStatus, AppError> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let ctx = build_ctx(&dir, registry.inner().clone(), manager.inner().clone());
     state
         .start(ctx, configured_port(&dir))
@@ -376,7 +376,7 @@ pub fn mcp_status(state: State<'_, McpState>) -> McpStatus {
 /// The current MCP configuration (preferred port).
 #[tauri::command]
 pub fn mcp_config(app: AppHandle) -> Result<McpConfig, AppError> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     Ok(McpConfig {
         port: configured_port(&dir),
     })
@@ -392,7 +392,7 @@ pub fn mcp_set_port(
     manager: State<'_, Arc<PluginManager>>,
     port: u16,
 ) -> Result<McpStatus, AppError> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     crate::storage::save_data(&dir, PORT_KEY, &port).map_err(AppError::from)?;
     if state.status().running {
         state.stop();

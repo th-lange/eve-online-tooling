@@ -6,7 +6,6 @@ use std::collections::HashMap;
 
 use tauri::{AppHandle, State};
 
-use super::commands::open_sde;
 use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
 use super::stats::{
     base_damage, capacitor_of, is_ship_module, required_skills_of, resolved_feasibility, tank_of,
@@ -409,7 +408,7 @@ pub async fn fitting_optimize(
     // dropped *before* the await.
     let prices: HashMap<i64, f64> = if max_cost.is_some() {
         let ids = {
-            let sde = open_sde(&app)?;
+            let sde = crate::sde::open_from_app(&app)?;
             let mut ids: Vec<i64> = vec![fit.ship_type_id];
             ids.extend(fit.items.iter().map(|i| i.type_id));
             ids.extend(fit.items.iter().filter_map(|i| i.charge_type_id));
@@ -453,7 +452,7 @@ pub async fn fitting_optimize(
         cap_stable: cap_stable.unwrap_or(false),
         max_cost,
     };
-    let sde = open_sde(&app)?;
+    let sde = crate::sde::open_from_app(&app)?;
     optimize_fit(
         &sde,
         fit,

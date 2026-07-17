@@ -3,11 +3,10 @@
 use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::lists::{self, ListItem};
 use crate::market::{default_region_id, resolve_location, MarketService, PriceModel};
-use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
 use super::engine::{evaluate, ore_efficiency, EfficiencyConfig, ReprocessRow};
@@ -64,8 +63,7 @@ pub async fn reprocessing_scan(
     market: State<'_, MarketService>,
     params: ReprocessParams,
 ) -> Result<Vec<ReprocessRow>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     let recipes = sde
         .reprocess_recipes(ORE_CATEGORY_ID)
         .map_err(|e| e.to_string())?;

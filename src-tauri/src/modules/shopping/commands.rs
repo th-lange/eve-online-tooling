@@ -6,9 +6,9 @@
 //! updates (same approach as [`crate::lists`]).
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
-use crate::sde::{Sde, SdePaths};
+use crate::sde::Sde;
 use crate::storage;
 
 /// Storage document name (a JSON file in `<app data>/data/`).
@@ -149,18 +149,12 @@ fn resolve(sde: &Sde, list: &StoredList) -> ShoppingList {
     }
 }
 
-fn dir_and_sde(app: &AppHandle) -> Result<(std::path::PathBuf, Sde), String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
-    Ok((dir, sde))
-}
-
 // --- Commands ---------------------------------------------------------------
 
 /// Every shopping list with its items (names resolved from the SDE).
 #[tauri::command]
 pub fn shopping_lists(app: AppHandle) -> Result<Vec<ShoppingList>, String> {
-    let (dir, sde) = dir_and_sde(&app)?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     let store = load(&dir);
     Ok(store.lists.iter().map(|l| resolve(&sde, l)).collect())
 }
@@ -173,7 +167,7 @@ pub fn shopping_create_list(app: AppHandle, name: String) -> Result<ShoppingList
     if name.is_empty() {
         return Err("list name can't be empty".into());
     }
-    let (dir, sde) = dir_and_sde(&app)?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     let mut store = load(&dir);
 
     let base: String = name
@@ -211,7 +205,7 @@ pub fn shopping_rename_list(app: AppHandle, id: String, name: String) -> Result<
     if name.is_empty() {
         return Err("list name can't be empty".into());
     }
-    let (dir, _sde) = dir_and_sde(&app)?;
+    let (dir, _sde) = crate::sde::dir_and_sde(&app)?;
     let mut store = load(&dir);
     list_mut(&mut store, &id)?.name = name;
     save(&dir, &store)
@@ -223,7 +217,7 @@ pub fn shopping_delete_list(app: AppHandle, id: String) -> Result<(), String> {
     if is_builtin(&id) {
         return Err("the default and production lists can't be removed".into());
     }
-    let (dir, _sde) = dir_and_sde(&app)?;
+    let (dir, _sde) = crate::sde::dir_and_sde(&app)?;
     let mut store = load(&dir);
     store.lists.retain(|l| l.id != id);
     save(&dir, &store)
@@ -240,7 +234,7 @@ pub fn shopping_add_item(
     quantity: Option<i64>,
 ) -> Result<(), String> {
     let qty = quantity.filter(|q| *q > 0).unwrap_or(1);
-    let (dir, _sde) = dir_and_sde(&app)?;
+    let (dir, _sde) = crate::sde::dir_and_sde(&app)?;
     let mut store = load(&dir);
     let list = list_mut(&mut store, &id)?;
     match list.items.iter_mut().find(|e| e.type_id == type_id) {
@@ -276,7 +270,7 @@ pub fn shopping_add_text(
     id: String,
     items: Vec<TextItem>,
 ) -> Result<Vec<String>, String> {
-    let (dir, sde) = dir_and_sde(&app)?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     let mut store = load(&dir);
     let mut unresolved = Vec::new();
     {
@@ -311,7 +305,7 @@ pub fn shopping_set_quantity(
     type_id: i64,
     quantity: i64,
 ) -> Result<(), String> {
-    let (dir, _sde) = dir_and_sde(&app)?;
+    let (dir, _sde) = crate::sde::dir_and_sde(&app)?;
     let mut store = load(&dir);
     let list = list_mut(&mut store, &id)?;
     if quantity <= 0 {
@@ -327,7 +321,7 @@ pub fn shopping_set_quantity(
 /// Remove an item from a list (no-op if absent).
 #[tauri::command]
 pub fn shopping_remove_item(app: AppHandle, id: String, type_id: i64) -> Result<(), String> {
-    let (dir, _sde) = dir_and_sde(&app)?;
+    let (dir, _sde) = crate::sde::dir_and_sde(&app)?;
     let mut store = load(&dir);
     list_mut(&mut store, &id)?
         .items
@@ -338,7 +332,7 @@ pub fn shopping_remove_item(app: AppHandle, id: String, type_id: i64) -> Result<
 /// Empty a list of all its items (keeps the list itself).
 #[tauri::command]
 pub fn shopping_clear_list(app: AppHandle, id: String) -> Result<(), String> {
-    let (dir, _sde) = dir_and_sde(&app)?;
+    let (dir, _sde) = crate::sde::dir_and_sde(&app)?;
     let mut store = load(&dir);
     list_mut(&mut store, &id)?.items.clear();
     save(&dir, &store)
@@ -358,7 +352,7 @@ pub fn shopping_move_item(
     if from_id == to_id {
         return Ok(());
     }
-    let (dir, _sde) = dir_and_sde(&app)?;
+    let (dir, _sde) = crate::sde::dir_and_sde(&app)?;
     let mut store = load(&dir);
 
     // Take from the source.
@@ -525,7 +519,7 @@ pub fn shopping_chat_sync(
     from_now: Option<bool>,
     list_id: Option<String>,
 ) -> Result<ChatSync, String> {
-    let (dir, sde) = dir_and_sde(&app)?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     let chan = channel.trim();
     if chan.is_empty() {
         return Err("channel name is empty".into());

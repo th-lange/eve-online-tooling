@@ -3,11 +3,10 @@
 use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::lists::{self, ListItem};
 use crate::market::{regions, resolve_location, MarketService, PriceModel};
-use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
 use super::engine::{evaluate, DayTradeConfig, DayTradeRow, Quote};
@@ -93,8 +92,7 @@ pub async fn daytrading_scan(
     market: State<'_, MarketService>,
     params: DayTradeParams,
 ) -> Result<Vec<DayTradeRow>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     // Whitelist scan: only price the chosen categories (default Ships/Modules/
     // Charges) instead of the whole ~19k catalogue — the headline win of #87.
     let items = sde

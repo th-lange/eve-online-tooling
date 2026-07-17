@@ -11,10 +11,9 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use super::candidates::{HUBS, POCHVEN_CANDIDATES};
-use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
 /// Highsec threshold: security ≥ 0.45 rounds to 0.5 in-game.
@@ -131,12 +130,10 @@ pub struct PochvenRoutes {
 /// Computed over the SDE stargate graph and cached ~24h.
 #[tauri::command]
 pub async fn pochven_routes(app: AppHandle) -> Result<PochvenRoutes, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     if let Some(cached) = storage::cache_get::<PochvenRoutes>(&dir, "pochven_routes") {
         return Ok(cached);
     }
-
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
 
     // k-space stargate adjacency (undirected) + security per system.
     let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
@@ -506,8 +503,7 @@ pub async fn pochven_search(
     system_id: i64,
     max_jumps: Option<i64>,
 ) -> Result<EntrySearch, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     let kills = system_kills(&dir).await;
 
     let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
@@ -741,8 +737,7 @@ pub struct PochvenTopology {
 /// Pochven), straight from the SDE — so it matches the in-game / dotlan map.
 #[tauri::command]
 pub async fn pochven_map(app: AppHandle) -> Result<PochvenTopology, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+    let sde = crate::sde::open_from_app(&app)?;
     let poch_ids: HashSet<i64> = POCHVEN_CANDIDATES.iter().map(|&(_, id, _)| id).collect();
     let info = sde.solar_system_info().map_err(|e| e.to_string())?;
     let pos = sde.solar_system_positions().map_err(|e| e.to_string())?;

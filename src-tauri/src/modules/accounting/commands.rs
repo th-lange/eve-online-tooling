@@ -4,16 +4,15 @@
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::esi::{authed_get_paged_pub, AuthState};
 use crate::market::{resolve_location, MarketService, PriceModel};
 use crate::model::AppError;
-use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
 fn first_character(app: &AppHandle) -> Result<i64, AppError> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(app)?;
     storage::primary_character(&dir).ok_or_else(AppError::auth_required)
 }
 
@@ -99,7 +98,7 @@ pub async fn wallet_sync(
     auth_state: State<'_, AuthState>,
 ) -> Result<WalletView, AppError> {
     let character_id = first_character(&app)?;
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let jkey = format!("journal_{character_id}");
     let tkey = format!("transactions_{character_id}");
 
@@ -224,7 +223,7 @@ pub async fn transaction_ledger(
     auth_state: State<'_, AuthState>,
 ) -> Result<LedgerView, AppError> {
     let character_id = first_character(&app)?;
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     let tkey = format!("transactions_{character_id}");
 
     let new_tx: Vec<Transaction> = authed_get_paged_pub(
@@ -242,7 +241,6 @@ pub async fn transaction_ledger(
     let _ = storage::save_data(&dir, &tkey, &transactions);
 
     // Resolve item names from the SDE in one batch.
-    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
     let type_ids: Vec<i64> = transactions.iter().map(|t| t.type_id).collect();
     let names: HashMap<i64, String> = sde
         .type_names(&type_ids)
@@ -394,8 +392,7 @@ pub async fn profit_fifo(
     market: State<'_, MarketService>,
 ) -> Result<ProfitView, AppError> {
     let character_id = first_character(&app)?;
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
 
     let transactions: Vec<Transaction> =
         storage::load_data(&dir, &format!("transactions_{character_id}")).unwrap_or_default();

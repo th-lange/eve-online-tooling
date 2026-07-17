@@ -3,14 +3,14 @@
 use std::collections::HashMap;
 
 use serde::Deserialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use crate::esi::EsiClient;
 use crate::lists::{self, ListItem};
 use crate::market::{
     default_region_id, location_label, resolve_location, MarketService, PriceModel,
 };
-use crate::sde::{Sde, SdePaths};
+use crate::sde::Sde;
 use crate::storage;
 
 use super::engine::{
@@ -202,8 +202,7 @@ pub async fn production_profit(
     market: State<'_, MarketService>,
     params: ProfitParams,
 ) -> Result<Vec<ProfitBreakdown>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
 
     // Saved lists are keyed by blueprint type id (the ranking row's identity):
     // blacklisted blueprints are dropped, favorites are flagged for the UI.
@@ -448,8 +447,7 @@ fn reprice_product(bd: &mut ProfitBreakdown, unit_price: f64, hub: &str) {
 /// The invention decryptors (for the UI dropdown).
 #[tauri::command]
 pub async fn production_decryptors(app: AppHandle) -> Result<Vec<crate::sde::Decryptor>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+    let sde = crate::sde::open_from_app(&app)?;
     sde.decryptors().map_err(|e| e.to_string())
 }
 
@@ -510,7 +508,7 @@ pub async fn production_system_cost_index(
     app: AppHandle,
     system_id: i64,
 ) -> Result<Option<f64>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let map: HashMap<i64, f64> = match storage::cache_get(&dir, "industry_cost_indices") {
         Some(cached) => cached,
         None => {

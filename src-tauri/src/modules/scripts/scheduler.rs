@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 use super::engine::{self, Limits};
 use super::host::{Host, HostCtx};
@@ -56,7 +56,7 @@ pub fn spawn(app: AppHandle) {
 
         loop {
             ticker.tick().await;
-            let Ok(dir) = app.path().app_data_dir() else {
+            let Ok(dir) = crate::storage::app_data_dir(&app) else {
                 minute = minute.wrapping_add(1);
                 continue;
             };

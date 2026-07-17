@@ -1,9 +1,10 @@
 //! Local persistence: per-character refresh tokens in the OS keychain, and the
 //! character roster as a JSON file in the app data dir.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use keyring::Entry;
+use tauri::Manager;
 
 use crate::model::Character;
 
@@ -12,6 +13,13 @@ const KEYCHAIN_SERVICE: &str = "com.thlange.eve-online-tooling";
 
 fn entry(character_id: i64) -> Result<Entry, String> {
     Entry::new(KEYCHAIN_SERVICE, &character_id.to_string()).map_err(|e| e.to_string())
+}
+
+/// Resolve the app data dir, mapping the lookup error to a `String` the way
+/// every command does. The single call site for the `app.path().app_data_dir()`
+/// plumbing that was otherwise copy-pasted across every command module.
+pub fn app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path().app_data_dir().map_err(|e| e.to_string())
 }
 
 /// Store a character's refresh token in the OS keychain.

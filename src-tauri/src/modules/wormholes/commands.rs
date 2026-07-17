@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::sde::{Sde, SdePaths};
 use crate::storage;
@@ -123,7 +123,7 @@ fn prune(mut conns: Vec<Connection>, now: u64) -> Vec<Connection> {
 }
 
 fn load(app: &AppHandle) -> Result<(std::path::PathBuf, Vec<Connection>), String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(app)?;
     let conns: Vec<Connection> = storage::load_data(&dir, STORE_KEY).unwrap_or_default();
     Ok((dir, prune(conns, now_secs())))
 }
@@ -300,7 +300,7 @@ pub fn wh_paste_signatures(
     system_id: i64,
     text: String,
 ) -> Result<SignatureScan, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let key = sig_key(system_id);
     let previous: Vec<Signature> = storage::load_data(&dir, &key).unwrap_or_default();
     let incoming = parse_signatures(&text);
@@ -329,7 +329,7 @@ pub fn wh_paste_signatures(
 /// Stored signatures for a system.
 #[tauri::command]
 pub fn wh_signatures(app: AppHandle, system_id: i64) -> Result<Vec<Signature>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     Ok(storage::load_data(&dir, &sig_key(system_id)).unwrap_or_default())
 }
 
@@ -407,8 +407,8 @@ pub fn wh_route(
     destination_system_id: i64,
     avoid_eol: bool,
 ) -> Result<RouteResult, String> {
-    let (dir, conns) = load(&app)?;
-    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+    let (_dir, conns) = load(&app)?;
+    let sde = crate::sde::open_from_app(&app)?;
 
     // Build the unioned adjacency: stargates ∪ wormhole/jumpbridge connections.
     let mut adj: HashMap<i64, Vec<(i64, Via)>> = HashMap::new();
@@ -665,8 +665,7 @@ pub fn wh_jump_plan(
     wh_type_code: String,
     mass_status: String,
 ) -> Result<JumpPlan, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+    let sde = crate::sde::open_from_app(&app)?;
 
     let Some((ship_name, ship_mass)) = sde.ship_mass(ship_type_id).map_err(|e| e.to_string())?
     else {
@@ -711,8 +710,7 @@ pub fn wh_jump_plan(
 /// the bundled SDE (#304). Feeds the sig-code auto-fill + type table (#307).
 #[tauri::command]
 pub fn wh_type_reference(app: AppHandle) -> Result<Vec<crate::sde::WormholeType>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+    let sde = crate::sde::open_from_app(&app)?;
     sde.wormhole_types().map_err(|e| e.to_string())
 }
 
@@ -723,8 +721,7 @@ pub fn wh_system_reference(
     app: AppHandle,
     system_id: i64,
 ) -> Result<super::reference::SystemReference, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let sde = Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())?;
+    let sde = crate::sde::open_from_app(&app)?;
     super::reference::system_reference(&sde, system_id)
 }
 
@@ -807,7 +804,7 @@ fn tripwire_status_from(dir: &std::path::Path) -> TripwireStatus {
 /// Current Tripwire opt-in status (configured? base URL, username, mask).
 #[tauri::command]
 pub fn wh_tripwire_status(app: AppHandle) -> Result<TripwireStatus, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     Ok(tripwire_status_from(&dir))
 }
 
@@ -821,7 +818,7 @@ pub fn wh_tripwire_connect(
     password: String,
     mask: Option<String>,
 ) -> Result<TripwireStatus, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let base = base_url.trim();
     let mask = mask.map(|m| m.trim().to_string()).filter(|m| !m.is_empty());
     let cfg = tripwire::TripwireConfig {
@@ -841,7 +838,7 @@ pub fn wh_tripwire_connect(
 /// Opt out: clear the stored Tripwire config + keychain password.
 #[tauri::command]
 pub fn wh_tripwire_disconnect(app: AppHandle) -> Result<TripwireStatus, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     storage::save_data(
         &dir,
         tripwire::CONFIG_KEY,
@@ -856,7 +853,7 @@ pub fn wh_tripwire_disconnect(app: AppHandle) -> Result<TripwireStatus, String> 
 /// active character's personal chain (`<id>.1`) when not overridden.
 #[tauri::command]
 pub async fn wh_tripwire_import(app: AppHandle) -> Result<Vec<ConnectionView>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     let cfg: tripwire::TripwireConfig =
         storage::load_data(&dir, tripwire::CONFIG_KEY).unwrap_or_default();
     if cfg.username.is_empty() {
@@ -872,7 +869,6 @@ pub async fn wh_tripwire_import(app: AppHandle) -> Result<Vec<ConnectionView>, S
 
     let (sigs, whs) = tripwire::fetch(&cfg, &password, &mask).await?;
 
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
     let jump_mass_by_code: HashMap<String, String> = sde
         .wormhole_types()
         .map_err(|e| e.to_string())?

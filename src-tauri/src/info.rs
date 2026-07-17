@@ -12,7 +12,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::storage;
 
@@ -103,7 +103,7 @@ pub fn push(
 /// The feed, newest first.
 #[tauri::command]
 pub fn info_list(app: AppHandle) -> Result<Vec<Entry>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let mut entries: Vec<Entry> = storage::load_data(&dir, STORE_KEY).unwrap_or_default();
     entries.reverse();
     Ok(entries)
@@ -112,7 +112,7 @@ pub fn info_list(app: AppHandle) -> Result<Vec<Entry>, String> {
 /// Empty the feed.
 #[tauri::command]
 pub fn info_clear(app: AppHandle) -> Result<(), String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = crate::storage::app_data_dir(&app)?;
     storage::save_data(&dir, STORE_KEY, &Vec::<Entry>::new())
 }
 

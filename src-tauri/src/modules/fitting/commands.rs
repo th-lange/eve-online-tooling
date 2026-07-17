@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, State};
 
 use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule};
 use super::engine::resolve::{resolve, EntityInput, FitInput};
@@ -16,19 +16,13 @@ use super::engine::validate::{validate, ValItem};
 use super::types::{EwTag, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind};
 use crate::esi::{corporation_id, AuthState};
 use crate::market::{resolve_location, MarketService, PriceModel};
-use crate::sde::{Sde, SdePaths, ShipLayout};
+use crate::sde::{Sde, ShipLayout};
 use crate::storage;
 
 use super::stats::{character_skill_levels, required_skills_of, run_dogma};
 
 /// Storage key for the local saved-fits document (a `Vec<Fit>`).
 const FITS_KEY: &str = "fitting_fits";
-
-/// Open the SDE for the current app data dir (read-only, cheap per call).
-pub(super) fn open_sde(app: &AppHandle) -> Result<Sde, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())
-}
 
 /// A stable-enough local id for a freshly imported fit (no `uuid` dependency).
 fn new_fit_id() -> String {
@@ -43,7 +37,7 @@ fn new_fit_id() -> String {
 /// `None` if the type id isn't a known ship.
 #[tauri::command]
 pub fn fitting_ship_layout(app: AppHandle, type_id: i64) -> Result<Option<ShipLayout>, String> {
-    open_sde(&app)?
+    crate::sde::open_from_app(&app)?
         .ship_layout(type_id)
         .map_err(|e| e.to_string())
 }
@@ -54,7 +48,7 @@ pub fn fitting_ship_layout(app: AppHandle, type_id: i64) -> Result<Option<ShipLa
 /// unknown ship is an error.
 #[tauri::command]
 pub fn fitting_import_eft(app: AppHandle, text: String) -> Result<Fit, String> {
-    let sde = open_sde(&app)?;
+    let sde = crate::sde::open_from_app(&app)?;
     let parsed = eft::parse_eft(&text).map_err(|e| e.to_string())?;
 
     let ship_type_id = sde
@@ -169,7 +163,7 @@ pub fn fitting_classify_slots(
     app: AppHandle,
     type_ids: Vec<i64>,
 ) -> Result<Vec<(i64, SlotKind)>, String> {
-    let sde = open_sde(&app)?;
+    let sde = crate::sde::open_from_app(&app)?;
     type_ids
         .into_iter()
         .map(|id| Ok((id, classify_slot(&sde, id)?)))
@@ -191,7 +185,7 @@ pub fn fitting_compatible_charges(
     app: AppHandle,
     type_id: i64,
 ) -> Result<Vec<ChargeOption>, String> {
-    let sde = open_sde(&app)?;
+    let sde = crate::sde::open_from_app(&app)?;
     Ok(sde
         .compatible_charges(type_id)
         .map_err(|e| e.to_string())?
@@ -238,7 +232,7 @@ pub async fn fitting_module_info(
         }
     };
 
-    let sde = open_sde(&app)?;
+    let sde = crate::sde::open_from_app(&app)?;
     let costs = resolve_module_costs(&sde, ship_type_id, &skill_level_for, &type_ids)?;
     type_ids
         .into_iter()
@@ -351,7 +345,7 @@ pub fn fitting_add_item(
     type_id: i64,
     charge_type_id: Option<i64>,
 ) -> Result<Fit, String> {
-    let sde = open_sde(&app)?;
+    let sde = crate::sde::open_from_app(&app)?;
     let slot = classify_slot(&sde, type_id)?;
     // Modules are added active by default; the user can deactivate (online) or
     // disable (offline) them in the slot grid.
@@ -372,7 +366,7 @@ pub fn fitting_add_item(
 /// follow as `Name xN` lines.
 #[tauri::command]
 pub fn fitting_export_eft(app: AppHandle, fit: Fit) -> Result<String, String> {
-    let sde = open_sde(&app)?;
+    let sde = crate::sde::open_from_app(&app)?;
     let name_of = |id: i64| -> Result<String, String> {
         Ok(sde
             .type_info(id)
@@ -436,7 +430,7 @@ pub async fn fitting_esi_push(
     auth_state: State<'_, AuthState>,
     fit: Fit,
 ) -> Result<i64, crate::model::AppError> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = storage::app_data_dir(&app)?;
     let character_id =
         storage::primary_character(&dir).ok_or_else(crate::model::AppError::auth_required)?;
     let granted = storage::load_roster(&dir)
@@ -493,7 +487,7 @@ pub async fn fitting_esi_list(
     auth_state: State<'_, AuthState>,
     force: Option<bool>,
 ) -> Result<Vec<Fit>, crate::model::AppError> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = storage::app_data_dir(&app)?;
     let character_id =
         storage::primary_character(&dir).ok_or_else(crate::model::AppError::auth_required)?;
 
@@ -538,7 +532,7 @@ pub async fn fitting_esi_list(
     }
 
     // Classify charges (SDE category 8 = Charge) and convert each fitting.
-    let sde = open_sde(&app)?;
+    let sde = crate::sde::open_from_app(&app)?;
     let mut charge: HashMap<i64, bool> = HashMap::new();
     for f in &esi {
         for it in &f.items {
@@ -581,7 +575,7 @@ pub async fn fitting_simulate(
         }
     };
 
-    let sde = open_sde(&app)?;
+    let sde = crate::sde::open_from_app(&app)?;
     simulate_fit(&sde, &fit, &skill_level_for)
 }
 
@@ -767,7 +761,7 @@ pub async fn fitting_price(
     region_id: i64,
     station_id: Option<i64>,
 ) -> Result<FitPrice, String> {
-    let sde = open_sde(&app)?;
+    let sde = crate::sde::open_from_app(&app)?;
 
     // type_id -> total quantity (hull + items + charges), summing duplicates.
     let mut qty: HashMap<i64, i32> = HashMap::new();
@@ -833,7 +827,7 @@ fn load_fits(dir: &Path) -> Vec<Fit> {
 /// Save (insert or update by id) a fit locally; returns its id (#164).
 #[tauri::command]
 pub fn fitting_save_local(app: AppHandle, mut fit: Fit) -> Result<String, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = storage::app_data_dir(&app)?;
     if fit.id.is_empty() {
         fit.id = new_fit_id();
     }
@@ -849,21 +843,21 @@ pub fn fitting_save_local(app: AppHandle, mut fit: Fit) -> Result<String, String
 /// All locally saved fits (#164).
 #[tauri::command]
 pub fn fitting_list_local(app: AppHandle) -> Result<Vec<Fit>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = storage::app_data_dir(&app)?;
     Ok(load_fits(&dir))
 }
 
 /// A single locally saved fit by id, or `None` (#164).
 #[tauri::command]
 pub fn fitting_load_local(app: AppHandle, id: String) -> Result<Option<Fit>, String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = storage::app_data_dir(&app)?;
     Ok(load_fits(&dir).into_iter().find(|f| f.id == id))
 }
 
 /// Delete a locally saved fit by id (no-op if absent) (#164).
 #[tauri::command]
 pub fn fitting_delete_local(app: AppHandle, id: String) -> Result<(), String> {
-    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let dir = storage::app_data_dir(&app)?;
     let mut fits = load_fits(&dir);
     fits.retain(|f| f.id != id);
     storage::save_data(&dir, FITS_KEY, &fits)
