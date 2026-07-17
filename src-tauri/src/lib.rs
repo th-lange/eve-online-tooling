@@ -206,7 +206,6 @@ pub fn run() {
             sde::commands::sde_type_infos,
             market::commands::market_regions,
             market::commands::market_price,
-            market::commands::market_prices,
             market::commands::market_history,
             market::commands::market_all_regions,
             market::commands::market_search_stations,

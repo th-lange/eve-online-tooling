@@ -72,21 +72,6 @@ pub async fn market_price(
         .map_err(|e| e.to_string())
 }
 
-/// Price models for many types at a region (and optional station).
-#[tauri::command]
-pub async fn market_prices(
-    service: State<'_, MarketService>,
-    region_id: i64,
-    station_id: Option<i64>,
-    type_ids: Vec<i64>,
-) -> Result<Vec<PriceModel>, String> {
-    let location = resolve_location(region_id, station_id);
-    service
-        .price_models(location, &type_ids)
-        .await
-        .map_err(|e| e.to_string())
-}
-
 // --- Market search (order list + jumps) ---
 
 /// Every known-space region, for the region picker. Backed by the SDE, so it

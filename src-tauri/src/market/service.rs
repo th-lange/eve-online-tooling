@@ -186,29 +186,6 @@ impl MarketService {
         ))
     }
 
-    /// Price models for many types at a location via live ESI orders + history.
-    pub async fn price_models(
-        &self,
-        location: Location,
-        type_ids: &[i64],
-    ) -> Result<Vec<PriceModel>, EsiError> {
-        let adjusted = self.adjusted_prices().await?;
-        let mut out = Vec::with_capacity(type_ids.len());
-        for &type_id in type_ids {
-            let orders = self.orders_for(location.region_id(), type_id).await?;
-            let history = self.history_for(location.region_id(), type_id).await?;
-            out.push(assemble_price_model(
-                type_id,
-                &orders,
-                &history,
-                adjusted.get(&type_id),
-                self.ma_days,
-                location.station_id(),
-            ));
-        }
-        Ok(out)
-    }
-
     /// Fuzzwork aggregates for the given types at a location, cached per type.
     async fn aggregates_for(
         &self,
@@ -337,13 +314,14 @@ impl MarketService {
     /// is this worth the most to sell". Prices every known hub (Fuzzwork
     /// aggregates per hub station) and keeps the max `sell_percentile`. Types
     /// with no priced hub are absent from the map. Shared by production
-    /// ("sell at best hub"), appraisal, and assets.
+    /// ("sell at best hub") and appraisal.
     pub async fn best_sell_hubs(
         &self,
         type_ids: &[i64],
     ) -> Result<HashMap<i64, BestSell>, EsiError> {
-        let mut best: HashMap<i64, BestSell> = HashMap::new();
-        for hub in super::markets::regions() {
+        use futures_util::future::try_join_all;
+
+        let hub_models = try_join_all(super::markets::regions().iter().map(|hub| async move {
             let station_id = hub.stations.first().map(|s| s.id);
             let label = hub
                 .stations
@@ -351,18 +329,25 @@ impl MarketService {
                 .map(|s| s.name.clone())
                 .unwrap_or_else(|| hub.name.clone());
             let location = super::markets::resolve_location(hub.id, station_id);
-            for model in self.price_models_at(location, type_ids).await? {
+            let models = self.price_models_at(location, type_ids).await?;
+            Ok::<_, EsiError>((hub.id, label, models))
+        }))
+        .await?;
+
+        let mut best: HashMap<i64, BestSell> = HashMap::new();
+        for (region_id, label, models) in hub_models {
+            for model in models {
                 let Some(price) = model.sell_percentile else {
                     continue;
                 };
                 let entry = best.entry(model.type_id).or_insert(BestSell {
-                    region_id: hub.id,
+                    region_id,
                     hub: label.clone(),
                     price,
                 });
                 if price > entry.price {
                     *entry = BestSell {
-                        region_id: hub.id,
+                        region_id,
                         hub: label.clone(),
                         price,
                     };
