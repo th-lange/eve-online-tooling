@@ -62,7 +62,7 @@ async fn authed_get_paged<T: DeserializeOwned>(
 /// without the required role, e.g. Director/Accountant) is treated as an
 /// empty result rather than an error — "no access" reads the same as "nothing
 /// there" to these callers.
-async fn authed_get_paged_or_empty_on_403<T: DeserializeOwned>(
+pub async fn authed_get_paged_or_empty_on_403<T: DeserializeOwned>(
     auth: &AuthState,
     character_id: i64,
     path: &str,
