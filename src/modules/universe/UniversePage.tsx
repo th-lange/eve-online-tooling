@@ -4,38 +4,24 @@ import {
   openMarketWindow,
   sdeCategories,
   sdeGroups,
-  sdeStatus,
   sdeTypeAttributes,
   sdeTypeDetail,
   sdeTypes,
 } from "../../lib/api";
-import { SdeSetup } from "../production/SdeSetup";
 import { formatInt, formatIsk } from "../../lib/format";
-import { Page, PageHeader, Centered } from "../../components/page";
+import { Page, PageHeader } from "../../components/page";
+import { SdeGate } from "../../components/SdeGate";
 
 const TITLE = "Universe browser";
 const SUBTITLE =
   "Browse every item type: Category → Group → Type, with stats and dogma attributes.";
 
 export function UniversePage() {
-  const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <Centered>Checking static data…</Centered>
-      </Page>
-    );
-  }
-  if (!status.data?.installed) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <SdeSetup onInstalled={() => status.refetch()} />
-      </Page>
-    );
-  }
-  return <Workbench />;
+  return (
+    <SdeGate title={TITLE} subtitle={SUBTITLE}>
+      <Workbench />
+    </SdeGate>
+  );
 }
 
 function Workbench() {

@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   errorMessage,
-  sdeStatus,
   whAddConnection,
   whConnections,
   whDeleteConnection,
@@ -13,7 +12,6 @@ import {
   type SystemMatch,
   type WormholeType,
 } from "../../lib/api";
-import { SdeSetup } from "../production/SdeSetup";
 import { maxShipLabel, whTypeByCode } from "./whTypes";
 import { ChainGraph } from "./ChainGraph";
 import { JumpPlanner } from "./JumpPlanner";
@@ -23,7 +21,8 @@ import { Signatures } from "./Signatures";
 import { TripwirePanel } from "./TripwirePanel";
 import { Field, SystemPicker } from "./shared";
 import { MASS, fmtHours, fmtMkg, massColor } from "./helpers";
-import { Page, PageHeader, Centered } from "../../components/page";
+import { Page, PageHeader } from "../../components/page";
+import { SdeGate } from "../../components/SdeGate";
 
 const JUMP = ["s", "m", "l", "xl"];
 const SCOPES = ["wormhole", "stargate", "jumpbridge"];
@@ -33,24 +32,11 @@ const SUBTITLE =
   "Map your chain by hand, or import live Thera/Turnur holes from EVE-Scout. Dead holes (past life / EOL) are pruned automatically.";
 
 export function WormholesPage() {
-  const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <Centered>Checking static data…</Centered>
-      </Page>
-    );
-  }
-  if (!status.data?.installed) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <SdeSetup onInstalled={() => status.refetch()} />
-      </Page>
-    );
-  }
-  return <Workbench />;
+  return (
+    <SdeGate title={TITLE} subtitle={SUBTITLE}>
+      <Workbench />
+    </SdeGate>
+  );
 }
 
 function Workbench() {

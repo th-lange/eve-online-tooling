@@ -9,14 +9,12 @@ import {
   marketSellOrders,
   openMarketWindow,
   sdeSearch,
-  sdeStatus,
   systemSearch,
   type HistoryPoint,
   type IdName,
   type PriceModel,
   type SellOrder,
 } from "../../lib/api";
-import { SdeSetup } from "../production/SdeSetup";
 import {
   subscribeMarketSearchItem,
   takePendingMarketSearchItem,
@@ -31,6 +29,7 @@ import {
 } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { Page, PageHeader, Centered } from "../../components/page";
+import { SdeGate } from "../../components/SdeGate";
 import {
   SortHeaderCell,
   type SortColumn,
@@ -46,24 +45,11 @@ const SUBTITLE =
   "Find an item's sell orders across the market, or chart its price & volume history.";
 
 export function MarketSearchPage() {
-  const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <Centered>Checking static data…</Centered>
-      </Page>
-    );
-  }
-  if (!status.data?.installed) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <SdeSetup onInstalled={() => status.refetch()} />
-      </Page>
-    );
-  }
-  return <Workbench />;
+  return (
+    <SdeGate title={TITLE} subtitle={SUBTITLE}>
+      <Workbench />
+    </SdeGate>
+  );
 }
 
 function Workbench() {

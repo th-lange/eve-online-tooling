@@ -7,7 +7,6 @@ import {
   routeClearBreadcrumb,
   routeLocation,
   routeNearestWormhole,
-  sdeStatus,
   systemActivity,
   systemNeighbourhood,
   systemSearch,
@@ -16,7 +15,6 @@ import {
   type SystemActivity,
   type SystemMatch,
 } from "../../lib/api";
-import { SdeSetup } from "../production/SdeSetup";
 import { formatInt } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { usePersistentState } from "../../lib/usePersistentState";
@@ -33,30 +31,18 @@ import {
 import { kindFromSecurity } from "../../components/systemGraphLayout";
 import { ZkillSystemLink } from "../../components/ZkillLink";
 import { Page, PageHeader, Centered } from "../../components/page";
+import { SdeGate } from "../../components/SdeGate";
 
 const TITLE = "Route";
 const SUBTITLE =
   "Per-system activity over the last hour — jumps and ship/pod/NPC kills. Known-space only (CCP excludes wormhole systems).";
 
 export function RoutePage() {
-  const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <Centered>Checking static data…</Centered>
-      </Page>
-    );
-  }
-  if (!status.data?.installed) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <SdeSetup onInstalled={() => status.refetch()} />
-      </Page>
-    );
-  }
-  return <Workbench />;
+  return (
+    <SdeGate title={TITLE} subtitle={SUBTITLE}>
+      <Workbench />
+    </SdeGate>
+  );
 }
 
 type Mode = "all" | "neighbouring";

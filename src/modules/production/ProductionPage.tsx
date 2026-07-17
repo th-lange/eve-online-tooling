@@ -1,9 +1,6 @@
-import { useQuery } from "@tanstack/react-query";
 import { DataAge } from "../../components/DataAge";
-import { errorMessage, sdeStatus } from "../../lib/api";
 import { Page, PageHeader } from "../../components/page";
-import { SdeSetup } from "./SdeSetup";
-import { Centered } from "./components";
+import { SdeGate } from "../../components/SdeGate";
 import { ParamsPanel } from "./ParamsPanel";
 import { Results } from "./Results";
 import { useWorkbench } from "./useWorkbench";
@@ -13,37 +10,11 @@ const SUBTITLE =
   "Every manufacturable item, ranked by build-vs-buy profit. Search, then filter.";
 
 export function ProductionPage() {
-  const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-
-  if (status.isLoading) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <Centered>Checking static data…</Centered>
-      </Page>
-    );
-  }
-  if (status.isError) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <Centered>
-          <span className="text-rose-400">
-            Couldn't reach the backend: {errorMessage(status.error)}
-          </span>
-        </Centered>
-      </Page>
-    );
-  }
-  if (!status.data?.installed) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <SdeSetup onInstalled={() => status.refetch()} />
-      </Page>
-    );
-  }
-  return <Workbench />;
+  return (
+    <SdeGate title={TITLE} subtitle={SUBTITLE}>
+      <Workbench />
+    </SdeGate>
+  );
 }
 
 function Workbench() {

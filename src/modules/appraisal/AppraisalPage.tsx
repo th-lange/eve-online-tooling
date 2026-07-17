@@ -4,7 +4,6 @@ import {
   appraisal,
   errorMessage,
   marketRegions,
-  sdeStatus,
   appraisalReprocess,
   type AppraisalLine,
   type AppraisalParams,
@@ -12,7 +11,6 @@ import {
   type ReprocessAppraisalParams,
   type ReprocessAppraisalResult,
 } from "../../lib/api";
-import { SdeSetup } from "../production/SdeSetup";
 import {
   RegionSelect,
   StationSelect,
@@ -23,7 +21,8 @@ import {
   SortHeaderCell,
   type SortColumn,
 } from "../../components/SortHeaderCell";
-import { Page, PageHeader, Centered } from "../../components/page";
+import { Page, PageHeader } from "../../components/page";
+import { SdeGate } from "../../components/SdeGate";
 
 const FORGE = 10000002;
 const JITA = 60003760;
@@ -33,24 +32,11 @@ const SUBTITLE =
   "Paste items (from EVE: select → copy) and get a buy/sell ISK value and cargo volume.";
 
 export function AppraisalPage() {
-  const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
-  if (status.isLoading) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <Centered>Checking static data…</Centered>
-      </Page>
-    );
-  }
-  if (!status.data?.installed) {
-    return (
-      <Page>
-        <PageHeader title={TITLE} subtitle={SUBTITLE} />
-        <SdeSetup onInstalled={() => status.refetch()} />
-      </Page>
-    );
-  }
-  return <Workbench />;
+  return (
+    <SdeGate title={TITLE} subtitle={SUBTITLE}>
+      <Workbench />
+    </SdeGate>
+  );
 }
 
 function Workbench() {
