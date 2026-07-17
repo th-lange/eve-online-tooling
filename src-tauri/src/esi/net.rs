@@ -131,7 +131,17 @@ pub async fn send_retrying<F>(build: F) -> Result<Response, reqwest::Error>
 where
     F: Fn() -> RequestBuilder,
 {
-    let budget = ErrorBudget::global();
+    send_retrying_with(ErrorBudget::global(), build).await
+}
+
+/// Core of [`send_retrying`], parameterised over the [`ErrorBudget`] instance
+/// so tests can exercise budget-pause behaviour on a fresh, non-global budget
+/// without touching (or being affected by) process-global state shared with
+/// every other test in this binary.
+async fn send_retrying_with<F>(budget: &ErrorBudget, build: F) -> Result<Response, reqwest::Error>
+where
+    F: Fn() -> RequestBuilder,
+{
     let mut attempt = 0u32;
     loop {
         attempt += 1;
@@ -386,5 +396,144 @@ mod tests {
 
             server_thread.join().expect("server thread");
         });
+    }
+
+    /// Attach headers reporting a healthy error budget so these tests never
+    /// throttle on (or perturb) the real process-global `ErrorBudget`, which
+    /// is shared with every other test in this binary.
+    fn with_healthy_budget_headers(
+        resp: tiny_http::Response<std::io::Cursor<Vec<u8>>>,
+    ) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+        resp.with_header(
+            tiny_http::Header::from_bytes(&b"X-ESI-Error-Limit-Remain"[..], &b"100"[..]).unwrap(),
+        )
+        .with_header(
+            tiny_http::Header::from_bytes(&b"X-ESI-Error-Limit-Reset"[..], &b"60"[..]).unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn send_retrying_retries_503_twice_then_returns_200() {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("bind loopback");
+        let addr = server.server_addr().to_ip().expect("ip addr");
+        let count = std::sync::Arc::new(AtomicU64::new(0));
+        let count_srv = count.clone();
+        let server_thread = std::thread::spawn(move || {
+            for _ in 0..3 {
+                let request = server.recv().expect("recv request");
+                count_srv.fetch_add(1, Ordering::SeqCst);
+                let n = count_srv.load(Ordering::SeqCst);
+                let resp = if n < 3 {
+                    with_healthy_budget_headers(
+                        tiny_http::Response::from_string("unavailable").with_status_code(503),
+                    )
+                    .with_header(
+                        tiny_http::Header::from_bytes(&b"Retry-After"[..], &b"0"[..]).unwrap(),
+                    )
+                } else {
+                    with_healthy_budget_headers(tiny_http::Response::from_string("ok"))
+                };
+                let _ = request.respond(resp);
+            }
+        });
+
+        let client = reqwest::Client::new();
+        let url = format!("http://{addr}/");
+        let resp = send_retrying(|| client.get(&url)).await.expect("response");
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(count.load(Ordering::SeqCst), 3);
+
+        server_thread.join().expect("server thread");
+    }
+
+    #[tokio::test]
+    async fn send_retrying_returns_404_immediately_without_retry() {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("bind loopback");
+        let addr = server.server_addr().to_ip().expect("ip addr");
+        let count = std::sync::Arc::new(AtomicU64::new(0));
+        let count_srv = count.clone();
+        let server_thread = std::thread::spawn(move || {
+            if let Ok(request) = server.recv() {
+                count_srv.fetch_add(1, Ordering::SeqCst);
+                let resp = with_healthy_budget_headers(
+                    tiny_http::Response::from_string("not found").with_status_code(404),
+                );
+                let _ = request.respond(resp);
+            }
+        });
+
+        let client = reqwest::Client::new();
+        let url = format!("http://{addr}/");
+        let resp = send_retrying(|| client.get(&url)).await.expect("response");
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+
+        server_thread.join().expect("server thread");
+    }
+
+    #[tokio::test]
+    async fn send_retrying_returns_503_after_max_attempts() {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("bind loopback");
+        let addr = server.server_addr().to_ip().expect("ip addr");
+        let count = std::sync::Arc::new(AtomicU64::new(0));
+        let count_srv = count.clone();
+        let server_thread = std::thread::spawn(move || {
+            for _ in 0..MAX_ATTEMPTS {
+                let request = server.recv().expect("recv request");
+                count_srv.fetch_add(1, Ordering::SeqCst);
+                let resp = with_healthy_budget_headers(
+                    tiny_http::Response::from_string("unavailable").with_status_code(503),
+                )
+                .with_header(
+                    tiny_http::Header::from_bytes(&b"Retry-After"[..], &b"0"[..]).unwrap(),
+                );
+                let _ = request.respond(resp);
+            }
+        });
+
+        let client = reqwest::Client::new();
+        let url = format!("http://{addr}/");
+        let resp = send_retrying(|| client.get(&url)).await.expect("response");
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(count.load(Ordering::SeqCst), u64::from(MAX_ATTEMPTS));
+
+        server_thread.join().expect("server thread");
+    }
+
+    #[tokio::test]
+    async fn send_retrying_with_pauses_when_injected_budget_is_low() {
+        // Fresh, non-global budget: low remaining count with a window that
+        // hasn't reset yet forces a throttle pause before the request goes
+        // out, isolated from the real process-global `ErrorBudget`.
+        let budget = ErrorBudget::new();
+        let now = crate::util::time::now_secs();
+        budget.remain.store(3, Ordering::Relaxed);
+        budget.reset_at.store(now + 1, Ordering::Relaxed);
+
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("bind loopback");
+        let addr = server.server_addr().to_ip().expect("ip addr");
+        let server_thread = std::thread::spawn(move || {
+            if let Ok(request) = server.recv() {
+                let _ = request.respond(with_healthy_budget_headers(
+                    tiny_http::Response::from_string("ok"),
+                ));
+            }
+        });
+
+        let client = reqwest::Client::new();
+        let url = format!("http://{addr}/");
+        let start = std::time::Instant::now();
+        let resp = send_retrying_with(&budget, || client.get(&url))
+            .await
+            .expect("response");
+        let elapsed = start.elapsed();
+        assert_eq!(resp.status(), StatusCode::OK);
+        // wait_needed() = reset_at - now + 1s cushion = 2s.
+        assert!(
+            elapsed >= Duration::from_millis(1900),
+            "expected a throttle pause, elapsed only {elapsed:?}"
+        );
+
+        server_thread.join().expect("server thread");
     }
 }
