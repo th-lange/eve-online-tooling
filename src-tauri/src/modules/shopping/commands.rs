@@ -58,6 +58,22 @@ struct StoredList {
     items: Vec<StoredEntry>,
 }
 
+impl StoredList {
+    /// Add `qty` of `type_id`, accumulating into an existing entry
+    /// (overflow-safe — `saturating_add`) or pushing a new one. The single
+    /// upsert used by every "add to a list" path (buttons, pasted text, chat
+    /// capture, move-between-lists).
+    fn add(&mut self, type_id: i64, qty: i64) {
+        match self.items.iter_mut().find(|e| e.type_id == type_id) {
+            Some(entry) => entry.quantity = entry.quantity.saturating_add(qty),
+            None => self.items.push(StoredEntry {
+                type_id,
+                quantity: qty,
+            }),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredEntry {
     #[serde(rename = "typeId", alias = "type_id")]
@@ -231,13 +247,7 @@ pub fn shopping_add_item(
     let (dir, _sde) = crate::sde::dir_and_sde(&app)?;
     let mut store = load(&dir);
     let list = list_mut(&mut store, &id)?;
-    match list.items.iter_mut().find(|e| e.type_id == type_id) {
-        Some(entry) => entry.quantity += qty,
-        None => list.items.push(StoredEntry {
-            type_id,
-            quantity: qty,
-        }),
-    }
+    list.add(type_id, qty);
     save(&dir, &store)
 }
 
@@ -276,13 +286,7 @@ pub fn shopping_add_text(
             }
             let qty = item.quantity.max(1);
             match sde.type_by_name(name).map_err(|e| e.to_string())? {
-                Some((type_id, _)) => match list.items.iter_mut().find(|e| e.type_id == type_id) {
-                    Some(entry) => entry.quantity += qty,
-                    None => list.items.push(StoredEntry {
-                        type_id,
-                        quantity: qty,
-                    }),
-                },
+                Some((type_id, _)) => list.add(type_id, qty),
                 None => unresolved.push(item.name.clone()),
             }
         }
@@ -372,7 +376,7 @@ pub fn shopping_move_item(
     {
         let dst = list_mut(&mut store, &to_id)?;
         match dst.items.iter_mut().find(|e| e.type_id == type_id) {
-            Some(e) => e.quantity += moved,
+            Some(e) => e.quantity = e.quantity.saturating_add(moved),
             None => dst.items.push(StoredEntry {
                 type_id,
                 quantity: moved,
@@ -452,6 +456,7 @@ fn parse_chat_line(raw: &str) -> Option<(String, i64)> {
 
 /// One resolved item line captured from chat, tagged with who posted it and
 /// when — the unit the cooldown de-duplicator works on.
+#[derive(Debug)]
 struct ChatItem {
     ts: i64,
     sender: String,
@@ -484,6 +489,85 @@ fn apply_cooldown(
         kept.push(c);
     }
     kept
+}
+
+/// Chatlogs for `channel` in `logs_dir` that could carry today's messages:
+/// filenames starting with `<channel>_` (EVE appends `_<date>_<time>_
+/// <charId>.txt`), modified in the last day, sorted by name. EVE writes a
+/// separate log file per client/session for a channel, so a multiboxer or
+/// anyone who reopens it ends up with several matching files — the caller
+/// follows all of them.
+fn recent_chatlogs(
+    logs_dir: &std::path::Path,
+    channel: &str,
+) -> Result<Vec<std::path::PathBuf>, String> {
+    let prefix = format!("{}_", channel.to_ascii_lowercase());
+    let cutoff =
+        std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(24 * 60 * 60));
+    let mut recent: Vec<(std::path::PathBuf, String)> = std::fs::read_dir(logs_dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .starts_with(&prefix)
+        })
+        .filter_map(|e| {
+            let modified = e.metadata().ok()?.modified().ok()?;
+            if cutoff.map(|c| modified < c).unwrap_or(false) {
+                return None;
+            }
+            let name = e.file_name().to_string_lossy().into_owned();
+            Some((e.path(), name))
+        })
+        .collect();
+    recent.sort_by(|a, b| a.1.cmp(&b.1));
+    Ok(recent.into_iter().map(|(path, _)| path).collect())
+}
+
+/// Turn the de-duplicated union of chat messages into resolved,
+/// timestamp-ordered item candidates: skips messages already in `seen`,
+/// parses each line via [`parse_chat_line`], and resolves names to type ids
+/// through `resolve` (dependency-injected so tests can supply a fake lookup
+/// instead of a real SDE). Leaves candidates in ascending `ts` order, which
+/// `apply_cooldown` requires.
+fn collect_candidates(
+    union: &[crate::chatlog::ChatEntry],
+    seen: &std::collections::BTreeSet<String>,
+    resolve: &dyn Fn(&str) -> Result<Option<i64>, String>,
+) -> Result<Vec<ChatItem>, String> {
+    let mut candidates: Vec<ChatItem> = Vec::new();
+    for entry in union {
+        if seen.contains(&entry.key) {
+            continue;
+        }
+        // One item per line: multi-line pastes arrive as one message with
+        // embedded newlines (see chatlog.rs), and each line may carry a
+        // quantity ("Tritanium 100", "Pyerite\t50", "x3" styles).
+        for raw in entry.text.lines().take(MAX_LINES_PER_MESSAGE) {
+            let Some((name, qty)) = parse_chat_line(raw) else {
+                continue;
+            };
+            if let Some(type_id) = resolve(&name)? {
+                candidates.push(ChatItem {
+                    ts: entry.ts,
+                    sender: entry.sender.clone(),
+                    type_id,
+                    quantity: qty,
+                    label: if qty > 1 {
+                        format!("{name} ×{qty}")
+                    } else {
+                        name
+                    },
+                });
+            }
+        }
+    }
+    // Timestamp order so the cooldown accepts the first of a burst and drops
+    // the rest, deterministically regardless of which client's file carried it.
+    candidates.sort_by_key(|c| c.ts);
+    Ok(candidates)
 }
 
 /// Result of a chat-capture poll.
@@ -526,33 +610,7 @@ pub fn shopping_chat_sync(
         .unwrap_or(CHAT_LIST.0)
         .to_string();
 
-    // Every chatlog whose name starts with "<channel>_" (EVE appends
-    // _<date>_<time>_<charId>.txt) that was modified in the last day — only
-    // those can carry today's messages, and a new write pulls an idle file back
-    // into the window on the next poll.
-    let logs = std::path::Path::new(&logs_dir);
-    let prefix = format!("{}_", chan.to_ascii_lowercase());
-    let cutoff =
-        std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(24 * 60 * 60));
-    let mut recent: Vec<(std::path::PathBuf, String)> = std::fs::read_dir(logs)
-        .map_err(|e| e.to_string())?
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .to_ascii_lowercase()
-                .starts_with(&prefix)
-        })
-        .filter_map(|e| {
-            let modified = e.metadata().ok()?.modified().ok()?;
-            if cutoff.map(|c| modified < c).unwrap_or(false) {
-                return None;
-            }
-            let name = e.file_name().to_string_lossy().into_owned();
-            Some((e.path(), name))
-        })
-        .collect();
-    recent.sort_by(|a, b| a.1.cmp(&b.1));
+    let recent = recent_chatlogs(std::path::Path::new(&logs_dir), chan)?;
 
     let mut store = load(&dir);
     // Ensure the target list exists. The built-in Chat list is auto-created on
@@ -591,7 +649,10 @@ pub fn shopping_chat_sync(
     // What to show as "listening to …" — one name, or a count when we follow
     // several files at once (multiboxing / rotated logs).
     let label = if recent.len() == 1 {
-        recent[0].1.clone()
+        recent[0]
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
     } else {
         format!("{} logs", recent.len())
     };
@@ -604,7 +665,7 @@ pub fn shopping_chat_sync(
     // timestamps. Insertion order = first file that carried each message.
     let mut union: Vec<crate::chatlog::ChatEntry> = Vec::new();
     let mut union_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for (path, _name) in &recent {
+    for path in &recent {
         for entry in crate::chatlog::parse_chat_entries(
             &crate::chatlog::read_chatlog(path).unwrap_or_default(),
         ) {
@@ -633,36 +694,11 @@ pub fn shopping_chat_sync(
     // the resolved item lines, then apply the per-sender cooldown before adding
     // — a rapid duplicate from the same sender is dropped, but different senders
     // / items and spaced re-posts still count.
-    let mut candidates: Vec<ChatItem> = Vec::new();
-    for entry in &union {
-        if store.chat.seen.contains(&entry.key) {
-            continue;
-        }
-        // One item per line: multi-line pastes arrive as one message with
-        // embedded newlines (see chatlog.rs), and each line may carry a
-        // quantity ("Tritanium 100", "Pyerite\t50", "x3" styles).
-        for raw in entry.text.lines().take(MAX_LINES_PER_MESSAGE) {
-            let Some((name, qty)) = parse_chat_line(raw) else {
-                continue;
-            };
-            if let Some((type_id, _)) = sde.type_by_name(&name).map_err(|e| e.to_string())? {
-                candidates.push(ChatItem {
-                    ts: entry.ts,
-                    sender: entry.sender.clone(),
-                    type_id,
-                    quantity: qty,
-                    label: if qty > 1 {
-                        format!("{name} ×{qty}")
-                    } else {
-                        name
-                    },
-                });
-            }
-        }
-    }
-    // Timestamp order so the cooldown accepts the first of a burst and drops the
-    // rest, deterministically regardless of which client's file carried it.
-    candidates.sort_by_key(|c| c.ts);
+    let candidates = collect_candidates(&union, &store.chat.seen, &|name| {
+        sde.type_by_name(name)
+            .map(|found| found.map(|(type_id, _)| type_id))
+            .map_err(|e| e.to_string())
+    })?;
 
     // Prune cooldown entries older than the follow window so it stays bounded
     // (stale entries flush to disk on the next save).
@@ -687,13 +723,7 @@ pub fn shopping_chat_sync(
             .find(|l| l.id == target_id)
             .expect("target list ensured above");
         for c in kept {
-            match list.items.iter_mut().find(|e| e.type_id == c.type_id) {
-                Some(e) => e.quantity = e.quantity.saturating_add(c.quantity),
-                None => list.items.push(StoredEntry {
-                    type_id: c.type_id,
-                    quantity: c.quantity,
-                }),
-            }
+            list.add(c.type_id, c.quantity);
             added.push(c.label);
         }
     }
@@ -829,5 +859,156 @@ mod tests {
             3,
         );
         assert_eq!(ids(&kept), vec![(105, "Bob", 34)]);
+    }
+
+    #[test]
+    fn stored_list_add_accumulates_into_existing_entry() {
+        let mut list = StoredList {
+            id: "x".into(),
+            name: "X".into(),
+            items: vec![StoredEntry {
+                type_id: 34,
+                quantity: 10,
+            }],
+        };
+        list.add(34, 5);
+        assert_eq!(list.items.len(), 1);
+        assert_eq!(list.items[0].quantity, 15);
+    }
+
+    #[test]
+    fn stored_list_add_pushes_new_entry_when_absent() {
+        let mut list = StoredList {
+            id: "x".into(),
+            name: "X".into(),
+            items: Vec::new(),
+        };
+        list.add(34, 5);
+        assert_eq!(list.items.len(), 1);
+        assert_eq!(list.items[0].type_id, 34);
+        assert_eq!(list.items[0].quantity, 5);
+    }
+
+    #[test]
+    fn stored_list_add_saturates_instead_of_overflowing() {
+        let mut list = StoredList {
+            id: "x".into(),
+            name: "X".into(),
+            items: vec![StoredEntry {
+                type_id: 1,
+                quantity: i64::MAX - 1,
+            }],
+        };
+        list.add(1, 10);
+        assert_eq!(list.items[0].quantity, i64::MAX);
+    }
+
+    /// A scratch directory under the system temp dir, unique to this test
+    /// process + tag (parallel `cargo test` runs never collide), removed if a
+    /// stale one is left over from a prior crash.
+    fn tmp_dir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("shopping-chat-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    #[test]
+    fn recent_chatlogs_filters_by_prefix_and_age_and_sorts_by_name() {
+        let dir = tmp_dir("scan");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        std::fs::write(dir.join("Corp_2026.07.10_120000_1.txt"), "").unwrap();
+        std::fs::write(dir.join("Corp_2026.07.10_090000_2.txt"), "").unwrap();
+        // Different channel — excluded regardless of age.
+        std::fs::write(dir.join("Local_2026.07.10_120000_1.txt"), "").unwrap();
+        // Same channel but stale — excluded by the 24h cutoff.
+        let stale_path = dir.join("Corp_2026.01.01_120000_1.txt");
+        let stale_file = std::fs::File::create(&stale_path).unwrap();
+        stale_file
+            .set_modified(
+                std::time::SystemTime::now() - std::time::Duration::from_secs(3 * 24 * 60 * 60),
+            )
+            .unwrap();
+
+        let found = recent_chatlogs(&dir, "Corp").unwrap();
+        let names: Vec<String> = found
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "Corp_2026.07.10_090000_2.txt".to_string(),
+                "Corp_2026.07.10_120000_1.txt".to_string(),
+            ]
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn recent_chatlogs_matches_channel_prefix_case_insensitively() {
+        let dir = tmp_dir("case");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("corp_2026.07.10_120000_1.txt"), "").unwrap();
+
+        let found = recent_chatlogs(&dir, "CORP").unwrap();
+        assert_eq!(found.len(), 1);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn recent_chatlogs_errors_when_the_directory_is_missing() {
+        let dir = tmp_dir("missing");
+        assert!(recent_chatlogs(&dir, "Corp").is_err());
+    }
+
+    fn chat_entry(key: &str, sender: &str, ts: i64, text: &str) -> crate::chatlog::ChatEntry {
+        crate::chatlog::ChatEntry {
+            key: key.into(),
+            sender: sender.into(),
+            ts,
+            text: text.into(),
+        }
+    }
+
+    #[test]
+    fn collect_candidates_skips_seen_unresolved_and_sorts_by_timestamp() {
+        let union = vec![
+            chat_entry("a", "Bob", 200, "Tritanium 10"),
+            chat_entry("b", "Bob", 100, "Unknown Thing\nPyerite 5"),
+            // Already ingested — excluded even though it would resolve.
+            chat_entry("c", "Alice", 300, "Tritanium"),
+        ];
+        let mut seen = std::collections::BTreeSet::new();
+        seen.insert("c".to_string());
+        let resolve = |name: &str| -> Result<Option<i64>, String> {
+            match name {
+                "Tritanium" => Ok(Some(34)),
+                "Pyerite" => Ok(Some(35)),
+                _ => Ok(None),
+            }
+        };
+
+        let candidates = collect_candidates(&union, &seen, &resolve).unwrap();
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|c| (c.ts, c.type_id, c.quantity))
+                .collect::<Vec<_>>(),
+            vec![(100, 35, 5), (200, 34, 10)]
+        );
+    }
+
+    #[test]
+    fn collect_candidates_propagates_resolver_errors() {
+        let union = vec![chat_entry("a", "Bob", 1, "Tritanium")];
+        let seen = std::collections::BTreeSet::new();
+        let resolve = |_: &str| -> Result<Option<i64>, String> { Err("db down".into()) };
+        assert_eq!(
+            collect_candidates(&union, &seen, &resolve).unwrap_err(),
+            "db down"
+        );
     }
 }
