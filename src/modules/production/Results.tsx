@@ -1,3 +1,4 @@
+import { errorMessage } from "../../lib/api";
 import {
   BlueprintLibrary,
   FilterChips,
@@ -69,7 +70,7 @@ export function Results({ wb }: { wb: WorkbenchState }) {
         {view === "opportunities" &&
           (profit.isError ? (
             <div className="text-sm text-rose-400">
-              Calculation failed: {String(profit.error)}
+              Calculation failed: {errorMessage(profit.error)}
             </div>
           ) : profit.isPending && rows.length === 0 ? (
             <TableSkeleton />

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { pochvenRoutes, type PochvenStat } from "../../lib/api";
+import { errorMessage, pochvenRoutes, type PochvenStat } from "../../lib/api";
 import { POCHVEN_META } from "./data";
 
 type Pref = "shortest" | "secure" | "insecure";
@@ -65,7 +65,7 @@ export function Logistics() {
       {q.isLoading ? (
         <div className="mt-3 text-sm text-zinc-500">Computing routes…</div>
       ) : q.isError ? (
-        <div className="mt-3 text-sm text-rose-400">{String(q.error)}</div>
+        <div className="mt-3 text-sm text-rose-400">{errorMessage(q.error)}</div>
       ) : (
         <div className="mt-3 overflow-auto rounded-lg border border-zinc-800">
           <table className="w-full border-collapse text-sm">

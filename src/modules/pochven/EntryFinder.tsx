@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MapPin } from "lucide-react";
 import {
+  errorMessage,
   marketCurrentLocation,
   pochvenSearch,
   systemSearch,
@@ -104,7 +105,7 @@ export function EntryFinder() {
           <div className="mt-4 text-sm text-zinc-500">Finding entries…</div>
         ) : result.isError ? (
           <div className="mt-4 text-sm text-rose-400">
-            {String(result.error)}
+            {errorMessage(result.error)}
           </div>
         ) : result.data ? (
           <EntryResults key={systemId} data={result.data} />

@@ -3,6 +3,7 @@ import { FeesFromCharacter } from "../../components/FeesFromCharacter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   contractsScan,
+  errorMessage,
   marketRegions,
   sdeStatus,
   type ContractParams,
@@ -144,7 +145,7 @@ function Workbench() {
 
       {run.isError && (
         <div className="mt-3 text-sm text-rose-400">
-          Failed: {String(run.error)}
+          Failed: {errorMessage(run.error)}
         </div>
       )}
 

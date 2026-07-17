@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { onSdeProgress, sdeUpdate, type SdeProgress } from "../../lib/api";
+import { errorMessage, onSdeProgress, sdeUpdate, type SdeProgress } from "../../lib/api";
 
 // Shown when the SDE isn't installed yet: a one-click download with live
 // progress. Rendered as a body section under the page's `PageHeader` (it must
@@ -59,7 +59,7 @@ export function SdeSetup({ onInstalled }: { onInstalled: () => void }) {
 
       {download.isError && (
         <p className="mt-4 text-sm text-rose-400">
-          Download failed: {String(download.error)}
+          Download failed: {errorMessage(download.error)}
         </p>
       )}
     </div>

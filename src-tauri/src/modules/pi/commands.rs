@@ -430,9 +430,7 @@ pub async fn pi_show_in_game(
     system_id: i64,
 ) -> Result<(), crate::model::AppError> {
     let (_, character_id) = storage::dir_and_primary_character(&app)?;
-    crate::esi::set_autopilot_waypoint(&auth_state, character_id, system_id)
-        .await
-        .map_err(|e| e.to_string())?;
+    crate::esi::set_autopilot_waypoint(&auth_state, character_id, system_id).await?;
     Ok(())
 }
 

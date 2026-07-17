@@ -204,7 +204,7 @@ function Workbench() {
 
       {activity.isError && (
         <div className="mt-3 text-sm text-rose-400">
-          Failed: {String(activity.error)}
+          Failed: {errorMessage(activity.error)}
         </div>
       )}
 
@@ -296,7 +296,7 @@ function Workbench() {
 
         {(locError || hood.isError) && (
           <div className="mt-2 text-xs text-rose-400">
-            {locError ?? String(hood.error)}
+            {locError ?? errorMessage(hood.error)}
             {locError && (
               <span className="ml-1 text-zinc-500">
                 (needs <code>esi-location.read_location.v1</code> — re-login if

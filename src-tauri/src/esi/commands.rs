@@ -15,13 +15,13 @@ use crate::storage;
 pub async fn auth_login(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
-) -> Result<Character, String> {
+) -> Result<Character, crate::model::AppError> {
     let pkce = auth::generate_pkce();
     let csrf = auth::random_state();
 
     // Bind the loopback server before opening the browser so the redirect can't
     // arrive before we're listening.
-    let server = auth::bind_loopback().map_err(|e| e.to_string())?;
+    let server = auth::bind_loopback()?;
     let url = auth::authorize_url(&pkce.challenge, &csrf);
     app.opener()
         .open_url(url, None::<&str>)
@@ -30,14 +30,10 @@ pub async fn auth_login(
     // Wait for the redirect off the async runtime.
     let code = tokio::task::spawn_blocking(move || auth::capture_code(server, &csrf))
         .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())??;
 
-    let tokens = auth::exchange_code(auth_state.http(), &code, &pkce.verifier)
-        .await
-        .map_err(|e| e.to_string())?;
-    let token_character =
-        auth::character_from_token(&tokens.access_token).map_err(|e| e.to_string())?;
+    let tokens = auth::exchange_code(auth_state.http(), &code, &pkce.verifier).await?;
+    let token_character = auth::character_from_token(&tokens.access_token)?;
 
     // Persist the refresh token (keychain) and the roster (json), de-duping.
     storage::store_refresh_token(token_character.character_id, &tokens.refresh_token)?;
@@ -160,10 +156,8 @@ pub struct Asset {
 pub async fn character_assets(
     auth_state: State<'_, AuthState>,
     character_id: i64,
-) -> Result<Vec<Asset>, String> {
-    let assets = character::fetch_assets(&auth_state, character_id)
-        .await
-        .map_err(|e| e.to_string())?;
+) -> Result<Vec<Asset>, crate::model::AppError> {
+    let assets = character::fetch_assets(&auth_state, character_id).await?;
     Ok(assets
         .into_iter()
         .map(|a| Asset {
@@ -208,11 +202,10 @@ pub async fn open_market_window(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
     type_id: i64,
-) -> Result<(), String> {
-    let (_, character_id) = storage::dir_and_primary_character(&app).map_err(|e| e.to_string())?;
-    character::open_market_window(&auth_state, character_id, type_id)
-        .await
-        .map_err(|e| e.to_string())
+) -> Result<(), crate::model::AppError> {
+    let (_, character_id) = storage::dir_and_primary_character(&app)?;
+    character::open_market_window(&auth_state, character_id, type_id).await?;
+    Ok(())
 }
 
 /// Best-effort startup warm-up: pull the active character's assets so the

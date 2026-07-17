@@ -6,6 +6,7 @@ import {
   daytradingGetList,
   daytradingScan,
   daytradingSetList,
+  errorMessage,
   marketRegions,
   rosterStock,
   sdeMarketCategories,
@@ -379,7 +380,7 @@ function Workbench() {
         {tab === "opportunities" &&
           (run.isError ? (
             <div className="text-sm text-rose-400">
-              Failed: {String(run.error)}
+              Failed: {errorMessage(run.error)}
             </div>
           ) : run.isPending ? (
             <Centered>

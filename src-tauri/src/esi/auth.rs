@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 
 use super::cache::ConditionalCache;
 use super::USER_AGENT;
-use crate::model::Character;
+use crate::model::{AppError, Character};
 
 /// Public Client ID of the registered EVE developer application (PKCE — not a
 /// secret).
@@ -82,6 +82,24 @@ pub enum AuthError {
     Storage(String),
     #[error(transparent)]
     Esi(#[from] super::error::EsiError),
+}
+
+impl From<AuthError> for AppError {
+    fn from(e: AuthError) -> Self {
+        match &e {
+            // No refresh token on file: the character isn't logged in.
+            AuthError::NotLoggedIn => AppError::auth_required(),
+            // A revoked/expired refresh token surfaces from the SSO token
+            // endpoint as an HTTP 400 (`invalid_grant`) — same remedy as
+            // `NotLoggedIn`: the user has to log in again.
+            AuthError::Http(err) if err.status() == Some(reqwest::StatusCode::BAD_REQUEST) => {
+                AppError::auth_required()
+            }
+            _ => AppError::Message {
+                message: e.to_string(),
+            },
+        }
+    }
 }
 
 /// In-memory auth state: an HTTP client and a per-character access-token cache,

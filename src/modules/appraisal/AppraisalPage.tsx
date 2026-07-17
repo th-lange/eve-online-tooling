@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   appraisal,
+  errorMessage,
   marketRegions,
   sdeStatus,
   appraisalReprocess,
@@ -187,7 +188,7 @@ function Workbench() {
 
       {(run.isError || runRepro.isError) && (
         <div className="mt-3 text-sm text-rose-400">
-          Failed: {String(run.error ?? runRepro.error)}
+          Failed: {errorMessage(run.error ?? runRepro.error)}
         </div>
       )}
 

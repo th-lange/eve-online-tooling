@@ -216,9 +216,7 @@ async fn character_skill_levels(
     let dir = storage::app_data_dir(app)?;
     let character_id =
         storage::primary_character(&dir).ok_or_else(crate::model::AppError::auth_required)?;
-    esi::character_skill_levels(auth_state, character_id)
-        .await
-        .map_err(|e| e.to_string().into())
+    Ok(esi::character_skill_levels(auth_state, character_id).await?)
 }
 
 /// Skill-level lookup for the dogma engine: the character's real level
@@ -477,8 +475,7 @@ pub async fn fitting_esi_push(
         fit.ship_type_id,
         &items,
     )
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
     // The new fitting should show up next open.
     storage::cache_invalidate(&dir, &format!("fitting_esi_{character_id}"));
@@ -526,9 +523,7 @@ pub async fn fitting_esi_list(
     }
 
     // Fetch (async) before opening the SDE — its Connection isn't Send.
-    let mut esi = crate::esi::fetch_character_fittings(&auth_state, character_id)
-        .await
-        .map_err(|e| e.to_string())?;
+    let mut esi = crate::esi::fetch_character_fittings(&auth_state, character_id).await?;
     if let Ok(corp_id) = corporation_id(&auth_state, character_id).await {
         if let Ok(mut corp) =
             crate::esi::fetch_corp_fittings(&auth_state, character_id, corp_id).await

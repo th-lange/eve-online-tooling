@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  errorMessage,
   sdeSearchShips,
   whJumpPlan,
   type IdName,
@@ -60,7 +61,7 @@ export function JumpPlanner() {
       </div>
 
       {plan.isError && (
-        <div className="mt-2 text-xs text-rose-400">{String(plan.error)}</div>
+        <div className="mt-2 text-xs text-rose-400">{errorMessage(plan.error)}</div>
       )}
 
       {r && !r.found && (

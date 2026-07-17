@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  errorMessage,
   sdeStatus,
   whAddConnection,
   whConnections,
@@ -141,7 +142,7 @@ function Workbench() {
             </button>
             {importEvescout.isError ? (
               <span className="max-w-56 text-right text-[11px] text-rose-400">
-                {String(importEvescout.error)}
+                {errorMessage(importEvescout.error)}
               </span>
             ) : (
               <span className="text-[11px] text-zinc-500">

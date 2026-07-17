@@ -7,6 +7,7 @@ import {
   dpsPlayback,
   dpsStart,
   dpsStop,
+  errorMessage,
   eveDefaultLogDir,
   onDpsTick,
   type DpsLogFile,
@@ -148,7 +149,7 @@ export function DpsPage() {
       await dpsStart({ gamelogsDir: dir, windowSecs });
       setRunning(true);
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     }
   }
 
@@ -165,7 +166,7 @@ export function DpsPage() {
       setLogs(list);
       if (list.length > 0 && !file) setFile(list[0].path);
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     }
   }
 
@@ -177,7 +178,7 @@ export function DpsPage() {
       await dpsPlayback({ file, speed, windowSecs });
       setRunning(true);
     } catch (e) {
-      setError(String(e));
+      setError(errorMessage(e));
     }
   }
 

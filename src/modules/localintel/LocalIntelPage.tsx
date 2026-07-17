@@ -7,6 +7,7 @@ import {
   sendNotification,
 } from "@tauri-apps/plugin-notification";
 import {
+  errorMessage,
   eveDefaultLogDir,
   localLogNames,
   localScan,
@@ -280,7 +281,7 @@ export function LocalIntelPage() {
               Load from latest Local log
             </button>
             {loadLog.isError && (
-              <span className="text-rose-400">{String(loadLog.error)}</span>
+              <span className="text-rose-400">{errorMessage(loadLog.error)}</span>
             )}
             {loadLog.data && (
               <span className="text-zinc-500">
@@ -356,7 +357,7 @@ export function LocalIntelPage() {
 
           {scan.isError && (
             <div className="mt-3 text-sm text-rose-400">
-              Failed: {String(scan.error)}
+              Failed: {errorMessage(scan.error)}
             </div>
           )}
 
