@@ -18,7 +18,12 @@ import {
   StationSelect,
 } from "../../components/RegionStationPicker";
 import { SdeSetup } from "../production/SdeSetup";
-import { formatInt, formatIsk, formatPercent } from "../../lib/format";
+import {
+  formatInt,
+  formatIsk,
+  formatPercent,
+  sortRows,
+} from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { FeesFromCharacter } from "../../components/FeesFromCharacter";
 import {
@@ -392,13 +397,10 @@ function TradeTable({
     ["name"],
   );
 
-  const sorted = useMemo(() => {
-    const dir = sortDir === "asc" ? 1 : -1;
-    return [...rows].sort((a, b) => {
-      if (sortKey === "name") return dir * a.name.localeCompare(b.name);
-      return dir * (a[sortKey] - b[sortKey]);
-    });
-  }, [rows, sortKey, sortDir]);
+  const sorted = useMemo(
+    () => sortRows(rows, sortKey, sortDir),
+    [rows, sortKey, sortDir],
+  );
 
   return (
     <div className="overflow-auto rounded border border-zinc-800">

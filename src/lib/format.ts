@@ -67,14 +67,39 @@ export function unitCost(row: ProfitBreakdown): number | null {
 }
 
 /**
+ * Nulls-last comparator helper: returns a definitive ordering when either
+ * value is `null`/`undefined` (nulls always sort last, regardless of
+ * direction), or `null` to signal "compare normally".
+ */
+function compareNullsLast(av: unknown, bv: unknown): number | null {
+  if (av == null && bv == null) return 0;
+  if (av == null) return 1; // nulls last regardless of dir
+  if (bv == null) return -1;
+  return null;
+}
+
+/**
  * Generic row sort by a field name. Strings compare lexically; numbers
  * numerically with `null`/`undefined` sorted last. Returns a new array.
+ *
+ * By default `null`/`undefined` values are treated as the smallest possible
+ * number (so they sort first ascending, last descending). Pass
+ * `{ nullsLast: true }` to force them to the end regardless of `dir`.
  */
-export function sortRows<T>(rows: T[], key: keyof T, dir: SortDir): T[] {
+export function sortRows<T>(
+  rows: T[],
+  key: keyof T,
+  dir: SortDir,
+  opts?: { nullsLast?: boolean },
+): T[] {
   const d = dir === "asc" ? 1 : -1;
   return [...rows].sort((a, b) => {
     const av = a[key];
     const bv = b[key];
+    if (opts?.nullsLast) {
+      const nullOrder = compareNullsLast(av, bv);
+      if (nullOrder !== null) return nullOrder;
+    }
     if (typeof av === "string" || typeof bv === "string") {
       return d * String(av ?? "").localeCompare(String(bv ?? ""));
     }
@@ -115,9 +140,8 @@ export function sortBreakdowns(
   return [...rows].sort((a, b) => {
     const av = value(a, key);
     const bv = value(b, key);
-    if (av === null && bv === null) return 0;
-    if (av === null) return 1; // nulls last regardless of dir
-    if (bv === null) return -1;
+    const nullOrder = compareNullsLast(av, bv);
+    if (nullOrder !== null) return nullOrder;
     if (typeof av === "string" && typeof bv === "string") {
       return factor * av.localeCompare(bv);
     }

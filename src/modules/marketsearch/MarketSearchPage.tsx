@@ -23,7 +23,12 @@ import {
 } from "../../lib/deepLink";
 import { AddToListButton } from "../../components/AddToListButton";
 import { PriceHistoryView, Stat } from "../../components/PriceHistory";
-import { formatInt, formatIsk, formatPercent } from "../../lib/format";
+import {
+  formatInt,
+  formatIsk,
+  formatPercent,
+  sortRows,
+} from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { Page, PageHeader, Centered } from "../../components/page";
 import {
@@ -448,16 +453,14 @@ function OrderTable({
   );
 
   const sorted = useMemo(() => {
+    if (sortKey === "jumps") {
+      // Unreachable / no-origin rows sort to the bottom regardless of dir.
+      return sortRows(orders, "jumps", sortDir, { nullsLast: true });
+    }
     const dir = sortDir === "asc" ? 1 : -1;
     return [...orders].sort((a, b) => {
       if (ORDER_TEXT_KEYS.includes(sortKey)) {
         return dir * String(a[sortKey]).localeCompare(String(b[sortKey]));
-      }
-      if (sortKey === "jumps") {
-        // Unreachable / no-origin rows sort to the bottom regardless of dir.
-        const av = a.jumps ?? Infinity;
-        const bv = b.jumps ?? Infinity;
-        return dir * (av - bv);
       }
       return dir * ((a[sortKey] as number) - (b[sortKey] as number));
     });

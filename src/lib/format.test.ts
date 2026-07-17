@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatIsk, formatPercent, sortBreakdowns } from "./format";
+import { sortBreakdowns, sortRows, formatIsk, formatPercent } from "./format";
 import type { ProfitBreakdown } from "./api";
 
 function row(
@@ -54,5 +54,20 @@ describe("format", () => {
     const byVolume = sortBreakdowns(rows, "productVolume", "desc");
     // B has null volume -> sorts last despite desc
     expect(byVolume.map((r) => r.productName)).toEqual(["C", "A", "B"]);
+  });
+
+  it("sortRows with nullsLast sorts null values last in both directions", () => {
+    type Item = { name: string; value: number | null };
+    const items: Item[] = [
+      { name: "A", value: 5 },
+      { name: "B", value: null },
+      { name: "C", value: 2 },
+    ];
+
+    const asc = sortRows(items, "value", "asc", { nullsLast: true });
+    expect(asc.map((r) => r.name)).toEqual(["C", "A", "B"]);
+
+    const desc = sortRows(items, "value", "desc", { nullsLast: true });
+    expect(desc.map((r) => r.name)).toEqual(["A", "C", "B"]);
   });
 });
