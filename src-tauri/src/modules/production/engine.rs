@@ -119,7 +119,8 @@ pub struct ProfitConfig {
     /// Combined structure+rig **cost** saving on the system-cost-index portion of
     /// the job fee (e.g. 0.03 = −3%). 0.0 = none.
     pub cost_bonus: f64,
-    /// SCC surcharge fraction of EIV added to the job fee (CCP's 4% for
+    /// SCC surcharge fraction of EIV added to the job fee (CCP's 4%, applied to
+    /// all job types — manufacturing, invention, copying, etc., not just
     /// manufacturing). 0.0 in the engine default; the command sets the real value.
     pub scc_surcharge: f64,
 }
@@ -419,7 +420,7 @@ pub fn evaluate_with_stock(
         });
     }
 
-    let job_fee = job_fee(eiv, config);
+    let job_fee_amount = job_fee(eiv, config);
 
     // Revenue from selling the product.
     let units_produced = step.product_per_run * runs;
@@ -471,16 +472,21 @@ pub fn evaluate_with_stock(
                     built: false,
                 });
             }
-            let invention_job_fee =
-                invention_eiv * config.system_cost_index * (1.0 + config.facility_tax);
+            // Invention job fee, using job_fee() like manufacturing. Approximation:
+            // config.system_cost_index is the manufacturing cost index; invention
+            // and copy jobs have their own per-activity cost indices in-game that
+            // this engine doesn't fetch. Parameterize per-activity indices later
+            // if/when they become available from ESI.
+            let invention_job_fee = job_fee(invention_eiv, config);
             // Copy job fee for the T1 BPC consumed each attempt: EIV of the T1
-            // product × the (manufacturing) cost index, as an approximation.
+            // product run through job_fee(), same manufacturing-cost-index
+            // approximation as invention_job_fee above.
             let copy_eiv: f64 = inv
                 .copy_materials
                 .iter()
                 .map(|m| eiv_unit_value(prices.get(&m.type_id)) * m.base_quantity as f64)
                 .sum();
-            let copy_fee = copy_eiv * config.system_cost_index * (1.0 + config.facility_tax);
+            let copy_fee = job_fee(copy_eiv, config);
             let attempt_cost = datacore_cost + invention_job_fee + copy_fee;
             let probability = (inv.probability * config.invention_skill_multiplier).min(1.0);
             let yielded = probability * inv.runs_per_success as f64;
@@ -504,7 +510,7 @@ pub fn evaluate_with_stock(
         None => (0.0, None),
     };
 
-    let cost = material_cost + job_fee + blueprint_cost + invention_cost;
+    let cost = material_cost + job_fee_amount + blueprint_cost + invention_cost;
     let profit = revenue - cost;
     let margin = if revenue > 0.0 {
         Some(profit / revenue)
@@ -531,7 +537,7 @@ pub fn evaluate_with_stock(
         job_time_seconds: 0.0,
         units_produced,
         material_cost,
-        job_fee,
+        job_fee: job_fee_amount,
         blueprint_cost,
         invention_cost,
         invention,
@@ -638,6 +644,73 @@ mod tests {
         };
         // 1000 EIV: 1000×0.05×0.97 + 1000×0.01 + 1000×0.04 = 48.5 + 10 + 40 = 98.5.
         assert!((job_fee(1000.0, &cfg) - 98.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn invention_and_copy_fees_include_scc_and_cost_bonus() {
+        // T2 step: no manufacturing materials of its own (isolates the
+        // invention/copy fee path); invention consumes 2x datacore (400) and
+        // the copy job consumes 3x copy material (500).
+        let step = BuildStep {
+            activity: Activity::Manufacturing,
+            blueprint_type_id: 998,
+            product_type_id: 101,
+            product_name: "T2 Widget".into(),
+            product_per_run: 1,
+            inputs: vec![],
+            invention: Some(Invention {
+                datacores: vec![InputLine {
+                    type_id: 400,
+                    name: "Datacore".into(),
+                    base_quantity: 2,
+                    sourcing: Sourcing::Buy,
+                }],
+                copy_materials: vec![InputLine {
+                    type_id: 500,
+                    name: "Copy Material".into(),
+                    base_quantity: 3,
+                    sourcing: Sourcing::Buy,
+                }],
+                runs_per_success: 1,
+                probability: 1.0,
+                result_me: 2,
+            }),
+        };
+        let prices = HashMap::from([
+            (400, price(400, Some(55.0), Some(50.0), None)),
+            (500, price(500, Some(22.0), Some(20.0), None)),
+            (101, price(101, Some(1.0), Some(1.0), None)),
+        ]);
+
+        // invention_eiv = 2*50 = 100; copy_eiv = 3*20 = 60.
+        let cfg_with_bonus = ProfitConfig {
+            system_cost_index: 0.05,
+            facility_tax: 0.01,
+            cost_bonus: 0.03,
+            scc_surcharge: 0.04,
+            ..Default::default()
+        };
+        let b = evaluate(&step, 1, 2, &prices, &cfg_with_bonus);
+        let inv = b.invention.expect("invention breakdown present");
+        // job_fee(100, cfg) = 100*0.05*0.97 + 100*0.01 + 100*0.04 = 4.85+1+4 = 9.85
+        approx(inv.invention_job_fee, 9.85);
+        // job_fee(60, cfg) = 60*0.05*0.97 + 60*0.01 + 60*0.04 = 2.91+0.6+2.4 = 5.91
+        approx(inv.copy_fee, 5.91);
+
+        // Without the surcharge/cost_bonus terms both fees must be lower —
+        // proves invention_job_fee/copy_fee actually flow through job_fee()
+        // rather than the old inline (index * (1 + facility_tax)) formula.
+        let cfg_no_bonus = ProfitConfig {
+            system_cost_index: 0.05,
+            facility_tax: 0.01,
+            cost_bonus: 0.0,
+            scc_surcharge: 0.0,
+            ..Default::default()
+        };
+        let b_no_bonus = evaluate(&step, 1, 2, &prices, &cfg_no_bonus);
+        let inv_no_bonus = b_no_bonus.invention.expect("invention breakdown present");
+        assert!(inv.invention_job_fee > inv_no_bonus.invention_job_fee);
+        assert!(inv.copy_fee > inv_no_bonus.copy_fee);
     }
 
     #[test]
