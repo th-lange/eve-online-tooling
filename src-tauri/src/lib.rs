@@ -14,6 +14,7 @@
 //!
 //! Feature modules live under [`modules`] (production first).
 
+mod bindings;
 mod capabilities;
 mod chatlog;
 mod commands;
@@ -134,6 +135,14 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // Pilot (#589): re-export the orders module's TS bindings on every
+            // debug launch, so a dev session that changes `OrderRow`/`orders_list`
+            // doesn't need a separate `cargo test` invocation to see the update.
+            // `npm run build`'s prebuild step (`cargo test export_orders_bindings`)
+            // is what release/CI builds rely on, since they never run the app.
+            #[cfg(debug_assertions)]
+            bindings::export_orders_bindings();
+
             // Resolve the app data dir once and give the shared services a
             // disk-backed conditional cache rooted there, so ESI reads survive
             // restarts and revalidate with ETags (see esi::cache).

@@ -16,6 +16,7 @@ use crate::model::AppError;
 /// own station**. A character whose orders can't be fetched is skipped
 /// rather than failing the whole call.
 #[tauri::command]
+#[specta::specta]
 pub async fn orders_list(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
@@ -23,4 +24,13 @@ pub async fn orders_list(
 ) -> Result<Vec<market::orders::OrderRow>, AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
     market::orders::collect_orders(&dir, &auth_state, &market).await
+}
+
+/// Collects this module's specta-annotated commands for [`crate::bindings`].
+/// Must live in this module: the `#[tauri::command]`/`#[specta::specta]`
+/// expansion emits helper macros that are only textually in scope here (a
+/// cross-module `collect_commands!` hits rustc's
+/// `macro_expanded_macro_exports_accessed_by_absolute_paths` restriction).
+pub fn specta_commands() -> tauri_specta::Commands<tauri::Wry> {
+    tauri_specta::collect_commands![orders_list]
 }

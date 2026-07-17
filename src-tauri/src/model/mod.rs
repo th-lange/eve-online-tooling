@@ -37,7 +37,7 @@ pub fn id_names(pairs: Vec<(i64, String)>) -> Vec<IdName> {
 /// Commands return `Result<T, AppError>`; because `AppError: From<String>`, an
 /// existing `.map_err(|e| e.to_string())?` inside such a command still works —
 /// `?` wraps the string as [`AppError::Message`].
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum AppError {
     /// No character is logged in, or a required ESI scope isn't granted.

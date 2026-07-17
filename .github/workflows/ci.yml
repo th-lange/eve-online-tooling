@@ -42,9 +42,34 @@ jobs:
       - name: Test
         run: npm run test
 
-      # `npm run build` is `tsc && vite build` — this is also the type-check gate.
+      # `npm run build`'s prebuild step regenerates the tauri-specta TS
+      # bindings for the orders module (#589), so this job also needs a Rust
+      # toolchain even though it's frontend-focused.
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+            pkg-config patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      # `npm run build` is `npm run generate:bindings && tsc && vite build` —
+      # this is also the type-check gate.
       - name: Type-check + build
         run: npm run build
+
+      # Fails the build if the committed bindings drifted from what the pilot's
+      # tauri-specta export actually produces for the current Rust source —
+      # i.e. someone changed `OrderRow`/`orders_list` and forgot to re-run
+      # `npm run generate:bindings` before committing.
+      - name: Check generated bindings are committed
+        run: git diff --exit-code -- src/lib/api/generated
 
   rust:
     name: Rust (fmt + clippy + test)
