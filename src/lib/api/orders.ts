@@ -26,5 +26,5 @@ export interface OrderRow {
  * Requires the `esi-markets.read_character_orders.v1` scope (re-login if added).
  */
 export function marketOrders(): Promise<OrderRow[]> {
-  return invoke<OrderRow[]>("market_orders");
+  return invoke<OrderRow[]>("orders_list");
 }

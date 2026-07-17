@@ -120,7 +120,7 @@ async fn activity_map(
 /// Per-system jumps + kills over the last hour, enriched with SDE names. Cached
 /// (~30 min) to match CCP's hourly refresh; `refresh = true` bypasses the cache.
 #[tauri::command]
-pub async fn system_activity(
+pub async fn route_system_activity(
     app: AppHandle,
     esi: State<'_, EsiClient>,
     refresh: bool,
@@ -137,7 +137,7 @@ pub async fn system_activity(
 
 /// Search solar systems by name (for the neighbourhood picker).
 #[tauri::command]
-pub fn system_search(app: AppHandle, query: String) -> Result<Vec<SystemMatch>, String> {
+pub fn route_system_search(app: AppHandle, query: String) -> Result<Vec<SystemMatch>, String> {
     if query.trim().len() < 2 {
         return Ok(Vec::new());
     }
@@ -181,7 +181,7 @@ pub struct Neighbourhood {
 /// carrying its last-hour jumps/kills heat. The "fog-of-war" view; until the
 /// location scope lands (#99) the centre is chosen by search rather than auto.
 #[tauri::command]
-pub async fn system_neighbourhood(
+pub async fn route_system_neighbourhood(
     app: AppHandle,
     esi: State<'_, EsiClient>,
     system_id: i64,

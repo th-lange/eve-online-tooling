@@ -43,7 +43,7 @@ describe("TradingPage", () => {
     mockInvoke({
       sde_status: () => SDE_OK,
       market_regions: () => REGIONS,
-      station_trading: () => [ROW],
+      trading_scan: () => [ROW],
     });
     renderWithQuery(<TradingPage />);
 
@@ -53,14 +53,14 @@ describe("TradingPage", () => {
   });
 
   it("shows the scan failure message", async () => {
-    // `station_trading` (src-tauri/src/modules/trading/commands.rs) still
+    // `trading_scan` (src-tauri/src/modules/trading/commands.rs) still
     // rejects with a plain `String`, not the structured AppError — the
     // page's `ErrorMsg` renders `String(e)` accordingly (no `errorMessage()`
     // call), so the fixture and assertion mirror that, not the AppError shape.
     mockInvoke({
       sde_status: () => SDE_OK,
       market_regions: () => REGIONS,
-      station_trading: () => Promise.reject("market snapshot stale"),
+      trading_scan: () => Promise.reject("market snapshot stale"),
     });
     renderWithQuery(<TradingPage />);
 

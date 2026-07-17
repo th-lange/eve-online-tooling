@@ -88,7 +88,7 @@ pub struct WalletView {
 /// merging into the durable store (so history accumulates beyond ESI's window),
 /// and return an income/expense summary pivoted by ref type.
 #[tauri::command]
-pub async fn wallet_sync(
+pub async fn accounting_wallet_sync(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<WalletView, AppError> {
@@ -212,7 +212,7 @@ pub struct LedgerView {
 /// (so the ledger stays current even if the Accounting page is never opened),
 /// then resolves item names via the SDE. Rows are newest-first.
 #[tauri::command]
-pub async fn transaction_ledger(
+pub async fn accounting_transaction_ledger(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<LedgerView, AppError> {
@@ -374,7 +374,7 @@ struct StoredJobLite {
 /// estimate — current prices, ME not applied, so cost is a slight overestimate /
 /// profit a slight underestimate). Unmatched sells get zero cost and are flagged.
 #[tauri::command]
-pub async fn profit_fifo(
+pub async fn accounting_profit_fifo(
     app: AppHandle,
     market: State<'_, MarketService>,
 ) -> Result<ProfitView, AppError> {

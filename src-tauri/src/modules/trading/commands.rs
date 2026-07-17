@@ -37,7 +37,7 @@ pub struct TradeParams {
 /// Rank tradeable items at a market by station-trade profit (buy→sell spread
 /// after fees). Excludes blacklisted items; marks favorites.
 #[tauri::command]
-pub async fn station_trading(
+pub async fn trading_scan(
     app: AppHandle,
     market: State<'_, MarketService>,
     params: TradeParams,

@@ -28,7 +28,7 @@ export interface LocalScanResult {
  * logged-in character.
  */
 export function localScan(text: string): Promise<LocalScanResult> {
-  return invoke<LocalScanResult>("local_scan", { text });
+  return invoke<LocalScanResult>("localintel_scan", { text });
 }
 
 export interface LocalLogResult {
@@ -39,7 +39,7 @@ export interface LocalLogResult {
 
 /** Speaker names from the newest `Local_*` chatlog in a user-configured folder. */
 export function localLogNames(logsDir: string): Promise<LocalLogResult> {
-  return invoke<LocalLogResult>("local_log_names", { logsDir });
+  return invoke<LocalLogResult>("localintel_log_names", { logsDir });
 }
 
 export interface ZkillStats {

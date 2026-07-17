@@ -21,12 +21,12 @@ export interface NotifRow {
  * Needs the `esi-characters.read_notifications.v1` scope.
  */
 export function notifications(): Promise<NotifRow[]> {
-  return invoke<NotifRow[]>("notifications");
+  return invoke<NotifRow[]>("notifications_list");
 }
 
 /** Hide a notification from the feed (durable, per character). */
 export function notificationDismiss(notificationId: number): Promise<void> {
-  return invoke<void>("notification_dismiss", { notificationId });
+  return invoke<void>("notifications_dismiss", { notificationId });
 }
 
 /** Un-dismiss everything so the full feed shows again. */

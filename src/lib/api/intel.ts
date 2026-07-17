@@ -76,5 +76,5 @@ export interface FwMap {
  * Public data, cached ~5 min.
  */
 export function fwSystems(): Promise<FwMap> {
-  return invoke<FwMap>("fw_systems");
+  return invoke<FwMap>("intel_fw_systems");
 }

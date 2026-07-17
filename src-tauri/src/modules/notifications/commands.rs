@@ -92,7 +92,7 @@ pub struct NotifRow {
 /// names in one batch. A character whose fetch fails is skipped rather than
 /// failing the whole call.
 #[tauri::command]
-pub async fn notifications(
+pub async fn notifications_list(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<Vec<NotifRow>, AppError> {
@@ -158,7 +158,7 @@ pub async fn notifications(
 /// Hide a notification from the feed (durable, per character). Under "all
 /// characters" this applies to the primary (first) character.
 #[tauri::command]
-pub fn notification_dismiss(app: AppHandle, notification_id: i64) -> Result<(), AppError> {
+pub fn notifications_dismiss(app: AppHandle, notification_id: i64) -> Result<(), AppError> {
     let (dir, character_id) = storage::dir_and_primary_character(&app)?;
     let key = format!("notifications_dismissed_{character_id}");
     let mut dismissed: Vec<i64> = storage::load_data(&dir, &key).unwrap_or_default();

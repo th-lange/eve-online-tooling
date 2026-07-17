@@ -29,7 +29,7 @@ export interface AppraisalParams {
 
 /** Value a pasted inventory (buy & sell) at a market, with total cargo volume. */
 export function appraisal(params: AppraisalParams): Promise<AppraisalResult> {
-  return invoke<AppraisalResult>("appraisal", { params });
+  return invoke<AppraisalResult>("appraisal_run", { params });
 }
 
 export interface ReprocessInputLine {

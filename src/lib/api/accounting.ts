@@ -17,7 +17,7 @@ export interface WalletView {
   recent: RecentEntry[];
 }
 export function walletSync(): Promise<WalletView> {
-  return invoke<WalletView>("wallet_sync");
+  return invoke<WalletView>("accounting_wallet_sync");
 }
 
 export interface ProfitView {
@@ -33,7 +33,7 @@ export interface ProfitView {
   totalProfit: number;
 }
 export function profitFifo(): Promise<ProfitView> {
-  return invoke<ProfitView>("profit_fifo");
+  return invoke<ProfitView>("accounting_profit_fifo");
 }
 
 /** One market transaction (a single buy or sell fill). */
@@ -57,5 +57,5 @@ export interface LedgerView {
  * first), refreshed from ESI and accumulated durably. Needs the wallet scope.
  */
 export function transactionLedger(): Promise<LedgerView> {
-  return invoke<LedgerView>("transaction_ledger");
+  return invoke<LedgerView>("accounting_transaction_ledger");
 }
