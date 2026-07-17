@@ -5,6 +5,7 @@ import {
   systemSearch,
   type SystemMatch,
 } from "../../lib/api";
+import { Combo } from "../../components/Combo";
 import { Field } from "./components";
 
 /** Cost-index % field with a build-system search that fills it from the live
@@ -16,13 +17,7 @@ export function CostIndexField({
   value: number;
   onChange: (n: number) => void;
 }) {
-  const [q, setQ] = useState("");
   const [picked, setPicked] = useState<SystemMatch | null>(null);
-  const matches = useQuery({
-    queryKey: ["production", "systemSearch", q],
-    queryFn: () => systemSearch(q),
-    enabled: q.trim().length >= 2 && !picked,
-  });
   const idx = useQuery({
     queryKey: ["production", "costIndex", picked?.id],
     queryFn: () => productionSystemCostIndex(picked!.id),
@@ -46,32 +41,15 @@ export function CostIndexField({
         onChange={(e) => onChange(Number(e.currentTarget.value))}
         className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
       />
-      <div className="relative">
-        <input
-          value={picked ? picked.name : q}
-          onChange={(e) => {
-            setPicked(null);
-            setQ(e.currentTarget.value);
-          }}
+      <div className="mt-1">
+        <Combo
+          value={picked}
+          onPick={setPicked}
+          search={systemSearch}
           placeholder="↳ fill from a build system…"
-          className="mt-1 w-full rounded bg-zinc-800/60 px-2 py-1 text-xs text-zinc-300 outline-none placeholder:text-zinc-500"
+          width="w-full"
+          maxResults={8}
         />
-        {!picked && (matches.data?.length ?? 0) > 0 && (
-          <div className="absolute z-10 mt-0.5 max-h-40 w-full overflow-auto rounded border border-zinc-700 bg-zinc-900 text-xs shadow-lg">
-            {matches.data!.slice(0, 8).map((m) => (
-              <button
-                key={m.id}
-                onClick={() => {
-                  setPicked(m);
-                  setQ(m.name);
-                }}
-                className="block w-full px-2 py-1 text-left text-zinc-300 hover:bg-zinc-800"
-              >
-                {m.name}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
       {picked && idx.isLoading && (
         <span className="text-[10px] text-zinc-500">

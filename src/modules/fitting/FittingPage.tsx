@@ -27,6 +27,7 @@ import {
   type WeaponRange,
 } from "../../lib/api";
 import { Page, PageHeader } from "../../components/page";
+import { Combo } from "../../components/Combo";
 import { SdeGate } from "../../components/SdeGate";
 import { formatInt, formatIsk } from "../../lib/format";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
@@ -63,7 +64,6 @@ function Workbench() {
   const [fit, setFit] = useState<Fit | null>(null);
   // When set (from clicking a free slot), the add-module browser filters to it.
   const [slotFilter, setSlotFilter] = useState<SlotKind | null>(null);
-  const [query, setQuery] = useState("");
   const [regionId, setRegionId] = useState(FORGE);
   const [eft, setEft] = useState("");
   const [skillSource, setSkillSource] = useState<SkillSource>("allFive");
@@ -88,12 +88,6 @@ function Workbench() {
   const regions = useQuery({
     queryKey: ["market", "regions"],
     queryFn: marketRegions,
-  });
-  // Ship-only search (no modules/charges/blueprints).
-  const ships = useQuery({
-    queryKey: ["fitting", "ships", query],
-    queryFn: () => sdeSearchShips(query),
-    enabled: query.trim().length >= 2,
   });
   const saved = useQuery({
     queryKey: ["fitting", "saved"],
@@ -317,7 +311,6 @@ function Workbench() {
   }, [fitGroups]);
 
   function pickShip(id: number, name: string) {
-    setQuery("");
     setFit({ id: "", name: `${name} fit`, shipTypeId: id, items: [] });
   }
   function removeItem(globalIndex: number) {
@@ -401,30 +394,16 @@ function Workbench() {
       <div className="flex h-full flex-col gap-4">
         {/* Controls: Ship · Skills · Price · (right) Fits */}
         <div className="flex flex-wrap items-end gap-3">
-          <div className="relative">
-            <label className="flex flex-col gap-1 text-xs text-zinc-400">
-              Ship (hull)
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.currentTarget.value)}
-                placeholder="search a hull…"
-                className="w-56 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
-              />
-            </label>
-            {query.trim().length >= 2 && (ships.data?.length ?? 0) > 0 && (
-              <div className="absolute z-20 mt-1 max-h-60 w-56 overflow-auto rounded border border-zinc-700 bg-zinc-900 text-sm shadow-lg">
-                {ships.data!.map((r) => (
-                  <button
-                    key={r.id}
-                    onClick={() => pickShip(r.id, r.name)}
-                    className="block w-full px-2 py-1 text-left text-zinc-300 hover:bg-zinc-800"
-                  >
-                    {r.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <Combo
+            value={
+              fit ? { id: fit.shipTypeId, name: nameOf(fit.shipTypeId) } : null
+            }
+            onPick={(v) => (v ? pickShip(v.id, v.name) : setFit(null))}
+            search={sdeSearchShips}
+            label="Ship (hull)"
+            placeholder="search a hull…"
+            width="w-56"
+          />
           <label className="flex flex-col gap-1 text-xs text-zinc-400">
             Skills
             <select
