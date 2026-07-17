@@ -22,6 +22,34 @@ restarts; changing it while the bridge is running restarts it on the new port.
 
 Deactivate any time from the same card; the server stops immediately.
 
+### Hands-free startup (for agent-driven testing)
+
+Check **Start MCP bridge on launch** on the same card to skip the manual
+Activate step on every session. When enabled, the bridge starts automatically
+with the app, on the port you've configured (auto by default).
+
+While running — whether started manually or via autostart — the app also
+writes a **discovery file** to `<app data dir>/mcp.json`:
+
+```json
+{ "url": "http://127.0.0.1:<port>/mcp", "token": "<bearer token>" }
+```
+
+The file is created with `0600` permissions (owner-only) and removed the
+moment the bridge stops or the app exits — so a stale file never outlives a
+running server. A local agent (e.g. Claude Code) can launch the app, poll for
+this file, and self-configure with no human copy-pasting:
+
+```bash
+claude mcp add --transport http eve-online-tooling "$(jq -r .url mcp.json)" \
+  --header "Authorization: Bearer $(jq -r .token mcp.json)"
+```
+
+Security posture is unchanged by either convenience: still loopback-only,
+still a fresh per-session token, still read-only public-data tools. The
+discovery file only makes the token readable to the same OS user that could
+already read the app's data directory.
+
 ## What it exposes
 
 All tools are read-only and operate on public data:

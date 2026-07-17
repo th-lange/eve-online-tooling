@@ -28,6 +28,8 @@ export function mcpStop(): Promise<McpStatus> {
 export interface McpConfig {
   /** Preferred port (0 = OS-assigned / auto). */
   port: number;
+  /** Start the bridge automatically on app launch. */
+  autostart: boolean;
 }
 
 /** The current MCP configuration. */
@@ -38,4 +40,10 @@ export function mcpConfig(): Promise<McpConfig> {
 /** Set the preferred port (0 = auto); restarts the bridge if running. */
 export function mcpSetPort(port: number): Promise<McpStatus> {
   return invoke<McpStatus>("mcp_set_port", { port });
+}
+
+/** Opt in/out of starting the MCP bridge automatically on app launch. Takes
+ *  effect on the next launch; does not itself start/stop the bridge. */
+export function mcpSetAutostart(autostart: boolean): Promise<McpConfig> {
+  return invoke<McpConfig>("mcp_set_autostart", { autostart });
 }

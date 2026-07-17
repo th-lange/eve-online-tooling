@@ -149,9 +149,22 @@ pub fn run() {
             app.manage(esi::EsiClient::with_cache(dir.clone()));
             app.manage(std::sync::Arc::new(plugins::PluginRegistry::load(&dir)));
             app.manage(std::sync::Arc::new(plugins::PluginManager::new()));
-            app.manage(esi::AuthState::with_cache(dir));
+            app.manage(esi::AuthState::with_cache(dir.clone()));
             modules::dpsmeter::init(app);
             mcp::init(app);
+
+            // Opt-in convenience for agent-driven testing (#591): if the user
+            // has enabled "start MCP bridge on launch", start it now on the
+            // persisted port. Failure here is logged, never fatal to launch.
+            if mcp::autostart_enabled(&dir) {
+                let registry = app.state::<std::sync::Arc<plugins::PluginRegistry>>().inner().clone();
+                let manager = app.state::<std::sync::Arc<plugins::PluginManager>>().inner().clone();
+                let ctx = mcp::build_ctx(&dir, registry, manager);
+                let port = mcp::configured_port(&dir);
+                if let Err(e) = app.state::<mcp::McpState>().start(ctx, port) {
+                    eprintln!("mcp: autostart failed: {e}");
+                }
+            }
 
             // Fetch key data early, in the background — never block launch. Keeps
             // the SDE current (daily, md5-gated) and primes the active
@@ -179,6 +192,7 @@ pub fn run() {
             mcp::mcp_status,
             mcp::mcp_config,
             mcp::mcp_set_port,
+            mcp::mcp_set_autostart,
             commands::eve_default_log_dir,
             esi::commands::auth_login,
             esi::commands::auth_characters,
@@ -328,6 +342,14 @@ pub fn run() {
             info::info_list,
             info::info_clear,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // Stop the MCP bridge (and remove its discovery file) on exit so
+            // a stale mcp.json never outlives the process.
+            if let tauri::RunEvent::Exit = event {
+                use tauri::Manager;
+                app_handle.state::<mcp::McpState>().stop();
+            }
+        });
 }
