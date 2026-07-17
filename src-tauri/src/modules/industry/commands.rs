@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::esi::{
-    authed_get, character_skill_levels, corporation_id, resolve_names, AuthState, ESI_BASE,
+    authed_get, authed_get_paged_or_empty_on_403, character_skill_levels, corporation_id,
+    resolve_names, AuthState,
 };
 use crate::sde::{Sde, SdePaths};
 use crate::storage;
@@ -67,19 +68,13 @@ async fn fetch_corp_jobs(
     character_id: i64,
     corporation_id: i64,
 ) -> Vec<StoredJob> {
-    let Ok(token) = auth.access_token_for(character_id).await else {
-        return Vec::new();
-    };
-    let url = format!(
-        "{ESI_BASE}/latest/corporations/{corporation_id}/industry/jobs/?include_completed=true"
-    );
-    let Ok(resp) = auth.http().get(&url).bearer_auth(&token).send().await else {
-        return Vec::new();
-    };
-    match resp.error_for_status() {
-        Ok(r) => r.json::<Vec<StoredJob>>().await.unwrap_or_default(),
-        Err(_) => Vec::new(),
-    }
+    authed_get_paged_or_empty_on_403(
+        auth,
+        character_id,
+        &format!("/latest/corporations/{corporation_id}/industry/jobs/?include_completed=true"),
+    )
+    .await
+    .unwrap_or_default()
 }
 
 /// Industry job slots of one kind: how many are in use vs available.

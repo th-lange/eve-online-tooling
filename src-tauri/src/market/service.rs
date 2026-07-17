@@ -60,7 +60,7 @@ impl MarketService {
         Self::with_client(EsiClient::with_cache(dir))
     }
 
-    fn with_client(esi: EsiClient) -> Self {
+    pub(crate) fn with_client(esi: EsiClient) -> Self {
         Self {
             esi,
             fuzzwork: FuzzworkClient::new(),
@@ -467,6 +467,10 @@ fn model_from_aggregate(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use crate::esi::ConditionalCache;
+
     use super::*;
 
     fn day(volume: i64) -> HistoryDay {
@@ -489,5 +493,141 @@ mod tests {
         assert_eq!(average_recent_volume(&history, 99), 30);
         // No history → 0, never a panic.
         assert_eq!(average_recent_volume(&[], 7), 0);
+    }
+
+    /// Build the `EsiError::Http` an ESI response with `status` would produce,
+    /// via the same `error_for_status()` path the real client goes through.
+    fn http_error(status: u16) -> EsiError {
+        let response = http::Response::builder()
+            .status(status)
+            .body(Vec::new())
+            .expect("valid response");
+        let err = reqwest::Response::from(response)
+            .error_for_status()
+            .expect_err("non-2xx status must error");
+        EsiError::Http(err)
+    }
+
+    #[test]
+    fn is_not_found_detects_404_only() {
+        assert!(is_not_found(&http_error(404)));
+        assert!(!is_not_found(&http_error(500)));
+    }
+
+    /// A loopback ESI stand-in: `/orders/` and `/history/` always 404 (the
+    /// "type isn't traded" case), everything else (the global adjusted-prices
+    /// document) 200s with an empty array. Returns the base URL plus one
+    /// request counter per endpoint family so tests can pin exactly how many
+    /// upstream requests a call sequence produced.
+    fn start_test_server() -> (String, Arc<AtomicUsize>, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("bind loopback");
+        let addr = server.server_addr().to_ip().expect("ip addr");
+        let orders_hits = Arc::new(AtomicUsize::new(0));
+        let history_hits = Arc::new(AtomicUsize::new(0));
+        let prices_hits = Arc::new(AtomicUsize::new(0));
+        let (o, h, p) = (
+            orders_hits.clone(),
+            history_hits.clone(),
+            prices_hits.clone(),
+        );
+        std::thread::spawn(move || {
+            for request in server.incoming_requests() {
+                let url = request.url().to_string();
+                if url.contains("/orders/") {
+                    o.fetch_add(1, Ordering::SeqCst);
+                    let _ = request.respond(
+                        tiny_http::Response::from_string("not found").with_status_code(404),
+                    );
+                } else if url.contains("/history/") {
+                    h.fetch_add(1, Ordering::SeqCst);
+                    let _ = request.respond(
+                        tiny_http::Response::from_string("not found").with_status_code(404),
+                    );
+                } else {
+                    p.fetch_add(1, Ordering::SeqCst);
+                    let _ = request.respond(tiny_http::Response::from_string("[]"));
+                }
+            }
+        });
+        (
+            format!("http://{addr}"),
+            orders_hits,
+            history_hits,
+            prices_hits,
+        )
+    }
+
+    #[test]
+    fn no_data_single_flight_and_ttl_cache() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let (base, orders_hits, history_hits, prices_hits) = start_test_server();
+            let esi = EsiClient::with_base(base, ConditionalCache::disabled());
+            let service = MarketService::with_client(esi);
+            let location = Location::Region(10000002);
+
+            // (a) 404-is-no-data: orders/history 404 → `price_model` is Ok
+            // with an empty-derived model, not Err.
+            let model = service
+                .price_model(location, 34)
+                .await
+                .expect("404 orders/history must be treated as no data, not an error");
+            assert_eq!(
+                model,
+                PriceModel {
+                    type_id: 34,
+                    ..Default::default()
+                }
+            );
+            assert_eq!(orders_hits.load(Ordering::SeqCst), 1);
+            assert_eq!(history_hits.load(Ordering::SeqCst), 1);
+            assert_eq!(prices_hits.load(Ordering::SeqCst), 1);
+
+            // `price_models_at` never touches orders/history (it prices via
+            // Fuzzwork aggregates) — an empty batch must still be Ok rather
+            // than erroring just because the region's orders/history 404.
+            let models = service
+                .price_models_at(location, &[])
+                .await
+                .expect("empty batch must be Ok");
+            assert!(models.is_empty());
+
+            // (b) Two concurrent `price_model` calls for the same, previously
+            // unseen (region, type) key must collapse into exactly one
+            // upstream request per endpoint — pins the `KeyLocks`
+            // single-flight dedup.
+            let (first, second) = tokio::join!(
+                service.price_model(location, 35),
+                service.price_model(location, 35),
+            );
+            first.expect("first concurrent call ok");
+            second.expect("second concurrent call ok");
+            assert_eq!(
+                orders_hits.load(Ordering::SeqCst),
+                2,
+                "single-flight must collapse concurrent orders fetches"
+            );
+            assert_eq!(
+                history_hits.load(Ordering::SeqCst),
+                2,
+                "single-flight must collapse concurrent history fetches"
+            );
+            // Adjusted prices were already cached by the very first call above.
+            assert_eq!(prices_hits.load(Ordering::SeqCst), 1);
+
+            // (c) A sequential repeat within the TTL window must serve
+            // entirely from cache — zero new upstream requests. Pins the
+            // `TtlCache` wiring.
+            service
+                .price_model(location, 35)
+                .await
+                .expect("cached call ok");
+            assert_eq!(orders_hits.load(Ordering::SeqCst), 2);
+            assert_eq!(history_hits.load(Ordering::SeqCst), 2);
+            assert_eq!(prices_hits.load(Ordering::SeqCst), 1);
+        });
     }
 }

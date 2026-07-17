@@ -114,3 +114,120 @@ fn verify(db: &Path) -> Result<(), SdeError> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+
+    /// Per-process scratch dir, following the repo convention of using the
+    /// real filesystem (not the `tempfile` crate) for on-disk fixtures.
+    fn test_dir() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("eve-sde-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn decompress_round_trips_gzip_payload() {
+        let dir = test_dir();
+        let archive = dir.join("roundtrip.gz");
+        let out = dir.join("roundtrip.out");
+
+        let payload = b"hello eve sde";
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(payload).unwrap();
+        let compressed = encoder.finish().unwrap();
+        std::fs::write(&archive, &compressed).unwrap();
+
+        decompress(&archive, &out).unwrap();
+        let result = std::fs::read(&out).unwrap();
+        assert_eq!(result, payload);
+
+        let _ = std::fs::remove_file(&archive);
+        let _ = std::fs::remove_file(&out);
+    }
+
+    #[test]
+    fn decompress_rejects_garbage_without_panicking() {
+        let dir = test_dir();
+        // Simulates a saved HTML error page mistakenly downloaded in place
+        // of the real gzip archive.
+        let archive = dir.join("garbage.gz");
+        let out = dir.join("garbage.out");
+        std::fs::write(&archive, b"<html>404</html>").unwrap();
+
+        let result = decompress(&archive, &out);
+        assert!(result.is_err());
+
+        let _ = std::fs::remove_file(&archive);
+        let _ = std::fs::remove_file(&out);
+    }
+
+    #[test]
+    fn verify_rejects_non_sqlite_file() {
+        let dir = test_dir();
+        let db = dir.join("not-a-db.sqlite");
+        std::fs::write(&db, b"not a database").unwrap();
+
+        assert!(verify(&db).is_err());
+
+        let _ = std::fs::remove_file(&db);
+    }
+
+    /// All required tables except `dgmEffects`, so `verify` should fail and
+    /// name the specific table it couldn't find.
+    fn create_db_missing_dgm_effects(db: &Path) {
+        let _ = std::fs::remove_file(db);
+        let conn = rusqlite::Connection::open(db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE invTypes(typeID INT);
+             CREATE TABLE industryActivityProducts(typeID INT);
+             CREATE TABLE industryActivityMaterials(typeID INT);
+             CREATE TABLE dgmTypeAttributes(typeID INT);
+             CREATE TABLE dgmAttributeTypes(attributeID INT);
+             CREATE TABLE dgmTypeEffects(typeID INT);",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn verify_names_missing_table() {
+        let dir = test_dir();
+        let db = dir.join("missing-table.sqlite");
+        create_db_missing_dgm_effects(&db);
+
+        match verify(&db) {
+            Err(SdeError::Corrupt(msg)) => assert!(
+                msg.contains("dgmEffects"),
+                "expected the missing-table error to name dgmEffects, got: {msg}"
+            ),
+            other => panic!("expected Corrupt(_) naming dgmEffects, got {other:?}"),
+        }
+
+        let _ = std::fs::remove_file(&db);
+    }
+
+    #[test]
+    fn verify_passes_with_all_required_tables() {
+        let dir = test_dir();
+        let db = dir.join("complete.sqlite");
+        let _ = std::fs::remove_file(&db);
+        let conn = rusqlite::Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE invTypes(typeID INT);
+             CREATE TABLE industryActivityProducts(typeID INT);
+             CREATE TABLE industryActivityMaterials(typeID INT);
+             CREATE TABLE dgmTypeAttributes(typeID INT);
+             CREATE TABLE dgmAttributeTypes(typeID INT);
+             CREATE TABLE dgmTypeEffects(typeID INT);
+             CREATE TABLE dgmEffects(effectID INT);",
+        )
+        .unwrap();
+        drop(conn);
+
+        assert!(verify(&db).is_ok());
+
+        let _ = std::fs::remove_file(&db);
+    }
+}

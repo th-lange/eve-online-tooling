@@ -109,6 +109,9 @@ pub struct AuthState {
     http: reqwest::Client,
     tokens: Mutex<HashMap<i64, CachedToken>>,
     cache: Arc<ConditionalCache>,
+    /// SSO token endpoint. Always [`TOKEN_URL`] outside tests; overridable via
+    /// [`AuthState::with_token_url`] so tests can point it at a local stub.
+    token_url: String,
 }
 
 struct CachedToken {
@@ -143,12 +146,32 @@ impl AuthState {
             http,
             tokens: Mutex::new(HashMap::new()),
             cache: Arc::new(cache),
+            token_url: TOKEN_URL.to_string(),
         }
     }
 
     /// The shared conditional cache, for authed endpoint wrappers.
     pub fn cache(&self) -> &ConditionalCache {
         &self.cache
+    }
+
+    /// Point the SSO token endpoint at a local stub instead of EVE's real
+    /// server. Test-only.
+    #[cfg(test)]
+    pub fn with_token_url(mut self, token_url: impl Into<String>) -> Self {
+        self.token_url = token_url.into();
+        self
+    }
+
+    /// The cached access token for a character, and whether it's still
+    /// considered valid (i.e. would be served without a refresh). `None` when
+    /// nothing is cached. Test-only.
+    #[cfg(test)]
+    pub fn cached_token(&self, character_id: i64) -> Option<(String, bool)> {
+        self.tokens.lock().unwrap().get(&character_id).map(|t| {
+            let valid = t.expires_at > Instant::now();
+            (t.access_token.clone(), valid)
+        })
     }
 
     fn cache_token(&self, character_id: i64, access_token: String, expires_in: u64) {
@@ -174,11 +197,21 @@ impl AuthState {
         let refresh_token = crate::storage::load_refresh_token(character_id)
             .map_err(AuthError::Storage)?
             .ok_or(AuthError::NotLoggedIn)?;
-        let tokens = refresh(&self.http, &refresh_token).await?;
+        let tokens = refresh(&self.http, &refresh_token, &self.token_url).await?;
         // ESI rotates refresh tokens: persist the new one so the old (now
         // invalidated) token isn't reused on the next refresh.
         if tokens.refresh_token != refresh_token {
-            let _ = crate::storage::store_refresh_token(character_id, &tokens.refresh_token);
+            if let Err(e) = crate::storage::store_refresh_token(character_id, &tokens.refresh_token)
+            {
+                // Not fatal to this refresh (the access token we just got is
+                // still good), but silently swallowing it here means the
+                // *next* refresh reuses the now-rotated-away token and the
+                // character gets logged out with no clue why — log it.
+                eprintln!(
+                    "esi::auth: failed to persist rotated refresh token for character \
+                     {character_id}: {e} — next refresh may use a stale token and force a re-login"
+                );
+            }
         }
         self.cache_token(character_id, tokens.access_token.clone(), tokens.expires_in);
         Ok(tokens.access_token)
@@ -264,10 +297,12 @@ pub async fn exchange_code(
     Ok(resp.json().await?)
 }
 
-/// Exchange a refresh token for a fresh access token.
+/// Exchange a refresh token for a fresh access token. `token_url` is the SSO
+/// token endpoint — always [`TOKEN_URL`] outside tests.
 pub async fn refresh(
     http: &reqwest::Client,
     refresh_token: &str,
+    token_url: &str,
 ) -> Result<TokenResponse, AuthError> {
     let params = [
         ("grant_type", "refresh_token"),
@@ -275,7 +310,7 @@ pub async fn refresh(
         ("client_id", CLIENT_ID),
     ];
     let resp = http
-        .post(TOKEN_URL)
+        .post(token_url)
         .form(&params)
         .send()
         .await?
@@ -477,5 +512,261 @@ mod tests {
     fn pkce_challenge_is_deterministic_for_verifier() {
         let p = generate_pkce();
         assert_eq!(code_challenge(&p.verifier), p.challenge);
+    }
+
+    #[test]
+    fn cache_token_saturates_short_ttl_below_the_expiry_cushion() {
+        let state = AuthState::new();
+        // 30s < the 60s "refresh a minute early" cushion, so the TTL must
+        // saturate to zero rather than underflow.
+        state.cache_token(910_001, "short-lived".to_string(), 30);
+        let (token, valid) = state.cached_token(910_001).expect("token cached");
+        assert_eq!(token, "short-lived");
+        assert!(
+            !valid,
+            "expires_in=30 is inside the 60s cushion and must not be served as valid"
+        );
+    }
+
+    #[test]
+    fn cache_token_with_generous_ttl_is_served_as_valid() {
+        let state = AuthState::new();
+        state.cache_token(910_002, "long-lived".to_string(), 3600);
+        let (token, valid) = state.cached_token(910_002).expect("token cached");
+        assert_eq!(token, "long-lived");
+        assert!(
+            valid,
+            "expires_in=3600 is well outside the 60s cushion and must be served as valid"
+        );
+    }
+
+    #[test]
+    fn access_token_for_serves_a_still_valid_cached_token_without_refreshing() {
+        let state = AuthState::new();
+        state.cache_token(910_003, "cached-access-token".to_string(), 3600);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        // No refresh token is stored and no SSO stub is running, so this only
+        // succeeds if the cache-hit branch returns without going further.
+        let token = rt
+            .block_on(state.access_token_for(910_003))
+            .expect("valid cached token should be served without a refresh");
+        assert_eq!(token, "cached-access-token");
+    }
+
+    /// A `keyring` credential store that (a) actually persists across
+    /// separate `Entry::new` calls — unlike `keyring::mock`, whose entries
+    /// have no persistence beyond the single `Entry` instance that created
+    /// them, which doesn't round-trip through `crate::storage`'s
+    /// call-a-fresh-`Entry`-every-time functions — and (b) counts
+    /// `set_secret` calls, so tests can assert exactly when a rotation write
+    /// actually happens.
+    mod counting_credential {
+        use std::any::Any;
+        use std::collections::HashMap;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, LazyLock};
+
+        use keyring::credential::{
+            Credential, CredentialApi, CredentialBuilderApi, CredentialPersistence,
+        };
+        use parking_lot::Mutex;
+
+        #[derive(Default)]
+        struct Inner {
+            secret: Mutex<Option<Vec<u8>>>,
+            set_calls: AtomicUsize,
+        }
+
+        #[derive(Clone, Default)]
+        pub struct CountingCredential(Arc<Inner>);
+
+        impl CountingCredential {
+            /// Number of `set_secret`/`set_password` calls seen so far.
+            pub fn set_calls(&self) -> usize {
+                self.0.set_calls.load(Ordering::SeqCst)
+            }
+        }
+
+        impl CredentialApi for CountingCredential {
+            fn set_secret(&self, secret: &[u8]) -> keyring::Result<()> {
+                self.0.set_calls.fetch_add(1, Ordering::SeqCst);
+                *self.0.secret.lock() = Some(secret.to_vec());
+                Ok(())
+            }
+            fn get_secret(&self) -> keyring::Result<Vec<u8>> {
+                self.0.secret.lock().clone().ok_or(keyring::Error::NoEntry)
+            }
+            fn delete_credential(&self) -> keyring::Result<()> {
+                let mut secret = self.0.secret.lock();
+                if secret.take().is_none() {
+                    return Err(keyring::Error::NoEntry);
+                }
+                Ok(())
+            }
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+        }
+
+        struct CountingBuilder;
+
+        impl CredentialBuilderApi for CountingBuilder {
+            fn build(
+                &self,
+                _target: Option<&str>,
+                service: &str,
+                user: &str,
+            ) -> keyring::Result<Box<Credential>> {
+                static REGISTRY: LazyLock<Mutex<HashMap<(String, String), CountingCredential>>> =
+                    LazyLock::new(|| Mutex::new(HashMap::new()));
+                let mut registry = REGISTRY.lock();
+                let credential = registry
+                    .entry((service.to_string(), user.to_string()))
+                    .or_default()
+                    .clone();
+                Ok(Box::new(credential))
+            }
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+            fn persistence(&self) -> CredentialPersistence {
+                CredentialPersistence::UntilDelete
+            }
+        }
+
+        /// Install this store as `keyring`'s default credential builder for
+        /// the rest of the test process.
+        pub fn install() {
+            keyring::set_default_credential_builder(Box::new(CountingBuilder));
+        }
+
+        /// The credential registered for a character's keychain entry.
+        /// [`install`] must have run first.
+        pub fn credential_for(character_id: i64) -> CountingCredential {
+            let entry =
+                keyring::Entry::new(crate::storage::KEYCHAIN_SERVICE, &character_id.to_string())
+                    .expect("build entry");
+            entry
+                .get_credential()
+                .downcast_ref::<CountingCredential>()
+                .expect("counting credential")
+                .clone()
+        }
+    }
+
+    /// Bind a one-shot HTTP stub that answers the next request with `body`,
+    /// returning its `http://127.0.0.1:<port>/` URL and the server thread.
+    fn start_token_stub(body: String) -> (String, std::thread::JoinHandle<()>) {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("bind stub sso");
+        let addr = server.server_addr().to_ip().expect("ip addr");
+        let handle = std::thread::spawn(move || {
+            if let Ok(request) = server.recv() {
+                let _ = request.respond(tiny_http::Response::from_string(body));
+            }
+        });
+        (format!("http://{addr}/"), handle)
+    }
+
+    #[test]
+    fn access_token_for_reports_not_logged_in_when_nothing_is_stored() {
+        counting_credential::install();
+        let state = AuthState::new();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let err = rt
+            .block_on(state.access_token_for(910_101))
+            .expect_err("no refresh token stored for this character");
+        assert!(
+            matches!(err, AuthError::NotLoggedIn),
+            "expected NotLoggedIn, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn access_token_for_persists_a_rotated_refresh_token() {
+        counting_credential::install();
+        let character_id = 910_102;
+        crate::storage::store_refresh_token(character_id, "old-refresh-token")
+            .expect("seed initial refresh token");
+        assert_eq!(
+            counting_credential::credential_for(character_id).set_calls(),
+            1
+        );
+
+        let body = serde_json::json!({
+            "access_token": "fresh-access-token",
+            "refresh_token": "rotated-refresh-token",
+            "expires_in": 1200,
+        })
+        .to_string();
+        let (url, server_thread) = start_token_stub(body);
+        let state = AuthState::new().with_token_url(url);
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let access_token = rt
+            .block_on(state.access_token_for(character_id))
+            .expect("refresh should succeed");
+        assert_eq!(access_token, "fresh-access-token");
+
+        // The rotated token differs from what was on file, so the write-back
+        // must have fired exactly once more.
+        assert_eq!(
+            counting_credential::credential_for(character_id).set_calls(),
+            2
+        );
+        assert_eq!(
+            crate::storage::load_refresh_token(character_id).unwrap(),
+            Some("rotated-refresh-token".to_string())
+        );
+
+        server_thread.join().expect("server thread");
+    }
+
+    #[test]
+    fn access_token_for_skips_a_redundant_store_when_the_refresh_token_is_unchanged() {
+        counting_credential::install();
+        let character_id = 910_103;
+        crate::storage::store_refresh_token(character_id, "same-refresh-token")
+            .expect("seed initial refresh token");
+        assert_eq!(
+            counting_credential::credential_for(character_id).set_calls(),
+            1
+        );
+
+        let body = serde_json::json!({
+            "access_token": "fresh-access-token",
+            "refresh_token": "same-refresh-token",
+            "expires_in": 1200,
+        })
+        .to_string();
+        let (url, server_thread) = start_token_stub(body);
+        let state = AuthState::new().with_token_url(url);
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let access_token = rt
+            .block_on(state.access_token_for(character_id))
+            .expect("refresh should succeed");
+        assert_eq!(access_token, "fresh-access-token");
+
+        // ESI returned the same refresh token we already had on file: no
+        // redundant write-back.
+        assert_eq!(
+            counting_credential::credential_for(character_id).set_calls(),
+            1,
+            "unchanged refresh token must not trigger a redundant store"
+        );
+
+        server_thread.join().expect("server thread");
     }
 }
