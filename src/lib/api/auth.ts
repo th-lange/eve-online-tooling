@@ -56,17 +56,6 @@ export function ownedBlueprints(): Promise<OwnedBlueprint[]> {
   return invoke<OwnedBlueprint[]>("owned_blueprints");
 }
 
-export interface Asset {
-  typeId: number;
-  quantity: number;
-  locationId: number;
-}
-
-/** A character's assets. */
-export function characterAssets(characterId: number): Promise<Asset[]> {
-  return invoke<Asset[]>("character_assets", { characterId });
-}
-
 /** Open the in-game market window for a type (needs a logged-in character + the
  * esi-ui.open_window scope). */
 export function openMarketWindow(typeId: number): Promise<void> {

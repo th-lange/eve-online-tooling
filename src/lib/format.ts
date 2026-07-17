@@ -1,6 +1,7 @@
 // Display helpers for ISK amounts, percentages, and integers, plus a pure
 // sort comparator for profit rows (kept here so it's unit-testable).
 import type { ProfitBreakdown } from "./api";
+import type { SortDir } from "./usePersistentSort";
 
 const isk = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 const int = new Intl.NumberFormat("en-US");
@@ -52,7 +53,7 @@ export type SortKey =
   | "productPrice"
   | "unitCost"
   | "productVolume";
-export type SortDir = "asc" | "desc";
+export type { SortDir };
 
 /**
  * Production cost per unit: materials + job fee + blueprint + invention,

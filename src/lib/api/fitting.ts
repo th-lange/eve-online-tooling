@@ -241,13 +241,6 @@ export function fittingCompatibleCharges(typeId: number): Promise<IdName[]> {
   return invoke<IdName[]>("fitting_compatible_charges", { typeId });
 }
 
-/** Classify each type id's slot (for the add-module browser's slot badges). */
-export function fittingClassifySlots(
-  typeIds: number[],
-): Promise<[number, SlotKind][]> {
-  return invoke<[number, SlotKind][]>("fitting_classify_slots", { typeIds });
-}
-
 /** Serialize a fit to an EFT clipboard string. */
 export function fittingExportEft(fit: Fit): Promise<string> {
   return invoke<string>("fitting_export_eft", { fit });
@@ -341,11 +334,6 @@ export function fittingEsiList(force = false): Promise<Fit[]> {
  * `esi-fittings.write_fittings.v1` scope). Returns the new fitting id. */
 export function fittingEsiPush(fit: Fit): Promise<number> {
   return invoke<number>("fitting_esi_push", { fit });
-}
-
-/** A single locally saved fit by id, or `null`. */
-export function fittingLoadLocal(id: string): Promise<Fit | null> {
-  return invoke<Fit | null>("fitting_load_local", { id });
 }
 
 /** Delete a locally saved fit by id. */
