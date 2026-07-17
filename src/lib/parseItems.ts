@@ -1,6 +1,7 @@
-// Liberal paste parsing for shopping lists: turn assorted copy/paste formats
-// (EVE Multibuy, inventory dumps with trailing columns, plain name lists) into
-// `{ name, quantity }` items. Kept pure (no Tauri imports) so it's unit-tested.
+// Liberal paste parsing for pasted item lists (shopping, appraisal, workbench
+// import): turn assorted copy/paste formats (EVE Multibuy, inventory dumps
+// with trailing columns, plain name lists) into `{ name, quantity }` items.
+// Kept pure (no Tauri imports) so it's unit-tested.
 
 /** A token that is purely a number (optional thousands separators and an `x`
  *  like "x100"/"100x") — used to split a line's name from its quantity. */

@@ -15,7 +15,7 @@ import {
   type ProfitParams,
 } from "../../lib/api";
 import { classifyPaste, dedupNames, toggle, uniqueSorted } from "./helpers";
-import { parseItems } from "../shopping/parse";
+import { parseItems } from "../../lib/parseItems";
 import {
   FORGE,
   IMPORTED_BP_KEY,

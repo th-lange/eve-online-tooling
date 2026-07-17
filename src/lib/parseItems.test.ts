@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { parseItems, parseLine } from "./parse";
+import { parseItems, parseLine } from "./parseItems";
 
-describe("shopping paste parser", () => {
+describe("shared paste item parser", () => {
   it("parses Multibuy name + quantity (space or tab)", () => {
     expect(parseLine("Tritanium 1000")).toEqual({
       name: "Tritanium",
@@ -46,6 +46,17 @@ describe("shopping paste parser", () => {
     expect(parseItems(text)).toEqual([
       { name: "Tritanium", quantity: 100 },
       { name: "Damage Control II", quantity: 2 },
+    ]);
+  });
+
+  it("parses a single-space multibuy line (appraisal's old weak parser required a tab or 2+ spaces)", () => {
+    expect(parseLine("Tritanium 100")).toEqual({
+      name: "Tritanium",
+      quantity: 100,
+    });
+    expect(parseItems("Tritanium 100\nPyerite 250")).toEqual([
+      { name: "Tritanium", quantity: 100 },
+      { name: "Pyerite", quantity: 250 },
     ]);
   });
 });
