@@ -4,7 +4,6 @@
 //! automatic cleanup of dead links. Modelled on Pathfinder's `ConnectionModel`.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
@@ -92,13 +91,6 @@ pub struct ConnectionView {
     pub created_at: u64,
 }
 
-fn now_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 /// Drop dead wormholes: past max age, or EOL beyond the grace window. Stargate /
 /// jumpbridge links are permanent and never pruned. Pure for testability.
 fn prune(mut conns: Vec<Connection>, now: u64) -> Vec<Connection> {
@@ -125,7 +117,7 @@ fn prune(mut conns: Vec<Connection>, now: u64) -> Vec<Connection> {
 fn load(app: &AppHandle) -> Result<(std::path::PathBuf, Vec<Connection>), String> {
     let dir = crate::storage::app_data_dir(app)?;
     let conns: Vec<Connection> = storage::load_data(&dir, STORE_KEY).unwrap_or_default();
-    Ok((dir, prune(conns, now_secs())))
+    Ok((dir, prune(conns, crate::util::time::now_secs())))
 }
 
 fn views(dir: &std::path::Path, conns: &[Connection]) -> Result<Vec<ConnectionView>, String> {
@@ -192,7 +184,7 @@ pub fn wh_add_connection(
         source_sig: connection.source_sig,
         target_sig: connection.target_sig,
         source: "manual".to_string(),
-        created_at: now_secs(),
+        created_at: crate::util::time::now_secs(),
         eol_updated_at: None,
     });
     save_and_view(&dir, &conns)
@@ -214,7 +206,7 @@ pub fn wh_update_connection(
     let (dir, mut conns) = load(&app)?;
     if let Some(c) = conns.iter_mut().find(|c| c.id == id) {
         if eol && !c.eol {
-            c.eol_updated_at = Some(now_secs());
+            c.eol_updated_at = Some(crate::util::time::now_secs());
         } else if !eol {
             c.eol_updated_at = None;
         }
@@ -536,7 +528,7 @@ fn merge_by_source(
 pub async fn wh_import_evescout(app: AppHandle) -> Result<Vec<ConnectionView>, String> {
     let (dir, existing) = load(&app)?;
     let sigs = crate::evescout::fetch_signatures(&dir).await?;
-    let now = now_secs();
+    let now = crate::util::time::now_secs();
     let imported: Vec<Connection> = sigs
         .iter()
         .filter_map(|s| imported_connection(s, now))
@@ -882,7 +874,7 @@ pub async fn wh_tripwire_import(app: AppHandle) -> Result<Vec<ConnectionView>, S
         .collect();
 
     let (_dir, existing) = load(&app)?;
-    let imported = tripwire_connections(&sigs, &whs, &jump_mass_by_code, now_secs());
+    let imported = tripwire_connections(&sigs, &whs, &jump_mass_by_code, crate::util::time::now_secs());
     let merged = merge_by_source(existing, imported, "tripwire");
     save_and_view(&dir, &merged)
 }

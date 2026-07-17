@@ -195,13 +195,6 @@ struct CacheEnvelope<T> {
     value: T,
 }
 
-fn now_epoch() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 fn cache_path(app_data_dir: &Path, key: &str) -> std::path::PathBuf {
     // Keys are caller-controlled identifiers; sanitize to a safe filename.
     let safe: String = key
@@ -221,7 +214,7 @@ fn cache_path(app_data_dir: &Path, key: &str) -> std::path::PathBuf {
 pub fn cache_get<T: DeserializeOwned>(app_data_dir: &Path, key: &str) -> Option<T> {
     let bytes = std::fs::read(cache_path(app_data_dir, key)).ok()?;
     let env: CacheEnvelope<T> = serde_json::from_slice(&bytes).ok()?;
-    (env.expires >= now_epoch()).then_some(env.value)
+    (env.expires >= crate::util::time::now_secs()).then_some(env.value)
 }
 
 /// Drop a cached value so the next read misses (e.g. after a write invalidates it).
@@ -274,7 +267,7 @@ pub fn cache_put<T: Serialize>(
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let env = CacheEnvelope {
-        expires: now_epoch() + ttl_secs,
+        expires: crate::util::time::now_secs() + ttl_secs,
         value,
     };
     let data = serde_json::to_vec(&env).map_err(|e| e.to_string())?;

@@ -16,7 +16,7 @@
 //!   caller to interpret.
 
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use reqwest::header::{HeaderMap, RETRY_AFTER};
 use reqwest::{RequestBuilder, Response, StatusCode};
@@ -25,13 +25,6 @@ use reqwest::{RequestBuilder, Response, StatusCode};
 const LOW_BUDGET: i64 = 10;
 /// Total attempts (1 try + up to 3 retries).
 const MAX_ATTEMPTS: u32 = 4;
-
-fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
 
 /// Process-global view of ESI's error budget.
 pub struct ErrorBudget {
@@ -63,7 +56,7 @@ impl ErrorBudget {
         if let Some(reset) = header_i64(headers, "x-esi-error-limit-reset") {
             // `reset` is seconds until the window resets.
             self.reset_at
-                .store(now() + reset.max(0) as u64, Ordering::Relaxed);
+                .store(crate::util::time::now_secs() + reset.max(0) as u64, Ordering::Relaxed);
         }
     }
 
@@ -81,7 +74,7 @@ impl ErrorBudget {
     }
 
     async fn throttle(&self) {
-        if let Some(d) = self.wait_needed(now()) {
+        if let Some(d) = self.wait_needed(crate::util::time::now_secs()) {
             tokio::time::sleep(d).await;
         }
     }
@@ -206,9 +199,9 @@ mod tests {
         let b = ErrorBudget::new();
         b.observe(&h);
         assert_eq!(b.remain.load(Ordering::Relaxed), 7);
-        assert!(b.reset_at.load(Ordering::Relaxed) >= now());
+        assert!(b.reset_at.load(Ordering::Relaxed) >= crate::util::time::now_secs());
         // Low budget recorded → it would pause within the window.
-        assert!(b.wait_needed(now()).is_some());
+        assert!(b.wait_needed(crate::util::time::now_secs()).is_some());
     }
 
     #[test]

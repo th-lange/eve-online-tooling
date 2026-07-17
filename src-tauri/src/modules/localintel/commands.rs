@@ -112,13 +112,6 @@ const CACHE_AFFILIATIONS: &str = "esi_affiliations"; // character id → CachedA
 const AFFILIATION_TTL: u64 = 60 * 60; // 1 hour
 const STANDINGS_TTL: u64 = 30 * 60; // 30 minutes
 
-fn now_epoch() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 /// The logged-in character's standings, cached for [`STANDINGS_TTL`] so repeated
 /// scans don't re-pull the (3-call) contacts set every time.
 async fn cached_standings(app: &AppHandle, auth_state: &AuthState) -> HashMap<i64, f64> {
@@ -191,7 +184,7 @@ pub async fn local_scan(
 
     // 2. character ids → corp/alliance/faction — cached with a 1h TTL (corp moves
     //    are infrequent); only stale/unknown ids hit /characters/affiliation/.
-    let now = now_epoch();
+    let now = crate::util::time::now_secs();
     let mut aff_cache: HashMap<i64, CachedAff> = dir
         .as_ref()
         .and_then(|d| storage::load_data(d, CACHE_AFFILIATIONS))

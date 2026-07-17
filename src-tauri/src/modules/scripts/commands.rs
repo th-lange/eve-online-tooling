@@ -4,7 +4,6 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 use tauri::AppHandle;
@@ -18,13 +17,6 @@ use super::types::{Language, Script, ScriptRun};
 
 fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     crate::storage::app_data_dir(app)
-}
-
-fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or_default()
 }
 
 /// Every stored script.
@@ -49,7 +41,7 @@ pub fn scripts_save(app: AppHandle, script: Script) -> Result<Vec<Script>, AppEr
     if script.id.trim().is_empty() {
         script.id = store::unique_id(&scripts, &script.name);
     }
-    script.updated_at = now();
+    script.updated_at = crate::util::time::now_secs();
     match scripts.iter_mut().find(|s| s.id == script.id) {
         Some(existing) => *existing = script,
         None => scripts.push(script),

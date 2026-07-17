@@ -28,6 +28,7 @@ mod modules;
 mod plugins;
 mod sde;
 mod storage;
+mod util;
 
 /// A snap-packaged terminal (e.g. Alacritty) exports GStreamer paths into the
 /// shell pointing at its own sandbox, which lacks `appsink`/`autoaudiosink`.

@@ -178,45 +178,8 @@ fn per_hour_balance(
 fn now_rfc3339_cmp(expiry: &str) -> bool {
     // A cheap "has this ISO instant passed?" — lexicographic compare works for
     // UTC RFC3339 (both Z-suffixed, same width). Good enough for the flag.
-    let now = chrono_like_now();
+    let now = crate::util::time::format_rfc3339(crate::util::time::now_secs());
     expiry <= now.as_str()
-}
-
-/// Current UTC time as an RFC3339 string (seconds precision, `Z`). Avoids adding
-/// a date crate: derive from the unix epoch.
-fn chrono_like_now() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    // Convert epoch seconds → civil date (days since 1970) using Howard Hinnant's
-    // algorithm, then format. Only used for a coarse "expired?" comparison.
-    let days = (secs / 86_400) as i64;
-    let rem = secs % 86_400;
-    let (y, m, d) = civil_from_days(days);
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-        y,
-        m,
-        d,
-        rem / 3600,
-        (rem % 3600) / 60,
-        rem % 60
-    )
-}
-
-/// days since 1970-01-01 → (year, month, day). Hinnant's civil_from_days.
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
-    (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
 /// Colonies overview with extractor timers, storage usage, and the balance.
@@ -536,12 +499,5 @@ mod tests {
     fn zero_cycle_is_ignored() {
         let f = schem(1, 0, vec![(100, 2)], vec![(200, 1)]);
         assert!(per_hour_balance(&[&f], &[(10, 5, 0)]).is_empty());
-    }
-
-    #[test]
-    fn civil_date_roundtrips_epoch() {
-        // 2021-01-01T00:00:00Z is 18628 days after epoch.
-        assert_eq!(civil_from_days(18628), (2021, 1, 1));
-        assert_eq!(civil_from_days(0), (1970, 1, 1));
     }
 }

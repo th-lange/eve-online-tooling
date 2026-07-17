@@ -19,7 +19,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 use reqwest::header::{CACHE_CONTROL, DATE, ETAG, EXPIRES, IF_NONE_MATCH};
 use reqwest::{RequestBuilder, StatusCode};
@@ -50,13 +50,6 @@ pub struct ConditionalCache {
     /// `None` disables persistence/caching (transparent pass-through).
     dir: Option<PathBuf>,
     mem: Mutex<HashMap<String, CachedResponse>>,
-}
-
-fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 fn sanitize(key: &str) -> String {
@@ -171,7 +164,7 @@ impl ConditionalCache {
     /// body. No-op if the entry has since vanished.
     fn touch(&self, key: &str, ttl: u64) {
         if let Some(mut e) = self.load(key) {
-            e.expires = now() + ttl;
+            e.expires = crate::util::time::now_secs() + ttl;
             self.store(key, e);
         }
     }
@@ -196,7 +189,7 @@ impl ConditionalCache {
 
         let entry = self.load(key);
         if let Some(e) = &entry {
-            if e.expires > now() {
+            if e.expires > crate::util::time::now_secs() {
                 return Ok(serde_json::from_str(&e.body)?);
             }
         }
@@ -221,7 +214,7 @@ impl ConditionalCache {
             key,
             CachedResponse {
                 etag,
-                expires: now() + ttl,
+                expires: crate::util::time::now_secs() + ttl,
                 body: body.clone(),
             },
         );
@@ -244,7 +237,7 @@ impl ConditionalCache {
 
         let entry = self.load(key);
         if let Some(e) = &entry {
-            if e.expires > now() {
+            if e.expires > crate::util::time::now_secs() {
                 return Ok(serde_json::from_str(&e.body)?);
             }
         }
@@ -279,7 +272,7 @@ impl ConditionalCache {
             key,
             CachedResponse {
                 etag,
-                expires: now() + ttl,
+                expires: crate::util::time::now_secs() + ttl,
                 body: body.clone(),
             },
         );
@@ -366,13 +359,13 @@ mod tests {
             "k",
             CachedResponse {
                 etag: Some("\"abc\"".into()),
-                expires: now() + 3600,
+                expires: crate::util::time::now_secs() + 3600,
                 body: "[1,2,3]".into(),
             },
         );
         let e = cache.load("k").expect("present");
         assert_eq!(e.body, "[1,2,3]");
-        assert!(e.expires > now());
+        assert!(e.expires > crate::util::time::now_secs());
 
         // A fresh process (cold mem) still reads it from disk.
         let cold = ConditionalCache::on_disk(dir.clone());

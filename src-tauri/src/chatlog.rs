@@ -146,19 +146,7 @@ fn parse_ts(stamp: &str) -> i64 {
     if !(1..=12).contains(&mo) || !(1..=31).contains(&da) {
         return 0;
     }
-    days_from_civil(y, mo, da) * 86_400 + h * 3_600 + mi * 60 + s
-}
-
-/// Days since 1970-01-01 for a proleptic-Gregorian date (Howard Hinnant's
-/// `days_from_civil`). Avoids pulling in `chrono` just to window chat messages.
-fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = (if y >= 0 { y } else { y - 399 }) / 400;
-    let yoe = y - era * 400; // [0, 399]
-    let mp = if m > 2 { m - 3 } else { m + 9 }; // [0, 11], Mar..Feb
-    let doy = (153 * mp + 2) / 5 + d - 1; // [0, 365]
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
-    era * 146_097 + doe - 719_468
+    crate::util::time::days_from_civil(y as i32, mo as u32, da as u32) * 86_400 + h * 3_600 + mi * 60 + s
 }
 
 #[cfg(test)]
@@ -259,7 +247,7 @@ Mexallon
         // 2026.06.25 12:00:05 UTC.
         assert_eq!(
             e[0].ts,
-            days_from_civil(2026, 6, 25) * 86_400 + 12 * 3_600 + 5
+            crate::util::time::days_from_civil(2026, 6, 25) * 86_400 + 12 * 3_600 + 5
         );
         // A repeat 4s later is a distinct message, 4s apart.
         let two = parse_chat_entries(

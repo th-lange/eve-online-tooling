@@ -374,7 +374,7 @@ pub async fn character_research(
 
     let ids: Vec<i64> = agents.iter().map(|a| a.agent_id).collect();
     let names = resolve_names(&auth_state, &ids).await;
-    let now = chrono_now_secs();
+    let now = crate::util::time::now_secs() as f64;
 
     let (mut total_points, mut points_per_day) = (0.0, 0.0);
     let rows = agents
@@ -474,7 +474,7 @@ pub async fn character_mining(
         .collect();
     let systems = sde.system_names().map_err(|e| e.to_string())?;
 
-    let now = chrono_now_secs();
+    let now = crate::util::time::now_secs() as f64;
     let (d1, d7, d30) = (now - 86_400.0, now - 7.0 * 86_400.0, now - 30.0 * 86_400.0);
     let (mut u24, mut u7, mut u30) = (0i64, 0i64, 0i64);
     let (mut v24, mut v7, mut v30) = (0.0, 0.0, 0.0);
@@ -634,32 +634,12 @@ pub async fn character_fleet(
     })
 }
 
-/// Seconds since the Unix epoch (no chrono dep — uses SystemTime).
-fn chrono_now_secs() -> f64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs_f64())
-        .unwrap_or(0.0)
-}
-
 /// Parse an ESI RFC3339 timestamp (`2026-01-02T03:04:05Z`) to epoch seconds.
+/// Falls back to "now" on a parse failure so a bad/missing timestamp reads as
+/// zero elapsed time rather than propagating an error into a display calc.
 fn parse_epoch(s: &str) -> f64 {
-    // Minimal parse: split date/time, compute days since epoch.
-    let bytes = s.as_bytes();
-    if s.len() < 19 || bytes.get(4) != Some(&b'-') {
-        return chrono_now_secs();
-    }
-    let num = |a: usize, b: usize| s[a..b].parse::<i64>().unwrap_or(0);
-    let (y, mo, d) = (num(0, 4), num(5, 7), num(8, 10));
-    let (h, mi, se) = (num(11, 13), num(14, 16), num(17, 19));
-    // Days from civil (Howard Hinnant's algorithm).
-    let y = if mo <= 2 { y - 1 } else { y };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400;
-    let doy = (153 * (if mo > 2 { mo - 3 } else { mo + 9 }) + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146_097 + doe - 719_468;
-    (days * 86_400 + h * 3600 + mi * 60 + se) as f64
+    crate::util::time::parse_rfc3339_epoch(s)
+        .unwrap_or_else(|_| crate::util::time::now_secs()) as f64
 }
 
 #[cfg(test)]
