@@ -21,7 +21,7 @@ import { Signatures } from "./Signatures";
 import { TripwirePanel } from "./TripwirePanel";
 import { Field, SystemPicker } from "./shared";
 import { MASS, fmtHours, fmtMkg, massColor } from "./helpers";
-import { Page, PageHeader } from "../../components/page";
+import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
 
 const JUMP = ["s", "m", "l", "xl"];
@@ -177,13 +177,12 @@ function Workbench() {
             className="w-20 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
           />
         </Field>
-        <button
+        <PrimaryButton
           onClick={() => add.mutate()}
           disabled={!source || !target || add.isPending}
-          className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
         >
           Add connection
-        </button>
+        </PrimaryButton>
         <div className="flex w-full flex-wrap gap-4">
           <WhSigHint label="From sig" code={srcSig} types={types} />
           <WhSigHint label="To sig" code={tgtSig} types={types} />

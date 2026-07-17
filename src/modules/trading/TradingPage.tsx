@@ -28,7 +28,12 @@ import {
   SortHeaderCell,
   type SortColumn,
 } from "../../components/SortHeaderCell";
-import { Page, PageHeader, Centered } from "../../components/page";
+import {
+  Page,
+  PageHeader,
+  Centered,
+  PrimaryButton,
+} from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
 
 const FORGE = 10000002;
@@ -146,13 +151,14 @@ function Workbench() {
         subtitle={SUBTITLE}
         actions={
           <>
-            <button
+            <PrimaryButton
               onClick={calculate}
               disabled={run.isPending}
-              className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              pending={run.isPending}
+              pendingLabel="Scanning…"
             >
-              {run.isPending ? "Scanning…" : "Calculate"}
-            </button>
+              Calculate
+            </PrimaryButton>
             <DataAge
               updatedAt={run.isSuccess ? run.submittedAt : undefined}
               fetching={run.isPending}

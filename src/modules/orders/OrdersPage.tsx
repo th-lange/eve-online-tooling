@@ -18,7 +18,7 @@ import {
   type SortColumn,
 } from "../../components/SortHeaderCell";
 import { DataAge } from "../../components/DataAge";
-import { Page, PageHeader } from "../../components/page";
+import { Page, PageHeader, PrimaryButton } from "../../components/page";
 
 export function OrdersPage() {
   const orders = useQuery({
@@ -97,13 +97,14 @@ export function OrdersPage() {
                   ? "Re-check cost"
                   : "Check build cost"}
             </button>
-            <button
+            <PrimaryButton
               onClick={() => orders.refetch()}
               disabled={orders.isFetching}
-              className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              pending={orders.isFetching}
+              pendingLabel="Loading…"
             >
-              {orders.isFetching ? "Loading…" : "Refresh"}
-            </button>
+              Refresh
+            </PrimaryButton>
             <DataAge
               updatedAt={orders.dataUpdatedAt}
               fetching={orders.isFetching}

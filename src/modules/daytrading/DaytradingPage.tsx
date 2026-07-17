@@ -26,7 +26,13 @@ import {
   SortHeaderCell,
   type SortColumn,
 } from "../../components/SortHeaderCell";
-import { Page, PageHeader, SplitPane, Centered } from "../../components/page";
+import {
+  Page,
+  PageHeader,
+  SplitPane,
+  Centered,
+  PrimaryButton,
+} from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
 
 type Tab = "opportunities" | "favorites" | "blacklist";
@@ -183,12 +189,13 @@ function Workbench() {
         subtitle={SUBTITLE}
         actions={
           <>
-            <button
+            <PrimaryButton
               onClick={calculate}
               disabled={
                 run.isPending || selectedCount < 2 || categoryIds.size === 0
               }
-              className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+              pending={run.isPending}
+              pendingLabel="Scanning…"
               title={
                 selectedCount < 2
                   ? "Select at least two hubs"
@@ -197,8 +204,8 @@ function Workbench() {
                     : undefined
               }
             >
-              {run.isPending ? "Scanning…" : "Calculate"}
-            </button>
+              Calculate
+            </PrimaryButton>
             <DataAge
               updatedAt={run.isSuccess ? run.submittedAt : undefined}
               fetching={run.isPending}

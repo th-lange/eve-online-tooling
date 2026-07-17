@@ -11,6 +11,7 @@ import {
 } from "../../lib/api";
 import { formatInt, formatIsk } from "../../lib/format";
 import { Page, PageHeader } from "../../components/page";
+import { Stat } from "../../components/Stat";
 
 type Tab = "skills" | "standings" | "research" | "mining" | "fleet";
 
@@ -330,15 +331,6 @@ function Tabs({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
           {t.label}
         </button>
       ))}
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-xs text-zinc-500">{label}</div>
-      <div className="tabular-nums text-zinc-200">{value}</div>
     </div>
   );
 }

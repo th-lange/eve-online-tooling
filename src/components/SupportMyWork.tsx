@@ -4,6 +4,7 @@ import { Check, Copy, ExternalLink, Heart, X } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { STORAGE_KEYS } from "../lib/storageKeys";
 import { useCopyToClipboard } from "../lib/useCopyToClipboard";
+import { PrimaryButton } from "./page";
 
 // EVE content-creator code (placeholder until CCP finishes processing it) and
 // the buddy / referral sign-up link. Surfaced once on first launch and, after
@@ -148,12 +149,7 @@ export function SupportModal() {
         </p>
 
         <div className="mt-4 flex justify-end">
-          <button
-            onClick={dismiss}
-            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"
-          >
-            Got it
-          </button>
+          <PrimaryButton onClick={dismiss}>Got it</PrimaryButton>
         </div>
       </div>
     </div>,

@@ -14,7 +14,7 @@ import {
   SortHeaderCell,
   type SortColumn,
 } from "../../components/SortHeaderCell";
-import { Page, PageHeader } from "../../components/page";
+import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
 
 type OfferSortKey =
@@ -107,16 +107,17 @@ function Workbench() {
               </span>
             )}
             <div className="flex items-center gap-2">
-              <button
+              <PrimaryButton
                 onClick={() =>
                   corpId != null &&
                   run.mutate({ corporationId: corpId, iskPerLp })
                 }
                 disabled={run.isPending || corpId == null}
-                className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                pending={run.isPending}
+                pendingLabel="Pricing…"
               >
-                {run.isPending ? "Pricing…" : "Calculate"}
-              </button>
+                Calculate
+              </PrimaryButton>
               <button
                 onClick={() =>
                   corpId != null &&

@@ -24,7 +24,7 @@ import {
 import { formatInt } from "../../lib/format";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { usePersistentState } from "../../lib/usePersistentState";
-import { Page, PageHeader } from "../../components/page";
+import { Page, PageHeader, PrimaryButton } from "../../components/page";
 
 /** Best-effort desktop notification — requests permission, never throws. */
 async function notify(title: string, body: string) {
@@ -247,13 +247,14 @@ export function LocalIntelPage() {
             title="Local Intel"
             subtitle="Select-all in the in-game Local member list, copy, and paste it here to classify every pilot by corp/alliance against your character's contacts (blue/red) and standings."
             actions={
-              <button
+              <PrimaryButton
                 onClick={() => scan.mutate(text)}
                 disabled={scan.isPending || text.trim() === ""}
-                className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+                pending={scan.isPending}
+                pendingLabel="Scanning…"
               >
-                {scan.isPending ? "Scanning…" : "Scan local"}
-              </button>
+                Scan local
+              </PrimaryButton>
             }
           />
 

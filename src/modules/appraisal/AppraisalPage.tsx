@@ -21,7 +21,7 @@ import {
   SortHeaderCell,
   type SortColumn,
 } from "../../components/SortHeaderCell";
-import { Page, PageHeader } from "../../components/page";
+import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
 
 const FORGE = 10000002;
@@ -81,15 +81,14 @@ function Workbench() {
         title={TITLE}
         subtitle={SUBTITLE}
         actions={
-          <button
+          <PrimaryButton
             onClick={calculate}
             disabled={run.isPending || runRepro.isPending || items.length === 0}
-            className="rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+            pending={run.isPending || runRepro.isPending}
+            pendingLabel="Pricing…"
           >
-            {run.isPending || runRepro.isPending
-              ? "Pricing…"
-              : `${reprocess ? "Reprocess" : "Appraise"} (${items.length})`}
-          </button>
+            {`${reprocess ? "Reprocess" : "Appraise"} (${items.length})`}
+          </PrimaryButton>
         }
       />
 
