@@ -326,12 +326,22 @@ fn packaged_volume(group_id: i64, assembled: Option<f64>) -> Option<f64> {
 }
 
 #[cfg(test)]
+/// Build an in-memory SDE from raw schema/data SQL, executed via
+/// `execute_batch`. Shared across `sde::db`'s own tests and other modules'
+/// (e.g. production's `resolve_input` tests) so each test only has to write
+/// the table/row SQL it actually needs.
+pub(crate) fn test_sde(sql: &str) -> Sde {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(sql).unwrap();
+    Sde::from_connection(conn)
+}
+
+#[cfg(test)]
 /// A tiny in-memory SDE: blueprint 999 builds 1x Widget (100) from
 /// 40x Tritanium (200) + 10x Pyerite (300).
 fn fixture() -> Sde {
-    let conn = Connection::open_in_memory().unwrap();
-    conn.execute_batch(
-            "CREATE TABLE invGroups(groupID INT, categoryID INT, groupName TEXT);
+    test_sde(
+        "CREATE TABLE invGroups(groupID INT, categoryID INT, groupName TEXT);
              CREATE TABLE invTypes(typeID INT, groupID INT, typeName TEXT, volume REAL);
              CREATE TABLE industryActivityProducts(typeID INT, activityID INT, productTypeID INT, quantity INT);
              CREATE TABLE industryActivityMaterials(typeID INT, activityID INT, materialTypeID INT, quantity INT);
@@ -364,9 +374,7 @@ fn fixture() -> Sde {
              INSERT INTO industryActivityProducts VALUES (998, 8, 999, 10);
              INSERT INTO industryActivityProbabilities VALUES (998, 8, 999, 0.3);
              INSERT INTO industryActivityMaterials VALUES (998, 8, 500, 2);",
-        )
-        .unwrap();
-    Sde::from_connection(conn)
+    )
 }
 
 #[cfg(test)]
@@ -375,17 +383,14 @@ mod tests {
 
     #[test]
     fn search_matches_terms_in_any_order() {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
+        let sde = test_sde(
             "CREATE TABLE invTypes(typeID INT, typeName TEXT, marketGroupID INT, published INT);
              INSERT INTO invTypes VALUES
                (1, 'Large Shield Hardener', 10, 1),
                (2, 'Small Shield Booster', 10, 1),
                (3, 'Damage Control II', 10, 1),
                (4, 'Unpublished Shield Hardener', 10, 0);",
-        )
-        .unwrap();
-        let sde = Sde::from_connection(conn);
+        );
 
         // Both terms must match, order-independent; unpublished excluded.
         let by_order = sde.search_types("shield hard", 10).unwrap();

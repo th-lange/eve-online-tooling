@@ -18,6 +18,8 @@ mod error;
 pub mod graph;
 mod types;
 
+#[cfg(test)]
+pub(crate) use db::test_sde;
 pub use db::{wormhole_class_label, Sde};
 pub use download::download_sde;
 pub use error::SdeError;

@@ -526,3 +526,237 @@ pub async fn production_system_cost_index(
     };
     Ok(map.get(&system_id).copied())
 }
+
+#[cfg(test)]
+mod resolve_input_tests {
+    use std::collections::HashSet;
+
+    use crate::sde::test_sde;
+
+    use super::*;
+
+    /// A↔B cycle: blueprint 11 (product A=10) needs 1x B=20; blueprint 21
+    /// (product B=20) needs 1x A=10.
+    fn cycle_sde() -> Sde {
+        test_sde(
+            "CREATE TABLE invTypes(typeID INT, typeName TEXT);
+             INSERT INTO invTypes VALUES (10, 'A'), (20, 'B');
+             CREATE TABLE industryActivityProducts(typeID INT, activityID INT, productTypeID INT, quantity INT);
+             CREATE TABLE industryActivityMaterials(typeID INT, activityID INT, materialTypeID INT, quantity INT);
+             INSERT INTO industryActivityProducts VALUES (11, 1, 10, 1), (21, 1, 20, 1);
+             INSERT INTO industryActivityMaterials VALUES (11, 1, 20, 1), (21, 1, 10, 1);",
+        )
+    }
+
+    /// A straight-line chain A=10 -> B=20 -> C=30, where C is a raw material
+    /// with no recipe of its own (a genuine Buy leaf).
+    fn chain_sde() -> Sde {
+        test_sde(
+            "CREATE TABLE invTypes(typeID INT, typeName TEXT);
+             INSERT INTO invTypes VALUES (10, 'A'), (20, 'B'), (30, 'C');
+             CREATE TABLE industryActivityProducts(typeID INT, activityID INT, productTypeID INT, quantity INT);
+             CREATE TABLE industryActivityMaterials(typeID INT, activityID INT, materialTypeID INT, quantity INT);
+             INSERT INTO industryActivityProducts VALUES (11, 1, 10, 1), (21, 1, 20, 1);
+             INSERT INTO industryActivityMaterials VALUES (11, 1, 20, 1), (21, 1, 30, 1);",
+        )
+    }
+
+    /// Reaction formula 500 (activityID 11) makes 100x Composite (600) from
+    /// 50x Tritanium (200, a Buy leaf).
+    fn reaction_sde() -> Sde {
+        test_sde(
+            "CREATE TABLE invTypes(typeID INT, typeName TEXT);
+             INSERT INTO invTypes VALUES (200, 'Tritanium'), (600, 'Composite');
+             CREATE TABLE industryActivityProducts(typeID INT, activityID INT, productTypeID INT, quantity INT);
+             CREATE TABLE industryActivityMaterials(typeID INT, activityID INT, materialTypeID INT, quantity INT);
+             INSERT INTO industryActivityProducts VALUES (500, 11, 600, 100);
+             INSERT INTO industryActivityMaterials VALUES (500, 11, 200, 50);",
+        )
+    }
+
+    fn build_step(line: &InputLine) -> &BuildStep {
+        match &line.sourcing {
+            Sourcing::Build(step) => step,
+            Sourcing::Buy => panic!("expected {} to be Build, got Buy", line.type_id),
+        }
+    }
+
+    fn assert_buy(line: &InputLine) {
+        assert!(
+            matches!(line.sourcing, Sourcing::Buy),
+            "expected {} to be Buy",
+            line.type_id
+        );
+    }
+
+    #[test]
+    fn cycle_terminates_with_inner_recurrence_bought() {
+        let sde = cycle_sde();
+        let mut cache = HashMap::new();
+        let mut needed = HashSet::new();
+        let mut path = Vec::new();
+
+        let root = resolve_input(
+            &sde,
+            &mut cache,
+            &mut needed,
+            10,
+            "A".to_string(),
+            1,
+            MAX_TREE_DEPTH,
+            true,
+            &mut path,
+        )
+        .unwrap();
+
+        // A builds from B, B builds from A -- but the second occurrence of A
+        // (closing the cycle) must be bought, not recursed into again.
+        let a_step = build_step(&root);
+        assert_eq!(a_step.inputs.len(), 1);
+        let b_line = &a_step.inputs[0];
+        assert_eq!(b_line.type_id, 20);
+        let b_step = build_step(b_line);
+        assert_eq!(b_step.inputs.len(), 1);
+        let inner_a = &b_step.inputs[0];
+        assert_eq!(inner_a.type_id, 10);
+        assert_buy(inner_a);
+        // `path` is restored to empty once the top-level call returns.
+        assert!(path.is_empty());
+    }
+
+    #[test]
+    fn zero_depth_buys_without_touching_the_recipe_cache() {
+        let sde = chain_sde();
+        let mut cache = HashMap::new();
+        let mut needed = HashSet::new();
+        let mut path = Vec::new();
+
+        let line = resolve_input(
+            &sde,
+            &mut cache,
+            &mut needed,
+            10,
+            "A".to_string(),
+            1,
+            0,
+            true,
+            &mut path,
+        )
+        .unwrap();
+
+        assert_buy(&line);
+        assert!(cache.is_empty(), "depth 0 must never consult recipe_for");
+    }
+
+    #[test]
+    fn build_false_buys_without_touching_the_recipe_cache() {
+        let sde = chain_sde();
+        let mut cache = HashMap::new();
+        let mut needed = HashSet::new();
+        let mut path = Vec::new();
+
+        let line = resolve_input(
+            &sde,
+            &mut cache,
+            &mut needed,
+            10,
+            "A".to_string(),
+            1,
+            MAX_TREE_DEPTH,
+            false,
+            &mut path,
+        )
+        .unwrap();
+
+        assert_buy(&line);
+        assert!(
+            cache.is_empty(),
+            "build=false must never consult recipe_for"
+        );
+    }
+
+    #[test]
+    fn depth_one_builds_the_root_but_buys_its_direct_input() {
+        let sde = chain_sde();
+        let mut cache = HashMap::new();
+        let mut needed = HashSet::new();
+        let mut path = Vec::new();
+
+        let root = resolve_input(
+            &sde,
+            &mut cache,
+            &mut needed,
+            10,
+            "A".to_string(),
+            1,
+            1,
+            true,
+            &mut path,
+        )
+        .unwrap();
+
+        let a_step = build_step(&root);
+        assert_eq!(a_step.inputs.len(), 1);
+        // B (A's direct input) is bought: depth 1 -> B is resolved at depth 0.
+        assert_buy(&a_step.inputs[0]);
+        assert_eq!(a_step.inputs[0].type_id, 20);
+        // C is never reached, so its recipe (if any) is never even looked up.
+        assert_eq!(cache.len(), 1);
+        assert!(cache.contains_key(&10));
+    }
+
+    #[test]
+    fn reaction_activity_carries_formula_blueprint_and_product_quantity() {
+        let sde = reaction_sde();
+        let mut cache = HashMap::new();
+        let mut needed = HashSet::new();
+        let mut path = Vec::new();
+
+        let line = resolve_input(
+            &sde,
+            &mut cache,
+            &mut needed,
+            600,
+            "Composite".to_string(),
+            50,
+            MAX_TREE_DEPTH,
+            true,
+            &mut path,
+        )
+        .unwrap();
+
+        let step = build_step(&line);
+        assert_eq!(step.activity, Activity::Reaction);
+        assert_eq!(step.blueprint_type_id, 500);
+        assert_eq!(step.product_type_id, 600);
+        assert_eq!(step.product_per_run, 100);
+        assert_eq!(step.inputs.len(), 1);
+        assert_eq!(step.inputs[0].type_id, 200);
+        assert_buy(&step.inputs[0]);
+    }
+
+    #[test]
+    fn needed_set_covers_the_whole_resolved_tree() {
+        let sde = chain_sde();
+        let mut cache = HashMap::new();
+        let mut needed = HashSet::new();
+        let mut path = Vec::new();
+
+        resolve_input(
+            &sde,
+            &mut cache,
+            &mut needed,
+            10,
+            "A".to_string(),
+            1,
+            MAX_TREE_DEPTH,
+            true,
+            &mut path,
+        )
+        .unwrap();
+
+        // Root (built) + B (built) + C (bought leaf) must all be present, or
+        // downstream pricing silently drops whichever id is missing.
+        assert_eq!(needed, HashSet::from([10, 20, 30]));
+    }
+}
