@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   errorMessage,
-  isAuthRequired,
   routeBreadcrumb,
   routeClearBreadcrumb,
   routeLocation,
@@ -15,6 +14,7 @@ import {
   type SystemActivity,
   type SystemMatch,
 } from "../../lib/api";
+import { queryErrorText } from "../../components/QueryErrorNotice";
 import { formatInt } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { usePersistentState } from "../../lib/usePersistentState";
@@ -109,9 +109,7 @@ function Workbench() {
       }
     } catch (e) {
       setLocError(
-        isAuthRequired(e)
-          ? "Log in a character first to track your location."
-          : errorMessage(e),
+        queryErrorText(e, "Log in a character first to track your location."),
       );
     }
   }
@@ -398,9 +396,10 @@ function NearestWormholeCard({
 
       {find.isError && (
         <div className="mt-2 text-xs text-rose-400">
-          {isAuthRequired(find.error)
-            ? "Log in a character first to find the nearest wormhole."
-            : errorMessage(find.error)}
+          {queryErrorText(
+            find.error,
+            "Log in a character first to find the nearest wormhole.",
+          )}
         </div>
       )}
 

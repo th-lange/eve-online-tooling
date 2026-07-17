@@ -1,13 +1,12 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
-  errorMessage,
-  isAuthRequired,
   profitFifo,
   walletSync,
   type ProfitView,
   type WalletView,
 } from "../../lib/api";
+import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { formatInt, formatIsk, sortRows } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import {
@@ -64,14 +63,24 @@ export function AccountingPage() {
       <div className="mt-3">
         {tab === "wallet" ? (
           wallet.isError ? (
-            <Err e={wallet.error} />
+            <QueryErrorNotice
+              error={wallet.error}
+              loginMessage="Log in a character first to view your wallet."
+              scopeHint="check the wallet scope is enabled on your EVE app."
+              className="p-6 text-sm"
+            />
           ) : wallet.data ? (
             <Wallet d={wallet.data} />
           ) : (
             <Hint>Hit Sync to pull and accumulate your wallet.</Hint>
           )
         ) : profit.isError ? (
-          <Err e={profit.error} />
+          <QueryErrorNotice
+            error={profit.error}
+            loginMessage="Log in a character first to view your wallet."
+            scopeHint="check the wallet scope is enabled on your EVE app."
+            className="p-6 text-sm"
+          />
         ) : profit.data ? (
           <Profit d={profit.data} />
         ) : (
@@ -394,19 +403,5 @@ function Stat({
 function Hint({ children }: { children: React.ReactNode }) {
   return (
     <div className="p-8 text-center text-sm text-zinc-500">{children}</div>
-  );
-}
-function Err({ e }: { e: unknown }) {
-  if (isAuthRequired(e)) {
-    return (
-      <div className="p-6 text-sm text-zinc-400">
-        Log in a character first to view your wallet.
-      </div>
-    );
-  }
-  return (
-    <div className="p-6 text-sm text-rose-400">
-      {errorMessage(e)} — check the wallet scope is enabled on your EVE app.
-    </div>
   );
 }

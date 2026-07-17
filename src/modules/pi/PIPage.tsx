@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  errorMessage,
-  isAuthRequired,
   piLockedGet,
   piLockedSet,
   piOverview,
@@ -11,6 +9,7 @@ import {
   type ExtractorView,
   type StorageView,
 } from "../../lib/api";
+import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { formatInt } from "../../lib/format";
 import { Page, PageHeader, Centered } from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
@@ -110,20 +109,17 @@ function Workbench() {
         }
       />
 
-      {colonies.isError &&
-        (isAuthRequired(colonies.error) ? (
-          <div className="mt-4 text-sm text-zinc-400">
-            Log in a character first to view your colonies.
-          </div>
-        ) : (
-          <div className="mt-4 text-sm text-rose-400">
-            {errorMessage(colonies.error)}
-            <span className="ml-1 text-zinc-500">
-              (needs <code>esi-planets.manage_planets.v1</code> — re-login if
-              just enabled)
-            </span>
-          </div>
-        ))}
+      <QueryErrorNotice
+        error={colonies.error}
+        loginMessage="Log in a character first to view your colonies."
+        scopeHint={
+          <>
+            needs <code>esi-planets.manage_planets.v1</code> — re-login if just
+            enabled
+          </>
+        }
+        className="mt-4 text-sm"
+      />
 
       {!colonies.isError && rows.length === 0 && !colonies.isFetching && (
         <Centered>No colonies found for this character.</Centered>
