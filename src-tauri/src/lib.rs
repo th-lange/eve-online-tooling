@@ -166,8 +166,14 @@ pub fn run() {
             // has enabled "start MCP bridge on launch", start it now on the
             // persisted port. Failure here is logged, never fatal to launch.
             if mcp::autostart_enabled(&dir) {
-                let registry = app.state::<std::sync::Arc<plugins::PluginRegistry>>().inner().clone();
-                let manager = app.state::<std::sync::Arc<plugins::PluginManager>>().inner().clone();
+                let registry = app
+                    .state::<std::sync::Arc<plugins::PluginRegistry>>()
+                    .inner()
+                    .clone();
+                let manager = app
+                    .state::<std::sync::Arc<plugins::PluginManager>>()
+                    .inner()
+                    .clone();
                 let ctx = mcp::build_ctx(&dir, registry, manager);
                 let port = mcp::configured_port(&dir);
                 if let Err(e) = app.state::<mcp::McpState>().start(ctx, port) {
