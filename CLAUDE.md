@@ -69,8 +69,13 @@ so the UI wires itself up.
   - `storage/` — OS keychain (refresh tokens + Tripwire password) + on-disk cache
   - `lists.rs` — shared persisted type-id lists (blacklist/favorites) reused across modules
   - `evescout` — EVE-Scout public Thera/Turnur wormhole connections
-- `modules/` — the feature modules (21 today: production, trading, fitting, wormholes, PI, the DPS
-  meter, …), each exposing its own commands. See `src/modules/registry.ts` for the full list.
+- `modules/` — the feature modules (24 today: production, trading, fitting, wormholes, PI, the DPS
+  meter, …), each exposing its own commands. See `src/modules/registry.ts` for the full list. The
+  mapping to `src/modules/registry.ts` entries isn't strictly 1:1: some frontend modules are views
+  over a shared service (`universe` → `sde`, `market-search` → `market`), some frontend modules
+  share one Rust module (`incursions` + `faction-warfare` → `modules/intel`; `transactions` →
+  `modules/accounting`), and some frontend modules are backend-free static pages (`exploration`,
+  `support`).
 
 ### Frontend (`src/`)
 
@@ -108,6 +113,12 @@ Vitest (jsdom), config in `vite.config.ts`, setup in `src/test/setup.ts`. To tes
     tree-shaped** (a build step is `(activity, inputs, output)`) so #9/#10 are additive, not rewrites.
 - **Price vectors**: the market service exposes more than spot — sell-min/buy-max, daily average,
   N-day moving average, and daily volume/order_count (liquidity), with a configurable basis per role.
+
+## Dependencies
+
+- `allowScripts` in `package.json` pins `esbuild@0.27.7` as an intentional re-approval gate: it is
+  version-pinned (not a range) so a future esbuild bump does not silently re-enable postinstall
+  scripts for a new version — bumping the pin requires a deliberate review and re-approval.
 
 ## Conventions
 

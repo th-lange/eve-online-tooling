@@ -79,6 +79,10 @@ export interface ModuleDef {
   Component: ComponentType;
 }
 
+// Note: this list isn't strictly 1:1 with src-tauri/src/modules/. Some entries are
+// views over a shared service (universe -> sde, market-search -> market), some share
+// one Rust module (incursions + faction-warfare -> modules/intel; transactions ->
+// modules/accounting), and some are backend-free static pages (exploration, support).
 export const modules: ModuleDef[] = [
   {
     id: "production",
