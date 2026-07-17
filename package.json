@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "generate:bindings": "cargo test --manifest-path src-tauri/Cargo.toml export_orders_bindings --quiet && prettier --write src/lib/api/generated/orders.ts",
+    "build": "npm run generate:bindings && tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

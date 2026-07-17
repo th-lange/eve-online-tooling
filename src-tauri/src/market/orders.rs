@@ -30,7 +30,7 @@ struct EsiOrder {
 }
 
 /// One of the character's open market orders, with undercut status.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderRow {
     pub character_id: i64,

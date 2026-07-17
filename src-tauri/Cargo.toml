@@ -22,6 +22,12 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
+# Type-safe TS binding generation for Tauri commands (pilot: orders module only, #589).
+# Pinned with `=` per upstream guidance — tauri-specta v2 is still pre-1.0 and each
+# rc can introduce breaking changes.
+specta = "=2.0.0-rc.22"
+specta-typescript = "0.0.9"
+tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "1"
