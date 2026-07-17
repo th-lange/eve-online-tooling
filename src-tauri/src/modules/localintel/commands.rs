@@ -451,6 +451,7 @@ pub struct ZkillStats {
 
 /// Raw zKill stats document (defensive: characters with no kills omit fields).
 #[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 struct ZkillRaw {
     #[serde(default)]
     danger_ratio: i64,
@@ -460,7 +461,7 @@ struct ZkillRaw {
     ships_destroyed: i64,
     #[serde(default)]
     ships_lost: i64,
-    #[serde(default)]
+    #[serde(default, rename = "activepvp")]
     active_pvp: serde_json::Value,
 }
 
@@ -623,5 +624,31 @@ mod tests {
         assert_eq!(threat_of(Some(-2.5)), "red");
         assert_eq!(threat_of(Some(0.0)), "neutral");
         assert_eq!(threat_of(None), "neutral");
+    }
+
+    #[test]
+    fn zkill_raw_maps_camelcase_fields_and_activepvp_sets_active() {
+        let raw: ZkillRaw = serde_json::from_str(
+            r#"{
+                "shipsDestroyed": 120, "shipsLost": 8,
+                "dangerRatio": 88, "gangRatio": 40,
+                "activepvp": { "ships": { "count": 3 } }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(raw.ships_destroyed, 120);
+        assert_eq!(raw.ships_lost, 8);
+        assert_eq!(raw.danger_ratio, 88);
+        assert_eq!(raw.gang_ratio, 40);
+        assert!(raw.active_pvp.as_object().is_some_and(|o| !o.is_empty()));
+    }
+
+    #[test]
+    fn zkill_raw_missing_fields_default_and_no_activepvp_is_inactive() {
+        // A character with no PvP: zKill omits the fields entirely.
+        let raw: ZkillRaw = serde_json::from_str("{}").unwrap();
+        assert_eq!(raw.ships_destroyed, 0);
+        assert_eq!(raw.danger_ratio, 0);
+        assert!(raw.active_pvp.as_object().is_none_or(|o| o.is_empty()));
     }
 }
