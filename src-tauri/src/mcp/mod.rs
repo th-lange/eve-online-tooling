@@ -261,15 +261,22 @@ fn dispatch(req: &Value, ctx: &ToolCtx) -> Option<Value> {
 }
 
 /// The tools this server advertises: the built-in read-only tools plus any
-/// declared by currently-active plugins (namespaced `<pluginId>.<tool>`).
+/// declared by currently-active plugins (namespaced `<pluginId>.<tool>`), plus
+/// the **dev-tier** compute-engine tools when [`dev_tier_enabled`] is on.
 fn tool_list(ctx: &ToolCtx) -> Value {
     let mut tools = vec![json!({
         "name": "ping",
         "description": "Health check — returns \"pong\".",
         "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
     })];
-    // Built-in tools are the MCP-exposed capabilities from the shared registry.
-    for cap in capabilities::registry().iter().filter(|c| c.mcp) {
+    // Built-in tools are the MCP-exposed capabilities from the shared registry;
+    // dev-tier ones only when the opt-in toggle is on (read fresh so a change
+    // takes effect without restarting the bridge).
+    let dev_tier = dev_tier_enabled(&ctx.app_data_dir);
+    for cap in capabilities::registry()
+        .iter()
+        .filter(|c| c.mcp || (c.mcp_dev && dev_tier))
+    {
         tools.push(json!({
             "name": cap.name,
             "description": cap.description,
@@ -298,7 +305,10 @@ fn call_tool(params: Option<&Value>, ctx: &ToolCtx) -> Result<Value, (i64, Strin
     match name {
         "ping" => text_content("pong"),
         // A built-in capability (read-only, MCP-exposed) from the registry.
-        other if capabilities::find(other).is_some_and(|c| c.mcp) => {
+        other
+            if capabilities::find(other)
+                .is_some_and(|c| c.mcp || (c.mcp_dev && dev_tier_enabled(&ctx.app_data_dir))) =>
+        {
             let auth = AuthState::with_cache(ctx.app_data_dir.clone());
             let hctx = capabilities::HostCtx {
                 app_data_dir: &ctx.app_data_dir,
@@ -363,10 +373,12 @@ fn text_response(status: u16, body: &str) -> tiny_http::Response<std::io::Cursor
     tiny_http::Response::from_string(body).with_status_code(status)
 }
 
-/// Persisted MCP config keys: the configured port (`0` = auto) and whether to
-/// start the bridge automatically on app launch.
+/// Persisted MCP config keys: the configured port (`0` = auto), whether to
+/// start the bridge automatically on app launch, and whether the dev-tier
+/// compute-engine tools are advertised.
 const PORT_KEY: &str = "mcp_port";
 const AUTOSTART_KEY: &str = "mcp_autostart";
+const DEV_TIER_KEY: &str = "mcp_dev_tier";
 
 /// User-configurable MCP settings.
 #[derive(Debug, Clone, Serialize)]
@@ -376,6 +388,10 @@ pub struct McpConfig {
     pub port: u16,
     /// Start the bridge automatically on app launch.
     pub autostart: bool,
+    /// Advertise the dev-tier compute-engine tools (production profit,
+    /// fitting stats, …) over MCP. Off by default — a second, higher-risk
+    /// opt-in on top of the bridge itself.
+    pub dev_tier: bool,
 }
 
 pub(crate) fn configured_port(dir: &std::path::Path) -> u16 {
@@ -386,6 +402,13 @@ pub(crate) fn configured_port(dir: &std::path::Path) -> u16 {
 /// default — an explicit opt-in, same posture as the bridge itself.
 pub(crate) fn autostart_enabled(dir: &std::path::Path) -> bool {
     crate::storage::load_data::<bool>(dir, AUTOSTART_KEY).unwrap_or(false)
+}
+
+/// Whether the dev-tier compute-engine tools are advertised over MCP. Off by
+/// default; read fresh at list/call time so it takes effect without
+/// restarting the bridge.
+pub(crate) fn dev_tier_enabled(dir: &std::path::Path) -> bool {
+    crate::storage::load_data::<bool>(dir, DEV_TIER_KEY).unwrap_or(false)
 }
 
 pub(crate) fn build_ctx(
@@ -429,13 +452,14 @@ pub fn mcp_status(state: State<'_, McpState>) -> McpStatus {
     state.status()
 }
 
-/// The current MCP configuration (preferred port + autostart).
+/// The current MCP configuration (preferred port + autostart + dev tier).
 #[tauri::command]
 pub fn mcp_config(app: AppHandle) -> Result<McpConfig, AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
     Ok(McpConfig {
         port: configured_port(&dir),
         autostart: autostart_enabled(&dir),
+        dev_tier: dev_tier_enabled(&dir),
     })
 }
 
@@ -448,6 +472,21 @@ pub fn mcp_set_autostart(app: AppHandle, autostart: bool) -> Result<McpConfig, A
     Ok(McpConfig {
         port: configured_port(&dir),
         autostart,
+        dev_tier: dev_tier_enabled(&dir),
+    })
+}
+
+/// Set the opt-in "expose compute engines to MCP" (dev-tier) flag. Takes
+/// effect immediately — `tool_list`/`tools/call` read it fresh, no restart
+/// needed.
+#[tauri::command]
+pub fn mcp_set_dev_tier(app: AppHandle, dev_tier: bool) -> Result<McpConfig, AppError> {
+    let dir = crate::storage::app_data_dir(&app)?;
+    crate::storage::save_data(&dir, DEV_TIER_KEY, &dev_tier).map_err(AppError::from)?;
+    Ok(McpConfig {
+        port: configured_port(&dir),
+        autostart: autostart_enabled(&dir),
+        dev_tier,
     })
 }
 
@@ -492,8 +531,10 @@ mod tests {
         conn.execute_batch(
             "CREATE TABLE invGroups(groupID INT, categoryID INT, groupName TEXT);
              CREATE TABLE invTypes(typeID INT, groupID INT, typeName TEXT, volume REAL, published INT, marketGroupID INT);
-             INSERT INTO invGroups VALUES (18, 4, 'Mineral');
+             INSERT INTO invGroups VALUES (18, 4, 'Mineral'), (25, 6, 'Frigate');
              INSERT INTO invTypes VALUES (34, 18, 'Tritanium', 0.01, 1, 1);
+             INSERT INTO invTypes VALUES (587, 25, 'Rifter', 27289.0, 1, NULL);
+             CREATE TABLE dgmTypeAttributes(typeID INT, attributeID INT, valueFloat REAL, valueInt INT);
              CREATE TABLE mapSolarSystems(solarSystemID INT, solarSystemName TEXT);
              INSERT INTO mapSolarSystems VALUES (30000001, 'Alpha'), (30000002, 'Beta'), (30000003, 'Gamma');
              CREATE TABLE mapSolarSystemJumps(fromSolarSystemID INT, toSolarSystemID INT);
@@ -619,6 +660,60 @@ mod tests {
         );
     }
 
+    /// Dev-tier tools (`production_profit`, `fitting_stats`, …) are absent
+    /// from `tools/list` and uncallable while the toggle is off; once the
+    /// opt-in `mcp_dev_tier` flag is set, they're listed and a call against
+    /// the fixture SDE succeeds — `fitting_stats` needs no market/auth, so
+    /// it's the one exercised end to end here.
+    #[test]
+    fn dev_tier_tools_gated_by_toggle() {
+        let (dir, ctx) = ctx_with_sde("dev-tier-tools");
+        let names = |v: &Value| -> Vec<String> {
+            v["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|t| t["name"].as_str().unwrap().to_string())
+                .collect()
+        };
+
+        // Off by default: not listed, not callable.
+        let list = dispatch(
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }),
+            &ctx,
+        )
+        .unwrap();
+        let off_names = names(&list);
+        assert!(!off_names.contains(&"production_profit".to_string()));
+        assert!(!off_names.contains(&"fitting_stats".to_string()));
+        let denied = call(&ctx, "fitting_stats", json!({ "eft": "[Rifter, T]" }));
+        assert_eq!(denied["error"]["code"], -32602);
+
+        // On: listed, and a call against the fixture succeeds.
+        crate::storage::save_data(&dir, DEV_TIER_KEY, &true).unwrap();
+        let list_on = dispatch(
+            &json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }),
+            &ctx,
+        )
+        .unwrap();
+        let on_names = names(&list_on);
+        assert!(on_names.contains(&"production_profit".to_string()));
+        assert!(on_names.contains(&"fitting_stats".to_string()));
+
+        let resp = call(
+            &ctx,
+            "fitting_stats",
+            json!({ "eft": "[Rifter, Test Fit]" }),
+        );
+        assert!(
+            resp.get("error").is_none(),
+            "expected success, got {resp:?}"
+        );
+        let stats = payload(&resp);
+        assert_eq!(stats["resources"]["cpuUsed"], json!(0.0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn configured_port_persists_and_defaults_to_auto() {
         let dir = tmp("port");
@@ -636,6 +731,16 @@ mod tests {
         assert!(!autostart_enabled(&dir)); // opt-in: off by default
         crate::storage::save_data(&dir, AUTOSTART_KEY, &true).unwrap();
         assert!(autostart_enabled(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dev_tier_persists_and_defaults_to_off() {
+        let dir = tmp("dev-tier");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(!dev_tier_enabled(&dir)); // opt-in: off by default
+        crate::storage::save_data(&dir, DEV_TIER_KEY, &true).unwrap();
+        assert!(dev_tier_enabled(&dir));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -13,6 +13,7 @@ import {
   mcpConfig,
   mcpSetPort,
   mcpSetAutostart,
+  mcpSetDevTier,
   PERMISSION_LABELS,
   type PluginEntry,
 } from "../../lib/api";
@@ -196,6 +197,10 @@ function McpBridgeCard() {
     mutationFn: (autostart: boolean) => mcpSetAutostart(autostart),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["mcp", "config"] }),
   });
+  const setDevTier = useMutation({
+    mutationFn: (devTier: boolean) => mcpSetDevTier(devTier),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["mcp", "config"] }),
+  });
   const data = status.data;
   const running = data?.running ?? false;
   const configuredPort = config.data?.port ?? 0;
@@ -269,6 +274,22 @@ function McpBridgeCard() {
         <span className="text-zinc-500">
           — also writes a discovery file (URL + token) to the app data directory
           so a local agent can self-configure without copying anything by hand.
+        </span>
+      </label>
+
+      <label className="mt-2 flex items-center gap-2 text-xs text-zinc-400">
+        <input
+          type="checkbox"
+          checked={config.data?.devTier ?? false}
+          disabled={setDevTier.isPending}
+          onChange={(e) => setDevTier.mutate(e.currentTarget.checked)}
+          className="rounded border-zinc-700 bg-zinc-800"
+        />
+        Expose compute engines to MCP
+        <span className="text-zinc-500">
+          — adds dev-tier tools (production profit, fitting stats, …) for an
+          agent to verify the app's calculations. Still read-only and auth-free;
+          off by default.
         </span>
       </label>
 

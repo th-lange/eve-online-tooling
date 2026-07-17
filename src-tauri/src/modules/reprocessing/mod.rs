@@ -3,3 +3,8 @@
 
 pub mod commands;
 mod engine;
+
+/// Curated cross-module surface: the MCP dev-tier `reprocessing_yield`
+/// capability needs the pure per-item engine directly, without the
+/// whole-catalogue ranking `commands::reprocessing_scan` does.
+pub(crate) use engine::{evaluate, ore_efficiency, EfficiencyConfig};
