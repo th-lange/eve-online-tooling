@@ -45,3 +45,7 @@ parking_lot = "0.12.5"
 rhai = { version = "1.25", features = ["sync", "serde"] }
 boa_engine = "0.21"
 
+
+[dev-dependencies]
+http = "1"
+tokio = { version = "1", features = ["macros"] }

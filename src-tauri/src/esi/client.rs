@@ -39,6 +39,17 @@ impl EsiClient {
         Self::build(ConditionalCache::on_disk(dir))
     }
 
+    /// Test-only seam: a client pointed at an arbitrary `base` (e.g. a
+    /// loopback test server) instead of the real [`ESI_BASE`], with an
+    /// explicit conditional-cache policy so tests can isolate the layer
+    /// they're exercising.
+    #[cfg(test)]
+    pub(crate) fn with_base(base: impl Into<String>, cache: ConditionalCache) -> Self {
+        let mut client = Self::build(cache);
+        client.base = base.into();
+        client
+    }
+
     fn build(cache: ConditionalCache) -> Self {
         let http = reqwest::Client::builder()
             .user_agent(USER_AGENT)
