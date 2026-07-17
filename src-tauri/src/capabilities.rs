@@ -329,7 +329,7 @@ fn cap_corp_assets(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
 }
 
 fn cap_my_orders(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
-    let rows = tauri::async_runtime::block_on(crate::modules::orders::commands::collect_orders(
+    let rows = tauri::async_runtime::block_on(crate::market::orders::collect_orders(
         ctx.app_data_dir,
         ctx.auth,
         ctx.market,
