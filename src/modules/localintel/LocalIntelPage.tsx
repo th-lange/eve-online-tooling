@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import {
@@ -8,7 +8,6 @@ import {
 } from "@tauri-apps/plugin-notification";
 import {
   errorMessage,
-  eveDefaultLogDir,
   localLogNames,
   localScan,
   localintelGetWatchlist,
@@ -24,6 +23,7 @@ import {
 import { formatInt } from "../../lib/format";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { usePersistentState } from "../../lib/usePersistentState";
+import { useEveLogDir } from "../../lib/useEveLogDir";
 import { Page, PageHeader } from "../../components/page";
 
 /** Best-effort desktop notification — requests permission, never throws. */
@@ -88,18 +88,11 @@ export function LocalIntelPage() {
   const [newIds, setNewIds] = useState<Set<number>>(new Set());
   // EVE logs folder (Chatlogs); persisted. Used to prefill names from the
   // newest Local log — only pilots who chatted (logs lack the member list).
-  const [logsDir, setLogsDir] = useState(
-    () => localStorage.getItem(STORAGE_KEYS.eveChatlogsDir) ?? "",
-  );
-  // Prefill the Chatlogs folder from the OS default when we have nothing yet.
-  useEffect(() => {
-    if (logsDir) return;
-    eveDefaultLogDir("chatlogs").then((d) => d && setLogsDir(d));
-  }, [logsDir]);
+  const [logsDir, setLogsDir, persistLogsDir] = useEveLogDir("chatlogs");
   const loadLog = useMutation({
     mutationFn: () => localLogNames(logsDir),
     onSuccess: (r) => {
-      localStorage.setItem(STORAGE_KEYS.eveChatlogsDir, logsDir);
+      persistLogsDir();
       if (r.senders.length > 0) setText(r.senders.join("\n"));
     },
   });
