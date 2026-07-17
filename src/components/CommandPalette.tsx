@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { CornerDownLeft, Package, Search } from "lucide-react";
 import { modules } from "../modules/registry";
 import { usePluginModules } from "../modules/plugins/pluginModules";
-import { sdeSearch } from "../lib/api";
+import { sdeKeys } from "../lib/queryKeys";
 import { openItemInMarketSearch } from "../lib/deepLink";
 import { fuzzy } from "../lib/fuzzy";
 
@@ -71,8 +71,7 @@ export function CommandPalette() {
   // Item lookup only kicks in once it looks like a real query.
   const trimmed = q.trim();
   const itemQuery = useQuery({
-    queryKey: ["palette", "items", trimmed],
-    queryFn: () => sdeSearch(trimmed),
+    ...sdeKeys.search(trimmed),
     enabled: open && trimmed.length >= 2,
   });
   const itemEntries: Entry[] = useMemo(

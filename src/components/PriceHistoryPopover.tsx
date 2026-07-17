@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { LineChart, X } from "lucide-react";
-import { errorMessage, marketHistory } from "../lib/api";
+import { errorMessage } from "../lib/api";
+import { marketKeys } from "../lib/queryKeys";
 import { PriceHistoryView } from "./PriceHistory";
 
 /**
@@ -33,10 +34,8 @@ export function PriceHistoryPopover({
   const [open, setOpen] = useState(false);
 
   const history = useQuery({
-    queryKey: ["market", "history", regionId, typeId],
-    queryFn: () => marketHistory(regionId, typeId),
+    ...marketKeys.history(regionId, typeId),
     enabled: open,
-    staleTime: 30 * 60 * 1000, // history is daily — cache aggressively
   });
 
   // Close on Escape.

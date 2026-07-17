@@ -13,6 +13,8 @@ export function Combo<T extends { id: number; name: string }>({
   placeholder,
   width = "w-52",
   maxResults,
+  queryKey,
+  staleTime,
 }: {
   label?: string;
   value: T | null;
@@ -21,13 +23,20 @@ export function Combo<T extends { id: number; name: string }>({
   placeholder?: string;
   width?: string;
   maxResults?: number;
+  /** Override the default `["combo", label, text]` cache key — e.g. to share
+   *  a cache entry with other components hitting the same underlying search
+   *  (see MarketSearchPage's item picker, keyed onto `sdeKeys.search`). */
+  queryKey?: (text: string) => readonly unknown[];
+  /** Override the default (global) staleTime to match the shared key's policy. */
+  staleTime?: number;
 }) {
   const [text, setText] = useState("");
   const debouncedText = useDebouncedValue(text, 200);
   const results = useQuery({
-    queryKey: ["combo", label ?? "", debouncedText],
+    queryKey: (queryKey ?? ((t) => ["combo", label ?? "", t]))(debouncedText),
     queryFn: () => search(debouncedText),
     enabled: debouncedText.trim().length >= 2 && value == null,
+    staleTime,
   });
   const data = maxResults
     ? (results.data?.slice(0, maxResults) ?? [])

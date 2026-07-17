@@ -4,11 +4,11 @@ import { Plus, X } from "lucide-react";
 import {
   fittingModuleInfo,
   sdeMarketGroupChildren,
-  sdeSearch,
   type MarketGroupNode,
   type SkillSource,
   type SlotKind,
 } from "../../lib/api";
+import { sdeKeys } from "../../lib/queryKeys";
 import {
   SLOT_BADGE,
   fitReason,
@@ -52,8 +52,7 @@ export function ModuleBrowser({
   }, [slotFilter]);
 
   const results = useQuery({
-    queryKey: ["fitting", "module-search", q],
-    queryFn: () => sdeSearch(q),
+    ...sdeKeys.search(q),
     enabled: q.trim().length >= 2,
   });
   const matches = (results.data ?? []).slice(0, 40);

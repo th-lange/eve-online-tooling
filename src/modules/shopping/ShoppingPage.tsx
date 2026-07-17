@@ -2,12 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 
-import { SHOPPING_LISTS_KEY } from "../../lib/queryKeys";
+import { SHOPPING_LISTS_KEY, sdeKeys } from "../../lib/queryKeys";
 import { useCopyToClipboard } from "../../lib/useCopyToClipboard";
 import { useEveLogDir } from "../../lib/useEveLogDir";
 import { parseItems, parseLine } from "../../lib/parseItems";
 import {
-  sdeSearch,
   shoppingAddItem,
   shoppingAddText,
   shoppingChatSync,
@@ -692,8 +691,7 @@ function SearchAddField({
   const [busy, setBusy] = useState(false);
 
   const results = useQuery({
-    queryKey: ["shopping", "search", q],
-    queryFn: () => sdeSearch(q),
+    ...sdeKeys.search(q),
     enabled: q.trim().length >= 2,
   });
   const matches = (results.data ?? []).slice(0, 12);

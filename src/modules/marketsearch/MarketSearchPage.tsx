@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   marketAllRegions,
   marketCurrentLocation,
-  marketHistory,
   marketPrice,
   marketSearchStations,
   marketSellOrders,
@@ -19,6 +18,11 @@ import {
   subscribeMarketSearchItem,
   takePendingMarketSearchItem,
 } from "../../lib/deepLink";
+import {
+  SDE_SEARCH_STALE_TIME,
+  marketKeys,
+  sdeKeys,
+} from "../../lib/queryKeys";
 import { AddToListButton } from "../../components/AddToListButton";
 import { Combo } from "../../components/Combo";
 import { PriceHistoryView } from "../../components/PriceHistory";
@@ -100,8 +104,7 @@ function Workbench() {
 
   const historyRegionId = regionId ?? FORGE;
   const history = useQuery({
-    queryKey: ["history", historyRegionId, picked?.id],
-    queryFn: () => marketHistory(historyRegionId, picked!.id),
+    ...marketKeys.history(historyRegionId, picked?.id),
     enabled: tab === "history" && picked != null,
   });
   const price = useQuery({
@@ -143,6 +146,8 @@ function Workbench() {
           value={picked}
           onPick={setPicked}
           search={sdeSearch}
+          queryKey={(text) => sdeKeys.search(text).queryKey}
+          staleTime={SDE_SEARCH_STALE_TIME}
           placeholder="search by name…"
           width="w-64"
         />
