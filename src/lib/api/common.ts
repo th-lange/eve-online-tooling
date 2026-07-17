@@ -16,6 +16,27 @@ export function eveDefaultLogDir(
 
 export type ListName = "blacklist" | "favorites";
 
+export type ListModule =
+  "trading" | "daytrading" | "reprocessing" | "production";
+
+/** Contents of a saved list (blacklist/favorites), with names. */
+export function getList(
+  module: ListModule,
+  list: ListName,
+): Promise<ListItem[]> {
+  return invoke<ListItem[]>(`${module}_get_list`, { list });
+}
+
+/** Add/remove a type (or blueprint type, for production) from a saved list. */
+export function setList(
+  module: ListModule,
+  list: ListName,
+  typeId: number,
+  add: boolean,
+): Promise<void> {
+  return invoke<void>(`${module}_set_list`, { list, typeId, add });
+}
+
 export interface ListItem {
   typeId: number;
   name: string;

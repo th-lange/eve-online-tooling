@@ -1,19 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   marketRegions,
   ownedBlueprints,
   productionDecryptors,
-  productionGetList,
   productionProfit,
-  productionSetList,
   rosterStock,
   sdeUpdate,
-  type ListName,
   type PriceBasis,
   type ProfitBreakdown,
   type ProfitParams,
 } from "../../lib/api";
+import { useTypeIdLists } from "../../lib/useSavedLists";
 import { classifyPaste, dedupNames, toggle, uniqueSorted } from "./helpers";
 import { parseItems } from "../shopping/parse";
 import {
@@ -29,7 +27,6 @@ import {
 import type { ActiveFilter, WorkbenchState } from "./workbenchTypes";
 
 export function useWorkbench(): WorkbenchState {
-  const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("market");
   const [view, setView] = useState<ResultsView>("opportunities");
 
@@ -135,41 +132,8 @@ export function useWorkbench(): WorkbenchState {
     onSuccess: setRows,
   });
 
-  const favorites = useQuery({
-    queryKey: ["production", "favorites"],
-    queryFn: () => productionGetList("favorites"),
-  });
-  const blacklist = useQuery({
-    queryKey: ["production", "blacklist"],
-    queryFn: () => productionGetList("blacklist"),
-  });
-  const setList = useMutation({
-    mutationFn: (v: { list: ListName; typeId: number; add: boolean }) =>
-      productionSetList(v.list, v.typeId, v.add),
-    onSuccess: (_d, v) =>
-      qc.invalidateQueries({ queryKey: ["production", v.list] }),
-  });
-
-  function toggleFavorite(r: ProfitBreakdown) {
-    setList.mutate({
-      list: "favorites",
-      typeId: r.blueprintTypeId,
-      add: !r.favorite,
-    });
-    setRows((prev) =>
-      prev.map((x) =>
-        x.blueprintTypeId === r.blueprintTypeId
-          ? { ...x, favorite: !x.favorite }
-          : x,
-      ),
-    );
-  }
-  function blacklistRow(r: ProfitBreakdown) {
-    setList.mutate({ list: "blacklist", typeId: r.blueprintTypeId, add: true });
-    setRows((prev) =>
-      prev.filter((x) => x.blueprintTypeId !== r.blueprintTypeId),
-    );
-  }
+  const { favorites, blacklist, setList, toggleFavorite, blacklistRow } =
+    useTypeIdLists("production", setRows, (r) => r.blueprintTypeId);
 
   // The pricing/cost settings that actually drive a re-price (the client-side
   // filters are excluded — they apply instantly). A change to any of these

@@ -1,13 +1,9 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { DataAge } from "../../components/DataAge";
-import { AddToListButton } from "../../components/AddToListButton";
 import {
   marketRegions,
   stationTrading,
-  tradingGetList,
-  tradingSetList,
-  type ListName,
   type TradeParams,
   type TradeRow,
 } from "../../lib/api";
@@ -30,9 +26,16 @@ import {
 } from "../../components/SortHeaderCell";
 import { Page, PageHeader, Centered } from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
+import { useTypeIdLists } from "../../lib/useSavedLists";
+import {
+  ListTabs,
+  SavedListView,
+  RowActionsCell,
+  type ListTab,
+} from "../../components/typeIdLists";
 
 const FORGE = 10000002;
-type Tab = "opportunities" | "favorites" | "blacklist";
+type Tab = ListTab;
 
 const TITLE = "Station Trading";
 const SUBTITLE = "Buy→sell margins at a hub, after broker fee & sales tax.";
@@ -46,7 +49,6 @@ export function TradingPage() {
 }
 
 function Workbench() {
-  const qc = useQueryClient();
   const [tab, setTab] = useState<Tab>("opportunities");
   const [regionId, setRegionId] = useState(FORGE);
   const [stationId, setStationId] = useState<number | null>(60003760); // Jita
@@ -64,14 +66,8 @@ function Workbench() {
     queryKey: ["market", "regions"],
     queryFn: marketRegions,
   });
-  const favorites = useQuery({
-    queryKey: ["trading", "favorites"],
-    queryFn: () => tradingGetList("favorites"),
-  });
-  const blacklist = useQuery({
-    queryKey: ["trading", "blacklist"],
-    queryFn: () => tradingGetList("blacklist"),
-  });
+  const { favorites, blacklist, toggleFavorite, blacklistRow, remove } =
+    useTypeIdLists("trading", setRows, (r) => r.typeId);
 
   const run = useMutation({
     mutationFn: (p: TradeParams) => stationTrading(p),
@@ -86,26 +82,6 @@ function Workbench() {
       salesTax: taxPct / 100,
       minVolume: minVolume.trim() === "" ? 0 : Number(minVolume),
     });
-  }
-
-  const setList = useMutation({
-    mutationFn: (v: { list: ListName; typeId: number; add: boolean }) =>
-      tradingSetList(v.list, v.typeId, v.add),
-    onSuccess: (_d, v) =>
-      qc.invalidateQueries({ queryKey: ["trading", v.list] }),
-  });
-
-  function toggleFavorite(r: TradeRow) {
-    setList.mutate({ list: "favorites", typeId: r.typeId, add: !r.favorite });
-    setRows((prev) =>
-      prev.map((x) =>
-        x.typeId === r.typeId ? { ...x, favorite: !x.favorite } : x,
-      ),
-    );
-  }
-  function blacklistRow(r: TradeRow) {
-    setList.mutate({ list: "blacklist", typeId: r.typeId, add: true });
-    setRows((prev) => prev.filter((x) => x.typeId !== r.typeId));
   }
 
   const stations = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
@@ -203,7 +179,7 @@ function Workbench() {
         </Field>
       </div>
 
-      <Tabs
+      <ListTabs
         tab={tab}
         onChange={setTab}
         counts={{
@@ -262,22 +238,24 @@ function Workbench() {
           ))}
 
         {tab === "favorites" && (
-          <ListView
+          <SavedListView
             items={favorites.data ?? []}
-            rowsByType={rowsByType}
+            rowsById={rowsByType}
             removeLabel="Unfavorite"
-            onRemove={(id) =>
-              setList.mutate({ list: "favorites", typeId: id, add: false })
+            onRemove={(id) => remove("favorites", id)}
+            detail={(r: TradeRow) =>
+              `${formatIsk(r.profitPerUnit)}/unit · ${formatPercent(r.margin)}`
             }
           />
         )}
         {tab === "blacklist" && (
-          <ListView
+          <SavedListView
             items={blacklist.data ?? []}
-            rowsByType={rowsByType}
+            rowsById={rowsByType}
             removeLabel="Remove"
-            onRemove={(id) =>
-              setList.mutate({ list: "blacklist", typeId: id, add: false })
+            onRemove={(id) => remove("blacklist", id)}
+            detail={(r: TradeRow) =>
+              `${formatIsk(r.profitPerUnit)}/unit · ${formatPercent(r.margin)}`
             }
           />
         )}
@@ -411,33 +389,12 @@ function TradeTable({
               key={r.typeId}
               className="border-t border-zinc-800 hover:bg-zinc-800/40"
             >
-              <td className="px-2">
-                <button
-                  onClick={() => onFavorite(r)}
-                  title="Favorite"
-                  className={
-                    r.favorite
-                      ? "text-amber-400"
-                      : "text-zinc-600 hover:text-amber-400"
-                  }
-                >
-                  ★
-                </button>
-                <button
-                  onClick={() => onBlacklist(r)}
-                  title="Blacklist"
-                  className="ml-2 text-zinc-600 hover:text-rose-400"
-                >
-                  ✕
-                </button>
-                <span className="ml-2">
-                  <AddToListButton
-                    typeId={r.typeId}
-                    label="+List"
-                    className="text-zinc-600 hover:text-emerald-400"
-                  />
-                </span>
-              </td>
+              <RowActionsCell
+                row={r}
+                onFavorite={onFavorite}
+                onBlacklist={onBlacklist}
+                showAddToList
+              />
               <td className="px-3 py-1.5">
                 <div className="text-zinc-200">
                   {r.name}
@@ -588,84 +545,6 @@ function CheckboxGroup({
           />
           {o}
         </label>
-      ))}
-    </div>
-  );
-}
-
-function ListView({
-  items,
-  rowsByType,
-  removeLabel,
-  onRemove,
-}: {
-  items: { typeId: number; name: string }[];
-  rowsByType: Map<number, TradeRow>;
-  removeLabel: string;
-  onRemove: (typeId: number) => void;
-}) {
-  if (items.length === 0) {
-    return <Centered>Nothing here yet.</Centered>;
-  }
-  return (
-    <div className="overflow-auto rounded border border-zinc-800">
-      <table className="w-full border-collapse text-sm">
-        <tbody>
-          {items.map((it) => {
-            const r = rowsByType.get(it.typeId);
-            return (
-              <tr key={it.typeId} className="border-t border-zinc-800">
-                <td className="px-3 py-1.5 text-zinc-200">{it.name}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                  {r
-                    ? `${formatIsk(r.profitPerUnit)}/unit · ${formatPercent(r.margin)}`
-                    : ""}
-                </td>
-                <td className="px-3 py-1.5 text-right">
-                  <button
-                    onClick={() => onRemove(it.typeId)}
-                    className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
-                  >
-                    {removeLabel}
-                  </button>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function Tabs({
-  tab,
-  onChange,
-  counts,
-}: {
-  tab: Tab;
-  onChange: (t: Tab) => void;
-  counts: { favorites: number; blacklist: number };
-}) {
-  const tabs: { value: Tab; label: string }[] = [
-    { value: "opportunities", label: "Opportunities" },
-    { value: "favorites", label: `Favorites (${counts.favorites})` },
-    { value: "blacklist", label: `Blacklist (${counts.blacklist})` },
-  ];
-  return (
-    <div className="mt-4 inline-flex rounded border border-zinc-800 bg-zinc-900 p-0.5">
-      {tabs.map((t) => (
-        <button
-          key={t.value}
-          onClick={() => onChange(t.value)}
-          className={`rounded px-3 py-1.5 text-sm ${
-            tab === t.value
-              ? "bg-zinc-700 text-zinc-100"
-              : "text-zinc-400 hover:text-zinc-200"
-          }`}
-        >
-          {t.label}
-        </button>
       ))}
     </div>
   );

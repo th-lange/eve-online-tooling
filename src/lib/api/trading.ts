@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ListName, ListItem } from "./common";
 
 export interface TradeRow {
   typeId: number;
@@ -38,18 +37,4 @@ export interface TradeParams {
 /** Rank tradeable items by buy→sell margin at a market. */
 export function stationTrading(params: TradeParams): Promise<TradeRow[]> {
   return invoke<TradeRow[]>("station_trading", { params });
-}
-
-/** Contents of a saved list (blacklist/favorites), with names. */
-export function tradingGetList(list: ListName): Promise<ListItem[]> {
-  return invoke<ListItem[]>("trading_get_list", { list });
-}
-
-/** Add/remove a type from a saved list. */
-export function tradingSetList(
-  list: ListName,
-  typeId: number,
-  add: boolean,
-): Promise<void> {
-  return invoke<void>("trading_set_list", { list, typeId, add });
 }
