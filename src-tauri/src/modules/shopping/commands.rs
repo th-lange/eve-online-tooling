@@ -666,10 +666,7 @@ pub fn shopping_chat_sync(
 
     // Prune cooldown entries older than the follow window so it stays bounded
     // (stale entries flush to disk on the next save).
-    let now_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    let now_secs = crate::util::time::now_secs() as i64;
     store
         .chat
         .cooldown

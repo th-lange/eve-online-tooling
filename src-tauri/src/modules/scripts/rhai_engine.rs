@@ -65,10 +65,7 @@ fn detail_string(value: &Dynamic) -> String {
 
 /// Current time as Unix epoch seconds.
 fn epoch_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or_default()
+    crate::util::time::now_secs() as i64
 }
 
 /// Basic, host-independent helpers available to every script (Rhai already

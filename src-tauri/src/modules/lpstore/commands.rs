@@ -83,13 +83,6 @@ struct CachedOffers {
     offers: Vec<EsiOffer>,
 }
 
-fn now_secs() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LpParams {
@@ -156,7 +149,7 @@ pub async fn lp_offers(
                 )
                 .await
                 .map_err(|e| e.to_string())?;
-            let fetched_at = now_secs();
+            let fetched_at = crate::util::time::now_secs();
             let _ = storage::save_data(
                 &dir,
                 &key,

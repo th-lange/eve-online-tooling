@@ -9,7 +9,6 @@
 //! handle) only persist, and the panel's poll picks those up.
 
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
@@ -51,13 +50,6 @@ pub struct Entry {
     pub at: u64,
 }
 
-fn now_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or_default()
-}
-
 /// Longest detail body kept.
 const MAX_DETAIL_LEN: usize = 8000;
 
@@ -89,7 +81,7 @@ pub fn push(
         text,
         detail,
         source: source.to_string(),
-        at: now_secs(),
+        at: crate::util::time::now_secs(),
     };
     entries.push(entry.clone());
     if entries.len() > MAX_ENTRIES {

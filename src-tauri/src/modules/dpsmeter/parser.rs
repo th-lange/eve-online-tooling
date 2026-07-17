@@ -309,19 +309,7 @@ fn parse_ts(line: &str) -> Option<i64> {
     if !(1..=12).contains(&mo) || !(1..=31).contains(&da) {
         return None;
     }
-    Some(days_from_civil(y, mo, da) * 86_400 + h * 3_600 + mi * 60 + s)
-}
-
-/// Days since 1970-01-01 for a proleptic-Gregorian date (Howard Hinnant's
-/// `days_from_civil`). Avoids pulling in `chrono` just to window events.
-fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = (if y >= 0 { y } else { y - 399 }) / 400;
-    let yoe = y - era * 400; // [0, 399]
-    let mp = if m > 2 { m - 3 } else { m + 9 }; // [0, 11], Mar..Feb
-    let doy = (153 * mp + 2) / 5 + d - 1; // [0, 365]
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
-    era * 146_097 + doe - 719_468
+    Some(crate::util::time::days_from_civil(y as i32, mo as u32, da as u32) * 86_400 + h * 3_600 + mi * 60 + s)
 }
 
 #[cfg(test)]
@@ -332,14 +320,7 @@ mod tests {
     // contain these exact markers.
     fn ts() -> i64 {
         // 2026.06.25 12:00:00 UTC
-        days_from_civil(2026, 6, 25) * 86_400 + 12 * 3_600
-    }
-
-    #[test]
-    fn epoch_matches_known_date() {
-        // 1970-01-01 = day 0; 2000-01-01 = 10957.
-        assert_eq!(days_from_civil(1970, 1, 1), 0);
-        assert_eq!(days_from_civil(2000, 1, 1), 10_957);
+        crate::util::time::days_from_civil(2026, 6, 25) * 86_400 + 12 * 3_600
     }
 
     #[test]

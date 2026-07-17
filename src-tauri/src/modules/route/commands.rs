@@ -7,7 +7,6 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
@@ -310,13 +309,6 @@ fn gate_distance(sde: &Sde, from: i64, to: i64, cap: i64) -> i64 {
     }
 }
 
-fn now_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 fn breadcrumb_key(app: &AppHandle) -> Result<(std::path::PathBuf, i64, String), AppError> {
     let (dir, character_id) = storage::dir_and_primary_character(app)?;
     let key = format!("route_breadcrumb_{character_id}");
@@ -367,7 +359,7 @@ pub async fn route_location(
             security,
             region,
             wspace,
-            entered_at: now_secs(),
+            entered_at: crate::util::time::now_secs(),
             gap_jumps,
         });
         if trail.len() > BREADCRUMB_CAP {

@@ -148,13 +148,6 @@ const AUTOCHECK_KEY: &str = "sde_last_autocheck";
 /// Don't auto-check more than once a day.
 const AUTOCHECK_INTERVAL: u64 = 24 * 3600;
 
-fn now_epoch() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 /// Best-effort daily SDE freshness check, run at startup. Only when the SDE is
 /// already installed (first-time download stays a deliberate user action), and
 /// at most once per day; re-downloads only if Fuzzwork's md5 changed. The SDE
@@ -167,7 +160,7 @@ pub async fn auto_refresh(app: &AppHandle) {
     if !paths.is_installed() {
         return;
     }
-    let now = now_epoch();
+    let now = crate::util::time::now_secs();
     if let Some(last) = crate::storage::load_data::<u64>(&paths.dir, AUTOCHECK_KEY) {
         if now.saturating_sub(last) < AUTOCHECK_INTERVAL {
             return;

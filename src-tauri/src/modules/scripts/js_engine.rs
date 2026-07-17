@@ -201,11 +201,7 @@ fn js_kv_set(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResu
 }
 
 fn js_now(_this: &JsValue, _args: &[JsValue], _context: &mut Context) -> JsResult<JsValue> {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or_default();
-    Ok(JsValue::from(secs as f64))
+    Ok(JsValue::from(crate::util::time::now_secs() as f64))
 }
 
 fn js_json_encode(_this: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {

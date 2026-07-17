@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -147,7 +147,7 @@ pub async fn dps_start(
                 }
             }
 
-            let _ = app.emit("dps://tick", &win.tick(epoch_now()));
+            let _ = app.emit("dps://tick", &win.tick(crate::util::time::now_secs() as i64));
         }
     });
 
@@ -332,11 +332,4 @@ fn resolve_ore_volumes(
             .unwrap_or(0.0);
         cache.insert(ore, vol);
     }
-}
-
-fn epoch_now() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
 }
