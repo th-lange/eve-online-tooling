@@ -4,6 +4,8 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 use super::auth::{AuthError, AuthState};
+use super::error::EsiError;
+use super::net::{send_once, send_retrying};
 use super::ESI_BASE;
 use std::collections::HashMap;
 use std::path::Path;
@@ -54,6 +56,25 @@ async fn authed_get_paged<T: DeserializeOwned>(
         })
         .await?;
     Ok(out)
+}
+
+/// Like [`authed_get_paged`], but a 403 (a corp endpoint hit by a character
+/// without the required role, e.g. Director/Accountant) is treated as an
+/// empty result rather than an error — "no access" reads the same as "nothing
+/// there" to these callers.
+async fn authed_get_paged_or_empty_on_403<T: DeserializeOwned>(
+    auth: &AuthState,
+    character_id: i64,
+    path: &str,
+) -> Result<Vec<T>, AuthError> {
+    match authed_get_paged(auth, character_id, path).await {
+        Err(AuthError::Esi(EsiError::Http(e)))
+            if e.status() == Some(reqwest::StatusCode::FORBIDDEN) =>
+        {
+            Ok(Vec::new())
+        }
+        other => other,
+    }
 }
 
 /// Authenticated single-page ESI GET (deserialized). Shared by the character
@@ -117,15 +138,15 @@ pub async fn resolve_names(
             continue;
         }
         let result = async {
-            let resp = auth
-                .http()
-                .post(format!("{ESI_BASE}/latest/universe/names/"))
-                .json(&batch)
-                .send()
-                .await
-                .ok()?
-                .error_for_status()
-                .ok()?;
+            let resp = send_retrying(|| {
+                auth.http()
+                    .post(format!("{ESI_BASE}/latest/universe/names/"))
+                    .json(&batch)
+            })
+            .await
+            .ok()?
+            .error_for_status()
+            .ok()?;
             resp.json::<Vec<NameRow>>().await.ok()
         }
         .await;
@@ -185,16 +206,17 @@ pub async fn resolve_character_ids(
         .collect();
     if !missing.is_empty() {
         if let Some(ids) = (async {
-            http.post(format!("{ESI_BASE}/latest/universe/ids/"))
-                .json(&missing)
-                .send()
-                .await
-                .ok()?
-                .error_for_status()
-                .ok()?
-                .json::<UniverseIds>()
-                .await
-                .ok()
+            send_retrying(|| {
+                http.post(format!("{ESI_BASE}/latest/universe/ids/"))
+                    .json(&missing)
+            })
+            .await
+            .ok()?
+            .error_for_status()
+            .ok()?
+            .json::<UniverseIds>()
+            .await
+            .ok()
         })
         .await
         {
@@ -216,13 +238,14 @@ pub async fn open_market_window(
     type_id: i64,
 ) -> Result<(), AuthError> {
     let token = auth.access_token_for(character_id).await?;
-    auth.http()
-        .post(format!("{ESI_BASE}/latest/ui/openwindow/marketdetails/"))
-        .query(&[("type_id", type_id.to_string())])
-        .bearer_auth(&token)
-        .send()
-        .await?
-        .error_for_status()?;
+    send_retrying(|| {
+        auth.http()
+            .post(format!("{ESI_BASE}/latest/ui/openwindow/marketdetails/"))
+            .query(&[("type_id", type_id.to_string())])
+            .bearer_auth(&token)
+    })
+    .await?
+    .error_for_status()?;
     Ok(())
 }
 
@@ -238,17 +261,18 @@ pub async fn set_autopilot_waypoint(
     destination_system_id: i64,
 ) -> Result<(), AuthError> {
     let token = auth.access_token_for(character_id).await?;
-    auth.http()
-        .post(format!("{ESI_BASE}/latest/ui/autopilot/waypoint/"))
-        .query(&[
-            ("destination_id", destination_system_id.to_string()),
-            ("add_to_beginning", "true".to_string()),
-            ("clear_other_waypoints", "true".to_string()),
-        ])
-        .bearer_auth(&token)
-        .send()
-        .await?
-        .error_for_status()?;
+    send_retrying(|| {
+        auth.http()
+            .post(format!("{ESI_BASE}/latest/ui/autopilot/waypoint/"))
+            .query(&[
+                ("destination_id", destination_system_id.to_string()),
+                ("add_to_beginning", "true".to_string()),
+                ("clear_other_waypoints", "true".to_string()),
+            ])
+            .bearer_auth(&token)
+    })
+    .await?
+    .error_for_status()?;
     Ok(())
 }
 
@@ -358,32 +382,12 @@ pub async fn fetch_corp_blueprints(
     character_id: i64,
     corporation_id: i64,
 ) -> Result<Vec<RawBlueprint>, AuthError> {
-    let token = auth.access_token_for(character_id).await?;
-    let url = format!("{ESI_BASE}/latest/corporations/{corporation_id}/blueprints/");
-    let resp = auth.http().get(&url).bearer_auth(&token).send().await?;
-    if resp.status() == reqwest::StatusCode::FORBIDDEN {
-        return Ok(Vec::new());
-    }
-    let resp = resp.error_for_status()?;
-    let pages: u32 = resp
-        .headers()
-        .get("x-pages")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1);
-    let mut out: Vec<RawBlueprint> = resp.json().await?;
-    for page in 2..=pages {
-        let resp = auth
-            .http()
-            .get(&url)
-            .query(&[("page", page.to_string())])
-            .bearer_auth(&token)
-            .send()
-            .await?
-            .error_for_status()?;
-        out.extend(resp.json::<Vec<RawBlueprint>>().await?);
-    }
-    Ok(out)
+    authed_get_paged_or_empty_on_403(
+        auth,
+        character_id,
+        &format!("/latest/corporations/{corporation_id}/blueprints/"),
+    )
+    .await
 }
 
 /// Corporation hangar/vault assets, using the character's token. Requires the
@@ -395,32 +399,12 @@ pub async fn fetch_corp_assets(
     character_id: i64,
     corporation_id: i64,
 ) -> Result<Vec<RawAsset>, AuthError> {
-    let token = auth.access_token_for(character_id).await?;
-    let url = format!("{ESI_BASE}/latest/corporations/{corporation_id}/assets/");
-    let resp = auth.http().get(&url).bearer_auth(&token).send().await?;
-    if resp.status() == reqwest::StatusCode::FORBIDDEN {
-        return Ok(Vec::new());
-    }
-    let resp = resp.error_for_status()?;
-    let pages: u32 = resp
-        .headers()
-        .get("x-pages")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1);
-    let mut out: Vec<RawAsset> = resp.json().await?;
-    for page in 2..=pages {
-        let resp = auth
-            .http()
-            .get(&url)
-            .query(&[("page", page.to_string())])
-            .bearer_auth(&token)
-            .send()
-            .await?
-            .error_for_status()?;
-        out.extend(resp.json::<Vec<RawAsset>>().await?);
-    }
-    Ok(out)
+    authed_get_paged_or_empty_on_403(
+        auth,
+        character_id,
+        &format!("/latest/corporations/{corporation_id}/assets/"),
+    )
+    .await
 }
 
 /// An in-game saved fitting from ESI (`/characters|corporations/{id}/fittings/`).
@@ -461,11 +445,7 @@ pub async fn fetch_character_fittings(
 ) -> Result<Vec<EsiFitting>, AuthError> {
     let token = auth.access_token_for(character_id).await?;
     let url = format!("{ESI_BASE}/latest/characters/{character_id}/fittings/");
-    let resp = auth
-        .http()
-        .get(&url)
-        .bearer_auth(&token)
-        .send()
+    let resp = send_retrying(|| auth.http().get(&url).bearer_auth(&token))
         .await?
         .error_for_status()?;
     Ok(resp.json().await?)
@@ -495,21 +475,18 @@ pub async fn create_character_fitting<T: serde::Serialize>(
     }
     let token = auth.access_token_for(character_id).await?;
     let url = format!("{ESI_BASE}/latest/characters/{character_id}/fittings/");
-    let created: Created = auth
-        .http()
-        .post(&url)
-        .bearer_auth(&token)
-        .json(&Body {
+    let created: Created = send_once(|| {
+        auth.http().post(&url).bearer_auth(&token).json(&Body {
             name,
             description,
             ship_type_id,
             items,
         })
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
+    })
+    .await?
+    .error_for_status()?
+    .json()
+    .await?;
     Ok(created.fitting_id)
 }
 
@@ -523,7 +500,7 @@ pub async fn fetch_corp_fittings(
 ) -> Result<Vec<EsiFitting>, AuthError> {
     let token = auth.access_token_for(character_id).await?;
     let url = format!("{ESI_BASE}/latest/corporations/{corporation_id}/fittings/");
-    let resp = auth.http().get(&url).bearer_auth(&token).send().await?;
+    let resp = send_retrying(|| auth.http().get(&url).bearer_auth(&token)).await?;
     if resp.status() == reqwest::StatusCode::FORBIDDEN {
         return Ok(Vec::new());
     }
