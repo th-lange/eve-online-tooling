@@ -65,6 +65,18 @@ impl SdePaths {
 
 /// Open the SDE for the app's data dir. The dir/SDE-open plumbing was
 /// otherwise copy-pasted identically across every command module.
+///
+/// Design note (#556): several call sites (route/pochven/wormholes/intel/pi
+/// planners, `capabilities.rs`) still load the *entire* `solar_system_info`
+/// or `all_stargate_edges` map on every command invocation just to read one
+/// or a handful of entries. Those maps are immutable between SDE swaps, so a
+/// shared cache is feasible: a `OnceLock<RwLock<HashMap<...>>>` (or
+/// tauri-managed state) keyed by the SDE's generation — e.g. the `db` file's
+/// mtime/size, or a monotonic counter bumped by [`download_sde`] on a
+/// successful swap — with the cache cleared/repopulated whenever that key
+/// changes. Deferred out of #556's scope (which is the `market_current_location`
+/// point-query fix); worth picking up if profiling shows the full-map loads
+/// actually cost something in practice.
 pub fn open_from_app(app: &tauri::AppHandle) -> Result<Sde, String> {
     let dir = storage::app_data_dir(app)?;
     Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())

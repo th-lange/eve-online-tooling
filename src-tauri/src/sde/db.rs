@@ -7,7 +7,7 @@ use std::path::Path;
 use super::types::{
     activity, AttrMeta, BlueprintMaterial, BlueprintProduct, Decryptor, EffectMeta, InventionData,
     ManufacturableBlueprint, MarketItem, ModifierInfo, PlanetSchematic, Recipe, ReprocessRecipe,
-    ShipLayout, TypeDetail, TypeInfo, TypeNameMap, WormholeType,
+    ShipLayout, SystemInfo, TypeDetail, TypeInfo, TypeNameMap, WormholeType,
 };
 use super::SdeError;
 
@@ -1096,6 +1096,29 @@ impl Sde {
         let mut rows = stmt.query(params![system_id])?;
         match rows.next()? {
             Some(r) => Ok(Some(r.get(0)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// A single solar system's name, security and region (id + name), via one
+    /// join — the point-lookup counterpart to
+    /// [`solar_system_info`](Self::solar_system_info), for call sites that
+    /// only need one system and shouldn't pay for a full-map load.
+    pub fn system_info(&self, system_id: i64) -> Result<Option<SystemInfo>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT s.solarSystemName, s.security, s.regionID, r.regionName
+             FROM mapSolarSystems s
+             LEFT JOIN mapRegions r ON r.regionID = s.regionID
+             WHERE s.solarSystemID = ?1",
+        )?;
+        let mut rows = stmt.query(params![system_id])?;
+        match rows.next()? {
+            Some(r) => Ok(Some(SystemInfo {
+                name: r.get(0)?,
+                security: r.get::<_, Option<f64>>(1)?.unwrap_or(0.0),
+                region_id: r.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                region_name: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+            })),
             None => Ok(None),
         }
     }

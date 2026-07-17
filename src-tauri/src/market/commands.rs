@@ -136,20 +136,18 @@ pub async fn market_current_location(
     };
 
     let sde = crate::sde::open_from_app(&app)?;
-    let info = sde.solar_system_info().map_err(|e| e.to_string())?;
-    let Some((system_name, security, region_name)) = info.get(&loc.solar_system_id).cloned() else {
+    let Some(info) = sde
+        .system_info(loc.solar_system_id)
+        .map_err(|e| e.to_string())?
+    else {
         return Ok(None);
     };
-    let region_id = sde
-        .system_region(loc.solar_system_id)
-        .map_err(|e| e.to_string())?
-        .unwrap_or(0);
     Ok(Some(CurrentLocation {
         system_id: loc.solar_system_id,
-        system_name,
-        security,
-        region_id,
-        region_name,
+        system_name: info.name,
+        security: info.security,
+        region_id: info.region_id,
+        region_name: info.region_name,
     }))
 }
 
