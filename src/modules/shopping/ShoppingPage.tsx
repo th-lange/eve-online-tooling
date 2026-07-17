@@ -5,7 +5,7 @@ import { Plus } from "lucide-react";
 import { SHOPPING_LISTS_KEY } from "../../lib/queryKeys";
 import { useCopyToClipboard } from "../../lib/useCopyToClipboard";
 import { useEveLogDir } from "../../lib/useEveLogDir";
-import { parseItems, parseLine } from "./parse";
+import { parseItems, parseLine } from "../../lib/parseItems";
 import {
   sdeSearch,
   shoppingAddItem,
