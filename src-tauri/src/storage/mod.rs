@@ -9,7 +9,7 @@ use tauri::Manager;
 use crate::model::Character;
 
 /// Keychain service name (one keyed entry per character id).
-const KEYCHAIN_SERVICE: &str = "com.thlange.eve-online-tooling";
+pub(crate) const KEYCHAIN_SERVICE: &str = "com.thlange.eve-online-tooling";
 
 fn entry(character_id: i64) -> Result<Entry, String> {
     Entry::new(KEYCHAIN_SERVICE, &character_id.to_string()).map_err(|e| e.to_string())
