@@ -18,7 +18,7 @@ use std::path::Path;
 use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 
-use crate::esi::USER_AGENT;
+use crate::esi::{fetch_json_url, USER_AGENT};
 use crate::storage;
 
 /// zKillboard etiquette: a descriptive UA (we have one) and low concurrency.
@@ -139,8 +139,7 @@ pub async fn stats_for_characters(
         .map(|id| {
             let http = http.clone();
             async move {
-                let raw: Option<ZkillStatsRaw> =
-                    async { http.get(stats_url(id)).send().await.ok()?.json().await.ok() }.await;
+                let raw: Option<ZkillStatsRaw> = fetch_json_url(&http, &stats_url(id)).await;
                 raw.map(|r| (id, r))
             }
         })
@@ -173,9 +172,7 @@ async fn fetch_losses(url: String) -> Vec<ZkillLossRef> {
     let Ok(http) = client() else {
         return Vec::new();
     };
-    async { http.get(url).send().await.ok()?.json().await.ok() }
-        .await
-        .unwrap_or_default()
+    fetch_json_url(&http, &url).await.unwrap_or_default()
 }
 
 /// Recent losses for one character, newest first. Killmails themselves aren't

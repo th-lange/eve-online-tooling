@@ -6,7 +6,7 @@ use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-use crate::esi::{resolve_character_ids, AuthState, ESI_BASE};
+use crate::esi::{fetch_killmail, resolve_character_ids, AuthState};
 use crate::modules::fitting::commands::simulate_fit;
 use crate::modules::fitting::types::{Fit, FitItem, FitStats, ModuleState, SlotKind};
 use crate::sde::Sde;
@@ -484,12 +484,8 @@ async fn fetch_killmails(
                 if let Some(km) = storage::cache_get::<Killmail>(&dir, &key) {
                     return Some(km);
                 }
-                let url = format!(
-                    "{ESI_BASE}/latest/killmails/{}/{}/",
-                    r.killmail_id, r.zkb.hash
-                );
                 let km: Option<Killmail> =
-                    async { client.get(&url).send().await.ok()?.json().await.ok() }.await;
+                    fetch_killmail(&client, r.killmail_id, &r.zkb.hash).await;
                 if let Some(k) = &km {
                     let _ = storage::cache_put(&dir, &key, k, KILLMAIL_TTL_SECS);
                 }

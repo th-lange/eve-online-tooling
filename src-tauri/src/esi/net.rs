@@ -22,7 +22,9 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
 
 use reqwest::header::{HeaderMap, RETRY_AFTER};
-use reqwest::{RequestBuilder, Response, StatusCode};
+use reqwest::{Client, RequestBuilder, Response, StatusCode};
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 
 /// Pause new requests once the remaining budget dips below this.
 const LOW_BUDGET: i64 = 10;
@@ -174,6 +176,52 @@ where
     Ok(resp)
 }
 
+/// POST `body` as JSON to `url` and decode the JSON response, through
+/// [`send_retrying`] (error-budget aware; retries transient failures).
+/// Mirrors the inline `send_retrying` → `error_for_status` → `json` pattern
+/// the public POST resolvers in `esi::character` (`resolve_names`,
+/// `resolve_character_ids`) use directly. Swallows any failure — network,
+/// non-2xx status, or decode — as `None`; callers that need to tell those
+/// apart should call [`send_retrying`] directly.
+pub async fn post_json<T: DeserializeOwned, B: Serialize + ?Sized>(
+    client: &Client,
+    url: &str,
+    body: &B,
+) -> Option<T> {
+    send_retrying(|| client.post(url).json(body))
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json::<T>()
+        .await
+        .ok()
+}
+
+/// GET and decode a JSON response for an **immutable** resource (e.g. a
+/// killmail) that never changes once created, so no conditional-cache
+/// revalidation is needed — just error-budget observation + transient retry
+/// via [`send_retrying`]. Swallows any failure as `None`.
+pub async fn get_immutable_json<T: DeserializeOwned>(client: &Client, url: &str) -> Option<T> {
+    send_retrying(|| client.get(url))
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json::<T>()
+        .await
+        .ok()
+}
+
+/// Fetch and decode JSON from an arbitrary URL, swallowing any failure —
+/// network, non-2xx status, or decode — as `None`. A plain one-shot GET with
+/// **no** error-budget throttling or retry: for best-effort external lookups
+/// (e.g. zKillboard) that don't share ESI's error budget. ESI calls should go
+/// through [`get_immutable_json`]/[`post_json`] instead.
+pub async fn fetch_json_url<T: DeserializeOwned>(client: &Client, url: &str) -> Option<T> {
+    client.get(url).send().await.ok()?.json().await.ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,5 +284,107 @@ mod tests {
         h.insert(RETRY_AFTER, "5".parse().unwrap());
         assert_eq!(retry_after(&h), Some(Duration::from_secs(5)));
         assert_eq!(retry_after(&HeaderMap::new()), None);
+    }
+
+    #[test]
+    fn post_json_decodes_a_successful_response() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let server = tiny_http::Server::http("127.0.0.1:0").expect("bind loopback");
+            let addr = server.server_addr().to_ip().expect("ip addr");
+            let server_thread = std::thread::spawn(move || {
+                if let Ok(request) = server.recv() {
+                    let _ = request.respond(tiny_http::Response::from_string(r#"{"n":7}"#));
+                }
+            });
+
+            #[derive(serde::Deserialize)]
+            struct Row {
+                n: i64,
+            }
+            let client = reqwest::Client::new();
+            let url = format!("http://{addr}/");
+            let got: Option<Row> = post_json(&client, &url, &[1, 2, 3]).await;
+            assert_eq!(got.map(|r| r.n), Some(7));
+
+            server_thread.join().expect("server thread");
+        });
+    }
+
+    #[test]
+    fn get_immutable_json_is_none_on_error_status() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let server = tiny_http::Server::http("127.0.0.1:0").expect("bind loopback");
+            let addr = server.server_addr().to_ip().expect("ip addr");
+            let server_thread = std::thread::spawn(move || {
+                if let Ok(request) = server.recv() {
+                    let _ = request.respond(
+                        tiny_http::Response::from_string("not found").with_status_code(404),
+                    );
+                }
+            });
+
+            let client = reqwest::Client::new();
+            let url = format!("http://{addr}/");
+            let got: Option<serde_json::Value> = get_immutable_json(&client, &url).await;
+            assert!(got.is_none());
+
+            server_thread.join().expect("server thread");
+        });
+    }
+
+    #[test]
+    fn fetch_json_url_decodes_a_successful_response() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let server = tiny_http::Server::http("127.0.0.1:0").expect("bind loopback");
+            let addr = server.server_addr().to_ip().expect("ip addr");
+            let server_thread = std::thread::spawn(move || {
+                if let Ok(request) = server.recv() {
+                    let _ = request.respond(tiny_http::Response::from_string("[1,2,3]"));
+                }
+            });
+
+            let client = reqwest::Client::new();
+            let url = format!("http://{addr}/");
+            let got: Option<Vec<i64>> = fetch_json_url(&client, &url).await;
+            assert_eq!(got, Some(vec![1, 2, 3]));
+
+            server_thread.join().expect("server thread");
+        });
+    }
+
+    #[test]
+    fn fetch_json_url_is_none_when_the_body_does_not_decode() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let server = tiny_http::Server::http("127.0.0.1:0").expect("bind loopback");
+            let addr = server.server_addr().to_ip().expect("ip addr");
+            let server_thread = std::thread::spawn(move || {
+                if let Ok(request) = server.recv() {
+                    let _ = request.respond(tiny_http::Response::from_string("not json"));
+                }
+            });
+
+            let client = reqwest::Client::new();
+            let url = format!("http://{addr}/");
+            let got: Option<Vec<i64>> = fetch_json_url(&client, &url).await;
+            assert!(got.is_none());
+
+            server_thread.join().expect("server thread");
+        });
     }
 }

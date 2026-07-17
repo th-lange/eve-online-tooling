@@ -16,13 +16,14 @@ mod net;
 
 pub use auth::AuthState;
 pub use character::{
-    authed_get, authed_get_paged_pub, character_skill_levels, corporation_id,
-    create_character_fitting, fetch_assets, fetch_character_fittings, fetch_corp_assets,
-    fetch_corp_fittings, resolve_character_ids, resolve_names, set_autopilot_waypoint, EsiFitting,
-    SkillLevels,
+    authed_get, authed_get_paged_pub, character_affiliation, character_skill_levels,
+    corporation_id, create_character_fitting, fetch_assets, fetch_character_fittings,
+    fetch_corp_assets, fetch_corp_fittings, fetch_killmail, resolve_character_ids, resolve_names,
+    set_autopilot_waypoint, CharacterAffiliation, EsiFitting, SkillLevels,
 };
 pub use client::EsiClient;
 pub use error::EsiError;
+pub use net::fetch_json_url;
 
 /// ESI base URL. Endpoint paths include the version segment (e.g. `/latest`).
 pub const ESI_BASE: &str = "https://esi.evetech.net";

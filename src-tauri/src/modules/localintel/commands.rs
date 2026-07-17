@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::esi::{
-    authed_get, authed_get_paged_pub, corporation_id, resolve_character_ids, resolve_names,
-    AuthState, ESI_BASE,
+    authed_get, authed_get_paged_pub, character_affiliation, corporation_id, resolve_character_ids,
+    resolve_names, AuthState, CharacterAffiliation,
 };
 use crate::storage;
 use crate::zkill;
@@ -75,15 +75,6 @@ fn threat_of(standing: Option<f64>) -> &'static str {
 struct IdName {
     id: i64,
     name: String,
-}
-#[derive(Deserialize)]
-struct Affiliation {
-    character_id: i64,
-    corporation_id: i64,
-    #[serde(default)]
-    alliance_id: Option<i64>,
-    #[serde(default)]
-    faction_id: Option<i64>,
 }
 /// One contact (`/{characters|corporations|alliances}/{id}/contacts/`): a
 /// blue/red mark on a character, corp, alliance or faction. `contact_id` is the
@@ -198,21 +189,7 @@ pub async fn local_scan(
         })
         .collect();
     if !stale.is_empty() {
-        if let Ok(rows) = (async {
-            http.post(format!("{ESI_BASE}/latest/characters/affiliation/"))
-                .json(&stale)
-                .send()
-                .await
-                .ok()?
-                .error_for_status()
-                .ok()?
-                .json::<Vec<Affiliation>>()
-                .await
-                .ok()
-        })
-        .await
-        .ok_or(())
-        {
+        if let Some(rows) = character_affiliation(http, &stale).await {
             for a in rows {
                 aff_cache.insert(
                     a.character_id,
@@ -229,10 +206,10 @@ pub async fn local_scan(
             }
         }
     }
-    let affiliations: Vec<Affiliation> = char_ids
+    let affiliations: Vec<CharacterAffiliation> = char_ids
         .iter()
         .filter_map(|id| {
-            aff_cache.get(id).map(|c| Affiliation {
+            aff_cache.get(id).map(|c| CharacterAffiliation {
                 character_id: *id,
                 corporation_id: c.corporation_id,
                 alliance_id: c.alliance_id,
@@ -274,7 +251,7 @@ pub async fn local_scan(
     // 4. the logged-in character's standings, keyed by entity id (cached 30m).
     let standings = cached_standings(&app, &auth_state).await;
 
-    let aff_by_id: HashMap<i64, &Affiliation> =
+    let aff_by_id: HashMap<i64, &CharacterAffiliation> =
         affiliations.iter().map(|a| (a.character_id, a)).collect();
 
     let mut pilots: Vec<LocalPilot> = Vec::new();

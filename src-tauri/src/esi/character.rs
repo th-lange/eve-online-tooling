@@ -5,7 +5,7 @@ use serde::Deserialize;
 
 use super::auth::{AuthError, AuthState};
 use super::error::EsiError;
-use super::net::{send_once, send_retrying};
+use super::net::{get_immutable_json, post_json, send_once, send_retrying};
 use super::ESI_BASE;
 use std::collections::HashMap;
 use std::path::Path;
@@ -229,6 +229,52 @@ pub async fn resolve_character_ids(
         }
     }
     id_cache
+}
+
+/// One row of the public `POST /characters/affiliation/`: a character's
+/// current corporation/alliance/faction. Unauthenticated; ESI accepts
+/// batches up to 1000 ids.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CharacterAffiliation {
+    pub character_id: i64,
+    pub corporation_id: i64,
+    #[serde(default)]
+    pub alliance_id: Option<i64>,
+    #[serde(default)]
+    pub faction_id: Option<i64>,
+}
+
+/// Resolve character ids → current corp/alliance/faction via the public
+/// `POST /characters/affiliation/`. `None` on any failure (network, status,
+/// or decode) — callers that cache per-id (e.g. Local Intel's 1h TTL
+/// affiliation cache) should treat that as "nothing fresh this round" and
+/// keep serving what they already have cached.
+pub async fn character_affiliation(
+    http: &reqwest::Client,
+    ids: &[i64],
+) -> Option<Vec<CharacterAffiliation>> {
+    post_json(
+        http,
+        &format!("{ESI_BASE}/latest/characters/affiliation/"),
+        ids,
+    )
+    .await
+}
+
+/// Fetch one public killmail (`GET /killmails/{id}/{hash}/`). Killmails are
+/// immutable once created, so this is a plain budget-observed GET — no
+/// conditional-cache revalidation needed. `None` on any failure, including a
+/// 404 (e.g. a killmail ESI has since dropped).
+pub async fn fetch_killmail<T: DeserializeOwned>(
+    http: &reqwest::Client,
+    killmail_id: i64,
+    hash: &str,
+) -> Option<T> {
+    get_immutable_json(
+        http,
+        &format!("{ESI_BASE}/latest/killmails/{killmail_id}/{hash}/"),
+    )
+    .await
 }
 
 /// Open the in-game market details window for a type (ESI UI write).
