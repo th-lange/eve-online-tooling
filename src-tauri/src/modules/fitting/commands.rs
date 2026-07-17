@@ -14,12 +14,12 @@ use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule};
 use super::engine::resolve::{resolve, EntityInput, FitInput};
 use super::engine::validate::{validate, ValItem};
 use super::types::{EwTag, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind};
-use crate::esi::{corporation_id, AuthState};
+use crate::esi::{self, corporation_id, AuthState, SkillLevels};
 use crate::market::{resolve_location, MarketService, PriceModel};
 use crate::sde::{Sde, ShipLayout};
 use crate::storage;
 
-use super::stats::{character_skill_levels, required_skills_of, run_dogma};
+use super::stats::{required_skills_of, run_dogma};
 
 /// Storage key for the local saved-fits document (a `Vec<Fit>`).
 const FITS_KEY: &str = "fitting_fits";
@@ -207,6 +207,31 @@ pub struct ModuleInfo {
     pub calibration: f64,
 }
 
+/// The active character's actual skill levels, via the shared ESI fetch
+/// (#177). Resolves the primary character before calling.
+async fn character_skill_levels(
+    app: &AppHandle,
+    auth_state: &AuthState,
+) -> Result<SkillLevels, crate::model::AppError> {
+    let dir = storage::app_data_dir(app)?;
+    let character_id =
+        storage::primary_character(&dir).ok_or_else(crate::model::AppError::auth_required)?;
+    esi::character_skill_levels(auth_state, character_id)
+        .await
+        .map_err(|e| e.to_string().into())
+}
+
+/// Skill-level lookup for the dogma engine: the character's real level
+/// (untrained = 0) when `levels` is `Some`, else all-V (5) as though every
+/// skill were maxed. Shared by [`fitting_module_info`] and [`fitting_simulate`]
+/// (#172–#177, #266).
+fn skill_level_for(levels: Option<&SkillLevels>, skill_id: i64) -> f64 {
+    match levels {
+        Some(levels) => levels.level(skill_id) as f64,
+        None => 5.0, // all-V
+    }
+}
+
 /// Slot + **skill-adjusted** CPU/PG/calibration for each candidate type, on the
 /// given hull at the chosen skills — the *same* resolution fitted modules get, so
 /// the add-module fit check matches reality (e.g. Weapon Upgrades cutting turret
@@ -220,20 +245,15 @@ pub async fn fitting_module_info(
     type_ids: Vec<i64>,
 ) -> Result<Vec<ModuleInfo>, String> {
     // Skills first (async) — the SDE connection below isn't Send across awaits.
-    let levels: Option<HashMap<i64, i64>> = if skill_source.as_deref() == Some("character") {
+    let levels: Option<SkillLevels> = if skill_source.as_deref() == Some("character") {
         character_skill_levels(&app, &auth_state).await.ok()
     } else {
         None
     };
-    let skill_level_for = |sid: i64| -> f64 {
-        match &levels {
-            Some(map) => map.get(&sid).copied().unwrap_or(0) as f64,
-            None => 5.0, // all-V
-        }
-    };
+    let lookup = |sid: i64| skill_level_for(levels.as_ref(), sid);
 
     let sde = crate::sde::open_from_app(&app)?;
-    let costs = resolve_module_costs(&sde, ship_type_id, &skill_level_for, &type_ids)?;
+    let costs = resolve_module_costs(&sde, ship_type_id, &lookup, &type_ids)?;
     type_ids
         .into_iter()
         .map(|id| {
@@ -563,20 +583,15 @@ pub async fn fitting_simulate(
 ) -> Result<FitStats, String> {
     // Fetch the character's skills (async) *before* opening the SDE — the SDE
     // connection isn't Send, so it must not be held across an await.
-    let levels: Option<HashMap<i64, i64>> = if skill_source.as_deref() == Some("character") {
+    let levels: Option<SkillLevels> = if skill_source.as_deref() == Some("character") {
         character_skill_levels(&app, &auth_state).await.ok()
     } else {
         None
     };
-    let skill_level_for = |sid: i64| -> f64 {
-        match &levels {
-            Some(map) => map.get(&sid).copied().unwrap_or(0) as f64,
-            None => 5.0, // all-V
-        }
-    };
+    let lookup = |sid: i64| skill_level_for(levels.as_ref(), sid);
 
     let sde = crate::sde::open_from_app(&app)?;
-    simulate_fit(&sde, &fit, &skill_level_for)
+    simulate_fit(&sde, &fit, &lookup)
 }
 
 /// Core simulation shared by `fitting_simulate` and the PVP fit analysis: given

@@ -273,6 +273,67 @@ pub async fn fetch_assets(auth: &AuthState, character_id: i64) -> Result<Vec<Raw
     .await
 }
 
+/// Raw skill entry as returned by `/characters/{id}/skills/`.
+#[derive(Deserialize)]
+struct RawSkillsResponse {
+    skills: Vec<RawSkillEntry>,
+    total_sp: i64,
+    #[serde(default)]
+    unallocated_sp: i64,
+}
+#[derive(Deserialize)]
+struct RawSkillEntry {
+    skill_id: i64,
+    #[serde(default)]
+    active_skill_level: i64,
+}
+
+/// A character's trained skill levels + SP totals, from
+/// `/characters/{id}/skills/`. Shared by the fitting simulator, industry slot
+/// counts, and the character skills/standings/trade-fees viewers — every
+/// caller was independently deserializing the same endpoint (#177, #55, #56).
+#[derive(Debug, Clone, Default)]
+pub struct SkillLevels {
+    levels: HashMap<i64, i64>,
+    pub total_sp: i64,
+    pub unallocated_sp: i64,
+}
+
+impl SkillLevels {
+    /// The character's trained level for `id` (0 if untrained/not returned).
+    pub fn level(&self, id: i64) -> i64 {
+        self.levels.get(&id).copied().unwrap_or(0)
+    }
+
+    /// Count of skills trained to at least level 1.
+    pub fn trained_count(&self) -> usize {
+        self.levels.values().filter(|&&level| level > 0).count()
+    }
+}
+
+/// The character's trained skill levels + SP totals, via authenticated ESI
+/// `/characters/{id}/skills/`. Requires the `esi-skills.read_skills.v1` scope.
+pub async fn character_skill_levels(
+    auth: &AuthState,
+    character_id: i64,
+) -> Result<SkillLevels, AuthError> {
+    let raw: RawSkillsResponse = authed_get(
+        auth,
+        character_id,
+        &format!("/latest/characters/{character_id}/skills/"),
+    )
+    .await?;
+    Ok(SkillLevels {
+        levels: raw
+            .skills
+            .into_iter()
+            .map(|s| (s.skill_id, s.active_skill_level))
+            .collect(),
+        total_sp: raw.total_sp,
+        unallocated_sp: raw.unallocated_sp,
+    })
+}
+
 #[derive(Deserialize)]
 struct CharacterPublic {
     corporation_id: i64,

@@ -10,7 +10,9 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-use crate::esi::{authed_get, corporation_id, resolve_names, AuthState, ESI_BASE};
+use crate::esi::{
+    authed_get, character_skill_levels, corporation_id, resolve_names, AuthState, ESI_BASE,
+};
 use crate::sde::{Sde, SdePaths};
 use crate::storage;
 
@@ -103,18 +105,6 @@ pub struct Slots {
 pub struct JobsResult {
     pub jobs: Vec<JobRow>,
     pub slots: Slots,
-}
-
-#[derive(Deserialize, Default)]
-struct EsiSkills {
-    #[serde(default)]
-    skills: Vec<EsiSkill>,
-}
-#[derive(Deserialize)]
-struct EsiSkill {
-    skill_id: i64,
-    #[serde(default)]
-    active_skill_level: i64,
 }
 
 /// Which slot pool an activity draws from: manufacturing / science / reactions.
@@ -213,21 +203,10 @@ async fn character_industry_jobs(
 
     // Slot usage: max slots come from skills (1 base + each rank), used = jobs
     // occupying a slot now (active or finished-but-undelivered).
-    let skills: EsiSkills = authed_get(
-        auth_state,
-        character_id,
-        &format!("/latest/characters/{character_id}/skills/"),
-    )
-    .await
-    .unwrap_or_default();
-    let level = |skill_id: i64| {
-        skills
-            .skills
-            .iter()
-            .find(|s| s.skill_id == skill_id)
-            .map(|s| s.active_skill_level)
-            .unwrap_or(0)
-    };
+    let skills = character_skill_levels(auth_state, character_id)
+        .await
+        .unwrap_or_default();
+    let level = |skill_id: i64| skills.level(skill_id);
     // Mass Production / Adv (3387/24625), Laboratory Operation / Adv (3406/24624),
     // Mass Reactions / Adv (45748/45749) — 1 base slot + 1 per level.
     let (total_m, total_s, total_r) = (
