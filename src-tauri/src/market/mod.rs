@@ -19,7 +19,7 @@ mod service;
 mod types;
 
 pub use markets::{default_region_id, jita_location, location_label, regions, resolve_location};
-pub use service::{MarketService, PriceMap, TradedStats};
-// `BestSell` is returned by a MarketService method and reached through its
-// return type; it doesn't need a named re-export.
+// `BestSell` is re-exported by name so appraisal's shared `price_items`
+// helper can take a `&HashMap<i64, BestSell>` parameter.
+pub use service::{BestSell, MarketService, PriceMap, TradedStats};
 pub use types::PriceModel;
