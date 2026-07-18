@@ -617,4 +617,3 @@ function DayTradeTable({
     </div>
   );
 }
-

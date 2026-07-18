@@ -16,12 +16,7 @@ import {
   systemsByRole,
 } from "./data";
 import { SEC_HEX, secBand } from "../../lib/security";
-import {
-  CLADE_HEX,
-  CLADE_KRAI,
-  ROLE_HEX,
-  systemVisual,
-} from "./visual";
+import { CLADE_HEX, CLADE_KRAI, ROLE_HEX, systemVisual } from "./visual";
 import { homeTriangleLayout } from "./graph";
 
 // Centred popover: the 27 Pochven systems + their internal connections, coloured
@@ -251,10 +246,7 @@ export function PochvenSystemsPopover() {
                                 )
                                   .filter(([, n]) => n > 0)
                                   .map(([b, n]) => (
-                                    <span
-                                      key={b}
-                                      style={{ color: SEC_HEX[b] }}
-                                    >
+                                    <span key={b} style={{ color: SEC_HEX[b] }}>
                                       {n} {b.replace("sec", "")}
                                     </span>
                                   ))}

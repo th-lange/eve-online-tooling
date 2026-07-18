@@ -309,8 +309,7 @@ function statusColor(status: string): string {
 
 /** "in 3h 20m" for running jobs, else the end date (UTC / EVE time). */
 function finishLabel(r: JobRow, now: number): string {
-  if (r.status !== "active" || !r.endDate)
-    return formatEveDateTime(r.endDate);
+  if (r.status !== "active" || !r.endDate) return formatEveDateTime(r.endDate);
   const end = Date.parse(r.endDate);
   if (Number.isNaN(end)) return r.endDate;
   const ms = end - now;
