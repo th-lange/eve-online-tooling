@@ -135,6 +135,68 @@ pub fn net_suggested_qty(demand: i64, owned: i64) -> i64 {
     (demand - owned).max(0)
 }
 
+/// Two views matter for hauling: ISK/m³ (cargo-bound) and absolute profit — a
+/// bulky ship can have low ISK/m³ but a big per-unit margin. Keep the top
+/// `profit_cap` by profit, sort the rest by ISK/m³ and truncate to
+/// `result_cap`, then union the profit-capped set back in (deduped by
+/// `type_id`) so high-value flips aren't silently dropped by the cargo cap.
+pub fn rank_and_cap(
+    mut rows: Vec<DayTradeRow>,
+    profit_cap: usize,
+    result_cap: usize,
+) -> Vec<DayTradeRow> {
+    rows.sort_by(|a, b| {
+        b.profit_per_unit
+            .partial_cmp(&a.profit_per_unit)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let by_profit: Vec<DayTradeRow> = rows.iter().take(profit_cap).cloned().collect();
+    rows.sort_by(|a, b| {
+        b.isk_per_m3
+            .partial_cmp(&a.isk_per_m3)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    rows.truncate(result_cap);
+    let present: std::collections::HashSet<i64> = rows.iter().map(|r| r.type_id).collect();
+    rows.extend(
+        by_profit
+            .into_iter()
+            .filter(|r| !present.contains(&r.type_id)),
+    );
+    rows
+}
+
+/// Fill in the fields that need live data outside `evaluate`'s pure quote
+/// comparison: how much of the sell hub's daily volume is worth buying over
+/// the purchase window (net of owned stock), the profit at that quantity, and
+/// how contested the sell-hub order book is relative to daily turnover.
+pub fn enrich(
+    row: &mut DayTradeRow,
+    dest_volume: i64,
+    purchase_days: f64,
+    owned: i64,
+    listed: i64,
+) {
+    row.dest_volume = dest_volume;
+    let demand = (dest_volume as f64 * purchase_days).round() as i64;
+    row.suggested_qty = net_suggested_qty(demand, owned);
+    row.total_profit = row.profit_per_unit * row.suggested_qty as f64;
+    row.days_of_supply = if dest_volume > 0 {
+        listed as f64 / dest_volume as f64
+    } else {
+        0.0
+    };
+}
+
+/// Liquidity floor: drop rows the sell hub can't absorb over a day. `0` keeps
+/// everything (the UI's floor is off).
+pub fn retain_min_demand(mut rows: Vec<DayTradeRow>, min_daily_demand: i64) -> Vec<DayTradeRow> {
+    if min_daily_demand > 0 {
+        rows.retain(|r| r.dest_volume >= min_daily_demand);
+    }
+    rows
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,6 +214,32 @@ mod tests {
             sales_tax,
             broker_fee,
             shipping_rate,
+        }
+    }
+
+    fn row(type_id: i64, profit_per_unit: f64, isk_per_m3: f64) -> DayTradeRow {
+        DayTradeRow {
+            type_id,
+            name: format!("Item{type_id}"),
+            buy_region_id: 1,
+            buy_hub: "Buy".to_string(),
+            buy_price: 10.0,
+            sell_region_id: 2,
+            sell_hub: "Sell".to_string(),
+            sell_price: 20.0,
+            profit_per_unit,
+            shipping_per_unit: 0.0,
+            margin: 0.0,
+            volume_m3: 1.0,
+            isk_per_m3,
+            dest_volume: 0,
+            suggested_qty: 0,
+            total_profit: 0.0,
+            days_of_supply: 0.0,
+            favorite: false,
+            category: None,
+            group: None,
+            meta_group: None,
         }
     }
 
@@ -220,5 +308,71 @@ mod tests {
         let quotes = [quote(1, 100.0), quote(2, 100.0)];
         let r = evaluate(1, "x", Some(1.0), &quotes, &config(0.0, 0.0, 0.0), false);
         assert!(r.is_none() || r.unwrap().profit_per_unit == 0.0);
+    }
+
+    #[test]
+    fn rank_and_cap_keeps_bulky_high_profit_row_via_profit_union_without_duplicating() {
+        // 3 rows ranked by isk/m3 fill the result cap; a 4th row (type 99) has a
+        // huge profit_per_unit but a tiny isk/m3, so it's truncated from the
+        // isk/m3 view — the profit union must bring it back exactly once.
+        let rows = vec![
+            row(1, 10.0, 300.0),
+            row(2, 10.0, 200.0),
+            row(3, 10.0, 100.0),
+            row(99, 10_000.0, 1.0),
+        ];
+        let result = rank_and_cap(rows, /* profit_cap */ 1, /* result_cap */ 3);
+        assert_eq!(result.iter().filter(|r| r.type_id == 99).count(), 1);
+        assert_eq!(result.len(), 4);
+    }
+
+    #[test]
+    fn rank_and_cap_does_not_duplicate_a_row_already_in_both_caps() {
+        // A single row that's both the top isk/m3 row and the top profit row
+        // must appear exactly once in the merged output.
+        let rows = vec![row(1, 100.0, 50.0), row(2, 1.0, 1.0)];
+        let result = rank_and_cap(rows, 1, 1);
+        assert_eq!(result.iter().filter(|r| r.type_id == 1).count(), 1);
+    }
+
+    #[test]
+    fn enrich_zero_dest_volume_gives_zero_days_of_supply() {
+        let mut r = row(1, 10.0, 5.0);
+        enrich(
+            &mut r, /* dest_volume */ 0, /* purchase_days */ 2.0, /* owned */ 0,
+            /* listed */ 500,
+        );
+        assert_eq!(r.days_of_supply, 0.0);
+        assert_eq!(r.suggested_qty, 0);
+        assert_eq!(r.total_profit, 0.0);
+    }
+
+    #[test]
+    fn enrich_computes_suggested_qty_and_total_profit() {
+        let mut r = row(1, 10.0, 5.0);
+        enrich(
+            &mut r, /* dest_volume */ 100, /* purchase_days */ 2.0, /* owned */ 50,
+            /* listed */ 300,
+        );
+        // demand = round(100 * 2.0) = 200; net of 50 owned -> 150.
+        assert_eq!(r.suggested_qty, 150);
+        assert!((r.total_profit - 1500.0).abs() < 1e-9);
+        assert!((r.days_of_supply - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn retain_min_demand_drops_illiquid_rows_and_zero_disables_the_floor() {
+        let mut a = row(1, 10.0, 5.0);
+        a.dest_volume = 5;
+        let mut b = row(2, 10.0, 5.0);
+        b.dest_volume = 50;
+        let rows = vec![a.clone(), b.clone()];
+        let result = retain_min_demand(rows.clone(), 10);
+        assert_eq!(
+            result.iter().map(|r| r.type_id).collect::<Vec<_>>(),
+            vec![2]
+        );
+        let unfiltered = retain_min_demand(rows, 0);
+        assert_eq!(unfiltered.len(), 2);
     }
 }

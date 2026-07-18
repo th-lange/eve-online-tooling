@@ -62,7 +62,7 @@ function renderPage(entries: PluginEntry[], mcpStart: McpStatus = STOPPED) {
       switch (cmd) {
         case "plugins_list":
           return Promise.resolve(entries);
-        case "plugin_set_active":
+        case "plugins_set_active":
           return Promise.resolve();
         case "mcp_status":
           return Promise.resolve(mcp);
@@ -125,7 +125,7 @@ describe("PluginsPage", () => {
     expect(screen.getByText("Store its own private data")).toBeInTheDocument();
   });
 
-  it("activating a plugin calls plugin_set_active(id, true)", async () => {
+  it("activating a plugin calls plugins_set_active(id, true)", async () => {
     renderPage([PLUGIN]);
     const card = await screen.findByText("Pricing Model");
     const button = within(
@@ -133,7 +133,7 @@ describe("PluginsPage", () => {
     ).getByRole("button", { name: "Activate" });
     fireEvent.click(button);
     await waitFor(() =>
-      expect(invokeMock).toHaveBeenCalledWith("plugin_set_active", {
+      expect(invokeMock).toHaveBeenCalledWith("plugins_set_active", {
         pluginId: "pricing-model",
         active: true,
       }),

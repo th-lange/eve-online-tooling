@@ -24,7 +24,6 @@ use super::manifest::Permission;
 use crate::capabilities;
 use crate::esi::AuthState;
 use crate::market::MarketService;
-use crate::sde::open_from_dir;
 
 /// Everything a plugin's host functions are allowed to know about it: where its
 /// private storage lives. Shared (immutably) into each host-fn closure.
@@ -130,13 +129,21 @@ pub fn host_functions(granted: &HashSet<Permission>, ctx: Arc<BrokerCtx>) -> Vec
                     .parse()
                     .map_err(|_| Error::msg(format!("sde_type_info: not a type id: {arg:?}")))?;
                 // The shared helper reports errors as `String`; extism hosts
-                // speak `extism::Error`, so map at this boundary.
-                let sde = open_from_dir(&sde_ctx.app_data_dir).map_err(Error::msg)?;
-                let info = sde
-                    .type_info(type_id)
-                    .map_err(|e| Error::msg(e.to_string()))?;
-                // `null` when the type is unknown — a clean, parseable result.
-                let json = serde_json::to_string(&info).map_err(|e| Error::msg(e.to_string()))?;
+                // speak `extism::Error`, so map at this boundary. Delegates to
+                // the capability registry (cap_sde_type_info) instead of
+                // re-implementing the SDE lookup here, so the two callers
+                // can't drift.
+                let market = MarketService::with_cache(sde_ctx.app_data_dir.clone());
+                let auth = AuthState::with_cache(sde_ctx.app_data_dir.clone());
+                let hctx = capabilities::HostCtx {
+                    app_data_dir: &sde_ctx.app_data_dir,
+                    market: &market,
+                    auth: &auth,
+                };
+                let args = serde_json::json!({ "typeId": type_id });
+                let json = capabilities::invoke(&hctx, "sde_type_info", &args)
+                    .map_err(Error::msg)?
+                    .to_string();
                 plugin.memory_set_val(&mut outputs[0], json)?;
                 Ok(())
             },
@@ -199,9 +206,9 @@ pub fn host_functions(granted: &HashSet<Permission>, ctx: Arc<BrokerCtx>) -> Vec
     // Threading: Extism host functions are synchronous by contract, and some
     // capability handlers `block_on` real network I/O (ESI/Fuzzwork). That is
     // only acceptable because every path into plugin wasm keeps this closure
-    // off async runtime workers and off the main thread: the `plugin_invoke`
+    // off async runtime workers and off the main thread: the `plugins_invoke`
     // command wraps the call in `tokio::task::spawn_blocking` (see
-    // `manager::plugin_invoke`), and the MCP bridge runs on its own dedicated
+    // `manager::plugins_invoke`), and the MCP bridge runs on its own dedicated
     // OS thread. Do not call plugin wasm inline from a sync command or from an
     // async task — a slow capability would stall the UI (or panic on
     // re-entrant `block_on`).

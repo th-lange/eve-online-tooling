@@ -22,6 +22,7 @@ import {
 import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { Field } from "../../components/forms";
 import { SdeGate } from "../../components/SdeGate";
+import { RegionSelect } from "../../components/RegionStationPicker";
 
 const FORGE = 10000002;
 
@@ -78,17 +79,11 @@ function Workbench() {
 
       <div className="mt-4 flex flex-wrap items-end gap-3">
         <Field label="Region">
-          <select
+          <RegionSelect
+            regions={regions.data}
             value={regionId}
-            onChange={(e) => setRegionId(Number(e.currentTarget.value))}
-            className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
-          >
-            {regions.data?.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
+            onChange={setRegionId}
+          />
         </Field>
         <Field label="Min ROI %">
           <input

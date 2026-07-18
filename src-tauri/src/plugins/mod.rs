@@ -967,6 +967,128 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Recursively collect every file under `root` whose name starts with
+    /// `prefix` — proves a zip-slip payload never lands anywhere on disk,
+    /// not just at the exact traversal target.
+    fn find_files_starting_with(root: &Path, prefix: &str) -> Vec<PathBuf> {
+        let mut hits = Vec::new();
+        let Ok(entries) = std::fs::read_dir(root) else {
+            return hits;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                hits.extend(find_files_starting_with(&path, prefix));
+            } else if path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with(prefix))
+            {
+                hits.push(path);
+            }
+        }
+        hits
+    }
+
+    /// `enclosed_name()` rejects any entry whose path climbs out of the
+    /// staging dir with a parent-dir component — pin that a `../` traversal
+    /// entry is rejected outright and nothing it names is ever written
+    /// anywhere under the app data dir.
+    #[test]
+    fn install_zip_rejects_a_parent_dir_traversal_entry() {
+        let root = tmp("zip-slip-parent");
+        std::fs::create_dir_all(root.join("plugins")).unwrap();
+        let zip_path = root.join("evil.zip");
+        write_zip(&zip_path, &[("../evil-parent-636.txt", "pwned")]);
+        let reg = PluginRegistry::load(&root);
+        let err = reg.install_zip(&zip_path).unwrap_err();
+        assert!(err.contains("unsafe path"), "unexpected error: {err}");
+        assert!(find_files_starting_with(&std::env::temp_dir(), "evil-parent-636").is_empty());
+        // No leftover staging dir.
+        assert!(std::fs::read_dir(root.join("plugins"))
+            .unwrap()
+            .flatten()
+            .all(|e| !e.file_name().to_string_lossy().starts_with(".installing-")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Same guard, but the traversal is buried under a normal-looking
+    /// leading component (`nested/../../evil2.txt`) — `enclosed_name()`'s
+    /// depth counter must still catch it going negative rather than only
+    /// checking for a leading `..`.
+    #[test]
+    fn install_zip_rejects_a_nested_traversal_entry() {
+        let root = tmp("zip-slip-nested");
+        std::fs::create_dir_all(root.join("plugins")).unwrap();
+        let zip_path = root.join("evil-nested.zip");
+        write_zip(&zip_path, &[("nested/../../evil-nested-636.txt", "pwned")]);
+        let reg = PluginRegistry::load(&root);
+        let err = reg.install_zip(&zip_path).unwrap_err();
+        assert!(err.contains("unsafe path"), "unexpected error: {err}");
+        assert!(find_files_starting_with(&std::env::temp_dir(), "evil-nested-636").is_empty());
+        assert!(std::fs::read_dir(root.join("plugins"))
+            .unwrap()
+            .flatten()
+            .all(|e| !e.file_name().to_string_lossy().starts_with(".installing-")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Same guard against an absolute-path entry name. `zip::write` doesn't
+    /// sanitize the name it's given (only `enclosed_name()` on the read side
+    /// does), so a leading `/` round-trips into the archive unmodified and
+    /// exercises the same `Component::RootDir => return None` branch as a
+    /// real hostile archive built by a non-Rust tool would.
+    #[test]
+    fn install_zip_rejects_an_absolute_path_entry() {
+        let root = tmp("zip-slip-abs");
+        std::fs::create_dir_all(root.join("plugins")).unwrap();
+        let zip_path = root.join("evil-abs.zip");
+        write_zip(&zip_path, &[("/evil-abs-636.txt", "pwned")]);
+        let reg = PluginRegistry::load(&root);
+        let err = reg.install_zip(&zip_path).unwrap_err();
+        assert!(err.contains("unsafe path"), "unexpected error: {err}");
+        assert!(find_files_starting_with(&std::env::temp_dir(), "evil-abs-636").is_empty());
+        assert!(std::fs::read_dir(root.join("plugins"))
+            .unwrap()
+            .flatten()
+            .all(|e| !e.file_name().to_string_lossy().starts_with(".installing-")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A zip whose `plugin.json` is otherwise well-formed but which also
+    /// carries one traversal entry must reject the *whole* install (not
+    /// just skip the bad entry) and leave no orphan staging dir behind —
+    /// `install_zip` always sweeps its staging dir on the way out, success
+    /// or failure, but this pins that the failure path doesn't skip it.
+    #[test]
+    fn install_zip_rejects_the_whole_archive_when_one_entry_traverses() {
+        let root = tmp("zip-slip-combo");
+        std::fs::create_dir_all(root.join("plugins")).unwrap();
+        let zip_path = root.join("evil-combo.zip");
+        write_zip(
+            &zip_path,
+            &[
+                ("plugin.json", &manifest_json("combo")),
+                ("a.wasm", "fake"),
+                ("../evil-combo-636.txt", "pwned"),
+            ],
+        );
+        let reg = PluginRegistry::load(&root);
+        let err = reg.install_zip(&zip_path).unwrap_err();
+        assert!(err.contains("unsafe path"), "unexpected error: {err}");
+        // The well-formed plugin.json in the same archive didn't get a
+        // partial install — nothing landed under plugins/combo at all.
+        assert!(reg.list().is_empty());
+        assert!(!root.join("plugins/combo").exists());
+        assert!(find_files_starting_with(&std::env::temp_dir(), "evil-combo-636").is_empty());
+        // No orphan staging dir left behind.
+        assert!(std::fs::read_dir(root.join("plugins"))
+            .unwrap()
+            .flatten()
+            .all(|e| !e.file_name().to_string_lossy().starts_with(".installing-")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// A manifest identical to [`manifest_json`] but with a chosen
     /// `minAppVersion`.
     fn manifest_json_min_app(id: &str, min_app: &str) -> String {

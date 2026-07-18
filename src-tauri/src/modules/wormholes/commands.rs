@@ -10,7 +10,7 @@ use tauri::AppHandle;
 
 use crate::storage;
 
-use super::store::{self, Connection, ConnectionView};
+use super::store::{self, ConnSource, Connection, ConnectionView, JumpMass, MassStatus, Scope};
 use super::tripwire;
 
 /// What the frontend sends to create a connection.
@@ -20,14 +20,14 @@ pub struct NewConnection {
     pub source_system_id: i64,
     pub target_system_id: i64,
     #[serde(default = "default_scope")]
-    pub scope: String,
+    pub scope: Scope,
     #[serde(default)]
     pub source_sig: Option<String>,
     #[serde(default)]
     pub target_sig: Option<String>,
 }
-fn default_scope() -> String {
-    "wormhole".to_string()
+fn default_scope() -> Scope {
+    Scope::Wormhole
 }
 
 /// Current connections (auto-pruned of dead wormholes), with system names.
@@ -50,12 +50,12 @@ pub fn wh_add_connection(
         source_system_id: connection.source_system_id,
         target_system_id: connection.target_system_id,
         scope: connection.scope,
-        mass_status: "fresh".to_string(),
-        jump_mass: "xl".to_string(),
+        mass_status: MassStatus::Fresh,
+        jump_mass: JumpMass::Xl,
         eol: false,
         source_sig: connection.source_sig,
         target_sig: connection.target_sig,
-        source: "manual".to_string(),
+        source: ConnSource::Manual,
         created_at: crate::util::time::now_secs(),
         eol_updated_at: None,
     });
@@ -69,8 +69,8 @@ pub fn wh_add_connection(
 pub fn wh_update_connection(
     app: AppHandle,
     id: i64,
-    mass_status: String,
-    jump_mass: String,
+    mass_status: MassStatus,
+    jump_mass: JumpMass,
     eol: bool,
     source_sig: Option<String>,
     target_sig: Option<String>,
@@ -283,10 +283,9 @@ pub fn wh_route(
         if avoid_eol && c.eol {
             continue;
         }
-        let via: Via = if c.scope == "stargate" {
-            "stargate"
-        } else {
-            "wormhole"
+        let via: Via = match c.scope {
+            Scope::Stargate => "stargate",
+            Scope::Wormhole | Scope::Jumpbridge => "wormhole",
         };
         adj.entry(c.source_system_id)
             .or_default()
@@ -355,13 +354,20 @@ fn imported_connection(sig: &crate::evescout::TheraSignature, now: u64) -> Optio
         id: 0,
         source_system_id: sig.out_system_id,
         target_system_id: sig.in_system_id,
-        scope: "wormhole".to_string(),
-        mass_status: "fresh".to_string(),
-        jump_mass: crate::evescout::jump_mass_from_ship_size(sig.max_ship_size.as_deref()),
+        scope: Scope::Wormhole,
+        mass_status: MassStatus::Fresh,
+        jump_mass: match crate::evescout::jump_mass_from_ship_size(sig.max_ship_size.as_deref())
+            .as_str()
+        {
+            "s" => JumpMass::S,
+            "m" => JumpMass::M,
+            "l" => JumpMass::L,
+            _ => JumpMass::Xl,
+        },
         eol: false,
         source_sig: sig.out_signature.clone(),
         target_sig: sig.in_signature.clone(),
-        source: "evescout".to_string(),
+        source: ConnSource::Evescout,
         created_at: now,
         eol_updated_at: None,
     })
@@ -375,7 +381,7 @@ fn imported_connection(sig: &crate::evescout::TheraSignature, now: u64) -> Optio
 fn merge_by_source(
     existing: Vec<Connection>,
     imported: Vec<Connection>,
-    source_tag: &str,
+    source_tag: ConnSource,
 ) -> Vec<Connection> {
     let mut out: Vec<Connection> = existing
         .into_iter()
@@ -405,7 +411,7 @@ pub async fn wh_import_evescout(app: AppHandle) -> Result<Vec<ConnectionView>, S
         .iter()
         .filter_map(|s| imported_connection(s, now))
         .collect();
-    let merged = merge_by_source(existing, imported, "evescout");
+    let merged = merge_by_source(existing, imported, ConnSource::Evescout);
     store::save_and_view(&dir, &merged)
 }
 
@@ -415,11 +421,11 @@ pub async fn wh_import_evescout(app: AppHandle) -> Result<Vec<ConnectionView>, S
 /// EVE's bands are fresh (>50%), reduced (10–50%), critical (<10%); we take a
 /// representative point in each so the budget is a sensible estimate, not a lie
 /// of precision (the exact remaining mass isn't observable in-game).
-fn status_remaining_fraction(mass_status: &str) -> f64 {
+fn status_remaining_fraction(mass_status: MassStatus) -> f64 {
     match mass_status {
-        "critical" => 0.10,
-        "reduced" => 0.50,
-        _ => 1.00, // fresh / unknown
+        MassStatus::Critical => 0.10,
+        MassStatus::Reduced => 0.50,
+        MassStatus::Fresh => 1.00,
     }
 }
 
@@ -442,7 +448,7 @@ fn mass_budget(
     ship_mass: f64,
     max_jump_mass: f64,
     max_stable_mass: f64,
-    mass_status: &str,
+    mass_status: MassStatus,
 ) -> MassBudget {
     let passes = max_jump_mass > 0.0 && ship_mass > 0.0 && ship_mass <= max_jump_mass;
     if !passes {
@@ -516,7 +522,7 @@ pub fn wh_jump_plan(
     app: AppHandle,
     ship_type_id: i64,
     wh_type_code: String,
-    mass_status: String,
+    mass_status: MassStatus,
 ) -> Result<JumpPlan, String> {
     let sde = crate::sde::open_from_app(&app)?;
 
@@ -538,7 +544,7 @@ pub fn wh_jump_plan(
 
     let max_jump = wh.max_jump_mass.unwrap_or(0.0);
     let max_stable = wh.max_stable_mass.unwrap_or(0.0);
-    let b = mass_budget(ship_mass, max_jump, max_stable, &mass_status);
+    let b = mass_budget(ship_mass, max_jump, max_stable, mass_status);
     Ok(JumpPlan {
         found: true,
         message: None,
@@ -549,7 +555,7 @@ pub fn wh_jump_plan(
         dest_class_label: wh.dest_class_label,
         max_jump_mass: max_jump,
         max_stable_mass: max_stable,
-        mass_status,
+        mass_status: mass_status.as_str().to_string(),
         passes: b.passes,
         remaining_crossings: b.remaining_crossings,
         crossings_until_critical: b.crossings_until_critical,
@@ -587,7 +593,7 @@ pub fn wh_system_reference(
 fn tripwire_connections(
     sigs: &[tripwire::RawSignature],
     whs: &[tripwire::RawWormhole],
-    jump_mass_by_code: &HashMap<String, String>,
+    jump_mass_by_code: &HashMap<String, JumpMass>,
     now: u64,
 ) -> Vec<Connection> {
     let mut sig_map: HashMap<i64, (i64, Option<String>)> = HashMap::new();
@@ -604,20 +610,20 @@ fn tripwire_connections(
             let code = w.wh_type.clone().unwrap_or_default();
             let jump_mass = jump_mass_by_code
                 .get(&code.to_ascii_uppercase())
-                .cloned()
-                .unwrap_or_else(|| "xl".to_string());
+                .copied()
+                .unwrap_or(JumpMass::Xl);
             let eol = w.life.as_deref() == Some("critical");
             Some(Connection {
                 id: 0,
                 source_system_id: src_sys,
                 target_system_id: tgt_sys,
-                scope: "wormhole".to_string(),
+                scope: Scope::Wormhole,
                 mass_status: tripwire::mass_status(w.mass.as_deref()),
                 jump_mass,
                 eol,
                 source_sig: src_sig,
                 target_sig: tgt_sig,
-                source: "tripwire".to_string(),
+                source: ConnSource::Tripwire,
                 created_at: now,
                 eol_updated_at: eol.then_some(now),
             })
@@ -722,7 +728,7 @@ pub async fn wh_tripwire_import(app: AppHandle) -> Result<Vec<ConnectionView>, S
 
     let (sigs, whs) = tripwire::fetch(&cfg, &password, &mask).await?;
 
-    let jump_mass_by_code: HashMap<String, String> = sde
+    let jump_mass_by_code: HashMap<String, JumpMass> = sde
         .wormhole_types()
         .map_err(|e| e.to_string())?
         .into_iter()
@@ -741,7 +747,7 @@ pub async fn wh_tripwire_import(app: AppHandle) -> Result<Vec<ConnectionView>, S
         &jump_mass_by_code,
         crate::util::time::now_secs(),
     );
-    let merged = merge_by_source(existing, imported, "tripwire");
+    let merged = merge_by_source(existing, imported, ConnSource::Tripwire);
     store::save_and_view(&dir, &merged)
 }
 
@@ -785,7 +791,7 @@ mod tests {
             },
         ];
         let mut jm = HashMap::new();
-        jm.insert("N766".to_string(), "l".to_string());
+        jm.insert("N766".to_string(), JumpMass::L);
 
         let conns = tripwire_connections(&sigs, &whs, &jm, 100);
         assert_eq!(conns.len(), 1);
@@ -793,10 +799,10 @@ mod tests {
         assert_eq!(c.source_system_id, 31000005);
         assert_eq!(c.target_system_id, 30000142);
         assert_eq!(c.source_sig.as_deref(), Some("ABC"));
-        assert_eq!(c.jump_mass, "l");
-        assert_eq!(c.mass_status, "reduced");
+        assert_eq!(c.jump_mass, JumpMass::L);
+        assert_eq!(c.mass_status, MassStatus::Reduced);
         assert!(c.eol);
-        assert_eq!(c.source, "tripwire");
+        assert_eq!(c.source, ConnSource::Tripwire);
     }
 
     fn evescout_sig(out: i64, in_: i64, sig: &str, size: &str) -> crate::evescout::TheraSignature {
@@ -821,8 +827,8 @@ mod tests {
         let c = imported_connection(&s, 100).unwrap();
         assert_eq!(c.source_system_id, 31000005);
         assert_eq!(c.target_system_id, 30002086);
-        assert_eq!(c.jump_mass, "l");
-        assert_eq!(c.source, "evescout");
+        assert_eq!(c.jump_mass, JumpMass::L);
+        assert_eq!(c.source, ConnSource::Evescout);
         assert_eq!(c.source_sig.as_deref(), Some("ABC"));
 
         // Non-wormhole / incomplete rows are skipped.
@@ -835,13 +841,13 @@ mod tests {
     fn merge_preserves_manual_and_refreshes_imports() {
         let now = 1_000_000;
         let manual = Connection {
-            source: "manual".into(),
+            source: ConnSource::Manual,
             ..wh(1, 1, false, 0, now)
         };
         // An older imported row that should be dropped and replaced by the feed.
         let stale = Connection {
             id: 2,
-            source: "evescout".into(),
+            source: ConnSource::Evescout,
             source_system_id: 31000005,
             target_system_id: 39999999,
             ..wh(2, 1, false, 0, now)
@@ -854,11 +860,16 @@ mod tests {
             imported_connection(&evescout_sig(31000005, 30002086, "ABC", "large"), now).unwrap(),
         ];
 
-        let merged = merge_by_source(existing, imported, "evescout");
+        let merged = merge_by_source(existing, imported, ConnSource::Evescout);
         // Manual kept, stale import gone, one fresh import added with a new id.
         assert_eq!(merged.len(), 2);
-        assert!(merged.iter().any(|c| c.id == 1 && c.source == "manual"));
-        let imp: Vec<&Connection> = merged.iter().filter(|c| c.source == "evescout").collect();
+        assert!(merged
+            .iter()
+            .any(|c| c.id == 1 && c.source == ConnSource::Manual));
+        let imp: Vec<&Connection> = merged
+            .iter()
+            .filter(|c| c.source == ConnSource::Evescout)
+            .collect();
         assert_eq!(imp.len(), 1);
         assert_eq!(imp[0].target_system_id, 30002086);
         assert!(imp[0].id > 1);
@@ -869,7 +880,7 @@ mod tests {
         // Manual A↔B; feed reports B↔A with the same hub sig → not duplicated.
         let manual = Connection {
             id: 7,
-            source: "manual".into(),
+            source: ConnSource::Manual,
             source_system_id: 30002086,
             target_system_id: 31000005,
             source_sig: Some("ABC".into()),
@@ -880,15 +891,20 @@ mod tests {
                 imported_connection(&evescout_sig(31000005, 30002086, "ABC", "large"), 1_000_000)
                     .unwrap(),
             ];
-        let merged = merge_by_source(vec![manual], imported, "evescout");
+        let merged = merge_by_source(vec![manual], imported, ConnSource::Evescout);
         assert_eq!(merged.len(), 1);
-        assert_eq!(merged[0].source, "manual");
+        assert_eq!(merged[0].source, ConnSource::Manual);
     }
 
     #[test]
     fn mass_budget_verdicts() {
         // C2 static N766: 300 Mkg jump, 2 Bkg total. A 13 Mkg cruiser passes.
-        let cruiser = mass_budget(13_000_000.0, 300_000_000.0, 2_000_000_000.0, "fresh");
+        let cruiser = mass_budget(
+            13_000_000.0,
+            300_000_000.0,
+            2_000_000_000.0,
+            MassStatus::Fresh,
+        );
         assert!(cruiser.passes);
         // 2 Bkg / 13 Mkg ≈ 153 full crossings.
         assert_eq!(cruiser.remaining_crossings, 153);
@@ -897,16 +913,31 @@ mod tests {
         assert!(!cruiser.crit_risk);
 
         // A 1.3 Bkg freighter exceeds the 300 Mkg jump limit → blocked.
-        let freighter = mass_budget(1_300_000_000.0, 300_000_000.0, 2_000_000_000.0, "fresh");
+        let freighter = mass_budget(
+            1_300_000_000.0,
+            300_000_000.0,
+            2_000_000_000.0,
+            MassStatus::Fresh,
+        );
         assert!(!freighter.passes);
         assert_eq!(freighter.remaining_crossings, 0);
 
         // Reduced hole (~50% left) roughly halves the crossings.
-        let reduced = mass_budget(13_000_000.0, 300_000_000.0, 2_000_000_000.0, "reduced");
+        let reduced = mass_budget(
+            13_000_000.0,
+            300_000_000.0,
+            2_000_000_000.0,
+            MassStatus::Reduced,
+        );
         assert_eq!(reduced.remaining_crossings, 76);
 
         // Critical hole: one more big-but-legal jump tips it over.
-        let crit = mass_budget(150_000_000.0, 300_000_000.0, 2_000_000_000.0, "critical");
+        let crit = mass_budget(
+            150_000_000.0,
+            300_000_000.0,
+            2_000_000_000.0,
+            MassStatus::Critical,
+        );
         assert!(crit.passes);
         assert!(crit.crit_risk);
     }
@@ -953,13 +984,13 @@ mod tests {
             id,
             source_system_id: 31000001,
             target_system_id: 30000142,
-            scope: "wormhole".into(),
-            mass_status: "fresh".into(),
-            jump_mass: "xl".into(),
+            scope: Scope::Wormhole,
+            mass_status: MassStatus::Fresh,
+            jump_mass: JumpMass::Xl,
             eol,
             source_sig: None,
             target_sig: None,
-            source: "manual".into(),
+            source: ConnSource::Manual,
             created_at: now - age_h * 3600,
             eol_updated_at: eol.then(|| now - eol_age_h * 3600),
         }

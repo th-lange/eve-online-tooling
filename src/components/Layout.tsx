@@ -18,6 +18,7 @@ import { Characters } from "./Characters";
 import { CommandPalette } from "./CommandPalette";
 import { SupportModal } from "./SupportMyWork";
 import { STORAGE_KEYS } from "../lib/storageKeys";
+import { usePersistentState } from "../lib/usePersistentState";
 import { useInfoAlerts } from "../modules/info/infoContext";
 import appIcon from "../assets/app-icon.png";
 
@@ -42,28 +43,18 @@ const COLORS: { key: string; label: string; hex: string }[] = [
 ];
 const COLOR_HEX = new Map(COLORS.map((c) => [c.key, c.hex]));
 
-function loadIds(key: string): string[] {
-  try {
-    const raw = JSON.parse(localStorage.getItem(key) ?? "[]");
-    return Array.isArray(raw) ? raw.filter((x) => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
+/** Keep only string entries — defends against hand-edited/corrupted storage. */
+function sanitizeIds(raw: string[]): string[] {
+  return raw.filter((x) => typeof x === "string");
 }
 
-/** Load the `{ moduleId: colorKey }` map, keeping only known color keys. */
-function loadColors(): Record<string, string> {
-  try {
-    const raw = JSON.parse(localStorage.getItem(COLORS_KEY) ?? "{}");
-    if (!raw || typeof raw !== "object") return {};
-    const out: Record<string, string> = {};
-    for (const [id, key] of Object.entries(raw)) {
-      if (typeof key === "string" && COLOR_HEX.has(key)) out[id] = key;
-    }
-    return out;
-  } catch {
-    return {};
+/** Keep only entries whose value is a known color key. */
+function sanitizeColors(raw: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [id, key] of Object.entries(raw)) {
+    if (typeof key === "string" && COLOR_HEX.has(key)) out[id] = key;
   }
+  return out;
 }
 
 /**
@@ -97,11 +88,14 @@ function moveBefore(ids: string[], dragId: string, targetId: string): string[] {
 // the routed module page in the main area. Modules can be pinned to a group at
 // the top and drag-reordered within their group (both persisted in localStorage).
 export function Layout() {
-  const [pins, setPins] = useState<string[]>(() => loadIds(PINS_KEY));
+  const [pinsRaw, setPins] = usePersistentState<string[]>(PINS_KEY, []);
+  const pins = sanitizeIds(pinsRaw);
   // Custom order over all modules; defaults to registry order until dragged.
-  const [order, setOrder] = useState<string[]>(() =>
-    applyOrder(modules, loadIds(ORDER_KEY)).map((m) => m.id),
+  const [orderRaw, setOrder] = usePersistentState<string[]>(
+    ORDER_KEY,
+    modules.map((m) => m.id),
   );
+  const order = sanitizeIds(orderRaw);
   // Active plugins that ship a UI become first-class nav modules, merged after
   // the built-ins. Everything below (ordering, pin/hide, the host) treats them
   // like any other module.
@@ -110,15 +104,22 @@ export function Layout() {
     () => [...modules, ...pluginModules],
     [pluginModules],
   );
-  const [colors, setColors] = useState<Record<string, string>>(loadColors);
-  // Collapsed section ids (sections default to open — only collapsed ones persist).
-  const [collapsed, setCollapsed] = useState<string[]>(() =>
-    loadIds(COLLAPSED_KEY),
+  const [colorsRaw, setColors] = usePersistentState<Record<string, string>>(
+    COLORS_KEY,
+    {},
   );
+  const colors = sanitizeColors(colorsRaw);
+  // Collapsed section ids (sections default to open — only collapsed ones persist).
+  const [collapsedRaw, setCollapsed] = usePersistentState<string[]>(
+    COLLAPSED_KEY,
+    [],
+  );
+  const collapsed = sanitizeIds(collapsedRaw);
   // Modules the user has hidden from the nav; they collect in a "Hidden" section
   // at the bottom from which they can be restored. Hiding is nav-only — the
   // route and command palette still reach the module.
-  const [hidden, setHidden] = useState<string[]>(() => loadIds(HIDDEN_KEY));
+  const [hiddenRaw, setHidden] = usePersistentState<string[]>(HIDDEN_KEY, []);
+  const hidden = sanitizeIds(hiddenRaw);
   // A drag in progress, tagged with the section it started in — a pinned module
   // shows in both the Pinned section and its group, so reordering is scoped to
   // the section the row was dragged from.
@@ -127,13 +128,9 @@ export function Layout() {
   );
 
   const toggleSection = (id: string) =>
-    setCollapsed((prev) => {
-      const next = prev.includes(id)
-        ? prev.filter((s) => s !== id)
-        : [...prev, id];
-      localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next));
-      return next;
-    });
+    setCollapsed((prev) =>
+      prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id],
+    );
 
   // Assign (or clear, when `key` is null) a module's accent colour.
   const setColor = (id: string, key: string | null) =>
@@ -141,27 +138,18 @@ export function Layout() {
       const next = { ...prev };
       if (key) next[id] = key;
       else delete next[id];
-      localStorage.setItem(COLORS_KEY, JSON.stringify(next));
       return next;
     });
 
   const toggleHidden = (id: string) =>
-    setHidden((prev) => {
-      const next = prev.includes(id)
-        ? prev.filter((h) => h !== id)
-        : [...prev, id];
-      localStorage.setItem(HIDDEN_KEY, JSON.stringify(next));
-      return next;
-    });
+    setHidden((prev) =>
+      prev.includes(id) ? prev.filter((h) => h !== id) : [...prev, id],
+    );
 
   const togglePin = (id: string) =>
-    setPins((prev) => {
-      const next = prev.includes(id)
-        ? prev.filter((p) => p !== id)
-        : [...prev, id];
-      localStorage.setItem(PINS_KEY, JSON.stringify(next));
-      return next;
-    });
+    setPins((prev) =>
+      prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id],
+    );
 
   // Drop the dragged row onto `targetId` — only reorders within the same visible
   // section (the row carries the section it was dragged from), so dragging never
@@ -170,11 +158,7 @@ export function Layout() {
   const handleDrop = (targetId: string, targetSection: string) => {
     if (drag === null) return;
     if (drag.section === targetSection && drag.id !== targetId) {
-      setOrder((prev) => {
-        const next = moveBefore(prev, drag.id, targetId);
-        localStorage.setItem(ORDER_KEY, JSON.stringify(next));
-        return next;
-      });
+      setOrder((prev) => moveBefore(prev, drag.id, targetId));
     }
     setDrag(null);
   };

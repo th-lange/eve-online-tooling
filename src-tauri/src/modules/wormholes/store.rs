@@ -23,34 +23,81 @@ const WH_MAX_AGE_HOURS: u64 = 48;
 /// collapse within ~4h).
 const EOL_GRACE_HOURS: u64 = 4;
 
+/// Where a wormhole/stargate connection leads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum Scope {
+    Wormhole,
+    Stargate,
+    Jumpbridge,
+}
+
+/// Wormhole mass status band.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum MassStatus {
+    Fresh,
+    Reduced,
+    Critical,
+}
+
+impl MassStatus {
+    /// Lowercase wire label, matching the serde `rename_all` spelling.
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            MassStatus::Fresh => "fresh",
+            MassStatus::Reduced => "reduced",
+            MassStatus::Critical => "critical",
+        }
+    }
+}
+
+/// Largest ship class that can jump a hole.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum JumpMass {
+    S,
+    M,
+    L,
+    Xl,
+}
+
+/// Where a connection row came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum ConnSource {
+    /// Hand-entered by the user.
+    Manual,
+    /// Auto-imported from the EVE-Scout Thera/Turnur feed.
+    Evescout,
+    /// Auto-imported from a Tripwire chain.
+    Tripwire,
+}
+
 /// A stored connection between two systems.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Connection {
     pub(crate) id: i64,
     pub(crate) source_system_id: i64,
     pub(crate) target_system_id: i64,
-    /// "wormhole" | "stargate" | "jumpbridge".
-    pub(crate) scope: String,
-    /// Wormhole mass status: "fresh" | "reduced" | "critical".
-    pub(crate) mass_status: String,
-    /// Largest ship that can jump it: "s" | "m" | "l" | "xl".
-    pub(crate) jump_mass: String,
+    pub(crate) scope: Scope,
+    pub(crate) mass_status: MassStatus,
+    pub(crate) jump_mass: JumpMass,
     /// End-of-life flagged.
     pub(crate) eol: bool,
     /// Endpoint signature codes (e.g. "K162" ↔ a specific WH code).
     pub(crate) source_sig: Option<String>,
     pub(crate) target_sig: Option<String>,
-    /// Where this row came from: "manual" (hand-entered) or "evescout"
-    /// (auto-imported from the EVE-Scout Thera/Turnur feed). Defaulted so
-    /// connections stored before this field existed still load.
+    /// Where this row came from. Defaulted so connections stored before this
+    /// field existed still load.
     #[serde(default = "default_source")]
-    pub(crate) source: String,
+    pub(crate) source: ConnSource,
     pub(crate) created_at: u64,
     pub(crate) eol_updated_at: Option<u64>,
 }
 
-fn default_source() -> String {
-    "manual".to_string()
+fn default_source() -> ConnSource {
+    ConnSource::Manual
 }
 
 /// A connection enriched with system names for display.
@@ -64,14 +111,14 @@ pub struct ConnectionView {
     pub target_system_id: i64,
     pub target_name: String,
     pub target_wspace: bool,
-    pub scope: String,
-    pub mass_status: String,
-    pub jump_mass: String,
+    pub scope: Scope,
+    pub mass_status: MassStatus,
+    pub jump_mass: JumpMass,
     pub eol: bool,
     pub source_sig: Option<String>,
     pub target_sig: Option<String>,
-    /// "manual" | "evescout" — lets the UI badge auto-imported rows.
-    pub source: String,
+    /// Lets the UI badge auto-imported rows.
+    pub source: ConnSource,
     pub created_at: u64,
 }
 
@@ -79,7 +126,7 @@ pub struct ConnectionView {
 /// jumpbridge links are permanent and never pruned. Pure for testability.
 fn prune(mut conns: Vec<Connection>, now: u64) -> Vec<Connection> {
     conns.retain(|c| {
-        if c.scope != "wormhole" {
+        if c.scope != Scope::Wormhole {
             return true; // permanent connections
         }
         let age_h = now.saturating_sub(c.created_at) / 3600;
@@ -124,13 +171,13 @@ fn views(dir: &std::path::Path, conns: &[Connection]) -> Result<Vec<ConnectionVi
             target_system_id: c.target_system_id,
             target_name: name(c.target_system_id),
             target_wspace: c.target_system_id >= WSPACE_MIN_SYSTEM_ID,
-            scope: c.scope.clone(),
-            mass_status: c.mass_status.clone(),
-            jump_mass: c.jump_mass.clone(),
+            scope: c.scope,
+            mass_status: c.mass_status,
+            jump_mass: c.jump_mass,
             eol: c.eol,
             source_sig: c.source_sig.clone(),
             target_sig: c.target_sig.clone(),
-            source: c.source.clone(),
+            source: c.source,
             created_at: c.created_at,
         })
         .collect())
@@ -165,13 +212,13 @@ mod tests {
             id,
             source_system_id: 31000001,
             target_system_id: 30000142,
-            scope: "wormhole".into(),
-            mass_status: "fresh".into(),
-            jump_mass: "xl".into(),
+            scope: Scope::Wormhole,
+            mass_status: MassStatus::Fresh,
+            jump_mass: JumpMass::Xl,
             eol,
             source_sig: None,
             target_sig: None,
-            source: "manual".into(),
+            source: ConnSource::Manual,
             created_at: now - age_h * 3600,
             eol_updated_at: eol.then(|| now - eol_age_h * 3600),
         }
@@ -186,12 +233,67 @@ mod tests {
             wh(3, 2, true, 5, now),   // EOL 5h ago → drop (past grace)
             wh(4, 2, true, 1, now),   // EOL 1h ago → keep (within grace)
             Connection {
-                scope: "stargate".into(),
+                scope: Scope::Stargate,
                 created_at: now - 100 * 3600,
                 ..wh(5, 0, false, 0, now)
             }, // permanent → keep
         ];
         let kept: Vec<i64> = prune(conns, now).into_iter().map(|c| c.id).collect();
         assert_eq!(kept, vec![1, 4, 5]);
+    }
+
+    #[test]
+    fn mass_status_rejects_invalid_wire_strings() {
+        // `wh_update_connection` takes `MassStatus` directly, so garbage from the
+        // frontend now fails to deserialize instead of being stored verbatim.
+        assert!(serde_json::from_str::<MassStatus>("\"bogus\"").is_err());
+        assert!(serde_json::from_str::<MassStatus>("\"fresh\"").is_ok());
+        assert!(serde_json::from_str::<MassStatus>("\"reduced\"").is_ok());
+        assert!(serde_json::from_str::<MassStatus>("\"critical\"").is_ok());
+    }
+
+    #[test]
+    fn vocabularies_round_trip_to_the_existing_lowercase_wire_strings() {
+        // The wire format must stay byte-identical to the pre-enum strings.
+        assert_eq!(
+            serde_json::to_string(&Scope::Wormhole).unwrap(),
+            "\"wormhole\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Scope::Stargate).unwrap(),
+            "\"stargate\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Scope::Jumpbridge).unwrap(),
+            "\"jumpbridge\""
+        );
+        assert_eq!(
+            serde_json::to_string(&MassStatus::Fresh).unwrap(),
+            "\"fresh\""
+        );
+        assert_eq!(
+            serde_json::to_string(&MassStatus::Reduced).unwrap(),
+            "\"reduced\""
+        );
+        assert_eq!(
+            serde_json::to_string(&MassStatus::Critical).unwrap(),
+            "\"critical\""
+        );
+        assert_eq!(serde_json::to_string(&JumpMass::S).unwrap(), "\"s\"");
+        assert_eq!(serde_json::to_string(&JumpMass::M).unwrap(), "\"m\"");
+        assert_eq!(serde_json::to_string(&JumpMass::L).unwrap(), "\"l\"");
+        assert_eq!(serde_json::to_string(&JumpMass::Xl).unwrap(), "\"xl\"");
+        assert_eq!(
+            serde_json::to_string(&ConnSource::Manual).unwrap(),
+            "\"manual\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ConnSource::Evescout).unwrap(),
+            "\"evescout\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ConnSource::Tripwire).unwrap(),
+            "\"tripwire\""
+        );
     }
 }

@@ -1,5 +1,5 @@
 //! WASM runtime host: loads plugin `.wasm` via Extism and dispatches calls
-//! into it at runtime through one generic `plugin_invoke` command — the way
+//! into it at runtime through one generic `plugins_invoke` command — the way
 //! around `tauri::generate_handler!` being fixed at compile time.
 //!
 //! Each plugin is instantiated with exactly the host functions its granted
@@ -161,7 +161,7 @@ impl PluginManager {
     }
 }
 
-/// Core plugin dispatch, shared by the `plugin_invoke` command and the MCP
+/// Core plugin dispatch, shared by the `plugins_invoke` command and the MCP
 /// bridge. Runs `func` on an **active** plugin with a JSON argument, returning
 /// its JSON result. Unknown/inactive/wasm-less plugin, a wasm path escaping the
 /// plugin dir, a non-JSON result, or a resource-limit kill all return an error.
@@ -237,7 +237,7 @@ pub fn run_plugin(
 /// the same handlers already run from the MCP bridge (dedicated OS thread) and
 /// from scripts (`spawn_blocking`).
 #[tauri::command]
-pub async fn plugin_invoke(
+pub async fn plugins_invoke(
     app: AppHandle,
     registry: State<'_, Arc<PluginRegistry>>,
     manager: State<'_, Arc<PluginManager>>,
@@ -262,7 +262,7 @@ pub async fn plugin_invoke(
 /// Activate or deactivate an installed plugin. Deactivating evicts any cached
 /// instance so it stops running immediately.
 #[tauri::command]
-pub fn plugin_set_active(
+pub fn plugins_set_active(
     registry: State<'_, Arc<PluginRegistry>>,
     manager: State<'_, Arc<PluginManager>>,
     plugin_id: String,
@@ -503,6 +503,39 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The manifest's `wasm` field is author-controlled and never validated
+    /// for traversal at parse time (only `id` is) — the guard inside
+    /// `run_plugin` is the only thing standing between a hostile
+    /// `"../outside.wasm"` and an arbitrary file read. Write the manifest
+    /// directly, bypassing `install_dir`/`install_zip` entirely, to prove
+    /// the guard itself (not the installer) is what's holding the line.
+    #[test]
+    fn run_plugin_rejects_a_wasm_path_that_escapes_the_plugin_dir() {
+        let root = tmp("wasm-escape");
+        let plugin_dir = root.join("plugins").join("acme");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("plugin.json"),
+            r#"{"id":"acme","name":"acme","version":"1.0.0","minAppVersion":"0.33.0","wasm":"../outside.wasm","permissions":[]}"#,
+        )
+        .unwrap();
+        // A real (non-wasm) file at the escape target: if the guard didn't
+        // fire first, `run_plugin` would still fail, but with an "invalid
+        // wasm module" error from actually reading it — a different failure
+        // that would prove the read happened before the guard.
+        std::fs::write(root.join("plugins").join("outside.wasm"), b"not wasm").unwrap();
+
+        let registry = PluginRegistry::load(&root);
+        registry.set_active("acme", true).unwrap();
+        let manager = PluginManager::new();
+        let err = run_plugin(&registry, &manager, &root, "acme", "echo", &Value::Null).unwrap_err();
+        assert!(
+            err.contains("must be relative to its dir"),
+            "unexpected error: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn ungranted_plugin_fails_to_instantiate() {
         let manager = PluginManager::new();
@@ -559,7 +592,7 @@ mod tests {
         let dir = tmp("example");
         write_sde(&dir);
         let granted = HashSet::from([Permission::SdeRead, Permission::StorageOwn]);
-        // Type id sent as a bare JSON number (what plugin_invoke serializes).
+        // Type id sent as a bare JSON number (what plugins_invoke serializes).
         let out = manager
             .invoke(
                 &dir,

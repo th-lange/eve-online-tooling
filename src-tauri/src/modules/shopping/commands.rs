@@ -72,6 +72,21 @@ impl StoredList {
             }),
         }
     }
+
+    /// Apply a batch of exact-quantity updates in one pass — same semantics as
+    /// `shopping_set_quantity` run once per pair (a quantity ≤ 0 removes the
+    /// entry), but a single mutation of `self` so the caller only saves once.
+    fn set_quantities(&mut self, updates: &[(i64, i64)]) {
+        for &(type_id, quantity) in updates {
+            if quantity <= 0 {
+                self.items.retain(|e| e.type_id != type_id);
+            } else if let Some(entry) = self.items.iter_mut().find(|e| e.type_id == type_id) {
+                entry.quantity = quantity;
+            } else {
+                self.items.push(StoredEntry { type_id, quantity });
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -136,6 +151,29 @@ fn list_mut<'a>(store: &'a mut Store, id: &str) -> Result<&'a mut StoredList, St
         .iter_mut()
         .find(|l| l.id == id)
         .ok_or_else(|| format!("no such list: {id}"))
+}
+
+/// Move every listed `type_id`'s whole available quantity from `src` to `dst`,
+/// upserting on the destination via `StoredList::add` (same semantics as
+/// `shopping_move_item` with no quantity cap). Ids absent or already empty in
+/// `src` are skipped.
+fn move_all(src: &mut StoredList, dst: &mut StoredList, type_ids: &[i64]) {
+    for &type_id in type_ids {
+        let avail = src
+            .items
+            .iter()
+            .find(|e| e.type_id == type_id)
+            .map(|e| e.quantity)
+            .unwrap_or(0);
+        if avail <= 0 {
+            continue;
+        }
+        if let Some(e) = src.items.iter_mut().find(|e| e.type_id == type_id) {
+            e.quantity = 0;
+        }
+        dst.add(type_id, avail);
+    }
+    src.items.retain(|e| e.quantity > 0);
 }
 
 /// Resolve a stored list's item names from the SDE.
@@ -316,6 +354,34 @@ pub fn shopping_set_quantity(
     save(&dir, &store)
 }
 
+/// One quantity update for `shopping_set_quantities`: set `type_id`'s
+/// quantity, removing the entry when `quantity` ≤ 0 (same semantics as
+/// `shopping_set_quantity` applied once per pair).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuantityUpdate {
+    pub type_id: i64,
+    pub quantity: i64,
+}
+
+/// Bulk version of `shopping_set_quantity`: applies every update to a single
+/// list in one load/mutate/save cycle instead of one round-trip per item.
+#[tauri::command]
+pub fn shopping_set_quantities(
+    app: AppHandle,
+    id: String,
+    updates: Vec<QuantityUpdate>,
+) -> Result<(), String> {
+    let (dir, _sde) = crate::sde::dir_and_sde(&app)?;
+    let mut store = load(&dir);
+    let pairs: Vec<(i64, i64)> = updates
+        .into_iter()
+        .map(|u| (u.type_id, u.quantity))
+        .collect();
+    list_mut(&mut store, &id)?.set_quantities(&pairs);
+    save(&dir, &store)
+}
+
 /// Remove an item from a list (no-op if absent).
 #[tauri::command]
 pub fn shopping_remove_item(app: AppHandle, id: String, type_id: i64) -> Result<(), String> {
@@ -375,14 +441,46 @@ pub fn shopping_move_item(
     // Give to the target.
     {
         let dst = list_mut(&mut store, &to_id)?;
-        match dst.items.iter_mut().find(|e| e.type_id == type_id) {
-            Some(e) => e.quantity = e.quantity.saturating_add(moved),
-            None => dst.items.push(StoredEntry {
-                type_id,
-                quantity: moved,
-            }),
-        }
+        dst.add(type_id, moved);
     }
+    save(&dir, &store)
+}
+
+/// Bulk version of `shopping_move_item`: moves the whole quantity of every
+/// listed `type_id` from `from_id` to `to_id` in one load/mutate/save cycle,
+/// upserting on the destination via `StoredList::add`. No-op if
+/// `from_id == to_id`.
+#[tauri::command]
+pub fn shopping_move_items(
+    app: AppHandle,
+    from_id: String,
+    to_id: String,
+    type_ids: Vec<i64>,
+) -> Result<(), String> {
+    if from_id == to_id {
+        return Ok(());
+    }
+    let (dir, _sde) = crate::sde::dir_and_sde(&app)?;
+    let mut store = load(&dir);
+
+    let src_idx = store
+        .lists
+        .iter()
+        .position(|l| l.id == from_id)
+        .ok_or_else(|| format!("no such list: {from_id}"))?;
+    let dst_idx = store
+        .lists
+        .iter()
+        .position(|l| l.id == to_id)
+        .ok_or_else(|| format!("no such list: {to_id}"))?;
+    let (src, dst) = if src_idx < dst_idx {
+        let (a, b) = store.lists.split_at_mut(dst_idx);
+        (&mut a[src_idx], &mut b[0])
+    } else {
+        let (a, b) = store.lists.split_at_mut(src_idx);
+        (&mut b[0], &mut a[dst_idx])
+    };
+    move_all(src, dst, &type_ids);
     save(&dir, &store)
 }
 
@@ -895,6 +993,75 @@ mod tests {
         };
         list.add(1, 10);
         assert_eq!(list.items[0].quantity, i64::MAX);
+    }
+
+    #[test]
+    fn stored_list_set_quantities_overwrites_creates_and_removes_in_one_pass() {
+        let mut list = StoredList {
+            id: "x".into(),
+            name: "X".into(),
+            items: vec![
+                StoredEntry {
+                    type_id: 34,
+                    quantity: 10,
+                },
+                StoredEntry {
+                    type_id: 35,
+                    quantity: 5,
+                },
+            ],
+        };
+        list.set_quantities(&[(34, 20), (35, 0), (36, 7)]);
+        assert_eq!(
+            list.items
+                .iter()
+                .map(|e| (e.type_id, e.quantity))
+                .collect::<Vec<_>>(),
+            vec![(34, 20), (36, 7)]
+        );
+    }
+
+    #[test]
+    fn move_all_moves_whole_quantity_and_upserts_on_destination() {
+        let mut src = StoredList {
+            id: "a".into(),
+            name: "A".into(),
+            items: vec![StoredEntry {
+                type_id: 34,
+                quantity: 10,
+            }],
+        };
+        let mut dst = StoredList {
+            id: "b".into(),
+            name: "B".into(),
+            items: vec![StoredEntry {
+                type_id: 34,
+                quantity: 3,
+            }],
+        };
+        move_all(&mut src, &mut dst, &[34]);
+        assert!(src.items.is_empty());
+        assert_eq!(dst.items[0].quantity, 13);
+    }
+
+    #[test]
+    fn move_all_skips_type_ids_absent_from_the_source() {
+        let mut src = StoredList {
+            id: "a".into(),
+            name: "A".into(),
+            items: vec![StoredEntry {
+                type_id: 34,
+                quantity: 10,
+            }],
+        };
+        let mut dst = StoredList {
+            id: "b".into(),
+            name: "B".into(),
+            items: Vec::new(),
+        };
+        move_all(&mut src, &mut dst, &[99]);
+        assert_eq!(src.items[0].quantity, 10);
+        assert!(dst.items.is_empty());
     }
 
     /// A scratch directory under the system temp dir, unique to this test

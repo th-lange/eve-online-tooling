@@ -78,7 +78,7 @@ export function pluginInvoke<T = unknown>(
   fn: string,
   args: unknown,
 ): Promise<T> {
-  return invoke<T>("plugin_invoke", { pluginId, fn, args });
+  return invoke<T>("plugins_invoke", { pluginId, fn, args });
 }
 
 /** Activate or deactivate an installed plugin. */
@@ -86,5 +86,5 @@ export function pluginSetActive(
   pluginId: string,
   active: boolean,
 ): Promise<void> {
-  return invoke<void>("plugin_set_active", { pluginId, active });
+  return invoke<void>("plugins_set_active", { pluginId, active });
 }

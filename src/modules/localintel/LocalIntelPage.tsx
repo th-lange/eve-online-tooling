@@ -34,6 +34,7 @@ import { usePersistentState } from "../../lib/usePersistentState";
 import { useEveLogDir } from "../../lib/useEveLogDir";
 import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { ModuleActiveContext } from "../../components/moduleActiveContext";
+import { classifyArrivals } from "./classifyArrivals";
 
 /** Best-effort desktop notification — requests permission, never throws. */
 async function notify(title: string, body: string) {
@@ -135,44 +136,38 @@ export function LocalIntelPage() {
       const ids = res.pilots.map((p) => p.characterId);
       if (ids.length > 0) zkillRun.mutate(ids);
 
-      // Pilots new since the last scan (first scan: everyone is "new").
-      const prev = prevIdsRef.current;
-      const fresh = new Set(
-        res.pilots
-          .filter((p) => !prev.has(p.characterId))
-          .map((p) => p.characterId),
-      );
+      const {
+        newIds: fresh,
+        notice,
+        alarm,
+      } = classifyArrivals(prevIdsRef.current, res.pilots, watchIds, {
+        alertAnyRed,
+        alertNeutrals,
+      });
       setNewIds(fresh);
-      const isWatch = (p: LocalPilot) =>
-        watchIds.has(p.corporationId) ||
-        (p.allianceId != null && watchIds.has(p.allianceId));
-      const arrivals = res.pilots.filter((p) => fresh.has(p.characterId));
-      const newWatched = arrivals.filter(isWatch);
-      const newReds = arrivals.filter((p) => p.threat === "red");
-      const newNeutrals = arrivals.filter((p) => p.threat === "neutral");
 
-      // Alert when a qualifying threat *enters* — watchlisted, red, or (opt-in)
-      // any neutral/unknown.
-      if (newWatched.length > 0) {
-        notify(
-          "⚠️ Watchlisted pilots entered local",
-          `${newWatched.length}: ${newWatched
-            .slice(0, 5)
-            .map((p) => p.name)
-            .join(", ")}`,
-        );
-      } else if (alertAnyRed && newReds.length > 0) {
-        notify("⚠️ Reds entered local", `${newReds.length} hostile pilot(s)`);
-      } else if (alertNeutrals && newNeutrals.length > 0) {
-        notify(
-          "⚠️ Neutrals entered local",
-          `${newNeutrals.length} unknown pilot(s)`,
-        );
+      if (notice) {
+        const names = notice.pilots
+          .slice(0, 5)
+          .map((p) => p.name)
+          .join(", ");
+        if (notice.kind === "watchlist") {
+          notify(
+            "⚠️ Watchlisted pilots entered local",
+            `${notice.pilots.length}: ${names}`,
+          );
+        } else if (notice.kind === "red") {
+          notify(
+            "⚠️ Reds entered local",
+            `${notice.pilots.length} hostile pilot(s)`,
+          );
+        } else {
+          notify(
+            "⚠️ Neutrals entered local",
+            `${notice.pilots.length} unknown pilot(s)`,
+          );
+        }
       }
-      const alarm =
-        newWatched.length > 0 ||
-        (alertAnyRed && newReds.length > 0) ||
-        (alertNeutrals && newNeutrals.length > 0);
       if (alarm && soundOn) playAlarm();
 
       prevIdsRef.current = new Set(ids);

@@ -1,6 +1,6 @@
 //! Tauri command surface for the daytrading (cross-region arbitrage) module.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use serde::Deserialize;
 use tauri::{AppHandle, State};
@@ -141,7 +141,7 @@ pub async fn daytrading_scan(
         shipping_rate: params.shipping_rate,
     };
 
-    let mut out: Vec<DayTradeRow> = items
+    let out: Vec<DayTradeRow> = items
         .iter()
         .filter(|item| !blacklist.contains(&item.type_id))
         .filter_map(|item| {
@@ -182,24 +182,7 @@ pub async fn daytrading_scan(
     // Two views matter for hauling: ISK/m³ (cargo-bound) and absolute profit — a
     // bulky ship can have low ISK/m³ but a big per-unit margin. Keep the top of
     // each so high-value flips aren't silently dropped by the cap.
-    out.sort_by(|a, b| {
-        b.profit_per_unit
-            .partial_cmp(&a.profit_per_unit)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    let by_profit: Vec<DayTradeRow> = out.iter().take(PROFIT_CAP).cloned().collect();
-    out.sort_by(|a, b| {
-        b.isk_per_m3
-            .partial_cmp(&a.isk_per_m3)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    out.truncate(RESULT_CAP);
-    let present: HashSet<i64> = out.iter().map(|r| r.type_id).collect();
-    out.extend(
-        by_profit
-            .into_iter()
-            .filter(|r| !present.contains(&r.type_id)),
-    );
+    let mut out = super::engine::rank_and_cap(out, PROFIT_CAP, RESULT_CAP);
 
     // Enrich the displayed set with daily-traded volume at each row's sell hub
     // (how much you can realistically offload). Group by sell region so each
@@ -219,14 +202,8 @@ pub async fn daytrading_scan(
         traded.extend(vols);
     }
     for row in &mut out {
-        row.dest_volume = traded.get(&row.type_id).copied().unwrap_or(0);
-        // Suggested quantity = how much the sell hub moves over the window, less
-        // what you already own (so you don't restock your own hangar). `stock` is
-        // empty when the UI's "subtract owned stock" toggle is off.
-        let demand = (row.dest_volume as f64 * params.purchase_days).round() as i64;
+        let dest_volume = traded.get(&row.type_id).copied().unwrap_or(0);
         let owned = params.stock.get(&row.type_id).copied().unwrap_or(0);
-        row.suggested_qty = super::engine::net_suggested_qty(demand, owned);
-        row.total_profit = row.profit_per_unit * row.suggested_qty as f64;
         // Days-of-supply = sell-hub order-book sell listing ÷ daily-traded. High =
         // a contested book (slow to clear); low = clears fast.
         let listed = hubs
@@ -235,18 +212,12 @@ pub async fn daytrading_scan(
             .and_then(|h| h.prices.get(row.type_id))
             .and_then(|m| m.daily_volume)
             .unwrap_or(0);
-        row.days_of_supply = if row.dest_volume > 0 {
-            listed as f64 / row.dest_volume as f64
-        } else {
-            0.0
-        };
+        super::engine::enrich(row, dest_volume, params.purchase_days, owned, listed);
     }
 
     // Liquidity floor: drop rows the sell hub can't absorb (after enrichment,
     // since dest_volume comes from history).
-    if params.min_daily_demand > 0 {
-        out.retain(|r| r.dest_volume >= params.min_daily_demand);
-    }
+    let out = super::engine::retain_min_demand(out, params.min_daily_demand);
 
     Ok(out)
 }
