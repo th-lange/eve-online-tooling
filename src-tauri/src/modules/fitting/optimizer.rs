@@ -453,16 +453,25 @@ pub async fn fitting_optimize(
         cap_stable: cap_stable.unwrap_or(false),
         max_cost,
     };
-    let sde = crate::sde::open_from_app(&app)?;
-    optimize_fit(
-        &sde,
-        fit,
-        &objective,
-        meta_groups,
-        mode.as_deref().unwrap_or("all"),
-        &prices,
-        constraints,
-    )
+    // The greedy seed + local search is seconds of pure CPU (thousands of
+    // `fit.clone()` + full dogma `resolve()` evaluations), so run it on the
+    // blocking pool instead of a tokio worker thread — same pattern as
+    // `scripts_run` (#611). The SDE handle is opened inside the closure
+    // because `Sde` is not `Send`.
+    tokio::task::spawn_blocking(move || {
+        let sde = crate::sde::open_from_app(&app)?;
+        optimize_fit(
+            &sde,
+            fit,
+            &objective,
+            meta_groups,
+            mode.as_deref().unwrap_or("all"),
+            &prices,
+            constraints,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Preloaded, read-only state threaded through the optimizer's search phases:

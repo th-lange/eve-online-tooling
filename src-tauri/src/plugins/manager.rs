@@ -174,8 +174,28 @@ pub fn run_plugin(
 
 /// Invoke an exported function of an activated plugin — the runtime dispatch
 /// point for logic plugins. Thin wrapper over [`run_plugin`].
+///
+/// # Threading model
+///
+/// The wasm call is deliberately pushed onto tokio's **blocking thread pool**
+/// (`spawn_blocking`), following the `scripts_run` precedent, because plugin
+/// execution is synchronous and can be slow in two independent ways:
+///
+/// 1. The guest itself may run up to the 5-second Extism timeout.
+/// 2. The broker's `host_call` gateway (see [`crate::plugins::broker`]) is a
+///    synchronous Extism host function — that contract is fixed by Extism —
+///    and capability handlers inside it `block_on` real network futures
+///    (ESI/Fuzzwork fetches with retry/backoff).
+///
+/// Run inline on a sync command, both of those parked the **main thread** and
+/// froze the whole UI for the duration. On a blocking-pool worker, blocking is
+/// exactly what the thread is for: `tauri::async_runtime::block_on` inside the
+/// capability handlers is safe there (the thread is not an async runtime
+/// worker, so re-entrant `block_on` panics can't occur), and it matches how
+/// the same handlers already run from the MCP bridge (dedicated OS thread) and
+/// from scripts (`spawn_blocking`).
 #[tauri::command]
-pub fn plugin_invoke(
+pub async fn plugin_invoke(
     app: AppHandle,
     registry: State<'_, Arc<PluginRegistry>>,
     manager: State<'_, Arc<PluginManager>>,
@@ -184,7 +204,17 @@ pub fn plugin_invoke(
     args: Value,
 ) -> Result<Value, AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
-    run_plugin(&registry, &manager, &dir, &plugin_id, &r#fn, &args).map_err(AppError::from)
+    // Both are `Arc`-managed in Tauri state, so cloning into the closure is
+    // a cheap refcount bump.
+    let registry = registry.inner().clone();
+    let manager = manager.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        run_plugin(&registry, &manager, &dir, &plugin_id, &r#fn, &args).map_err(AppError::from)
+    })
+    .await
+    // A JoinError means the blocking task panicked or was cancelled; surface
+    // it as a normal command error instead of poisoning the caller.
+    .map_err(|e| AppError::from(format!("plugin task failed: {e}")))?
 }
 
 /// Activate or deactivate an installed plugin. Deactivating evicts any cached
