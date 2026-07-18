@@ -15,8 +15,9 @@ import {
   shoppingCreateList,
   shoppingDeleteList,
   shoppingLists,
-  shoppingMoveItem,
+  shoppingMoveItems,
   shoppingRemoveItem,
+  shoppingSetQuantities,
   shoppingSetQuantity,
   type ShoppingList,
 } from "../../lib/api";
@@ -425,6 +426,7 @@ function ListDetail({
   // Row selection + bulk quantity ops (multiply / add / set).
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [amount, setAmount] = useState("");
+  const [bulkError, setBulkError] = useState<string | null>(null);
   // Drop selections that no longer exist as the list changes.
   useEffect(() => {
     setSelected((prev) => {
@@ -452,21 +454,24 @@ function ListDetail({
 
   async function applyToSelected(mode: "multiply" | "add" | "set", n: number) {
     if (!Number.isFinite(n) || selected.size === 0) return;
-    for (const it of list.items) {
-      if (!selected.has(it.typeId)) continue;
-      const next =
-        mode === "multiply"
-          ? it.quantity * n
-          : mode === "add"
-            ? it.quantity + n
-            : n;
-      await shoppingSetQuantity(
-        list.id,
-        it.typeId,
-        Math.max(1, Math.round(next)),
-      );
+    const updates = list.items
+      .filter((it) => selected.has(it.typeId))
+      .map((it) => {
+        const next =
+          mode === "multiply"
+            ? it.quantity * n
+            : mode === "add"
+              ? it.quantity + n
+              : n;
+        return { typeId: it.typeId, quantity: Math.max(1, Math.round(next)) };
+      });
+    setBulkError(null);
+    try {
+      await shoppingSetQuantities(list.id, updates);
+      await onChange();
+    } catch (e) {
+      setBulkError(errorMessage(e));
     }
-    await onChange();
   }
   const bulkApply = (mode: "multiply" | "add" | "set") =>
     applyToSelected(mode, Number(amount));
@@ -485,12 +490,18 @@ function ListDetail({
   }
   async function moveSelected(toId: string) {
     if (!toId) return;
-    for (const it of list.items) {
-      if (selected.has(it.typeId))
-        await shoppingMoveItem(list.id, toId, it.typeId);
+    const typeIds = list.items
+      .filter((it) => selected.has(it.typeId))
+      .map((it) => it.typeId);
+    if (typeIds.length === 0) return;
+    setBulkError(null);
+    try {
+      await shoppingMoveItems(list.id, toId, typeIds);
+      setSelected(new Set());
+      await onChange();
+    } catch (e) {
+      setBulkError(errorMessage(e));
     }
-    setSelected(new Set());
-    await onChange();
   }
   const otherLists = allLists.filter((l) => l.id !== list.id);
 
@@ -606,6 +617,10 @@ function ListDetail({
             Clear selection
           </button>
         </div>
+      )}
+
+      {bulkError && (
+        <p className="mt-2 text-sm text-rose-400">Failed: {bulkError}</p>
       )}
 
       {list.items.length === 0 ? (

@@ -59,6 +59,16 @@ export function shoppingSetQuantity(
   return invoke<void>("shopping_set_quantity", { id, typeId, quantity });
 }
 
+/** Set exact quantities for multiple items on a list in one call (same
+ * semantics as `shoppingSetQuantity` applied per pair, but a single
+ * load/mutate/save round-trip on the backend). */
+export function shoppingSetQuantities(
+  id: string,
+  updates: { typeId: number; quantity: number }[],
+): Promise<void> {
+  return invoke<void>("shopping_set_quantities", { id, updates });
+}
+
 /** Remove an item from a list. */
 export function shoppingRemoveItem(id: string, typeId: number): Promise<void> {
   return invoke<void>("shopping_remove_item", { id, typeId });
@@ -77,6 +87,17 @@ export function shoppingMoveItem(
   quantity?: number,
 ): Promise<void> {
   return invoke<void>("shopping_move_item", { fromId, toId, typeId, quantity });
+}
+
+/** Move multiple items between lists in one call (each moving its whole
+ * available quantity, upserted on the destination — same semantics as
+ * `shoppingMoveItem` with no quantity given). */
+export function shoppingMoveItems(
+  fromId: string,
+  toId: string,
+  typeIds: number[],
+): Promise<void> {
+  return invoke<void>("shopping_move_items", { fromId, toId, typeIds });
 }
 
 /** Result of a chat-capture poll. */
