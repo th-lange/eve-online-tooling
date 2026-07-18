@@ -5,7 +5,8 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-use crate::market::{default_region_id, resolve_location, MarketService};
+use crate::market::{default_region_id, resolve_location, BestSell, MarketService, PriceMap};
+use crate::sde::Sde;
 
 /// One pasted line: an item name and a quantity (defaults to 1 in the UI).
 #[derive(Debug, Deserialize)]
@@ -64,26 +65,7 @@ pub async fn appraisal_run(
     params: AppraisalParams,
 ) -> Result<AppraisalResult, String> {
     let sde = crate::sde::open_from_app(&app)?;
-
-    // Resolve names → (type id, packaged volume), keeping the original line order.
-    struct Resolved {
-        name: String,
-        quantity: i64,
-        type_id: Option<i64>,
-        volume_each: f64,
-    }
-    let mut resolved = Vec::with_capacity(params.items.len());
-    for item in &params.items {
-        let lookup = sde
-            .type_by_name(item.name.trim())
-            .map_err(|e| e.to_string())?;
-        resolved.push(Resolved {
-            name: item.name.clone(),
-            quantity: item.quantity.max(0),
-            type_id: lookup.map(|(id, _)| id),
-            volume_each: lookup.and_then(|(_, v)| v).unwrap_or(0.0),
-        });
-    }
+    let resolved = resolve_items(&sde, &params.items)?;
 
     let ids: Vec<i64> = resolved.iter().filter_map(|r| r.type_id).collect();
     let location = resolve_location(params.region_id, params.station_id);
@@ -100,9 +82,51 @@ pub async fn appraisal_run(
         HashMap::new()
     };
 
-    // Pick each line's buy/sell price (best hub overrides sell when requested),
-    // then hand off to the pure valuation.
-    let items: Vec<PricedItem> = resolved
+    Ok(appraise(price_items(resolved, &prices, &best)))
+}
+
+/// A pasted line resolved against the SDE: the type id (if the name matched)
+/// and its packaged volume per unit. Shared by [`appraisal_run`] and the
+/// plugin/MCP `appraise` capability so resolution rules live in one place.
+pub struct Resolved {
+    pub name: String,
+    /// Requested quantity, clamped to `>= 0`.
+    pub quantity: i64,
+    /// `None` when the name didn't match any type (the line still appears in
+    /// the output, valued at 0).
+    pub type_id: Option<i64>,
+    /// Packaged volume per unit; 0 when unknown.
+    pub volume_each: f64,
+}
+
+/// Resolve pasted lines to types — names are trimmed before lookup, quantities
+/// clamped to `>= 0` — keeping the original line order.
+pub fn resolve_items(sde: &Sde, items: &[AppraisalItem]) -> Result<Vec<Resolved>, String> {
+    let mut resolved = Vec::with_capacity(items.len());
+    for item in items {
+        let lookup = sde
+            .type_by_name(item.name.trim())
+            .map_err(|e| e.to_string())?;
+        resolved.push(Resolved {
+            name: item.name.clone(),
+            quantity: item.quantity.max(0),
+            type_id: lookup.map(|(id, _)| id),
+            volume_each: lookup.and_then(|(_, v)| v).unwrap_or(0.0),
+        });
+    }
+    Ok(resolved)
+}
+
+/// Pick each resolved line's buy/sell price from the price map (a best-hub
+/// sell overrides the local sell when the type appears in `best`; pass an
+/// empty map for no best-hub path). A type with no market data keeps `None`
+/// prices, which [`appraise`] values as 0.
+pub fn price_items(
+    resolved: Vec<Resolved>,
+    prices: &PriceMap,
+    best: &HashMap<i64, BestSell>,
+) -> Vec<PricedItem> {
+    resolved
         .into_iter()
         .map(|r| {
             let model = r.type_id.and_then(|id| prices.get(id));
@@ -121,26 +145,24 @@ pub async fn appraisal_run(
                 volume_each: r.volume_each,
             }
         })
-        .collect();
-
-    Ok(appraise(items))
+        .collect()
 }
 
 /// A pasted line resolved to a type and priced, ready for valuation.
-struct PricedItem {
-    name: String,
-    type_id: Option<i64>,
-    quantity: i64,
-    buy_price: Option<f64>,
-    sell_price: Option<f64>,
-    sell_hub: Option<String>,
-    volume_each: f64,
+pub struct PricedItem {
+    pub name: String,
+    pub type_id: Option<i64>,
+    pub quantity: i64,
+    pub buy_price: Option<f64>,
+    pub sell_price: Option<f64>,
+    pub sell_hub: Option<String>,
+    pub volume_each: f64,
 }
 
 /// Value priced lines: per line, `price × qty` (a missing price counts as 0) and
 /// `volume_each × qty`, plus the running buy/sell/volume totals. Pure, so the
 /// valuation is unit-tested without the SDE or market service.
-fn appraise(items: Vec<PricedItem>) -> AppraisalResult {
+pub fn appraise(items: Vec<PricedItem>) -> AppraisalResult {
     let mut lines = Vec::with_capacity(items.len());
     let (mut buy_total, mut sell_total, mut volume_total) = (0.0, 0.0, 0.0);
     for it in items {

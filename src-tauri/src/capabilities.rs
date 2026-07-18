@@ -19,6 +19,7 @@ use serde_json::{json, Value};
 
 use crate::esi::{self, AuthState};
 use crate::market::{default_region_id, resolve_location, MarketService};
+use crate::modules::appraisal;
 use crate::modules::fitting::{self, Fit, FitStats};
 use crate::modules::production;
 use crate::modules::reprocessing;
@@ -286,57 +287,46 @@ fn cap_appraise(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
         .unwrap_or_else(default_region_id);
     let sde = open_from_dir(ctx.app_data_dir)?;
 
-    struct Line {
-        name: String,
-        quantity: i64,
-        type_id: Option<i64>,
-        volume_each: f64,
-    }
-    let mut lines = Vec::with_capacity(items.len());
+    // Parse the JSON items, then delegate resolution + pricing + valuation to
+    // the appraisal module's pure core (same functions `appraisal_run` uses),
+    // so the rules — trim before lookup, qty clamped to >= 0, missing price
+    // counts as 0 — live in exactly one place. Only the JSON shape is adapted
+    // here; the capability has no best-hub path (empty best map).
+    let mut parsed = Vec::with_capacity(items.len());
     for it in items {
         let name = it
             .get("name")
             .and_then(Value::as_str)
             .ok_or("each item needs a string \"name\"")?;
-        let quantity = it
-            .get("quantity")
-            .and_then(Value::as_i64)
-            .unwrap_or(1)
-            .max(0);
-        let lookup = sde.type_by_name(name.trim()).map_err(|e| e.to_string())?;
-        lines.push(Line {
+        let quantity = it.get("quantity").and_then(Value::as_i64).unwrap_or(1);
+        parsed.push(appraisal::AppraisalItem {
             name: name.to_string(),
             quantity,
-            type_id: lookup.map(|(id, _)| id),
-            volume_each: lookup.and_then(|(_, v)| v).unwrap_or(0.0),
         });
     }
+    let resolved = appraisal::resolve_items(&sde, &parsed)?;
 
-    let ids: Vec<i64> = lines.iter().filter_map(|l| l.type_id).collect();
+    let ids: Vec<i64> = resolved.iter().filter_map(|r| r.type_id).collect();
     let location = resolve_location(region_id, None);
     let prices = tauri::async_runtime::block_on(ctx.market.price_map_at(location, &ids))
         .map_err(|e| e.to_string())?;
 
-    let (mut buy_total, mut sell_total, mut volume_total) = (0.0, 0.0, 0.0);
-    let out_lines: Vec<Value> = lines
+    let result = appraisal::appraise(appraisal::price_items(resolved, &prices, &HashMap::new()));
+
+    let out_lines: Vec<Value> = result
+        .lines
         .iter()
         .map(|l| {
-            let model = l.type_id.and_then(|id| prices.get(id));
-            let buy = model.and_then(|m| m.buy_percentile);
-            let sell = model.and_then(|m| m.sell_percentile);
-            let q = l.quantity as f64;
-            buy_total += buy.unwrap_or(0.0) * q;
-            sell_total += sell.unwrap_or(0.0) * q;
-            volume_total += l.volume_each * q;
             json!({
                 "name": l.name, "quantity": l.quantity, "typeId": l.type_id,
-                "buyPrice": buy, "sellPrice": sell,
+                "buyPrice": l.buy_price, "sellPrice": l.sell_price,
             })
         })
         .collect();
 
     Ok(json!({
-        "buyTotal": buy_total, "sellTotal": sell_total, "volume": volume_total,
+        "buyTotal": result.buy_total, "sellTotal": result.sell_total,
+        "volume": result.volume_total,
         "lines": out_lines,
     }))
 }
