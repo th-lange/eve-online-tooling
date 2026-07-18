@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { sortBreakdowns, sortRows, formatIsk, formatPercent } from "./format";
+import {
+  sortBreakdowns,
+  sortRows,
+  formatEveDateTime,
+  formatIsk,
+  formatPercent,
+} from "./format";
 import type { ProfitBreakdown } from "./api";
 
 function row(
@@ -54,6 +60,32 @@ describe("format", () => {
     const byVolume = sortBreakdowns(rows, "productVolume", "desc");
     // B has null volume -> sorts last despite desc
     expect(byVolume.map((r) => r.productName)).toEqual(["C", "A", "B"]);
+  });
+
+  describe("formatEveDateTime", () => {
+    it("trims an ESI ISO timestamp to YYYY-MM-DD HH:MM in UTC", () => {
+      expect(formatEveDateTime("2026-07-18T09:30:45Z")).toBe(
+        "2026-07-18 09:30",
+      );
+      // Offset timestamps are normalized to UTC, not shown verbatim.
+      expect(formatEveDateTime("2026-07-18T09:30:45+02:00")).toBe(
+        "2026-07-18 07:30",
+      );
+    });
+
+    it("stays UTC regardless of the local timezone", () => {
+      // The rendered hour must match the Z-timestamp's UTC hour even though
+      // the test process runs in some arbitrary local zone.
+      const iso = "2026-01-02T23:59:00Z";
+      expect(formatEveDateTime(iso)).toBe("2026-01-02 23:59");
+    });
+
+    it("handles empty and unparseable input", () => {
+      expect(formatEveDateTime("")).toBe("—");
+      expect(formatEveDateTime(null)).toBe("—");
+      expect(formatEveDateTime(undefined)).toBe("—");
+      expect(formatEveDateTime("not-a-date")).toBe("not-a-date");
+    });
   });
 
   it("sortRows with nullsLast sorts null values last in both directions", () => {

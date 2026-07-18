@@ -7,7 +7,12 @@ import {
   type WalletView,
 } from "../../lib/api";
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
-import { formatInt, formatIsk, sortRows } from "../../lib/format";
+import {
+  formatEveDateTime,
+  formatInt,
+  formatIsk,
+  sortRows,
+} from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import {
   SortHeaderCell,
@@ -213,7 +218,7 @@ function Wallet({ d }: { d: WalletView }) {
             {recent.map((e, i) => (
               <tr key={i} className="border-t border-zinc-800 text-zinc-300">
                 <td className="px-3 py-1 whitespace-nowrap text-zinc-400">
-                  {fmtDate(e.date)}
+                  {formatEveDateTime(e.date)}
                 </td>
                 <td className="px-3 py-1">{e.refType.replace(/_/g, " ")}</td>
                 <td
@@ -331,7 +336,7 @@ function Profit({ d }: { d: ProfitView }) {
                   {formatIsk(r.profit)}
                 </td>
                 <td className="px-3 py-1.5 text-zinc-500">
-                  {fmtDate(r.lastSold)}
+                  {formatEveDateTime(r.lastSold)}
                 </td>
               </tr>
             ))}
@@ -372,14 +377,6 @@ function Head<K extends string>({
       </tr>
     </thead>
   );
-}
-
-/** ESI timestamps to a compact local `YYYY-MM-DD HH:MM`. */
-function fmtDate(iso: string): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toISOString().slice(0, 16).replace("T", " ");
 }
 
 function Hint({ children }: { children: React.ReactNode }) {

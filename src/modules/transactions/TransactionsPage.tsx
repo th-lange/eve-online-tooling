@@ -1,8 +1,8 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { transactionLedger, type LedgerRow } from "../../lib/api";
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
-import { formatInt, formatIsk } from "../../lib/format";
+import { formatEveDateTime, formatInt, formatIsk } from "../../lib/format";
 import { Page, PageHeader } from "../../components/page";
 import { Stat } from "../../components/Stat";
 
@@ -131,7 +131,7 @@ function Table({ rows, loading }: { rows: LedgerRow[]; loading: boolean }) {
           {rows.map((r, i) => (
             <tr key={i} className="border-t border-zinc-800 text-zinc-300">
               <td className="whitespace-nowrap px-3 py-1.5 text-zinc-500">
-                {fmtDate(r.date)}
+                {formatEveDateTime(r.date)}
               </td>
               <td className="px-3 py-1.5">{r.name}</td>
               <td className="px-3 py-1.5 text-center">
@@ -178,10 +178,4 @@ function Table({ rows, loading }: { rows: LedgerRow[]; loading: boolean }) {
       </table>
     </div>
   );
-}
-
-/** Trim an ESI ISO timestamp to "YYYY-MM-DD HH:MM". */
-function fmtDate(iso: string): ReactNode {
-  if (!iso) return "—";
-  return iso.replace("T", " ").replace("Z", "").slice(0, 16);
 }
