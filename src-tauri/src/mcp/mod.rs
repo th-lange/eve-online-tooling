@@ -151,17 +151,50 @@ fn discovery_path(dir: &std::path::Path) -> PathBuf {
 /// (mode 0600 on Unix; Windows ACLs already default to the owning user for
 /// files under the app data dir).
 fn write_discovery_file(dir: &std::path::Path, url: &str, token: &str) -> std::io::Result<()> {
+    use std::io::Write;
+
     let path = discovery_path(dir);
     if let Some(parent) = path.parent() {
+        // On Unix, any directory we have to create on the way is made 0700 so
+        // the token file is never reachable through a world-readable parent.
+        // (Pre-existing directories are left untouched.)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(parent)?;
+        }
+        #[cfg(not(unix))]
         std::fs::create_dir_all(parent)?;
     }
-    let body = json!({ "url": url, "token": token });
-    std::fs::write(&path, serde_json::to_vec(&body).unwrap_or_default())?;
+
+    // Build the open options first, then (Unix only) restrict the mode *at
+    // creation time*. Creating world-readable and chmod-ing afterwards (the
+    // old approach) leaves a window where another local user can read the
+    // bearer token — and a crash between the two calls left it 0644 forever.
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // Applies only when the file is created; an existing file keeps its
+        // mode, so also enforce 0600 below for files left over from old runs.
+        opts.mode(0o600);
+    }
+    let mut file = opts.open(&path)?;
+
+    // If the file pre-existed (e.g. written 0644 by an older version of the
+    // app), tighten it now. For freshly created files this is a no-op.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     }
+
+    let body = json!({ "url": url, "token": token });
+    file.write_all(&serde_json::to_vec(&body).unwrap_or_default())?;
     Ok(())
 }
 
