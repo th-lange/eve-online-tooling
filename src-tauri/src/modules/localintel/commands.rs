@@ -455,20 +455,11 @@ pub fn localintel_log_names(logs_dir: String) -> Result<LocalLogResult, String> 
     if !dir.is_dir() {
         return Err(format!("not a folder: {logs_dir}"));
     }
-    // Newest Local_*.txt by modified time.
-    let newest = std::fs::read_dir(dir)
-        .map_err(|e| e.to_string())?
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .to_ascii_lowercase()
-                .starts_with("local_")
-        })
-        .filter_map(|e| Some((e.path(), e.metadata().ok()?.modified().ok()?)))
-        .max_by_key(|(_, m)| *m);
+    // Newest Local_* log by modified time.
+    let newest = crate::util::fs::newest_file_by_mtime(dir, |name| name.starts_with("local_"))
+        .map_err(|e| e.to_string())?;
 
-    let Some((path, _)) = newest else {
+    let Some(path) = newest else {
         return Ok(LocalLogResult {
             senders: Vec::new(),
             file: String::new(),

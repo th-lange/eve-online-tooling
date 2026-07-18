@@ -248,26 +248,14 @@ pub fn dps_list_logs(gamelogs_dir: String) -> Result<Vec<LogFile>, String> {
     if !dir.is_dir() {
         return Err(format!("not a folder: {gamelogs_dir}"));
     }
-    let mut files: Vec<LogFile> = std::fs::read_dir(dir)
+    let mut files: Vec<LogFile> = crate::util::fs::list_files_by_mtime(dir, is_gamelog)
         .map_err(|e| e.to_string())?
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .to_ascii_lowercase()
-                .ends_with(".txt")
-        })
-        .filter_map(|e| {
-            let meta = e.metadata().ok()?;
-            let modified = meta
-                .modified()
-                .ok()?
-                .duration_since(UNIX_EPOCH)
-                .ok()?
-                .as_secs();
+        .into_iter()
+        .filter_map(|(path, mtime)| {
+            let modified = mtime.duration_since(UNIX_EPOCH).ok()?.as_secs();
             Some(LogFile {
-                name: e.file_name().to_string_lossy().into_owned(),
-                path: e.path().to_string_lossy().into_owned(),
+                name: path.file_name()?.to_string_lossy().into_owned(),
+                path: path.to_string_lossy().into_owned(),
                 modified,
             })
         })
@@ -276,21 +264,16 @@ pub fn dps_list_logs(gamelogs_dir: String) -> Result<Vec<LogFile>, String> {
     Ok(files)
 }
 
-/// The newest `*.txt` in `dir` by mtime (the active gamelog). Mirrors
-/// `localintel::local_log_names`'s newest-by-mtime selection.
+/// Name predicate for gamelog files (fed lowercased names by `util::fs`).
+fn is_gamelog(name: &str) -> bool {
+    name.ends_with(".txt")
+}
+
+/// The newest `*.txt` in `dir` by mtime (the active gamelog).
 fn newest_gamelog(dir: &Path) -> Option<PathBuf> {
-    std::fs::read_dir(dir)
-        .ok()?
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .to_ascii_lowercase()
-                .ends_with(".txt")
-        })
-        .filter_map(|e| Some((e.path(), e.metadata().ok()?.modified().ok()?)))
-        .max_by_key(|(_, m)| *m)
-        .map(|(p, _)| p)
+    crate::util::fs::newest_file_by_mtime(dir, is_gamelog)
+        .ok()
+        .flatten()
 }
 
 /// Read bytes appended to `path` since `offset`. Returns the decoded text up to

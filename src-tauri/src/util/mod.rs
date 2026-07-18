@@ -2,5 +2,6 @@
 //! modules. Add siblings here rather than re-duplicating one-off helpers
 //! per module.
 
+pub mod fs;
 pub mod text;
 pub mod time;

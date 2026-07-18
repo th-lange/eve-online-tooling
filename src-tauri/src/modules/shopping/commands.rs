@@ -504,24 +504,18 @@ fn recent_chatlogs(
     let prefix = format!("{}_", channel.to_ascii_lowercase());
     let cutoff =
         std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(24 * 60 * 60));
-    let mut recent: Vec<(std::path::PathBuf, String)> = std::fs::read_dir(logs_dir)
-        .map_err(|e| e.to_string())?
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_string_lossy()
-                .to_ascii_lowercase()
-                .starts_with(&prefix)
-        })
-        .filter_map(|e| {
-            let modified = e.metadata().ok()?.modified().ok()?;
-            if cutoff.map(|c| modified < c).unwrap_or(false) {
-                return None;
-            }
-            let name = e.file_name().to_string_lossy().into_owned();
-            Some((e.path(), name))
-        })
-        .collect();
+    let mut recent: Vec<(std::path::PathBuf, String)> =
+        crate::util::fs::list_files_by_mtime(logs_dir, |name| name.starts_with(&prefix))
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .filter_map(|(path, modified)| {
+                if cutoff.map(|c| modified < c).unwrap_or(false) {
+                    return None;
+                }
+                let name = path.file_name()?.to_string_lossy().into_owned();
+                Some((path, name))
+            })
+            .collect();
     recent.sort_by(|a, b| a.1.cmp(&b.1));
     Ok(recent.into_iter().map(|(path, _)| path).collect())
 }
