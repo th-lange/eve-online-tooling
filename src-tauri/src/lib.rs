@@ -143,8 +143,9 @@ pub fn run() {
             // Pilot (#589): re-export the orders module's TS bindings on every
             // debug launch, so a dev session that changes `OrderRow`/`orders_list`
             // doesn't need a separate `cargo test` invocation to see the update.
-            // `npm run build`'s prebuild step (`cargo test export_orders_bindings`)
-            // is what release/CI builds rely on, since they never run the app.
+            // CI's "Regenerate bindings" step (`npm run generate:bindings`)
+            // keeps the committed file fresh; release builds just consume it,
+            // since they never run the app.
             #[cfg(debug_assertions)]
             bindings::export_orders_bindings();
 

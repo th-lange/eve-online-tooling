@@ -49,11 +49,14 @@ pub fn export_orders_bindings() {
 mod tests {
     use super::export_orders_bindings;
 
-    /// Regenerates the committed bindings file. `npm run build` runs this via
-    /// `cargo test --features export-bindings export_orders_bindings --quiet`
-    /// before `tsc`; run it by hand (through `npm run generate:bindings`)
-    /// after touching `OrderRow` or `orders_list`'s signature and check in
-    /// the diff — CI's drift check fails the build otherwise.
+    /// Regenerates the committed bindings file. CI's "Regenerate bindings"
+    /// step runs this via `npm run generate:bindings` (`cargo test --features
+    /// export-bindings export_orders_bindings --quiet` + prettier); run the
+    /// same script by hand after touching `OrderRow` or `orders_list`'s
+    /// signature and check in the diff — CI's drift check fails otherwise.
+    /// Deliberately NOT part of `npm run build`: release builds consume the
+    /// committed file (the cargo test binary crashes on the Windows runner
+    /// under tauri-action, and the drift gate already guarantees freshness).
     #[test]
     fn export_orders_bindings_regenerates_the_committed_file() {
         export_orders_bindings();
