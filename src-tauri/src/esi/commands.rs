@@ -142,32 +142,6 @@ pub async fn owned_blueprints(
     Ok(out)
 }
 
-/// A character's assets (type id, quantity, location).
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Asset {
-    pub type_id: i64,
-    pub quantity: i64,
-    pub location_id: i64,
-}
-
-/// Assets for one character.
-#[tauri::command]
-pub async fn character_assets(
-    auth_state: State<'_, AuthState>,
-    character_id: i64,
-) -> Result<Vec<Asset>, crate::model::AppError> {
-    let assets = character::fetch_assets(&auth_state, character_id).await?;
-    Ok(assets
-        .into_iter()
-        .map(|a| Asset {
-            type_id: a.type_id,
-            quantity: a.quantity,
-            location_id: a.location_id,
-        })
-        .collect())
-}
-
 /// Total owned quantity per type across the **whole roster** (personal assets),
 /// for stock-aware production. Durably cached for 10 minutes so repeated builds
 /// don't re-hit ESI; characters whose token can't refresh are skipped.

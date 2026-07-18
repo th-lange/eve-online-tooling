@@ -223,7 +223,6 @@ pub fn run() {
             esi::commands::set_active_character,
             esi::commands::active_character,
             esi::commands::owned_blueprints,
-            esi::commands::character_assets,
             esi::commands::roster_stock,
             esi::commands::open_market_window,
             sde::commands::sde_status,
