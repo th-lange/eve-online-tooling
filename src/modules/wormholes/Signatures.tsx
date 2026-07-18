@@ -7,7 +7,8 @@ import {
   type SignatureScan,
   type SystemMatch,
 } from "../../lib/api";
-import { Field, SystemPicker } from "./shared";
+import { Field } from "../../components/forms";
+import { SystemPicker } from "./shared";
 
 /** Paste a probe-scanner result for a system → signature list with the
  * added/removed diff; wormhole sigs already referenced by a connection's

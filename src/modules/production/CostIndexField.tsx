@@ -6,7 +6,7 @@ import {
   type SystemMatch,
 } from "../../lib/api";
 import { Combo } from "../../components/Combo";
-import { Field } from "./components";
+import { Field } from "../../components/forms";
 
 /** Cost-index % field with a build-system search that fills it from the live
  *  ESI per-system index. The number stays editable as a manual override. */

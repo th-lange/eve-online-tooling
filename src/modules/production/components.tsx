@@ -1,5 +1,6 @@
 import { type ReactNode } from "react";
 import { RefreshCw, X } from "lucide-react";
+import { Field } from "../../components/forms";
 import {
   type OwnedBlueprint,
   type PriceBasis,
@@ -418,56 +419,6 @@ export function Tabs({
         >
           {t.label}
         </button>
-      ))}
-    </div>
-  );
-}
-
-export function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <label className="flex flex-col gap-1 text-xs text-zinc-400">
-      {label}
-      {children}
-    </label>
-  );
-}
-
-export function CheckboxGroup({
-  options,
-  selected,
-  onToggle,
-}: {
-  options: string[];
-  selected: Set<string>;
-  onToggle: (v: string) => void;
-}) {
-  if (options.length === 0) {
-    return <div className="text-xs text-zinc-600">—</div>;
-  }
-  return (
-    <div className="flex max-h-40 flex-wrap gap-1 overflow-auto">
-      {options.map((o) => (
-        <label
-          key={o}
-          className={`flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 text-xs ${
-            selected.has(o)
-              ? "bg-zinc-700 text-zinc-100"
-              : "bg-zinc-800 text-zinc-400"
-          }`}
-        >
-          <input
-            type="checkbox"
-            checked={selected.has(o)}
-            onChange={() => onToggle(o)}
-          />
-          {o}
-        </label>
       ))}
     </div>
   );

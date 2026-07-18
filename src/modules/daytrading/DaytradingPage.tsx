@@ -1,6 +1,13 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { DataAge } from "../../components/DataAge";
+import {
+  CheckboxGroup,
+  Field,
+  NumField,
+  SearchFilterRow,
+} from "../../components/forms";
+import { toggle, uniqueSorted } from "../../lib/sets";
 import {
   daytradingScan,
   errorMessage,
@@ -371,17 +378,13 @@ function Workbench() {
                 </div>
               )}
               {rows.length > 0 && (
-                <div className="mb-2 flex items-center gap-3">
-                  <input
-                    value={search}
-                    onChange={(e) => setSearch(e.currentTarget.value)}
-                    placeholder="Search name / category / hub…"
-                    className="w-72 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
-                  />
-                  <span className="text-xs text-zinc-500">
-                    {filteredRows.length} of {rows.length} shown
-                  </span>
-                </div>
+                <SearchFilterRow
+                  value={search}
+                  onChange={setSearch}
+                  placeholder="Search name / category / hub…"
+                  shown={filteredRows.length}
+                  total={rows.length}
+                />
               )}
               <DayTradeTable
                 rows={filteredRows}
@@ -618,87 +621,3 @@ function DayTradeTable({
   );
 }
 
-function uniqueSorted(
-  rows: DayTradeRow[],
-  pick: (r: DayTradeRow) => string | null,
-): string[] {
-  const set = new Set<string>();
-  for (const r of rows) {
-    const v = pick(r);
-    if (v) set.add(v);
-  }
-  return [...set].sort();
-}
-
-function toggle(set: Set<string>, v: string): Set<string> {
-  const next = new Set(set);
-  next.has(v) ? next.delete(v) : next.add(v);
-  return next;
-}
-
-function CheckboxGroup({
-  options,
-  selected,
-  onToggle,
-}: {
-  options: string[];
-  selected: Set<string>;
-  onToggle: (v: string) => void;
-}) {
-  if (options.length === 0) {
-    return <div className="text-xs text-zinc-600">—</div>;
-  }
-  return (
-    <div className="flex max-h-28 flex-wrap gap-1 overflow-auto">
-      {options.map((o) => (
-        <label
-          key={o}
-          className={`flex cursor-pointer items-center gap-1 rounded px-2 py-0.5 text-xs ${
-            selected.has(o)
-              ? "bg-zinc-700 text-zinc-100"
-              : "bg-zinc-800 text-zinc-400"
-          }`}
-        >
-          <input
-            type="checkbox"
-            checked={selected.has(o)}
-            onChange={() => onToggle(o)}
-          />
-          {o}
-        </label>
-      ))}
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1 text-xs text-zinc-400">
-      {label}
-      {children}
-    </label>
-  );
-}
-
-function NumField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  onChange: (n: number) => void;
-}) {
-  return (
-    <Field label={label}>
-      <input
-        type="number"
-        value={value}
-        min={0}
-        step={0.1}
-        onChange={(e) => onChange(Number(e.currentTarget.value))}
-        className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
-      />
-    </Field>
-  );
-}

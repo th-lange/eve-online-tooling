@@ -9,7 +9,7 @@ import {
 } from "../../lib/api";
 import { Combo } from "../../components/Combo";
 import { MASS, fmtMkg, massColor } from "./helpers";
-import { Field } from "./shared";
+import { Field } from "../../components/forms";
 
 /** Ship-mass jump planner: can this hull pass this hole, and how many crossings
  * remain? Physics come from the bundled SDE (offline). */

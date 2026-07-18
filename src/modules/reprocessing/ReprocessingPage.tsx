@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   errorMessage,
@@ -24,6 +24,7 @@ import {
   Centered,
   PrimaryButton,
 } from "../../components/page";
+import { Field } from "../../components/forms";
 import { SdeGate } from "../../components/SdeGate";
 import { useTypeIdLists } from "../../lib/useSavedLists";
 import {
@@ -467,15 +468,6 @@ function ReprocessTable({
         </tbody>
       </table>
     </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1 text-xs text-zinc-400">
-      {label}
-      {children}
-    </label>
   );
 }
 

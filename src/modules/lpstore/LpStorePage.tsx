@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   errorMessage,
@@ -15,6 +15,7 @@ import {
   type SortColumn,
 } from "../../components/SortHeaderCell";
 import { Page, PageHeader, PrimaryButton } from "../../components/page";
+import { Field } from "../../components/forms";
 import { SdeGate } from "../../components/SdeGate";
 
 type OfferSortKey =
@@ -252,15 +253,6 @@ function OfferTable({ rows }: { rows: OfferRow[] }) {
         known under-valuation.
       </div>
     </>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1 text-xs text-zinc-400">
-      {label}
-      {children}
-    </label>
   );
 }
 

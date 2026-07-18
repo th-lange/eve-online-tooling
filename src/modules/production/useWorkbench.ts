@@ -12,7 +12,8 @@ import {
   type ProfitParams,
 } from "../../lib/api";
 import { useTypeIdLists } from "../../lib/useSavedLists";
-import { classifyPaste, dedupNames, toggle, uniqueSorted } from "./helpers";
+import { classifyPaste, dedupNames } from "./helpers";
+import { toggle, uniqueSorted } from "../../lib/sets";
 import { parseItems } from "../../lib/parseItems";
 import {
   FORGE,
