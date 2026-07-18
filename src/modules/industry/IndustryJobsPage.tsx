@@ -10,7 +10,7 @@ import {
   type Slot,
 } from "../../lib/api";
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
-import { formatInt, formatIsk } from "../../lib/format";
+import { formatEveDateTime, formatInt, formatIsk } from "../../lib/format";
 import { DataAge } from "../../components/DataAge";
 import { Page, PageHeader, PrimaryButton } from "../../components/page";
 
@@ -307,10 +307,10 @@ function statusColor(status: string): string {
   return "text-zinc-500";
 }
 
-/** "in 3h 20m" for running jobs, else the end date. */
+/** "in 3h 20m" for running jobs, else the end date (UTC / EVE time). */
 function finishLabel(r: JobRow, now: number): string {
   if (r.status !== "active" || !r.endDate)
-    return r.endDate?.slice(0, 16).replace("T", " ") || "—";
+    return formatEveDateTime(r.endDate);
   const end = Date.parse(r.endDate);
   if (Number.isNaN(end)) return r.endDate;
   const ms = end - now;

@@ -45,6 +45,19 @@ export function formatDuration(seconds: number | null | undefined): string {
 }
 
 /**
+ * An ESI ISO-8601 timestamp as a compact `YYYY-MM-DD HH:MM`, always in
+ * **UTC** — i.e. EVE time, which is what the game client and ESI use —
+ * deliberately NOT the viewer's local time. Empty/missing input renders
+ * as "—"; an unparseable string is returned unchanged.
+ */
+export function formatEveDateTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso;
+  return new Date(t).toISOString().slice(0, 16).replace("T", " ");
+}
+
+/**
  * Compact relative time from a millisecond epoch timestamp: "just now"
  * (under a minute), then "Nm ago" / "Nh ago" / "Nd ago". Beyond ~30 days
  * a bare UTC date (`YYYY-MM-DD`) is shown instead, since "97d ago" stops
