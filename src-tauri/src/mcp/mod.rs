@@ -6,12 +6,18 @@
 //! guarded by a per-session bearer token, speaking JSON-RPC 2.0 over HTTP
 //! (`initialize`, `tools/list`, `tools/call`).
 //!
-//! Tools are **read-only and public**: SDE lookups and market prices. The tool
-//! layer is handed a [`ToolCtx`] carrying only the query services it may touch
-//! (the SDE dir + a `MarketService`) — never `AuthState`, ESI tokens, the
-//! keychain, or any write path — so an MCP tool *cannot* reach personal data or
-//! mutate anything, by construction. Market lookups reuse `MarketService` and
-//! therefore its caches (so a looping agent mostly hits cache, not ESI).
+//! Tools are **read-only**: SDE lookups, market prices, and (behind the
+//! opt-in dev-tier toggle, #592) the compute engines. The tool layer is
+//! handed a [`ToolCtx`] with the query services plus live plugin state.
+//! Registry-backed calls construct the shared [`capabilities::HostCtx`],
+//! which *does* carry an `AuthState` (scripts and plugins share that host
+//! layer and need it) — so what keeps MCP away from personal data is
+//! **policy, not construction**: only capabilities flagged `mcp` (or
+//! `mcp_dev` when the toggle is on) are reachable, none of them is
+//! auth-gated, and the `mcp_never_reaches_auth_gated_data` test in
+//! `capabilities.rs` pins exactly that. Market lookups reuse
+//! `MarketService` and therefore its caches (so a looping agent mostly
+//! hits cache, not ESI).
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -37,9 +43,13 @@ use crate::plugins::{PluginManager, PluginRegistry};
 /// MCP protocol revision this server implements.
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
-/// The **only** capabilities MCP tools may reach: read-only game data. No auth
-/// state, no ESI token, no keychain, no filesystem beyond the SDE db, no write
-/// path — a tool physically cannot touch anything else.
+/// What the MCP tool layer holds: read-only game-data services plus live
+/// plugin state for plugin-contributed tools. `AuthState` is deliberately
+/// absent here, but note that registry-backed tool calls still build one to
+/// satisfy the shared `capabilities::HostCtx` — the guard against personal
+/// data is the registry's `mcp`/`mcp_dev` exposure flags (no auth-gated
+/// capability is MCP-exposed; pinned by `mcp_never_reaches_auth_gated_data`),
+/// not this struct's shape.
 pub struct ToolCtx {
     app_data_dir: PathBuf,
     market: MarketService,
