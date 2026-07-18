@@ -323,3 +323,79 @@ fn resolve_ore_volumes(
         cache.insert(ore, vol);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A throwaway directory under the OS temp dir, removed on drop.
+    struct TmpDir(PathBuf);
+    impl TmpDir {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir()
+                .join(format!("eve-tooling-dpsmeter-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).expect("create tmp dir");
+            TmpDir(dir)
+        }
+    }
+    impl Drop for TmpDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Create `name` in `dir` with a mtime `secs_ago` seconds in the past.
+    fn touch(dir: &Path, name: &str, secs_ago: u64) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, "").expect("create file");
+        let mtime = std::time::SystemTime::now() - Duration::from_secs(secs_ago);
+        let file = std::fs::File::open(&path).expect("open file");
+        file.set_modified(mtime).expect("set mtime");
+        path
+    }
+
+    #[tokio::test]
+    async fn read_appended_reads_complete_lines_and_reoffsets() {
+        let tmp = TmpDir::new("read-appended");
+        let path = tmp.0.join("gamelog.txt");
+        std::fs::write(&path, "line1\nline2\npartial").expect("write file");
+
+        let (text, offset) = read_appended(&path, 0).await.expect("some appended text");
+        assert_eq!(text, "line1\nline2\n");
+        assert_eq!(offset, 12);
+
+        // Nothing appended since `offset` yet.
+        assert!(read_appended(&path, offset).await.is_none());
+
+        // Complete the trailing partial line.
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .expect("open for append");
+        use std::io::Write;
+        file.write_all(b"-done\n").expect("append");
+        drop(file);
+
+        let (text, offset) = read_appended(&path, offset)
+            .await
+            .expect("completed line appended");
+        assert_eq!(text, "partial-done\n");
+        assert_eq!(offset, 25);
+
+        // Truncated file (offset now beyond EOF) is also a no-op.
+        std::fs::write(&path, "short").expect("truncate file");
+        assert!(read_appended(&path, offset).await.is_none());
+    }
+
+    #[test]
+    fn newest_gamelog_picks_newest_txt_and_ignores_log() {
+        let tmp = TmpDir::new("newest-gamelog");
+        touch(&tmp.0, "old.txt", 30);
+        let expected = touch(&tmp.0, "new.txt", 5);
+        touch(&tmp.0, "notes.log", 1); // newest mtime, but wrong extension.
+
+        let newest = newest_gamelog(&tmp.0).expect("some txt file");
+        assert_eq!(newest, expected);
+    }
+}
