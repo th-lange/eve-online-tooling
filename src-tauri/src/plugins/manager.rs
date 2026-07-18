@@ -335,6 +335,29 @@ mod tests {
     }
 
     #[test]
+    fn evict_drops_the_warm_instance_so_the_next_invoke_reloads_from_disk() {
+        let manager = PluginManager::new();
+        let dir = tmp("evict-reload");
+        std::fs::create_dir_all(&dir).unwrap();
+        let wasm = dir.join("plugin.wasm");
+        std::fs::copy(echo_path(), &wasm).unwrap();
+        let call = |payload: &'static [u8]| {
+            manager.invoke(&dir, "swap", &HashSet::new(), &[], &wasm, "echo", payload)
+        };
+        assert!(call(br#"{"a":1}"#).is_ok());
+        // Replace the artifact on disk (what a reinstall does). The warm
+        // instance still serves the OLD bytes — that's the cache semantics
+        // an install must compensate for by evicting...
+        std::fs::copy(kv_path(), &wasm).unwrap();
+        assert!(call(br#"{"a":2}"#).is_ok());
+        // ...and once evicted, the next invoke loads the new wasm from disk
+        // (kv.wasm has no `echo` export, so the call now fails).
+        manager.evict("swap");
+        assert!(call(br#"{"a":3}"#).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn granted_plugin_can_use_its_storage() {
         let manager = PluginManager::new();
         let dir = tmp("granted");

@@ -42,8 +42,11 @@ using the `id` from its `plugin.json` regardless of what the dropped
 folder/zip was named. A `.zip` may have the plugin's files at its root, or
 wrapped one level deep in a single folder — both work, matching the shape of
 the release zips linked below. Dropping a plugin whose `id` you already have
-installed **replaces** it — that's also how you update one. A malformed
-manifest is rejected before anything is published; nothing changes.
+installed **replaces** it — that's also how you update one; the update takes
+effect on the plugin's next invocation (any already-running instance of the
+old version is discarded). A malformed manifest is rejected before anything
+is published; nothing changes — an existing install of that `id` stays
+intact and keeps working.
 
 Prefer doing it by hand? Copy the folder straight into the path shown on the
 Plugins page, then click **Rescan** (or restart the app) to pick it up.

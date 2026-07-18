@@ -159,32 +159,48 @@ impl PluginRegistry {
 
     /// Copy a plugin from `source` (a directory containing `plugin.json`)
     /// into `plugins_dir/<id>/`, replacing any existing install of the same
-    /// id (an install is also an update/reinstall). Validates the manifest
-    /// against the *destination* id before publishing it — a malformed drop
-    /// never becomes visible, and a failed copy is cleaned up. Returns the
-    /// installed id.
+    /// id (an install is also an update/reinstall). The manifest is fully
+    /// validated against the *destination* id **before** any disk mutation,
+    /// and the files are copied into a staging dir that only replaces the
+    /// destination once the copy has fully succeeded — so a malformed or
+    /// half-copied replacement leaves an existing install of the same id
+    /// untouched, on disk and in the registry. Returns the installed id.
     pub fn install_dir(&self, source: &Path) -> Result<String, String> {
         let raw = std::fs::read_to_string(source.join("plugin.json"))
             .map_err(|e| format!("no plugin.json in {source:?}: {e}"))?;
         let id = raw_manifest_id(&raw)?;
+        // Validation needs nothing from the copy — reject a bad manifest
+        // here, with zero disk mutation.
+        let manifest = Manifest::parse_and_validate(&raw, &id).map_err(|e| e.to_string())?;
         let dest = self.plugins_dir().join(&id);
-        if dest.exists() {
-            std::fs::remove_dir_all(&dest).map_err(|e| e.to_string())?;
+        // Stage the copy next to the destination (same filesystem, so the
+        // final `rename` is a cheap atomic swap-in). `id` is path-safe
+        // ([A-Za-z0-9_-], checked above), and the leading dot keeps a
+        // crash-orphaned staging dir from ever validating as a plugin at
+        // discovery time (its dir name can't match a manifest id).
+        let staging = self
+            .plugins_dir()
+            .join(format!(".replacing-{id}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&staging);
+        let swapped = copy_dir_all(source, &staging)
+            .map_err(|e| e.to_string())
+            .and_then(|()| {
+                // Only now — with a fully validated, fully copied replacement
+                // in hand — is the previous install allowed to go away.
+                if dest.exists() {
+                    std::fs::remove_dir_all(&dest).map_err(|e| e.to_string())?;
+                }
+                std::fs::rename(&staging, &dest).map_err(|e| e.to_string())
+            });
+        if let Err(e) = swapped {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(e);
         }
-        copy_dir_all(source, &dest).map_err(|e| e.to_string())?;
-        match Manifest::parse_and_validate(&raw, &id) {
-            Ok(manifest) => {
-                let mut manifests = self.manifests.lock();
-                manifests.retain(|m| m.id != id);
-                manifests.push(manifest);
-                manifests.sort_by(|a, b| a.id.cmp(&b.id));
-                Ok(id)
-            }
-            Err(e) => {
-                let _ = std::fs::remove_dir_all(&dest);
-                Err(e.to_string())
-            }
-        }
+        let mut manifests = self.manifests.lock();
+        manifests.retain(|m| m.id != id);
+        manifests.push(manifest);
+        manifests.sort_by(|a, b| a.id.cmp(&b.id));
+        Ok(id)
     }
 
     /// Extract a `.zip` at `zip_path` into a scratch dir under `plugins_dir`,
@@ -363,26 +379,41 @@ fn extract_zip(zip_path: &Path, dest: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Shared implementation of [`plugins_install`]: install from a folder or a
+/// `.zip`, then evict any cached WASM instance of the (re)installed id. The
+/// eviction matters on *re*install — the manager keeps invoked plugins warm,
+/// and a warm instance has the old wasm bytes and the old manifest's
+/// permission grants baked in; dropping it makes the next invoke load the
+/// artifact that is actually on disk now. Returns the installed id.
+fn install_and_evict(
+    registry: &PluginRegistry,
+    manager: &PluginManager,
+    path: &Path,
+) -> Result<String, String> {
+    let is_zip = path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"));
+    let id = if is_zip {
+        registry.install_zip(path)?
+    } else if path.is_dir() {
+        registry.install_dir(path)?
+    } else {
+        return Err(format!("{path:?} is neither a folder nor a .zip file"));
+    };
+    manager.evict(&id);
+    Ok(id)
+}
+
 /// Install a plugin dropped onto the Plugins page: `path` is an absolute
 /// path to either a plugin folder (containing `plugin.json`) or a `.zip` of
 /// one. Returns the fresh installed list on success.
 #[tauri::command]
 pub fn plugins_install(
     registry: State<'_, std::sync::Arc<PluginRegistry>>,
+    manager: State<'_, std::sync::Arc<PluginManager>>,
     path: String,
 ) -> Result<Vec<PluginEntry>, AppError> {
-    let source = Path::new(&path);
-    let is_zip = source
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"));
-    let result = if is_zip {
-        registry.install_zip(source)
-    } else if source.is_dir() {
-        registry.install_dir(source)
-    } else {
-        Err(format!("{path:?} is neither a folder nor a .zip file"))
-    };
-    result.map_err(AppError::from)?;
+    install_and_evict(&registry, &manager, Path::new(&path)).map_err(AppError::from)?;
     Ok(registry.list())
 }
 
@@ -600,8 +631,90 @@ mod tests {
         let reg = PluginRegistry::load(&root);
         assert!(reg.install_dir(&source).is_err());
         assert!(reg.list().is_empty());
-        // The copy was rolled back, not left behind as a ghost install.
+        // Rejected before any disk mutation — no ghost install, no staging.
         assert!(!root.join("plugins/acme").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn failed_reinstall_leaves_the_previous_install_intact() {
+        let root = tmp("reinstall-bad");
+        std::fs::create_dir_all(root.join("plugins")).unwrap();
+        let source = root.join("src");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("plugin.json"), manifest_json("acme")).unwrap();
+        std::fs::write(source.join("a.wasm"), b"v1").unwrap();
+        let reg = PluginRegistry::load(&root);
+        reg.install_dir(&source).unwrap();
+        reg.set_active("acme", true).unwrap();
+
+        // Try to replace it with a malformed manifest (no wasm and no ui ->
+        // NoEntryPoint). The docs promise "nothing changes" on a rejected
+        // drop — including when the id is already installed.
+        let bad = root.join("bad-src");
+        std::fs::create_dir_all(&bad).unwrap();
+        std::fs::write(
+            bad.join("plugin.json"),
+            r#"{"id":"acme","name":"acme","version":"2.0.0","minAppVersion":"0.33.0","permissions":[]}"#,
+        )
+        .unwrap();
+        assert!(reg.install_dir(&bad).is_err());
+
+        // The previous good install survives on disk...
+        assert!(root.join("plugins/acme/plugin.json").exists());
+        assert!(root.join("plugins/acme/a.wasm").exists());
+        // ...and in the registry: still listed, still active, still v1.
+        let list = reg.list();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].manifest.version, "1.0.0");
+        assert!(list[0].active);
+        // No staging leftovers in the plugins dir.
+        assert!(std::fs::read_dir(root.join("plugins"))
+            .unwrap()
+            .flatten()
+            .all(|e| !e.file_name().to_string_lossy().starts_with('.')));
+        // A fresh load agrees — disk still has a working acme.
+        let ids: Vec<_> = PluginRegistry::load(&root)
+            .list()
+            .iter()
+            .map(|e| e.manifest.id.clone())
+            .collect();
+        assert_eq!(ids, vec!["acme".to_string()]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn reinstall_evicts_the_cached_wasm_instance() {
+        let root = tmp("reinstall-evict");
+        std::fs::create_dir_all(root.join("plugins")).unwrap();
+        let source = root.join("src");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(
+            source.join("plugin.json"),
+            r#"{"id":"swap","name":"swap","version":"1.0.0","minAppVersion":"0.33.0","wasm":"plugin.wasm","permissions":[]}"#,
+        )
+        .unwrap();
+        let testdata = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/plugins/testdata");
+        std::fs::copy(testdata.join("echo.wasm"), source.join("plugin.wasm")).unwrap();
+
+        let reg = PluginRegistry::load(&root);
+        let mgr = PluginManager::new();
+        install_and_evict(&reg, &mgr, &source).unwrap();
+        reg.set_active("swap", true).unwrap();
+        // First invoke builds the instance and keeps it warm.
+        let out =
+            manager::run_plugin(&reg, &mgr, &root, "swap", "echo", &serde_json::json!(1)).unwrap();
+        assert_eq!(out, serde_json::json!(1));
+
+        // Reinstall with a different artifact. Without the eviction the warm
+        // echo instance would keep answering from the old bytes; with it the
+        // next invoke loads the new wasm, which has no `echo` export.
+        std::fs::copy(testdata.join("kv.wasm"), source.join("plugin.wasm")).unwrap();
+        install_and_evict(&reg, &mgr, &source).unwrap();
+        assert!(
+            manager::run_plugin(&reg, &mgr, &root, "swap", "echo", &serde_json::json!(2)).is_err(),
+            "stale cached instance still serving the old wasm"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
