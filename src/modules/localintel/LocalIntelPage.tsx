@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { memo, useCallback, useContext, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import {
@@ -26,6 +26,7 @@ import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { usePersistentState } from "../../lib/usePersistentState";
 import { useEveLogDir } from "../../lib/useEveLogDir";
 import { Page, PageHeader, PrimaryButton } from "../../components/page";
+import { ModuleActiveContext } from "../../components/moduleActiveContext";
 
 /** Best-effort desktop notification — requests permission, never throws. */
 async function notify(title: string, body: string) {
@@ -75,6 +76,11 @@ function playAlarm() {
 
 export function LocalIntelPage() {
   const qc = useQueryClient();
+  // ModuleHost (Layout) keeps every visited page mounted (hidden with
+  // `display:none`), so without this gate the two 30s polls below would keep
+  // hitting ESI for the rest of the session once the page has been visited,
+  // burning the ESI error budget for an invisible panel. Mirrors DpsPage.
+  const active = useContext(ModuleActiveContext);
   const [text, setText] = useState("");
   const [alertAnyRed, setAlertAnyRed] = useState(true);
   const [alertNeutrals, setAlertNeutrals] = useState(
@@ -174,9 +180,20 @@ export function LocalIntelPage() {
   });
 
   const result = scan.data;
-  const isWatched = (p: LocalPilot) =>
-    watchIds.has(p.corporationId) ||
-    (p.allianceId != null && watchIds.has(p.allianceId));
+  // Stable references so the memoized PilotTable/HostileCorpsPanel only
+  // re-render when their actual inputs change — not on every keystroke in the
+  // paste textarea or every 30s poll tick (see the memo() notes below).
+  const isWatched = useCallback(
+    (p: LocalPilot) =>
+      watchIds.has(p.corporationId) ||
+      (p.allianceId != null && watchIds.has(p.allianceId)),
+    [watchIds],
+  );
+  const watchMutate = setWatch.mutate; // mutate is referentially stable
+  const onWatch = useCallback(
+    (id: number, name: string) => watchMutate({ id, name, add: true }),
+    [watchMutate],
+  );
 
   // Right-rail danger list: player corporations in local you've set a negative
   // (red) standing toward. Player corp ids start at 98,000,000 (NPC corps are
@@ -221,16 +238,20 @@ export function LocalIntelPage() {
   const location = useQuery({
     queryKey: ["localintel", "location"],
     queryFn: routeLocation,
+    // Only while the page is on screen: a stale location then refreshes
+    // immediately on return (staleTime) instead of waiting a full interval.
+    enabled: active,
     // Auto-refresh so the panel follows the character as they move.
-    refetchInterval: 30_000,
+    refetchInterval: active ? 30_000 : false,
   });
   const here = location.data?.[location.data.length - 1];
   const hood = useQuery({
     queryKey: ["localintel", "hood", here?.systemId ?? null, hoodDepth],
     queryFn: () => systemNeighbourhood(here!.systemId, hoodDepth),
     enabled: here != null,
-    // Keep neighbourhood kills/jumps live (CCP aggregates update ~hourly).
-    refetchInterval: 30_000,
+    // Keep neighbourhood kills/jumps live (CCP aggregates update ~hourly) —
+    // but only while the page is visible.
+    refetchInterval: active ? 30_000 : false,
   });
 
   return (
@@ -366,7 +387,7 @@ export function LocalIntelPage() {
               zkillLoading={zkillRun.isPending}
               isWatched={isWatched}
               newIds={newIds}
-              onWatch={(id, name) => setWatch.mutate({ id, name, add: true })}
+              onWatch={onWatch}
             />
           )}
           {result && result.unresolved.length > 0 && (
@@ -382,7 +403,7 @@ export function LocalIntelPage() {
           corps={hostileCorps}
           scanned={!!result}
           watchIds={watchIds}
-          onWatch={(id, name) => setWatch.mutate({ id, name, add: true })}
+          onWatch={onWatch}
         />
         <NeighbourhoodPanel
           here={here}
@@ -406,8 +427,10 @@ export function LocalIntelPage() {
  *  stricter < −4 that hid most reds. */
 const HOSTILE_STANDING = 0;
 
-/** Right-rail panel: player corporations in local with a negative (red) standing. */
-function HostileCorpsPanel({
+/** Right-rail panel: player corporations in local with a negative (red) standing.
+ *  Memoized: the parent re-renders on every textarea keystroke and poll tick;
+ *  this panel's props (memoized corps list, stable onWatch) don't change then. */
+const HostileCorpsPanel = memo(function HostileCorpsPanel({
   corps,
   scanned,
   watchIds,
@@ -466,7 +489,7 @@ function HostileCorpsPanel({
       )}
     </div>
   );
-}
+});
 
 /**
  * Right-rail panel: recent ship/pod kills (CCP hourly, k-space) in systems
@@ -625,7 +648,11 @@ function Summary({ result }: { result: LocalScanResult }) {
   );
 }
 
-function PilotTable({
+/** Memoized: a busy Local paste is 500-2,000 rows x 6 cells; without memo()
+ *  every keystroke in the paste textarea and every 30s poll tick re-diffed the
+ *  whole table even though its data hadn't changed. Props are kept stable in
+ *  the parent (state Maps/Sets, useCallback'd isWatched/onWatch). */
+const PilotTable = memo(function PilotTable({
   pilots,
   zkill,
   zkillLoading,
@@ -751,7 +778,7 @@ function PilotTable({
       </table>
     </div>
   );
-}
+});
 
 function dot(threat: string): string {
   if (threat === "red") return "text-rose-500";
