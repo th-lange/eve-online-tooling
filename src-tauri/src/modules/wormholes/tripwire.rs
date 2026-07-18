@@ -76,26 +76,26 @@ pub struct RawWormhole {
 }
 
 /// Map a wormhole type's max jump mass (kg) to our jump-mass class (s/m/l/xl).
-/// Buckets mirror the frontend `maxShipLabel`. Missing mass → "xl" (least
+/// Buckets mirror the frontend `maxShipLabel`. Missing mass → `Xl` (least
 /// restrictive, so we never under-report). Pure.
-pub fn jump_mass_class(max_jump_mass_kg: Option<f64>) -> String {
+pub fn jump_mass_class(max_jump_mass_kg: Option<f64>) -> super::store::JumpMass {
+    use super::store::JumpMass;
     match max_jump_mass_kg {
-        Some(m) if m > 0.0 && m <= 5_000_000.0 => "s",
-        Some(m) if m > 0.0 && m <= 62_000_000.0 => "m",
-        Some(m) if m > 0.0 && m <= 375_000_000.0 => "l",
-        _ => "xl",
+        Some(m) if m > 0.0 && m <= 5_000_000.0 => JumpMass::S,
+        Some(m) if m > 0.0 && m <= 62_000_000.0 => JumpMass::M,
+        Some(m) if m > 0.0 && m <= 375_000_000.0 => JumpMass::L,
+        _ => JumpMass::Xl,
     }
-    .to_string()
 }
 
 /// Map Tripwire's `mass` enum to our mass-status vocabulary. Pure.
-pub fn mass_status(mass: Option<&str>) -> String {
+pub fn mass_status(mass: Option<&str>) -> super::store::MassStatus {
+    use super::store::MassStatus;
     match mass {
-        Some("critical") => "critical",
-        Some("destab") => "reduced",
-        _ => "fresh",
+        Some("critical") => MassStatus::Critical,
+        Some("destab") => MassStatus::Reduced,
+        _ => MassStatus::Fresh,
     }
-    .to_string()
 }
 
 /// Fetch the wormholes + signatures for a mask via Basic Auth. The API echoes a
@@ -150,19 +150,21 @@ mod tests {
 
     #[test]
     fn jump_mass_buckets() {
-        assert_eq!(jump_mass_class(Some(5_000_000.0)), "s");
-        assert_eq!(jump_mass_class(Some(62_000_000.0)), "m");
-        assert_eq!(jump_mass_class(Some(375_000_000.0)), "l");
-        assert_eq!(jump_mass_class(Some(1_000_000_000.0)), "xl");
-        assert_eq!(jump_mass_class(None), "xl");
+        use super::super::store::JumpMass;
+        assert_eq!(jump_mass_class(Some(5_000_000.0)), JumpMass::S);
+        assert_eq!(jump_mass_class(Some(62_000_000.0)), JumpMass::M);
+        assert_eq!(jump_mass_class(Some(375_000_000.0)), JumpMass::L);
+        assert_eq!(jump_mass_class(Some(1_000_000_000.0)), JumpMass::Xl);
+        assert_eq!(jump_mass_class(None), JumpMass::Xl);
     }
 
     #[test]
     fn mass_status_maps_tripwire_enum() {
-        assert_eq!(mass_status(Some("stable")), "fresh");
-        assert_eq!(mass_status(Some("destab")), "reduced");
-        assert_eq!(mass_status(Some("critical")), "critical");
-        assert_eq!(mass_status(None), "fresh");
+        use super::super::store::MassStatus;
+        assert_eq!(mass_status(Some("stable")), MassStatus::Fresh);
+        assert_eq!(mass_status(Some("destab")), MassStatus::Reduced);
+        assert_eq!(mass_status(Some("critical")), MassStatus::Critical);
+        assert_eq!(mass_status(None), MassStatus::Fresh);
     }
 
     #[test]
