@@ -382,6 +382,14 @@ impl PriceMap {
         self.0.get(&type_id)
     }
 
+    /// Borrow the underlying `HashMap` — for pure engine functions (e.g.
+    /// `production::evaluate`) that take a plain `&HashMap<i64, PriceModel>`.
+    /// Keeping those signatures map-based means the engines stay decoupled
+    /// from the market service and their unit tests can hand-build maps.
+    pub fn as_map(&self) -> &HashMap<i64, PriceModel> {
+        &self.0
+    }
+
     /// Realistic sell price (percentile), if the type has sell orders.
     pub fn sell(&self, type_id: i64) -> Option<f64> {
         self.get(type_id).and_then(|m| m.sell_percentile)

@@ -7,9 +7,7 @@ use tauri::{AppHandle, State};
 
 use crate::esi::EsiClient;
 use crate::lists::{self, ListItem};
-use crate::market::{
-    default_region_id, location_label, resolve_location, MarketService, PriceModel,
-};
+use crate::market::{default_region_id, location_label, resolve_location, MarketService};
 use crate::sde::Sde;
 use crate::storage;
 
@@ -313,13 +311,10 @@ pub async fn production_profit(
     // Price everything at the chosen location (Fuzzwork aggregates + ESI adjusted).
     let location = resolve_location(params.region_id, params.station_id);
     let market_name = location_label(params.region_id, params.station_id);
-    let prices: HashMap<i64, PriceModel> = market
-        .price_models_at(location, &ids)
+    let prices = market
+        .price_map_at(location, &ids)
         .await
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(|m| (m.type_id, m))
-        .collect();
+        .map_err(|e| e.to_string())?;
 
     // Invention probability multiplier from skills (1 + L/40 + 2L/30); all-V ≈ 1.458.
     let skill = params.invention_skill_level.unwrap_or(5).clamp(0, 5) as f64;
@@ -361,8 +356,14 @@ pub async fn production_profit(
                 .get(&step.blueprint_type_id)
                 .copied()
                 .unwrap_or(params.me);
-            let mut bd =
-                evaluate_with_stock(step, params.runs, step_me, &prices, &config, &params.stock);
+            let mut bd = evaluate_with_stock(
+                step,
+                params.runs,
+                step_me,
+                prices.as_map(),
+                &config,
+                &params.stock,
+            );
             // Job time = base × runs × (1 − TE/100) × skill × structure.
             let te = params
                 .owned_te
