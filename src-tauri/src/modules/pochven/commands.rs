@@ -201,26 +201,15 @@ pub async fn pochven_routes(app: AppHandle) -> Result<PochvenRoutes, String> {
 /// A BFS result: (distance per system, predecessor per system).
 type Bfs = (HashMap<i64, i64>, HashMap<i64, i64>);
 
-/// Raw `/universe/system_kills/` entry (public, hourly).
-#[derive(Deserialize)]
-struct EsiKills {
-    system_id: i64,
-    #[serde(default)]
-    ship_kills: i64,
-    #[serde(default)]
-    pod_kills: i64,
-}
-
-/// Ship + pod kills per system (last hour), from public ESI. Cached ~5 min on
-/// success; best-effort on failure (an empty map for this call only — never
-/// cached, so the next call retries instead of showing "0 kills" for the TTL).
+/// Ship + pod kills per system (last hour), from public ESI (the shared
+/// `esi::system_kills` wrapper). Cached ~5 min on success; best-effort on
+/// failure (an empty map for this call only — never cached, so the next call
+/// retries instead of showing "0 kills" for the TTL).
 async fn system_kills(dir: &std::path::Path, esi: &crate::esi::EsiClient) -> HashMap<i64, i64> {
     if let Some(c) = storage::cache_get::<HashMap<i64, i64>>(dir, "pochven_kills") {
         return c;
     }
-    let fetched: Result<Vec<EsiKills>, _> =
-        esi.get_json("/latest/universe/system_kills/", &[]).await;
-    store_kills(dir, fetched)
+    store_kills(dir, crate::esi::system_kills(esi).await)
 }
 
 /// Fold fetched kill rows into a per-system map and cache the result — but
@@ -232,7 +221,10 @@ async fn system_kills(dir: &std::path::Path, esi: &crate::esi::EsiClient) -> Has
 /// next call hits ESI again. Split out of `system_kills` so this rule is
 /// unit-testable without a network; generic over the error type (`E`) because
 /// the tests don't need to construct a real ESI error to exercise it.
-fn store_kills<E>(dir: &std::path::Path, fetched: Result<Vec<EsiKills>, E>) -> HashMap<i64, i64> {
+fn store_kills<E>(
+    dir: &std::path::Path,
+    fetched: Result<Vec<crate::esi::SystemKills>, E>,
+) -> HashMap<i64, i64> {
     match fetched {
         Ok(rows) => {
             let map: HashMap<i64, i64> = rows
@@ -835,10 +827,11 @@ mod tests {
             None
         );
         // A successful fetch is folded (ship + pod) and cached as before.
-        let rows = vec![EsiKills {
+        let rows = vec![crate::esi::SystemKills {
             system_id: 30_000_142,
             ship_kills: 3,
             pod_kills: 2,
+            npc_kills: 0,
         }];
         let map = store_kills::<()>(&dir, Ok(rows));
         assert_eq!(map.get(&30_000_142), Some(&5));

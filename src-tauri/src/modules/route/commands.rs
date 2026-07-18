@@ -11,7 +11,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-use crate::esi::{authed_get, AuthState, EsiClient};
+use crate::esi::{authed_get, AuthState, EsiClient, SystemKills};
 use crate::model::AppError;
 use crate::sde::{graph, open_from_dir, Sde};
 use crate::storage;
@@ -34,14 +34,6 @@ struct EsiJumps {
     ship_jumps: i64,
 }
 
-#[derive(Deserialize)]
-struct EsiKills {
-    system_id: i64,
-    ship_kills: i64,
-    pod_kills: i64,
-    npc_kills: i64,
-}
-
 /// Last-hour activity for one solar system, joined with SDE name/security/region.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -59,7 +51,7 @@ pub struct SystemActivity {
 
 /// Merge the jumps + kills aggregates into a per-system map. Pure (no I/O) so it
 /// can be unit-tested; a system appears if it has *either* jumps or kills.
-fn merge_activity(jumps: &[EsiJumps], kills: &[EsiKills]) -> HashMap<i64, SystemActivity> {
+fn merge_activity(jumps: &[EsiJumps], kills: &[SystemKills]) -> HashMap<i64, SystemActivity> {
     let mut map: HashMap<i64, SystemActivity> = HashMap::new();
     for j in jumps {
         let e = map.entry(j.system_id).or_default();
@@ -94,8 +86,7 @@ async fn activity_map(
         .get_json("/latest/universe/system_jumps/", &[])
         .await
         .map_err(|e| e.to_string())?;
-    let kills: Vec<EsiKills> = esi
-        .get_json("/latest/universe/system_kills/", &[])
+    let kills = crate::esi::system_kills(esi)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -613,13 +604,13 @@ mod tests {
             },
         ];
         let kills = [
-            EsiKills {
+            SystemKills {
                 system_id: 30000142,
                 ship_kills: 3,
                 pod_kills: 1,
                 npc_kills: 50,
             },
-            EsiKills {
+            SystemKills {
                 system_id: 30009999,
                 ship_kills: 2,
                 pod_kills: 0,
