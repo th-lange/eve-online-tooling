@@ -6,7 +6,7 @@
 // lookup used by a single panel) stay inline in their component file.
 
 import { queryOptions } from "@tanstack/react-query";
-import { marketHistory, sdeSearch } from "./api";
+import { marketHistory, marketRegions, sdeSearch } from "./api";
 
 /** Key for the shopping lists; shared so "add to list" buttons can invalidate
  *  the Shopping page from anywhere. */
@@ -23,7 +23,23 @@ export const SHOPPING_LISTS_KEY = ["shopping", "lists"] as const;
  *  instead of double-fetching. */
 const MARKET_HISTORY_STALE_TIME = 30 * 60 * 1000;
 
+/** The region/trade-hub list is baked into the backend (market service
+ *  `markets.rs`), so it can only change with an app update — like the SDE it
+ *  is static for the whole session. A long stale time stops every page mount
+ *  and window refocus from refetching a constant list. */
+const MARKET_REGIONS_STALE_TIME = 24 * 60 * 60 * 1000;
+
 export const marketKeys = {
+  /** The static region + trade-hub list backing every region dropdown
+   *  (trading, daytrading, reprocessing, fitting, contracts, production
+   *  workbench, appraisal, …). One shared key so all pages read a single
+   *  cache entry instead of each forking its own. */
+  regions: () =>
+    queryOptions({
+      queryKey: ["market", "regions"] as const,
+      queryFn: marketRegions,
+      staleTime: MARKET_REGIONS_STALE_TIME,
+    }),
   /** Daily price/volume history for a type in a region. `typeId` is nullable
    *  so callers can build the key before an item is picked; pair with
    *  `enabled: typeId != null` on the query. */

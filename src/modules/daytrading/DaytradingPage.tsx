@@ -11,12 +11,12 @@ import { toggle, uniqueSorted } from "../../lib/sets";
 import {
   daytradingScan,
   errorMessage,
-  marketRegions,
   rosterStock,
   sdeMarketCategories,
   type DayTradeParams,
   type DayTradeRow,
 } from "../../lib/api";
+import { marketKeys } from "../../lib/queryKeys";
 import {
   formatInt,
   formatIsk,
@@ -85,10 +85,7 @@ function Workbench() {
   const [hideMetas, setHideMetas] = useState<Set<string>>(new Set());
   const [rows, setRows] = useState<DayTradeRow[]>([]);
 
-  const regions = useQuery({
-    queryKey: ["market", "regions"],
-    queryFn: marketRegions,
-  });
+  const regions = useQuery(marketKeys.regions());
   const categories = useQuery({
     queryKey: ["sde", "marketCategories"],
     queryFn: sdeMarketCategories,

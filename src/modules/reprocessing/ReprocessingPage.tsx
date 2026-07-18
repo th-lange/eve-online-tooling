@@ -2,12 +2,12 @@ import { Fragment, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   errorMessage,
-  marketRegions,
   reprocessingEfficiency,
   reprocessingScan,
   type ReprocessParams,
   type ReprocessRow,
 } from "../../lib/api";
+import { marketKeys } from "../../lib/queryKeys";
 import {
   RegionSelect,
   StationSelect,
@@ -76,10 +76,7 @@ function Workbench() {
     securityMult,
   };
 
-  const regions = useQuery({
-    queryKey: ["market", "regions"],
-    queryFn: marketRegions,
-  });
+  const regions = useQuery(marketKeys.regions());
   const eff = useQuery({
     queryKey: [
       "reprocessing",

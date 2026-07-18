@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-  marketRegions,
   ownedBlueprints,
   productionDecryptors,
   productionProfit,
@@ -11,6 +10,7 @@ import {
   type ProfitBreakdown,
   type ProfitParams,
 } from "../../lib/api";
+import { marketKeys } from "../../lib/queryKeys";
 import { useTypeIdLists } from "../../lib/useSavedLists";
 import { classifyPaste, dedupNames } from "./helpers";
 import { toggle, uniqueSorted } from "../../lib/sets";
@@ -74,10 +74,7 @@ export function useWorkbench(): WorkbenchState {
   const [pasteList, setPasteList] = useState("");
   const [pasteMinRoiPct, setPasteMinRoiPct] = useState("20");
 
-  const regions = useQuery({
-    queryKey: ["market", "regions"],
-    queryFn: marketRegions,
-  });
+  const regions = useQuery(marketKeys.regions());
   const owned = useQuery({
     queryKey: ["owned", "blueprints"],
     queryFn: ownedBlueprints,

@@ -10,11 +10,11 @@ import {
 import { toggle, uniqueSorted } from "../../lib/sets";
 import {
   errorMessage,
-  marketRegions,
   stationTrading,
   type TradeParams,
   type TradeRow,
 } from "../../lib/api";
+import { marketKeys } from "../../lib/queryKeys";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
 import {
   RegionSelect,
@@ -75,10 +75,7 @@ function Workbench() {
   const [hideMetas, setHideMetas] = useState<Set<string>>(new Set());
   const [rows, setRows] = useState<TradeRow[]>([]);
 
-  const regions = useQuery({
-    queryKey: ["market", "regions"],
-    queryFn: marketRegions,
-  });
+  const regions = useQuery(marketKeys.regions());
   const { favorites, blacklist, toggleFavorite, blacklistRow, remove } =
     useTypeIdLists("trading", setRows, (r) => r.typeId);
 

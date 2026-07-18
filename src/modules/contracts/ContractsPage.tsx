@@ -4,10 +4,10 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   contractsScan,
   errorMessage,
-  marketRegions,
   type ContractParams,
   type ContractRow,
 } from "../../lib/api";
+import { marketKeys } from "../../lib/queryKeys";
 import {
   formatInt,
   formatIsk,
@@ -46,10 +46,7 @@ function Workbench() {
 
   const num = (s: string) => (s.trim() === "" ? 0 : Number(s));
 
-  const regions = useQuery({
-    queryKey: ["market", "regions"],
-    queryFn: marketRegions,
-  });
+  const regions = useQuery(marketKeys.regions());
   const run = useMutation({
     mutationFn: (p: ContractParams) => contractsScan(p),
     onSuccess: setRows,
