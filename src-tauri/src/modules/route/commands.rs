@@ -13,7 +13,7 @@ use tauri::{AppHandle, State};
 
 use crate::esi::{authed_get, AuthState, EsiClient};
 use crate::model::AppError;
-use crate::sde::{graph, Sde, SdePaths};
+use crate::sde::{graph, open_from_dir, Sde};
 use crate::storage;
 
 /// J-space (wormhole) solar systems start at this id.
@@ -102,7 +102,7 @@ async fn activity_map(
     let mut activity = merge_activity(&jumps, &kills);
 
     // Enrich with SDE name / security / region (k-space systems only).
-    let sde = Sde::open(&SdePaths::new(dir.to_path_buf()).db).map_err(|e| e.to_string())?;
+    let sde = open_from_dir(dir)?;
     let info = sde.solar_system_info().map_err(|e| e.to_string())?;
     for row in activity.values_mut() {
         if let Some((name, security, region)) = info.get(&row.system_id) {

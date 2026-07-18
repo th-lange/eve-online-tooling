@@ -11,7 +11,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-use crate::sde::{Sde, SdePaths};
+use crate::sde::open_from_dir;
 use crate::storage;
 
 const STORE_KEY: &str = "wh_connections";
@@ -107,7 +107,7 @@ pub(crate) fn load(app: &AppHandle) -> Result<(std::path::PathBuf, Vec<Connectio
 }
 
 fn views(dir: &std::path::Path, conns: &[Connection]) -> Result<Vec<ConnectionView>, String> {
-    let sde = Sde::open(&SdePaths::new(dir.to_path_buf()).db).map_err(|e| e.to_string())?;
+    let sde = open_from_dir(dir)?;
     let info = sde.solar_system_info().map_err(|e| e.to_string())?;
     let name = |id: i64| {
         info.get(&id)

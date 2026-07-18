@@ -7,12 +7,12 @@
 use std::sync::OnceLock;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 use super::types::{
     BlueprintMaterial, BlueprintProduct, ManufacturableBlueprint, TypeDetail, TypeInfo,
 };
-use super::{download_sde, Sde, SdeError, SdePaths};
+use super::{download_sde, Sde, SdePaths};
 
 pub use crate::model::{id_names, IdName};
 
@@ -35,12 +35,11 @@ pub struct SdeStatus {
     pub updated: bool,
 }
 
-fn paths(app: &AppHandle) -> Result<SdePaths, SdeError> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| SdeError::Path(e.to_string()))?;
-    Ok(SdePaths::new(dir))
+/// Resolve [`SdePaths`] for this app. Goes through [`crate::storage::app_data_dir`]
+/// (the single call site for the raw Tauri path API) rather than calling
+/// `app.path().app_data_dir()` directly.
+fn paths(app: &AppHandle) -> Result<SdePaths, String> {
+    Ok(SdePaths::new(crate::storage::app_data_dir(app)?))
 }
 
 fn status_of(paths: &SdePaths, updated: bool) -> SdeStatus {
@@ -96,15 +95,16 @@ async fn fetch_remote_md5() -> Option<String> {
     text.split_whitespace().next().map(|s| s.to_string())
 }
 
+/// Open the SDE for this app — a local shorthand for the shared
+/// [`super::open_from_app`] helper the query commands all use.
 fn open(app: &AppHandle) -> Result<Sde, String> {
-    let paths = paths(app).map_err(|e| e.to_string())?;
-    Sde::open(&paths.db).map_err(|e| e.to_string())
+    super::open_from_app(app)
 }
 
 /// Whether the SDE is installed locally, and where.
 #[tauri::command]
 pub fn sde_status(app: AppHandle) -> Result<SdeStatus, String> {
-    let paths = paths(&app).map_err(|e| e.to_string())?;
+    let paths = paths(&app)?;
     Ok(status_of(&paths, false))
 }
 
@@ -115,7 +115,7 @@ pub fn sde_status(app: AppHandle) -> Result<SdeStatus, String> {
 /// only when the data actually changed.
 #[tauri::command]
 pub async fn sde_update(app: AppHandle, force: bool) -> Result<SdeStatus, String> {
-    let paths = paths(&app).map_err(|e| e.to_string())?;
+    let paths = paths(&app)?;
 
     if paths.is_installed() && !force {
         let changed = match (read_local_md5(&paths).await, fetch_remote_md5().await) {
