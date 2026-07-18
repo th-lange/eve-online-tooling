@@ -6,13 +6,18 @@
 //! `src/modules/registry.ts`; the services below are reused as-is.
 //!
 //! Shared services:
-//! - [`esi`]     — EVE SSO auth + ESI HTTP client and endpoint wrappers
-//! - [`sde`]     — Static Data Export (blueprint / material data)
-//! - [`market`]  — market price service (multiple price vectors + cache)
-//! - [`model`]   — shared domain types
-//! - [`storage`] — local persistence (OS keychain, on-disk cache)
+//! - [`esi`]      — EVE SSO auth + ESI HTTP client and endpoint wrappers
+//! - [`sde`]      — Static Data Export (blueprint / material data)
+//! - [`market`]   — market price service (multiple price vectors + cache)
+//! - [`model`]    — shared domain types
+//! - [`storage`]  — local persistence (OS keychain, on-disk cache)
+//! - [`zkill`]    — shared zKillboard client (kill/loss lookups)
+//! - [`util`]     — cross-cutting helpers (time: epoch-now, civil dates, RFC-3339)
+//! - [`lists`]    — persisted type-id lists (blacklist/favorites)
+//! - [`evescout`] — EVE-Scout public Thera/Turnur wormhole connections
 //!
-//! Feature modules live under [`modules`] (production first).
+//! Feature modules live under [`modules`]; the frontend registry in
+//! `src/modules/registry.ts` is the canonical catalogue of them.
 
 mod bindings;
 mod capabilities;
