@@ -6,7 +6,7 @@ use serde::Deserialize;
 use tauri::{AppHandle, State};
 
 use crate::lists::{self, ListItem};
-use crate::market::{regions, resolve_location, MarketService, PriceModel};
+use crate::market::{regions, resolve_location, MarketService, PriceMap};
 
 use super::engine::{evaluate, DayTradeConfig, DayTradeRow, Quote};
 
@@ -79,7 +79,7 @@ fn default_category_ids() -> Vec<i64> {
 struct HubPrices {
     region_id: i64,
     label: String,
-    prices: HashMap<i64, PriceModel>,
+    prices: PriceMap,
 }
 
 /// Scan several market hubs for the best cross-region flip per item: buy where
@@ -119,13 +119,10 @@ pub async fn daytrading_scan(
             .map(|s| s.name.clone())
             .unwrap_or_else(|| hub.name.clone());
         let location = resolve_location(hub.id, station_id);
-        let prices: HashMap<i64, PriceModel> = market
-            .price_models_at(location, &ids)
+        let prices = market
+            .price_map_at(location, &ids)
             .await
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|m| (m.type_id, m))
-            .collect();
+            .map_err(|e| e.to_string())?;
         hubs.push(HubPrices {
             region_id: hub.id,
             label,
@@ -152,7 +149,7 @@ pub async fn daytrading_scan(
             let quotes: Vec<Quote> = hubs
                 .iter()
                 .filter_map(|h| {
-                    let price = h.prices.get(&item.type_id)?.sell_percentile?;
+                    let price = h.prices.sell(item.type_id)?;
                     Some(Quote {
                         region_id: h.region_id,
                         hub: h.label.clone(),
@@ -235,7 +232,7 @@ pub async fn daytrading_scan(
         let listed = hubs
             .iter()
             .find(|h| h.region_id == row.sell_region_id)
-            .and_then(|h| h.prices.get(&row.type_id))
+            .and_then(|h| h.prices.get(row.type_id))
             .and_then(|m| m.daily_volume)
             .unwrap_or(0);
         row.days_of_supply = if row.dest_volume > 0 {

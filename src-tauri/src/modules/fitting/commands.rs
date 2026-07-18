@@ -15,7 +15,7 @@ use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule};
 use super::engine::resolve::{resolve, FitInput};
 use super::types::{Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind};
 use crate::esi::{self, corporation_id, AuthState, SkillLevels};
-use crate::market::{resolve_location, MarketService, PriceModel};
+use crate::market::{resolve_location, MarketService};
 use crate::sde::{Sde, ShipLayout};
 use crate::storage;
 
@@ -584,18 +584,15 @@ pub async fn fitting_price(
 
     let ids: Vec<i64> = qty.keys().copied().collect();
     let location = resolve_location(region_id, station_id);
-    let prices: HashMap<i64, PriceModel> = market
-        .price_models_at(location, &ids)
+    let prices = market
+        .price_map_at(location, &ids)
         .await
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(|m| (m.type_id, m))
-        .collect();
+        .map_err(|e| e.to_string())?;
 
     let mut lines = Vec::with_capacity(qty.len());
     let (mut buy_total, mut sell_total) = (0.0, 0.0);
     for (type_id, quantity) in qty {
-        let model = prices.get(&type_id);
+        let model = prices.get(type_id);
         let buy_unit = model.and_then(|m| m.sell_min);
         let sell_unit = model.and_then(|m| m.buy_max);
         buy_total += buy_unit.unwrap_or(0.0) * quantity as f64;

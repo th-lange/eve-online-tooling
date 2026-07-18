@@ -18,7 +18,7 @@ use std::path::Path;
 use serde_json::{json, Value};
 
 use crate::esi::{self, AuthState};
-use crate::market::{default_region_id, resolve_location, MarketService, PriceModel};
+use crate::market::{default_region_id, resolve_location, MarketService};
 use crate::modules::fitting::{self, Fit, FitStats};
 use crate::modules::production;
 use crate::modules::reprocessing;
@@ -433,19 +433,15 @@ fn cap_production_profit(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
     let mut ids: Vec<i64> = materials.iter().map(|m| m.material_type_id).collect();
     ids.push(product.product_type_id);
     let location = resolve_location(region_id, None);
-    let prices: HashMap<i64, PriceModel> =
-        tauri::async_runtime::block_on(ctx.market.price_models_at(location, &ids))
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|m| (m.type_id, m))
-            .collect();
+    let prices = tauri::async_runtime::block_on(ctx.market.price_map_at(location, &ids))
+        .map_err(|e| e.to_string())?;
 
     let config = production::ProfitConfig {
         system_cost_index,
         facility_tax,
         ..Default::default()
     };
-    let breakdown = production::evaluate(&step, runs, me, &prices, &config);
+    let breakdown = production::evaluate(&step, runs, me, prices.as_map(), &config);
     serde_json::to_value(breakdown).map_err(|e| e.to_string())
 }
 
@@ -484,13 +480,9 @@ fn cap_reprocessing_yield(ctx: &HostCtx, args: &Value) -> Result<Value, String> 
     let mut ids: Vec<i64> = recipe.outputs.iter().map(|o| o.material_type_id).collect();
     ids.push(type_id);
     let location = resolve_location(region_id, None);
-    let prices: HashMap<i64, PriceModel> =
-        tauri::async_runtime::block_on(ctx.market.price_models_at(location, &ids))
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|m| (m.type_id, m))
-            .collect();
-    let sell = |tid: i64| -> Option<f64> { prices.get(&tid).and_then(|m| m.sell_percentile) };
+    let prices = tauri::async_runtime::block_on(ctx.market.price_map_at(location, &ids))
+        .map_err(|e| e.to_string())?;
+    let sell = |tid: i64| prices.sell(tid);
 
     let efficiency = reprocessing::ore_efficiency(&reprocessing::EfficiencyConfig {
         reprocessing: i64_arg("reprocessing"),

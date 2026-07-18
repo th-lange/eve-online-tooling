@@ -1,12 +1,12 @@
 //! Tauri command surface for the reprocessing (reprocess-vs-sell) module.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use serde::Deserialize;
 use tauri::{AppHandle, State};
 
 use crate::lists::{self, ListItem};
-use crate::market::{default_region_id, resolve_location, MarketService, PriceModel};
+use crate::market::{default_region_id, resolve_location, MarketService};
 
 use super::engine::{evaluate, ore_efficiency, EfficiencyConfig, ReprocessRow};
 
@@ -75,15 +75,11 @@ pub async fn reprocessing_scan(
     }
     let ids: Vec<i64> = ids.into_iter().collect();
     let location = resolve_location(params.region_id, params.station_id);
-    let prices: HashMap<i64, PriceModel> = market
-        .price_models_at(location, &ids)
+    let prices = market
+        .price_map_at(location, &ids)
         .await
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(|m| (m.type_id, m))
-        .collect();
-    let sell =
-        |type_id: i64| -> Option<f64> { prices.get(&type_id).and_then(|m| m.sell_percentile) };
+        .map_err(|e| e.to_string())?;
+    let sell = |type_id: i64| prices.sell(type_id);
 
     let efficiency = ore_efficiency(&EfficiencyConfig {
         reprocessing: params.reprocessing,

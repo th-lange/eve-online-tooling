@@ -126,13 +126,10 @@ pub async fn assets_value(
 
     let ids: Vec<i64> = stock.keys().copied().collect();
     let location = resolve_location(default_region_id(), Some(JITA_STATION_ID));
-    let prices: HashMap<i64, PriceModel> = market
-        .price_models_at(location, &ids)
+    let prices = market
+        .price_map_at(location, &ids)
         .await
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(|m| (m.type_id, m))
-        .collect();
+        .map_err(|e| e.to_string())?;
     let names = sde.market_items().map_err(|e| e.to_string())?;
     let name_vol: HashMap<i64, (String, f64)> = names
         .into_iter()
@@ -144,7 +141,7 @@ pub async fn assets_value(
     let (mut sell_total, mut buy_total, mut volume_total) = (0.0, 0.0, 0.0);
     let mut rows: Vec<AssetRow> = Vec::new();
     for (type_id, owners) in stock.into_iter() {
-        let model = prices.get(&type_id);
+        let model = prices.get(type_id);
         let buy_price = model.and_then(|m| m.buy_percentile);
         let sell_price = model.and_then(basis_price);
         let (name, vol_each) = name_vol
