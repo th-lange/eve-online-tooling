@@ -131,7 +131,17 @@ pub struct PochvenRoutes {
 /// Computed over the SDE stargate graph and cached ~24h.
 #[tauri::command]
 pub async fn pochven_routes(app: AppHandle) -> Result<PochvenRoutes, String> {
-    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
+    // 15 Dijkstra passes over the full k-space graph plus full-table SDE loads
+    // — pure CPU with zero awaits, so run the whole body on the blocking pool
+    // instead of a tokio worker thread (#611, same pattern as `scripts_run`).
+    tokio::task::spawn_blocking(move || pochven_routes_blocking(&app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// The CPU-bound body of [`pochven_routes`], run on the blocking pool.
+fn pochven_routes_blocking(app: &AppHandle) -> Result<PochvenRoutes, String> {
+    let (dir, sde) = crate::sde::dir_and_sde(app)?;
     if let Some(cached) = storage::cache_get::<PochvenRoutes>(&dir, "pochven_routes") {
         return Ok(cached);
     }
@@ -474,9 +484,25 @@ pub async fn pochven_search(
     system_id: i64,
     max_jumps: Option<i64>,
 ) -> Result<EntrySearch, String> {
-    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
+    // Fetch the (cached) kill overlay first — the only await — then run the
+    // Steiner-tree DP + BFS/map building on the blocking pool instead of a
+    // tokio worker thread (#611, same pattern as `scripts_run`). The SDE
+    // handle is opened inside the closure because `Sde` is not `Send`.
+    let dir = storage::app_data_dir(&app)?;
     let kills = system_kills(&dir, &esi).await;
+    tokio::task::spawn_blocking(move || pochven_search_blocking(&dir, kills, system_id, max_jumps))
+        .await
+        .map_err(|e| e.to_string())?
+}
 
+/// The CPU-bound body of [`pochven_search`], run on the blocking pool.
+fn pochven_search_blocking(
+    dir: &std::path::Path,
+    kills: HashMap<i64, i64>,
+    system_id: i64,
+    max_jumps: Option<i64>,
+) -> Result<EntrySearch, String> {
+    let sde = crate::sde::open_from_dir(dir)?;
     let adj = sde.stargate_adjacency().map_err(|e| e.to_string())?;
     let (dist, pred) = graph::bfs(&adj, system_id, None);
     let info = sde.solar_system_info().map_err(|e| e.to_string())?;
@@ -704,7 +730,17 @@ pub struct PochvenTopology {
 /// Pochven), straight from the SDE — so it matches the in-game / dotlan map.
 #[tauri::command]
 pub async fn pochven_map(app: AppHandle) -> Result<PochvenTopology, String> {
-    let sde = crate::sde::open_from_app(&app)?;
+    // Full geo-table scan + 27×N distance calcs — pure CPU with zero awaits,
+    // so run the whole body on the blocking pool instead of a tokio worker
+    // thread (#611, same pattern as `scripts_run`).
+    tokio::task::spawn_blocking(move || pochven_map_blocking(&app))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// The CPU-bound body of [`pochven_map`], run on the blocking pool.
+fn pochven_map_blocking(app: &AppHandle) -> Result<PochvenTopology, String> {
+    let sde = crate::sde::open_from_app(app)?;
     let poch_ids: HashSet<i64> = POCHVEN_CANDIDATES.iter().map(|&(_, id, _)| id).collect();
     let info = sde.solar_system_info().map_err(|e| e.to_string())?;
     let pos = sde.solar_system_positions().map_err(|e| e.to_string())?;
