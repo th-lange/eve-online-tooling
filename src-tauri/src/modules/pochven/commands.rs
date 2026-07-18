@@ -211,22 +211,39 @@ struct EsiKills {
     pod_kills: i64,
 }
 
-/// Ship + pod kills per system (last hour), from public ESI. Cached ~5 min;
-/// best-effort (empty on failure — the search still works).
+/// Ship + pod kills per system (last hour), from public ESI. Cached ~5 min on
+/// success; best-effort on failure (an empty map for this call only — never
+/// cached, so the next call retries instead of showing "0 kills" for the TTL).
 async fn system_kills(dir: &std::path::Path, esi: &crate::esi::EsiClient) -> HashMap<i64, i64> {
     if let Some(c) = storage::cache_get::<HashMap<i64, i64>>(dir, "pochven_kills") {
         return c;
     }
-    let rows: Vec<EsiKills> = esi
-        .get_json("/latest/universe/system_kills/", &[])
-        .await
-        .unwrap_or_default();
-    let map: HashMap<i64, i64> = rows
-        .into_iter()
-        .map(|k| (k.system_id, k.ship_kills + k.pod_kills))
-        .collect();
-    let _ = storage::cache_put(dir, "pochven_kills", &map, 300);
-    map
+    let fetched: Result<Vec<EsiKills>, _> =
+        esi.get_json("/latest/universe/system_kills/", &[]).await;
+    store_kills(dir, fetched)
+}
+
+/// Fold fetched kill rows into a per-system map and cache the result — but
+/// **only when the fetch succeeded**. The old code `unwrap_or_default()`ed the
+/// error and cached the empty fallback, so one transient ESI hiccup showed
+/// "0 kills everywhere" for the full 5-minute TTL even though a retry would
+/// have worked. On `Err` we now return an empty, *uncached* map: the kill
+/// overlay is decorative (the entry search still works without it), and the
+/// next call hits ESI again. Split out of `system_kills` so this rule is
+/// unit-testable without a network; generic over the error type (`E`) because
+/// the tests don't need to construct a real ESI error to exercise it.
+fn store_kills<E>(dir: &std::path::Path, fetched: Result<Vec<EsiKills>, E>) -> HashMap<i64, i64> {
+    match fetched {
+        Ok(rows) => {
+            let map: HashMap<i64, i64> = rows
+                .into_iter()
+                .map(|k| (k.system_id, k.ship_kills + k.pod_kills))
+                .collect();
+            let _ = storage::cache_put(dir, "pochven_kills", &map, 300);
+            map
+        }
+        Err(_) => HashMap::new(),
+    }
 }
 
 /// How a `dp[mask][v]` cell was reached, for Steiner-tree reconstruction.
@@ -803,6 +820,34 @@ pub async fn pochven_map(app: AppHandle) -> Result<PochvenTopology, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_kills_fetch_is_not_cached() {
+        // Pin the #612 fix: an ESI error must not poison the kills cache.
+        let dir = std::env::temp_dir().join(format!("pochven-kills-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // A failed fetch yields an empty map for this call only...
+        let map = store_kills(&dir, Err(()));
+        assert!(map.is_empty());
+        // ...and writes nothing, so the next call misses the cache and retries.
+        assert_eq!(
+            storage::cache_get::<HashMap<i64, i64>>(&dir, "pochven_kills"),
+            None
+        );
+        // A successful fetch is folded (ship + pod) and cached as before.
+        let rows = vec![EsiKills {
+            system_id: 30_000_142,
+            ship_kills: 3,
+            pod_kills: 2,
+        }];
+        let map = store_kills::<()>(&dir, Ok(rows));
+        assert_eq!(map.get(&30_000_142), Some(&5));
+        assert_eq!(
+            storage::cache_get::<HashMap<i64, i64>>(&dir, "pochven_kills"),
+            Some(map)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn stat_aggregates() {

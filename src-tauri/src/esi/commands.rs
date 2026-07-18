@@ -144,7 +144,9 @@ pub async fn owned_blueprints(
 
 /// Total owned quantity per type across the **whole roster** (personal assets),
 /// for stock-aware production. Durably cached for 10 minutes so repeated builds
-/// don't re-hit ESI; characters whose token can't refresh are skipped.
+/// don't re-hit ESI. Characters whose fetch fails (e.g. an expired token) are
+/// skipped from the totals, but such a *partial* result is never cached — the
+/// next call retries instead of serving wrong stock counts for the full TTL.
 #[tauri::command]
 pub async fn roster_stock(
     app: AppHandle,
@@ -157,15 +159,41 @@ pub async fn roster_stock(
         return Ok(cached);
     }
     let mut stock: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    // Track whether every character contributed. One failed fetch means the
+    // totals are incomplete, and incomplete totals must not be cached below.
+    let mut complete = true;
     for c in storage::load_roster(&dir) {
-        if let Ok(assets) = character::fetch_assets(&auth_state, c.character_id).await {
-            for a in assets {
-                *stock.entry(a.type_id).or_default() += a.quantity;
+        match character::fetch_assets(&auth_state, c.character_id).await {
+            Ok(assets) => {
+                for a in assets {
+                    *stock.entry(a.type_id).or_default() += a.quantity;
+                }
             }
+            // Best-effort: still return what we could count, but remember
+            // that this snapshot is partial.
+            Err(_) => complete = false,
         }
     }
-    let _ = storage::cache_put(&dir, "roster_stock", &stock, 600);
+    cache_stock_if_complete(&dir, &stock, complete);
     Ok(stock)
+}
+
+/// Cache the roster stock totals — but **only when every character's fetch
+/// succeeded**. The old code cached unconditionally, so a single failed
+/// character (one alt's token expired, a network blip) froze silently-wrong
+/// stock counts for the full 10-minute TTL, corrupting stock-aware production
+/// math with no signal to the user. Skipping the write on a partial snapshot
+/// means the next `roster_stock` call misses the cache and retries the failed
+/// characters. Split out of `roster_stock` so the rule is unit-testable
+/// without a network or a Tauri `AppHandle`.
+fn cache_stock_if_complete(
+    dir: &std::path::Path,
+    stock: &std::collections::HashMap<i64, i64>,
+    complete: bool,
+) {
+    if complete {
+        let _ = storage::cache_put(dir, "roster_stock", stock, 600);
+    }
 }
 
 /// Open the in-game market window for a type, using the active character (the
@@ -211,4 +239,34 @@ pub fn auth_logout(
     storage::delete_refresh_token(character_id)?;
     auth_state.forget(character_id);
     Ok(roster)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn partial_roster_stock_is_not_cached() {
+        // Pin the #612 fix: totals missing a character (a failed fetch) must
+        // not be cached, or stock-aware production math would be silently
+        // wrong for the full 10-minute TTL.
+        let dir = std::env::temp_dir().join(format!("roster-stock-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let stock = HashMap::from([(34_i64, 1_000_i64)]);
+        // Partial snapshot (complete = false): nothing is written, so the
+        // next roster_stock call misses the cache and retries.
+        cache_stock_if_complete(&dir, &stock, false);
+        assert_eq!(
+            storage::cache_get::<HashMap<i64, i64>>(&dir, "roster_stock"),
+            None
+        );
+        // Complete snapshot: cached as before.
+        cache_stock_if_complete(&dir, &stock, true);
+        assert_eq!(
+            storage::cache_get::<HashMap<i64, i64>>(&dir, "roster_stock"),
+            Some(stock)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
