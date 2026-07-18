@@ -99,7 +99,7 @@ one yourself instead, read on — the full source is in
 | `id`            | yes      | Stable id; must equal the folder name; `[A-Za-z0-9_-]` only.       |
 | `name`          | yes      | Human-readable name.                                               |
 | `version`       | yes      | Plugin version (semver).                                           |
-| `minAppVersion` | yes      | Minimum app version this plugin supports (semver).                 |
+| `minAppVersion` | yes      | Minimum app version this plugin supports (semver). Enforced: install and activation are refused on an older app, naming the required version. |
 | `wasm`          | one of   | Path to the WASM entry point (relative to the plugin folder).      |
 | `ui`            | one of   | Path to the UI HTML entry point (Phase 2).                         |
 | `permissions`   | no       | Capabilities requested (see below). Empty = a powerless plugin.    |
