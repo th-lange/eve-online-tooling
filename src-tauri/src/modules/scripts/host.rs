@@ -132,9 +132,9 @@ impl Host for HostCtx {
             return;
         }
         let mut line = line;
-        if line.len() > MAX_LOG_LINE_LEN {
-            line.truncate(MAX_LOG_LINE_LEN);
-        }
+        // Char-boundary-safe: scripts log arbitrary unicode; a plain
+        // `String::truncate` panics mid-character.
+        crate::util::text::truncate_to_char_boundary(&mut line, MAX_LOG_LINE_LEN);
         logs.push(line);
     }
 

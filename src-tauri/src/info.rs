@@ -65,14 +65,12 @@ pub fn push(
 ) -> Entry {
     let mut entries: Vec<Entry> = storage::load_data(app_data_dir, STORE_KEY).unwrap_or_default();
     let mut text = text.to_string();
-    if text.len() > MAX_TEXT_LEN {
-        text.truncate(MAX_TEXT_LEN);
-    }
+    // Char-boundary-safe: producer text is untrusted and may be non-ASCII;
+    // a plain `String::truncate` panics mid-character.
+    crate::util::text::truncate_to_char_boundary(&mut text, MAX_TEXT_LEN);
     let detail = detail.map(|d| {
         let mut d = d.to_string();
-        if d.len() > MAX_DETAIL_LEN {
-            d.truncate(MAX_DETAIL_LEN);
-        }
+        crate::util::text::truncate_to_char_boundary(&mut d, MAX_DETAIL_LEN);
         d
     });
     let entry = Entry {
