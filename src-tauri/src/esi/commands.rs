@@ -62,14 +62,14 @@ pub fn auth_characters(app: AppHandle) -> Result<Vec<Character>, String> {
 /// Bookmark the "active" character used by per-character features (industry
 /// jobs, route, etc.).
 #[tauri::command]
-pub fn set_active_character(app: AppHandle, character_id: i64) -> Result<(), String> {
+pub fn auth_set_active_character(app: AppHandle, character_id: i64) -> Result<(), String> {
     let dir = crate::storage::app_data_dir(&app)?;
     storage::save_active_character(&dir, character_id)
 }
 
 /// The active character id (bookmarked if set + in roster, else the first).
 #[tauri::command]
-pub fn active_character(app: AppHandle) -> Result<Option<i64>, String> {
+pub fn auth_active_character(app: AppHandle) -> Result<Option<i64>, String> {
     let dir = crate::storage::app_data_dir(&app)?;
     Ok(storage::active_character(&dir))
 }
@@ -96,7 +96,7 @@ pub struct OwnedBlueprint {
 /// (where the character has the Director role + corp scope). A character whose
 /// token can't be refreshed is skipped rather than failing the whole call.
 #[tauri::command]
-pub async fn owned_blueprints(
+pub async fn esi_owned_blueprints(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<Vec<OwnedBlueprint>, String> {
@@ -148,7 +148,7 @@ pub async fn owned_blueprints(
 /// skipped from the totals, but such a *partial* result is never cached — the
 /// next call retries instead of serving wrong stock counts for the full TTL.
 #[tauri::command]
-pub async fn roster_stock(
+pub async fn esi_roster_stock(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<std::collections::HashMap<i64, i64>, String> {
@@ -200,7 +200,7 @@ fn cache_stock_if_complete(
 /// one whose orders are shown). Requires the `esi-ui.open_window.v1` scope
 /// (re-login if added).
 #[tauri::command]
-pub async fn open_market_window(
+pub async fn esi_open_market_window(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
     type_id: i64,

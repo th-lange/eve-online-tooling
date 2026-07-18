@@ -54,7 +54,7 @@ describe("DaytradingPage", () => {
       sde_status: () => SDE_OK,
       market_regions: () => REGIONS,
       sde_market_categories: () => [],
-      roster_stock: () => ({}),
+      esi_roster_stock: () => ({}),
       daytrading_scan: () => [ROW],
     });
     renderWithQuery(<DaytradingPage />);
@@ -77,7 +77,7 @@ describe("DaytradingPage", () => {
       sde_status: () => SDE_OK,
       market_regions: () => REGIONS,
       sde_market_categories: () => [],
-      roster_stock: () => ({}),
+      esi_roster_stock: () => ({}),
       daytrading_scan: () => {
         throw error;
       },
