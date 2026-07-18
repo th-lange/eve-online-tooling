@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   activeCharacter,
@@ -328,7 +328,10 @@ const ASSET_COLUMNS: SortColumn<AssetSortKey>[] = [
 ];
 const ASSET_KEYS = ASSET_COLUMNS.map((c) => c.key);
 
-function AssetTable({ rows }: { rows: AssetRow[] }) {
+// memo(): Workbench re-renders on every raw search-box keystroke (the
+// debounce only delays the *filter*, so `rows` stays referentially stable
+// until it lands) and this lets those re-renders skip the table entirely.
+const AssetTable = memo(function AssetTable({ rows }: { rows: AssetRow[] }) {
   const { sortKey, sortDir, toggleSort } = usePersistentSort<AssetSortKey>(
     "sort.assets",
     ASSET_KEYS,
@@ -336,7 +339,14 @@ function AssetTable({ rows }: { rows: AssetRow[] }) {
     "desc",
     ["name"],
   );
-  const sorted = sortRows(rows, sortKey, sortDir).slice(0, 500);
+  // The row set is uncapped (one row per typeId × owner — easily 5k-20k for a
+  // multi-character roster), so memoize the O(n log n) sort instead of
+  // re-running it in the render body — same pattern as DayTradeTable and
+  // TradeTable.
+  const sorted = useMemo(
+    () => sortRows(rows, sortKey, sortDir).slice(0, 500),
+    [rows, sortKey, sortDir],
+  );
   return (
     <div className="mt-2 overflow-auto rounded border border-zinc-800">
       <table className="w-full border-collapse text-sm">
@@ -361,7 +371,7 @@ function AssetTable({ rows }: { rows: AssetRow[] }) {
       </table>
     </div>
   );
-}
+});
 
 function Row({ r }: { r: AssetRow }) {
   return (
