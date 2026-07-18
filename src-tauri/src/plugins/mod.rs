@@ -96,11 +96,21 @@ impl PluginRegistry {
         self.manifests.lock().iter().find(|m| m.id == id).cloned()
     }
 
-    /// Activate or deactivate plugin `id`, persisting the new set. Errors if the
-    /// id isn't installed.
+    /// Activate or deactivate plugin `id`, persisting the new set. Errors if
+    /// the id isn't installed, or (when activating) if the plugin's declared
+    /// `minAppVersion` is newer than the running app — activation is the
+    /// moment a plugin gets to run, so the compatibility gate must hold here
+    /// even for a plugin that skipped `install_dir` (hand-copied + rescan).
     pub fn set_active(&self, id: &str, active: bool) -> Result<(), String> {
-        if !self.manifests.lock().iter().any(|m| m.id == id) {
-            return Err(format!("unknown plugin {id:?}"));
+        {
+            let manifests = self.manifests.lock();
+            let manifest = manifests
+                .iter()
+                .find(|m| m.id == id)
+                .ok_or_else(|| format!("unknown plugin {id:?}"))?;
+            if active {
+                check_min_app_version(manifest, &app_version())?;
+            }
         }
         let mut set = self.active.lock();
         if active {
@@ -176,6 +186,10 @@ impl PluginRegistry {
         // Validation needs nothing from the copy — reject a bad manifest
         // here, with zero disk mutation.
         let manifest = Manifest::parse_and_validate(&raw, &id).map_err(|e| e.to_string())?;
+        // Refuse a plugin that declares it needs a newer app than this one —
+        // better a clear "needs app >= X" at install time than an opaque
+        // runtime failure after the user has already trusted it in.
+        check_min_app_version(&manifest, &app_version())?;
         let dest = self.plugins_dir().join(&id);
         // Stage the copy next to the destination (same filesystem, so the
         // final `rename` is a cheap atomic swap-in). `id` is path-safe
@@ -329,6 +343,29 @@ pub fn seed_example_plugin(app_data_dir: &Path) {
         dir.join("index.html"),
         include_str!("../../../examples/plugins/hello-ui/index.html"),
     );
+}
+
+/// The running app's version, baked in from `Cargo.toml` at compile time.
+/// Panic-free in practice: the package version is always valid semver.
+fn app_version() -> semver::Version {
+    semver::Version::parse(env!("CARGO_PKG_VERSION")).expect("CARGO_PKG_VERSION is valid semver")
+}
+
+/// Enforce the manifest's `minAppVersion` compatibility floor against the
+/// running app version `app`. The manifest field is already known to be
+/// valid semver (checked in `parse_and_validate`); a plugin requiring a
+/// newer app is rejected with a message naming both versions, so the user
+/// sees "needs app >= X, this is Y" instead of an opaque runtime failure.
+fn check_min_app_version(manifest: &Manifest, app: &semver::Version) -> Result<(), String> {
+    let min = semver::Version::parse(&manifest.min_app_version)
+        .map_err(|e| format!("invalid minAppVersion {:?}: {e}", manifest.min_app_version))?;
+    if *app < min {
+        return Err(format!(
+            "plugin {:?} needs app version {min} or newer, but this app is version {app}",
+            manifest.id
+        ));
+    }
+    Ok(())
 }
 
 /// Pull the bare `id` field out of a `plugin.json` without fully validating
@@ -927,6 +964,72 @@ mod tests {
         let reg = PluginRegistry::load(&root);
         assert!(reg.install_zip(&zip_path).is_err());
         assert!(reg.list().is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A manifest identical to [`manifest_json`] but with a chosen
+    /// `minAppVersion`.
+    fn manifest_json_min_app(id: &str, min_app: &str) -> String {
+        format!(
+            r#"{{"id":"{id}","name":"{id}","version":"1.0.0","minAppVersion":"{min_app}","wasm":"a.wasm","permissions":[]}}"#
+        )
+    }
+
+    #[test]
+    fn min_app_version_check_rejects_newer_and_passes_equal_or_older() {
+        let app = semver::Version::parse("0.44.0").unwrap();
+        let manifest = |min: &str| {
+            Manifest::parse_and_validate(&manifest_json_min_app("acme", min), "acme").unwrap()
+        };
+        // Requires a newer app -> rejected, naming both versions.
+        let err = check_min_app_version(&manifest("99.0.0"), &app).unwrap_err();
+        assert!(err.contains("99.0.0"), "missing required version: {err}");
+        assert!(err.contains("0.44.0"), "missing app version: {err}");
+        // Equal and older both pass.
+        check_min_app_version(&manifest("0.44.0"), &app).unwrap();
+        check_min_app_version(&manifest("0.33.0"), &app).unwrap();
+    }
+
+    #[test]
+    fn install_rejects_a_plugin_requiring_a_newer_app() {
+        let root = tmp("min-app-install");
+        std::fs::create_dir_all(root.join("plugins")).unwrap();
+        let source = root.join("src");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(
+            source.join("plugin.json"),
+            manifest_json_min_app("future", "99.0.0"),
+        )
+        .unwrap();
+        std::fs::write(source.join("a.wasm"), b"fake").unwrap();
+
+        let reg = PluginRegistry::load(&root);
+        let err = reg.install_dir(&source).unwrap_err();
+        assert!(err.contains("99.0.0"), "unexpected error: {err}");
+        assert!(
+            err.contains(env!("CARGO_PKG_VERSION")),
+            "error must name the running app version: {err}"
+        );
+        // Rejected before any disk mutation — nothing installed.
+        assert!(reg.list().is_empty());
+        assert!(!root.join("plugins/future").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn activation_rejects_a_plugin_requiring_a_newer_app() {
+        let root = tmp("min-app-activate");
+        // Hand-copied into plugins/ (bypassing install_dir), then discovered —
+        // the activation gate has to catch it.
+        write_plugin(&root, "future", &manifest_json_min_app("future", "99.0.0"));
+        let reg = PluginRegistry::load(&root);
+        assert_eq!(reg.list().len(), 1);
+        let err = reg.set_active("future", true).unwrap_err();
+        assert!(err.contains("99.0.0"), "unexpected error: {err}");
+        assert!(!reg.is_active("future"));
+        // Deactivating never needs the gate (turning a plugin *off* must
+        // always work, even on an app it no longer supports).
+        reg.set_active("future", false).unwrap();
         let _ = std::fs::remove_dir_all(&root);
     }
 
