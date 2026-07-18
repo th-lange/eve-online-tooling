@@ -3,9 +3,10 @@ import {
   RegionSelect,
   StationSelect,
 } from "../../components/RegionStationPicker";
-import { BasisSelect, CheckboxGroup, Field, Num, Tabs } from "./components";
+import { CheckboxGroup, Field } from "../../components/forms";
+import { BasisSelect, Num, Tabs } from "./components";
 import { CostIndexField } from "./CostIndexField";
-import { toggle } from "./helpers";
+import { toggle } from "../../lib/sets";
 import { STRUCTURES, type StructureKey } from "./types";
 import type { WorkbenchState } from "./workbenchTypes";
 
@@ -137,6 +138,7 @@ export function ParamsPanel({ wb }: { wb: WorkbenchState }) {
                 options={categoryOptions}
                 selected={categories}
                 onToggle={(v) => setCategories(toggle(categories, v))}
+                maxHeight="max-h-40"
               />
             </Field>
             <Field label="Meta (tech level / faction)">
@@ -144,6 +146,7 @@ export function ParamsPanel({ wb }: { wb: WorkbenchState }) {
                 options={metaOptions}
                 selected={metas}
                 onToggle={(v) => setMetas(toggle(metas, v))}
+                maxHeight="max-h-40"
               />
             </Field>
           </div>

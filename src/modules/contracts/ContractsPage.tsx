@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { FeesFromCharacter } from "../../components/FeesFromCharacter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
@@ -20,6 +20,7 @@ import {
   type SortColumn,
 } from "../../components/SortHeaderCell";
 import { Page, PageHeader, PrimaryButton } from "../../components/page";
+import { Field } from "../../components/forms";
 import { SdeGate } from "../../components/SdeGate";
 
 const FORGE = 10000002;
@@ -254,14 +255,5 @@ function ContractTable({ rows }: { rows: ContractRow[] }) {
         </tbody>
       </table>
     </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1 text-xs text-zinc-400">
-      {label}
-      {children}
-    </label>
   );
 }

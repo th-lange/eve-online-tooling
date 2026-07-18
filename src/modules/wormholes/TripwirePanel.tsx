@@ -9,7 +9,7 @@ import {
   type ConnectionView,
   type TripwireStatus,
 } from "../../lib/api";
-import { Field } from "./shared";
+import { Field } from "../../components/forms";
 
 /** Opt-in Tripwire import. Inert until connected: shows a connect form, then an
  * import + disconnect control. Credentials live in the OS keychain. */

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { whRoute, type RouteResult, type SystemMatch } from "../../lib/api";
-import { Field, SystemPicker } from "./shared";
+import { Field } from "../../components/forms";
+import { SystemPicker } from "./shared";
 
 /** Route between two systems over stargates ∪ mapped wormhole connections. */
 export function Routing() {
