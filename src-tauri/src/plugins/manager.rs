@@ -65,9 +65,26 @@ fn build_plugin(
 
 /// Runtime cache of instantiated plugins, keyed by plugin id. Lazy: a plugin is
 /// built on first invocation and kept warm. Held in Tauri managed state.
+///
+/// # Locking model
+///
+/// Two levels, so distinct plugins never serialize against each other:
+///
+/// - The **map mutex** guards only lookup/insert/remove of cache entries. It
+///   is held for microseconds — never across a wasm call, a file read, or a
+///   compile.
+/// - Each entry is an `Arc<Mutex<Plugin>>` — the **per-plugin mutex**. An
+///   Extism `Plugin` is a single instance and must not run two calls at once,
+///   so calls to the *same* plugin still queue behind each other; calls to
+///   *different* plugins proceed concurrently (UI command vs. MCP bridge vs.
+///   another plugin's command).
+///
+/// Lock order is strictly map-then-plugin or plugin-then-map-briefly (the
+/// error path), and no path ever locks a per-plugin mutex while holding the
+/// map mutex, so the two levels cannot deadlock.
 #[derive(Default)]
 pub struct PluginManager {
-    loaded: Mutex<HashMap<String, Plugin>>,
+    loaded: Mutex<HashMap<String, Arc<Mutex<Plugin>>>>,
     limits: Limits,
 }
 
@@ -91,23 +108,48 @@ impl PluginManager {
         func: &str,
         args: &[u8],
     ) -> Result<Vec<u8>, String> {
-        let mut loaded = self.loaded.lock();
-        if !loaded.contains_key(id) {
-            let bytes = std::fs::read(wasm_path)
-                .map_err(|e| format!("cannot read plugin wasm {wasm_path:?}: {e}"))?;
-            let ctx = Arc::new(BrokerCtx::new(app_data_dir.to_path_buf(), id.to_string()));
-            let functions = host_functions(granted, ctx);
-            loaded.insert(
-                id.to_string(),
-                build_plugin(&bytes, &self.limits, functions, allowed_hosts)?,
-            );
-        }
-        let plugin = loaded.get_mut(id).expect("present: just inserted");
+        // Grab the cached entry, or build one. The fs read + wasm compile of a
+        // cold build happen *outside* the map lock so a slow first load of one
+        // plugin doesn't stall every other plugin's lookup. If two threads
+        // race to build the same plugin, `or_insert` keeps the first insert
+        // and the loser's instance is simply dropped — wasteful but rare and
+        // correct.
+        let cached = self.loaded.lock().get(id).cloned();
+        let entry = match cached {
+            Some(entry) => entry,
+            None => {
+                let bytes = std::fs::read(wasm_path)
+                    .map_err(|e| format!("cannot read plugin wasm {wasm_path:?}: {e}"))?;
+                let ctx = Arc::new(BrokerCtx::new(app_data_dir.to_path_buf(), id.to_string()));
+                let functions = host_functions(granted, ctx);
+                let built = Arc::new(Mutex::new(build_plugin(
+                    &bytes,
+                    &self.limits,
+                    functions,
+                    allowed_hosts,
+                )?));
+                self.loaded
+                    .lock()
+                    .entry(id.to_string())
+                    .or_insert(built)
+                    .clone()
+            }
+        };
+        // Only this plugin's own mutex is held across the call (bounded by the
+        // Extism timeout); other plugins remain fully available meanwhile.
+        let mut plugin = entry.lock();
         let result = plugin
             .call::<&[u8], Vec<u8>>(func, args)
             .map_err(|e| e.to_string());
         if result.is_err() {
-            loaded.remove(id); // discard a possibly-interrupted instance
+            // Discard a possibly-interrupted instance — but only if the map
+            // still holds *this* instance. A concurrent evict + rebuild (e.g.
+            // a reinstall) must not have its fresh instance thrown away by our
+            // stale failure.
+            let mut loaded = self.loaded.lock();
+            if loaded.get(id).is_some_and(|e| Arc::ptr_eq(e, &entry)) {
+                loaded.remove(id);
+            }
         }
         result
     }
@@ -384,6 +426,55 @@ mod tests {
         // (kv.wasm has no `echo` export, so the call now fails).
         manager.evict("swap");
         assert!(call(br#"{"a":3}"#).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_busy_plugin_does_not_block_a_different_plugin() {
+        // Deterministic stand-in for "plugin A is mid-call": hold A's
+        // per-plugin mutex from the test thread — exactly the lock an
+        // in-flight `plugin.call` holds — then invoke a *different* plugin
+        // from another thread. Under the old single manager-wide mutex this
+        // would park B behind A (up to the 5s Extism timeout); with
+        // per-plugin locking B must complete promptly.
+        let manager = Arc::new(PluginManager::new());
+        let dir = tmp("concurrent");
+        manager
+            .invoke(
+                &dir,
+                "a",
+                &HashSet::new(),
+                &[],
+                &echo_path(),
+                "echo",
+                br#"{"warm":true}"#,
+            )
+            .unwrap();
+        let a_entry = manager.loaded.lock().get("a").unwrap().clone();
+        let a_guard = a_entry.lock(); // "a" is now busy
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (m, d) = (manager.clone(), dir.clone());
+        std::thread::spawn(move || {
+            let r = m.invoke(
+                &d,
+                "b",
+                &HashSet::new(),
+                &[],
+                &echo_path(),
+                "echo",
+                br#"{"who":"b"}"#,
+            );
+            let _ = tx.send(r);
+        });
+        let out = rx
+            .recv_timeout(Duration::from_secs(3))
+            .expect("invoking plugin b must not wait for plugin a's in-flight call")
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&out).unwrap(),
+            serde_json::json!({"who": "b"})
+        );
+        drop(a_guard);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
