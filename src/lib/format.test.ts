@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { sortBreakdowns, sortRows, formatIsk, formatPercent } from "./format";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  sortBreakdowns,
+  sortRows,
+  formatAgo,
+  formatIsk,
+  formatPercent,
+} from "./format";
 import type { ProfitBreakdown } from "./api";
 
 function row(
@@ -54,6 +60,38 @@ describe("format", () => {
     const byVolume = sortBreakdowns(rows, "productVolume", "desc");
     // B has null volume -> sorts last despite desc
     expect(byVolume.map((r) => r.productName)).toEqual(["C", "A", "B"]);
+  });
+
+  describe("formatAgo", () => {
+    const NOW = Date.UTC(2026, 6, 18, 12, 0, 0); // 2026-07-18T12:00:00Z
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(NOW);
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("renders each unit at its threshold", () => {
+      expect(formatAgo(NOW)).toBe("just now");
+      expect(formatAgo(NOW - 59_000)).toBe("just now");
+      expect(formatAgo(NOW - 60_000)).toBe("1m ago");
+      expect(formatAgo(NOW - 3_599_000)).toBe("59m ago");
+      expect(formatAgo(NOW - 3_600_000)).toBe("1h ago");
+      expect(formatAgo(NOW - 86_399_000)).toBe("23h ago");
+      expect(formatAgo(NOW - 86_400_000)).toBe("1d ago");
+      expect(formatAgo(NOW - 2_591_999_000)).toBe("29d ago");
+    });
+
+    it("falls back to a UTC date beyond 30 days", () => {
+      expect(formatAgo(NOW - 2_592_000_000)).toBe("2026-06-18");
+      expect(formatAgo(Date.UTC(2026, 0, 1))).toBe("2026-01-01");
+    });
+
+    it("clamps future timestamps to just now", () => {
+      expect(formatAgo(NOW + 120_000)).toBe("just now");
+    });
   });
 
   it("sortRows with nullsLast sorts null values last in both directions", () => {
