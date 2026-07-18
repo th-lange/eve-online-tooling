@@ -7,26 +7,43 @@ use serde::Serialize;
 
 use super::types::Language;
 
-/// Alarm + sound (and Info Panel output) when a market order is outpriced.
+/// Alarm + optional sound (and Info Panel output) when a market order is
+/// outpriced.
 pub const OUTPRICED_RHAI: &str = r#"// Warn when any of your market orders is outpriced. The alarm shows in the
 // Info Panel (under Support) — the headline plus the beaten orders as detail —
-// lights the bell badge, and plays a sound.
+// lights the bell badge, and optionally plays a sound.
 // Needs the esi-markets.read_character_orders scope and a logged-in character.
+
+// Optional: set this to a sound file on your machine to also hear the alarm,
+// e.g. "C:/Users/you/Music/alarm.mp3" or "/home/you/Music/alarm.mp3".
+// Leave it empty to skip the sound.
+let alarm_sound = "";
+
 let beaten = my_orders().filter(|o| o.undercut);
 if beaten.len() > 0 {
     send_alarm("" + beaten.len() + " market order(s) outpriced", beaten);
-    play_sound("/home/letigre/Music/jeremayjimenez-greece-eas-alarm-451404.mp3");
+    if alarm_sound != "" {
+        play_sound(alarm_sound);
+    }
 }
 beaten.len()"#;
 
 pub const OUTPRICED_JS: &str = r#"// Warn when any of your market orders is outpriced. The alarm shows in the
 // Info Panel (under Support) — the headline plus the beaten orders as detail —
-// lights the bell badge, and plays a sound.
+// lights the bell badge, and optionally plays a sound.
 // Needs the esi-markets.read_character_orders scope and a logged-in character.
+
+// Optional: set this to a sound file on your machine to also hear the alarm,
+// e.g. "C:/Users/you/Music/alarm.mp3" or "/home/you/Music/alarm.mp3".
+// Leave it empty to skip the sound.
+const alarmSound = "";
+
 const beaten = my_orders().filter((o) => o.undercut);
 if (beaten.length > 0) {
   send_alarm(`${beaten.length} market order(s) outpriced`, beaten);
-  play_sound("/home/letigre/Music/jeremayjimenez-greece-eas-alarm-451404.mp3");
+  if (alarmSound !== "") {
+    play_sound(alarmSound);
+  }
 }
 beaten.length;"#;
 
@@ -196,4 +213,43 @@ pub fn examples() -> Vec<ExampleScript> {
         ),
         example("corp-js", "Corp asset count (JS)", Language::Js, CORP_JS),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Bundled examples ship in every release, so they must never bake in a
+    /// machine-specific filesystem path (it fails on every other machine and
+    /// leaks the author's environment). `play_sound` in particular must take a
+    /// user-configurable variable, not a hardcoded string literal — the
+    /// engine's `every_bundled_example_runs_green` can't catch this because
+    /// the fake host's `play_sound` always succeeds.
+    #[test]
+    fn examples_never_hardcode_a_sound_file_path() {
+        for ex in examples() {
+            assert!(
+                !ex.code.contains("play_sound(\"") && !ex.code.contains("play_sound(`"),
+                "example {:?} passes a hardcoded literal to play_sound; \
+                 use an empty, user-configurable variable instead",
+                ex.id
+            );
+        }
+    }
+
+    /// No example may embed an absolute path outside of comments (comments may
+    /// show illustrative paths like `/home/you/...`).
+    #[test]
+    fn examples_never_embed_absolute_paths_in_code() {
+        for ex in examples() {
+            for line in ex.code.lines() {
+                let code_part = line.split("//").next().unwrap_or("");
+                assert!(
+                    !code_part.contains("\"/") && !code_part.contains("\"C:"),
+                    "example {:?} embeds an absolute path in code: {line:?}",
+                    ex.id
+                );
+            }
+        }
+    }
 }
