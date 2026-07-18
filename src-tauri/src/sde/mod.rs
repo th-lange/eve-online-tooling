@@ -28,7 +28,7 @@ pub use types::{
     PlanetSchematic, Recipe, ReprocessRecipe, ShipLayout, WormholeType,
 };
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::storage;
 
@@ -80,13 +80,21 @@ impl SdePaths {
 /// actually cost something in practice.
 pub fn open_from_app(app: &tauri::AppHandle) -> Result<Sde, String> {
     let dir = storage::app_data_dir(app)?;
-    Sde::open(&SdePaths::new(dir).db).map_err(|e| e.to_string())
+    open_from_dir(&dir)
+}
+
+/// Like [`open_from_app`], but for callers that already resolved the app data
+/// dir (or have no `AppHandle` at all, e.g. the plugin broker). This is the
+/// one place that knows "an app data dir + [`SdePaths`] = an openable SDE",
+/// so call sites don't each rebuild that plumbing by hand.
+pub fn open_from_dir(dir: &Path) -> Result<Sde, String> {
+    Sde::open(&SdePaths::new(dir.to_path_buf()).db).map_err(|e| e.to_string())
 }
 
 /// Like [`open_from_app`], but also returns the resolved app data dir for
 /// callers that need both (e.g. to load a store alongside the SDE lookups).
 pub fn dir_and_sde(app: &tauri::AppHandle) -> Result<(PathBuf, Sde), String> {
     let dir = storage::app_data_dir(app)?;
-    let sde = Sde::open(&SdePaths::new(dir.clone()).db).map_err(|e| e.to_string())?;
+    let sde = open_from_dir(&dir)?;
     Ok((dir, sde))
 }

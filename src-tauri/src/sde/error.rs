@@ -8,8 +8,6 @@ pub enum SdeError {
     NotInstalled,
     #[error("SDE database is corrupt: {0}")]
     Corrupt(String),
-    #[error("could not resolve app data path: {0}")]
-    Path(String),
     #[error("decompression failed: {0}")]
     Decompress(String),
     #[error(transparent)]

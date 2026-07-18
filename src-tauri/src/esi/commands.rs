@@ -130,7 +130,7 @@ pub async fn owned_blueprints(
     }
 
     // Resolve blueprint names from the SDE (cached per type id).
-    if let Ok(sde) = crate::sde::Sde::open(&crate::sde::SdePaths::new(dir).db) {
+    if let Ok(sde) = crate::sde::open_from_dir(&dir) {
         let mut names: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
         for bp in &mut out {
             let name = names

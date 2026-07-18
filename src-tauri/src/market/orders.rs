@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::esi::{authed_get, resolve_names, AuthState};
 use crate::market::{resolve_location, MarketService, PriceModel};
 use crate::model::AppError;
-use crate::sde::{Sde, SdePaths};
+use crate::sde::open_from_dir;
 use crate::storage;
 
 #[derive(Deserialize)]
@@ -124,7 +124,7 @@ async fn fetch_character_orders(
     // player structures may not — fall back to the id).
     let loc_ids: Vec<i64> = orders.iter().map(|o| o.location_id).collect();
     let loc_names = resolve_names(auth_state, &loc_ids).await;
-    let sde = Sde::open(&SdePaths::new(dir.to_path_buf()).db).map_err(|e| e.to_string())?;
+    let sde = open_from_dir(dir)?;
     let type_ids: Vec<i64> = orders.iter().map(|o| o.type_id).collect();
     let type_names = sde.type_name_map(&type_ids).map_err(|e| e.to_string())?;
 

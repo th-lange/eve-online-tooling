@@ -14,7 +14,7 @@ use crate::esi::{
     authed_get, authed_get_paged_or_empty_on_403, character_skill_levels, corporation_id,
     resolve_names, AuthState,
 };
-use crate::sde::{Sde, SdePaths};
+use crate::sde::open_from_dir;
 use crate::storage;
 
 /// Raw ESI industry job (the fields we keep). Stored durably, merged by job id.
@@ -231,7 +231,7 @@ async fn character_industry_jobs(
     // Resolve names: product/blueprint via SDE, facility via /universe/names.
     // Opened here (not passed in) so no `!Sync` connection is held across an
     // earlier `.await`, which would make this future non-`Send`.
-    let sde = Sde::open(&SdePaths::new(dir.to_path_buf()).db).map_err(|e| e.to_string())?;
+    let sde = open_from_dir(dir)?;
     let facility_ids: Vec<i64> = combined
         .iter()
         .filter_map(|(j, _)| j.facility_id.or(j.station_id))

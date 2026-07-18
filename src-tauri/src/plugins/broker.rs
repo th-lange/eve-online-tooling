@@ -24,7 +24,7 @@ use super::manifest::Permission;
 use crate::capabilities;
 use crate::esi::AuthState;
 use crate::market::MarketService;
-use crate::sde::{Sde, SdePaths};
+use crate::sde::open_from_dir;
 
 /// Everything a plugin's host functions are allowed to know about it: where its
 /// private storage lives. Shared (immutably) into each host-fn closure.
@@ -129,8 +129,9 @@ pub fn host_functions(granted: &HashSet<Permission>, ctx: Arc<BrokerCtx>) -> Vec
                     .trim()
                     .parse()
                     .map_err(|_| Error::msg(format!("sde_type_info: not a type id: {arg:?}")))?;
-                let sde = Sde::open(&SdePaths::new(sde_ctx.app_data_dir.clone()).db)
-                    .map_err(|e| Error::msg(e.to_string()))?;
+                // The shared helper reports errors as `String`; extism hosts
+                // speak `extism::Error`, so map at this boundary.
+                let sde = open_from_dir(&sde_ctx.app_data_dir).map_err(Error::msg)?;
                 let info = sde
                     .type_info(type_id)
                     .map_err(|e| Error::msg(e.to_string()))?;

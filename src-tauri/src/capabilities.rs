@@ -23,7 +23,7 @@ use crate::modules::fitting::{self, Fit, FitStats};
 use crate::modules::production;
 use crate::modules::reprocessing;
 use crate::plugins::manifest::Permission;
-use crate::sde::{graph, Sde, SdePaths};
+use crate::sde::{graph, open_from_dir, Sde};
 use crate::storage;
 
 const QUERY_MAX_LEN: usize = 200;
@@ -225,10 +225,6 @@ static REGISTRY: &[Capability] = &[
 
 // --- handlers ---------------------------------------------------------------
 
-fn open_sde(dir: &Path) -> Result<Sde, String> {
-    Sde::open(&SdePaths::new(dir.to_path_buf()).db).map_err(|e| e.to_string())
-}
-
 fn req_i64(args: &Value, key: &str) -> Result<i64, String> {
     args.get(key)
         .and_then(Value::as_i64)
@@ -249,7 +245,7 @@ fn cap_market_price(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
 
 fn cap_sde_type_info(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
     let type_id = req_i64(args, "typeId")?;
-    let sde = open_sde(ctx.app_data_dir)?;
+    let sde = open_from_dir(ctx.app_data_dir)?;
     let info = sde.type_info(type_id).map_err(|e| e.to_string())?;
     serde_json::to_value(info).map_err(|e| e.to_string())
 }
@@ -267,7 +263,7 @@ fn cap_sde_search(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
         .and_then(Value::as_i64)
         .unwrap_or(SEARCH_LIMIT_MAX)
         .clamp(1, SEARCH_LIMIT_MAX);
-    let sde = open_sde(ctx.app_data_dir)?;
+    let sde = open_from_dir(ctx.app_data_dir)?;
     let hits = sde.search_types(query, limit).map_err(|e| e.to_string())?;
     let results: Vec<Value> = hits
         .into_iter()
@@ -288,7 +284,7 @@ fn cap_appraise(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
         .get("regionId")
         .and_then(Value::as_i64)
         .unwrap_or_else(default_region_id);
-    let sde = open_sde(ctx.app_data_dir)?;
+    let sde = open_from_dir(ctx.app_data_dir)?;
 
     struct Line {
         name: String,
@@ -354,7 +350,7 @@ fn cap_route(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
         .get("to")
         .and_then(Value::as_str)
         .ok_or("route requires a \"to\" system name")?;
-    let sde = open_sde(ctx.app_data_dir)?;
+    let sde = open_from_dir(ctx.app_data_dir)?;
     let from = resolve_system(&sde, from_name)?;
     let to = resolve_system(&sde, to_name)?;
     let adj = sde.stargate_adjacency().map_err(|e| e.to_string())?;
@@ -420,7 +416,7 @@ fn cap_production_profit(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
         .and_then(Value::as_f64)
         .unwrap_or(0.0);
 
-    let sde = open_sde(ctx.app_data_dir)?;
+    let sde = open_from_dir(ctx.app_data_dir)?;
     let product = sde
         .blueprint_product(blueprint_type_id)
         .map_err(|e| e.to_string())?
@@ -453,7 +449,7 @@ fn cap_fitting_stats(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
         .get("eft")
         .and_then(Value::as_str)
         .ok_or("\"eft\" (string) is required")?;
-    let sde = open_sde(ctx.app_data_dir)?;
+    let sde = open_from_dir(ctx.app_data_dir)?;
     let fit: Fit = fitting::commands::import_eft_to_fit(&sde, eft_text)?;
     let stats: FitStats = fitting::simulate_fit(&sde, &fit, &|_skill_id| 5.0)?;
     serde_json::to_value(stats).map_err(|e| e.to_string())
@@ -471,7 +467,7 @@ fn cap_reprocessing_yield(ctx: &HostCtx, args: &Value) -> Result<Value, String> 
         |key: &str, default: f64| args.get(key).and_then(Value::as_f64).unwrap_or(default);
     let i64_arg = |key: &str| args.get(key).and_then(Value::as_i64).unwrap_or(0);
 
-    let sde = open_sde(ctx.app_data_dir)?;
+    let sde = open_from_dir(ctx.app_data_dir)?;
     let recipe = sde
         .reprocess_recipe(type_id)
         .map_err(|e| e.to_string())?
