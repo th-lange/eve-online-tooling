@@ -7,6 +7,7 @@ import { useCopyToClipboard } from "../../lib/useCopyToClipboard";
 import { useEveLogDir } from "../../lib/useEveLogDir";
 import { parseItems, parseLine } from "../../lib/parseItems";
 import {
+  errorMessage,
   shoppingAddItem,
   shoppingAddText,
   shoppingChatSync,
@@ -266,7 +267,7 @@ function ChatCapture({
           await onSync();
         }
       } catch (e) {
-        if (!cancelled) setStatus(String(e));
+        if (!cancelled) setStatus(errorMessage(e));
       }
     };
     void poll();
