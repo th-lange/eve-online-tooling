@@ -57,6 +57,21 @@ export function formatEveDateTime(iso: string | null | undefined): string {
   return new Date(t).toISOString().slice(0, 16).replace("T", " ");
 }
 
+/**
+ * Compact relative time from a millisecond epoch timestamp: "just now"
+ * (under a minute), then "Nm ago" / "Nh ago" / "Nd ago". Beyond ~30 days
+ * a bare UTC date (`YYYY-MM-DD`) is shown instead, since "97d ago" stops
+ * being a useful mental anchor. Future timestamps clamp to "just now".
+ */
+export function formatAgo(epochMs: number): string {
+  const s = Math.max(0, Math.floor((Date.now() - epochMs) / 1000));
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  if (s < 2_592_000) return `${Math.floor(s / 86400)}d ago`;
+  return new Date(epochMs).toISOString().slice(0, 10);
+}
+
 export type SortKey =
   | "productName"
   | "profit"

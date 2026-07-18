@@ -15,6 +15,12 @@ edition = "2021"
 name = "eve_tooling_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# Opt-in gate for the tauri-specta TS export test (bindings.rs): only
+# `npm run generate:bindings` turns it on, so a plain `cargo test` never
+# rewrites the committed src/lib/api/generated/orders.ts as a side effect.
+export-bindings = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

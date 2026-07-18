@@ -96,6 +96,19 @@ impl PluginRegistry {
         self.manifests.lock().iter().find(|m| m.id == id).cloned()
     }
 
+    /// Persist `set` as the activated-plugin ids under [`ACTIVE_KEY`], sorted
+    /// so the stored document is deterministic regardless of `HashSet`
+    /// iteration order. The one home of the "active set is persisted sorted"
+    /// invariant — every mutation of the active set funnels through here.
+    /// Callers decide what an `Err` means: `set_active`/`remove` propagate it,
+    /// `rescan` deliberately ignores it (a failed persist must not stop the
+    /// evicted-ids list from reaching the caller).
+    fn persist_active(&self, set: &HashSet<String>) -> Result<(), String> {
+        let mut ids: Vec<String> = set.iter().cloned().collect();
+        ids.sort();
+        storage::save_data(&self.app_data_dir, ACTIVE_KEY, &ids)
+    }
+
     /// Activate or deactivate plugin `id`, persisting the new set. Errors if
     /// the id isn't installed, or (when activating) if the plugin's declared
     /// `minAppVersion` is newer than the running app — activation is the
@@ -118,12 +131,7 @@ impl PluginRegistry {
         } else {
             set.remove(id);
         }
-        let ids: Vec<String> = {
-            let mut v: Vec<String> = set.iter().cloned().collect();
-            v.sort();
-            v
-        };
-        storage::save_data(&self.app_data_dir, ACTIVE_KEY, &ids)
+        self.persist_active(&set)
     }
 
     /// `(pluginId, tool)` for every MCP tool declared by a currently-active
@@ -156,12 +164,7 @@ impl PluginRegistry {
         for id in &removed {
             active.remove(id);
         }
-        let ids: Vec<String> = {
-            let mut v: Vec<String> = active.iter().cloned().collect();
-            v.sort();
-            v
-        };
-        let _ = storage::save_data(&self.app_data_dir, ACTIVE_KEY, &ids);
+        let _ = self.persist_active(&active);
         removed
     }
 
@@ -262,14 +265,11 @@ impl PluginRegistry {
             return Err(format!("unknown plugin {id:?}"));
         }
         self.manifests.lock().retain(|m| m.id != id);
-        self.active.lock().remove(id);
-        let ids: Vec<String> = {
-            let set = self.active.lock();
-            let mut v: Vec<String> = set.iter().cloned().collect();
-            v.sort();
-            v
-        };
-        storage::save_data(&self.app_data_dir, ACTIVE_KEY, &ids)?;
+        {
+            let mut set = self.active.lock();
+            set.remove(id);
+            self.persist_active(&set)?;
+        }
         let _ = std::fs::remove_dir_all(self.plugins_dir().join(id));
         Ok(())
     }

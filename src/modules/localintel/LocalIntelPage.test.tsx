@@ -1,7 +1,8 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import type { AppError, LocalPilot, LocalScanResult } from "../../lib/api";
 import { invokeMock, mockInvoke, renderWithQuery } from "../../test/harness";
+import { ModuleActiveContext } from "../../components/moduleActiveContext";
 
 import { LocalIntelPage } from "./LocalIntelPage";
 
@@ -61,5 +62,27 @@ describe("LocalIntelPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /scan local/i }));
 
     expect(await screen.findByText(/ESI unreachable/)).toBeInTheDocument();
+  });
+
+  it("polls the character location while the module is active", async () => {
+    mockInvoke({ route_location: () => [] });
+    renderWithQuery(<LocalIntelPage />);
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("route_location"),
+    );
+  });
+
+  it("does not poll the character location while the module is hidden", async () => {
+    mockInvoke({ route_location: () => [] });
+    renderWithQuery(
+      <ModuleActiveContext.Provider value={false}>
+        <LocalIntelPage />
+      </ModuleActiveContext.Provider>,
+    );
+
+    // Let any (wrongly) scheduled fetch flush before asserting.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(invokeMock).not.toHaveBeenCalledWith("route_location");
   });
 });

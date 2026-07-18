@@ -1,13 +1,5 @@
 import { useEffect, useState } from "react";
-
-/** Compact "X min/h/d ago" from a millisecond epoch timestamp. */
-function agoMs(ms: number): string {
-  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return `${Math.floor(s / 86400)}d ago`;
-}
+import { formatAgo } from "../lib/format";
 
 /** Older than this and the label ambers to flag possibly-stale data. */
 const STALE_MS = 10 * 60_000;
@@ -41,7 +33,7 @@ export function DataAge({
       className={`text-xs ${stale ? "text-amber-400" : "text-zinc-500"}`}
       title={new Date(updatedAt).toLocaleString()}
     >
-      Updated {agoMs(updatedAt)}
+      Updated {formatAgo(updatedAt)}
     </span>
   );
 }
