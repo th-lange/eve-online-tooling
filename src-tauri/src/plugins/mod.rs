@@ -55,7 +55,11 @@ impl PluginRegistry {
     /// the persisted set of activated ids (dropping any that no longer exist).
     /// A missing/empty plugins dir yields an empty registry (not an error).
     pub fn load(app_data_dir: &Path) -> Self {
-        let manifests = discover(&app_data_dir.join("plugins"));
+        let plugins_dir = app_data_dir.join("plugins");
+        // A crash mid-install leaves its staging dir behind; clean those up
+        // now, at boot, when no install can possibly be in flight.
+        sweep_staging(&plugins_dir);
+        let manifests = discover(&plugins_dir);
         let installed: HashSet<&str> = manifests.iter().map(|m| m.id.as_str()).collect();
         let active: HashSet<String> = storage::load_data::<Vec<String>>(app_data_dir, ACTIVE_KEY)
             .unwrap_or_default()
@@ -273,6 +277,12 @@ fn discover(plugins_dir: &Path) -> Vec<Manifest> {
         let Some(dir_id) = dir.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
+        // Dot-prefixed dirs are never plugins (a manifest id can't start with
+        // a dot) — they're install staging dirs or hidden folders. Skip them
+        // silently instead of logging a "skipping" error every boot.
+        if dir_id.starts_with('.') {
+            continue;
+        }
         let Ok(raw) = std::fs::read_to_string(dir.join("plugin.json")) else {
             continue; // no manifest -> not a plugin
         };
@@ -353,13 +363,63 @@ fn copy_dir_all(source: &Path, dest: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Remove crash-orphaned install staging dirs (`.installing-*` /
+/// `.replacing-*`) under `plugins_dir`. A crash mid-install leaves its
+/// staging dir behind forever otherwise — and a flat-zip staging dir even
+/// contains a `plugin.json`, which `discover` used to trip over on every
+/// boot. Only call this when no install is in flight (i.e. at startup):
+/// sweeping while an install runs would delete its live staging dir.
+fn sweep_staging(plugins_dir: &Path) {
+    let Ok(read) = std::fs::read_dir(plugins_dir) else {
+        return; // dir absent/unreadable -> nothing to sweep
+    };
+    for dirent in read.flatten() {
+        let name = dirent.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with(".installing-") || name.starts_with(".replacing-") {
+            let _ = std::fs::remove_dir_all(dirent.path());
+        }
+    }
+}
+
+/// Ceiling on the *total decompressed* size of a plugin archive. Generous —
+/// real plugin zips (a wasm module plus some UI assets) are a few MiB — but
+/// it keeps a hostile zip bomb from filling the disk at install time, before
+/// any trust decision has been made ("installed" is supposed to be inert).
+const MAX_ZIP_TOTAL_BYTES: u64 = 256 * 1024 * 1024; // 256 MiB
+/// Ceiling on the number of entries in a plugin archive — a plugin ships a
+/// handful of files, not tens of thousands.
+const MAX_ZIP_ENTRIES: usize = 4_096;
+
 /// Extract every entry of the zip at `zip_path` under `dest`, rejecting any
 /// entry whose path would escape `dest` (a malicious or malformed zip
-/// otherwise writing outside the staging dir — "zip slip").
+/// otherwise writing outside the staging dir — "zip slip"), any archive with
+/// more than [`MAX_ZIP_ENTRIES`] entries, and any archive that decompresses
+/// past [`MAX_ZIP_TOTAL_BYTES`].
 fn extract_zip(zip_path: &Path, dest: &Path) -> Result<(), String> {
+    extract_zip_with_limits(zip_path, dest, MAX_ZIP_ENTRIES, MAX_ZIP_TOTAL_BYTES)
+}
+
+/// [`extract_zip`] with the entry-count and total-byte ceilings injectable,
+/// so tests can exercise the limits without multi-hundred-MiB fixtures.
+fn extract_zip_with_limits(
+    zip_path: &Path,
+    dest: &Path,
+    max_entries: usize,
+    max_total_bytes: u64,
+) -> Result<(), String> {
     let file = std::fs::File::open(zip_path).map_err(|e| e.to_string())?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+    if archive.len() > max_entries {
+        return Err(format!(
+            "zip has {} entries; a plugin archive may have at most {max_entries}",
+            archive.len()
+        ));
+    }
     std::fs::create_dir_all(dest).map_err(|e| e.to_string())?;
+    // Bytes of decompressed output still allowed. Decremented as entries are
+    // written, so the cap holds across the whole archive, not per entry.
+    let mut budget = max_total_bytes;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
         let Some(name) = entry.enclosed_name() else {
@@ -370,11 +430,31 @@ fn extract_zip(zip_path: &Path, dest: &Path) -> Result<(), String> {
             std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
             continue;
         }
+        // Cheap upfront reject on the *declared* size — but headers can lie,
+        // so the metered copy below is what actually enforces the cap.
+        if entry.size() > budget {
+            return Err(format!(
+                "zip decompresses past the {max_total_bytes}-byte plugin size limit"
+            ));
+        }
         if let Some(parent) = out.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         let mut out_file = std::fs::File::create(&out).map_err(|e| e.to_string())?;
-        std::io::copy(&mut entry, &mut out_file).map_err(|e| e.to_string())?;
+        // Read at most budget+1 bytes: writing budget+1 proves the entry's
+        // real size exceeds the remaining allowance regardless of what its
+        // header declared, without decompressing unboundedly first.
+        let written = std::io::copy(
+            &mut std::io::Read::take(&mut entry, budget + 1),
+            &mut out_file,
+        )
+        .map_err(|e| e.to_string())?;
+        if written > budget {
+            return Err(format!(
+                "zip decompresses past the {max_total_bytes}-byte plugin size limit"
+            ));
+        }
+        budget -= written;
     }
     Ok(())
 }
@@ -407,14 +487,26 @@ fn install_and_evict(
 /// Install a plugin dropped onto the Plugins page: `path` is an absolute
 /// path to either a plugin folder (containing `plugin.json`) or a `.zip` of
 /// one. Returns the fresh installed list on success.
+///
+/// Async, with the work on a blocking thread: extraction + recursive copy +
+/// `remove_dir_all` are heavy filesystem operations, and running them inline
+/// (in a sync command) would freeze the whole UI for the duration of a large
+/// archive.
 #[tauri::command]
-pub fn plugins_install(
+pub async fn plugins_install(
     registry: State<'_, std::sync::Arc<PluginRegistry>>,
     manager: State<'_, std::sync::Arc<PluginManager>>,
     path: String,
 ) -> Result<Vec<PluginEntry>, AppError> {
-    install_and_evict(&registry, &manager, Path::new(&path)).map_err(AppError::from)?;
-    Ok(registry.list())
+    let registry = registry.inner().clone();
+    let manager = manager.inner().clone();
+    tokio::task::spawn_blocking(move || -> Result<Vec<PluginEntry>, String> {
+        install_and_evict(&registry, &manager, Path::new(&path))?;
+        Ok(registry.list())
+    })
+    .await
+    .map_err(|e| AppError::from(e.to_string()))?
+    .map_err(AppError::from)
 }
 
 #[cfg(test)]
@@ -760,6 +852,69 @@ mod tests {
             .unwrap()
             .flatten()
             .all(|e| !e.file_name().to_string_lossy().starts_with(".installing-")));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn extract_zip_rejects_an_archive_over_the_byte_cap() {
+        let root = tmp("zip-byte-cap");
+        std::fs::create_dir_all(&root).unwrap();
+        let zip_path = root.join("big.zip");
+        // Two 40-byte entries against a 64-byte cap: the first fits, the
+        // second pushes the *total* over — proving the cap spans the whole
+        // archive rather than resetting per entry.
+        let chunk = "x".repeat(40);
+        write_zip(&zip_path, &[("a.txt", &chunk), ("b.txt", &chunk)]);
+        let err = extract_zip_with_limits(&zip_path, &root.join("out"), 100, 64).unwrap_err();
+        assert!(err.contains("size limit"), "unexpected error: {err}");
+        // A cap that fits both entries succeeds.
+        let _ = std::fs::remove_dir_all(root.join("out"));
+        extract_zip_with_limits(&zip_path, &root.join("out"), 100, 80).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn extract_zip_rejects_an_archive_over_the_entry_cap() {
+        let root = tmp("zip-entry-cap");
+        std::fs::create_dir_all(&root).unwrap();
+        let zip_path = root.join("many.zip");
+        write_zip(&zip_path, &[("a.txt", "a"), ("b.txt", "b"), ("c.txt", "c")]);
+        let err = extract_zip_with_limits(&zip_path, &root.join("out"), 2, 1024).unwrap_err();
+        assert!(err.contains("entries"), "unexpected error: {err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn load_sweeps_orphaned_staging_dirs_and_discover_skips_dot_dirs() {
+        let root = tmp("sweep");
+        write_plugin(&root, "acme", &manifest_json("acme"));
+        // Simulate installs that crashed mid-flight in *other* processes:
+        // their staging dirs (which even contain a plugin.json, in the
+        // flat-zip shape) survive under plugins/.
+        for stale in [".installing-99999", ".replacing-acme-99999"] {
+            let dir = root.join("plugins").join(stale);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("plugin.json"), manifest_json("acme")).unwrap();
+        }
+        let reg = PluginRegistry::load(&root);
+        // The orphans are gone from disk...
+        assert!(!root.join("plugins/.installing-99999").exists());
+        assert!(!root.join("plugins/.replacing-acme-99999").exists());
+        // ...and only the real plugin was discovered.
+        let ids: Vec<_> = reg.list().iter().map(|e| e.manifest.id.clone()).collect();
+        assert_eq!(ids, vec!["acme".to_string()]);
+        // A dot-dir that appears at runtime (e.g. an in-flight staging dir)
+        // is silently ignored by discovery, not swept and not listed.
+        let live = root.join("plugins").join(".installing-live");
+        std::fs::create_dir_all(&live).unwrap();
+        std::fs::write(live.join("plugin.json"), manifest_json("acme")).unwrap();
+        reg.rescan();
+        assert!(
+            live.exists(),
+            "rescan must not sweep an in-flight staging dir"
+        );
+        let ids: Vec<_> = reg.list().iter().map(|e| e.manifest.id.clone()).collect();
+        assert_eq!(ids, vec!["acme".to_string()]);
         let _ = std::fs::remove_dir_all(&root);
     }
 
