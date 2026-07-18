@@ -59,15 +59,21 @@ jobs:
         with:
           workspaces: "./src-tauri -> target"
 
-      # `npm run build` is `npm run generate:bindings && tsc && vite build` —
-      # this is also the type-check gate.
+      # Regenerate the tauri-specta bindings, then fail if the committed file
+      # drifted from what the export produces for the current Rust source —
+      # i.e. someone changed `OrderRow`/`orders_list` and forgot to re-run
+      # `npm run generate:bindings` before committing. This runs here (Linux)
+      # and NOT inside `npm run build`, so release builds — including the
+      # Windows runner, where the cargo test binary crashes under
+      # tauri-action (STATUS_ENTRYPOINT_NOT_FOUND) — just consume the
+      # committed, CI-verified file.
+      - name: Regenerate bindings
+        run: npm run generate:bindings
+
+      # Type-check gate (`tsc && vite build`).
       - name: Type-check + build
         run: npm run build
 
-      # Fails the build if the committed bindings drifted from what the pilot's
-      # tauri-specta export actually produces for the current Rust source —
-      # i.e. someone changed `OrderRow`/`orders_list` and forgot to re-run
-      # `npm run generate:bindings` before committing.
       - name: Check generated bindings are committed
         run: git diff --exit-code -- src/lib/api/generated
 

@@ -1,13 +1,13 @@
 {
   "name": "eve-online-tooling",
   "private": true,
-  "version": "0.45.0",
+  "version": "0.45.1",
   "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "generate:bindings": "cargo test --manifest-path src-tauri/Cargo.toml --features export-bindings export_orders_bindings --quiet && prettier --write src/lib/api/generated/orders.ts",
-    "build": "npm run generate:bindings && tsc && vite build",
+    "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
