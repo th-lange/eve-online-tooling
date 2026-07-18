@@ -9,6 +9,7 @@ import {
   type SlotKind,
 } from "../../lib/api";
 import { sdeKeys } from "../../lib/queryKeys";
+import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import {
   SLOT_BADGE,
   fitReason,
@@ -51,9 +52,14 @@ export function ModuleBrowser({
     }
   }, [slotFilter]);
 
+  // Debounce the typed query before it reaches the search invoke (same
+  // pattern as Combo) — one sdeSearch per pause instead of per keystroke.
+  // The dependent fittingModuleInfo batch below keys off these results, so
+  // the per-module dogma/slot work is debounced along with it.
+  const debouncedQ = useDebouncedValue(q, 200);
   const results = useQuery({
-    ...sdeKeys.search(q),
-    enabled: q.trim().length >= 2,
+    ...sdeKeys.search(debouncedQ),
+    enabled: debouncedQ.trim().length >= 2,
   });
   const matches = (results.data ?? []).slice(0, 40);
   // Slot + fitting cost of each result, to badge the slot and rank by what fits.

@@ -6,6 +6,7 @@ import { modules } from "../modules/registry";
 import { usePluginModules } from "../modules/plugins/pluginModules";
 import { sdeKeys } from "../lib/queryKeys";
 import { openItemInMarketSearch } from "../lib/deepLink";
+import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { fuzzy } from "../lib/fuzzy";
 
 // A flat row in the result list — either a module jump or an item lookup.
@@ -68,11 +69,14 @@ export function CommandPalette() {
     [q, pluginModules],
   );
 
-  // Item lookup only kicks in once it looks like a real query.
+  // Item lookup only kicks in once it looks like a real query. The typed
+  // text is debounced before it reaches the search invoke (same pattern as
+  // Combo), so fast typing fires one sdeSearch per pause, not per keystroke.
   const trimmed = q.trim();
+  const debouncedQ = useDebouncedValue(trimmed, 200);
   const itemQuery = useQuery({
-    ...sdeKeys.search(trimmed),
-    enabled: open && trimmed.length >= 2,
+    ...sdeKeys.search(debouncedQ),
+    enabled: open && debouncedQ.length >= 2,
   });
   const itemEntries: Entry[] = useMemo(
     () =>
