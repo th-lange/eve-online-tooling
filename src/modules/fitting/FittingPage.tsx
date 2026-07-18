@@ -117,7 +117,9 @@ function Workbench() {
             value={
               fit ? { id: fit.shipTypeId, name: nameOf(fit.shipTypeId) } : null
             }
-            onPick={(v) => (v ? editor.pickShip(v.id, v.name) : editor.setFit(null))}
+            onPick={(v) =>
+              v ? editor.pickShip(v.id, v.name) : editor.setFit(null)
+            }
             search={sdeSearchShips}
             label="Ship (hull)"
             placeholder="search a hull…"
@@ -177,7 +179,10 @@ function Workbench() {
                   </optgroup>
                 ))}
               </select>
-              <EsiFitStatus esi={library.esiFits} refresh={library.refreshEsi} />
+              <EsiFitStatus
+                esi={library.esiFits}
+                refresh={library.refreshEsi}
+              />
             </label>
             <button
               onClick={() => library.refreshEsi.mutate()}
@@ -199,7 +204,9 @@ function Workbench() {
           />
           <button
             onClick={() => editor.importEft.mutate()}
-            disabled={editor.eft.trim().length === 0 || editor.importEft.isPending}
+            disabled={
+              editor.eft.trim().length === 0 || editor.importEft.isPending
+            }
             className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
           >
             {editor.importEft.isPending ? "Importing…" : "Import EFT"}

@@ -10,7 +10,7 @@ use tauri::AppHandle;
 
 use crate::storage;
 
-use super::store::{self, Connection, ConnectionView, ConnSource, JumpMass, MassStatus, Scope};
+use super::store::{self, ConnSource, Connection, ConnectionView, JumpMass, MassStatus, Scope};
 use super::tripwire;
 
 /// What the frontend sends to create a connection.
@@ -863,7 +863,9 @@ mod tests {
         let merged = merge_by_source(existing, imported, ConnSource::Evescout);
         // Manual kept, stale import gone, one fresh import added with a new id.
         assert_eq!(merged.len(), 2);
-        assert!(merged.iter().any(|c| c.id == 1 && c.source == ConnSource::Manual));
+        assert!(merged
+            .iter()
+            .any(|c| c.id == 1 && c.source == ConnSource::Manual));
         let imp: Vec<&Connection> = merged
             .iter()
             .filter(|c| c.source == ConnSource::Evescout)
@@ -897,7 +899,12 @@ mod tests {
     #[test]
     fn mass_budget_verdicts() {
         // C2 static N766: 300 Mkg jump, 2 Bkg total. A 13 Mkg cruiser passes.
-        let cruiser = mass_budget(13_000_000.0, 300_000_000.0, 2_000_000_000.0, MassStatus::Fresh);
+        let cruiser = mass_budget(
+            13_000_000.0,
+            300_000_000.0,
+            2_000_000_000.0,
+            MassStatus::Fresh,
+        );
         assert!(cruiser.passes);
         // 2 Bkg / 13 Mkg ≈ 153 full crossings.
         assert_eq!(cruiser.remaining_crossings, 153);
@@ -906,18 +913,31 @@ mod tests {
         assert!(!cruiser.crit_risk);
 
         // A 1.3 Bkg freighter exceeds the 300 Mkg jump limit → blocked.
-        let freighter =
-            mass_budget(1_300_000_000.0, 300_000_000.0, 2_000_000_000.0, MassStatus::Fresh);
+        let freighter = mass_budget(
+            1_300_000_000.0,
+            300_000_000.0,
+            2_000_000_000.0,
+            MassStatus::Fresh,
+        );
         assert!(!freighter.passes);
         assert_eq!(freighter.remaining_crossings, 0);
 
         // Reduced hole (~50% left) roughly halves the crossings.
-        let reduced =
-            mass_budget(13_000_000.0, 300_000_000.0, 2_000_000_000.0, MassStatus::Reduced);
+        let reduced = mass_budget(
+            13_000_000.0,
+            300_000_000.0,
+            2_000_000_000.0,
+            MassStatus::Reduced,
+        );
         assert_eq!(reduced.remaining_crossings, 76);
 
         // Critical hole: one more big-but-legal jump tips it over.
-        let crit = mass_budget(150_000_000.0, 300_000_000.0, 2_000_000_000.0, MassStatus::Critical);
+        let crit = mass_budget(
+            150_000_000.0,
+            300_000_000.0,
+            2_000_000_000.0,
+            MassStatus::Critical,
+        );
         assert!(crit.passes);
         assert!(crit.crit_risk);
     }

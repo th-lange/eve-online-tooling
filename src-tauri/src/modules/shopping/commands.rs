@@ -374,7 +374,10 @@ pub fn shopping_set_quantities(
 ) -> Result<(), String> {
     let (dir, _sde) = crate::sde::dir_and_sde(&app)?;
     let mut store = load(&dir);
-    let pairs: Vec<(i64, i64)> = updates.into_iter().map(|u| (u.type_id, u.quantity)).collect();
+    let pairs: Vec<(i64, i64)> = updates
+        .into_iter()
+        .map(|u| (u.type_id, u.quantity))
+        .collect();
     list_mut(&mut store, &id)?.set_quantities(&pairs);
     save(&dir, &store)
 }

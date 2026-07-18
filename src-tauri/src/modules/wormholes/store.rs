@@ -255,18 +255,45 @@ mod tests {
     #[test]
     fn vocabularies_round_trip_to_the_existing_lowercase_wire_strings() {
         // The wire format must stay byte-identical to the pre-enum strings.
-        assert_eq!(serde_json::to_string(&Scope::Wormhole).unwrap(), "\"wormhole\"");
-        assert_eq!(serde_json::to_string(&Scope::Stargate).unwrap(), "\"stargate\"");
-        assert_eq!(serde_json::to_string(&Scope::Jumpbridge).unwrap(), "\"jumpbridge\"");
-        assert_eq!(serde_json::to_string(&MassStatus::Fresh).unwrap(), "\"fresh\"");
-        assert_eq!(serde_json::to_string(&MassStatus::Reduced).unwrap(), "\"reduced\"");
-        assert_eq!(serde_json::to_string(&MassStatus::Critical).unwrap(), "\"critical\"");
+        assert_eq!(
+            serde_json::to_string(&Scope::Wormhole).unwrap(),
+            "\"wormhole\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Scope::Stargate).unwrap(),
+            "\"stargate\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Scope::Jumpbridge).unwrap(),
+            "\"jumpbridge\""
+        );
+        assert_eq!(
+            serde_json::to_string(&MassStatus::Fresh).unwrap(),
+            "\"fresh\""
+        );
+        assert_eq!(
+            serde_json::to_string(&MassStatus::Reduced).unwrap(),
+            "\"reduced\""
+        );
+        assert_eq!(
+            serde_json::to_string(&MassStatus::Critical).unwrap(),
+            "\"critical\""
+        );
         assert_eq!(serde_json::to_string(&JumpMass::S).unwrap(), "\"s\"");
         assert_eq!(serde_json::to_string(&JumpMass::M).unwrap(), "\"m\"");
         assert_eq!(serde_json::to_string(&JumpMass::L).unwrap(), "\"l\"");
         assert_eq!(serde_json::to_string(&JumpMass::Xl).unwrap(), "\"xl\"");
-        assert_eq!(serde_json::to_string(&ConnSource::Manual).unwrap(), "\"manual\"");
-        assert_eq!(serde_json::to_string(&ConnSource::Evescout).unwrap(), "\"evescout\"");
-        assert_eq!(serde_json::to_string(&ConnSource::Tripwire).unwrap(), "\"tripwire\"");
+        assert_eq!(
+            serde_json::to_string(&ConnSource::Manual).unwrap(),
+            "\"manual\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ConnSource::Evescout).unwrap(),
+            "\"evescout\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ConnSource::Tripwire).unwrap(),
+            "\"tripwire\""
+        );
     }
 }

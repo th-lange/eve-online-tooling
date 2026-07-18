@@ -528,8 +528,7 @@ mod tests {
         let registry = PluginRegistry::load(&root);
         registry.set_active("acme", true).unwrap();
         let manager = PluginManager::new();
-        let err = run_plugin(&registry, &manager, &root, "acme", "echo", &Value::Null)
-            .unwrap_err();
+        let err = run_plugin(&registry, &manager, &root, "acme", "echo", &Value::Null).unwrap_err();
         assert!(
             err.contains("must be relative to its dir"),
             "unexpected error: {err}"

@@ -136,12 +136,14 @@ export function LocalIntelPage() {
       const ids = res.pilots.map((p) => p.characterId);
       if (ids.length > 0) zkillRun.mutate(ids);
 
-      const { newIds: fresh, notice, alarm } = classifyArrivals(
-        prevIdsRef.current,
-        res.pilots,
-        watchIds,
-        { alertAnyRed, alertNeutrals },
-      );
+      const {
+        newIds: fresh,
+        notice,
+        alarm,
+      } = classifyArrivals(prevIdsRef.current, res.pilots, watchIds, {
+        alertAnyRed,
+        alertNeutrals,
+      });
       setNewIds(fresh);
 
       if (notice) {

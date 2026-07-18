@@ -29,7 +29,6 @@ function efficiency(destroyed: number, lost: number): number {
   return total > 0 ? Math.round((destroyed / total) * 100) : 0;
 }
 
-
 const SLOT_ORDER = ["high", "mid", "low", "rig", "subsystem", "drone"] as const;
 const SLOT_LABEL: Record<string, string> = {
   high: "High",

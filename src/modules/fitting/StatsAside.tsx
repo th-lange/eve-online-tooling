@@ -113,7 +113,11 @@ export function StatsAside({
         )}
 
         {stats.data?.projectedEw && stats.data.projectedEw.length > 0 && (
-          <EwPanel tags={stats.data.projectedEw} jammed={jammed} onJam={onJam} />
+          <EwPanel
+            tags={stats.data.projectedEw}
+            jammed={jammed}
+            onJam={onJam}
+          />
         )}
 
         {stats.data?.tank && (

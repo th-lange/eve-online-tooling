@@ -170,7 +170,13 @@ pub fn rank_and_cap(
 /// comparison: how much of the sell hub's daily volume is worth buying over
 /// the purchase window (net of owned stock), the profit at that quantity, and
 /// how contested the sell-hub order book is relative to daily turnover.
-pub fn enrich(row: &mut DayTradeRow, dest_volume: i64, purchase_days: f64, owned: i64, listed: i64) {
+pub fn enrich(
+    row: &mut DayTradeRow,
+    dest_volume: i64,
+    purchase_days: f64,
+    owned: i64,
+    listed: i64,
+) {
     row.dest_volume = dest_volume;
     let demand = (dest_volume as f64 * purchase_days).round() as i64;
     row.suggested_qty = net_suggested_qty(demand, owned);
@@ -332,7 +338,10 @@ mod tests {
     #[test]
     fn enrich_zero_dest_volume_gives_zero_days_of_supply() {
         let mut r = row(1, 10.0, 5.0);
-        enrich(&mut r, /* dest_volume */ 0, /* purchase_days */ 2.0, /* owned */ 0, /* listed */ 500);
+        enrich(
+            &mut r, /* dest_volume */ 0, /* purchase_days */ 2.0, /* owned */ 0,
+            /* listed */ 500,
+        );
         assert_eq!(r.days_of_supply, 0.0);
         assert_eq!(r.suggested_qty, 0);
         assert_eq!(r.total_profit, 0.0);
@@ -341,7 +350,10 @@ mod tests {
     #[test]
     fn enrich_computes_suggested_qty_and_total_profit() {
         let mut r = row(1, 10.0, 5.0);
-        enrich(&mut r, /* dest_volume */ 100, /* purchase_days */ 2.0, /* owned */ 50, /* listed */ 300);
+        enrich(
+            &mut r, /* dest_volume */ 100, /* purchase_days */ 2.0, /* owned */ 50,
+            /* listed */ 300,
+        );
         // demand = round(100 * 2.0) = 200; net of 50 owned -> 150.
         assert_eq!(r.suggested_qty, 150);
         assert!((r.total_profit - 1500.0).abs() < 1e-9);
@@ -356,7 +368,10 @@ mod tests {
         b.dest_volume = 50;
         let rows = vec![a.clone(), b.clone()];
         let result = retain_min_demand(rows.clone(), 10);
-        assert_eq!(result.iter().map(|r| r.type_id).collect::<Vec<_>>(), vec![2]);
+        assert_eq!(
+            result.iter().map(|r| r.type_id).collect::<Vec<_>>(),
+            vec![2]
+        );
         let unfiltered = retain_min_demand(rows, 0);
         assert_eq!(unfiltered.len(), 2);
     }

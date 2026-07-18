@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { LocalPilot } from "../../lib/api";
 import { classifyArrivals } from "./classifyArrivals";
 
-function pilot(overrides: Partial<LocalPilot> & { characterId: number }): LocalPilot {
+function pilot(
+  overrides: Partial<LocalPilot> & { characterId: number },
+): LocalPilot {
   return {
     name: `Pilot ${overrides.characterId}`,
     corporationId: 98_000_001,
@@ -46,7 +48,12 @@ describe("classifyArrivals", () => {
     expect(() =>
       classifyArrivals(new Set(), [p], new Set([999]), OPTS_DEFAULT),
     ).not.toThrow();
-    const result = classifyArrivals(new Set(), [p], new Set([999]), OPTS_DEFAULT);
+    const result = classifyArrivals(
+      new Set(),
+      [p],
+      new Set([999]),
+      OPTS_DEFAULT,
+    );
     expect(result.notice).toBeNull();
     expect(result.alarm).toBe(false);
   });
@@ -99,7 +106,12 @@ describe("classifyArrivals", () => {
       allianceId: 42,
       threat: "blue",
     });
-    const result = classifyArrivals(new Set(), [p], new Set([42]), OPTS_DEFAULT);
+    const result = classifyArrivals(
+      new Set(),
+      [p],
+      new Set([42]),
+      OPTS_DEFAULT,
+    );
     expect(result.notice).toEqual({ kind: "watchlist", pilots: [p] });
   });
 });
