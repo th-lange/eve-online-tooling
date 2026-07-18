@@ -8,7 +8,7 @@ import {
   type OfferRow,
 } from "../../lib/api";
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
-import { formatInt, formatIsk, sortRows } from "../../lib/format";
+import { formatAgo, formatInt, formatIsk, sortRows } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import {
   SortHeaderCell,
@@ -104,7 +104,7 @@ function Workbench() {
           <>
             {fetchedAt != null && (
               <span className="text-xs text-zinc-500">
-                Offers pulled {ago(fetchedAt)}
+                Offers pulled {formatAgo(fetchedAt * 1000)}
               </span>
             )}
             <div className="flex items-center gap-2">
@@ -254,13 +254,4 @@ function OfferTable({ rows }: { rows: OfferRow[] }) {
       </div>
     </>
   );
-}
-
-/** Compact "X min/h/d ago" from a Unix-seconds timestamp. */
-function ago(epochSecs: number): string {
-  const s = Math.max(0, Math.floor(Date.now() / 1000 - epochSecs));
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return `${Math.floor(s / 86400)}d ago`;
 }

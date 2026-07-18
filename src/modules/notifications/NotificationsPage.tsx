@@ -8,6 +8,7 @@ import {
   type NotifRow,
 } from "../../lib/api";
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
+import { formatAgo } from "../../lib/format";
 import { Page, PageHeader } from "../../components/page";
 
 const CATEGORY_STYLE: Record<string, string> = {
@@ -188,15 +189,14 @@ function NotificationCard({
   );
 }
 
-/** Compact relative time from an ISO-8601 timestamp. */
+/**
+ * Compact relative time from an ISO-8601 timestamp. Converts to epoch ms
+ * and delegates to the shared `formatAgo`; empty input renders as "—" and
+ * an unparseable timestamp falls back to the raw string.
+ */
 function fmtTime(iso: string): string {
   if (!iso) return "—";
   const then = Date.parse(iso);
   if (Number.isNaN(then)) return iso;
-  const s = Math.max(0, Math.floor((Date.now() - then) / 1000));
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  if (s < 2592000) return `${Math.floor(s / 86400)}d ago`;
-  return new Date(then).toISOString().slice(0, 10);
+  return formatAgo(then);
 }
