@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { whRoute, type RouteResult, type SystemMatch } from "../../lib/api";
+import { SEC_TEXT_CLASS, secBand } from "../../lib/security";
 import { Field } from "../../components/forms";
 import { SystemPicker } from "./shared";
 
@@ -77,7 +78,7 @@ export function Routing() {
                     <span className="text-purple-300">{h.name}</span>
                   ) : (
                     <>
-                      <span className={massColorSec(h.security)}>
+                      <span className={SEC_TEXT_CLASS[secBand(h.security)]}>
                         {h.security.toFixed(1)}
                       </span>{" "}
                       <span className="text-zinc-200">{h.name}</span>
@@ -91,10 +92,4 @@ export function Routing() {
       )}
     </div>
   );
-}
-
-function massColorSec(sec: number): string {
-  if (sec >= 0.5) return "text-emerald-400";
-  if (sec > 0.0) return "text-amber-400";
-  return "text-rose-400";
 }

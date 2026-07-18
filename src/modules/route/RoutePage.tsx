@@ -30,6 +30,7 @@ import {
   type SystemGraphNode,
 } from "../../components/SystemGraph";
 import { kindFromSecurity } from "../../components/systemGraphLayout";
+import { SEC_TEXT_CLASS, secBand } from "../../lib/security";
 import { ZkillSystemLink } from "../../components/ZkillLink";
 import {
   Page,
@@ -520,7 +521,7 @@ function SystemHop({
         <span className="text-purple-300">{entry.name}</span>
       ) : (
         <>
-          <span className={secColor(entry.security)}>
+          <span className={SEC_TEXT_CLASS[secBand(entry.security)]}>
             {entry.security.toFixed(1)}
           </span>{" "}
           <span className="text-zinc-200">{entry.name}</span>
@@ -628,7 +629,7 @@ function ActivityTable({ rows }: { rows: SystemActivity[] }) {
               <td className="px-3 py-1.5 text-zinc-200">{r.name}</td>
               <td className="px-3 py-1.5 text-zinc-400">{r.region}</td>
               <td
-                className={`px-3 py-1.5 text-right tabular-nums ${secColor(r.security)}`}
+                className={`px-3 py-1.5 text-right tabular-nums ${SEC_TEXT_CLASS[secBand(r.security)]}`}
               >
                 {r.security.toFixed(1)}
               </td>
@@ -668,11 +669,4 @@ function ActivityTable({ rows }: { rows: SystemActivity[] }) {
       </table>
     </div>
   );
-}
-
-/** Color the security number by band: hi-sec green, low-sec amber, null/neg red. */
-function secColor(sec: number): string {
-  if (sec >= 0.5) return "text-emerald-400";
-  if (sec > 0.0) return "text-amber-400";
-  return "text-rose-400";
 }

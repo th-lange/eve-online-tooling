@@ -15,8 +15,8 @@ import {
   systemsByClade,
   systemsByRole,
 } from "./data";
+import { SEC_HEX, secBand } from "../../lib/security";
 import {
-  BAND_HEX,
   CLADE_HEX,
   CLADE_KRAI,
   ROLE_HEX,
@@ -253,7 +253,7 @@ export function PochvenSystemsPopover() {
                                   .map(([b, n]) => (
                                     <span
                                       key={b}
-                                      style={{ color: BAND_HEX[b] }}
+                                      style={{ color: SEC_HEX[b] }}
                                     >
                                       {n} {b.replace("sec", "")}
                                     </span>
@@ -350,13 +350,7 @@ export function PochvenSystemsPopover() {
                                           <span
                                             style={{
                                               color:
-                                                BAND_HEX[
-                                                  e.security >= 0.45
-                                                    ? "hisec"
-                                                    : e.security > 0
-                                                      ? "lowsec"
-                                                      : "nullsec"
-                                                ],
+                                                SEC_HEX[secBand(e.security)],
                                             }}
                                           >
                                             {e.name}

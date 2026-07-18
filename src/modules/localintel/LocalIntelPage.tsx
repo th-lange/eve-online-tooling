@@ -21,6 +21,7 @@ import {
   type ZkillStats,
 } from "../../lib/api";
 import { formatInt } from "../../lib/format";
+import { SEC_TEXT_CLASS, secBand } from "../../lib/security";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { usePersistentState } from "../../lib/usePersistentState";
 import { useEveLogDir } from "../../lib/useEveLogDir";
@@ -467,13 +468,6 @@ function HostileCorpsPanel({
   );
 }
 
-/** Security-status colour: hisec green, lowsec amber, null/WH red. */
-function secColor(s: number): string {
-  if (s >= 0.45) return "text-emerald-400";
-  if (s > 0.0) return "text-amber-400";
-  return "text-rose-400";
-}
-
 /**
  * Right-rail panel: recent ship/pod kills (CCP hourly, k-space) in systems
  * within N jumps of the active character's current location — "what's happening
@@ -564,7 +558,7 @@ function NeighbourhoodPanel({
               {here.name}
               <ExternalLink size={10} className="opacity-60" />
             </a>{" "}
-            <span className={`tabular-nums ${secColor(here.security)}`}>
+            <span className={`tabular-nums ${SEC_TEXT_CLASS[secBand(here.security)]}`}>
               {here.security.toFixed(1)}
             </span>
           </div>
@@ -583,7 +577,7 @@ function NeighbourhoodPanel({
                     className="min-w-0 truncate text-zinc-300"
                     title={`${n.name} · ${n.region}`}
                   >
-                    <span className={secColor(n.security)}>•</span>{" "}
+                    <span className={SEC_TEXT_CLASS[secBand(n.security)]}>•</span>{" "}
                     <a
                       href={`https://zkillboard.com/system/${n.systemId}/`}
                       target="_blank"

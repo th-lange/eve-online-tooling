@@ -2,16 +2,17 @@
 // react-refresh can hot-reload it cleanly (and so these stay unit-testable).
 
 import type { NodeKind, SystemGraphEdge, SystemGraphNode } from "./SystemGraph";
+import { secBand } from "../lib/security";
 
 /** Tree-layout cell size (px): column width / row height per BFS layer. */
 export const COL = 190;
 export const ROW = 74;
 
-/** Map a raw SDE security value to a node kind (w-space handled by caller). */
+/** Map a raw SDE security value to a node kind (w-space handled by caller).
+ *  Delegates to the shared `secBand` so graph nodes agree with every other
+ *  surface on the round-first hisec boundary. */
 export function kindFromSecurity(security: number): NodeKind {
-  if (security >= 0.5) return "hisec";
-  if (security > 0.0) return "lowsec";
-  return "nullsec";
+  return secBand(security);
 }
 
 /**
