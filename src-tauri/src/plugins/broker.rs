@@ -195,6 +195,16 @@ pub fn host_functions(granted: &HashSet<Permission>, ctx: Arc<BrokerCtx>) -> Vec
     // `host_call(name, argsJson) -> resultJson` — the generic gateway to the
     // capability registry. Always linked; each call is gated at runtime against
     // the plugin's grants (a generic dispatcher can't be gated at load time).
+    //
+    // Threading: Extism host functions are synchronous by contract, and some
+    // capability handlers `block_on` real network I/O (ESI/Fuzzwork). That is
+    // only acceptable because every path into plugin wasm keeps this closure
+    // off async runtime workers and off the main thread: the `plugin_invoke`
+    // command wraps the call in `tokio::task::spawn_blocking` (see
+    // `manager::plugin_invoke`), and the MCP bridge runs on its own dedicated
+    // OS thread. Do not call plugin wasm inline from a sync command or from an
+    // async task — a slow capability would stall the UI (or panic on
+    // re-entrant `block_on`).
     let call_granted = granted.clone();
     let call_ctx = ctx.clone();
     functions.push(Function::new(
