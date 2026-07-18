@@ -67,6 +67,8 @@ so the UI wires itself up.
     orders/history path; regions/hubs + `Location` in `markets.rs`; TTL cache
   - `model/` — shared domain types
   - `storage/` — OS keychain (refresh tokens + Tripwire password) + on-disk cache
+  - `zkill/` — shared zKillboard HTTP client (kill/loss lookups; used by pvp + localintel)
+  - `util/` — cross-cutting helpers (`time`: epoch-now, civil-date math, RFC-3339 parsing)
   - `lists.rs` — shared persisted type-id lists (blacklist/favorites) reused across modules
   - `evescout` — EVE-Scout public Thera/Turnur wormhole connections
 - `modules/` — the feature modules (24 today: production, trading, fitting, wormholes, PI, the DPS
