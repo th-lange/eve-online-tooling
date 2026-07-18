@@ -82,6 +82,27 @@ pub(super) fn parse_objective(s: &str) -> Result<Objective, String> {
     }
 }
 
+/// Which slots the optimizer may touch: `All` reworks every objective-relevant
+/// slot (clear + rebuild); `Empty` only fills empty ones, leaving the user's
+/// existing modules alone.
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum Mode {
+    All,
+    Empty,
+}
+
+/// Parse the wire-format mode string, rejecting unknown values (mirrors
+/// [`parse_objective`]). Parsed once at the command edge so a typo or a future
+/// frontend value fails closed instead of silently behaving like `"all"` —
+/// the destructive clear-and-rebuild branch.
+pub(super) fn parse_mode(s: &str) -> Result<Mode, String> {
+    match s {
+        "all" => Ok(Mode::All),
+        "empty" => Ok(Mode::Empty),
+        other => Err(format!("unknown mode: {other}")),
+    }
+}
+
 /// Candidate module groups per slot kind for an objective (group ids verified
 /// against the SDE). The optimizer fills empty slots of these kinds.
 pub(super) fn opt_config(obj: Objective) -> Vec<(SlotKind, Vec<i64>)> {
@@ -396,11 +417,17 @@ pub async fn fitting_optimize(
     region_id: Option<i64>,
     station_id: Option<i64>,
 ) -> Result<OptimizeResult, String> {
+    // Parse the wire-format strings once, here at the invoke boundary; the
+    // rest of the optimizer only sees the enums. An unknown objective or mode
+    // is an error, never a silent default.
     let obj = parse_objective(&objective)?;
+    let mode = parse_mode(mode.as_deref().unwrap_or("all"))?;
+    // Default to Tech I (incl. named/meta) + Tech II, once for both the price
+    // prefetch and the search.
     let meta = if meta_groups.is_empty() {
         vec![1, 2]
     } else {
-        meta_groups.clone()
+        meta_groups
     };
 
     // Prefetch unit prices only when a budget is set: gather every type the optimizer
@@ -460,15 +487,7 @@ pub async fn fitting_optimize(
     // because `Sde` is not `Send`.
     tokio::task::spawn_blocking(move || {
         let sde = crate::sde::open_from_app(&app)?;
-        optimize_fit(
-            &sde,
-            fit,
-            &objective,
-            meta_groups,
-            mode.as_deref().unwrap_or("all"),
-            &prices,
-            constraints,
-        )
+        optimize_fit(&sde, fit, obj, meta, mode, &prices, constraints)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -485,7 +504,7 @@ struct SearchCtx<'a> {
     prices: &'a HashMap<i64, f64>,
     constraints: Constraints,
     objective: Objective,
-    mode: &'a str,
+    mode: Mode,
     /// Best fully-constraint-satisfying config seen (by true objective). The
     /// penalized hill-climb can end on a violating config when none is nearby,
     /// so this lets the pipeline fall back to guarantee the constraints
@@ -501,7 +520,7 @@ impl<'a> SearchCtx<'a> {
         prices: &'a HashMap<i64, f64>,
         constraints: Constraints,
         objective: Objective,
-        mode: &'a str,
+        mode: Mode,
     ) -> Self {
         Self {
             ctx,
@@ -606,7 +625,7 @@ impl<'a> SearchCtx<'a> {
             }
             // In "empty" mode, match any weapon already in this class so the rack
             // stays uniform with the user's existing modules.
-            let existing = if self.mode == "empty" {
+            let existing = if self.mode == Mode::Empty {
                 fit.items
                     .iter()
                     .find(|i| {
@@ -921,17 +940,17 @@ fn build_candidates(
 /// so they get their own pass. Picks the combat drone (from `drone_ids`/
 /// `drone_attrs`, group 100) whose full flight does the most damage — bigger
 /// drones hit harder but fewer fit the bandwidth (e.g. a Vexor's 75 fields 5
-/// medium or 3 heavy). Honors `mode`: "all" refits the bay, "empty" only arms
+/// medium or 3 heavy). Honors `mode`: `All` refits the bay, `Empty` only arms
 /// an empty bay.
 fn fit_drone_bay(
     fit: &mut Fit,
-    mode: &str,
+    mode: Mode,
     attrs: &AttrMap,
     drone_ids: &[i64],
     drone_attrs: &AttrMap,
 ) {
     let has_drones = fit.items.iter().any(|i| i.slot == SlotKind::Drone);
-    if mode == "empty" && has_drones {
+    if mode == Mode::Empty && has_drones {
         return;
     }
     let bandwidth = attrs
@@ -1050,30 +1069,26 @@ fn load_ammo(fit: &mut Fit, attrs: &AttrMap, charge_cands: &[(i64, i64)], charge
     }
 }
 
-/// Core of [`fitting_optimize`], taking the SDE directly so it's testable. `mode` is
-/// `"all"` (rework every relevant slot) or `"empty"` (fill only empty slots). `prices`
-/// supplies unit costs for the budget constraint (empty ⇒ cost unused); `constraints`
-/// are kept as hard limits on the returned fit (cap-stable / ISK budget).
+/// Core of [`fitting_optimize`], taking the SDE directly so it's testable. The
+/// wire-format strings are already parsed to [`Objective`] and [`Mode`] at the
+/// command edge, and `meta` is the already-defaulted meta-group list. `prices`
+/// supplies unit costs for the budget constraint (empty ⇒ cost unused);
+/// `constraints` are kept as hard limits on the returned fit (cap-stable /
+/// ISK budget).
 pub(super) fn optimize_fit(
     sde: &Sde,
     fit: Fit,
-    objective: &str,
-    meta_groups: Vec<i64>,
-    mode: &str,
+    obj: Objective,
+    meta: Vec<i64>,
+    mode: Mode,
     prices: &HashMap<i64, f64>,
     constraints: Constraints,
 ) -> Result<OptimizeResult, String> {
-    let obj = parse_objective(objective)?;
     let Some(layout) = sde
         .ship_layout(fit.ship_type_id)
         .map_err(|e| e.to_string())?
     else {
         return Err(format!("unknown ship: {}", fit.ship_type_id));
-    };
-    let meta = if meta_groups.is_empty() {
-        vec![1, 2] // Tech I (incl. named/meta) + Tech II
-    } else {
-        meta_groups
     };
 
     let (slot_candidates, ctx) = build_candidates(sde, &fit, obj, &meta)?;
@@ -1092,13 +1107,13 @@ pub(super) fn optimize_fit(
         .iter()
         .map(|(s, c)| (*s, c.clone()))
         .collect();
-    // "all" reworks every relevant slot (clear + rebuild); "empty" fills only the
+    // `All` reworks every relevant slot (clear + rebuild); `Empty` fills only the
     // objective's empty slots, leaving your existing modules untouched.
-    if mode != "empty" {
+    if mode == Mode::All {
         fit.items.retain(|i| !relevant_kinds.contains(&i.slot));
     }
     // Only modules the optimizer adds from here are eligible for local-search
-    // swaps, so "empty" mode never rewrites your existing choices.
+    // swaps, so `Empty` mode never rewrites your existing choices.
     let added_start = fit.items.len();
 
     // 1) Seed.
@@ -1274,7 +1289,7 @@ mod tests {
             (20, vec![(1272, 25.0), (64, 2.0), (51, 1000.0), (114, 5.0)]),
         ]);
 
-        fit_drone_bay(&mut fit, "all", &attrs, &drone_ids, &drone_attrs);
+        fit_drone_bay(&mut fit, Mode::All, &attrs, &drone_ids, &drone_attrs);
 
         let drones: Vec<_> = fit
             .items
@@ -1287,7 +1302,7 @@ mod tests {
 
         // "empty" mode with drones already present leaves the bay untouched.
         let mut fit2 = fit.clone();
-        fit_drone_bay(&mut fit2, "empty", &attrs, &drone_ids, &drone_attrs);
+        fit_drone_bay(&mut fit2, Mode::Empty, &attrs, &drone_ids, &drone_attrs);
         assert_eq!(fit2.items, fit.items);
 
         // No bandwidth ⇒ no drones armed.
@@ -1298,7 +1313,7 @@ mod tests {
             items: Vec::new(),
             projected: Vec::new(),
         };
-        fit_drone_bay(&mut unarmed, "all", &attrs, &drone_ids, &drone_attrs);
+        fit_drone_bay(&mut unarmed, Mode::All, &attrs, &drone_ids, &drone_attrs);
         assert!(unarmed.items.is_empty());
     }
 
@@ -1465,6 +1480,23 @@ mod tests {
         assert_eq!(
             parse_objective("dps").err(),
             Some("unknown objective: dps".to_string())
+        );
+    }
+
+    /// `parse_mode` round-trips both known strings to their enum variant.
+    #[test]
+    fn parse_mode_round_trips_known_strings() {
+        assert!(matches!(parse_mode("all"), Ok(Mode::All)));
+        assert!(matches!(parse_mode("empty"), Ok(Mode::Empty)));
+    }
+
+    /// An unknown mode fails closed with a descriptive error — it must never
+    /// silently behave like "all", the destructive clear-and-rebuild branch.
+    #[test]
+    fn parse_mode_errors_on_unknown_string() {
+        assert_eq!(
+            parse_mode("emtpy").err(),
+            Some("unknown mode: emtpy".to_string())
         );
     }
 
