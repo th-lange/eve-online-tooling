@@ -11,6 +11,7 @@ import {
 } from "../../lib/api";
 import { formatInt } from "../../lib/format";
 import { Page, PageHeader } from "../../components/page";
+import { Stat } from "../../components/Stat";
 
 /** Compact ISK (52.3B, 1.4M) for the dense stat grid. */
 function iskShort(n: number): string {
@@ -28,30 +29,6 @@ function efficiency(destroyed: number, lost: number): number {
   return total > 0 ? Math.round((destroyed / total) * 100) : 0;
 }
 
-function Stat({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: "good" | "bad";
-}) {
-  const color =
-    tone === "good"
-      ? "text-emerald-400"
-      : tone === "bad"
-        ? "text-red-400"
-        : "text-zinc-100";
-  return (
-    <div className="flex flex-col">
-      <span className="text-[10px] uppercase tracking-wide text-zinc-500">
-        {label}
-      </span>
-      <span className={`text-sm ${color}`}>{value}</span>
-    </div>
-  );
-}
 
 const SLOT_ORDER = ["high", "mid", "low", "rig", "subsystem", "drone"] as const;
 const SLOT_LABEL: Record<string, string> = {
@@ -286,19 +263,31 @@ function PilotCard({ p, topN }: { p: PvpStats; topN: number }) {
         <Stat
           label="Destroyed"
           value={formatInt(p.shipsDestroyed)}
-          tone="good"
+          dense
+          accent="text-emerald-400"
         />
-        <Stat label="Lost" value={formatInt(p.shipsLost)} tone="bad" />
+        <Stat
+          label="Lost"
+          value={formatInt(p.shipsLost)}
+          dense
+          accent="text-red-400"
+        />
         <Stat
           label="ISK destroyed"
           value={iskShort(p.iskDestroyed)}
-          tone="good"
+          dense
+          accent="text-emerald-400"
         />
-        <Stat label="ISK lost" value={iskShort(p.iskLost)} tone="bad" />
-        <Stat label="ISK efficiency" value={`${eff}%`} />
-        <Stat label="Solo kills" value={formatInt(p.soloKills)} />
-        <Stat label="Gang ratio" value={`${p.gangRatio}%`} />
-        <Stat label="Solo losses" value={formatInt(p.soloLosses)} />
+        <Stat
+          label="ISK lost"
+          value={iskShort(p.iskLost)}
+          dense
+          accent="text-red-400"
+        />
+        <Stat label="ISK efficiency" value={`${eff}%`} dense />
+        <Stat label="Solo kills" value={formatInt(p.soloKills)} dense />
+        <Stat label="Gang ratio" value={`${p.gangRatio}%`} dense />
+        <Stat label="Solo losses" value={formatInt(p.soloLosses)} dense />
       </div>
       {p.hulls.length > 0 && (
         <div className="mt-3 border-t border-zinc-800 pt-3">

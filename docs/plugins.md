@@ -183,7 +183,7 @@ today: `market_price`, `sde_type_info`, `sde_search`, `appraise`, `route`
 The host invokes an exported function by name through a single command:
 
 ```
-plugin_invoke(pluginId, fn, argsJson) -> Result<JsonValue, AppError>
+plugins_invoke(pluginId, fn, argsJson) -> Result<JsonValue, AppError>
 ```
 
 `argsJson` is passed to your exported function as its input, and your return
@@ -236,7 +236,7 @@ bridge](./mcp.md). Declare them in `plugin.json`:
 ```
 
 `function` is the exported WASM function that implements the tool; it's called
-exactly like `plugin_invoke` (JSON in, JSON out) with your granted
+exactly like `plugins_invoke` (JSON in, JSON out) with your granted
 capabilities. The host advertises the tool as `<pluginId>.<name>` — but only
 while your plugin **and** the MCP bridge are active. Your plugin never touches
 the network; the native bridge proxies the call.
@@ -260,12 +260,12 @@ the app's DOM or `localStorage`, call `invoke`, or reach the network
 
 Your UI reaches its own logic through one call, `invoke(fn, args)`: it runs one
 of **your own** plugin's exported WASM functions through the host
-(`plugin_invoke`) and resolves with the JSON return value. The broker still
+(`plugins_invoke`) and resolves with the JSON return value. The broker still
 enforces the capabilities your manifest was granted, and the host only ever
 dispatches to _your_ plugin — a UI can drive nothing but its own logic. To pull
 foreign data, that logic uses `net:fetch` in the WASM layer, never the iframe.
 
-`args` reaches your export exactly as `plugin_invoke` sends it: the
+`args` reaches your export exactly as `plugins_invoke` sends it: the
 JSON-serialised value. A function taking a bare `String` (like the reference's
 `evaluate(type_id: String)`) wants a JSON **number** / unquoted value, not a
 quoted string; a function taking a struct wants an object.

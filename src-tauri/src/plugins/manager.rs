@@ -1,5 +1,5 @@
 //! WASM runtime host: loads plugin `.wasm` via Extism and dispatches calls
-//! into it at runtime through one generic `plugin_invoke` command — the way
+//! into it at runtime through one generic `plugins_invoke` command — the way
 //! around `tauri::generate_handler!` being fixed at compile time.
 //!
 //! Each plugin is instantiated with exactly the host functions its granted
@@ -161,7 +161,7 @@ impl PluginManager {
     }
 }
 
-/// Core plugin dispatch, shared by the `plugin_invoke` command and the MCP
+/// Core plugin dispatch, shared by the `plugins_invoke` command and the MCP
 /// bridge. Runs `func` on an **active** plugin with a JSON argument, returning
 /// its JSON result. Unknown/inactive/wasm-less plugin, a wasm path escaping the
 /// plugin dir, a non-JSON result, or a resource-limit kill all return an error.
@@ -237,7 +237,7 @@ pub fn run_plugin(
 /// the same handlers already run from the MCP bridge (dedicated OS thread) and
 /// from scripts (`spawn_blocking`).
 #[tauri::command]
-pub async fn plugin_invoke(
+pub async fn plugins_invoke(
     app: AppHandle,
     registry: State<'_, Arc<PluginRegistry>>,
     manager: State<'_, Arc<PluginManager>>,
@@ -262,7 +262,7 @@ pub async fn plugin_invoke(
 /// Activate or deactivate an installed plugin. Deactivating evicts any cached
 /// instance so it stops running immediately.
 #[tauri::command]
-pub fn plugin_set_active(
+pub fn plugins_set_active(
     registry: State<'_, Arc<PluginRegistry>>,
     manager: State<'_, Arc<PluginManager>>,
     plugin_id: String,
@@ -559,7 +559,7 @@ mod tests {
         let dir = tmp("example");
         write_sde(&dir);
         let granted = HashSet::from([Permission::SdeRead, Permission::StorageOwn]);
-        // Type id sent as a bare JSON number (what plugin_invoke serializes).
+        // Type id sent as a bare JSON number (what plugins_invoke serializes).
         let out = manager
             .invoke(
                 &dir,

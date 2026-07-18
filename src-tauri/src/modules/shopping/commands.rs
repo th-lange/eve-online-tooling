@@ -375,13 +375,7 @@ pub fn shopping_move_item(
     // Give to the target.
     {
         let dst = list_mut(&mut store, &to_id)?;
-        match dst.items.iter_mut().find(|e| e.type_id == type_id) {
-            Some(e) => e.quantity = e.quantity.saturating_add(moved),
-            None => dst.items.push(StoredEntry {
-                type_id,
-                quantity: moved,
-            }),
-        }
+        dst.add(type_id, moved);
     }
     save(&dir, &store)
 }

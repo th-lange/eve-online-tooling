@@ -8,7 +8,7 @@ import { pluginInvoke } from "../lib/api";
  * iframe — **no** `allow-same-origin`, so the frame is a unique opaque origin
  * that cannot read the app DOM, its `localStorage`, or call `invoke`. Its only
  * channel to the app is `postMessage`: the guest posts capability requests, this
- * host validates them and forwards to `plugin_invoke` **against this plugin's own
+ * host validates them and forwards to `plugins_invoke` **against this plugin's own
  * id only**, so a UI can drive nothing but its own (already sandboxed, broker-
  * gated) logic. The served `plugin://` document also carries `connect-src 'none'`,
  * so the iframe itself has no network — foreign data flows through the plugin's
@@ -76,7 +76,7 @@ export function PluginHost({
       const reply = (r: HostReply) => frame.contentWindow?.postMessage(r, "*");
 
       // Forward to this plugin's own logic only — the broker still gates every
-      // capability inside plugin_invoke.
+      // capability inside plugins_invoke.
       pluginInvoke(pluginId, fn, args)
         .then((result) =>
           reply({ channel: CHANNEL, kind: "result", id, ok: true, result }),

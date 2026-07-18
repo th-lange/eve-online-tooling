@@ -33,7 +33,7 @@ function postFrom(source: unknown, data: unknown) {
 const flush = () => new Promise((r) => setTimeout(r, 20));
 
 describe("PluginHost", () => {
-  it("forwards a guest invoke to plugin_invoke and replies with the result", async () => {
+  it("forwards a guest invoke to plugins_invoke and replies with the result", async () => {
     invokeMock.mockResolvedValue({ isk: 42 });
     render(<PluginHost pluginId="pricing-model" />);
     const win = stubFrameWindow();
@@ -47,7 +47,7 @@ describe("PluginHost", () => {
     });
     await flush();
 
-    expect(invokeMock).toHaveBeenCalledWith("plugin_invoke", {
+    expect(invokeMock).toHaveBeenCalledWith("plugins_invoke", {
       pluginId: "pricing-model",
       fn: "appraise",
       args: { items: ["Tritanium"] },

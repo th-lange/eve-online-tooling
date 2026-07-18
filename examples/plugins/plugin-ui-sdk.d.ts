@@ -8,7 +8,7 @@
  * can drive nothing but its own (sandboxed, broker-gated) logic.
  *
  * @param fn   Exported function name in your plugin's WASM.
- * @param args JSON-serialisable argument, exactly as `plugin_invoke` receives
+ * @param args JSON-serialisable argument, exactly as `plugins_invoke` receives
  *   it (e.g. a number, string, or object your function decodes).
  */
 export function invoke<T = unknown>(fn: string, args?: unknown): Promise<T>;
