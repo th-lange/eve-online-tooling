@@ -16,6 +16,7 @@ import {
   type DayTradeParams,
   type DayTradeRow,
 } from "../../lib/api";
+import { tripMetrics } from "./tripMetrics";
 import { marketKeys } from "../../lib/queryKeys";
 import {
   formatInt,
@@ -52,7 +53,7 @@ const DEFAULT_CATEGORY_IDS = [6, 7, 8];
 
 const TITLE = "Daytrading";
 const SUBTITLE =
-  "Short-term flips across regions — scans hubs for price gaps on the same item, ranked by ISK/m³.";
+  "Short-term flips across regions — scans hubs for price gaps on the same item, ranked by profit/m³.";
 
 export function DaytradingPage() {
   return (
@@ -70,6 +71,8 @@ function Workbench() {
   const [taxPct, setTaxPct] = useState(4.5);
   const [shippingRate, setShippingRate] = useState(1000);
   const [purchaseDays, setPurchaseDays] = useState(1);
+  // Hauler cargo hold size (m³); 0 = off, hides the per-trip columns (#602).
+  const [cargoM3, setCargoM3] = useState(0);
   const [minProfit, setMinProfit] = useState("100000");
   const [minDailyDemand, setMinDailyDemand] = useState("0");
   // Net owned stock off the suggested quantity (default on) — don't restock the
@@ -145,6 +148,13 @@ function Workbench() {
       return true;
     });
   }, [rows, search, hideMetas]);
+  // Merge cargo-aware per-trip metrics in before sorting (#602); off when
+  // cargoM3 is 0.
+  const tripRows = useMemo(
+    () =>
+      filteredRows.map((r) => ({ ...r, ...(tripMetrics(r, cargoM3) ?? {}) })),
+    [filteredRows, cargoM3],
+  );
 
   function toggleRegion(id: number) {
     setRegionIds((prev) => {
@@ -252,6 +262,11 @@ function Workbench() {
                 label="Stock days"
                 value={purchaseDays}
                 onChange={setPurchaseDays}
+              />
+              <NumField
+                label="Cargo m³"
+                value={cargoM3}
+                onChange={setCargoM3}
               />
               <Field label="Min profit/unit">
                 <input
@@ -384,7 +399,8 @@ function Workbench() {
                 />
               )}
               <DayTradeTable
-                rows={filteredRows}
+                rows={tripRows}
+                cargoM3={cargoM3}
                 onFavorite={toggleFavorite}
                 onBlacklist={blacklistRow}
               />
@@ -429,9 +445,11 @@ type DaySortKey =
   | "suggestedQty"
   | "volumeM3"
   | "destVolume"
-  | "daysOfSupply";
+  | "daysOfSupply"
+  | "profitPerTrip"
+  | "trips";
 
-const DAY_COLUMNS: SortColumn<DaySortKey>[] = [
+const BASE_DAY_COLUMNS: SortColumn<DaySortKey>[] = [
   {
     key: "name",
     label: "Item",
@@ -466,7 +484,7 @@ const DAY_COLUMNS: SortColumn<DaySortKey>[] = [
   },
   {
     key: "iskPerM3",
-    label: "ISK/m³",
+    label: "Profit/m³",
     numeric: true,
     description:
       "Profit per m³ of cargo — the metric a hauler optimizes (cargo-bound).",
@@ -506,14 +524,38 @@ const DAY_COLUMNS: SortColumn<DaySortKey>[] = [
   },
 ];
 
-const DAY_SORT_KEYS = DAY_COLUMNS.map((c) => c.key);
+// Cargo-aware per-trip columns (#602) — only shown once a cargo m³ is set.
+const TRIP_COLUMNS: SortColumn<DaySortKey>[] = [
+  {
+    key: "profitPerTrip",
+    label: "Profit/trip",
+    numeric: true,
+    description:
+      "Profit on a single trip at the given cargo size (capped by suggested qty).",
+  },
+  {
+    key: "trips",
+    label: "Trips",
+    numeric: true,
+    description: "Trips needed to move the full suggested quantity.",
+  },
+];
+
+const DAY_SORT_KEYS = [...BASE_DAY_COLUMNS, ...TRIP_COLUMNS].map((c) => c.key);
+
+type DayTradeRowWithTrip = DayTradeRow & {
+  profitPerTrip?: number;
+  trips?: number;
+};
 
 function DayTradeTable({
   rows,
+  cargoM3,
   onFavorite,
   onBlacklist,
 }: {
-  rows: DayTradeRow[];
+  rows: DayTradeRowWithTrip[];
+  cargoM3: number;
   onFavorite: (r: DayTradeRow) => void;
   onBlacklist: (r: DayTradeRow) => void;
 }) {
@@ -524,6 +566,9 @@ function DayTradeTable({
     "desc",
     ["name"],
   );
+
+  const columns =
+    cargoM3 > 0 ? [...BASE_DAY_COLUMNS, ...TRIP_COLUMNS] : BASE_DAY_COLUMNS;
 
   const sorted = useMemo(
     () => sortRows(rows, sortKey, sortDir),
@@ -536,7 +581,7 @@ function DayTradeTable({
         <thead className="bg-zinc-900 text-zinc-400">
           <tr>
             <th className="w-16" />
-            {DAY_COLUMNS.map((c) => (
+            {columns.map((c) => (
               <SortHeaderCell
                 key={c.key}
                 column={c}
@@ -603,11 +648,24 @@ function DayTradeTable({
                   maximumFractionDigits: 1,
                 })}
               </td>
+              {cargoM3 > 0 && (
+                <>
+                  <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
+                    {formatIsk(r.profitPerTrip)}
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                    {formatInt(r.trips)}
+                  </td>
+                </>
+              )}
             </tr>
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={12} className="px-3 py-6 text-center text-zinc-500">
+              <td
+                colSpan={cargoM3 > 0 ? 14 : 12}
+                className="px-3 py-6 text-center text-zinc-500"
+              >
                 Hit Calculate to scan for cross-region flips.
               </td>
             </tr>
