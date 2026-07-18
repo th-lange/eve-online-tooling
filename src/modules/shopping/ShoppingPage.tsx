@@ -22,6 +22,7 @@ import {
 } from "../../lib/api";
 import { formatInt } from "../../lib/format";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
+import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { Page, PageHeader } from "../../components/page";
 
 /**
@@ -735,9 +736,12 @@ function SearchAddField({
   const [qty, setQty] = useState("1");
   const [busy, setBusy] = useState(false);
 
+  // Debounce the typed query before it reaches the search invoke (same
+  // pattern as Combo): one backend request per pause, not per keystroke.
+  const debouncedQ = useDebouncedValue(q, 200);
   const results = useQuery({
-    ...sdeKeys.search(q),
-    enabled: q.trim().length >= 2,
+    ...sdeKeys.search(debouncedQ),
+    enabled: debouncedQ.trim().length >= 2,
   });
   const matches = (results.data ?? []).slice(0, 12);
 
