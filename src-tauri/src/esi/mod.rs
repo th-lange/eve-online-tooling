@@ -13,6 +13,7 @@ mod client;
 pub mod commands;
 mod error;
 mod net;
+mod universe;
 
 pub use auth::AuthState;
 #[cfg(test)]
@@ -27,6 +28,7 @@ pub use character::{
 pub use client::EsiClient;
 pub use error::EsiError;
 pub use net::fetch_json_url;
+pub use universe::{system_kills, SystemKills};
 
 /// ESI base URL. Endpoint paths include the version segment (e.g. `/latest`).
 pub const ESI_BASE: &str = "https://esi.evetech.net";
