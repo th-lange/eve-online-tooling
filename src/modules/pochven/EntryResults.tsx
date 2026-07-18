@@ -5,7 +5,7 @@ import {
   type SystemGraphNode,
 } from "../../components/SystemGraph";
 import type { EntrySearch as EntrySearchResult } from "../../lib/api";
-import { BAND_HEX } from "./visual";
+import { SEC_HEX, secBand } from "../../lib/security";
 import { ZkillSystemLink } from "../../components/ZkillLink";
 import { buildScanTree, computeGreenEdges, edgeKey, keptSets } from "./graph";
 
@@ -324,12 +324,7 @@ export function EntryResults({ data }: { data: EntrySearchResult }) {
                 const node = data.map.nodes.find((n) => n.name === c.system);
                 const id = node?.systemId;
                 const done = id != null && visited.has(id);
-                const band =
-                  c.security >= 0.45
-                    ? "hisec"
-                    : c.security > 0
-                      ? "lowsec"
-                      : "nullsec";
+                const band = secBand(c.security);
                 return (
                   <tr
                     key={c.system}
@@ -345,7 +340,7 @@ export function EntryResults({ data }: { data: EntrySearchResult }) {
                     <td className="px-3 py-1.5 text-zinc-500">{c.region}</td>
                     <td
                       className="px-3 py-1.5 text-right tabular-nums"
-                      style={{ color: BAND_HEX[band] }}
+                      style={{ color: SEC_HEX[band] }}
                     >
                       {c.security.toFixed(1)}
                     </td>

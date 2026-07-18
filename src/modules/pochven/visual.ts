@@ -5,12 +5,6 @@ import type { SystemGraphNode } from "../../components/SystemGraph";
 import type { EntryBands } from "../../lib/api";
 import { POCHVEN_META } from "./data";
 
-export const BAND_HEX: Record<string, string> = {
-  hisec: "#34d399",
-  lowsec: "#fbbf24",
-  nullsec: "#fb7185",
-};
-
 /** Fill colour by system role. */
 export const ROLE_HEX: Record<string, string> = {
   Home: "#f59e0b",

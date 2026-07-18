@@ -46,6 +46,9 @@ describe("SystemGraph.kindFromSecurity", () => {
   it("bands security into hi/low/null", () => {
     expect(kindFromSecurity(0.9)).toBe("hisec");
     expect(kindFromSecurity(0.5)).toBe("hisec");
+    // True sec 0.45–0.4999 displays as 0.5 in game and is high-sec.
+    expect(kindFromSecurity(0.45)).toBe("hisec");
+    expect(kindFromSecurity(0.4499)).toBe("lowsec");
     expect(kindFromSecurity(0.3)).toBe("lowsec");
     expect(kindFromSecurity(0.0)).toBe("nullsec");
     expect(kindFromSecurity(-0.5)).toBe("nullsec");

@@ -24,6 +24,7 @@ import {
   marketKeys,
   sdeKeys,
 } from "../../lib/queryKeys";
+import { SEC_HEX, secBand } from "../../lib/security";
 import { AddToListButton } from "../../components/AddToListButton";
 import { Combo } from "../../components/Combo";
 import { PriceHistoryView } from "../../components/PriceHistory";
@@ -473,7 +474,7 @@ function OrderTable({
 
 function SecDot({ security }: { security: number }) {
   const s = Math.round(security * 10) / 10;
-  const color = s >= 0.5 ? "#34d399" : s > 0.0 ? "#fbbf24" : "#f87171";
+  const color = SEC_HEX[secBand(security)];
   return (
     <span className="tabular-nums" style={{ color }}>
       {s.toFixed(1)}
