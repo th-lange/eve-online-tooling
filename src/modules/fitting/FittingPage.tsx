@@ -185,7 +185,7 @@ function Workbench() {
       setFit(f);
       setEft("");
     },
-    onError: (e) => alert(`Import failed: ${e}`),
+    onError: (e) => alert(`Import failed: ${errorMessage(e)}`),
   });
   const price = useMutation({
     mutationFn: () => fittingPrice(fit!, regionId, null),
@@ -243,7 +243,7 @@ function Workbench() {
           : null,
       );
     },
-    onError: (e) => alert(`Optimize failed: ${e}`),
+    onError: (e) => alert(`Optimize failed: ${errorMessage(e)}`),
   });
 
   // All fits (local + in-game), each tagged with its source.
@@ -385,7 +385,7 @@ function Workbench() {
   const addItem = useMutation({
     mutationFn: (typeId: number) => fittingAddItem(fit!, typeId),
     onSuccess: (f) => setFit(f),
-    onError: (e) => alert(`Couldn't add module: ${e}`),
+    onError: (e) => alert(`Couldn't add module: ${errorMessage(e)}`),
   });
 
   return (
@@ -675,7 +675,7 @@ function Workbench() {
               {stats.isError && (
                 <p className="text-xs text-red-400">
                   Eval failed:{" "}
-                  {(stats.error as Error)?.message ?? errorMessage(stats.error)}
+                  {errorMessage(stats.error)}
                 </p>
               )}
               {!stats.data && !stats.isFetching && !stats.isError && (

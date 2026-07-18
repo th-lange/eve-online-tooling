@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { DataAge } from "../../components/DataAge";
 import {
+  errorMessage,
   marketRegions,
   stationTrading,
   type TradeParams,
@@ -197,7 +198,9 @@ function Workbench() {
       <div className="mt-3">
         {tab === "opportunities" &&
           (run.isError ? (
-            <ErrorMsg e={run.error} />
+            <div className="text-sm text-rose-400">
+              Failed: {errorMessage(run.error)}
+            </div>
           ) : run.isPending ? (
             <Centered>Scanning ~19k items at the chosen market…</Centered>
           ) : (
@@ -586,8 +589,4 @@ function NumField({
       />
     </Field>
   );
-}
-
-function ErrorMsg({ e }: { e: unknown }) {
-  return <div className="text-sm text-rose-400">Failed: {String(e)}</div>;
 }

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import {
+  errorMessage,
   marketOrders,
   openMarketWindow,
   productionProfit,
@@ -311,7 +312,9 @@ function OrdersTable({
                   })()}
                   <button
                     onClick={() =>
-                      openMarketWindow(r.typeId).catch((e) => alert(String(e)))
+                      openMarketWindow(r.typeId).catch((e) =>
+                        alert(errorMessage(e)),
+                      )
                     }
                     title="Open this item's market window in the EVE client"
                     aria-label={`Open ${r.name} in EVE`}

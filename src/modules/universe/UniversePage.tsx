@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  errorMessage,
   openMarketWindow,
   sdeCategories,
   sdeGroups,
@@ -190,7 +191,7 @@ function Detail({ typeId }: { typeId: number }) {
         <button
           onClick={() =>
             openMarketWindow(d.typeId).catch((e) =>
-              alert(`Couldn't open market window: ${e}`),
+              alert(`Couldn't open market window: ${errorMessage(e)}`),
             )
           }
           title="Open this item's market in the EVE client"

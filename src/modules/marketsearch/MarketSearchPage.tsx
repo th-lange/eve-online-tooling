@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  errorMessage,
   marketAllRegions,
   marketCurrentLocation,
   marketPrice,
@@ -155,7 +156,7 @@ function Workbench() {
           <button
             onClick={() =>
               openMarketWindow(picked.id).catch((e) =>
-                alert(`Couldn't open market window: ${e}`),
+                alert(`Couldn't open market window: ${errorMessage(e)}`),
               )
             }
             title="Open this item's market in the EVE client (needs a logged-in character + the open-window scope)"
@@ -324,7 +325,7 @@ function SearchTab({
         ) : loading ? (
           <Centered>Loading orders…</Centered>
         ) : error ? (
-          <Centered>Couldn't load orders: {String(error)}</Centered>
+          <Centered>Couldn't load orders: {errorMessage(error)}</Centered>
         ) : orders.length === 0 ? (
           <Centered>
             No sell orders for this item in the selected area.
