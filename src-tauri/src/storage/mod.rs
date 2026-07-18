@@ -216,17 +216,9 @@ struct CacheEnvelope<T> {
 
 fn cache_path(app_data_dir: &Path, key: &str) -> std::path::PathBuf {
     // Keys are caller-controlled identifiers; sanitize to a safe filename.
-    let safe: String = key
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '_' || c == '-' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    app_data_dir.join("cache").join(format!("{safe}.json"))
+    app_data_dir
+        .join("cache")
+        .join(format!("{}.json", sanitize(key)))
 }
 
 /// Read a cached value, or `None` if absent, unreadable, or expired.
@@ -262,6 +254,9 @@ pub fn save_data<T: Serialize>(app_data_dir: &Path, name: &str, value: &T) -> Re
     std::fs::write(path, data).map_err(|e| e.to_string())
 }
 
+/// Path-safety filter for caller-controlled names: every on-disk filename
+/// derived from a caller string (cache keys, data-document names) must go
+/// through here, so a hardening change lands in one place.
 fn sanitize(key: &str) -> String {
     key.chars()
         .map(|c| {
@@ -313,6 +308,16 @@ mod tests {
         // for the absent/fresh cases above.
         let _ = cache_get::<i64>(&dir, "old");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cache_path_neutralizes_traversal_keys() {
+        // Caller-controlled keys must never escape the cache dir: everything
+        // but [A-Za-z0-9_-] becomes '_' via the shared sanitize() filter.
+        let dir = Path::new("/base");
+        let p = cache_path(dir, "../../etc/passwd");
+        assert_eq!(p, Path::new("/base/cache/______etc_passwd.json"));
+        assert_eq!(sanitize("a/b\\c:d"), "a_b_c_d");
     }
 
     #[test]
