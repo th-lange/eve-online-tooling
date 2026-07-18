@@ -41,14 +41,19 @@ pub fn export_orders_bindings() {
         .expect("failed to export orders TS bindings");
 }
 
-#[cfg(test)]
+/// Gated behind the `export-bindings` feature so a plain `cargo test` (the
+/// documented standard command) stays side-effect-free with respect to git
+/// state — the always-on version rewrote the committed file un-prettified on
+/// every suite run, leaving the tree dirty during unrelated Rust work.
+#[cfg(all(test, feature = "export-bindings"))]
 mod tests {
     use super::export_orders_bindings;
 
     /// Regenerates the committed bindings file. `npm run build` runs this via
-    /// `cargo test export_orders_bindings --quiet` before `tsc`; run it by
-    /// hand after touching `OrderRow` or `orders_list`'s signature and check
-    /// in the diff — CI's drift check fails the build otherwise.
+    /// `cargo test --features export-bindings export_orders_bindings --quiet`
+    /// before `tsc`; run it by hand (through `npm run generate:bindings`)
+    /// after touching `OrderRow` or `orders_list`'s signature and check in
+    /// the diff — CI's drift check fails the build otherwise.
     #[test]
     fn export_orders_bindings_regenerates_the_committed_file() {
         export_orders_bindings();
