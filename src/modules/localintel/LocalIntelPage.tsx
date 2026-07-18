@@ -1,4 +1,11 @@
-import { memo, useCallback, useContext, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import {
@@ -581,7 +588,9 @@ function NeighbourhoodPanel({
               {here.name}
               <ExternalLink size={10} className="opacity-60" />
             </a>{" "}
-            <span className={`tabular-nums ${SEC_TEXT_CLASS[secBand(here.security)]}`}>
+            <span
+              className={`tabular-nums ${SEC_TEXT_CLASS[secBand(here.security)]}`}
+            >
               {here.security.toFixed(1)}
             </span>
           </div>
@@ -600,7 +609,9 @@ function NeighbourhoodPanel({
                     className="min-w-0 truncate text-zinc-300"
                     title={`${n.name} · ${n.region}`}
                   >
-                    <span className={SEC_TEXT_CLASS[secBand(n.security)]}>•</span>{" "}
+                    <span className={SEC_TEXT_CLASS[secBand(n.security)]}>
+                      •
+                    </span>{" "}
                     <a
                       href={`https://zkillboard.com/system/${n.systemId}/`}
                       target="_blank"

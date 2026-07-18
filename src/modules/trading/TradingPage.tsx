@@ -505,4 +505,3 @@ function UndercutPrice({
     </button>
   );
 }
-

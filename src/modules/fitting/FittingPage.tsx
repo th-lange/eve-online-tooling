@@ -671,8 +671,7 @@ function Workbench() {
               </div>
               {stats.isError && (
                 <p className="text-xs text-red-400">
-                  Eval failed:{" "}
-                  {errorMessage(stats.error)}
+                  Eval failed: {errorMessage(stats.error)}
                 </p>
               )}
               {!stats.data && !stats.isFetching && !stats.isError && (
