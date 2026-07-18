@@ -23,12 +23,12 @@ export function authLogout(characterId: number): Promise<Character[]> {
 
 /** Bookmark the "active" character used by per-character features. */
 export function setActiveCharacter(characterId: number): Promise<void> {
-  return invoke<void>("set_active_character", { characterId });
+  return invoke<void>("auth_set_active_character", { characterId });
 }
 
 /** The active character id (bookmarked if set + in roster, else the first). */
 export function activeCharacter(): Promise<number | null> {
-  return invoke<number | null>("active_character");
+  return invoke<number | null>("auth_active_character");
 }
 
 /** Sentinel active-character id meaning "all characters" — per-character views
@@ -53,13 +53,13 @@ export interface OwnedBlueprint {
 
 /** Blueprints owned across the whole roster (their real ME/TE). */
 export function ownedBlueprints(): Promise<OwnedBlueprint[]> {
-  return invoke<OwnedBlueprint[]>("owned_blueprints");
+  return invoke<OwnedBlueprint[]>("esi_owned_blueprints");
 }
 
 /** Open the in-game market window for a type (needs a logged-in character + the
  * esi-ui.open_window scope). */
 export function openMarketWindow(typeId: number): Promise<void> {
-  return invoke<void>("open_market_window", { typeId });
+  return invoke<void>("esi_open_market_window", { typeId });
 }
 
 /**
@@ -67,5 +67,5 @@ export function openMarketWindow(typeId: number): Promise<void> {
  * Keys are type ids (as strings, per JSON object keys).
  */
 export function rosterStock(): Promise<Record<string, number>> {
-  return invoke<Record<string, number>>("roster_stock");
+  return invoke<Record<string, number>>("esi_roster_stock");
 }
