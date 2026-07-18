@@ -3,7 +3,6 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   appraisal,
   errorMessage,
-  marketRegions,
   appraisalReprocess,
   type AppraisalLine,
   type AppraisalParams,
@@ -11,6 +10,7 @@ import {
   type ReprocessAppraisalParams,
   type ReprocessAppraisalResult,
 } from "../../lib/api";
+import { marketKeys } from "../../lib/queryKeys";
 import {
   RegionSelect,
   StationSelect,
@@ -51,10 +51,7 @@ function Workbench() {
   const [result, setResult] = useState<AppraisalResult | null>(null);
   const [repro, setRepro] = useState<ReprocessAppraisalResult | null>(null);
 
-  const regions = useQuery({
-    queryKey: ["market", "regions"],
-    queryFn: marketRegions,
-  });
+  const regions = useQuery(marketKeys.regions());
   const run = useMutation({
     mutationFn: (p: AppraisalParams) => appraisal(p),
     onSuccess: setResult,

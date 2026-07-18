@@ -14,7 +14,6 @@ import {
   fittingSaveLocal,
   fittingShipLayout,
   fittingSimulate,
-  marketRegions,
   sdeSearchShips,
   sdeTypeInfos,
   sdeTypeNames,
@@ -26,6 +25,7 @@ import {
   type SlotKind,
   type WeaponRange,
 } from "../../lib/api";
+import { marketKeys } from "../../lib/queryKeys";
 import { Page, PageHeader } from "../../components/page";
 import { Combo } from "../../components/Combo";
 import { SdeGate } from "../../components/SdeGate";
@@ -85,10 +85,7 @@ function Workbench() {
     5: false,
   });
 
-  const regions = useQuery({
-    queryKey: ["market", "regions"],
-    queryFn: marketRegions,
-  });
+  const regions = useQuery(marketKeys.regions());
   const saved = useQuery({
     queryKey: ["fitting", "saved"],
     queryFn: fittingListLocal,

@@ -20,6 +20,16 @@ describe("marketKeys.history", () => {
   });
 });
 
+describe("marketKeys.regions", () => {
+  it("uses the canonical [market, regions] key every page previously inlined by hand", () => {
+    expect(marketKeys.regions().queryKey).toEqual(["market", "regions"]);
+  });
+
+  it("treats the static hub list as fresh for 24 hours instead of refetching per mount/refocus", () => {
+    expect(marketKeys.regions().staleTime).toBe(24 * 60 * 60 * 1000);
+  });
+});
+
 describe("sdeKeys.search", () => {
   it("keys by the query string under a dedicated sde/search namespace", () => {
     expect(sdeKeys.search("tritanium").queryKey).toEqual([
