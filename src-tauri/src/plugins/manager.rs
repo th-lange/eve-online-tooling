@@ -503,6 +503,40 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// The manifest's `wasm` field is author-controlled and never validated
+    /// for traversal at parse time (only `id` is) — the guard inside
+    /// `run_plugin` is the only thing standing between a hostile
+    /// `"../outside.wasm"` and an arbitrary file read. Write the manifest
+    /// directly, bypassing `install_dir`/`install_zip` entirely, to prove
+    /// the guard itself (not the installer) is what's holding the line.
+    #[test]
+    fn run_plugin_rejects_a_wasm_path_that_escapes_the_plugin_dir() {
+        let root = tmp("wasm-escape");
+        let plugin_dir = root.join("plugins").join("acme");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("plugin.json"),
+            r#"{"id":"acme","name":"acme","version":"1.0.0","minAppVersion":"0.33.0","wasm":"../outside.wasm","permissions":[]}"#,
+        )
+        .unwrap();
+        // A real (non-wasm) file at the escape target: if the guard didn't
+        // fire first, `run_plugin` would still fail, but with an "invalid
+        // wasm module" error from actually reading it — a different failure
+        // that would prove the read happened before the guard.
+        std::fs::write(root.join("plugins").join("outside.wasm"), b"not wasm").unwrap();
+
+        let registry = PluginRegistry::load(&root);
+        registry.set_active("acme", true).unwrap();
+        let manager = PluginManager::new();
+        let err = run_plugin(&registry, &manager, &root, "acme", "echo", &Value::Null)
+            .unwrap_err();
+        assert!(
+            err.contains("must be relative to its dir"),
+            "unexpected error: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn ungranted_plugin_fails_to_instantiate() {
         let manager = PluginManager::new();
