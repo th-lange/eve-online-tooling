@@ -53,7 +53,12 @@ registry** — the same operations plugins and the MCP bridge use, so data is
 fetched and cached once. `invoke(name, args)` reaches the whole registry,
 including ones without a dedicated wrapper: `invoke("sde_search", { query })`,
 `invoke("appraise", { items })`, `invoke("route", { from, to })`,
-`invoke("pi_overview", {})`, `invoke("industry_jobs", {})`.
+`invoke("pi_overview", {})`, `invoke("industry_jobs", {})`. Prefer the small
+"who's idle" summaries — `invoke("pi_idle_colonies", {})`,
+`invoke("industry_line_status", {})` — over the full `pi_overview`/
+`industry_jobs` dumps when a script only needs to know what needs
+attention: much less data crosses into the sandbox, and Rhai's data-size
+cap (below) is far less likely to matter.
 
 > Browser/DOM globals like `Audio`, `fetch`, `document` or `window` **do not
 > exist** — the JS engine is a standalone ECMAScript runtime, not a webpage. To

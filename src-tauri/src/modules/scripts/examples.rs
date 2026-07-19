@@ -142,17 +142,16 @@ pub const IDLE_PRODUCTION_RHAI: &str = r#"// Idle-production alarm: PI, manufact
 // selection, otherwise just the active one). Each numbered section below is
 // self-contained — comment out (or delete) a whole section to stop checking
 // it; the others keep working. Manufacturing/invention alarm as soon as ANY
-// one character's line is idle, naming which character(s).
+// one character's line is idle, naming which character(s). Uses the small
+// "who's idle" capabilities (pi_idle_colonies/industry_line_status), not the
+// full pi_overview/industry_jobs dumps — much less data into the sandbox.
 // Needs esi-planets.manage_planets.v1 for the PI check and
 // esi-industry.read_character_jobs.v1 for the job checks (enable the scope
 // on the EVE app, then re-login).
 let alarms_fired = 0;
 
 // --- 1) PI: colonies out of production ----------------------------------
-// Flags every colony the app already marked "needs attention": its
-// extraction program ended, or a commodity is in deficit.
-let colonies = invoke("pi_overview", #{});
-let idle_colonies = colonies.filter(|c| c.needsAttention);
+let idle_colonies = invoke("pi_idle_colonies", #{});
 if idle_colonies.len() > 0 {
     let detail = idle_colonies.map(|c| c.characterName + ": " + c.systemName + " (" + c.planetType + ")");
     send_alarm("" + idle_colonies.len() + " PI colony(ies) need attention", detail);
@@ -160,10 +159,8 @@ if idle_colonies.len() > 0 {
 }
 
 // --- 2) Manufacturing: idle line, per character --------------------------
-// Fires as soon as any one character's manufacturing line is idle (used ==
-// 0), naming exactly which character(s) — not just an aggregate.
-let mfg_jobs = invoke("industry_jobs", #{});
-let idle_mfg = mfg_jobs.byCharacter.filter(|c| c.slots.manufacturing.used == 0);
+let mfg_status = invoke("industry_line_status", #{});
+let idle_mfg = mfg_status.manufacturing.filter(|c| c.idle);
 if idle_mfg.len() > 0 {
     let names = idle_mfg.map(|c| c.characterName);
     send_alarm("" + idle_mfg.len() + " character(s) have an idle manufacturing line", names);
@@ -171,13 +168,8 @@ if idle_mfg.len() > 0 {
 }
 
 // --- 3) Invention: idle line, per character -------------------------------
-// Same idea for invention: a character counts as idle unless they have an
-// active/ready Invention job right now.
-let inv_jobs = invoke("industry_jobs", #{});
-let inventing = inv_jobs.jobs
-    .filter(|j| j.activity == "Invention" && (j.status == "active" || j.status == "ready"))
-    .map(|j| j.characterId);
-let idle_inv = inv_jobs.byCharacter.filter(|c| !inventing.contains(c.characterId));
+let inv_status = invoke("industry_line_status", #{});
+let idle_inv = inv_status.invention.filter(|c| c.idle);
 if idle_inv.len() > 0 {
     let names = idle_inv.map(|c| c.characterName);
     send_alarm("" + idle_inv.len() + " character(s) have an idle invention line", names);
@@ -191,17 +183,16 @@ pub const IDLE_PRODUCTION_JS: &str = r#"// Idle-production alarm: PI, manufactur
 // selection, otherwise just the active one). Each numbered section below is
 // self-contained — comment out (or delete) a whole section to stop checking
 // it; the others keep working. Manufacturing/invention alarm as soon as ANY
-// one character's line is idle, naming which character(s).
+// one character's line is idle, naming which character(s). Uses the small
+// "who's idle" capabilities (pi_idle_colonies/industry_line_status), not the
+// full pi_overview/industry_jobs dumps — much less data into the sandbox.
 // Needs esi-planets.manage_planets.v1 for the PI check and
 // esi-industry.read_character_jobs.v1 for the job checks (enable the scope
 // on the EVE app, then re-login).
 let alarmsFired = 0;
 
 // --- 1) PI: colonies out of production ------------------------------------
-// Flags every colony the app already marked "needs attention": its
-// extraction program ended, or a commodity is in deficit.
-const colonies = invoke("pi_overview", {});
-const idleColonies = colonies.filter((c) => c.needsAttention);
+const idleColonies = invoke("pi_idle_colonies", {});
 if (idleColonies.length > 0) {
   const detail = idleColonies.map((c) => `${c.characterName}: ${c.systemName} (${c.planetType})`);
   send_alarm(`${idleColonies.length} PI colony(ies) need attention`, detail);
@@ -209,10 +200,8 @@ if (idleColonies.length > 0) {
 }
 
 // --- 2) Manufacturing: idle line, per character ----------------------------
-// Fires as soon as any one character's manufacturing line is idle (used ===
-// 0), naming exactly which character(s) — not just an aggregate.
-const mfgJobs = invoke("industry_jobs", {});
-const idleMfg = mfgJobs.byCharacter.filter((c) => c.slots.manufacturing.used === 0);
+const mfgStatus = invoke("industry_line_status", {});
+const idleMfg = mfgStatus.manufacturing.filter((c) => c.idle);
 if (idleMfg.length > 0) {
   const names = idleMfg.map((c) => c.characterName);
   send_alarm(`${idleMfg.length} character(s) have an idle manufacturing line`, names);
@@ -220,13 +209,8 @@ if (idleMfg.length > 0) {
 }
 
 // --- 3) Invention: idle line, per character --------------------------------
-// Same idea for invention: a character counts as idle unless they have an
-// active/ready Invention job right now.
-const invJobs = invoke("industry_jobs", {});
-const inventing = invJobs.jobs
-  .filter((j) => j.activity === "Invention" && (j.status === "active" || j.status === "ready"))
-  .map((j) => j.characterId);
-const idleInv = invJobs.byCharacter.filter((c) => !inventing.includes(c.characterId));
+const invStatus = invoke("industry_line_status", {});
+const idleInv = invStatus.invention.filter((c) => c.idle);
 if (idleInv.length > 0) {
   const names = idleInv.map((c) => c.characterName);
   send_alarm(`${idleInv.length} character(s) have an idle invention line`, names);

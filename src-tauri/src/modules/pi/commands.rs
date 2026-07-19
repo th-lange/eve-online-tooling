@@ -263,6 +263,34 @@ pub async fn pi_overview(
     pi_overview_core(&dir, sde, &auth_state).await
 }
 
+/// A colony's minimal "needs attention" summary — just enough to name it in
+/// an alert, not the full extractor/storage/balance detail `pi_overview`
+/// ships for the UI.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdleColony {
+    pub character_id: i64,
+    pub character_name: String,
+    pub system_name: String,
+    pub planet_type: String,
+}
+
+/// Every colony flagged `needs_attention`, trimmed down to just enough to
+/// name it. Pure — a view over an already-fetched [`ColonyView`] list, so
+/// it's directly unit-testable.
+pub fn idle_colonies(views: &[ColonyView]) -> Vec<IdleColony> {
+    views
+        .iter()
+        .filter(|c| c.needs_attention)
+        .map(|c| IdleColony {
+            character_id: c.character_id,
+            character_name: c.character_name.clone(),
+            system_name: c.system_name.clone(),
+            planet_type: c.planet_type.clone(),
+        })
+        .collect()
+}
+
 /// Assemble one colony's view (splits ESI + SDE joins from the async fetch).
 #[allow(clippy::too_many_arguments)]
 fn build_colony(
@@ -499,5 +527,33 @@ mod tests {
     fn zero_cycle_is_ignored() {
         let f = schem(1, 0, vec![(100, 2)], vec![(200, 1)]);
         assert!(per_hour_balance(&[&f], &[(10, 5, 0)]).is_empty());
+    }
+
+    fn colony(character_id: i64, needs_attention: bool) -> ColonyView {
+        ColonyView {
+            character_id,
+            character_name: format!("Char {character_id}"),
+            planet_id: 1,
+            system_id: 30000001,
+            system_name: "Jita".to_string(),
+            planet_type: "Barren".to_string(),
+            upgrade_level: 1,
+            pin_count: 3,
+            extractors: Vec::new(),
+            storage: Vec::new(),
+            balance: Vec::new(),
+            produced: Vec::new(),
+            needs_attention,
+        }
+    }
+
+    #[test]
+    fn idle_colonies_keeps_only_needs_attention_and_trims_the_fields() {
+        let views = vec![colony(1, true), colony(2, false)];
+        let idle = idle_colonies(&views);
+        assert_eq!(idle.len(), 1);
+        assert_eq!(idle[0].character_id, 1);
+        assert_eq!(idle[0].system_name, "Jita");
+        assert_eq!(idle[0].planet_type, "Barren");
     }
 }

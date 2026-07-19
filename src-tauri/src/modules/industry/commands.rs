@@ -372,9 +372,69 @@ pub async fn industry_jobs(
     industry_jobs_core(&dir, &auth_state, character_id).await
 }
 
+/// One character's status for a single job-slot pool: idle (no active/ready
+/// job holding a slot right now) or busy.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineStatus {
+    pub character_id: i64,
+    pub character_name: String,
+    pub idle: bool,
+}
+
+/// Per-character idle/busy status for each job-slot pool — a small,
+/// purpose-shaped summary for consumers (scripts, plugins, MCP) that only
+/// need "who's idle", not the full job list and slot totals `industry_jobs`
+/// ships for the UI.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineStatusResult {
+    pub manufacturing: Vec<LineStatus>,
+    pub invention: Vec<LineStatus>,
+    pub reactions: Vec<LineStatus>,
+}
+
+/// Derive [`LineStatusResult`] from an already-fetched [`JobsResult`]. Pure —
+/// no ESI, no I/O — so it's directly unit-testable. `manufacturing`/
+/// `reactions` read straight off each character's slot usage (unambiguous:
+/// one activity per pool); `invention` isn't slot-derivable (the "science"
+/// pool also covers ME/TE research and copying), so it checks the job list
+/// for an active/ready Invention job per character instead.
+pub fn line_status(result: &JobsResult) -> LineStatusResult {
+    let inventing: HashSet<i64> = result
+        .jobs
+        .iter()
+        .filter(|j| j.activity == "Invention" && (j.status == "active" || j.status == "ready"))
+        .map(|j| j.character_id)
+        .collect();
+    let status = |idle: bool, c: &CharacterSlots| LineStatus {
+        character_id: c.character_id,
+        character_name: c.character_name.clone(),
+        idle,
+    };
+    LineStatusResult {
+        manufacturing: result
+            .by_character
+            .iter()
+            .map(|c| status(c.slots.manufacturing.used == 0, c))
+            .collect(),
+        invention: result
+            .by_character
+            .iter()
+            .map(|c| status(!inventing.contains(&c.character_id), c))
+            .collect(),
+        reactions: result
+            .by_character
+            .iter()
+            .map(|c| status(c.slots.reactions.used == 0, c))
+            .collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{compute_slots, slot_pool};
+    use super::{compute_slots, line_status, slot_pool};
+    use super::{CharacterSlots, JobRow, JobsResult, Slot, Slots};
 
     #[test]
     fn slot_pool_maps_activities() {
@@ -408,5 +468,68 @@ mod tests {
         assert_eq!(slots.science.total, 6);
         assert_eq!(slots.reactions.total, 4);
         assert_eq!(slots.manufacturing.used, 0);
+    }
+
+    fn job_row(character_id: i64, activity: &str, status: &str) -> JobRow {
+        JobRow {
+            job_id: 1,
+            activity: activity.to_string(),
+            product: "Widget".to_string(),
+            runs: 1,
+            status: status.to_string(),
+            cost: None,
+            start_date: String::new(),
+            end_date: String::new(),
+            facility: String::new(),
+            owner: "You".to_string(),
+            character_id,
+            character_name: format!("Char {character_id}"),
+        }
+    }
+
+    fn character_slots(
+        character_id: i64,
+        manufacturing_used: i64,
+        reactions_used: i64,
+    ) -> CharacterSlots {
+        CharacterSlots {
+            character_id,
+            character_name: format!("Char {character_id}"),
+            slots: Slots {
+                manufacturing: Slot {
+                    used: manufacturing_used,
+                    total: 1,
+                },
+                science: Slot { used: 0, total: 1 },
+                reactions: Slot {
+                    used: reactions_used,
+                    total: 1,
+                },
+            },
+        }
+    }
+
+    #[test]
+    fn line_status_flags_manufacturing_and_reactions_from_slots_and_invention_from_jobs() {
+        let result = JobsResult {
+            jobs: vec![job_row(2, "Invention", "active")],
+            slots: Slots {
+                manufacturing: Slot { used: 1, total: 2 },
+                science: Slot { used: 0, total: 2 },
+                reactions: Slot { used: 0, total: 2 },
+            },
+            by_character: vec![character_slots(1, 0, 0), character_slots(2, 1, 0)],
+        };
+        let status = line_status(&result);
+
+        let find = |v: &[super::LineStatus], id: i64| {
+            v.iter().find(|s| s.character_id == id).unwrap().idle
+        };
+        assert!(find(&status.manufacturing, 1)); // char 1: 0 used -> idle
+        assert!(!find(&status.manufacturing, 2)); // char 2: 1 used -> busy
+        assert!(find(&status.invention, 1)); // char 1: no Invention job -> idle
+        assert!(!find(&status.invention, 2)); // char 2: active Invention job -> busy
+        assert!(find(&status.reactions, 1));
+        assert!(find(&status.reactions, 2)); // reactions.used == 0 for both
     }
 }
