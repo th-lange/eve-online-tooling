@@ -12,7 +12,6 @@ export default tseslint.config(
       "dist",
       "src-tauri",
       "node_modules",
-      "examples",
       // Emitted by tauri-specta (issue #589) — not hand-written, and
       // upstream ships an unused Channel import/any-typed helper
       // (specta-rs/tauri-specta#198) that the strict lint config would

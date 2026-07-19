@@ -337,11 +337,11 @@ pub fn seed_example_plugin(app_data_dir: &Path) {
     }
     let _ = std::fs::write(
         dir.join("plugin.json"),
-        include_str!("../../../examples/plugins/hello-ui/plugin.json"),
+        include_str!("../../assets/hello-ui/plugin.json"),
     );
     let _ = std::fs::write(
         dir.join("index.html"),
-        include_str!("../../../examples/plugins/hello-ui/index.html"),
+        include_str!("../../assets/hello-ui/index.html"),
     );
 }
 

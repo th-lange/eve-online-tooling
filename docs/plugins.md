@@ -67,19 +67,20 @@ it and it stays gone.
 
 ## Try a ready-made one
 
-Don't want to build anything? Grab a prebuilt example from the
-[latest release](https://github.com/th-lange/eve-online-tooling/releases/latest):
+Don't want to build anything? Grab a prebuilt example from
+[eve-online-tooling-plugins' latest release](https://github.com/th-lange/eve-online-tooling-plugins/releases/latest):
 
-- **[pricing-model-plugin.zip](https://github.com/th-lange/eve-online-tooling/releases/latest/download/pricing-model-plugin.zip)**
+- **[pricing-model-plugin.zip](https://github.com/th-lange/eve-online-tooling-plugins/releases/latest/download/pricing-model-plugin.zip)**
   — the logic **+** UI reference documented below (needs the SDE: open the
   Production module once so it downloads).
-- **[hello-ui-plugin.zip](https://github.com/th-lange/eve-online-tooling/releases/latest/download/hello-ui-plugin.zip)**
+- **[hello-ui-plugin.zip](https://github.com/th-lange/eve-online-tooling-plugins/releases/latest/download/hello-ui-plugin.zip)**
   — a minimal UI-only plugin.
 
 Drag the downloaded `.zip` onto the app window and it's installed — no need
 to unzip it yourself first. Then activate it from the Plugins page. To build
-one yourself instead, read on — the full source is in
-[`examples/plugins/`](https://github.com/th-lange/eve-online-tooling/tree/main/examples/plugins).
+one yourself instead, read on — the full source (and both examples above)
+lives in
+[`eve-online-tooling-plugins`](https://github.com/th-lange/eve-online-tooling-plugins).
 
 ## The manifest: `plugin.json`
 
@@ -193,7 +194,7 @@ memory cap (~64 MiB) and a per-call timeout.
 ## The reference plugin
 
 A complete, buildable example lives in
-[`examples/plugins/pricing-model/`](https://github.com/th-lange/eve-online-tooling/tree/main/examples/plugins/pricing-model). It reads
+[`eve-online-tooling-plugins/pricing-model/`](https://github.com/th-lange/eve-online-tooling-plugins/tree/main/pricing-model). It reads
 an item's volume via `sde:read` and its Jita price via `market:read`, derives a
 volume-only density plus a price-aware ISK-per-m³ score, and keeps a call
 counter in `storage:own`.
@@ -201,11 +202,12 @@ counter in `storage:own`.
 ### Build it
 
 ```sh
+git clone https://github.com/th-lange/eve-online-tooling-plugins
 rustup target add wasm32-unknown-unknown
 cargo build --release --target wasm32-unknown-unknown \
-  --manifest-path examples/plugins/pricing-model/Cargo.toml
-cp examples/plugins/pricing-model/target/wasm32-unknown-unknown/release/pricing_model.wasm \
-   examples/plugins/pricing-model/pricing_model.wasm
+  --manifest-path eve-online-tooling-plugins/pricing-model/Cargo.toml
+cp eve-online-tooling-plugins/pricing-model/target/wasm32-unknown-unknown/release/pricing_model.wasm \
+   eve-online-tooling-plugins/pricing-model/pricing_model.wasm
 ```
 
 ### Install it
@@ -309,15 +311,15 @@ Under the hood that's this wire protocol, if you'd rather implement it yourself:
 ```
 
 For a **multi-file / TypeScript UI**, copy
-[`plugin-ui-sdk.js`](https://github.com/th-lange/eve-online-tooling/blob/main/examples/plugins/plugin-ui-sdk.js)
-(and [`plugin-ui-sdk.d.ts`](https://github.com/th-lange/eve-online-tooling/blob/main/examples/plugins/plugin-ui-sdk.d.ts)
+[`plugin-ui-sdk.js`](https://github.com/th-lange/eve-online-tooling-plugins/blob/main/plugin-ui-sdk.js)
+(and [`plugin-ui-sdk.d.ts`](https://github.com/th-lange/eve-online-tooling-plugins/blob/main/plugin-ui-sdk.d.ts)
 for types) into your UI and `import { invoke }` from it. The `plugin://` host
 sends `Access-Control-Allow-Origin`, so a sandboxed frame can ES-module-import
 its own assets (app builds from v0.40).
 
 ### Reference
 
-[`examples/plugins/pricing-model/`](https://github.com/th-lange/eve-online-tooling/tree/main/examples/plugins/pricing-model)
+[`eve-online-tooling-plugins/pricing-model/`](https://github.com/th-lange/eve-online-tooling-plugins/tree/main/pricing-model)
 is a complete logic **+** UI plugin: its Rust WASM scores an item by name
 (`search` resolves the name via `sde_search`, `evaluate` scores its cargo
 density and price-aware ISK/m³ via `sde_type_info` + `market_price`),

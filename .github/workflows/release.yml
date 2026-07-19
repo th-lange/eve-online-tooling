@@ -90,31 +90,6 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
-  # Attach ready-to-drop example plugins (runtime files only — manifest, wasm,
-  # UI) as release assets, so people can grab a working plugin without building
-  # it. Runs once (not per-platform) after the installers are up.
-  plugins:
-    needs: release
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - name: Package + upload example plugins
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
-          REPO: ${{ github.repository }}
-        run: |
-          cd examples/plugins
-          zip pricing-model-plugin.zip \
-            pricing-model/plugin.json pricing-model/pricing_model.wasm pricing-model/index.html
-          zip hello-ui-plugin.zip \
-            hello-ui/plugin.json hello-ui/index.html
-          gh release upload "$TAG" \
-            pricing-model-plugin.zip hello-ui-plugin.zip \
-            --repo "$REPO" --clobber
-
   # Fill in the GitHub Release description once the builds are up: "what goes
   # live" (the changed) is GitHub's auto-generated changelog (merged PRs since
   # the previous tag); on top of that we explain why the installers are

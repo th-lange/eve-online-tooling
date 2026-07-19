@@ -323,8 +323,7 @@ mod tests {
         dir
     }
     fn example_wasm() -> std::path::PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../examples/plugins/pricing-model/pricing_model.wasm")
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/plugins/testdata/pricing_model.wasm")
     }
     /// Write a minimal SDE db at `<dir>/sde/sde.sqlite` with one type (34 =
     /// Tritanium, volume 0.01) so `sde_type_info` has something to read.
