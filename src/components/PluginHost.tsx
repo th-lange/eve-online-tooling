@@ -15,7 +15,8 @@ import { pluginInvoke } from "../lib/api";
  * WASM (`net:fetch`), never the UI.
  */
 
-/** Wire channel shared with the guest SDK (`examples/plugins/plugin-ui-sdk.js`). */
+/** Wire channel shared with the guest SDK (`plugin-ui-sdk.js` in
+ *  github.com/th-lange/eve-online-tooling-plugins). */
 const CHANNEL = "eve-plugin";
 
 interface InvokeRequest {
