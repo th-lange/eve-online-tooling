@@ -127,6 +127,11 @@ Every run is bounded so it can't hang the app:
 
 - a wall-clock timeout,
 - Rhai: an operation-count cap; JavaScript: a loop-iteration and recursion cap,
-- caps on log volume and result/string sizes.
+- Rhai only: a data-size cap (8 MiB of cumulative string content, 512 Ki
+  array/map entries) covering both script-built values and capability
+  results returned to the script (e.g. `industry_jobs`/`pi_overview`/`assets`
+  over "All characters" on a long-lived account) — sized for real personal
+  ESI payloads, not just script-authored strings,
+- caps on log volume.
 
 A snippet that exceeds a limit returns an error instead of running forever.

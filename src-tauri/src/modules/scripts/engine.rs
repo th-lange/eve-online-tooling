@@ -208,6 +208,15 @@ mod tests {
                         }
                     ]
                 })),
+                "big_payload" => Ok(json!({
+                    // ~400 KB of cumulative string content: comfortably over
+                    // Rhai's old 256 KiB max_string_size (real personal
+                    // industry_jobs/pi_overview/assets payloads blow that),
+                    // comfortably under the new 8 MiB cap.
+                    "items": (0..2000)
+                        .map(|i| json!({ "name": format!("item-{i}"), "note": "x".repeat(200) }))
+                        .collect::<Vec<_>>()
+                })),
                 other => Ok(json!({ "called": other })),
             }
         }
@@ -449,6 +458,25 @@ mod tests {
         );
         assert!(js.ok, "error: {:?}", js.error);
         assert_eq!(js.result.as_f64(), Some(1.0));
+    }
+
+    #[test]
+    fn rhai_accepts_a_capability_result_over_the_old_256kib_string_cap() {
+        // Regression pin: a real personal ESI payload (e.g. industry_jobs or
+        // pi_overview fanned out over "All characters" with real history) can
+        // easily exceed Rhai's old 256 KiB cumulative max_string_size —
+        // rhai checks this on the RETURN VALUE of every native host
+        // function, not just script-built strings, so `invoke(...)` itself
+        // used to fail with "Length of string too large" on ordinary data,
+        // not just a runaway script.
+        let out = run(
+            host(),
+            Language::Rhai,
+            r#"invoke("big_payload", #{}).items.len()"#,
+            &Limits::default(),
+        );
+        assert!(out.ok, "error: {:?}", out.error);
+        assert_eq!(out.result.as_f64(), Some(2000.0));
     }
 
     #[test]
