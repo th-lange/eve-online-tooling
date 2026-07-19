@@ -20,9 +20,21 @@ impl ScriptEngine for RhaiEngine {
         let mut engine = Engine::new();
         engine.set_max_operations(limits.max_ops);
         engine.set_max_call_levels(limits.recursion_limit);
-        engine.set_max_string_size(256 * 1024);
-        engine.set_max_array_size(64 * 1024);
-        engine.set_max_map_size(64 * 1024);
+        // Rhai's max_string/array/map_size limits are the *cumulative* size
+        // of every string/array/map anywhere in a Dynamic (rhai's
+        // calc_data_sizes recurses and sums), not any single field — and
+        // they're checked on the RETURN VALUE of every native host function
+        // too, not just script-built values. 256 KiB / 64 Ki entries (the
+        // crate's toy-example-sized defaults) is comfortably blown by real
+        // personal ESI payloads once a script pulls a capability like
+        // industry_jobs/pi_overview/assets over "All characters" on an
+        // account with real history — that's real data, not a runaway
+        // script, so the caps need real headroom. Still bounded: a
+        // pathological/malicious script is caught by these plus the
+        // operation-count and wall-clock limits above.
+        engine.set_max_string_size(8 * 1024 * 1024);
+        engine.set_max_array_size(512 * 1024);
+        engine.set_max_map_size(512 * 1024);
 
         // Cooperative wall-clock timeout: `on_progress` runs every operation;
         // returning `Some` terminates the evaluation.
