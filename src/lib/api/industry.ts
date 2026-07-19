@@ -25,10 +25,18 @@ export interface Slots {
   science: Slot;
   reactions: Slot;
 }
+export interface CharacterSlots {
+  characterId: number;
+  characterName: string;
+  slots: Slots;
+}
 export interface JobsResult {
   jobs: JobRow[];
-  /** Job-slot usage (used vs available), from the character's skills. */
+  /** Job-slot usage (used vs available), summed across every target character. */
   slots: Slots;
+  /** Per-character breakdown of the same slot pools — which character has an
+   *  idle line, not just the aggregate. */
+  byCharacter: CharacterSlots[];
 }
 
 /**
