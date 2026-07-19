@@ -185,24 +185,26 @@ fn now_rfc3339_cmp(expiry: &str) -> bool {
 /// Colonies overview with extractor timers, storage usage, and the balance.
 /// Fans out over [`storage::target_characters`] so "All characters" merges
 /// every roster member's colonies; a character whose ESI fetch fails is
-/// skipped rather than failing the whole call.
-#[tauri::command]
-pub async fn pi_overview(
-    app: AppHandle,
-    auth_state: State<'_, AuthState>,
+/// skipped rather than failing the whole call. The Tauri command's core,
+/// factored out so `capabilities::cap_pi_overview` can call it with a
+/// [`HostCtx`](crate::capabilities::HostCtx)-supplied dir/auth instead of a
+/// Tauri `AppHandle`/`State`.
+pub async fn pi_overview_core(
+    dir: &std::path::Path,
+    sde: Sde,
+    auth: &AuthState,
 ) -> Result<Vec<ColonyView>, crate::model::AppError> {
-    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
-    let character_ids = storage::target_characters(&dir);
+    let character_ids = storage::target_characters(dir);
     if character_ids.is_empty() {
         return Err(crate::model::AppError::auth_required());
     }
 
     let schematics = sde.planet_schematics().map_err(|e| e.to_string())?;
     let systems = sde.solar_system_info().map_err(|e| e.to_string())?;
-    let locked: HashSet<i64> = storage::load_id_list(&dir, LOCKED_LIST)
+    let locked: HashSet<i64> = storage::load_id_list(dir, LOCKED_LIST)
         .into_iter()
         .collect();
-    let names = storage::character_names(&dir);
+    let names = storage::character_names(dir);
 
     let mut views = Vec::new();
     for character_id in character_ids {
@@ -212,7 +214,7 @@ pub async fn pi_overview(
             .unwrap_or_else(|| format!("Character {character_id}"));
 
         let colonies: Vec<EsiColony> = match authed_get(
-            &auth_state,
+            auth,
             character_id,
             &format!("/latest/characters/{character_id}/planets/"),
         )
@@ -224,7 +226,7 @@ pub async fn pi_overview(
 
         for c in &colonies {
             let planet: EsiPlanet = match authed_get(
-                &auth_state,
+                auth,
                 character_id,
                 &format!("/latest/characters/{character_id}/planets/{}/", c.planet_id),
             )
@@ -249,6 +251,16 @@ pub async fn pi_overview(
         }
     }
     Ok(views)
+}
+
+/// Colonies overview with extractor timers, storage usage, and the balance.
+#[tauri::command]
+pub async fn pi_overview(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+) -> Result<Vec<ColonyView>, crate::model::AppError> {
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
+    pi_overview_core(&dir, sde, &auth_state).await
 }
 
 /// Assemble one colony's view (splits ESI + SDE joins from the async fetch).

@@ -135,6 +135,86 @@ const stacks = corp_assets();
 write_message(`Corp asset stacks: ${stacks.length}`, stacks);
 stacks.length;"#;
 
+/// Idle-production alarm: PI colonies out of production, plus manufacturing
+/// and invention lines nobody is running, across every character.
+pub const IDLE_PRODUCTION_RHAI: &str = r#"// Idle-production alarm: PI, manufacturing, and invention, across every
+// character (the whole roster when "All characters" is the app's active
+// selection, otherwise just the active one). Each numbered section below is
+// self-contained — comment out (or delete) a whole section to stop checking
+// it; the others keep working.
+// Needs esi-planets.manage_planets.v1 for the PI check and
+// esi-industry.read_character_jobs.v1 for the job checks (enable the scope
+// on the EVE app, then re-login).
+let alarms_fired = 0;
+
+// --- 1) PI: colonies out of production ----------------------------------
+// Flags every colony the app already marked "needs attention": its
+// extraction program ended, or a commodity is in deficit.
+let colonies = invoke("pi_overview", #{});
+let idle_colonies = colonies.filter(|c| c.needsAttention);
+if idle_colonies.len() > 0 {
+    let detail = idle_colonies.map(|c| c.characterName + ": " + c.systemName + " (" + c.planetType + ")");
+    send_alarm("" + idle_colonies.len() + " PI colony(ies) need attention", detail);
+    alarms_fired += 1;
+}
+
+// --- 2) Manufacturing: no line running for any character -----------------
+let mfg_jobs = invoke("industry_jobs", #{});
+if mfg_jobs.slots.manufacturing.used == 0 {
+    send_alarm("No manufacturing job running for any character", mfg_jobs.slots.manufacturing);
+    alarms_fired += 1;
+}
+
+// --- 3) Invention: no job running for any character -----------------------
+let inv_jobs = invoke("industry_jobs", #{});
+let active_invention = inv_jobs.jobs.filter(|j| j.activity == "Invention" && (j.status == "active" || j.status == "ready"));
+if active_invention.len() == 0 {
+    send_alarm("No invention job running for any character", "every invention slot is idle");
+    alarms_fired += 1;
+}
+
+alarms_fired"#;
+
+pub const IDLE_PRODUCTION_JS: &str = r#"// Idle-production alarm: PI, manufacturing, and invention, across every
+// character (the whole roster when "All characters" is the app's active
+// selection, otherwise just the active one). Each numbered section below is
+// self-contained — comment out (or delete) a whole section to stop checking
+// it; the others keep working.
+// Needs esi-planets.manage_planets.v1 for the PI check and
+// esi-industry.read_character_jobs.v1 for the job checks (enable the scope
+// on the EVE app, then re-login).
+let alarmsFired = 0;
+
+// --- 1) PI: colonies out of production ------------------------------------
+// Flags every colony the app already marked "needs attention": its
+// extraction program ended, or a commodity is in deficit.
+const colonies = invoke("pi_overview", {});
+const idleColonies = colonies.filter((c) => c.needsAttention);
+if (idleColonies.length > 0) {
+  const detail = idleColonies.map((c) => `${c.characterName}: ${c.systemName} (${c.planetType})`);
+  send_alarm(`${idleColonies.length} PI colony(ies) need attention`, detail);
+  alarmsFired += 1;
+}
+
+// --- 2) Manufacturing: no line running for any character ------------------
+const mfgJobs = invoke("industry_jobs", {});
+if (mfgJobs.slots.manufacturing.used === 0) {
+  send_alarm("No manufacturing job running for any character", mfgJobs.slots.manufacturing);
+  alarmsFired += 1;
+}
+
+// --- 3) Invention: no job running for any character ------------------------
+const invJobs = invoke("industry_jobs", {});
+const activeInvention = invJobs.jobs.filter(
+  (j) => j.activity === "Invention" && (j.status === "active" || j.status === "ready"),
+);
+if (activeInvention.length === 0) {
+  send_alarm("No invention job running for any character", "every invention slot is idle");
+  alarmsFired += 1;
+}
+
+alarmsFired;"#;
+
 /// One selectable example template shown in the editor.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -212,6 +292,18 @@ pub fn examples() -> Vec<ExampleScript> {
             CORP_RHAI,
         ),
         example("corp-js", "Corp asset count (JS)", Language::Js, CORP_JS),
+        example(
+            "idle-production-rhai",
+            "Idle production alarm (Rhai)",
+            Language::Rhai,
+            IDLE_PRODUCTION_RHAI,
+        ),
+        example(
+            "idle-production-js",
+            "Idle production alarm (JS)",
+            Language::Js,
+            IDLE_PRODUCTION_JS,
+        ),
     ]
 }
 

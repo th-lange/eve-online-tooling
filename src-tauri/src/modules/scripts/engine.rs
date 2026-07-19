@@ -166,6 +166,30 @@ mod tests {
                     "from": "Jita", "to": "Amarr", "jumps": 5, "reachable": true
                 })),
                 "sde_search" => Ok(json!({ "results": [{ "typeId": 34, "name": "Tritanium" }] })),
+                "pi_overview" => Ok(json!([
+                    {
+                        "characterId": 1, "characterName": "Test Pilot",
+                        "planetId": 40000001, "systemId": 30000001, "systemName": "Jita",
+                        "planetType": "Barren", "upgradeLevel": 3, "pinCount": 5,
+                        "extractors": [], "storage": [], "balance": [], "produced": [],
+                        "needsAttention": true,
+                    }
+                ])),
+                "industry_jobs" => Ok(json!({
+                    "jobs": [
+                        {
+                            "jobId": 1, "activity": "Manufacturing", "product": "Rifter",
+                            "runs": 1, "status": "delivered", "cost": 1000.0,
+                            "startDate": "", "endDate": "", "facility": "Jita IV - Moon 4",
+                            "owner": "You", "characterId": 1, "characterName": "Test Pilot",
+                        }
+                    ],
+                    "slots": {
+                        "manufacturing": { "used": 0, "total": 2 },
+                        "science": { "used": 0, "total": 1 },
+                        "reactions": { "used": 0, "total": 0 },
+                    }
+                })),
                 other => Ok(json!({ "called": other })),
             }
         }
@@ -362,6 +386,29 @@ mod tests {
         );
         assert!(out.ok, "error: {:?}", out.error);
         assert_eq!(out.result.as_f64(), Some(1.0)); // one undercut order in the fake feed
+    }
+
+    #[test]
+    fn idle_production_example_flags_all_three_conditions() {
+        // Fake feed: one PI colony needing attention, zero manufacturing
+        // slots in use, and no active/ready invention job — all three
+        // sections should fire.
+        let rhai = run(
+            host(),
+            Language::Rhai,
+            examples::IDLE_PRODUCTION_RHAI,
+            &Limits::default(),
+        );
+        assert!(rhai.ok, "error: {:?}", rhai.error);
+        assert_eq!(rhai.result.as_f64(), Some(3.0));
+        let js = run(
+            host(),
+            Language::Js,
+            examples::IDLE_PRODUCTION_JS,
+            &Limits::default(),
+        );
+        assert!(js.ok, "error: {:?}", js.error);
+        assert_eq!(js.result.as_f64(), Some(3.0));
     }
 
     #[test]

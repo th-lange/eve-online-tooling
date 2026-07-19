@@ -35,6 +35,12 @@ pub enum Permission {
     /// Post alarms / messages to the Info Panel.
     #[serde(rename = "info:write")]
     InfoWrite,
+    /// Read the user's Planetary Interaction colonies.
+    #[serde(rename = "pi:read")]
+    PiRead,
+    /// Read the user's industry jobs (manufacturing/research/invention/reactions).
+    #[serde(rename = "industry:read")]
+    IndustryRead,
 }
 
 /// One MCP tool a plugin declares it backs. The host advertises it (namespaced

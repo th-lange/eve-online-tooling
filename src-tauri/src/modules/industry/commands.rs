@@ -165,7 +165,7 @@ fn activity_name(id: i64) -> &'static str {
 /// per roster character when "All characters" is active.
 async fn character_industry_jobs(
     dir: &std::path::Path,
-    auth_state: &State<'_, AuthState>,
+    auth: &AuthState,
     character_id: i64,
     character_name: &str,
 ) -> Result<(Vec<JobRow>, Slots), crate::model::AppError> {
@@ -174,7 +174,7 @@ async fn character_industry_jobs(
     // under load) and backs off the error budget; a real 4xx (403 missing scope)
     // still fails fast.
     let incoming: Vec<StoredJob> = authed_get(
-        auth_state,
+        auth,
         character_id,
         &format!("/latest/characters/{character_id}/industry/jobs/?include_completed=true"),
     )
@@ -197,7 +197,7 @@ async fn character_industry_jobs(
 
     // Slot usage: max slots come from skills (1 base + each rank), used = jobs
     // occupying a slot now (active or finished-but-undelivered).
-    let skills = character_skill_levels(auth_state, character_id)
+    let skills = character_skill_levels(auth, character_id)
         .await
         .unwrap_or_default();
     let level = |skill_id: i64| skills.level(skill_id);
@@ -219,9 +219,9 @@ async fn character_industry_jobs(
     // the personal one. Slots above stay character-only.
     let mut combined: Vec<(StoredJob, &'static str)> =
         jobs.into_iter().map(|j| (j, "You")).collect();
-    if let Ok(corp_id) = corporation_id(auth_state, character_id).await {
+    if let Ok(corp_id) = corporation_id(auth, character_id).await {
         let seen: HashSet<i64> = combined.iter().map(|(j, _)| j.job_id).collect();
-        for j in fetch_corp_jobs(auth_state, character_id, corp_id).await {
+        for j in fetch_corp_jobs(auth, character_id, corp_id).await {
             if !seen.contains(&j.job_id) {
                 combined.push((j, "Corp"));
             }
@@ -236,7 +236,7 @@ async fn character_industry_jobs(
         .iter()
         .filter_map(|(j, _)| j.facility_id.or(j.station_id))
         .collect();
-    let facilities = resolve_names(auth_state, &facility_ids).await;
+    let facilities = resolve_names(auth, &facility_ids).await;
 
     let rows: Vec<JobRow> = combined
         .into_iter()
@@ -271,15 +271,16 @@ async fn character_industry_jobs(
 /// roster character; `None` defaults to the active selection — every roster
 /// character when "All characters" is active (rows tagged, slots summed; a
 /// character whose ESI fetch fails is skipped rather than failing the whole
-/// call), otherwise just the active one (errors propagate, as before).
-#[tauri::command]
-pub async fn industry_jobs(
-    app: AppHandle,
-    auth_state: State<'_, AuthState>,
+/// call), otherwise just the active one (errors propagate, as before). The
+/// Tauri command's core, factored out so `capabilities::cap_industry_jobs` can
+/// call it with a [`HostCtx`](crate::capabilities::HostCtx)-supplied dir/auth
+/// instead of a Tauri `AppHandle`/`State`.
+pub async fn industry_jobs_core(
+    dir: &std::path::Path,
+    auth: &AuthState,
     character_id: Option<i64>,
 ) -> Result<JobsResult, crate::model::AppError> {
-    let dir = crate::storage::app_data_dir(&app)?;
-    let roster = storage::load_roster(&dir);
+    let roster = storage::load_roster(dir);
 
     // An explicit, valid roster id always means "just this character". Else
     // fan out over the active selection's target set: the whole roster when
@@ -287,7 +288,7 @@ pub async fn industry_jobs(
     let (targets, aggregating): (Vec<i64>, bool) = match character_id {
         Some(id) if roster.iter().any(|c| c.character_id == id) => (vec![id], false),
         _ => {
-            let targets = storage::target_characters(&dir);
+            let targets = storage::target_characters(dir);
             if targets.is_empty() {
                 return Err(crate::model::AppError::auth_required());
             }
@@ -296,7 +297,7 @@ pub async fn industry_jobs(
         }
     };
 
-    let names = storage::character_names(&dir);
+    let names = storage::character_names(dir);
 
     let mut rows: Vec<JobRow> = Vec::new();
     let mut slots = Slots {
@@ -306,7 +307,7 @@ pub async fn industry_jobs(
     };
     for cid in targets {
         let name = names.get(&cid).cloned().unwrap_or_else(|| cid.to_string());
-        match character_industry_jobs(&dir, &auth_state, cid, &name).await {
+        match character_industry_jobs(dir, auth, cid, &name).await {
             Ok((mut r, s)) => {
                 rows.append(&mut r);
                 slots.manufacturing.used += s.manufacturing.used;
@@ -333,6 +334,17 @@ pub async fn industry_jobs(
             .then_with(|| b.end_date.cmp(&a.end_date))
     });
     Ok(JobsResult { jobs: rows, slots })
+}
+
+/// The character's industry jobs (running + recently delivered), names resolved.
+#[tauri::command]
+pub async fn industry_jobs(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+    character_id: Option<i64>,
+) -> Result<JobsResult, crate::model::AppError> {
+    let dir = crate::storage::app_data_dir(&app)?;
+    industry_jobs_core(&dir, &auth_state, character_id).await
 }
 
 #[cfg(test)]

@@ -21,6 +21,8 @@ use crate::esi::{self, AuthState};
 use crate::market::{default_region_id, resolve_location, MarketService};
 use crate::modules::appraisal;
 use crate::modules::fitting::{self, Fit, FitStats};
+use crate::modules::industry;
+use crate::modules::pi;
 use crate::modules::production;
 use crate::modules::reprocessing;
 use crate::plugins::manifest::Permission;
@@ -177,6 +179,24 @@ static REGISTRY: &[Capability] = &[
         description: "The active character's open market orders, flagged for undercut.",
         params: &[],
         run: cap_my_orders,
+    },
+    Capability {
+        name: "pi_overview",
+        permission: Permission::PiRead,
+        mcp: false,
+        mcp_dev: false,
+        description: "Planetary Interaction colonies (extractor timers, storage, commodity balance) for every target character — the whole roster when \"All characters\" is the app's active selection, otherwise just the active one.",
+        params: &[],
+        run: cap_pi_overview,
+    },
+    Capability {
+        name: "industry_jobs",
+        permission: Permission::IndustryRead,
+        mcp: false,
+        mcp_dev: false,
+        description: "Running + recently-delivered industry jobs and job-slot usage (manufacturing/science/reactions) for every target character — the whole roster when \"All characters\" is the app's active selection, otherwise just the active one.",
+        params: &[],
+        run: cap_industry_jobs,
     },
     Capability {
         name: "production_profit",
@@ -384,6 +404,34 @@ fn cap_my_orders(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
     serde_json::to_value(rows).map_err(|e| e.to_string())
 }
 
+/// Colonies overview (extractor timers, storage, commodity balance) for
+/// every target character. Touches `ctx.auth` (per-character ESI) — never
+/// exposed on the MCP bridge.
+fn cap_pi_overview(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
+    let sde = open_from_dir(ctx.app_data_dir)?;
+    let views = tauri::async_runtime::block_on(pi::commands::pi_overview_core(
+        ctx.app_data_dir,
+        sde,
+        ctx.auth,
+    ))
+    .map_err(|e| e.to_string())?;
+    serde_json::to_value(views).map_err(|e| e.to_string())
+}
+
+/// Running + recently-delivered industry jobs and job-slot usage for every
+/// target character (`None` defaults to the app's active selection — the
+/// whole roster when "All characters" is active). Touches `ctx.auth` — never
+/// exposed on the MCP bridge.
+fn cap_industry_jobs(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
+    let result = tauri::async_runtime::block_on(industry::commands::industry_jobs_core(
+        ctx.app_data_dir,
+        ctx.auth,
+        None,
+    ))
+    .map_err(|e| e.to_string())?;
+    serde_json::to_value(result).map_err(|e| e.to_string())
+}
+
 /// Dev-tier: build-vs-buy manufacturing profit for one blueprint (flat —
 /// materials priced at market, no recursive sub-build resolution; that keeps
 /// the result reproducible from the SDE + a price vector alone, per
@@ -536,9 +584,16 @@ mod tests {
             find("corp_assets").unwrap().permission,
             Permission::AssetsRead
         );
+        assert_eq!(find("pi_overview").unwrap().permission, Permission::PiRead);
+        assert_eq!(
+            find("industry_jobs").unwrap().permission,
+            Permission::IndustryRead
+        );
         // Auth-gated reads stay off the public MCP bridge; public data is on it.
         assert!(!find("my_orders").unwrap().mcp);
         assert!(!find("assets").unwrap().mcp);
+        assert!(!find("pi_overview").unwrap().mcp);
+        assert!(!find("industry_jobs").unwrap().mcp);
         assert!(find("market_price").unwrap().mcp);
         assert!(find("sde_search").unwrap().mcp);
     }
@@ -571,8 +626,15 @@ mod tests {
     /// and this test fails.
     #[test]
     fn mcp_never_reaches_auth_gated_data() {
-        let auth_gated =
-            |p: Permission| matches!(p, Permission::AssetsRead | Permission::OrdersRead);
+        let auth_gated = |p: Permission| {
+            matches!(
+                p,
+                Permission::AssetsRead
+                    | Permission::OrdersRead
+                    | Permission::PiRead
+                    | Permission::IndustryRead
+            )
+        };
         for cap in registry() {
             if cap.mcp || cap.mcp_dev {
                 assert!(
