@@ -179,16 +179,34 @@ mod tests {
                     "jobs": [
                         {
                             "jobId": 1, "activity": "Manufacturing", "product": "Rifter",
-                            "runs": 1, "status": "delivered", "cost": 1000.0,
+                            "runs": 1, "status": "active", "cost": 1000.0,
                             "startDate": "", "endDate": "", "facility": "Jita IV - Moon 4",
-                            "owner": "You", "characterId": 1, "characterName": "Test Pilot",
+                            "owner": "You", "characterId": 2, "characterName": "Second Pilot",
                         }
                     ],
                     "slots": {
-                        "manufacturing": { "used": 0, "total": 2 },
-                        "science": { "used": 0, "total": 1 },
+                        "manufacturing": { "used": 1, "total": 3 },
+                        "science": { "used": 0, "total": 2 },
                         "reactions": { "used": 0, "total": 0 },
-                    }
+                    },
+                    "byCharacter": [
+                        {
+                            "characterId": 1, "characterName": "Test Pilot",
+                            "slots": {
+                                "manufacturing": { "used": 0, "total": 2 },
+                                "science": { "used": 0, "total": 1 },
+                                "reactions": { "used": 0, "total": 0 },
+                            }
+                        },
+                        {
+                            "characterId": 2, "characterName": "Second Pilot",
+                            "slots": {
+                                "manufacturing": { "used": 1, "total": 1 },
+                                "science": { "used": 0, "total": 1 },
+                                "reactions": { "used": 0, "total": 0 },
+                            }
+                        }
+                    ]
                 })),
                 other => Ok(json!({ "called": other })),
             }
@@ -390,9 +408,9 @@ mod tests {
 
     #[test]
     fn idle_production_example_flags_all_three_conditions() {
-        // Fake feed: one PI colony needing attention, zero manufacturing
-        // slots in use, and no active/ready invention job — all three
-        // sections should fire.
+        // Fake feed: one PI colony needing attention, two characters where
+        // only one (Test Pilot) has an idle manufacturing line, and neither
+        // has an active/ready invention job — all three sections should fire.
         let rhai = run(
             host(),
             Language::Rhai,
@@ -409,6 +427,28 @@ mod tests {
         );
         assert!(js.ok, "error: {:?}", js.error);
         assert_eq!(js.result.as_f64(), Some(3.0));
+    }
+
+    #[test]
+    fn idle_production_manufacturing_check_names_only_the_idle_character() {
+        // Second Pilot has a running manufacturing job (used == 1) and Test
+        // Pilot doesn't — only Test Pilot should count as idle, not both.
+        let rhai = run(
+            host(),
+            Language::Rhai,
+            r#"invoke("industry_jobs", #{}).byCharacter.filter(|c| c.slots.manufacturing.used == 0).len()"#,
+            &Limits::default(),
+        );
+        assert!(rhai.ok, "error: {:?}", rhai.error);
+        assert_eq!(rhai.result.as_f64(), Some(1.0));
+        let js = run(
+            host(),
+            Language::Js,
+            r#"invoke("industry_jobs", {}).byCharacter.filter((c) => c.slots.manufacturing.used === 0).length;"#,
+            &Limits::default(),
+        );
+        assert!(js.ok, "error: {:?}", js.error);
+        assert_eq!(js.result.as_f64(), Some(1.0));
     }
 
     #[test]

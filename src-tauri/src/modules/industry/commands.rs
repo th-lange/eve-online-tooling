@@ -94,12 +94,27 @@ pub struct Slots {
     pub reactions: Slot,
 }
 
+/// One character's job-slot pools, so a consumer can tell *which* character
+/// has an idle line rather than only an aggregate used-vs-total.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CharacterSlots {
+    pub character_id: i64,
+    pub character_name: String,
+    pub slots: Slots,
+}
+
 /// Jobs + slot usage — the Industry Jobs command's response.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JobsResult {
     pub jobs: Vec<JobRow>,
+    /// Summed across every target character.
     pub slots: Slots,
+    /// Per-character breakdown of the same slot pools, one entry per target
+    /// character regardless of whether they have any jobs at all (so a
+    /// character who has never run a job still shows up with `used: 0`).
+    pub by_character: Vec<CharacterSlots>,
 }
 
 /// Which slot pool an activity draws from: manufacturing / science / reactions.
@@ -305,6 +320,7 @@ pub async fn industry_jobs_core(
         science: Slot { used: 0, total: 0 },
         reactions: Slot { used: 0, total: 0 },
     };
+    let mut by_character: Vec<CharacterSlots> = Vec::new();
     for cid in targets {
         let name = names.get(&cid).cloned().unwrap_or_else(|| cid.to_string());
         match character_industry_jobs(dir, auth, cid, &name).await {
@@ -316,6 +332,11 @@ pub async fn industry_jobs_core(
                 slots.science.total += s.science.total;
                 slots.reactions.used += s.reactions.used;
                 slots.reactions.total += s.reactions.total;
+                by_character.push(CharacterSlots {
+                    character_id: cid,
+                    character_name: name,
+                    slots: s,
+                });
             }
             Err(e) => {
                 if aggregating {
@@ -333,7 +354,11 @@ pub async fn industry_jobs_core(
             .cmp(&rank(&b.status))
             .then_with(|| b.end_date.cmp(&a.end_date))
     });
-    Ok(JobsResult { jobs: rows, slots })
+    Ok(JobsResult {
+        jobs: rows,
+        slots,
+        by_character,
+    })
 }
 
 /// The character's industry jobs (running + recently delivered), names resolved.

@@ -136,12 +136,13 @@ write_message(`Corp asset stacks: ${stacks.length}`, stacks);
 stacks.length;"#;
 
 /// Idle-production alarm: PI colonies out of production, plus manufacturing
-/// and invention lines nobody is running, across every character.
+/// and invention lines idle on any one character, across every character.
 pub const IDLE_PRODUCTION_RHAI: &str = r#"// Idle-production alarm: PI, manufacturing, and invention, across every
 // character (the whole roster when "All characters" is the app's active
 // selection, otherwise just the active one). Each numbered section below is
 // self-contained — comment out (or delete) a whole section to stop checking
-// it; the others keep working.
+// it; the others keep working. Manufacturing/invention alarm as soon as ANY
+// one character's line is idle, naming which character(s).
 // Needs esi-planets.manage_planets.v1 for the PI check and
 // esi-industry.read_character_jobs.v1 for the job checks (enable the scope
 // on the EVE app, then re-login).
@@ -158,18 +159,28 @@ if idle_colonies.len() > 0 {
     alarms_fired += 1;
 }
 
-// --- 2) Manufacturing: no line running for any character -----------------
+// --- 2) Manufacturing: idle line, per character --------------------------
+// Fires as soon as any one character's manufacturing line is idle (used ==
+// 0), naming exactly which character(s) — not just an aggregate.
 let mfg_jobs = invoke("industry_jobs", #{});
-if mfg_jobs.slots.manufacturing.used == 0 {
-    send_alarm("No manufacturing job running for any character", mfg_jobs.slots.manufacturing);
+let idle_mfg = mfg_jobs.byCharacter.filter(|c| c.slots.manufacturing.used == 0);
+if idle_mfg.len() > 0 {
+    let names = idle_mfg.map(|c| c.characterName);
+    send_alarm("" + idle_mfg.len() + " character(s) have an idle manufacturing line", names);
     alarms_fired += 1;
 }
 
-// --- 3) Invention: no job running for any character -----------------------
+// --- 3) Invention: idle line, per character -------------------------------
+// Same idea for invention: a character counts as idle unless they have an
+// active/ready Invention job right now.
 let inv_jobs = invoke("industry_jobs", #{});
-let active_invention = inv_jobs.jobs.filter(|j| j.activity == "Invention" && (j.status == "active" || j.status == "ready"));
-if active_invention.len() == 0 {
-    send_alarm("No invention job running for any character", "every invention slot is idle");
+let inventing = inv_jobs.jobs
+    .filter(|j| j.activity == "Invention" && (j.status == "active" || j.status == "ready"))
+    .map(|j| j.characterId);
+let idle_inv = inv_jobs.byCharacter.filter(|c| !inventing.contains(c.characterId));
+if idle_inv.len() > 0 {
+    let names = idle_inv.map(|c| c.characterName);
+    send_alarm("" + idle_inv.len() + " character(s) have an idle invention line", names);
     alarms_fired += 1;
 }
 
@@ -179,7 +190,8 @@ pub const IDLE_PRODUCTION_JS: &str = r#"// Idle-production alarm: PI, manufactur
 // character (the whole roster when "All characters" is the app's active
 // selection, otherwise just the active one). Each numbered section below is
 // self-contained — comment out (or delete) a whole section to stop checking
-// it; the others keep working.
+// it; the others keep working. Manufacturing/invention alarm as soon as ANY
+// one character's line is idle, naming which character(s).
 // Needs esi-planets.manage_planets.v1 for the PI check and
 // esi-industry.read_character_jobs.v1 for the job checks (enable the scope
 // on the EVE app, then re-login).
@@ -196,20 +208,28 @@ if (idleColonies.length > 0) {
   alarmsFired += 1;
 }
 
-// --- 2) Manufacturing: no line running for any character ------------------
+// --- 2) Manufacturing: idle line, per character ----------------------------
+// Fires as soon as any one character's manufacturing line is idle (used ===
+// 0), naming exactly which character(s) — not just an aggregate.
 const mfgJobs = invoke("industry_jobs", {});
-if (mfgJobs.slots.manufacturing.used === 0) {
-  send_alarm("No manufacturing job running for any character", mfgJobs.slots.manufacturing);
+const idleMfg = mfgJobs.byCharacter.filter((c) => c.slots.manufacturing.used === 0);
+if (idleMfg.length > 0) {
+  const names = idleMfg.map((c) => c.characterName);
+  send_alarm(`${idleMfg.length} character(s) have an idle manufacturing line`, names);
   alarmsFired += 1;
 }
 
-// --- 3) Invention: no job running for any character ------------------------
+// --- 3) Invention: idle line, per character --------------------------------
+// Same idea for invention: a character counts as idle unless they have an
+// active/ready Invention job right now.
 const invJobs = invoke("industry_jobs", {});
-const activeInvention = invJobs.jobs.filter(
-  (j) => j.activity === "Invention" && (j.status === "active" || j.status === "ready"),
-);
-if (activeInvention.length === 0) {
-  send_alarm("No invention job running for any character", "every invention slot is idle");
+const inventing = invJobs.jobs
+  .filter((j) => j.activity === "Invention" && (j.status === "active" || j.status === "ready"))
+  .map((j) => j.characterId);
+const idleInv = invJobs.byCharacter.filter((c) => !inventing.includes(c.characterId));
+if (idleInv.length > 0) {
+  const names = idleInv.map((c) => c.characterName);
+  send_alarm(`${idleInv.length} character(s) have an idle invention line`, names);
   alarmsFired += 1;
 }
 
