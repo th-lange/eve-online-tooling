@@ -8,10 +8,9 @@ import {
   act,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
 import type { ReactNode } from "react";
 import { PluginsPage } from "./PluginsPage";
-import type { McpStatus, PluginEntry, Script } from "../../lib/api";
+import type { McpStatus, PluginEntry } from "../../lib/api";
 
 const invokeMock = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
@@ -50,11 +49,7 @@ const RUNNING: McpStatus = {
 };
 const STOPPED: McpStatus = { running: false, url: null, token: null };
 
-function renderPage(
-  entries: PluginEntry[],
-  mcpStart: McpStatus = STOPPED,
-  scripts: Script[] = [],
-) {
+function renderPage(entries: PluginEntry[], mcpStart: McpStatus = STOPPED) {
   // Stateful MCP mock: start/stop flip what status returns next.
   let mcp: McpStatus = mcpStart;
   let autostart = false;
@@ -95,8 +90,6 @@ function renderPage(
           return Promise.resolve(entries);
         case "plugins_remove":
           return Promise.resolve(entries.filter((e) => e !== PLUGIN));
-        case "scripts_list":
-          return Promise.resolve(scripts);
         default:
           return Promise.reject(
             new Error(`unexpected command ${cmd} ${JSON.stringify(args)}`),
@@ -106,9 +99,7 @@ function renderPage(
   );
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={qc}>
-      <MemoryRouter>{children}</MemoryRouter>
-    </QueryClientProvider>
+    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
   );
   return render(<PluginsPage />, { wrapper });
 }
@@ -298,64 +289,5 @@ describe("PluginsPage", () => {
       expect.anything(),
     );
     expect(screen.getByText("Pricing Model")).toBeInTheDocument();
-  });
-
-  it("shows the running-scripts count but stays collapsed by default", async () => {
-    const armed: Script = {
-      id: "watcher",
-      name: "Price Watcher",
-      language: "rhai",
-      code: "1",
-      intervalMin: 5,
-      enabled: true,
-      updatedAt: 0,
-    };
-    renderPage([], STOPPED, [armed]);
-    await screen.findByText("Running scripts");
-    const card = pluginCard("Running scripts");
-    expect(await within(card).findByText("1")).toBeInTheDocument();
-    expect(screen.queryByText("Price Watcher")).toBeNull();
-  });
-
-  it("expanding the running-scripts card lists armed scripts, not manual ones", async () => {
-    const armed: Script = {
-      id: "watcher",
-      name: "Price Watcher",
-      language: "rhai",
-      code: "1",
-      intervalMin: 5,
-      enabled: true,
-      updatedAt: 0,
-    };
-    const manual: Script = {
-      id: "one-off",
-      name: "One-off Report",
-      language: "js",
-      code: "1",
-      intervalMin: null,
-      enabled: false,
-      updatedAt: 0,
-    };
-    renderPage([], STOPPED, [armed, manual]);
-    await screen.findByText("Running scripts");
-    const card = pluginCard("Running scripts");
-    fireEvent.click(within(card).getByRole("button"));
-    expect(await within(card).findByText("Price Watcher")).toBeInTheDocument();
-    expect(within(card).getByText("every 5m")).toBeInTheDocument();
-    expect(screen.queryByText("One-off Report")).toBeNull();
-  });
-
-  it("shows an empty state and a link to Scripts when nothing is armed", async () => {
-    renderPage([], STOPPED, []);
-    await screen.findByText("Running scripts");
-    const card = pluginCard("Running scripts");
-    fireEvent.click(within(card).getByRole("button"));
-    expect(
-      await within(card).findByText(/No script has an armed loop/),
-    ).toBeInTheDocument();
-    expect(within(card).getByRole("link", { name: "Scripts" })).toHaveAttribute(
-      "href",
-      "/scripts",
-    );
   });
 });

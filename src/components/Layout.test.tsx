@@ -9,6 +9,8 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockResolvedValue(undefined),
 }));
 
+import { invoke } from "@tauri-apps/api/core";
+
 import { Layout } from "./Layout";
 import { modules } from "../modules/registry";
 
@@ -53,7 +55,10 @@ function pinnedHandleFor(title: string): HTMLElement {
 }
 
 describe("Layout sidebar", () => {
-  beforeEach(() => localStorage.clear());
+  beforeEach(() => {
+    localStorage.clear();
+    vi.mocked(invoke).mockReset().mockResolvedValue(undefined);
+  });
 
   it("renders labelled group sections in order", () => {
     renderLayout();
@@ -219,5 +224,37 @@ describe("Layout sidebar", () => {
     // Pinned + hidden → only appears once, in the Hidden section.
     expect(screen.queryByText("Pinned")).toBeNull();
     expect(screen.getAllByRole("link", { name: TRADING })).toHaveLength(1);
+  });
+
+  it("badges the Scripts nav entry with the number of running scripts", async () => {
+    vi.mocked(invoke).mockImplementation((cmd: unknown) => {
+      if (cmd === "scripts_list") {
+        return Promise.resolve([
+          {
+            id: "a",
+            name: "Watcher",
+            language: "rhai",
+            code: "1",
+            intervalMin: 5,
+            enabled: true,
+            updatedAt: 0,
+          },
+          // Not armed (no interval) — shouldn't count.
+          {
+            id: "b",
+            name: "One-off",
+            language: "js",
+            code: "1",
+            intervalMin: null,
+            enabled: false,
+            updatedAt: 0,
+          },
+        ]);
+      }
+      return Promise.resolve(undefined);
+    });
+    renderLayout();
+    const scriptsLink = await screen.findByRole("link", { name: /scripts/i });
+    expect(await within(scriptsLink).findByText("1")).toBeInTheDocument();
   });
 });
