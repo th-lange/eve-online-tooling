@@ -208,6 +208,26 @@ mod tests {
                         }
                     ]
                 })),
+                "pi_idle_colonies" => Ok(json!([
+                    {
+                        "characterId": 1, "characterName": "Test Pilot",
+                        "systemName": "Jita", "planetType": "Barren",
+                    }
+                ])),
+                "industry_line_status" => Ok(json!({
+                    "manufacturing": [
+                        { "characterId": 1, "characterName": "Test Pilot", "idle": true },
+                        { "characterId": 2, "characterName": "Second Pilot", "idle": false }
+                    ],
+                    "invention": [
+                        { "characterId": 1, "characterName": "Test Pilot", "idle": true },
+                        { "characterId": 2, "characterName": "Second Pilot", "idle": true }
+                    ],
+                    "reactions": [
+                        { "characterId": 1, "characterName": "Test Pilot", "idle": true },
+                        { "characterId": 2, "characterName": "Second Pilot", "idle": true }
+                    ]
+                })),
                 "big_payload" => Ok(json!({
                     // ~400 KB of cumulative string content: comfortably over
                     // Rhai's old 256 KiB max_string_size (real personal
@@ -440,12 +460,12 @@ mod tests {
 
     #[test]
     fn idle_production_manufacturing_check_names_only_the_idle_character() {
-        // Second Pilot has a running manufacturing job (used == 1) and Test
-        // Pilot doesn't — only Test Pilot should count as idle, not both.
+        // Second Pilot is busy (idle: false) and Test Pilot isn't — only
+        // Test Pilot should count as idle, not both.
         let rhai = run(
             host(),
             Language::Rhai,
-            r#"invoke("industry_jobs", #{}).byCharacter.filter(|c| c.slots.manufacturing.used == 0).len()"#,
+            r#"invoke("industry_line_status", #{}).manufacturing.filter(|c| c.idle).len()"#,
             &Limits::default(),
         );
         assert!(rhai.ok, "error: {:?}", rhai.error);
@@ -453,7 +473,7 @@ mod tests {
         let js = run(
             host(),
             Language::Js,
-            r#"invoke("industry_jobs", {}).byCharacter.filter((c) => c.slots.manufacturing.used === 0).length;"#,
+            r#"invoke("industry_line_status", {}).manufacturing.filter((c) => c.idle).length;"#,
             &Limits::default(),
         );
         assert!(js.ok, "error: {:?}", js.error);

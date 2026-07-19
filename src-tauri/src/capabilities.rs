@@ -199,6 +199,24 @@ static REGISTRY: &[Capability] = &[
         run: cap_industry_jobs,
     },
     Capability {
+        name: "pi_idle_colonies",
+        permission: Permission::PiRead,
+        mcp: false,
+        mcp_dev: false,
+        description: "PI colonies flagged \"needs attention\" (an extraction program ended, or a commodity is in deficit), trimmed to character/system/planet only — a small summary of pi_overview for \"who's idle\" checks, not the full colony detail (extractors, storage, balance, produced items).",
+        params: &[],
+        run: cap_pi_idle_colonies,
+    },
+    Capability {
+        name: "industry_line_status",
+        permission: Permission::IndustryRead,
+        mcp: false,
+        mcp_dev: false,
+        description: "Per-character idle/busy status for manufacturing, invention, and reactions — a small summary of industry_jobs for \"who's idle\" checks, not the full job list and slot totals.",
+        params: &[],
+        run: cap_industry_line_status,
+    },
+    Capability {
         name: "production_profit",
         permission: Permission::MarketRead,
         mcp: false,
@@ -432,6 +450,32 @@ fn cap_industry_jobs(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
     serde_json::to_value(result).map_err(|e| e.to_string())
 }
 
+/// PI colonies flagged "needs attention", trimmed to just enough to name
+/// them — a small summary, not the full colony detail `pi_overview` ships.
+fn cap_pi_idle_colonies(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
+    let sde = open_from_dir(ctx.app_data_dir)?;
+    let views = tauri::async_runtime::block_on(pi::commands::pi_overview_core(
+        ctx.app_data_dir,
+        sde,
+        ctx.auth,
+    ))
+    .map_err(|e| e.to_string())?;
+    serde_json::to_value(pi::commands::idle_colonies(&views)).map_err(|e| e.to_string())
+}
+
+/// Per-character idle/busy status for manufacturing/invention/reactions — a
+/// small summary, not the full job list and slot totals `industry_jobs`
+/// ships.
+fn cap_industry_line_status(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
+    let result = tauri::async_runtime::block_on(industry::commands::industry_jobs_core(
+        ctx.app_data_dir,
+        ctx.auth,
+        None,
+    ))
+    .map_err(|e| e.to_string())?;
+    serde_json::to_value(industry::commands::line_status(&result)).map_err(|e| e.to_string())
+}
+
 /// Dev-tier: build-vs-buy manufacturing profit for one blueprint (flat —
 /// materials priced at market, no recursive sub-build resolution; that keeps
 /// the result reproducible from the SDE + a price vector alone, per
@@ -589,11 +633,21 @@ mod tests {
             find("industry_jobs").unwrap().permission,
             Permission::IndustryRead
         );
+        assert_eq!(
+            find("pi_idle_colonies").unwrap().permission,
+            Permission::PiRead
+        );
+        assert_eq!(
+            find("industry_line_status").unwrap().permission,
+            Permission::IndustryRead
+        );
         // Auth-gated reads stay off the public MCP bridge; public data is on it.
         assert!(!find("my_orders").unwrap().mcp);
         assert!(!find("assets").unwrap().mcp);
         assert!(!find("pi_overview").unwrap().mcp);
         assert!(!find("industry_jobs").unwrap().mcp);
+        assert!(!find("pi_idle_colonies").unwrap().mcp);
+        assert!(!find("industry_line_status").unwrap().mcp);
         assert!(find("market_price").unwrap().mcp);
         assert!(find("sde_search").unwrap().mcp);
     }

@@ -179,8 +179,11 @@ linked and gated **per call**: each capability declares the permission it
 needs, and a call is refused unless your manifest was granted it. Capabilities
 today: `market_price`, `sde_type_info`, `sde_search`, `appraise`, `route`
 (read-only) and `assets`, `corp_assets`, `my_orders`, `pi_overview`,
-`industry_jobs` (need the matching `assets:read` / `orders:read` / `pi:read` /
-`industry:read` grant + a logged-in character).
+`pi_idle_colonies`, `industry_jobs`, `industry_line_status` (need the
+matching `assets:read` / `orders:read` / `pi:read` / `industry:read` grant +
+a logged-in character). `pi_idle_colonies`/`industry_line_status` are small
+"who's idle" summaries of `pi_overview`/`industry_jobs` — prefer them when
+you only need to know what needs attention, not the full colony/job detail.
 
 ## Being called
 
