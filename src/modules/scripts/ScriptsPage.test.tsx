@@ -48,6 +48,16 @@ const RUNNING: Script = {
   updatedAt: 2,
 };
 
+const ARMABLE: Script = {
+  id: "armable",
+  name: "Armable",
+  language: "rhai",
+  code: "1",
+  intervalMin: 5,
+  enabled: false,
+  updatedAt: 2,
+};
+
 const RUN_OK: ScriptRun = {
   ok: true,
   result: 42,
@@ -65,15 +75,27 @@ const EXAMPLES: ExampleScript[] = [
   },
 ];
 
-function renderPage(scripts: Script[] = [SCRIPT]) {
-  invokeMock.mockImplementation((cmd: string) => {
+function renderPage(initial: Script[] = [SCRIPT]) {
+  // Stateful upsert so a save's returned list reflects the saved script —
+  // needed to exercise "dirty until saved" behavior end to end.
+  let scripts = [...initial];
+  invokeMock.mockImplementation((cmd: string, args?: { script?: Script }) => {
     switch (cmd) {
       case "scripts_list":
         return Promise.resolve(scripts);
       case "scripts_run":
         return Promise.resolve(RUN_OK);
-      case "scripts_save":
+      case "scripts_save": {
+        const s = args!.script!;
+        const id = s.id || `new-${scripts.length + 1}`;
+        const saved = { ...s, id, updatedAt: (s.updatedAt || 0) + 1 };
+        const idx = scripts.findIndex((x) => x.id === id);
+        scripts =
+          idx >= 0
+            ? scripts.map((x, i) => (i === idx ? saved : x))
+            : [...scripts, saved];
         return Promise.resolve(scripts);
+      }
       case "scripts_delete":
         return Promise.resolve([]);
       case "scripts_examples":
@@ -173,5 +195,43 @@ describe("ScriptsPage", () => {
         script: expect.objectContaining({ id: "ticker", enabled: false }),
       }),
     );
+  });
+
+  it("keeps Loop armed disabled for a brand-new script even once an interval is set", async () => {
+    renderPage([]);
+    fireEvent.click(await screen.findByRole("button", { name: /new script/i }));
+    await screen.findByDisplayValue("New script");
+    const checkbox = screen.getByRole("checkbox", { name: /loop armed/i });
+    expect(checkbox).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText("manual"), {
+      target: { value: "5" },
+    });
+    expect(checkbox).toBeDisabled();
+    expect(
+      screen.getByText(/save your changes to arm the loop/i),
+    ).toBeInTheDocument();
+  });
+
+  it("disables Loop armed after editing a saved script, and re-enables it once saved", async () => {
+    renderPage([ARMABLE]);
+    fireEvent.click(await screen.findByText("Armable"));
+    await screen.findByDisplayValue("Armable");
+    const checkbox = screen.getByRole("checkbox", { name: /loop armed/i });
+    // Untouched since load: matches the saved script, so it's armable.
+    expect(checkbox).not.toBeDisabled();
+
+    fireEvent.change(screen.getByDisplayValue("1"), {
+      target: { value: "2" },
+    });
+    expect(checkbox).toBeDisabled();
+    expect(
+      screen.getByText(/save your changes to arm the loop/i),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(checkbox).not.toBeDisabled());
+    expect(
+      screen.queryByText(/save your changes to arm the loop/i),
+    ).not.toBeInTheDocument();
   });
 });
