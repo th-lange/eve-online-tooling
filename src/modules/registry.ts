@@ -288,6 +288,14 @@ export const modules: ModuleDef[] = [
     Component: PvpPage,
   },
   {
+    id: "info",
+    title: "Info Panel",
+    description: "Alarms and messages posted by your scripts and plugins.",
+    group: "support",
+    icon: Bell,
+    Component: InfoPanel,
+  },
+  {
     id: "scripts",
     title: "Scripts",
     description:
@@ -295,14 +303,6 @@ export const modules: ModuleDef[] = [
     group: "support",
     icon: Terminal,
     Component: ScriptsPage,
-  },
-  {
-    id: "info",
-    title: "Info Panel",
-    description: "Alarms and messages posted by your scripts and plugins.",
-    group: "support",
-    icon: Bell,
-    Component: InfoPanel,
   },
   {
     id: "plugins",
