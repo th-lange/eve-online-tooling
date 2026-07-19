@@ -52,7 +52,8 @@ The convenience functions above are thin wrappers over a shared **capability
 registry** — the same operations plugins and the MCP bridge use, so data is
 fetched and cached once. `invoke(name, args)` reaches the whole registry,
 including ones without a dedicated wrapper: `invoke("sde_search", { query })`,
-`invoke("appraise", { items })`, `invoke("route", { from, to })`.
+`invoke("appraise", { items })`, `invoke("route", { from, to })`,
+`invoke("pi_overview", {})`, `invoke("industry_jobs", {})`.
 
 > Browser/DOM globals like `Audio`, `fetch`, `document` or `window` **do not
 > exist** — the JS engine is a standalone ECMAScript runtime, not a webpage. To
@@ -66,7 +67,9 @@ including ones without a dedicated wrapper: `invoke("sde_search", { query })`,
 The editor autocompletes these functions (and their signatures) as you type, so
 you get inline hints for the whole API. The editor's collapsible **Examples**
 section offers ready-made scripts (in both languages) — an outpriced-order sound
-alarm and a demand-vs-saturation scan — that you can load and tweak.
+alarm, a demand-vs-saturation scan, and an idle-production alarm (PI colonies,
+manufacturing, and invention, each check independently comment-outable) — that
+you can load and tweak.
 
 ## Basic libraries
 

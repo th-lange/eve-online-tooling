@@ -125,6 +125,8 @@ functions; nothing else is reachable.
 | `orders:read`  | `my_orders` via `host_call`                                    | available   |
 | `net:fetch`    | outbound HTTP, but only to the manifest's `allowedHosts`       | available   |
 | `info:write`   | `send_alarm` / `write_message` — post to the Info Panel        | available   |
+| `pi:read`      | `pi_overview` via `host_call`                                  | available   |
+| `industry:read`| `industry_jobs` via `host_call`                                | available   |
 
 Enforcement is **load-time**: the host only links the host functions your
 granted permissions cover. A plugin that imports an un-granted host function
@@ -176,8 +178,9 @@ Unlike the specific host functions (gated at load time), `host_call` is always
 linked and gated **per call**: each capability declares the permission it
 needs, and a call is refused unless your manifest was granted it. Capabilities
 today: `market_price`, `sde_type_info`, `sde_search`, `appraise`, `route`
-(read-only) and `assets`, `corp_assets`, `my_orders` (need the matching
-`assets:read` / `orders:read` grant + a logged-in character).
+(read-only) and `assets`, `corp_assets`, `my_orders`, `pi_overview`,
+`industry_jobs` (need the matching `assets:read` / `orders:read` / `pi:read` /
+`industry:read` grant + a logged-in character).
 
 ## Being called
 
