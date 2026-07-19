@@ -106,6 +106,19 @@ export function ScriptsPage() {
   }
 
   const scripts = scriptsQ.data ?? [];
+  // The loop always runs the *saved* code (docs/scripts.md), so arming it
+  // from a draft that hasn't been saved yet — a brand-new script, or edits
+  // to name/language/code/interval since the last save — would be
+  // misleading: the checkbox would show "armed" while the scheduler either
+  // has nothing to run yet or keeps running the stale saved version.
+  const persisted = draft ? scripts.find((s) => s.id === draft.id) : undefined;
+  const dirty =
+    !draft ||
+    !persisted ||
+    draft.name !== persisted.name ||
+    draft.language !== persisted.language ||
+    draft.code !== persisted.code ||
+    draft.intervalMin !== persisted.intervalMin;
 
   return (
     <Page>
@@ -202,6 +215,7 @@ export function ScriptsPage() {
               running={run.isPending}
               saving={save.isPending}
               output={output}
+              dirty={dirty}
             />
           ) : (
             <Centered>Select a script, or create a new one.</Centered>
@@ -288,6 +302,7 @@ function Editor({
   running,
   saving,
   output,
+  dirty,
 }: {
   draft: Script;
   onChange: (s: Script) => void;
@@ -297,6 +312,7 @@ function Editor({
   running: boolean;
   saving: boolean;
   output: ScriptRun | null;
+  dirty: boolean;
 }) {
   return (
     <div className="flex flex-col gap-3">
@@ -357,11 +373,16 @@ function Editor({
           <input
             type="checkbox"
             checked={draft.enabled}
-            disabled={draft.intervalMin == null}
+            disabled={draft.intervalMin == null || dirty}
             onChange={(e) => onChange({ ...draft, enabled: e.target.checked })}
           />
           Loop armed
         </label>
+        {dirty && draft.intervalMin != null ? (
+          <span className="pb-1.5 text-xs text-amber-400">
+            Save your changes to arm the loop — it always runs the saved code.
+          </span>
+        ) : null}
       </div>
 
       <CodeEditor

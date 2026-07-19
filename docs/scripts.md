@@ -124,7 +124,10 @@ sell;
   runs whether or not the Scripts page is open, and armed scripts show a **play
   icon** in the list. Arming/disarming (a save) takes effect on the next minute;
   overlapping runs of the same script are skipped, and it always runs the
-  **saved** code.
+  **saved** code — so **Loop armed** is disabled while the editor has unsaved
+  changes (a brand-new script, or edits since the last save) to avoid the
+  checkbox showing "armed" for code the scheduler either can't see yet or
+  won't actually run; save first to arm it.
 
 ## Limits
 
