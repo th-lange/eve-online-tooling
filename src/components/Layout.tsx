@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ModuleActiveContext } from "./moduleActiveContext";
 import { ModuleChromeContext } from "./moduleChromeContext";
 import { NavLink, useLocation } from "react-router-dom";
@@ -20,6 +21,7 @@ import { SupportModal } from "./SupportMyWork";
 import { STORAGE_KEYS } from "../lib/storageKeys";
 import { usePersistentState } from "../lib/usePersistentState";
 import { useInfoAlerts } from "../modules/info/infoContext";
+import { scriptsList } from "../lib/api";
 import appIcon from "../assets/app-icon.png";
 
 const PINS_KEY = STORAGE_KEYS.sidebarPins;
@@ -386,6 +388,12 @@ function NavRow({
 }) {
   const hex = color ? COLOR_HEX.get(color) : undefined;
   const { unseen } = useInfoAlerts();
+  // Shares the ["scripts"] query cache with the Scripts page, so this stays
+  // live the moment a script is armed/disarmed/saved there — no polling.
+  const scriptsQ = useQuery({ queryKey: ["scripts"], queryFn: scriptsList });
+  const runningScripts = (scriptsQ.data ?? []).filter(
+    (s) => s.enabled && s.intervalMin != null,
+  ).length;
   return (
     <div
       onDragOver={
@@ -462,6 +470,14 @@ function NavRow({
             className="ml-auto min-w-4 rounded-full bg-red-600 px-1.5 text-center text-[10px] font-semibold leading-4 text-white"
           >
             {unseen}
+          </span>
+        )}
+        {module.id === "scripts" && runningScripts > 0 && (
+          <span
+            title={`${runningScripts} script${runningScripts === 1 ? "" : "s"} running on a loop`}
+            className="ml-auto min-w-4 rounded-full bg-emerald-600 px-1.5 text-center text-[10px] font-semibold leading-4 text-white"
+          >
+            {runningScripts}
           </span>
         )}
       </NavLink>

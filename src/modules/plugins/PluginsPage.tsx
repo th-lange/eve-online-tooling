@@ -1,18 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { Link } from "react-router-dom";
-import {
-  ChevronDown,
-  ChevronRight,
-  FolderOpen,
-  Play,
-  Radio,
-  RefreshCw,
-  Terminal,
-  Trash2,
-  Upload,
-} from "lucide-react";
+import { FolderOpen, Radio, RefreshCw, Trash2, Upload } from "lucide-react";
 import {
   errorMessage,
   pluginsList,
@@ -28,22 +17,14 @@ import {
   mcpSetPort,
   mcpSetAutostart,
   mcpSetDevTier,
-  scriptsList,
   PERMISSION_LABELS,
   type PluginEntry,
-  type ScriptLanguage,
 } from "../../lib/api";
 import { useCopyToClipboard } from "../../lib/useCopyToClipboard";
 import { Page, PageHeader, Centered } from "../../components/page";
-import { useScriptRuns } from "../scripts/runnerContext";
 
 const SUBTITLE =
   "Installed plugins are inert until you activate them. Each shows the capabilities it declares — activate only what you trust.";
-
-const LANGUAGE_LABEL: Record<ScriptLanguage, string> = {
-  rhai: "Rhai",
-  js: "JavaScript",
-};
 
 export function PluginsPage() {
   const plugins = useQuery({ queryKey: ["plugins"], queryFn: pluginsList });
@@ -130,7 +111,6 @@ export function PluginsPage() {
         }
       />
       <McpBridgeCard />
-      <RunningScriptsCard />
       <div
         className={`mt-4 flex items-start gap-2 rounded-lg border p-3 text-xs transition-colors ${
           isDragOver
@@ -287,95 +267,6 @@ function PluginCard({ entry }: { entry: PluginEntry }) {
           </button>
         )}
       </div>
-    </div>
-  );
-}
-
-/** Collapsible list of scripts whose timed loop is currently armed (from the
- *  Scripts module) — a quick "what's running in the background" check
- *  alongside plugins and the MCP bridge, the app's other always-on
- *  extension points. Collapsed by default; the count in the header stays
- *  visible either way. */
-function RunningScriptsCard() {
-  const scriptsQ = useQuery({ queryKey: ["scripts"], queryFn: scriptsList });
-  const runs = useScriptRuns();
-  const [open, setOpen] = useState(false);
-  const running = (scriptsQ.data ?? []).filter(
-    (s) => s.enabled && s.intervalMin != null,
-  );
-
-  return (
-    <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2"
-      >
-        {open ? (
-          <ChevronDown size={14} className="text-zinc-500" />
-        ) : (
-          <ChevronRight size={14} className="text-zinc-500" />
-        )}
-        <Terminal
-          size={15}
-          className={running.length > 0 ? "text-emerald-400" : "text-zinc-500"}
-        />
-        <span className="font-medium text-zinc-100">Running scripts</span>
-        <span
-          className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${
-            running.length > 0
-              ? "bg-emerald-950 text-emerald-300"
-              : "bg-zinc-800 text-zinc-400"
-          }`}
-        >
-          {running.length}
-        </span>
-      </button>
-      {open ? (
-        running.length === 0 ? (
-          <p className="mt-3 text-xs text-zinc-500">
-            No script has an armed loop. Arm one from{" "}
-            <Link to="/scripts" className="text-indigo-400 hover:underline">
-              Scripts
-            </Link>
-            .
-          </p>
-        ) : (
-          <ul className="mt-3 flex flex-col gap-1.5">
-            {running.map((s) => {
-              const lastRun = runs[s.id];
-              return (
-                <li key={s.id}>
-                  <Link
-                    to="/scripts"
-                    className="flex items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2 text-sm transition hover:bg-zinc-800/60"
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <Play size={12} className="shrink-0 text-emerald-400" />
-                      <span className="truncate text-zinc-100">{s.name}</span>
-                      <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400">
-                        {LANGUAGE_LABEL[s.language]}
-                      </span>
-                    </span>
-                    <span className="shrink-0 text-xs text-zinc-500">
-                      every {s.intervalMin}m
-                      {lastRun ? (
-                        <span
-                          className={
-                            lastRun.run.ok ? "text-emerald-400" : "text-red-400"
-                          }
-                        >
-                          {" "}
-                          • last {lastRun.run.ok ? "ok" : "error"}
-                        </span>
-                      ) : null}
-                    </span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        )
-      ) : null}
     </div>
   );
 }
