@@ -401,7 +401,13 @@ impl PriceMap {
     }
 }
 
-/// Recent traded volume + price band over the last `days` of history.
+/// Number of trailing days used for the trend sparkline + change%. Longer than
+/// the volume window so the price direction is meaningful, but computed from the
+/// same already-fetched history (no extra network).
+const TREND_DAYS: usize = 30;
+
+/// Recent traded volume + price band over the last `days` of history, plus a
+/// longer-window trend series and change% (both over [`TREND_DAYS`]).
 #[derive(Debug, Clone, Default)]
 pub struct TradedStats {
     /// Mean daily traded volume.
@@ -410,9 +416,38 @@ pub struct TradedStats {
     pub low: f64,
     /// Highest daily high in the window.
     pub high: f64,
+    /// Daily average price over the trailing [`TREND_DAYS`] (oldest→newest), for
+    /// a sparkline. Empty when there's no history.
+    pub trend: Vec<f64>,
+    /// Fractional price change across the trend window: the volume-weighted
+    /// average price of its last quarter vs its first quarter. `None` when
+    /// either quarter has no traded volume (too little evidence to claim a move).
+    pub change_pct: Option<f64>,
 }
 
-/// Volume + price band (avg/low/high) over the `days` most recent history days.
+/// Volume-weighted mean price over a slice of history days (`None` if no volume).
+fn vw_average(days: &[HistoryDay]) -> Option<f64> {
+    let vol: i64 = days.iter().map(|d| d.volume).sum();
+    if vol <= 0 {
+        return None;
+    }
+    let isk: f64 = days.iter().map(|d| d.average * d.volume as f64).sum();
+    Some(isk / vol as f64)
+}
+
+/// Change% over `window`: last-quarter vs first-quarter volume-weighted average.
+fn change_over(window: &[HistoryDay]) -> Option<f64> {
+    let q = window.len() / 4;
+    if q == 0 {
+        return None;
+    }
+    let first = vw_average(&window[..q])?;
+    let last = vw_average(&window[window.len() - q..])?;
+    (first > 0.0).then(|| (last - first) / first)
+}
+
+/// Volume + price band (avg/low/high) over the `days` most recent history days,
+/// plus the trend series + change% over the trailing [`TREND_DAYS`].
 fn recent_stats(history: &[HistoryDay], days: usize) -> TradedStats {
     if history.is_empty() || days == 0 {
         return TradedStats::default();
@@ -427,10 +462,13 @@ fn recent_stats(history: &[HistoryDay], days: usize) -> TradedStats {
         .iter()
         .map(|h| h.highest.max(h.average))
         .fold(0.0_f64, f64::max);
+    let trend_window = &history[history.len().saturating_sub(TREND_DAYS)..];
     TradedStats {
         volume,
         low: if low.is_finite() { low } else { 0.0 },
         high,
+        trend: trend_window.iter().map(|h| h.average).collect(),
+        change_pct: change_over(trend_window),
     }
 }
 
@@ -501,6 +539,45 @@ mod tests {
         assert_eq!(average_recent_volume(&history, 99), 30);
         // No history → 0, never a panic.
         assert_eq!(average_recent_volume(&[], 7), 0);
+    }
+
+    #[test]
+    fn recent_stats_computes_trend_and_change() {
+        // 8 days rising 100→170 by 10, constant volume → change% = last-quarter
+        // (avg 165) vs first-quarter (avg 105): (165-105)/105 ≈ 0.5714.
+        let mut history = Vec::new();
+        for i in 0..8 {
+            history.push(HistoryDay {
+                date: format!("2026-01-{:02}", i + 1),
+                average: 100.0 + i as f64 * 10.0,
+                highest: 100.0 + i as f64 * 10.0,
+                lowest: 100.0 + i as f64 * 10.0,
+                order_count: 1,
+                volume: 10,
+            });
+        }
+        let s = recent_stats(&history, 7);
+        assert_eq!(s.trend.len(), 8);
+        assert_eq!(s.trend.first(), Some(&100.0));
+        assert_eq!(s.trend.last(), Some(&170.0));
+        let change = s.change_pct.expect("enough volume for change");
+        assert!((change - (165.0 - 105.0) / 105.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn recent_stats_change_is_none_without_volume() {
+        // Prices present but zero traded volume → no evidence, change% is None.
+        let history: Vec<HistoryDay> = (0..8)
+            .map(|i| HistoryDay {
+                date: format!("2026-02-{:02}", i + 1),
+                average: 50.0,
+                highest: 50.0,
+                lowest: 50.0,
+                order_count: 0,
+                volume: 0,
+            })
+            .collect();
+        assert!(recent_stats(&history, 7).change_pct.is_none());
     }
 
     /// Build the `EsiError::Http` an ESI response with `status` would produce,

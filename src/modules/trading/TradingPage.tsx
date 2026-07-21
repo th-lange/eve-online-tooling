@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { DataAge } from "../../components/DataAge";
+import { Sparkline } from "../../components/Sparkline";
 import {
   CheckboxGroup,
   Field,
@@ -283,6 +284,8 @@ type TradeSortKey =
   | "buyVolume"
   | "buySellRatio"
   | "dailyTraded"
+  | "dailyValue"
+  | "changePct"
   | "daysOfSupply";
 
 const TRADE_COLUMNS: SortColumn<TradeSortKey>[] = [
@@ -343,6 +346,20 @@ const TRADE_COLUMNS: SortColumn<TradeSortKey>[] = [
       "Average units traded per day, from market history. Buys and sells are the same quantity (every trade is both), so it isn't split.",
   },
   {
+    key: "dailyValue",
+    label: "ISK/day",
+    numeric: true,
+    description:
+      "Traded/day × sell price — ISK throughput per day (liquidity in ISK, not just units).",
+  },
+  {
+    key: "changePct",
+    label: "Change",
+    numeric: true,
+    description:
+      "Price move over the last ~30d (last-quarter vs first-quarter volume-weighted average). Blank when trading is too thin.",
+  },
+  {
     key: "daysOfSupply",
     label: "Supply",
     numeric: true,
@@ -370,8 +387,15 @@ function TradeTable({
     ["name"],
   );
 
+  // ISK/day throughput = units traded/day × sell price. Derived here so it's
+  // both a sortable key and a column without a backend round-trip.
   const sorted = useMemo(
-    () => sortRows(rows, sortKey, sortDir),
+    () =>
+      sortRows(
+        rows.map((r) => ({ ...r, dailyValue: r.dailyTraded * r.sell })),
+        sortKey,
+        sortDir,
+      ),
     [rows, sortKey, sortDir],
   );
 
@@ -390,6 +414,7 @@ function TradeTable({
                 onClick={toggleSort}
               />
             ))}
+            <th className="px-3 py-1.5 text-right font-medium">Trend</th>
           </tr>
         </thead>
         <tbody>
@@ -462,6 +487,20 @@ function TradeTable({
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
                 {formatInt(r.dailyTraded)}
               </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+                {r.dailyTraded > 0 ? formatIsk(r.dailyTraded * r.sell) : "—"}
+              </td>
+              <td
+                className={`px-3 py-1.5 text-right tabular-nums ${
+                  r.changePct == null
+                    ? "text-zinc-500"
+                    : r.changePct >= 0
+                      ? "text-emerald-400"
+                      : "text-rose-400"
+                }`}
+              >
+                {formatPercent(r.changePct)}
+              </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                 {r.daysOfSupply > 0
                   ? r.daysOfSupply.toLocaleString(undefined, {
@@ -469,11 +508,14 @@ function TradeTable({
                     })
                   : "—"}
               </td>
+              <td className="px-3 py-1.5">
+                <Sparkline values={r.trend} />
+              </td>
             </tr>
           ))}
           {rows.length === 0 && (
             <tr>
-              <td colSpan={11} className="px-3 py-6 text-center text-zinc-500">
+              <td colSpan={14} className="px-3 py-6 text-center text-zinc-500">
                 Hit Calculate to scan the market.
               </td>
             </tr>

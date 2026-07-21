@@ -4,6 +4,7 @@ import { Check, Copy, ExternalLink, Heart, X } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { STORAGE_KEYS } from "../lib/storageKeys";
 import { useCopyToClipboard } from "../lib/useCopyToClipboard";
+import { errorMessage, openInfoWindow } from "../lib/api";
 import { PrimaryButton } from "./page";
 
 // EVE content-creator code (placeholder until CCP finishes processing it) and
@@ -12,6 +13,9 @@ import { PrimaryButton } from "./page";
 export const CREATOR_CODE = "-----";
 export const REFERRAL_URL =
   "https://www.eveonline.com/signup?invc=c2926a85-e10f-4522-9245-0d8364eacb86";
+// Corp id for the in-game "Show Info" window, so players can send an ISK
+// donation straight from the corp panel's "Give Money" action.
+export const CORP_ID = 98_463_993;
 
 function openExternal(url: string) {
   void openUrl(url).catch(() => {});
@@ -87,6 +91,29 @@ export function LinkRow() {
   );
 }
 
+/** In-game donation: opens the corp's "Show Info" window (its "Give Money"
+ *  action lets a player send ISK directly) — needs a logged-in character with
+ *  the esi-ui.open_window scope. */
+export function CorpRow() {
+  return (
+    <div className="mt-2">
+      <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+        Donate ISK in-game
+      </div>
+      <button
+        onClick={() =>
+          openInfoWindow(CORP_ID).catch((e) =>
+            alert(`Couldn't open the corp's info window: ${errorMessage(e)}`),
+          )
+        }
+        className="mt-1 flex w-full items-center justify-center gap-1.5 truncate rounded bg-indigo-600 px-2 py-1.5 text-[11px] font-medium text-white hover:bg-indigo-500"
+      >
+        <ExternalLink size={12} className="shrink-0" /> Support my corp
+      </button>
+    </div>
+  );
+}
+
 /**
  * First-launch overlay introducing the support links. Shown once, then never
  * again (dismissal persisted); the sidebar panel keeps the links available.
@@ -141,6 +168,7 @@ export function SupportModal() {
 
         <CopyRow label="Creator code" value={CREATOR_CODE} note="(pending)" />
         <LinkRow />
+        <CorpRow />
 
         <p className="mt-4 text-xs leading-relaxed text-zinc-500">
           These links also live in the <strong>Support my work</strong> section

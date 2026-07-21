@@ -106,6 +106,20 @@ pub fn info_clear(app: AppHandle) -> Result<(), String> {
     storage::save_data(&dir, STORE_KEY, &Vec::<Entry>::new())
 }
 
+/// Remove all entries from one `source`, leaving the rest of the feed intact.
+fn clear_source(app_data_dir: &Path, source: &str) -> Result<(), String> {
+    let mut entries: Vec<Entry> = storage::load_data(app_data_dir, STORE_KEY).unwrap_or_default();
+    entries.retain(|e| e.source != source);
+    storage::save_data(app_data_dir, STORE_KEY, &entries)
+}
+
+/// Empty the feed for one source only (per-segment "Clear" in the panel).
+#[tauri::command]
+pub fn info_clear_source(app: AppHandle, source: String) -> Result<(), String> {
+    let dir = crate::storage::app_data_dir(&app)?;
+    clear_source(&dir, &source)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,6 +154,19 @@ mod tests {
         assert_eq!(all.len(), MAX_ENTRIES);
         // Oldest dropped: the first surviving entry is m25.
         assert_eq!(all[0].text, "m25");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn clear_source_removes_only_that_source() {
+        let dir = tmp();
+        push(&dir, Kind::Message, "a1", None, "script:a");
+        push(&dir, Kind::Alarm, "b1", None, "plugin:b");
+        push(&dir, Kind::Message, "a2", None, "script:a");
+        clear_source(&dir, "script:a").unwrap();
+        let all: Vec<Entry> = storage::load_data(&dir, STORE_KEY).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].source, "plugin:b");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

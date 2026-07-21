@@ -10,6 +10,59 @@ fn at_station(order: &Order, station_id: Option<i64>) -> bool {
     station_id.is_none_or(|s| order.location_id == s)
 }
 
+/// Sell orders priced above this multiple of the sell median are treated as
+/// outliers (overpriced junk / would-be scams) and dropped by the
+/// "exclude scams" filter.
+pub const SELL_OUTLIER_MULT: f64 = 10.0;
+/// Buy orders priced below this fraction of the buy median are dropped likewise.
+pub const BUY_OUTLIER_FRAC: f64 = 0.1;
+
+/// Median of a price list (`None` for empty). Operates on a sorted copy.
+fn median_price(prices: &[f64]) -> Option<f64> {
+    if prices.is_empty() {
+        return None;
+    }
+    let mut v = prices.to_vec();
+    v.sort_by(f64::total_cmp);
+    let n = v.len();
+    Some(if n % 2 == 1 {
+        v[n / 2]
+    } else {
+        (v[n / 2 - 1] + v[n / 2]) / 2.0
+    })
+}
+
+/// "Exclude scams" outlier guard. Within `orders`, drop sell orders
+/// priced above [`SELL_OUTLIER_MULT`]× the sell median and buy orders below
+/// [`BUY_OUTLIER_FRAC`]× the buy median. Cheap sells and generous buys stay
+/// visible; a side with no orders imposes no filter on that side. This is a
+/// rough heuristic — misleading orders inside the band still pass.
+pub fn filter_outliers(orders: &[Order]) -> Vec<Order> {
+    let sell_prices: Vec<f64> = orders
+        .iter()
+        .filter(|o| !o.is_buy_order)
+        .map(|o| o.price)
+        .collect();
+    let buy_prices: Vec<f64> = orders
+        .iter()
+        .filter(|o| o.is_buy_order)
+        .map(|o| o.price)
+        .collect();
+    let sell_cap = median_price(&sell_prices).map(|m| m * SELL_OUTLIER_MULT);
+    let buy_floor = median_price(&buy_prices).map(|m| m * BUY_OUTLIER_FRAC);
+    orders
+        .iter()
+        .filter(|o| {
+            if o.is_buy_order {
+                buy_floor.is_none_or(|f| o.price >= f)
+            } else {
+                sell_cap.is_none_or(|c| o.price <= c)
+            }
+        })
+        .cloned()
+        .collect()
+}
+
 /// Lowest sell price among sell orders at `station_id` (whole region if `None`).
 pub fn sell_min(orders: &[Order], station_id: Option<i64>) -> Option<f64> {
     orders
@@ -91,6 +144,43 @@ mod tests {
             volume_remain: 0,
             system_id: 0,
         }
+    }
+
+    #[test]
+    fn filter_outliers_drops_overpriced_sells_and_lowball_buys() {
+        // Sell median = 100 → cap 1000; the 5000 sell is dropped, cheap ones stay.
+        // Buy median = 90 → floor 9; the 1.0 buy is dropped, generous ones stay.
+        let orders = vec![
+            order(80.0, false, HUB),
+            order(100.0, false, HUB),
+            order(120.0, false, HUB),
+            order(5000.0, false, HUB), // scam sell, dropped
+            order(90.0, true, HUB),
+            order(95.0, true, HUB),
+            order(1.0, true, HUB), // lowball buy, dropped
+        ];
+        let kept = filter_outliers(&orders);
+        let sells: Vec<f64> = kept
+            .iter()
+            .filter(|o| !o.is_buy_order)
+            .map(|o| o.price)
+            .collect();
+        let buys: Vec<f64> = kept
+            .iter()
+            .filter(|o| o.is_buy_order)
+            .map(|o| o.price)
+            .collect();
+        assert_eq!(sells, vec![80.0, 100.0, 120.0]);
+        assert_eq!(buys, vec![90.0, 95.0]);
+    }
+
+    #[test]
+    fn filter_outliers_keeps_cheap_sells_and_empty_sides() {
+        // A single ultra-cheap sell is *not* dropped (bait stays visible), and a
+        // side with no orders imposes no filter.
+        let orders = vec![order(1.0, false, HUB), order(100.0, false, HUB)];
+        assert_eq!(filter_outliers(&orders).len(), 2);
+        assert!(filter_outliers(&[]).is_empty());
     }
 
     fn day(date: &str, average: f64, volume: i64, order_count: i64) -> HistoryDay {

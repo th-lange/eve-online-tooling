@@ -1,7 +1,14 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { FolderOpen, Radio, RefreshCw, Trash2, Upload } from "lucide-react";
+import {
+  ChevronRight,
+  FolderOpen,
+  Radio,
+  RefreshCw,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import {
   errorMessage,
   pluginsList,
@@ -21,6 +28,7 @@ import {
   type PluginEntry,
 } from "../../lib/api";
 import { useCopyToClipboard } from "../../lib/useCopyToClipboard";
+import { usePersistentState } from "../../lib/usePersistentState";
 import { Page, PageHeader, Centered } from "../../components/page";
 
 const SUBTITLE =
@@ -280,6 +288,10 @@ function McpBridgeCard() {
   const status = useQuery({ queryKey: ["mcp"], queryFn: mcpStatus });
   const config = useQuery({ queryKey: ["mcp", "config"], queryFn: mcpConfig });
   const [portInput, setPortInput] = useState("");
+  const [collapsed, setCollapsed] = usePersistentState(
+    "eve.plugins.mcpCollapsed",
+    false,
+  );
   const toggle = useMutation({
     mutationFn: (next: boolean) => (next ? mcpStart() : mcpStop()),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["mcp"] }),
@@ -321,29 +333,42 @@ function McpBridgeCard() {
   return (
     <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
       <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <Radio
-              size={15}
-              className={running ? "text-emerald-400" : "text-zinc-500"}
-            />
-            <span className="font-medium text-zinc-100">MCP bridge</span>
-            <span
-              className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${
-                running
-                  ? "bg-emerald-950 text-emerald-300"
-                  : "bg-zinc-800 text-zinc-400"
-              }`}
-            >
-              {running ? "Active" : "Inactive"}
-            </span>
+        <button
+          onClick={() => setCollapsed((c) => !c)}
+          aria-expanded={!collapsed}
+          className="flex min-w-0 flex-1 items-start gap-2 text-left"
+        >
+          <ChevronRight
+            size={14}
+            aria-hidden
+            className={`mt-1 shrink-0 text-zinc-500 transition-transform ${
+              collapsed ? "" : "rotate-90"
+            }`}
+          />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Radio
+                size={15}
+                className={running ? "text-emerald-400" : "text-zinc-500"}
+              />
+              <span className="font-medium text-zinc-100">MCP bridge</span>
+              <span
+                className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${
+                  running
+                    ? "bg-emerald-950 text-emerald-300"
+                    : "bg-zinc-800 text-zinc-400"
+                }`}
+              >
+                {running ? "Active" : "Inactive"}
+              </span>
+            </div>
+            <p className="mt-1 max-w-2xl text-xs text-zinc-500">
+              Built-in. Serves a read-only, localhost MCP endpoint (item data +
+              market prices) to an external AI agent. No character or account
+              data is exposed. Off by default.
+            </p>
           </div>
-          <p className="mt-1 max-w-2xl text-xs text-zinc-500">
-            Built-in. Serves a read-only, localhost MCP endpoint (item data +
-            market prices) to an external AI agent. No character or account data
-            is exposed. Off by default.
-          </p>
-        </div>
+        </button>
         <button
           onClick={() => toggle.mutate(!running)}
           disabled={toggle.isPending}
@@ -357,59 +382,66 @@ function McpBridgeCard() {
         </button>
       </div>
 
-      <label className="mt-3 flex items-center gap-2 text-xs text-zinc-400">
-        <input
-          type="checkbox"
-          checked={config.data?.autostart ?? false}
-          disabled={setAutostart.isPending}
-          onChange={(e) => setAutostart.mutate(e.currentTarget.checked)}
-          className="rounded border-zinc-700 bg-zinc-800"
-        />
-        Start MCP bridge on launch
-        <span className="text-zinc-500">
-          — also writes a discovery file (URL + token) to the app data directory
-          so a local agent can self-configure without copying anything by hand.
-        </span>
-      </label>
+      {!collapsed && (
+        <label className="mt-3 flex items-center gap-2 text-xs text-zinc-400">
+          <input
+            type="checkbox"
+            checked={config.data?.autostart ?? false}
+            disabled={setAutostart.isPending}
+            onChange={(e) => setAutostart.mutate(e.currentTarget.checked)}
+            className="rounded border-zinc-700 bg-zinc-800"
+          />
+          Start MCP bridge on launch
+          <span className="text-zinc-500">
+            — also writes a discovery file (URL + token) to the app data
+            directory so a local agent can self-configure without copying
+            anything by hand.
+          </span>
+        </label>
+      )}
 
-      <label className="mt-2 flex items-center gap-2 text-xs text-zinc-400">
-        <input
-          type="checkbox"
-          checked={config.data?.devTier ?? false}
-          disabled={setDevTier.isPending}
-          onChange={(e) => setDevTier.mutate(e.currentTarget.checked)}
-          className="rounded border-zinc-700 bg-zinc-800"
-        />
-        Expose compute engines to MCP
-        <span className="text-zinc-500">
-          — adds dev-tier tools (production profit, fitting stats, …) for an
-          agent to verify the app's calculations. Still read-only and auth-free;
-          off by default.
-        </span>
-      </label>
+      {!collapsed && (
+        <label className="mt-2 flex items-center gap-2 text-xs text-zinc-400">
+          <input
+            type="checkbox"
+            checked={config.data?.devTier ?? false}
+            disabled={setDevTier.isPending}
+            onChange={(e) => setDevTier.mutate(e.currentTarget.checked)}
+            className="rounded border-zinc-700 bg-zinc-800"
+          />
+          Expose compute engines to MCP
+          <span className="text-zinc-500">
+            — adds dev-tier tools (production profit, fitting stats, …) for an
+            agent to verify the app's calculations. Still read-only and
+            auth-free; off by default.
+          </span>
+        </label>
+      )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
-        <span className="text-zinc-500">Port</span>
-        <input
-          type="number"
-          value={portValue}
-          placeholder="auto"
-          onChange={(e) => setPortInput(e.currentTarget.value)}
-          className="w-24 rounded bg-zinc-800 px-2 py-1 text-zinc-100 outline-none placeholder:text-zinc-500"
-        />
-        <button
-          onClick={() => setPort.mutate(Number(portValue) || 0)}
-          disabled={setPort.isPending}
-          className="rounded border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
-        >
-          Set
-        </button>
-        <span className="text-zinc-500">
-          0 / blank = auto. Changing it restarts a running bridge.
-        </span>
-      </div>
+      {!collapsed && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-zinc-500">Port</span>
+          <input
+            type="number"
+            value={portValue}
+            placeholder="auto"
+            onChange={(e) => setPortInput(e.currentTarget.value)}
+            className="w-24 rounded bg-zinc-800 px-2 py-1 text-zinc-100 outline-none placeholder:text-zinc-500"
+          />
+          <button
+            onClick={() => setPort.mutate(Number(portValue) || 0)}
+            disabled={setPort.isPending}
+            className="rounded border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
+          >
+            Set
+          </button>
+          <span className="text-zinc-500">
+            0 / blank = auto. Changing it restarts a running bridge.
+          </span>
+        </div>
+      )}
 
-      {running && data?.url && (
+      {!collapsed && running && data?.url && (
         <div className="mt-3 flex flex-col gap-2 border-t border-zinc-800 pt-3">
           <ConnRow
             label="URL"

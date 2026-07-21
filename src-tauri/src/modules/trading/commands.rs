@@ -104,6 +104,8 @@ pub async fn trading_scan(
     for row in &mut out {
         let s = stats.get(&row.type_id).cloned().unwrap_or_default();
         row.daily_traded = s.volume;
+        row.change_pct = s.change_pct;
+        row.trend = s.trend.clone();
         let (days_of_supply, price_flag) = enrich(row.volume, row.sell, &s);
         row.days_of_supply = days_of_supply;
         row.price_flag = price_flag;

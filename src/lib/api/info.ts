@@ -28,6 +28,11 @@ export function infoClear(): Promise<void> {
   return invoke<void>("info_clear");
 }
 
+/** Empty the Info Panel feed for one `source` only. */
+export function infoClearSource(source: string): Promise<void> {
+  return invoke<void>("info_clear_source", { source });
+}
+
 /** Subscribe to live Info Panel entries (scripts emit these as they post). */
 export function onInfoEntry(
   handler: (entry: InfoEntry) => void,

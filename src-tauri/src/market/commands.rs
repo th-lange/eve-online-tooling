@@ -9,6 +9,7 @@ use crate::esi::{authed_get, AuthState};
 use crate::sde::graph;
 use crate::storage;
 
+use super::aggregate::filter_outliers;
 use super::markets::{regions, resolve_location, Region};
 use super::service::MarketService;
 use super::types::{Order, PriceModel};
@@ -166,6 +167,13 @@ pub struct SellOrdersParams {
     /// Route only through high-sec (≥ 0.45) systems for the jumps count.
     #[serde(default)]
     pub high_sec_only: bool,
+    /// Drop outlier orders (scam guard) before listing. Default on.
+    #[serde(default = "default_true")]
+    pub exclude_scams: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// One sell order in the order list, enriched with location + jumps.
@@ -200,62 +208,28 @@ pub async fn market_sell_orders(
 ) -> Result<Vec<SellOrder>, String> {
     let sde = crate::sde::open_from_app(&app)?;
 
-    // Resolve the region set + any narrower (system/station) filter.
-    let mut system_filter: Option<i64> = params.system_id;
-    let station_filter: Option<i64> = params.station_id;
-    let region_ids: Vec<i64> = if let Some(station_id) = station_filter {
-        let (system_id, region_id) = sde
-            .station_location(station_id)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "Unknown station".to_string())?;
-        // A station pins its system too (for filtering structure-free results).
-        system_filter = Some(system_id);
-        vec![region_id]
-    } else if let Some(system_id) = system_filter {
-        let region_id = sde
-            .system_region(system_id)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| "Unknown system".to_string())?;
-        vec![region_id]
-    } else if let Some(region_id) = params.region_id {
-        vec![region_id]
-    } else {
-        sde.market_regions()
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|(id, _)| id)
-            .collect()
-    };
-
-    // Fetch each region's orders concurrently; swallow per-region errors so one
-    // bad region can't sink an everywhere scan.
-    use futures_util::stream::{self, StreamExt};
-    const CONCURRENCY: usize = 16;
-    let fetched: Vec<Order> = stream::iter(region_ids)
-        .map(|region_id| {
-            let service = &service;
-            let type_id = params.type_id;
-            async move {
-                service
-                    .region_orders(region_id, type_id)
-                    .await
-                    .unwrap_or_default()
-            }
-        })
-        .buffer_unordered(CONCURRENCY)
-        .collect::<Vec<Vec<Order>>>()
-        .await
-        .into_iter()
-        .flatten()
-        .collect();
+    // Resolve the region set + any narrower (system/station) filter, then fetch.
+    let Scope {
+        region_ids,
+        system_filter,
+        station_filter,
+    } = resolve_scope(&sde, params.region_id, params.system_id, params.station_id)?;
+    let fetched = fetch_region_orders(&service, region_ids, params.type_id).await;
 
     // Keep sell orders matching the (optional) station / system filter.
-    let mut sells: Vec<Order> = fetched
+    let sells: Vec<Order> = fetched
         .into_iter()
         .filter(|o| !o.is_buy_order)
         .filter(|o| station_filter.is_none_or(|s| o.location_id == s))
         .filter(|o| system_filter.is_none_or(|s| o.system_id == s))
         .collect();
+    // Scam guard: drop overpriced sell outliers within the scope
+    // before ranking/truncating (on by default).
+    let mut sells = if params.exclude_scams {
+        filter_outliers(&sells)
+    } else {
+        sells
+    };
     sells.sort_by(|a, b| a.price.total_cmp(&b.price));
     sells.truncate(MAX_ORDERS);
 
@@ -304,6 +278,148 @@ pub async fn market_sell_orders(
         })
         .collect();
     Ok(rows)
+}
+
+/// A resolved market-scope selection: which regions to fetch, and the narrower
+/// filters to apply afterward.
+struct Scope {
+    region_ids: Vec<i64>,
+    system_filter: Option<i64>,
+    station_filter: Option<i64>,
+}
+
+/// Resolve a market-scope selection into the region set to fetch plus the
+/// narrower system/station filters to apply after fetching. Precedence:
+/// station → system → region → everywhere (every k-space region). A station
+/// also pins its system.
+fn resolve_scope(
+    sde: &crate::sde::Sde,
+    region_id: Option<i64>,
+    system_id: Option<i64>,
+    station_id: Option<i64>,
+) -> Result<Scope, String> {
+    let mut system_filter = system_id;
+    let region_ids = if let Some(station_id) = station_id {
+        let (system_id, region_id) = sde
+            .station_location(station_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Unknown station".to_string())?;
+        system_filter = Some(system_id);
+        vec![region_id]
+    } else if let Some(system_id) = system_filter {
+        let region_id = sde
+            .system_region(system_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "Unknown system".to_string())?;
+        vec![region_id]
+    } else if let Some(region_id) = region_id {
+        vec![region_id]
+    } else {
+        sde.market_regions()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect()
+    };
+    Ok(Scope {
+        region_ids,
+        system_filter,
+        station_filter: station_id,
+    })
+}
+
+/// Fetch every region's orders for a type concurrently, flattening into one
+/// list. Per-region errors are swallowed so one bad region can't sink a scan.
+async fn fetch_region_orders(
+    service: &MarketService,
+    region_ids: Vec<i64>,
+    type_id: i64,
+) -> Vec<Order> {
+    use futures_util::stream::{self, StreamExt};
+    const CONCURRENCY: usize = 16;
+    stream::iter(region_ids)
+        .map(|region_id| async move {
+            service
+                .region_orders(region_id, type_id)
+                .await
+                .unwrap_or_default()
+        })
+        .buffer_unordered(CONCURRENCY)
+        .collect::<Vec<Vec<Order>>>()
+        .await
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+/// One price level in the order book: total remaining units at that price.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DepthLevel {
+    pub price: f64,
+    pub volume: i64,
+}
+
+/// Aggregated order book for the depth chart: sell levels ascending by price,
+/// buy levels descending. Cumulative curves are built on the client.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderBook {
+    pub sell: Vec<DepthLevel>,
+    pub buy: Vec<DepthLevel>,
+}
+
+/// Sum order volume into price levels, then sort. `ascending` for the sell side
+/// (cheapest first), descending for the buy side (highest bid first).
+fn depth_levels(orders: impl Iterator<Item = Order>, ascending: bool) -> Vec<DepthLevel> {
+    let mut by_price: std::collections::BTreeMap<u64, i64> = std::collections::BTreeMap::new();
+    for o in orders {
+        // Bit-pattern key keeps f64 ordering for non-negative prices (all prices
+        // are > 0), so the BTreeMap stays price-sorted.
+        *by_price.entry(o.price.to_bits()).or_default() += o.volume_remain;
+    }
+    let mut levels: Vec<DepthLevel> = by_price
+        .into_iter()
+        .map(|(bits, volume)| DepthLevel {
+            price: f64::from_bits(bits),
+            volume,
+        })
+        .collect();
+    if !ascending {
+        levels.reverse();
+    }
+    levels
+}
+
+/// Aggregated buy + sell order book for a type across the chosen scope, for the
+/// depth chart. Honours the same scope + scam-guard as [`market_sell_orders`].
+#[tauri::command]
+pub async fn market_order_book(
+    app: AppHandle,
+    service: State<'_, MarketService>,
+    params: SellOrdersParams,
+) -> Result<OrderBook, String> {
+    let sde = crate::sde::open_from_app(&app)?;
+    let Scope {
+        region_ids,
+        system_filter,
+        station_filter,
+    } = resolve_scope(&sde, params.region_id, params.system_id, params.station_id)?;
+    let fetched = fetch_region_orders(&service, region_ids, params.type_id).await;
+    let scoped: Vec<Order> = fetched
+        .into_iter()
+        .filter(|o| station_filter.is_none_or(|s| o.location_id == s))
+        .filter(|o| system_filter.is_none_or(|s| o.system_id == s))
+        .collect();
+    let scoped = if params.exclude_scams {
+        filter_outliers(&scoped)
+    } else {
+        scoped
+    };
+    Ok(OrderBook {
+        sell: depth_levels(scoped.iter().filter(|o| !o.is_buy_order).cloned(), true),
+        buy: depth_levels(scoped.iter().filter(|o| o.is_buy_order).cloned(), false),
+    })
 }
 
 /// Breadth-first jumps from `origin` to every reachable system over the stargate
@@ -368,5 +484,35 @@ mod tests {
         assert_eq!(dist[&2], 1);
         assert!(!dist.contains_key(&3));
         assert!(!dist.contains_key(&4));
+    }
+
+    fn order(price: f64, is_buy: bool, volume: i64) -> Order {
+        Order {
+            price,
+            is_buy_order: is_buy,
+            location_id: 0,
+            volume_remain: volume,
+            system_id: 0,
+        }
+    }
+
+    #[test]
+    fn depth_levels_aggregates_by_price_and_orders_each_side() {
+        let sells = [
+            order(10.0, false, 5),
+            order(10.0, false, 3),
+            order(12.0, false, 7),
+        ];
+        // Ascending, volumes summed per price level.
+        let sell = depth_levels(sells.into_iter(), true);
+        assert_eq!(sell.len(), 2);
+        assert_eq!(sell[0].price, 10.0);
+        assert_eq!(sell[0].volume, 8);
+        assert_eq!(sell[1].price, 12.0);
+        // Buy side descending (highest bid first).
+        let buys = [order(8.0, true, 4), order(9.0, true, 6)];
+        let buy = depth_levels(buys.into_iter(), false);
+        assert_eq!(buy[0].price, 9.0);
+        assert_eq!(buy[1].price, 8.0);
     }
 }

@@ -445,6 +445,7 @@ type DaySortKey =
   | "suggestedQty"
   | "volumeM3"
   | "destVolume"
+  | "dailyValue"
   | "daysOfSupply"
   | "profitPerTrip"
   | "trips";
@@ -516,6 +517,13 @@ const BASE_DAY_COLUMNS: SortColumn<DaySortKey>[] = [
       "Average units traded per day at the sell hub — how much you can offload.",
   },
   {
+    key: "dailyValue",
+    label: "Sell ISK/day",
+    numeric: true,
+    description:
+      "Sell-hub traded/day × sell price — ISK you can move per day at the destination.",
+  },
+  {
     key: "daysOfSupply",
     label: "Supply",
     numeric: true,
@@ -570,8 +578,15 @@ function DayTradeTable({
   const columns =
     cargoM3 > 0 ? [...BASE_DAY_COLUMNS, ...TRIP_COLUMNS] : BASE_DAY_COLUMNS;
 
+  // Sell-hub ISK/day throughput = daily-traded units × sell price. Derived here
+  // so it's a sortable key and a column with no backend round-trip.
   const sorted = useMemo(
-    () => sortRows(rows, sortKey, sortDir),
+    () =>
+      sortRows(
+        rows.map((r) => ({ ...r, dailyValue: r.destVolume * r.sellPrice })),
+        sortKey,
+        sortDir,
+      ),
     [rows, sortKey, sortDir],
   );
 
@@ -643,6 +658,9 @@ function DayTradeTable({
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                 {formatInt(r.destVolume)}
               </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+                {r.destVolume > 0 ? formatIsk(r.destVolume * r.sellPrice) : "—"}
+              </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                 {r.daysOfSupply.toLocaleString(undefined, {
                   maximumFractionDigits: 1,
@@ -663,7 +681,7 @@ function DayTradeTable({
           {rows.length === 0 && (
             <tr>
               <td
-                colSpan={cargoM3 > 0 ? 14 : 12}
+                colSpan={cargoM3 > 0 ? 15 : 13}
                 className="px-3 py-6 text-center text-zinc-500"
               >
                 Hit Calculate to scan for cross-region flips.

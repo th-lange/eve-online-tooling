@@ -1,5 +1,10 @@
 import { Heart } from "lucide-react";
-import { CopyRow, LinkRow, CREATOR_CODE } from "../../components/SupportMyWork";
+import {
+  CopyRow,
+  LinkRow,
+  CorpRow,
+  CREATOR_CODE,
+} from "../../components/SupportMyWork";
 import { Page, PageHeader } from "../../components/page";
 
 // The "Support my work" module: the EVE content-creator code + buddy invite
@@ -24,6 +29,7 @@ export function SupportPage() {
       <div className="mt-6 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
         <CopyRow label="Creator code" value={CREATOR_CODE} note="(pending)" />
         <LinkRow />
+        <CorpRow />
       </div>
 
       <p className="mt-6 text-xs leading-relaxed text-zinc-500">

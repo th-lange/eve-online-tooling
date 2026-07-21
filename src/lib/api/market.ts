@@ -101,8 +101,9 @@ export interface SellOrdersParams {
   originSystemId?: number | null;
   /** Route only through high-sec (≥ 0.45) systems for the jumps count. */
   highSecOnly?: boolean;
+  /** Drop outlier orders (scam guard) before listing. Default on. */
+  excludeScams?: boolean;
 }
-
 /** One sell order in the order list, with location + jumps. */
 export interface SellOrder {
   price: number;
@@ -121,4 +122,21 @@ export function marketSellOrders(
   params: SellOrdersParams,
 ): Promise<SellOrder[]> {
   return invoke<SellOrder[]>("market_sell_orders", { params });
+}
+
+/** One aggregated price level in the order book. */
+export interface DepthLevel {
+  price: number;
+  volume: number;
+}
+
+/** Aggregated buy + sell book for the depth chart (sell ascending, buy descending). */
+export interface OrderBook {
+  sell: DepthLevel[];
+  buy: DepthLevel[];
+}
+
+/** Aggregated buy + sell order book for a type across the chosen scope. */
+export function marketOrderBook(params: SellOrdersParams): Promise<OrderBook> {
+  return invoke<OrderBook>("market_order_book", { params });
 }

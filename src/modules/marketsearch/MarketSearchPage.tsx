@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import {
   errorMessage,
   marketAllRegions,
@@ -7,6 +7,7 @@ import {
   marketPrice,
   marketSearchStations,
   marketSellOrders,
+  marketOrderBook,
   openMarketWindow,
   sdeSearch,
   systemSearch,
@@ -14,6 +15,7 @@ import {
   type IdName,
   type PriceModel,
   type SellOrder,
+  type OrderBook,
 } from "../../lib/api";
 import {
   subscribeMarketSearchItem,
@@ -28,6 +30,11 @@ import { SEC_HEX, secBand } from "../../lib/security";
 import { AddToListButton } from "../../components/AddToListButton";
 import { Combo } from "../../components/Combo";
 import { PriceHistoryView } from "../../components/PriceHistory";
+import { DepthChart } from "../../components/DepthChart";
+import {
+  MultiRegionHistory,
+  type RegionSeries,
+} from "../../components/MultiRegionHistory";
 import { Stat } from "../../components/Stat";
 import {
   formatInt,
@@ -71,9 +78,11 @@ function Workbench() {
   const [system, setSystem] = useState<Picked>(null);
   const [station, setStation] = useState<Picked>(null);
 
-  // Jumps origin + routing preference (search tab).
+  // Extra regions to overlay on the history chart (comparison).
+  const [compareRegionIds, setCompareRegionIds] = useState<number[]>([]);
   const [origin, setOrigin] = useState<Picked>(null);
   const [highSecOnly, setHighSecOnly] = useState(false);
+  const [excludeScams, setExcludeScams] = useState(true);
 
   const regions = useQuery({
     queryKey: ["market", "all-regions"],
@@ -109,6 +118,12 @@ function Workbench() {
     ...marketKeys.history(historyRegionId, picked?.id),
     enabled: tab === "history" && picked != null,
   });
+  const compareQueries = useQueries({
+    queries: compareRegionIds.map((rid) => ({
+      ...marketKeys.history(rid, picked?.id),
+      enabled: tab === "history" && picked != null,
+    })),
+  });
   const price = useQuery({
     queryKey: ["price", historyRegionId, picked?.id],
     queryFn: () => marketPrice(historyRegionId, picked!.id),
@@ -124,6 +139,7 @@ function Workbench() {
       station?.id ?? null,
       origin?.id ?? null,
       highSecOnly,
+      excludeScams,
     ],
     queryFn: () =>
       marketSellOrders({
@@ -133,6 +149,27 @@ function Workbench() {
         stationId: station?.id ?? null,
         originSystemId: origin?.id ?? null,
         highSecOnly,
+        excludeScams,
+      }),
+    enabled: tab === "search" && picked != null,
+  });
+
+  const orderBook = useQuery({
+    queryKey: [
+      "order-book",
+      picked?.id,
+      regionId,
+      system?.id ?? null,
+      station?.id ?? null,
+      excludeScams,
+    ],
+    queryFn: () =>
+      marketOrderBook({
+        typeId: picked!.id,
+        regionId,
+        systemId: system?.id ?? null,
+        stationId: station?.id ?? null,
+        excludeScams,
       }),
     enabled: tab === "search" && picked != null,
   });
@@ -199,7 +236,10 @@ function Workbench() {
           setOrigin={setOrigin}
           highSecOnly={highSecOnly}
           setHighSecOnly={setHighSecOnly}
+          excludeScams={excludeScams}
+          setExcludeScams={setExcludeScams}
           orders={orders.data ?? []}
+          orderBook={orderBook.data}
           loading={orders.isFetching}
           error={orders.error}
         />
@@ -211,6 +251,9 @@ function Workbench() {
           setRegionId={setRegionId}
           price={price.data}
           history={history.data ?? []}
+          compareRegionIds={compareRegionIds}
+          setCompareRegionIds={setCompareRegionIds}
+          compareHistories={compareQueries.map((q) => q.data ?? [])}
           loading={history.isLoading}
         />
       )}
@@ -233,7 +276,10 @@ function SearchTab({
   setOrigin,
   highSecOnly,
   setHighSecOnly,
+  excludeScams,
+  setExcludeScams,
   orders,
+  orderBook,
   loading,
   error,
 }: {
@@ -249,7 +295,10 @@ function SearchTab({
   setOrigin: (v: Picked) => void;
   highSecOnly: boolean;
   setHighSecOnly: (v: boolean) => void;
+  excludeScams: boolean;
+  setExcludeScams: (v: boolean) => void;
   orders: SellOrder[];
+  orderBook: OrderBook | undefined;
   loading: boolean;
   error: unknown;
 }) {
@@ -313,6 +362,18 @@ function SearchTab({
           />
           High-sec only
         </label>
+        <label
+          title="Hide sell orders priced above 10× the median (rough scam guard)"
+          className="flex items-center gap-2 pb-1 text-xs text-zinc-300"
+        >
+          <input
+            type="checkbox"
+            checked={excludeScams}
+            onChange={(e) => setExcludeScams(e.currentTarget.checked)}
+            className="accent-emerald-500"
+          />
+          Exclude scams
+        </label>
         <span className="pb-1 text-xs text-zinc-500">
           {highSecOnly
             ? "routing avoids low/null-sec"
@@ -332,7 +393,13 @@ function SearchTab({
             No sell orders for this item in the selected area.
           </Centered>
         ) : (
-          <OrderTable orders={orders} hasOrigin={origin != null} />
+          <div className="flex flex-col gap-4">
+            {orderBook &&
+              (orderBook.sell.length > 0 || orderBook.buy.length > 0) && (
+                <DepthChart sell={orderBook.sell} buy={orderBook.buy} />
+              )}
+            <OrderTable orders={orders} hasOrigin={origin != null} />
+          </div>
         )}
       </div>
     </div>
@@ -491,6 +558,9 @@ function HistoryTab({
   setRegionId,
   price,
   history,
+  compareRegionIds,
+  setCompareRegionIds,
+  compareHistories,
   loading,
 }: {
   picked: Picked;
@@ -499,6 +569,9 @@ function HistoryTab({
   setRegionId: (id: number | null) => void;
   price: PriceModel | undefined;
   history: HistoryPoint[];
+  compareRegionIds: number[];
+  setCompareRegionIds: (ids: number[]) => void;
+  compareHistories: HistoryPoint[][];
   loading: boolean;
 }) {
   return (
@@ -518,6 +591,52 @@ function HistoryTab({
             ))}
           </select>
         </label>
+        <label className="flex flex-col gap-1 text-xs text-zinc-400">
+          Compare regions
+          <select
+            value=""
+            onChange={(e) => {
+              const id = Number(e.currentTarget.value);
+              if (id && !compareRegionIds.includes(id))
+                setCompareRegionIds([...compareRegionIds, id]);
+            }}
+            className="w-48 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+          >
+            <option value="">add a region…</option>
+            {regions
+              .filter(
+                (r) => r.id !== regionId && !compareRegionIds.includes(r.id),
+              )
+              .map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+          </select>
+        </label>
+        {compareRegionIds.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 pb-1">
+            {compareRegionIds.map((id) => (
+              <span
+                key={id}
+                className="flex items-center gap-1 rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300"
+              >
+                {regions.find((r) => r.id === id)?.name ?? id}
+                <button
+                  onClick={() =>
+                    setCompareRegionIds(
+                      compareRegionIds.filter((x) => x !== id),
+                    )
+                  }
+                  aria-label="Remove region"
+                  className="text-zinc-500 hover:text-rose-300"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {picked && price && (
@@ -545,7 +664,33 @@ function HistoryTab({
         ) : history.length === 0 ? (
           <Centered>No history for this item in this region.</Centered>
         ) : (
-          <PriceHistoryView history={history} />
+          <div className="flex flex-col gap-4">
+            <PriceHistoryView history={history} />
+            {compareRegionIds.length > 0 && (
+              <div>
+                <div className="mb-1 text-xs text-zinc-400">
+                  Region comparison — daily average
+                </div>
+                <MultiRegionHistory
+                  regions={
+                    [
+                      {
+                        name:
+                          regions.find((r) => r.id === regionId)?.name ??
+                          "Primary",
+                        history,
+                      },
+                      ...compareRegionIds.map((id, i) => ({
+                        name:
+                          regions.find((r) => r.id === id)?.name ?? String(id),
+                        history: compareHistories[i] ?? [],
+                      })),
+                    ] satisfies RegionSeries[]
+                  }
+                />
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>

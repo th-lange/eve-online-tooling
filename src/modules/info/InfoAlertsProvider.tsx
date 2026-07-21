@@ -27,6 +27,9 @@ export function InfoAlertsProvider({ children }: { children: ReactNode }) {
   const seenIdx = seenId ? alarms.findIndex((a) => a.id === seenId) : -1;
   // Entries newer than the last-seen alarm (all of them if it's unknown/absent).
   const unseen = seenIdx === -1 ? alarms.length : seenIdx;
+  // Persists across "seen" — a red bell means the feed has *something*, the
+  // numeric badge means there's something *new*.
+  const hasEntries = (feed.data ?? []).length > 0;
 
   const markSeen = useCallback(() => {
     const data = qc.getQueryData<InfoEntry[]>(["info"]) ?? [];
@@ -37,7 +40,7 @@ export function InfoAlertsProvider({ children }: { children: ReactNode }) {
   }, [qc]);
 
   return (
-    <InfoAlertsContext.Provider value={{ unseen, markSeen }}>
+    <InfoAlertsContext.Provider value={{ unseen, hasEntries, markSeen }}>
       {children}
     </InfoAlertsContext.Provider>
   );
