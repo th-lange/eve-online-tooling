@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { LineChart, X } from "lucide-react";
-import { errorMessage } from "../lib/api";
+import { errorMessage, marketOrderBook } from "../lib/api";
 import { marketKeys } from "../lib/queryKeys";
 import { PriceHistoryView } from "./PriceHistory";
+import { DepthChart } from "./DepthChart";
 
 /**
  * A chart-icon button that opens a centered modal with an item's price/volume
@@ -37,6 +38,23 @@ export function PriceHistoryPopover({
     ...marketKeys.history(regionId, typeId),
     enabled: open,
   });
+  const orderBook = useQuery({
+    queryKey: ["market", "order-book", regionId, typeId],
+    queryFn: () => marketOrderBook({ typeId, regionId }),
+    enabled: open,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const depth =
+    orderBook.data &&
+    (orderBook.data.sell.length > 0 || orderBook.data.buy.length > 0) ? (
+      <div>
+        <div className="mb-1 text-xs text-zinc-400">
+          Order-book depth — {regionName ?? "region"}
+        </div>
+        <DepthChart sell={orderBook.data.sell} buy={orderBook.data.buy} />
+      </div>
+    ) : null;
 
   // Close on Escape.
   useEffect(() => {
@@ -109,11 +127,17 @@ export function PriceHistoryPopover({
                     {errorMessage(history.error)}
                   </div>
                 ) : (history.data?.length ?? 0) === 0 ? (
-                  <div className="p-8 text-center text-sm text-zinc-500">
-                    No market history for this item in the selected region.
-                  </div>
+                  <>
+                    <div className="p-8 text-center text-sm text-zinc-500">
+                      No market history for this item in the selected region.
+                    </div>
+                    {depth && <div className="mt-2">{depth}</div>}
+                  </>
                 ) : (
-                  <PriceHistoryView history={history.data!} />
+                  <PriceHistoryView
+                    history={history.data!}
+                    afterPriceChart={depth}
+                  />
                 )}
               </div>
             </div>

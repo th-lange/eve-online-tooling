@@ -1,4 +1,4 @@
-import { useMemo, useState, type MouseEvent } from "react";
+import { useMemo, useState, type MouseEvent, type ReactNode } from "react";
 import type { HistoryPoint } from "../lib/api";
 import { formatInt, formatIsk } from "../lib/format";
 import { Stat } from "./Stat";
@@ -17,7 +17,15 @@ const PERIOD_FOR: Record<number, number> = {
   400: 90,
 };
 
-export function PriceHistoryView({ history }: { history: HistoryPoint[] }) {
+export function PriceHistoryView({
+  history,
+  afterPriceChart,
+}: {
+  history: HistoryPoint[];
+  /** Optional content rendered right under the price-history chart, above the
+   *  daily-volume chart and table (e.g. an order-book depth chart). */
+  afterPriceChart?: ReactNode;
+}) {
   const [windowDays, setWindowDays] = useState(90);
   const period =
     PERIOD_FOR[windowDays] ?? Math.max(2, Math.round(windowDays / 4));
@@ -92,6 +100,7 @@ export function PriceHistoryView({ history }: { history: HistoryPoint[] }) {
         showMa={showMa}
         showMedian={showMedian}
       />
+      {afterPriceChart && <div className="mt-4">{afterPriceChart}</div>}
       <div className="h-3" />
       <Chart
         series={series}
