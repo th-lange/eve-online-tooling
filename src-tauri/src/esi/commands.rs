@@ -210,6 +210,20 @@ pub async fn esi_open_market_window(
     Ok(())
 }
 
+/// Open the in-game "Show Info" window for a character/corporation/alliance
+/// id, using the active character. Requires the `esi-ui.open_window.v1` scope
+/// (re-login if added). Used e.g. by the "Support my corp" link.
+#[tauri::command]
+pub async fn esi_open_info_window(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+    target_id: i64,
+) -> Result<(), crate::model::AppError> {
+    let (_, character_id) = storage::dir_and_primary_character(&app)?;
+    character::open_info_window(&auth_state, character_id, target_id).await?;
+    Ok(())
+}
+
 /// Best-effort startup warm-up: pull the active character's assets so the
 /// ESI conditional cache is primed and Production/Assets open without waiting on
 /// a cold network fetch. Silent on any failure (offline, no character, etc.).

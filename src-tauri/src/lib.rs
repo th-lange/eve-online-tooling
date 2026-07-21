@@ -226,6 +226,7 @@ pub fn run() {
             esi::commands::esi_owned_blueprints,
             esi::commands::esi_roster_stock,
             esi::commands::esi_open_market_window,
+            esi::commands::esi_open_info_window,
             sde::commands::sde_status,
             sde::commands::sde_update,
             sde::commands::sde_blueprint_materials,
@@ -250,6 +251,7 @@ pub fn run() {
             market::commands::market_search_stations,
             market::commands::market_current_location,
             market::commands::market_sell_orders,
+            market::commands::market_order_book,
             modules::production::commands::production_profit,
             modules::production::commands::production_decryptors,
             modules::production::commands::production_get_list,
@@ -366,6 +368,7 @@ pub fn run() {
             modules::scripts::commands::scripts_examples,
             info::info_list,
             info::info_clear,
+            info::info_clear_source,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

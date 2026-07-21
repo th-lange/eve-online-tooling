@@ -387,7 +387,7 @@ function NavRow({
   onDropRow: () => void;
 }) {
   const hex = color ? COLOR_HEX.get(color) : undefined;
-  const { unseen } = useInfoAlerts();
+  const { unseen, hasEntries } = useInfoAlerts();
   // Shares the ["scripts"] query cache with the Scripts page, so this stays
   // live the moment a script is armed/disarmed/saved there — no polling.
   const scriptsQ = useQuery({ queryKey: ["scripts"], queryFn: scriptsList });
@@ -462,7 +462,12 @@ function NavRow({
           }`
         }
       >
-        {module.icon && <module.icon size={14} className="shrink-0" />}
+        {module.icon && (
+          <module.icon
+            size={14}
+            className={`shrink-0 ${module.id === "info" && hasEntries ? "text-red-400" : ""}`}
+          />
+        )}
         {module.title}
         {module.id === "info" && unseen > 0 && (
           <span

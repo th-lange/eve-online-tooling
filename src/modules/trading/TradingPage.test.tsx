@@ -28,6 +28,8 @@ const ROW: TradeRow = {
   dailyTraded: 2_000_000,
   daysOfSupply: 0.25,
   priceFlag: null,
+  changePct: 0.12,
+  trend: [4.2, 4.3, 4.5, 4.6],
   favorite: false,
   category: "Material",
   group: "Mineral",

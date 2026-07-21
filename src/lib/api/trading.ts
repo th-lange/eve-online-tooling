@@ -19,10 +19,13 @@ export interface TradeRow {
   daysOfSupply: number;
   /** Set when the current sell sits at a recent price extreme, else null. */
   priceFlag: string | null;
+  /** Fractional price move over the recent window (last vs first quarter, vol-weighted); null when thin. */
+  changePct: number | null;
+  /** Daily average price over the trend window (oldest→newest), for a sparkline. */
+  trend: number[];
   favorite: boolean;
   category: string | null;
   group: string | null;
-  /** Meta group (Tech I/II/III, Faction, …). */
   metaGroup: string | null;
 }
 

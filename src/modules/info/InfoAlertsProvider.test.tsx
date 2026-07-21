@@ -11,10 +11,11 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 function Probe() {
-  const { unseen, markSeen } = useInfoAlerts();
+  const { unseen, hasEntries, markSeen } = useInfoAlerts();
   return (
     <div>
       <span data-testid="unseen">{unseen}</span>
+      <span data-testid="has-entries">{String(hasEntries)}</span>
       <button onClick={markSeen}>seen</button>
     </div>
   );
@@ -60,9 +61,30 @@ describe("InfoAlertsProvider", () => {
     );
 
     expect(screen.getByTestId("unseen").textContent).toBe("1");
+    expect(screen.getByTestId("has-entries").textContent).toBe("true");
     act(() => {
       fireEvent.click(screen.getByRole("button", { name: "seen" }));
     });
+    // Marking seen clears the unseen counter but the bell stays "lit" —
+    // the feed itself still has entries.
     expect(screen.getByTestId("unseen").textContent).toBe("0");
+    expect(screen.getByTestId("has-entries").textContent).toBe("true");
+  });
+
+  it("reports no entries when the feed is empty", async () => {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    qc.setQueryData<InfoEntry[]>(["info"], []);
+
+    render(
+      <QueryClientProvider client={qc}>
+        <InfoAlertsProvider>
+          <Probe />
+        </InfoAlertsProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByTestId("has-entries").textContent).toBe("false");
   });
 });

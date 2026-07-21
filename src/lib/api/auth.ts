@@ -62,6 +62,12 @@ export function openMarketWindow(typeId: number): Promise<void> {
   return invoke<void>("esi_open_market_window", { typeId });
 }
 
+/** Open the in-game "Show Info" window for a character/corporation/alliance id
+ * (needs a logged-in character + the esi-ui.open_window scope). */
+export function openInfoWindow(targetId: number): Promise<void> {
+  return invoke<void>("esi_open_info_window", { targetId });
+}
+
 /**
  * Total owned quantity per type across the whole roster (durably cached ~10min).
  * Keys are type ids (as strings, per JSON object keys).

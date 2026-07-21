@@ -114,6 +114,7 @@ describe("PluginsPage", () => {
     invokeMock.mockReset();
     dragDropHandler = null;
     unlistenMock.mockReset();
+    localStorage.clear();
   });
 
   it("lists an installed plugin and the capabilities it declares", async () => {
@@ -166,6 +167,39 @@ describe("PluginsPage", () => {
     // After activation the connection details appear.
     expect(await screen.findByText(RUNNING.url as string)).toBeInTheDocument();
     expect(screen.getByText(RUNNING.token as string)).toBeInTheDocument();
+  });
+
+  it("collapses the MCP bridge card, hiding config, even while active", async () => {
+    renderPage([], RUNNING);
+    await screen.findByText("MCP bridge");
+    const card = pluginCard("MCP bridge");
+    // Active, connection details visible, header still shows Deactivate.
+    expect(
+      await within(card).findByText(RUNNING.url as string),
+    ).toBeInTheDocument();
+    within(card).getByRole("button", { name: "Deactivate" });
+
+    const toggle = within(card).getByRole("button", { name: /mcp bridge/i });
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    // Config controls and connection details collapse away...
+    expect(within(card).queryByText(RUNNING.url as string)).toBeNull();
+    expect(
+      within(card).queryByRole("checkbox", {
+        name: /start mcp bridge on launch/i,
+      }),
+    ).toBeNull();
+    // ...but the header — including Deactivate — stays usable.
+    within(card).getByRole("button", { name: "Deactivate" });
+    expect(within(card).getByText("Active")).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(
+      await within(card).findByText(RUNNING.url as string),
+    ).toBeInTheDocument();
   });
 
   it("setting a port calls mcp_set_port", async () => {

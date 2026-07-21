@@ -49,6 +49,13 @@ pub struct TradeRow {
     /// Set when the current sell price sits at a recent extreme ("above 30d high"
     /// / "below 30d low") — risk of mean reversion. Filled by the command.
     pub price_flag: Option<String>,
+    /// Fractional price move over the recent history window (last-quarter vs
+    /// first-quarter volume-weighted average); `None` when trading is too thin.
+    /// Filled by the command.
+    pub change_pct: Option<f64>,
+    /// Daily average price over the trend window (oldest→newest), for a
+    /// sparkline. Empty until filled by the command.
+    pub trend: Vec<f64>,
     pub favorite: bool,
     /// Category/group of the item (Ship/Module…, Frigate/Cruiser…), for search + filters.
     pub category: Option<String>,
@@ -96,6 +103,8 @@ pub fn evaluate(
         daily_traded: 0,
         days_of_supply: 0.0,
         price_flag: None,
+        change_pct: None,
+        trend: Vec::new(),
         favorite,
         category: None,
         group: None,
@@ -174,7 +183,12 @@ mod tests {
     }
 
     fn stats(volume: i64, low: f64, high: f64) -> TradedStats {
-        TradedStats { volume, low, high }
+        TradedStats {
+            volume,
+            low,
+            high,
+            ..Default::default()
+        }
     }
 
     #[test]

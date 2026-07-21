@@ -295,6 +295,26 @@ pub async fn open_market_window(
     Ok(())
 }
 
+/// Open the in-game "Show Info" window for a character, corporation, or
+/// alliance id (ESI UI write) — e.g. surfacing a corp's info window (with its
+/// "Give ISK" action) for players who want to donate.
+pub async fn open_info_window(
+    auth: &AuthState,
+    character_id: i64,
+    target_id: i64,
+) -> Result<(), AuthError> {
+    let token = auth.access_token_for(character_id).await?;
+    send_retrying(|| {
+        auth.http()
+            .post(format!("{ESI_BASE}/latest/ui/openwindow/information/"))
+            .query(&[("target_id", target_id.to_string())])
+            .bearer_auth(&token)
+    })
+    .await?
+    .error_for_status()?;
+    Ok(())
+}
+
 /// Set the character's autopilot destination to a solar system (ESI UI write).
 /// This is the closest *working* in-game hook for "take me to this colony":
 /// `/ui/openwindow/information/` only accepts character/corporation/alliance
