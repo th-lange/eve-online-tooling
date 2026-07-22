@@ -69,6 +69,10 @@ pub struct Invention {
     /// The T1 product's manufacturing materials, used to estimate the copy job
     /// fee for the consumed T1 BPC (EIV × cost index).
     pub copy_materials: Vec<InputLine>,
+    /// The T1 blueprint copied/consumed each attempt — what "invented from"
+    /// names in the UI. For T3 invention this is the Ancient Relic's own type
+    /// id (it isn't copied, but the id still identifies the product's source).
+    pub base_blueprint_type_id: i64,
     /// Runs on the resulting T2 BPC per successful attempt.
     pub runs_per_success: i64,
     /// Success probability (0..1).
@@ -184,6 +188,11 @@ pub struct InventionBreakdown {
     pub runs_per_success: i64,
     /// Invention cost per produced unit-run = attempt_cost / (probability × runs).
     pub per_unit: f64,
+    /// The T1 blueprint invented from — id + name, so the UI can show what a
+    /// T2 item's invention is actually based on. Name is filled by the command
+    /// layer from the SDE; the pure engine leaves it empty.
+    pub base_blueprint_type_id: i64,
+    pub base_blueprint_name: String,
 }
 
 /// How deep the recursive build-vs-buy resolver descends.
@@ -504,6 +513,8 @@ pub fn evaluate_with_stock(
                 probability,
                 runs_per_success: inv.runs_per_success,
                 per_unit,
+                base_blueprint_type_id: inv.base_blueprint_type_id,
+                base_blueprint_name: String::new(),
             };
             (per_unit * runs as f64, Some(breakdown))
         }
@@ -674,6 +685,7 @@ mod tests {
                 runs_per_success: 1,
                 probability: 1.0,
                 result_me: 2,
+                base_blueprint_type_id: 599,
             }),
         };
         let prices = HashMap::from([
@@ -830,6 +842,7 @@ mod tests {
             runs_per_success: 10,
             probability: 0.5,
             result_me: 10,
+            base_blueprint_type_id: 599,
         });
         let mut prices = widget_prices();
         prices.insert(500, price(500, Some(100.0), Some(100.0), None));
@@ -843,6 +856,10 @@ mod tests {
         approx(inv.datacore_cost, 200.0);
         approx(inv.per_unit, 40.0);
         assert_eq!(inv.datacores.len(), 1);
+        // Propagates from the step's Invention (name is backfilled by the
+        // command layer from the SDE, not the pure engine — stays empty here).
+        assert_eq!(inv.base_blueprint_type_id, 599);
+        assert_eq!(inv.base_blueprint_name, "");
     }
 
     #[test]

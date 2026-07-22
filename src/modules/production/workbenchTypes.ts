@@ -91,6 +91,8 @@ export interface WorkbenchState {
   setMetas: (s: Set<string>) => void;
   ownedOnly: boolean;
   setOwnedOnly: (b: boolean) => void;
+  excludeSpecialMods: boolean;
+  setExcludeSpecialMods: (b: boolean) => void;
   favoritesOnly: boolean;
   setFavoritesOnly: (b: boolean) => void;
   minRoiPct: string;

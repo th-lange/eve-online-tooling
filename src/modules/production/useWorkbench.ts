@@ -12,7 +12,7 @@ import {
 } from "../../lib/api";
 import { marketKeys } from "../../lib/queryKeys";
 import { useTypeIdLists } from "../../lib/useSavedLists";
-import { classifyPaste, dedupNames } from "./helpers";
+import { classifyPaste, dedupNames, isExcludedMetaGroup } from "./helpers";
 import { toggle, uniqueSorted } from "../../lib/sets";
 import { parseItems } from "../../lib/parseItems";
 import {
@@ -69,6 +69,7 @@ export function useWorkbench(): WorkbenchState {
   const [metas, setMetas] = useState<Set<string>>(new Set());
   const [ownedOnly, setOwnedOnly] = useState(false);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [excludeSpecialMods, setExcludeSpecialMods] = useState(false);
   const [minRoiPct, setMinRoiPct] = useState("");
   const [minVolume, setMinVolume] = useState("");
   const [pasteList, setPasteList] = useState("");
@@ -270,6 +271,7 @@ export function useWorkbench(): WorkbenchState {
       if (metas.size > 0 && !(r.metaGroup && metas.has(r.metaGroup)))
         return false;
       if (ownedOnly && !ownedSet.has(r.blueprintTypeId)) return false;
+      if (excludeSpecialMods && isExcludedMetaGroup(r.metaGroup)) return false;
       if (favoritesOnly && !r.favorite) return false;
       if (minRoi !== null && (r.roi ?? -Infinity) < minRoi) return false;
       if (minVol !== null && (r.productVolume ?? 0) < minVol) return false;
@@ -281,6 +283,7 @@ export function useWorkbench(): WorkbenchState {
     categories,
     metas,
     ownedOnly,
+    excludeSpecialMods,
     favoritesOnly,
     ownedSet,
     minRoiPct,
@@ -322,6 +325,12 @@ export function useWorkbench(): WorkbenchState {
       label: "Owned only",
       clear: () => setOwnedOnly(false),
     });
+  if (excludeSpecialMods)
+    activeFilters.push({
+      key: "special",
+      label: "Excl. Abyssal/Faction/Storyline/Deadspace/Officer",
+      clear: () => setExcludeSpecialMods(false),
+    });
   if (favoritesOnly)
     activeFilters.push({
       key: "fav",
@@ -351,6 +360,7 @@ export function useWorkbench(): WorkbenchState {
     setCategories(new Set());
     setMetas(new Set());
     setOwnedOnly(false);
+    setExcludeSpecialMods(false);
     setFavoritesOnly(false);
     setMinRoiPct("");
     setMinVolume("");
@@ -418,6 +428,8 @@ export function useWorkbench(): WorkbenchState {
     setMetas,
     ownedOnly,
     setOwnedOnly,
+    excludeSpecialMods,
+    setExcludeSpecialMods,
     favoritesOnly,
     setFavoritesOnly,
     minRoiPct,

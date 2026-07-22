@@ -23,6 +23,9 @@ export interface InventionBreakdown {
   runsPerSuccess: number;
   /** Invention cost per produced unit. */
   perUnit: number;
+  /** The T1 (or T3 relic) blueprint this item is invented from. */
+  baseBlueprintTypeId: number;
+  baseBlueprintName: string;
 }
 
 export interface ProfitBreakdown {

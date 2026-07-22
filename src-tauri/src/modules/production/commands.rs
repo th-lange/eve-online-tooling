@@ -302,6 +302,7 @@ pub async fn production_profit(
                 runs_per_success,
                 probability,
                 result_me,
+                base_blueprint_type_id: inv.inventing_blueprint_type_id,
             });
         }
         steps.push(step);
@@ -338,6 +339,17 @@ pub async fn production_profit(
     let categories = sde.category_names().map_err(|e| e.to_string())?;
     let groups = sde.group_names().map_err(|e| e.to_string())?;
     let base_times = sde.base_times(1).map_err(|e| e.to_string())?; // 1 = manufacturing
+    // Names for the T1 (or T3 relic) blueprint each T2/T3 row is invented
+    // from, so the UI can show what a "build" actually starts from.
+    let base_bp_ids: Vec<i64> = steps
+        .iter()
+        .filter_map(|s| s.invention.as_ref().map(|i| i.base_blueprint_type_id))
+        .collect();
+    let base_bp_names: HashMap<i64, String> = sde
+        .type_names(&base_bp_ids)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .collect();
 
     // Job-time multipliers shared by every row: Industry (−4%/lvl) × Advanced
     // Industry (−3%/lvl) × structure TE bonus.
@@ -384,6 +396,12 @@ pub async fn production_profit(
             );
             bd.category = categories.get(&bd.product_type_id).cloned();
             bd.group = groups.get(&bd.product_type_id).cloned();
+            if let Some(inv) = bd.invention.as_mut() {
+                inv.base_blueprint_name = base_bp_names
+                    .get(&inv.base_blueprint_type_id)
+                    .cloned()
+                    .unwrap_or_default();
+            }
             bd.market = Some(market_name.clone());
             bd.favorite = favorites.contains(&bd.blueprint_type_id);
             bd

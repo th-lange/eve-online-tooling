@@ -525,7 +525,11 @@ function BreakdownRow({ row }: { row: ProfitBreakdown }) {
         {row.invention && (
           <div className="mt-3">
             <div className="mb-1 text-xs font-medium text-zinc-400">
-              Invention — {formatPercent(row.invention.probability)} chance ×{" "}
+              Invention
+              {row.invention.baseBlueprintName
+                ? ` from ${row.invention.baseBlueprintName}`
+                : ""}{" "}
+              — {formatPercent(row.invention.probability)} chance ×{" "}
               {row.invention.runsPerSuccess} runs/success ={" "}
               {formatIsk(row.invention.perUnit)}/unit
             </div>

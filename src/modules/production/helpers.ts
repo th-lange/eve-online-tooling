@@ -3,6 +3,29 @@
 
 import type { ProfitBreakdown } from "../../lib/api";
 
+// Meta groups that never make sense to manufacture-and-sell in the ranked
+// list: Abyssal mods can't be built at all (mutaplasmid-only); Officer
+// items drop only from rare NPCs (never manufacturable); Faction/Storyline/
+// Deadspace are LP-store/NPC-drop lines a builder has no reason to chase
+// even when a blueprint exists. Tech I/II are unaffected — EVE's meta
+// groups are mutually exclusive, so this never touches plain T2.
+const EXCLUDED_META_GROUPS = new Set([
+  "Abyssal",
+  "Faction",
+  "Storyline",
+  "Deadspace",
+  "Officer",
+]);
+
+/** Whether a row's meta group is one of the always-exclude special lines
+ *  (Abyssal/Faction/Storyline/Deadspace/Officer) — see
+ *  [`EXCLUDED_META_GROUPS`]. */
+export function isExcludedMetaGroup(
+  metaGroup: string | null | undefined,
+): boolean {
+  return metaGroup != null && EXCLUDED_META_GROUPS.has(metaGroup);
+}
+
 /** Distinct names (first occurrence wins, case-insensitive), preserving the
  *  original casing and input order — used to normalize a pasted item list. */
 export function dedupNames(items: { name: string }[]): string[] {

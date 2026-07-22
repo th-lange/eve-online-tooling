@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyPaste, dedupNames } from "./helpers";
+import { classifyPaste, dedupNames, isExcludedMetaGroup } from "./helpers";
 
 describe("dedupNames", () => {
   it("keeps first occurrence, case-insensitive, in input order", () => {
@@ -11,6 +11,26 @@ describe("dedupNames", () => {
         { name: "Warrior II" },
       ]),
     ).toEqual(["Rifter", "Warrior II"]);
+  });
+});
+
+describe("isExcludedMetaGroup", () => {
+  it("flags Abyssal, Faction, Storyline, Deadspace, and Officer", () => {
+    expect(isExcludedMetaGroup("Abyssal")).toBe(true);
+    expect(isExcludedMetaGroup("Faction")).toBe(true);
+    expect(isExcludedMetaGroup("Storyline")).toBe(true);
+    expect(isExcludedMetaGroup("Deadspace")).toBe(true);
+    expect(isExcludedMetaGroup("Officer")).toBe(true);
+  });
+
+  it("leaves plain Tech I/II untouched (mutually exclusive groups)", () => {
+    expect(isExcludedMetaGroup("Tech I")).toBe(false);
+    expect(isExcludedMetaGroup("Tech II")).toBe(false);
+  });
+
+  it("treats missing meta group as not excluded", () => {
+    expect(isExcludedMetaGroup(null)).toBe(false);
+    expect(isExcludedMetaGroup(undefined)).toBe(false);
   });
 });
 

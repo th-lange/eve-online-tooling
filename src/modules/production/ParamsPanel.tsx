@@ -19,6 +19,8 @@ export function ParamsPanel({ wb }: { wb: WorkbenchState }) {
     ownedCount,
     ownedOnly,
     setOwnedOnly,
+    excludeSpecialMods,
+    setExcludeSpecialMods,
     favoritesOnly,
     setFavoritesOnly,
     categoryOptions,
@@ -131,6 +133,19 @@ export function ParamsPanel({ wb }: { wb: WorkbenchState }) {
                   onChange={(e) => setFavoritesOnly(e.currentTarget.checked)}
                 />
                 Favorites only
+              </label>
+              <label
+                className="mt-1 flex items-center gap-1 text-xs text-zinc-300"
+                title="Hide Abyssal, Faction, Storyline, Deadspace, and Officer items — LP-store/NPC-drop/mutaplasmid lines you wouldn't build to sell, even when a blueprint exists (plain Tech I/II are unaffected)"
+              >
+                <input
+                  type="checkbox"
+                  checked={excludeSpecialMods}
+                  onChange={(e) =>
+                    setExcludeSpecialMods(e.currentTarget.checked)
+                  }
+                />
+                Excl. Abyssal/Faction/Storyline/Deadspace/Officer
               </label>
             </Field>
             <Field label="Category / Type">
