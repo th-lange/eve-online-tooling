@@ -49,6 +49,10 @@ export interface FitItem {
   state: ModuleState;
   chargeTypeId?: number | null;
   quantity: number;
+  /** How many of this drone stack are active (deployed), 0..=quantity. `null`
+   * means "not yet customized" — defaults to as many as bandwidth/the 5-in-
+   * space limit allow. Only meaningful for `slot === "drone"`. */
+  activeDrones?: number | null;
 }
 
 /** The editable fit document. */
@@ -65,6 +69,7 @@ export interface Fit {
 export interface ShipLayout {
   typeId: number;
   name: string;
+  groupName: string;
   highSlots: number;
   midSlots: number;
   lowSlots: number;
@@ -191,6 +196,14 @@ export interface FitStats {
   activatableTypes?: number[];
   /** EW projected onto this fit, by category (presence only). */
   projectedEw?: EwTag[];
+  /** Authoritative active (deployed) count per fitted item, parallel to
+   * `Fit.items` by index — `null` for non-drone items. */
+  droneActive?: Array<number | null>;
+  /** How many of each fitted drone stack could ever be active on this hull
+   * (bandwidth cap), parallel to `Fit.items` — `null` for non-drone items.
+   * The star-count display cap: some hulls only support a couple of a
+   * bandwidth-hungry drone type even though the 5-in-space limit allows more. */
+  droneMaxActive?: Array<number | null>;
 }
 
 /** One priced line of a whole-fit valuation. */

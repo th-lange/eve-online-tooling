@@ -129,6 +129,7 @@ mod tests {
         ShipLayout {
             type_id: 587,
             name: "Rifter".into(),
+            group_name: "Frigate".into(),
             high_slots: 3,
             mid_slots: 3,
             low_slots: 4,

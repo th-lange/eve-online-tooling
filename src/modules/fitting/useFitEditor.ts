@@ -172,6 +172,45 @@ export function useFitEditor() {
         : f,
     );
   }
+  // Set a cargo/drone stack's quantity (clamped to ≥ 1) — re-simulates off the
+  // new fit, same as any other slot edit.
+  function setQuantity(globalIndex: number, quantity: number) {
+    const q = Math.max(1, Math.round(quantity));
+    setFit((f) =>
+      f
+        ? {
+            ...f,
+            items: f.items.map((it, i) =>
+              i === globalIndex ? { ...it, quantity: q } : it,
+            ),
+          }
+        : f,
+    );
+  }
+  // How many of a fitted drone stack are active (deployed), clamped to
+  // 0..=quantity here; the backend re-clamps to bandwidth + the 5-in-space
+  // limit (a shared pool across every drone type) and returns the granted
+  // counts via `stats.droneActive`, which the UI displays as the truth.
+  function setActiveDrones(globalIndex: number, activeDrones: number) {
+    setFit((f) =>
+      f
+        ? {
+            ...f,
+            items: f.items.map((it, i) =>
+              i === globalIndex
+                ? {
+                    ...it,
+                    activeDrones: Math.max(
+                      0,
+                      Math.min(Math.round(activeDrones), it.quantity),
+                    ),
+                  }
+                : it,
+            ),
+          }
+        : f,
+    );
+  }
   // Load/clear a charge on *every* fitted weapon of the given type at once.
   function setChargeForType(weaponTypeId: number, chargeTypeId: number | null) {
     setFit((f) =>
@@ -238,6 +277,8 @@ export function useFitEditor() {
     setCharge,
     setChargeForType,
     setModuleState,
+    setQuantity,
+    setActiveDrones,
     addProjected,
     removeProjected,
     addItem,

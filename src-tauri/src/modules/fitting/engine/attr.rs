@@ -44,6 +44,7 @@ pub mod attr {
     pub const CALIBRATION_COST: i64 = 1153;
     pub const RIG_SLOTS: i64 = 1137;
     pub const DRONE_BANDWIDTH: i64 = 1271;
+    pub const DRONE_BANDWIDTH_USED: i64 = 1272;
     pub const SUBSYSTEM_SLOTS: i64 = 1367;
 }
 

@@ -8,6 +8,7 @@ import { isAuthRequired, type Fit } from "../../lib/api";
 import { queryErrorText } from "../../components/QueryErrorNotice";
 
 export { BrowseTree, ModuleBrowser } from "./ModuleBrowser";
+export { FitHeader } from "./FitHeader";
 export { ProjectedPanel } from "./ProjectedPanel";
 export { ChargeControl, SlotBadge, SlotGrid } from "./SlotGrid";
 export {

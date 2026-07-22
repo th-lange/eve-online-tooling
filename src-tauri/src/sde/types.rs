@@ -257,6 +257,8 @@ pub struct AttrMeta {
 pub struct ShipLayout {
     pub type_id: i64,
     pub name: String,
+    /// The hull's group name (e.g. "Frigate", "Battlecruiser") for display.
+    pub group_name: String,
     pub high_slots: i64,
     pub mid_slots: i64,
     pub low_slots: i64,

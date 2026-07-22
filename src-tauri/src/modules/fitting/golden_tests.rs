@@ -35,6 +35,7 @@ fn golden_pyfa_fits() {
         state: ModuleState::Active,
         charge_type_id: charge.map(tid),
         quantity: 1,
+        active_drones: None,
     };
     let drone = |name: &str, qty: i32| FitItem {
         type_id: tid(name),
@@ -43,6 +44,7 @@ fn golden_pyfa_fits() {
         state: ModuleState::Active,
         charge_type_id: None,
         quantity: qty,
+        active_drones: None,
     };
     let fit = |name: &str, items: Vec<FitItem>| Fit {
         id: "t".into(),

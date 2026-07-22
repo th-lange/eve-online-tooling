@@ -179,6 +179,7 @@ fn module(type_id: i64, slot: SlotKind, index: i32, state: ModuleState, quantity
         state,
         charge_type_id: None,
         quantity,
+        active_drones: None,
     }
 }
 

@@ -52,6 +52,12 @@ pub struct FitItem {
     /// Drones/charges count; 1 for a single module.
     #[serde(default = "one")]
     pub quantity: i32,
+    /// How many of this drone stack are declared active (deployed), 0..=quantity;
+    /// `None` = not yet customized, defaulting to as many as the ship's drone
+    /// bandwidth and the 5-active-drones limit allow. Only meaningful for
+    /// `slot == Drone`.
+    #[serde(default)]
+    pub active_drones: Option<i32>,
 }
 
 /// The editable fit document. `id` is a stable key for local storage; `items`
@@ -231,6 +237,19 @@ pub struct FitStats {
     /// numerically (and a label for the ones we do).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub projected_ew: Vec<EwTag>,
+    /// Authoritative active (deployed) count per fitted item, parallel to the
+    /// fit's `items` by index — `None` for non-drone items. Clamped to what the
+    /// ship's drone bandwidth and the 5-active-drones limit actually allow, in
+    /// fit order; this is what `dps` reflects. Empty when the fit carries no
+    /// drones (or the dogma engine hasn't run).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub drone_active: Vec<Option<i32>>,
+    /// How many of each fitted drone stack *could ever* be active on this
+    /// hull, parallel to `items` — `None` for non-drone items. The star-count
+    /// display cap: some hulls only support a couple of a bandwidth-hungry
+    /// drone type even though the 5-in-space limit would allow more.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub drone_max_active: Vec<Option<i32>>,
 }
 
 /// One category of electronic warfare projected onto the fit (presence only).
@@ -294,6 +313,7 @@ mod tests {
                 state: ModuleState::Online,
                 charge_type_id: None,
                 quantity: 1,
+                active_drones: None,
             }],
             projected: Vec::new(),
         };

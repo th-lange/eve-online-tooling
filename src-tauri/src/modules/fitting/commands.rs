@@ -96,6 +96,7 @@ pub(crate) fn import_eft_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
             state: ModuleState::Active,
             charge_type_id,
             quantity: 1,
+            active_drones: None,
         });
     }
 
@@ -115,6 +116,7 @@ pub(crate) fn import_eft_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
             state: ModuleState::Active,
             charge_type_id: None,
             quantity: e.quantity,
+            active_drones: None,
         });
     }
 
@@ -388,6 +390,7 @@ pub fn fitting_add_item(
         state,
         charge_type_id,
         quantity: 1,
+        active_drones: None,
     });
     Ok(fit)
 }
@@ -678,6 +681,7 @@ mod tests {
             state: ModuleState::Active,
             charge_type_id: charge,
             quantity: qty,
+            active_drones: None,
         }
     }
 
@@ -705,6 +709,7 @@ mod tests {
                 state: ModuleState::Active,
                 charge_type_id: Some(tid("Republic Fleet EMP S")),
                 quantity: 1,
+                active_drones: None,
             }],
             projected: Vec::new(),
         };
@@ -729,6 +734,7 @@ mod tests {
                 state: ModuleState::Active,
                 charge_type_id: Some(tid("Scorch S")),
                 quantity: 1,
+                active_drones: None,
             }],
             projected: Vec::new(),
         };
@@ -762,6 +768,7 @@ mod tests {
                 state,
                 charge_type_id: Some(tid("Republic Fleet EMP S")),
                 quantity: 1,
+                active_drones: None,
             }],
             projected: Vec::new(),
         };
@@ -811,6 +818,7 @@ mod tests {
                 state,
                 charge_type_id: None,
                 quantity: 1,
+                active_drones: None,
             }],
             projected: Vec::new(),
         };
@@ -851,6 +859,7 @@ mod tests {
                 state,
                 charge_type_id: None,
                 quantity: 1,
+                active_drones: None,
             }],
             projected: Vec::new(),
         };

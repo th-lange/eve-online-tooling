@@ -1,10 +1,108 @@
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { errorMessage, type FitPrice, type FitStats } from "../../lib/api";
-import { formatInt, formatIsk } from "../../lib/format";
+import { formatDuration, formatInt, formatIsk } from "../../lib/format";
 import { CapGauge, EwPanel, ResourceBar, TankResists } from "./components";
 
-/** Right-hand stats sidebar: fitting resources, DPS, tank, navigation, and
- *  price — purely presentational, driven by the simulate/price queries
+/**
+ * The four numbers a fitter actually swaps modules to chase (#708): DPS, EHP,
+ * capacitor stability and top speed, as a headline block instead of small
+ * label/value stacks with the same weight as sensor strength. Capacitor is
+ * colour-coded good/marginal/bad (stable & comfortable / stable & tight /
+ * unstable) — the same three-state read as the resist table's colour scale.
+ */
+function Vitals({
+  stats,
+  jammedActive,
+}: {
+  stats: FitStats;
+  jammedActive: boolean;
+}) {
+  const dps = jammedActive ? 0 : (stats.dps?.total ?? null);
+  const ehp = stats.tank?.ehp ?? null;
+  const cap = stats.capacitor ?? null;
+  const speed = stats.navigation?.maxVelocity ?? null;
+
+  const capTone: "good" | "warn" | "bad" | "neutral" = !cap
+    ? "neutral"
+    : !cap.stable
+      ? "bad"
+      : (cap.stablePct ?? 100) >= 50
+        ? "good"
+        : "warn";
+  const capToneClass = {
+    good: "text-emerald-400",
+    warn: "text-amber-400",
+    bad: "text-red-400",
+    neutral: "text-zinc-100",
+  }[capTone];
+
+  return (
+    <div className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
+      <VitalStat
+        label="DPS"
+        value={dps == null ? "—" : dps.toFixed(0)}
+        suffix={jammedActive ? "jammed (no lock)" : undefined}
+        suffixClassName={jammedActive ? "text-amber-400" : undefined}
+      />
+      <VitalStat
+        label="EHP"
+        value={ehp == null ? "—" : formatInt(Math.round(ehp))}
+      />
+      <VitalStat
+        label="Capacitor"
+        value={
+          cap == null
+            ? "—"
+            : cap.stable
+              ? `${Math.max(0, Math.min(100, cap.stablePct ?? 100)).toFixed(0)}%`
+              : formatDuration(cap.depletionSeconds ?? 0)
+        }
+        valueClassName={capToneClass}
+        suffix={cap == null ? undefined : cap.stable ? "stable" : "to empty"}
+      />
+      <VitalStat
+        label="Speed"
+        value={speed == null ? "—" : `${Math.round(speed)} m/s`}
+      />
+    </div>
+  );
+}
+
+function VitalStat({
+  label,
+  value,
+  valueClassName = "text-zinc-100",
+  suffix,
+  suffixClassName = "text-zinc-500",
+}: {
+  label: string;
+  value: string;
+  valueClassName?: string;
+  suffix?: string;
+  suffixClassName?: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+        {label}
+      </div>
+      <div
+        className={`text-xl font-semibold leading-tight tabular-nums ${valueClassName}`}
+      >
+        {value}
+      </div>
+      {suffix && (
+        <div className={`truncate text-[10px] ${suffixClassName}`}>
+          {suffix}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Right-hand stats sidebar: a sticky vitals headline (DPS/EHP/cap/speed) over
+ *  the detail stats (resources, DPS breakdown, EW, tank resists, navigation)
+ *  and price — purely presentational, driven by the simulate/price queries
  *  `useFitEditor`/the page-level `price` mutation own. */
 export function StatsAside({
   stats,
@@ -22,16 +120,25 @@ export function StatsAside({
   price: UseMutationResult<FitPrice, Error, void, unknown>;
 }) {
   return (
-    <aside className="w-72 shrink-0 space-y-4 overflow-auto">
-      <div className="flex h-5 items-center justify-between">
-        <h2 className="text-sm font-medium text-zinc-200">Stats</h2>
-        {stats.isFetching && (
-          <span className="flex items-center gap-1.5 text-xs text-zinc-400">
-            <span className="h-3 w-3 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-300" />
-            Evaluating…
-          </span>
+    <aside className="w-72 shrink-0 overflow-auto">
+      {/* Sticky so the headline numbers stay visible while detail scrolls. */}
+      <div className="sticky top-0 z-10 bg-zinc-950 pb-3">
+        <div className="flex h-5 items-center justify-between">
+          <h2 className="text-sm font-medium text-zinc-200">Stats</h2>
+          {stats.isFetching && (
+            <span className="flex items-center gap-1.5 text-xs text-zinc-400">
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-zinc-600 border-t-zinc-300" />
+              Evaluating…
+            </span>
+          )}
+        </div>
+        {stats.data && (
+          <div className="mt-2">
+            <Vitals stats={stats.data} jammedActive={jammedActive} />
+          </div>
         )}
       </div>
+
       {stats.isError && (
         <p className="text-xs text-red-400">
           Eval failed: {errorMessage(stats.error)}
@@ -176,7 +283,7 @@ export function StatsAside({
         )}
       </div>
 
-      <div className="space-y-1">
+      <div className="mt-4 space-y-1">
         <div className="flex items-center justify-between">
           <h3 className="text-xs uppercase tracking-wide text-zinc-500">
             Price

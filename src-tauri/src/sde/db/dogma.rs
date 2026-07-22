@@ -318,15 +318,17 @@ impl Sde {
     /// Reads the relevant dogma attributes by id (verified against the SDE);
     /// `None` if the type doesn't exist.
     pub fn ship_layout(&self, type_id: i64) -> Result<Option<ShipLayout>, SdeError> {
-        let name: Option<String> = self
+        let found: Option<(String, String)> = self
             .conn
             .query_row(
-                "SELECT typeName FROM invTypes WHERE typeID = ?1",
+                "SELECT t.typeName, COALESCE(g.groupName, '')
+                 FROM invTypes t LEFT JOIN invGroups g ON g.groupID = t.groupID
+                 WHERE t.typeID = ?1",
                 params![type_id],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .optional()?;
-        let Some(name) = name else {
+        let Some((name, group_name)) = found else {
             return Ok(None);
         };
         // attributeID -> value for this hull; missing attributes default to 0.
@@ -335,6 +337,7 @@ impl Sde {
         Ok(Some(ShipLayout {
             type_id,
             name,
+            group_name,
             high_slots: a(14) as i64,           // hiSlots
             mid_slots: a(13) as i64,            // medSlots
             low_slots: a(12) as i64,            // lowSlots
@@ -399,12 +402,14 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE invTypes(typeID INT, groupID INT, typeName TEXT, volume REAL, published INT);
+             CREATE TABLE invGroups(groupID INT, groupName TEXT);
              CREATE TABLE dgmTypeAttributes(typeID INT, attributeID INT, valueFloat REAL, valueInt INT);
              CREATE TABLE dgmAttributeTypes(attributeID INT, attributeName TEXT, defaultValue REAL, stackable INT, highIsGood INT);
              CREATE TABLE dgmTypeEffects(typeID INT, effectID INT, isDefault INT);
              CREATE TABLE dgmEffects(effectID INT, effectName TEXT, effectCategory INT, isOffensive INT, isAssistance INT, durationAttributeID INT, dischargeAttributeID INT, rangeAttributeID INT, falloffAttributeID INT, trackingSpeedAttributeID INT, modifierInfo TEXT);
 
              INSERT INTO invTypes VALUES (587, 25, 'Rifter', 27.0, 1), (519, 60, 'Gyrostabilizer II', 5.0, 1);
+             INSERT INTO invGroups VALUES (25, 'Frigate'), (60, 'Damage Control');
              INSERT INTO dgmTypeAttributes(typeID, attributeID, valueFloat) VALUES
                (587,14,3),(587,13,3),(587,12,4),(587,1137,3),(587,102,3),(587,101,2),
                (587,48,130),(587,11,41),(587,1132,400),(587,283,0),(587,1271,0),
@@ -470,6 +475,7 @@ mod tests {
         let sde = dogma_fixture();
         let layout = sde.ship_layout(587).unwrap().unwrap();
         assert_eq!(layout.name, "Rifter");
+        assert_eq!(layout.group_name, "Frigate");
         assert_eq!(layout.high_slots, 3);
         assert_eq!(layout.mid_slots, 3);
         assert_eq!(layout.low_slots, 4);

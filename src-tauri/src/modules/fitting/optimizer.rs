@@ -166,6 +166,7 @@ pub(super) fn new_module(type_id: i64, slot: SlotKind, index: i32) -> FitItem {
         state: ModuleState::Active,
         charge_type_id: None,
         quantity: 1,
+        active_drones: None,
     }
 }
 
@@ -993,6 +994,7 @@ fn fit_drone_bay(
             state: ModuleState::Active,
             charge_type_id: None,
             quantity: count as i32,
+            active_drones: None,
         });
     }
 }
@@ -1203,6 +1205,7 @@ mod tests {
         ShipLayout {
             type_id: 1,
             name: "Test Hull".into(),
+            group_name: "Test Group".into(),
             high_slots: 4,
             mid_slots: 3,
             low_slots: 2,
@@ -1226,6 +1229,7 @@ mod tests {
             state: ModuleState::Active,
             charge_type_id: charge,
             quantity: qty,
+            active_drones: None,
         }
     }
 

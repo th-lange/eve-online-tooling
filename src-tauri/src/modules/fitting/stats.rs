@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use super::context::DogmaContext;
-use super::engine::attr::AttrStore;
+use super::engine::attr::{attr, AttrStore};
 use super::engine::capacitor::capacitor;
 use super::engine::damage::{damage, Weapon};
 use super::engine::navigation::{navigation, prop_velocity, targeting};
@@ -21,6 +21,11 @@ use super::types::{
     ResourceUsage, SlotKind, TankStats, TargetStats, WeaponRange,
 };
 use crate::sde::{Sde, ShipLayout};
+
+/// The hard cap on simultaneously active drones — five, at Drones V, which
+/// the app assumes (all-V skills by default, same basis as everything else
+/// in this module).
+const MAX_ACTIVE_DRONES: i32 = 5;
 
 /// Dogma-engine stats derived from one resolution pass.
 pub(super) struct DogmaStats {
@@ -38,6 +43,15 @@ pub(super) struct DogmaStats {
     pub(super) weapon_ranges: Vec<WeaponRange>,
     pub(super) navigation: NavStats,
     pub(super) targeting: TargetStats,
+    /// Authoritative active (deployed) count per fitted item, parallel to
+    /// `fit.items` by index — `None` for non-drone items.
+    pub(super) drone_active: Vec<Option<i32>>,
+    /// How many of each fitted drone stack *could ever* be active on this
+    /// hull (bandwidth cap, independent of what other stacks currently use),
+    /// parallel to `fit.items` — `None` for non-drone items. The star-count
+    /// display cap (#712 follow-up): some hulls can only fly 2 of a
+    /// bandwidth-hungry drone type.
+    pub(super) drone_max_active: Vec<Option<i32>>,
 }
 
 /// Build the engine inputs (ship + modules + all-V skills) from the SDE, resolve
@@ -237,6 +251,45 @@ pub(super) fn run_dogma(
         .into_iter()
         .collect();
 
+    // Active (deployed) drones: bandwidth + the 5-in-space limit are a shared
+    // pool across every drone type in the bay, granted greedily in fit order.
+    let drone_active_counts = resolve_active_drones(
+        &drone_items,
+        &resolved.drones,
+        resolved.ship.get(attr::DRONE_BANDWIDTH),
+    );
+    let drone_active_full: Vec<Option<i32>> = {
+        let mut counts = drone_active_counts.iter().copied();
+        fit.items
+            .iter()
+            .map(|it| {
+                if it.slot == SlotKind::Drone {
+                    counts.next()
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+    let drone_max_active_counts = max_active_drones(
+        &drone_items,
+        &resolved.drones,
+        resolved.ship.get(attr::DRONE_BANDWIDTH),
+    );
+    let drone_max_active_full: Vec<Option<i32>> = {
+        let mut counts = drone_max_active_counts.iter().copied();
+        fit.items
+            .iter()
+            .map(|it| {
+                if it.slot == SlotKind::Drone {
+                    counts.next()
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+
     Ok(DogmaStats {
         resources,
         validation,
@@ -244,7 +297,7 @@ pub(super) fn run_dogma(
         activatable_types,
         capacitor: capacitor_of(&resolved, &module_items),
         tank: tank_of(&resolved, &module_items),
-        dps: dps_of(&resolved, &module_items, &drone_items),
+        dps: dps_of(&resolved, &module_items, &drone_items, &drone_active_counts),
         weapon_ranges: weapon_ranges_of(&resolved, &module_items),
         navigation: {
             // Prop modules (AB/MWD) are identified by speedFactor (20) +
@@ -288,6 +341,8 @@ pub(super) fn run_dogma(
             s.get(564),
             [s.get(208), s.get(209), s.get(210), s.get(211)],
         ),
+        drone_active: drone_active_full,
+        drone_max_active: drone_max_active_full,
     })
 }
 
@@ -308,6 +363,7 @@ pub(super) fn resolved_feasibility(
     let resolved_layout = ShipLayout {
         type_id: base_layout.type_id,
         name: base_layout.name.clone(),
+        group_name: base_layout.group_name.clone(),
         high_slots: s.get(14) as i64,
         mid_slots: s.get(13) as i64,
         low_slots: s.get(12) as i64,
@@ -380,16 +436,84 @@ pub(super) fn resolved_damage(store: &AttrStore) -> f64 {
     store.get(114) + store.get(116) + store.get(117) + store.get(118)
 }
 
+/// How many of each fitted drone stack are actually active (deployed), given
+/// the ship's resolved drone bandwidth and the 5-in-space limit (assumed at
+/// Drones V, consistent with the app's all-V-by-default skill basis). Both
+/// are a *shared pool* across every drone type in the bay — granted greedily
+/// in fit order from each item's request (`active_drones`, defaulting to its
+/// full `quantity` when unset). The rest sit in the bay contributing nothing.
+/// Parallel to `drone_items`/`drones` (the drones' resolved attribute stores).
+pub(super) fn resolve_active_drones(
+    drone_items: &[&FitItem],
+    drones: &[AttrStore],
+    ship_bandwidth: f64,
+) -> Vec<i32> {
+    let mut remaining_bandwidth = ship_bandwidth.max(0.0);
+    let mut remaining_slots = MAX_ACTIVE_DRONES;
+    drone_items
+        .iter()
+        .zip(drones)
+        .map(|(item, store)| {
+            let per_unit = store.get(attr::DRONE_BANDWIDTH_USED);
+            let requested = item
+                .active_drones
+                .unwrap_or(item.quantity)
+                .clamp(0, item.quantity.max(0));
+            let by_bandwidth = if per_unit > 0.0 {
+                (remaining_bandwidth / per_unit).floor() as i32
+            } else {
+                requested
+            };
+            let granted = requested.min(by_bandwidth).min(remaining_slots).max(0);
+            remaining_bandwidth -= granted as f64 * per_unit;
+            remaining_slots -= granted;
+            granted
+        })
+        .collect()
+}
+
+/// How many of each fitted drone stack *could ever* be active on this hull —
+/// the display cap for the stars (#712 follow-up). Computed independently per
+/// stack (as if it alone had the ship's full bandwidth budget), not the
+/// shared-pool allocation `resolve_active_drones` grants: some hulls can only
+/// support 2 of a bandwidth-hungry drone type even though the 5-in-space
+/// limit would otherwise allow more. Parallel to `drone_items`/`drones`.
+pub(super) fn max_active_drones(
+    drone_items: &[&FitItem],
+    drones: &[AttrStore],
+    ship_bandwidth: f64,
+) -> Vec<i32> {
+    let ship_bandwidth = ship_bandwidth.max(0.0);
+    drone_items
+        .iter()
+        .zip(drones)
+        .map(|(item, store)| {
+            let per_unit = store.get(attr::DRONE_BANDWIDTH_USED);
+            let by_bandwidth = if per_unit > 0.0 {
+                (ship_bandwidth / per_unit).floor() as i32
+            } else {
+                item.quantity
+            };
+            by_bandwidth
+                .min(MAX_ACTIVE_DRONES)
+                .min(item.quantity)
+                .max(0)
+        })
+        .collect()
+}
+
 /// DPS from a resolved fit (#174, #176). Turrets read finalized `damageMultiplier`
 /// (64) + `speed` (51) and the loaded charge's base damage; **missiles** ride on
 /// the *resolved* charge, so missile-damage skills and ship role bonuses (applied
 /// to the charge in pass 4) count; **drones** read their resolved store, so drone
-/// skills + drone-damage bonuses count. `drone_items` is parallel to
+/// skills + drone-damage bonuses count, scaled by `drone_active` (#712) rather
+/// than raw fitted quantity. `drone_items`/`drone_active` are parallel to
 /// `resolved.drones`; `resolved.charges` is parallel to `resolved.modules`.
 pub(super) fn dps_of(
     resolved: &ResolvedFit,
     module_items: &[&FitItem],
     drone_items: &[&FitItem],
+    drone_active: &[i32],
 ) -> DpsBreakdown {
     let mut turrets = Vec::new();
     let mut missiles = Vec::new();
@@ -426,11 +550,12 @@ pub(super) fn dps_of(
     let drones: Vec<Weapon> = drone_items
         .iter()
         .zip(&resolved.drones)
-        .map(|(d, store)| Weapon {
+        .zip(drone_active)
+        .map(|((_, store), &active)| Weapon {
             damage_mult: store.get(64),
             damage_per_shot: resolved_damage(store),
             rof_seconds: store.get(51) / 1000.0,
-            count: d.quantity.max(1),
+            count: active.max(0),
         })
         .collect();
 
@@ -698,9 +823,17 @@ pub(crate) fn simulate_fit(
             .as_ref()
             .map(|d| d.activatable_types.clone())
             .unwrap_or_default(),
-        targeting: dogma.map(|d| d.targeting),
+        targeting: dogma.as_ref().map(|d| d.targeting.clone()),
         price: None,
         projected_ew,
+        drone_active: dogma
+            .as_ref()
+            .map(|d| d.drone_active.clone())
+            .unwrap_or_default(),
+        drone_max_active: dogma
+            .as_ref()
+            .map(|d| d.drone_max_active.clone())
+            .unwrap_or_default(),
     })
 }
 
@@ -815,6 +948,7 @@ mod tests {
             state,
             charge_type_id: charge,
             quantity: qty,
+            active_drones: None,
         }
     }
 
@@ -872,15 +1006,111 @@ mod tests {
             item(100, None, ModuleState::Active, 1),
         ];
         let module_items: Vec<&FitItem> = items.iter().collect();
-        // Drone state is irrelevant to dps_of — only quantity scales it.
+        // Drone state is irrelevant to dps_of — only the resolved active count
+        // (computed upstream by resolve_active_drones) scales it.
         let drone_item = item(300, None, ModuleState::Offline, 3);
         let drone_items = vec![&drone_item];
 
-        let dps = dps_of(&resolved, &module_items, &drone_items);
+        let dps = dps_of(&resolved, &module_items, &drone_items, &[3]);
         assert_eq!(dps.turret, 100.0 * 5.0 / 2.0); // only the active module counts
         assert_eq!(dps.missile, 0.0);
         assert_eq!(dps.drone, 2.0 * 40.0 * 3.0 / 1.0); // scaled by quantity, regardless of state
         assert_eq!(dps.total, dps.turret + dps.drone);
+    }
+
+    fn drone_item(type_id: i64, qty: i32, active: Option<i32>) -> FitItem {
+        FitItem {
+            type_id,
+            slot: SlotKind::Drone,
+            index: 0,
+            state: ModuleState::Active,
+            charge_type_id: None,
+            quantity: qty,
+            active_drones: active,
+        }
+    }
+    fn drone_store(bandwidth_used: f64) -> AttrStore {
+        store(&[(attr::DRONE_BANDWIDTH_USED, bandwidth_used)])
+    }
+
+    #[test]
+    fn resolve_active_drones_defaults_to_full_quantity_within_budget() {
+        let d = drone_item(300, 3, None);
+        let drones = vec![&d];
+        let stores = vec![drone_store(10.0)];
+        assert_eq!(resolve_active_drones(&drones, &stores, 50.0), vec![3]);
+    }
+
+    #[test]
+    fn resolve_active_drones_caps_by_bandwidth() {
+        let d = drone_item(300, 10, None);
+        let drones = vec![&d];
+        let stores = vec![drone_store(25.0)];
+        // floor(75 / 25) = 3, well under the fitted quantity of 10.
+        assert_eq!(resolve_active_drones(&drones, &stores, 75.0), vec![3]);
+    }
+
+    #[test]
+    fn resolve_active_drones_caps_by_five_in_space_limit() {
+        let d = drone_item(300, 10, None);
+        let drones = vec![&d];
+        let stores = vec![drone_store(1.0)]; // bandwidth is not the binding constraint
+        assert_eq!(resolve_active_drones(&drones, &stores, 1000.0), vec![5]);
+    }
+
+    #[test]
+    fn resolve_active_drones_shares_bandwidth_across_types_in_fit_order() {
+        // Two stacks of 3, each at 20 Mbit/drone; ship has 100 Mbit. The first
+        // stack (fit order) takes its full request (3x20=60), leaving 40 -> 2
+        // for the second — bandwidth is a shared pool, not per-type.
+        let a = drone_item(300, 3, None);
+        let b = drone_item(400, 3, None);
+        let items = vec![&a, &b];
+        let stores = vec![drone_store(20.0), drone_store(20.0)];
+        assert_eq!(resolve_active_drones(&items, &stores, 100.0), vec![3, 2]);
+    }
+
+    #[test]
+    fn resolve_active_drones_honors_a_lower_request_and_clamps_an_overshoot() {
+        let low_request = drone_item(300, 5, Some(1)); // user deactivated down to 1
+        let over_request = drone_item(400, 3, Some(99)); // clamps to its own quantity
+        let items = vec![&low_request, &over_request];
+        let stores = vec![drone_store(5.0), drone_store(5.0)];
+        assert_eq!(resolve_active_drones(&items, &stores, 1000.0), vec![1, 3]);
+    }
+
+    #[test]
+    fn max_active_drones_caps_by_bandwidth_regardless_of_other_stacks() {
+        // A hull with only 10 Mbit of drone bandwidth can fly at most 2 of a
+        // 5 Mbit/unit drone, even if 5 are fitted and the 5-in-space limit
+        // would otherwise allow more.
+        let d = drone_item(300, 5, None);
+        let drones = vec![&d];
+        let stores = vec![drone_store(5.0)];
+        assert_eq!(max_active_drones(&drones, &stores, 10.0), vec![2]);
+    }
+
+    #[test]
+    fn max_active_drones_caps_at_five_and_at_fitted_quantity() {
+        let plenty_bandwidth = drone_item(300, 10, None);
+        let scarce_fit = drone_item(400, 1, None);
+        let items = vec![&plenty_bandwidth, &scarce_fit];
+        let stores = vec![drone_store(1.0), drone_store(1.0)];
+        // Ample bandwidth for both: the first caps at the 5-in-space limit
+        // (fitted 10 > 5); the second caps at its own fitted quantity (1).
+        assert_eq!(max_active_drones(&items, &stores, 1000.0), vec![5, 1]);
+    }
+
+    #[test]
+    fn max_active_drones_is_independent_per_stack_unlike_the_shared_pool() {
+        // Unlike resolve_active_drones, each stack's max is computed as if it
+        // alone had the full bandwidth budget — this is a display cap, not a
+        // joint allocation, so it does not shrink as other stacks are fitted.
+        let a = drone_item(300, 5, None);
+        let b = drone_item(400, 5, None);
+        let items = vec![&a, &b];
+        let stores = vec![drone_store(10.0), drone_store(10.0)];
+        assert_eq!(max_active_drones(&items, &stores, 20.0), vec![2, 2]);
     }
 
     /// Turret range from maxRange(54)/falloff(158); a launcher with no

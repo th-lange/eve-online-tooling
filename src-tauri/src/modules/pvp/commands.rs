@@ -337,6 +337,7 @@ fn build_engine_fit(hull: i64, items: &[KmItem], cat_of: &dyn Fn(i64) -> i64) ->
                     state: ModuleState::Active,
                     charge_type_id: None,
                     quantity: (it.quantity_destroyed + it.quantity_dropped).max(1) as i32,
+                    active_drones: None,
                 });
                 drone_idx += 1;
             }
@@ -360,6 +361,7 @@ fn build_engine_fit(hull: i64, items: &[KmItem], cat_of: &dyn Fn(i64) -> i64) ->
                 state: ModuleState::Active,
                 charge_type_id: charge,
                 quantity: 1,
+                active_drones: None,
             });
         }
     }
@@ -780,6 +782,7 @@ mod tests {
                 state: ModuleState::Active,
                 charge_type_id: None,
                 quantity: 1,
+                active_drones: None,
             }],
             projected: vec![],
         };
