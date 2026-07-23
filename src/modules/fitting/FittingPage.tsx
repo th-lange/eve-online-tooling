@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardPaste, SlidersHorizontal } from "lucide-react";
+import { BarChart2, ClipboardPaste, SlidersHorizontal } from "lucide-react";
 import {
   errorMessage,
   fittingDeleteLocal,
@@ -18,6 +18,7 @@ import { Combo } from "../../components/Combo";
 import { SdeGate } from "../../components/SdeGate";
 import {
   Centered,
+  ComparisonPanel,
   EsiFitStatus,
   FitHeader,
   ModuleBrowser,
@@ -58,6 +59,7 @@ function Workbench() {
   const library = useFitLibrary();
   // When set (from clicking a free slot), the add-module browser filters to it.
   const [slotFilter, setSlotFilter] = useState<SlotKind | null>(null);
+  const [comparing, setComparing] = useState(false);
   const [regionId, setRegionId] = useState(FORGE);
   const [objective, setObjective] = useState<OptimizeObjective>("tank");
   const [optimizeMode, setOptimizeMode] = useState<OptimizeMode>("all");
@@ -215,6 +217,26 @@ function Workbench() {
           </div>
         </div>
 
+        {fit != null && (
+          <div className="flex items-center justify-end">
+            <button
+              onClick={() => setComparing((v) => !v)}
+              className="flex items-center gap-1.5 rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+            >
+              <BarChart2 className="h-3.5 w-3.5" />
+              {comparing ? "Hide comparison" : "Compare"}
+            </button>
+          </div>
+        )}
+
+        {comparing && (
+          <ComparisonPanel
+            currentFit={fit}
+            nameOf={nameOf}
+            onClose={() => setComparing(false)}
+          />
+        )}
+
         {fit == null ? (
           <Centered>
             Pick a hull, load a saved/in-game fit, or import an EFT fit to
@@ -311,6 +333,16 @@ function Workbench() {
               onJam={editor.setJammed}
               jammedActive={editor.jammedActive}
               price={price}
+              damageProfile={editor.damageProfile}
+              onDamageProfile={editor.setDamageProfile}
+              neutGjs={editor.neutGjs}
+              onNeutGjs={editor.setNeutGjs}
+              targetProfile={editor.targetProfile}
+              onTargetProfile={editor.setTargetProfile}
+              fleetBoosts={editor.fleetBoosts}
+              onAddFleetBoost={editor.addFleetBoost}
+              onRemoveFleetBoost={editor.removeFleetBoost}
+              nameOf={nameOf}
             />
           </div>
         )}

@@ -26,7 +26,7 @@ use super::modifier::{Domain, ModifierDef, Op};
 const DAMAGE_MULT_SKILL_BONUS: &str = "damageMultiplierSkillBonus";
 
 /// `dgmEffects.effectCategory` 5 = overload (overheat) effects — only active
-/// while the module is overheated, which the simulator doesn't model yet.
+/// while the module is overheated (#703, tracked via `EntityInput::overheated`).
 const OVERLOAD_CATEGORY: i64 = 5;
 
 /// `skillBoostDamageMultiplierBonus` — carried by both turret/drone skills (which
@@ -67,6 +67,9 @@ pub struct EntityInput {
     /// them (e.g. Weapon Upgrades reduces CPU of modules requiring Gunnery, which
     /// is a turret's *second* required skill, not its first).
     pub required_skills: Vec<i64>,
+    /// Whether the module is currently overheated — while true, its category-5
+    /// (overload) effects apply on top of its normal ones (#703).
+    pub overheated: bool,
 }
 
 /// A whole fit reduced to resolution inputs.
@@ -84,6 +87,14 @@ pub struct FitInput {
     /// module's group/skill-keyed bonuses plus missile-damage skills/ship role
     /// bonuses, so its finalized damage drives missile DPS. `None` = empty slot.
     pub charges: Vec<Option<EntityInput>>,
+    /// Command-burst / fleet-link modules projecting `GangModifier` bonuses
+    /// onto this ship (#705). The user specifies which fleet-boost modules
+    /// (+ charges) they're "receiving"; each is built as an ordinary
+    /// [`EntityInput`] and its outward modifiers are applied to the ship in a
+    /// dedicated pass after the main module pass — stacking-penalized per its
+    /// own modifier flags, identical to how a fitted module projects onto the
+    /// ship, just sourced externally instead of from `modules`.
+    pub gang_modules: Vec<EntityInput>,
 }
 
 /// Resolved attribute stores for the ship and each module (parallel to input).
@@ -162,10 +173,10 @@ pub fn resolve(
         let mut has_rof_boost = false;
         for &eid in &e.effect_ids {
             if let Some(meta) = effects.get(&eid) {
-                // Overload (category 5) effects only apply when the module is
-                // overheated, which the simulator doesn't model — so skip them
-                // (otherwise e.g. a gun's overload damage bonus inflates DPS).
-                if meta.category == OVERLOAD_CATEGORY {
+                // Overload (category 5) effects only apply while the module is
+                // overheated (#703); otherwise skip them (e.g. a gun's overload
+                // damage bonus shouldn't inflate DPS unless it's lit).
+                if meta.category == OVERLOAD_CATEGORY && !e.overheated {
                     continue;
                 }
                 if meta.name == DAMAGE_MULT_SKILL_BONUS {
@@ -245,6 +256,15 @@ pub fn resolve(
             AuxDest::Charge(i) => mods(input.charges[*i].as_ref().unwrap(), &mut unresolved),
         })
         .collect();
+    // Gang/fleet-link modules (#705): resolved as their own entities so their
+    // self-modifiers (e.g. a charge's bonus-magnitude effect) apply before
+    // they project outward.
+    let gang_mods: Vec<Vec<ModifierDef>> = input
+        .gang_modules
+        .iter()
+        .map(|e| mods(e, &mut unresolved))
+        .collect();
+    let mut gang_modules: Vec<AttrStore> = input.gang_modules.iter().map(seed).collect();
 
     // Pass A — self (Item) modifiers on every entity (e.g. skill per-level scaling).
     for (s, ms) in skills.iter_mut().zip(&skill_mods) {
@@ -256,6 +276,9 @@ pub fn resolve(
     }
     for (a, ms) in aux.iter_mut().zip(&aux_mods) {
         apply_self(&mut a.store, ms);
+    }
+    for (g, ms) in gang_modules.iter_mut().zip(&gang_mods) {
+        apply_self(g, ms);
     }
 
     // Pass B — outward modifiers, in tree order: skills → ship → modules.
@@ -290,6 +313,32 @@ pub fn resolve(
             .iter()
             .enumerate()
             .map(|(k, m)| (k, modules[i].get(m.src_attr)))
+            .collect();
+        for (k, value) in src_vals {
+            let m = &ms[k];
+            apply_to_targets(
+                m,
+                value,
+                m.penalized,
+                &mut ship,
+                &mut modules,
+                &group_ids,
+                &req_skills,
+                &mut aux,
+            );
+        }
+    }
+
+    // Pass C — gang/fleet-link modules (#705): each applies its outward
+    // modifiers to the ship (GangModifier -> Domain::Ship, see effects.rs),
+    // exactly like a fitted module projecting onto the ship — stacking
+    // penalization follows each modifier's own flag.
+    for i in 0..gang_modules.len() {
+        let ms = gang_mods[i].clone();
+        let src_vals: Vec<(usize, f64)> = ms
+            .iter()
+            .enumerate()
+            .map(|(k, m)| (k, gang_modules[i].get(m.src_attr)))
             .collect();
         for (k, value) in src_vals {
             let m = &ms[k];
@@ -478,10 +527,10 @@ mod tests {
             modifiers,
         }
     }
-    /// Overload (overheat) effects must not apply while the simulator runs the
-    /// module un-overheated (#176): a category-5 self damage bonus is dropped.
+    /// Overload (overheat) effects must not apply while the module is not
+    /// overheated (#703): a category-5 self damage bonus is dropped.
     #[test]
-    fn overload_category_effects_are_skipped() {
+    fn overload_category_effects_are_skipped_when_not_overheated() {
         let mut overload = effect(400, vec![mi("ItemModifier", "itemID", 6, 64, 1210, None)]);
         overload.category = OVERLOAD_CATEGORY; // 5 = overload
         let mut effects = HashMap::new();
@@ -498,6 +547,32 @@ mod tests {
         let resolved = resolve(&input, &effects, &|_| true, &|_| 0.0);
         // Un-overheated: the overload bonus is skipped, so it stays 1.0.
         assert_eq!(resolved.modules[0].get(64), 1.0);
+    }
+
+    /// An overheated module includes its category-5 (overload) effect (#703):
+    /// the same +15% self damage bonus now applies.
+    #[test]
+    fn overload_category_effects_apply_when_overheated() {
+        let mut overload = effect(400, vec![mi("ItemModifier", "itemID", 6, 64, 1210, None)]);
+        overload.category = OVERLOAD_CATEGORY; // 5 = overload
+        let mut effects = HashMap::new();
+        effects.insert(400, overload);
+
+        let input = FitInput {
+            modules: vec![EntityInput {
+                attrs: vec![(64, 1.0), (1210, 15.0)], // +15% overload damage bonus
+                effect_ids: vec![400],
+                overheated: true,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let resolved = resolve(&input, &effects, &|_| true, &|_| 0.0);
+        let dmg = resolved.modules[0].get(64);
+        assert!(
+            (dmg - 1.15).abs() < 1e-9,
+            "overheated turret damage = {dmg}, want 1.15"
+        );
     }
 
     fn mi(func: &str, dom: &str, op: i64, tgt: i64, src: i64, group: Option<i64>) -> ModifierInfo {
@@ -560,6 +635,7 @@ mod tests {
                 effect_ids: vec![200],
                 group_id: 0,
                 required_skills: Vec::new(),
+                overheated: false,
             },
             skills: vec![EntityInput {
                 type_id: 0,
@@ -567,6 +643,7 @@ mod tests {
                 effect_ids: vec![201],
                 group_id: 0,
                 required_skills: Vec::new(),
+                overheated: false,
             }],
             drones: vec![EntityInput {
                 type_id: 0,
@@ -574,6 +651,7 @@ mod tests {
                 effect_ids: vec![],
                 group_id: 0,
                 required_skills: vec![3436], // Hammerhead II requires Drones (184)
+                overheated: false,
             }],
             ..Default::default()
         };
@@ -742,6 +820,7 @@ mod tests {
                 effect_ids: vec![],
                 group_id: 55,
                 required_skills: Vec::new(),
+                overheated: false,
             }],
             skills: vec![EntityInput {
                 type_id: 0,
@@ -749,6 +828,7 @@ mod tests {
                 effect_ids: vec![100, 101],
                 group_id: 0,
                 required_skills: Vec::new(),
+                overheated: false,
             }],
             ..Default::default()
         };
@@ -782,6 +862,7 @@ mod tests {
                 effect_ids: vec![],
                 group_id: 55, // projectile, not the hybrid group 74
                 required_skills: Vec::new(),
+                overheated: false,
             }],
             skills: vec![EntityInput {
                 type_id: 0,
@@ -789,10 +870,39 @@ mod tests {
                 effect_ids: vec![101],
                 group_id: 0,
                 required_skills: Vec::new(),
+                overheated: false,
             }],
             ..Default::default()
         };
         let resolved = resolve(&input, &effects, &|_| true, &|_| 0.0);
         assert_eq!(resolved.modules[0].get(64), 1.0);
+    }
+
+    /// A fleet-link/command-burst module in `gang_modules` (#705) projects its
+    /// `Domain::Ship`-mapped `GangModifier` bonus straight onto the ship,
+    /// stacking-penalized per the modifier's own flag — mirroring how a
+    /// fitted module's outward modifiers reach the ship.
+    #[test]
+    fn gang_module_bonus_reaches_the_ship() {
+        // A skirmish burst's velocity bonus: postPercent(658) scaled by the
+        // module's own warfare-buff-strength attribute (arbitrary attr 900).
+        let burst = effect(800, vec![mi("GangModifier", "shipID", 6, 51, 900, None)]);
+        let mut effects = HashMap::new();
+        effects.insert(800, burst);
+
+        let input = FitInput {
+            ship: EntityInput {
+                attrs: vec![(51, 200.0)], // base max velocity
+                ..Default::default()
+            },
+            gang_modules: vec![EntityInput {
+                attrs: vec![(900, 20.0)], // +20% velocity
+                effect_ids: vec![800],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let resolved = resolve(&input, &effects, &|_| false, &|_| 0.0);
+        assert_eq!(resolved.ship.get(51), 240.0); // 200 * 1.20
     }
 }

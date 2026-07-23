@@ -8,6 +8,7 @@ use tauri::{AppHandle, State};
 
 use super::context::DogmaContext;
 use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
+use super::engine::tank::DamageProfile;
 use super::stats::{
     base_damage, capacitor_of, is_ship_module, required_skills_of, resolved_feasibility, tank_of,
     AttrMap, EffectMap, GroupMap,
@@ -238,6 +239,7 @@ pub(super) fn entity_from_maps(
         effect_ids: effects.get(&type_id).cloned().unwrap_or_default(),
         group_id: groups.get(&type_id).copied().unwrap_or(0),
         required_skills: required_skills_of(attrs, type_id),
+        overheated: false,
     }
 }
 
@@ -369,9 +371,9 @@ pub(super) fn evaluate(
     }
 
     let objective = match obj {
-        Objective::Tank => tank_of(&resolved, &module_items).ehp,
+        Objective::Tank => tank_of(&resolved, &module_items, &DamageProfile::default()).ehp,
         Objective::Repair => {
-            let t = tank_of(&resolved, &module_items);
+            let t = tank_of(&resolved, &module_items, &DamageProfile::default());
             t.shield_rep_s + t.armor_rep_s
         }
         Objective::Damage => damage_score(&resolved, &module_items, &drone_items, attrs),
@@ -379,7 +381,7 @@ pub(super) fn evaluate(
     };
     Some(Eval {
         objective,
-        cap_stable: capacitor_of(&resolved, &module_items).stable,
+        cap_stable: capacitor_of(&resolved, &module_items, 0.0).stable,
         cost: fit_cost(fit, prices),
     })
 }

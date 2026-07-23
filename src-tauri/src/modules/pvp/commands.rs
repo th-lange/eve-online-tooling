@@ -447,7 +447,7 @@ fn build_lost_fit(sde: &Sde, km: &Killmail, lost_count: i64) -> LostFit {
         })
         .collect();
     let fit = build_engine_fit(km.victim.ship_type_id, &km.victim.items, &cat_of);
-    let analysis = simulate_fit(sde, &fit, &|_| 5.0)
+    let analysis = simulate_fit(sde, &fit, &|_| 5.0, None, None, None, None)
         .ok()
         .map(|s| analysis_from_stats(&s, &attrs, &fit, &name_of));
     LostFit {

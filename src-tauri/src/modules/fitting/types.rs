@@ -174,6 +174,18 @@ pub struct WeaponRange {
     pub falloff: f64,
 }
 
+/// Target profile for applied-DPS calculation (#701).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetProfile {
+    /// Signature radius (m).
+    pub sig_radius: f64,
+    /// Speed (m/s).
+    pub speed: f64,
+    /// Distance from the shooter (m).
+    pub distance: f64,
+}
+
 /// Navigation: speed, agility, align and signature (#175).
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -250,6 +262,15 @@ pub struct FitStats {
     /// drone type even though the 5-in-space limit would allow more.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub drone_max_active: Vec<Option<i32>>,
+    /// Applied DPS against the supplied target profile (#701); `None` when no
+    /// target profile was given.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub applied_dps: Option<DpsBreakdown>,
+    /// DPS-over-range curve: `(distance_m, total_applied_dps)` sampled at 30
+    /// points from 0 to the fit's maximum effective range. Empty when no
+    /// target profile was given.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub dps_range_curve: Vec<(f64, f64)>,
 }
 
 /// One category of electronic warfare projected onto the fit (presence only).

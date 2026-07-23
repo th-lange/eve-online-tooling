@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 
 use super::context::DogmaContext;
+use super::engine::application::{missile_application, turret_application};
 use super::engine::attr::{attr, AttrStore};
 use super::engine::capacitor::capacitor;
 use super::engine::damage::{damage, Weapon};
@@ -18,7 +19,7 @@ use super::engine::tank::{tank, DamageProfile, Layer};
 use super::engine::validate::{validate, ValItem};
 use super::types::{
     CapStats, DpsBreakdown, EwTag, Fit, FitItem, FitProblem, FitStats, ModuleState, NavStats,
-    ResourceUsage, SlotKind, TankStats, TargetStats, WeaponRange,
+    ResourceUsage, SlotKind, TankStats, TargetProfile, TargetStats, WeaponRange,
 };
 use crate::sde::{Sde, ShipLayout};
 
@@ -52,16 +53,29 @@ pub(super) struct DogmaStats {
     /// display cap (#712 follow-up): some hulls can only fly 2 of a
     /// bandwidth-hungry drone type.
     pub(super) drone_max_active: Vec<Option<i32>>,
+    /// Applied DPS against the supplied target profile (#701); `None` when
+    /// no target profile was given.
+    pub(super) applied_dps: Option<DpsBreakdown>,
+    /// DPS-over-range curve (#701); empty when no target profile was given.
+    pub(super) dps_range_curve: Vec<(f64, f64)>,
 }
 
 /// Build the engine inputs (ship + modules + all-V skills) from the SDE, resolve
 /// the fit once, and derive the dogma stats from the finalized attributes
-/// (capacitor #172, tank #173).
+/// (capacitor #172, tank #173). `target_profile`, when given, additionally
+/// computes applied DPS and the DPS-vs-range curve (#701). `fleet_boosts`
+/// (#705) are command-burst/fleet-link modules the user is "receiving" from a
+/// fleet member — `(module_type_id, charge_type_id)` pairs, `-1` meaning no
+/// charge loaded — whose `GangModifier` effects project onto this ship.
 pub(super) fn run_dogma(
     sde: &Sde,
     fit: &Fit,
     base_layout: &ShipLayout,
     skill_level_for: &dyn Fn(i64) -> f64,
+    damage_profile: &DamageProfile,
+    neut_gjs: f64,
+    target_profile: Option<&TargetProfile>,
+    fleet_boosts: &[(i64, i64)],
 ) -> Result<DogmaStats, String> {
     // Only slots that affect ship stats (drones/cargo/implants don't here).
     let module_items: Vec<&FitItem> = fit
@@ -96,7 +110,11 @@ pub(super) fn run_dogma(
     // Preload every dogma-engine input the resolution pass needs in five bulk
     // SDE queries — no per-type round-trips inside the loops below.
     let mut extra_ids = Vec::with_capacity(
-        1 + module_items.len() * 2 + drone_items.len() + implant_items.len() + fit.projected.len(),
+        1 + module_items.len() * 2
+            + drone_items.len()
+            + implant_items.len()
+            + fit.projected.len()
+            + fleet_boosts.len() * 2,
     );
     extra_ids.push(fit.ship_type_id);
     extra_ids.extend(module_items.iter().map(|i| i.type_id));
@@ -104,6 +122,8 @@ pub(super) fn run_dogma(
     extra_ids.extend(drone_items.iter().map(|i| i.type_id));
     extra_ids.extend(implant_items.iter().map(|i| i.type_id));
     extra_ids.extend(fit.projected.iter().map(|i| i.type_id));
+    extra_ids.extend(fleet_boosts.iter().map(|&(m, _)| m));
+    extra_ids.extend(fleet_boosts.iter().filter_map(|&(_, c)| (c > 0).then_some(c)));
     let ctx = DogmaContext::load(sde, &extra_ids)?;
 
     let mut ship = ctx.entity(fit.ship_type_id, Vec::new());
@@ -140,6 +160,9 @@ pub(super) fn run_dogma(
             }),
             _ => {}
         }
+        // Overheated modules include their category-5 (overload) effects on top
+        // of the normal ones (#703); resolve.rs gates on this per-entity flag.
+        e.overheated = it.state == ModuleState::Overheated;
         modules.push(e);
     }
 
@@ -167,6 +190,22 @@ pub(super) fn run_dogma(
         skills.push(ctx.entity(it.type_id, Vec::new()));
     }
 
+    // Fleet boosts (#705): command-burst/fleet-link modules the user is
+    // "receiving". Built as ordinary entities; a loaded charge's base
+    // attributes merge in on top of the module's own (command-burst charges
+    // carry the burst's magnitude attribute, which the module's GangModifier
+    // effect reads to scale its bonus).
+    let mut gang_modules = Vec::with_capacity(fleet_boosts.len());
+    for &(mod_id, charge_id) in fleet_boosts {
+        let mut e = ctx.entity(mod_id, required_skills_of(&ctx.attrs, mod_id));
+        if charge_id > 0 {
+            if let Some(charge_attrs) = ctx.attrs.get(&charge_id) {
+                e.attrs.extend(charge_attrs.iter().copied());
+            }
+        }
+        gang_modules.push(e);
+    }
+
     let mut resolved = resolve(
         &FitInput {
             ship,
@@ -174,6 +213,7 @@ pub(super) fn run_dogma(
             skills,
             drones,
             charges,
+            gang_modules,
         },
         &ctx.effect_meta,
         &|a| ctx.is_stackable(a),
@@ -290,15 +330,38 @@ pub(super) fn run_dogma(
             .collect()
     };
 
+    let weapon_ranges = weapon_ranges_of(&resolved, &module_items);
+    let (applied_dps, dps_range_curve) = if let Some(target) = target_profile {
+        let applied = applied_dps_of(
+            &resolved,
+            &module_items,
+            &drone_items,
+            &drone_active_counts,
+            target,
+            &weapon_ranges,
+        );
+        let curve = dps_range_curve_of(
+            &resolved,
+            &module_items,
+            &drone_items,
+            &drone_active_counts,
+            target,
+            &weapon_ranges,
+        );
+        (Some(applied), curve)
+    } else {
+        (None, Vec::new())
+    };
+
     Ok(DogmaStats {
         resources,
         validation,
         layout,
         activatable_types,
-        capacitor: capacitor_of(&resolved, &module_items),
-        tank: tank_of(&resolved, &module_items),
+        capacitor: capacitor_of(&resolved, &module_items, neut_gjs),
+        tank: tank_of(&resolved, &module_items, damage_profile),
         dps: dps_of(&resolved, &module_items, &drone_items, &drone_active_counts),
-        weapon_ranges: weapon_ranges_of(&resolved, &module_items),
+        weapon_ranges,
         navigation: {
             // Prop modules (AB/MWD) are identified by speedFactor (20) +
             // speedBoostFactor (567). Their mass penalty (massAddition 796) and
@@ -343,6 +406,8 @@ pub(super) fn run_dogma(
         ),
         drone_active: drone_active_full,
         drone_max_active: drone_max_active_full,
+        applied_dps,
+        dps_range_curve,
     })
 }
 
@@ -562,6 +627,198 @@ pub(super) fn dps_of(
     damage(&turrets, &missiles, &drones)
 }
 
+/// Shared applied-DPS math for one distance: turret/missile hit-quality
+/// (#701) folded onto the paper per-weapon DPS, mirroring [`dps_of`]'s
+/// iteration but scaling each weapon by its `application` factor at
+/// `distance`. `weapon_ranges` gates missiles beyond their flight range.
+fn applied_dps_at(
+    resolved: &ResolvedFit,
+    module_items: &[&FitItem],
+    drone_items: &[&FitItem],
+    drone_active: &[i32],
+    target_sig: f64,
+    target_speed: f64,
+    distance: f64,
+    weapon_ranges: &[WeaponRange],
+) -> DpsBreakdown {
+    let mut turret_dps = 0.0;
+    let mut missile_dps = 0.0;
+    for (i, store) in resolved.modules.iter().enumerate() {
+        if module_items
+            .get(i)
+            .is_some_and(|it| it.state != ModuleState::Active)
+        {
+            continue; // only active weapons fire
+        }
+        let Some(Some(charge)) = resolved.charges.get(i) else {
+            continue;
+        };
+        let damage_per_shot = resolved_damage(charge);
+        let rof_seconds = store.get(51) / 1000.0;
+        if rof_seconds <= 0.0 {
+            continue;
+        }
+        let mult = store.get(64);
+        if mult > 0.0 {
+            let optimal = store.get(54);
+            let falloff = store.get(158);
+            let tracking_speed = store.get(160);
+            let sig_resolution = {
+                let sr = store.get(105);
+                if sr > 0.0 {
+                    sr
+                } else {
+                    40.0
+                }
+            };
+            let app = turret_application(
+                optimal,
+                falloff,
+                tracking_speed,
+                sig_resolution,
+                target_speed,
+                target_sig,
+                distance,
+            );
+            turret_dps += mult * damage_per_shot / rof_seconds * app;
+        } else {
+            let explosion_radius = charge.get(103);
+            if explosion_radius <= 0.0 {
+                continue; // not a missile weapon
+            }
+            let explosion_velocity = charge.get(104);
+            let mut app = missile_application(
+                explosion_radius,
+                explosion_velocity,
+                target_sig,
+                target_speed,
+            );
+            let item = module_items.get(i);
+            let in_range = item.is_none_or(|it| {
+                weapon_ranges
+                    .iter()
+                    .find(|wr| wr.type_id == it.type_id && wr.charge_type_id == it.charge_type_id)
+                    .is_none_or(|wr| distance <= wr.optimal)
+            });
+            if !in_range {
+                app = 0.0;
+            }
+            missile_dps += damage_per_shot / rof_seconds * app;
+        }
+    }
+
+    let mut drone_dps = 0.0;
+    for ((_, store), &active) in drone_items.iter().zip(&resolved.drones).zip(drone_active) {
+        let count = active.max(0);
+        if count == 0 {
+            continue;
+        }
+        let damage_per_shot = resolved_damage(store);
+        let rof_seconds = store.get(51) / 1000.0;
+        if rof_seconds <= 0.0 {
+            continue;
+        }
+        let mult = store.get(64);
+        let tracking_speed = store.get(160);
+        let sig_resolution = {
+            let sr = store.get(105);
+            if sr > 0.0 {
+                sr
+            } else {
+                40.0
+            }
+        };
+        // Drones are always within optimal of their orbited target in normal
+        // use, so the falloff term is forced to zero — pass the tracking
+        // distance as both `optimal` and `distance` so `turret_application`
+        // only picks up the tracking penalty.
+        let tracking_distance = store.get(54).max(1000.0);
+        let app = turret_application(
+            tracking_distance,
+            0.0,
+            tracking_speed,
+            sig_resolution,
+            target_speed,
+            target_sig,
+            tracking_distance,
+        );
+        drone_dps += mult * damage_per_shot * count as f64 / rof_seconds * app;
+    }
+
+    DpsBreakdown {
+        turret: turret_dps,
+        missile: missile_dps,
+        drone: drone_dps,
+        total: turret_dps + missile_dps + drone_dps,
+    }
+}
+
+/// Applied DPS against a target profile (#701): same weapon set as
+/// [`dps_of`], each scaled by its hit-quality `application` factor at
+/// `target.distance`.
+pub(super) fn applied_dps_of(
+    resolved: &ResolvedFit,
+    module_items: &[&FitItem],
+    drone_items: &[&FitItem],
+    drone_active: &[i32],
+    target: &TargetProfile,
+    weapon_ranges: &[WeaponRange],
+) -> DpsBreakdown {
+    applied_dps_at(
+        resolved,
+        module_items,
+        drone_items,
+        drone_active,
+        target.sig_radius,
+        target.speed,
+        target.distance,
+        weapon_ranges,
+    )
+}
+
+/// DPS-over-range curve (#701): 30 linearly spaced `(distance_m,
+/// total_applied_dps)` samples from 0 to the fit's maximum effective range
+/// (the largest turret optimal+3×falloff or missile flight range, capped at
+/// 1000km). Empty when the fit has no ranged weapon.
+pub(super) fn dps_range_curve_of(
+    resolved: &ResolvedFit,
+    module_items: &[&FitItem],
+    drone_items: &[&FitItem],
+    drone_active: &[i32],
+    target: &TargetProfile,
+    weapon_ranges: &[WeaponRange],
+) -> Vec<(f64, f64)> {
+    const SAMPLES: usize = 30;
+    const MAX_RANGE_CAP: f64 = 1_000_000.0;
+
+    let max_range = weapon_ranges
+        .iter()
+        .map(|wr| wr.optimal + 3.0 * wr.falloff)
+        .fold(0.0_f64, f64::max)
+        .min(MAX_RANGE_CAP);
+    if max_range <= 0.0 {
+        return Vec::new();
+    }
+
+    (0..SAMPLES)
+        .map(|i| {
+            let distance = max_range * i as f64 / (SAMPLES - 1) as f64;
+            let dps = applied_dps_at(
+                resolved,
+                module_items,
+                drone_items,
+                drone_active,
+                target.sig_radius,
+                target.speed,
+                distance,
+                weapon_ranges,
+            )
+            .total;
+            (distance, dps)
+        })
+        .collect()
+}
+
 /// Per-weapon engagement ranges from the resolved fit: turret optimal(54)/
 /// falloff(158), mining-laser reach (also `maxRange`), and missile flight range
 /// (velocity × flight time) from the loaded missile. Deduped by (type, charge),
@@ -605,8 +862,13 @@ pub(super) fn weapon_ranges_of(
 
 /// Capacitor stability from a resolved fit (#172). Steady drain assumes every
 /// cap-using module runs (capacitorNeed 6 / duration 73 ms); per-module on/off
-/// toggling is a UI follow-up.
-pub(super) fn capacitor_of(resolved: &ResolvedFit, module_items: &[&FitItem]) -> CapStats {
+/// toggling is a UI follow-up. `neut_gjs` adds projected neut pressure (#706)
+/// on top of the module drain.
+pub(super) fn capacitor_of(
+    resolved: &ResolvedFit,
+    module_items: &[&FitItem],
+    neut_gjs: f64,
+) -> CapStats {
     let mut drain = 0.0;
     let mut module_drains: Vec<(f64, f64)> = Vec::new();
     for (i, store) in resolved.modules.iter().enumerate() {
@@ -637,13 +899,19 @@ pub(super) fn capacitor_of(resolved: &ResolvedFit, module_items: &[&FitItem]) ->
         resolved.ship.get(55),
         drain,
         &module_drains,
+        neut_gjs,
     )
 }
 
 /// Tank from a resolved fit (#173): HP + resonances from the ship, local rep/s
 /// from shield boosters (shieldBonus 68) and armor repairers (armorDamageAmount
-/// 84). Even 25/25/25/25 damage profile.
-pub(super) fn tank_of(resolved: &ResolvedFit, module_items: &[&FitItem]) -> TankStats {
+/// 84). `profile` weighs the resonances (#702); callers default to even
+/// 25/25/25/25 when none is specified.
+pub(super) fn tank_of(
+    resolved: &ResolvedFit,
+    module_items: &[&FitItem],
+    profile: &DamageProfile,
+) -> TankStats {
     let s = &resolved.ship;
     // Resonance attribute ids verified vs the SDE: [em, thermal, kinetic, explosive].
     let shield = Layer {
@@ -694,7 +962,7 @@ pub(super) fn tank_of(resolved: &ResolvedFit, module_items: &[&FitItem]) -> Tank
         shield,
         armor,
         hull,
-        &DamageProfile::default(),
+        profile,
         shield_rep_s,
         armor_rep_s,
     );
@@ -735,10 +1003,16 @@ pub(super) fn required_skills_of(attrs: &AttrMap, type_id: i64) -> Vec<i64> {
 /// Core simulation shared by `fitting_simulate` and the PVP fit analysis: given
 /// an open SDE, a fit and a skill-level lookup, resolve the dogma engine and
 /// assemble [`FitStats`]. Kept engine-identical so both surfaces agree.
+/// `fleet_boosts` (#705) is `[module_type_id, charge_type_id]` pairs (`-1` for
+/// no charge) of command-burst/fleet-link modules the fit is "receiving".
 pub(crate) fn simulate_fit(
     sde: &Sde,
     fit: &Fit,
     skill_level_for: &dyn Fn(i64) -> f64,
+    damage_profile: Option<[f64; 4]>,
+    neut_gjs: Option<f64>,
+    target_profile: Option<TargetProfile>,
+    fleet_boosts: Option<Vec<[i64; 2]>>,
 ) -> Result<FitStats, String> {
     let Some(ship) = sde
         .ship_layout(fit.ship_type_id)
@@ -796,7 +1070,24 @@ pub(crate) fn simulate_fit(
 
     // Dogma engine: resolve finalized attributes and derive stats (incl. the
     // skill-adjusted resources/validation). Best-effort.
-    let dogma = run_dogma(sde, fit, &ship, skill_level_for).ok();
+    let profile = damage_profile.map(DamageProfile).unwrap_or_default();
+    let neut = neut_gjs.unwrap_or(0.0);
+    let boosts: Vec<(i64, i64)> = fleet_boosts
+        .unwrap_or_default()
+        .into_iter()
+        .map(|[m, c]| (m, c))
+        .collect();
+    let dogma = run_dogma(
+        sde,
+        fit,
+        &ship,
+        skill_level_for,
+        &profile,
+        neut,
+        target_profile.as_ref(),
+        &boosts,
+    )
+    .ok();
 
     // Classify any EW projected onto the fit (#265) — presence only.
     let projected_ew = classify_projected_ew(sde, fit);
@@ -833,6 +1124,11 @@ pub(crate) fn simulate_fit(
         drone_max_active: dogma
             .as_ref()
             .map(|d| d.drone_max_active.clone())
+            .unwrap_or_default(),
+        applied_dps: dogma.as_ref().and_then(|d| d.applied_dps.clone()),
+        dps_range_curve: dogma
+            .as_ref()
+            .map(|d| d.dps_range_curve.clone())
             .unwrap_or_default(),
     })
 }
@@ -1018,6 +1314,43 @@ mod tests {
         assert_eq!(dps.total, dps.turret + dps.drone);
     }
 
+    /// A turret-armed fit against a far/small/fast target profile applies
+    /// less DPS than the paper (full-application) figure — falloff and
+    /// tracking both bite (#701).
+    #[test]
+    fn applied_dps_of_reduces_paper_dps_against_a_far_target() {
+        let turret = store(&[
+            (64, 5.0),     // damage multiplier
+            (51, 2000.0),  // 2s RoF
+            (54, 10_000.0), // optimal
+            (158, 5_000.0), // falloff
+            (160, 40.0),   // tracking speed
+            (105, 40.0),   // sig resolution
+        ]);
+        let charge = store(&[(114, 25.0), (116, 25.0), (117, 25.0), (118, 25.0)]); // 100 dmg
+
+        let resolved = resolved_fit(vec![turret], vec![Some(charge)], Vec::new());
+        let it = item(100, Some(200), ModuleState::Active, 1);
+        let module_items: Vec<&FitItem> = vec![&it];
+
+        let target = TargetProfile {
+            sig_radius: 40.0, // small, fast frigate — hard to track
+            speed: 400.0,
+            distance: 40_000.0, // well beyond optimal + falloff
+        };
+
+        let paper = dps_of(&resolved, &module_items, &[], &[]);
+        let applied = applied_dps_of(&resolved, &module_items, &[], &[], &target, &[]);
+        assert!(
+            applied.turret < paper.turret,
+            "applied {} should be below paper {}",
+            applied.turret,
+            paper.turret
+        );
+        assert!(applied.turret > 0.0, "some rounds should still land");
+        assert_eq!(applied.total, applied.turret);
+    }
+
     fn drone_item(type_id: i64, qty: i32, active: Option<i32>) -> FitItem {
         FitItem {
             type_id,
@@ -1194,7 +1527,68 @@ mod tests {
         ];
         let module_items: Vec<&FitItem> = items.iter().collect();
 
-        let cap = capacitor_of(&resolved, &module_items);
+        let cap = capacitor_of(&resolved, &module_items, 0.0);
         assert_eq!(cap.drain, 20.0 / (4000.0 / 1000.0));
+    }
+
+    /// A different damage profile weighs the same resonances differently
+    /// (#702): a shield-tanked ship with an em hole (poor em resist, strong
+    /// resist elsewhere) shows lower EHP against an em-heavy profile than an
+    /// even 25/25/25/25 split.
+    #[test]
+    fn tank_of_ehp_varies_with_damage_profile() {
+        let mut ship = AttrStore::new();
+        ship.set_base(263, 1000.0); // shield HP
+        // [em, thermal, kinetic, explosive] resonances: weak to em (0.75 = 25%
+        // resist), hardened everywhere else (0.25 = 75% resist).
+        ship.set_base(271, 0.75); // em
+        ship.set_base(274, 0.25); // thermal
+        ship.set_base(273, 0.25); // kinetic
+        ship.set_base(272, 0.25); // explosive
+        let resolved = ResolvedFit {
+            ship,
+            modules: Vec::new(),
+            drones: Vec::new(),
+            charges: Vec::new(),
+            unresolved: 0,
+        };
+
+        let em_heavy = tank_of(&resolved, &[], &DamageProfile([1.0, 0.0, 0.0, 0.0]));
+        let even = tank_of(&resolved, &[], &DamageProfile::default());
+        assert!(
+            em_heavy.ehp < even.ehp,
+            "em-heavy EHP {} should be lower than even-profile EHP {} against an em hole",
+            em_heavy.ehp,
+            even.ehp
+        );
+    }
+
+    /// Projected neut pressure (#706) shortens the discrete depletion sim vs
+    /// no neut, mirroring the engine-level capacitor tests but through the
+    /// stats-layer entry point.
+    #[test]
+    fn capacitor_of_neut_pressure_shortens_depletion() {
+        let mut ship = AttrStore::new();
+        ship.set_base(482, 250.0); // capacitorCapacity
+        ship.set_base(55, 125_000.0); // rechargeRate (ms)
+        let module = store(&[(6, 8.0), (73, 1000.0)]); // 8 GJ/s, well above the 5 GJ/s peak
+        let resolved = ResolvedFit {
+            ship,
+            modules: vec![module],
+            drones: Vec::new(),
+            charges: vec![None],
+            unresolved: 0,
+        };
+        let items = [item(100, None, ModuleState::Active, 1)];
+        let module_items: Vec<&FitItem> = items.iter().collect();
+
+        let no_neut = capacitor_of(&resolved, &module_items, 0.0);
+        let with_neut = capacitor_of(&resolved, &module_items, 3.0);
+        let t_no_neut = no_neut.depletion_seconds.expect("unstable without neut");
+        let t_with_neut = with_neut.depletion_seconds.expect("unstable with neut");
+        assert!(
+            t_with_neut < t_no_neut,
+            "with-neut depletion {t_with_neut} should be < no-neut {t_no_neut}"
+        );
     }
 }

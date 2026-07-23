@@ -1,6 +1,6 @@
 import { type CapStats, type EwTag, type TankStats } from "../../lib/api";
 import { formatDuration, formatInt } from "../../lib/format";
-import { DAMAGE_TYPES, resistClass } from "./fitHelpers";
+import { DAMAGE_TYPES, km, resistClass } from "./fitHelpers";
 
 /** Per-layer HP + EM/Th/Kin/Exp resistances for shield, armor and hull. */
 export function TankResists({ tank }: { tank: TankStats }) {
@@ -185,6 +185,52 @@ export function CapChart({
       <div className="flex justify-between text-[10px] text-zinc-600">
         <span>0s</span>
         <span>{formatDuration(endSecs)}</span>
+      </div>
+    </div>
+  );
+}
+
+/** DPS-vs-range curve (#701): inline SVG, same pattern as [`CapChart`]. The
+ *  x-axis spans 0 to the fit's max effective range (km); y is 0 to the peak
+ *  applied DPS in the curve. */
+export function DpsRangeCurve({ curve }: { curve: [number, number][] }) {
+  const w = 240;
+  const h = 56;
+  const padY = 3;
+  const distMax = curve[curve.length - 1][0] || 1;
+  const dpsMax = Math.max(...curve.map(([, dps]) => dps), 1e-9);
+  const x = (d: number) => (d / distMax) * w;
+  const y = (dps: number) => padY + (1 - dps / dpsMax) * (h - 2 * padY);
+  const line = curve
+    .map(([d, dps]) => `${x(d).toFixed(1)},${y(dps).toFixed(1)}`)
+    .join(" ");
+  const area = `0,${h} ${line} ${w},${h}`;
+  const color = "#f59e0b";
+  return (
+    <div className="mt-1">
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        preserveAspectRatio="none"
+        className="w-full"
+        style={{ height: h }}
+      >
+        {[0.25, 0.5, 0.75].map((f) => (
+          <line
+            key={f}
+            x1={0}
+            x2={w}
+            y1={padY + f * (h - 2 * padY)}
+            y2={padY + f * (h - 2 * padY)}
+            stroke="#27272a"
+            strokeWidth="0.75"
+          />
+        ))}
+        <polygon points={area} fill={color} fillOpacity="0.12" stroke="none" />
+        <polyline points={line} fill="none" stroke={color} strokeWidth="1.5" />
+      </svg>
+      <div className="flex justify-between text-[10px] text-zinc-600">
+        <span>0km</span>
+        <span>{km(distMax)}</span>
       </div>
     </div>
   );

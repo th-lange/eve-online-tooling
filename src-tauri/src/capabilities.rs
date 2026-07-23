@@ -533,7 +533,8 @@ fn cap_fitting_stats(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
         .ok_or("\"eft\" (string) is required")?;
     let sde = open_from_dir(ctx.app_data_dir)?;
     let fit: Fit = fitting::commands::import_eft_to_fit(&sde, eft_text)?;
-    let stats: FitStats = fitting::simulate_fit(&sde, &fit, &|_skill_id| 5.0)?;
+    let stats: FitStats =
+        fitting::simulate_fit(&sde, &fit, &|_skill_id| 5.0, None, None, None, None)?;
     serde_json::to_value(stats).map_err(|e| e.to_string())
 }
 
@@ -760,7 +761,7 @@ mod tests {
         }
         let sde = Sde::open(&path).unwrap();
         let fit = fitting::commands::import_eft_to_fit(&sde, "[Rifter, Golden Test]").unwrap();
-        let stats = fitting::simulate_fit(&sde, &fit, &|_| 5.0).unwrap();
+        let stats = fitting::simulate_fit(&sde, &fit, &|_| 5.0, None, None, None, None).unwrap();
         let layout = stats.layout.expect("dogma engine should resolve a layout");
         assert_eq!(layout.high_slots, 3);
         assert_eq!(layout.mid_slots, 3);

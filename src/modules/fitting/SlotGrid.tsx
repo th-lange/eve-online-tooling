@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Crosshair, Minus, Plus, Power, Star, X } from "lucide-react";
+import { Crosshair, Flame, Minus, Plus, Power, Star, X } from "lucide-react";
 import {
   fittingCompatibleCharges,
   type Fit,
@@ -312,28 +312,36 @@ export function SlotGrid({
     if (canActivate) {
       next =
         it.state === "active"
-          ? "online"
-          : it.state === "online"
-            ? "offline"
-            : "active";
+          ? "overheated"
+          : it.state === "overheated"
+            ? "online"
+            : it.state === "online"
+              ? "offline"
+              : "active";
       stateTag =
         it.state === "active"
           ? { label: "active", cls: "text-emerald-400" }
-          : it.state === "online"
-            ? { label: "inactive", cls: "text-red-400" }
-            : { label: "offline", cls: "text-zinc-400" };
+          : it.state === "overheated"
+            ? { label: "overheat", cls: "text-orange-400" }
+            : it.state === "online"
+              ? { label: "inactive", cls: "text-red-400" }
+              : { label: "offline", cls: "text-zinc-400" };
       toggleTitle =
         it.state === "active"
-          ? "Deactivate (online)"
-          : it.state === "online"
-            ? "Disable (offline)"
-            : "Activate";
+          ? "Overheat"
+          : it.state === "overheated"
+            ? "Deactivate overheat (online)"
+            : it.state === "online"
+              ? "Disable (offline)"
+              : "Activate";
       toggleCls =
         it.state === "active"
           ? "text-zinc-600 group-hover:text-zinc-300"
-          : it.state === "online"
-            ? "text-amber-500 hover:text-amber-400"
-            : "text-zinc-500 hover:text-emerald-400";
+          : it.state === "overheated"
+            ? "text-orange-500 hover:text-orange-400"
+            : it.state === "online"
+              ? "text-amber-500 hover:text-amber-400"
+              : "text-zinc-500 hover:text-emerald-400";
     } else {
       next = offline ? "online" : "offline";
       stateTag = offline ? { label: "offline", cls: "text-zinc-400" } : null;
@@ -368,6 +376,26 @@ export function SlotGrid({
               <Power size={13} />
             </button>
           )}
+          {canActivate &&
+            (it.state === "active" || it.state === "overheated") && (
+              <button
+                onClick={() =>
+                  onSetState(
+                    i,
+                    it.state === "overheated" ? "active" : "overheated",
+                  )
+                }
+                title={it.state === "overheated" ? "Un-overheat" : "Overheat"}
+                aria-label="Toggle overheat"
+                className={`flex shrink-0 items-center rounded p-0.5 ${
+                  it.state === "overheated"
+                    ? "text-orange-400"
+                    : "text-orange-700 hover:text-orange-500"
+                }`}
+              >
+                <Flame size={13} />
+              </button>
+            )}
           <span
             className={`min-w-0 flex-1 truncate ${
               offline ? "text-zinc-500" : dimmed ? "text-zinc-400" : ""

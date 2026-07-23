@@ -13,7 +13,9 @@ use tauri::{AppHandle, State};
 use super::context::DogmaContext;
 use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule};
 use super::engine::resolve::{resolve, FitInput};
-use super::types::{Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind};
+use super::types::{
+    Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind, TargetProfile,
+};
 use crate::esi::{self, corporation_id, AuthState, SkillLevels};
 use crate::market::{resolve_location, MarketService};
 use crate::sde::{Sde, ShipLayout};
@@ -355,6 +357,7 @@ fn resolve_module_costs(
             skills,
             drones: Vec::new(),
             charges,
+            gang_modules: Vec::new(),
         },
         &ctx.effect_meta,
         &|a| ctx.is_stackable(a),
@@ -547,20 +550,38 @@ pub async fn fitting_esi_list(
 /// Simulate a fit: slot/resource validation plus the dogma stats (capacitor,
 /// tank, DPS, navigation, targeting). `skill_source` is `"character"` for the
 /// logged-in pilot's real skills, anything else (default) for all-V (#172–#177).
-/// `price` stays `None` here (priced separately via [`fitting_price`]).
+/// `damage_profile` weighs EHP resonances (#702, default even 25/25/25/25);
+/// `neut_gjs` adds projected neut pressure to the cap simulation (#706,
+/// default none). `target_profile` supplies a target for applied-DPS and the
+/// DPS-vs-range curve (#701, default none). `fleet_boosts` are command-burst/
+/// fleet-link modules (+ optional charge) the fit is "receiving" from a fleet
+/// member (#705, default none). `price` stays `None` here (priced
+/// separately via [`fitting_price`]).
 #[tauri::command]
 pub async fn fitting_simulate(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
     fit: Fit,
     skill_source: Option<String>,
+    damage_profile: Option<[f64; 4]>,
+    neut_gjs: Option<f64>,
+    target_profile: Option<TargetProfile>,
+    fleet_boosts: Option<Vec<[i64; 2]>>,
 ) -> Result<FitStats, String> {
     // Skills first (async, before opening the SDE — see resolve_skill_levels).
     let levels = resolve_skill_levels(&app, &auth_state, skill_source.as_deref()).await;
     let lookup = skill_fn(levels.as_ref());
 
     let sde = crate::sde::open_from_app(&app)?;
-    simulate_fit(&sde, &fit, &lookup)
+    simulate_fit(
+        &sde,
+        &fit,
+        &lookup,
+        damage_profile,
+        neut_gjs,
+        target_profile,
+        fleet_boosts,
+    )
 }
 
 /// Price a whole fit (hull + modules + charges + drones/cargo) at a market
@@ -672,6 +693,7 @@ pub fn fitting_delete_local(app: AppHandle, id: String) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::modules::fitting::stats::run_dogma;
+    use crate::modules::fitting::engine::tank::DamageProfile;
 
     fn item(type_id: i64, slot: SlotKind, charge: Option<i64>, qty: i32) -> FitItem {
         FitItem {
@@ -714,7 +736,7 @@ mod tests {
             projected: Vec::new(),
         };
         let layout = sde.ship_layout(fit.ship_type_id).unwrap().unwrap();
-        let d = run_dogma(&sde, &fit, &layout, &|_| 5.0).unwrap();
+        let d = run_dogma(&sde, &fit, &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
         let r = d.weapon_ranges.first().expect("a weapon range");
         // A turret has both an optimal and a (larger, for autocannons) falloff.
         assert!(r.optimal > 0.0, "optimal should be set: {r:?}");
@@ -739,7 +761,7 @@ mod tests {
             projected: Vec::new(),
         };
         let layout = sde.ship_layout(scorch.ship_type_id).unwrap().unwrap();
-        let d = run_dogma(&sde, &scorch, &layout, &|_| 5.0).unwrap();
+        let d = run_dogma(&sde, &scorch, &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
         let r = d.weapon_ranges.first().expect("a laser range");
         assert!(r.falloff > 0.0, "Scorch should keep falloff: {r:?}");
     }
@@ -773,9 +795,9 @@ mod tests {
             projected: Vec::new(),
         };
         let layout = sde.ship_layout(tid("Rifter")).unwrap().unwrap();
-        let active = run_dogma(&sde, &gun(ModuleState::Active), &layout, &|_| 5.0).unwrap();
-        let online = run_dogma(&sde, &gun(ModuleState::Online), &layout, &|_| 5.0).unwrap();
-        let offline = run_dogma(&sde, &gun(ModuleState::Offline), &layout, &|_| 5.0).unwrap();
+        let active = run_dogma(&sde, &gun(ModuleState::Active), &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
+        let online = run_dogma(&sde, &gun(ModuleState::Online), &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
+        let offline = run_dogma(&sde, &gun(ModuleState::Offline), &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
         assert!(active.dps.total > 0.0);
         assert_eq!(offline.dps.total, 0.0, "offline gun should do no DPS");
         assert!(
@@ -823,9 +845,9 @@ mod tests {
             projected: Vec::new(),
         };
         let layout = sde.ship_layout(tid("Rifter")).unwrap().unwrap();
-        let active = run_dogma(&sde, &ab(ModuleState::Active), &layout, &|_| 5.0).unwrap();
-        let online = run_dogma(&sde, &ab(ModuleState::Online), &layout, &|_| 5.0).unwrap();
-        let offline = run_dogma(&sde, &ab(ModuleState::Offline), &layout, &|_| 5.0).unwrap();
+        let active = run_dogma(&sde, &ab(ModuleState::Active), &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
+        let online = run_dogma(&sde, &ab(ModuleState::Online), &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
+        let offline = run_dogma(&sde, &ab(ModuleState::Offline), &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
         assert!(active.capacitor.drain > 0.0, "active AB draws cap");
         assert_eq!(online.capacitor.drain, 0.0, "deactivated AB draws no cap");
         assert_eq!(offline.capacitor.drain, 0.0, "offline AB draws no cap");
@@ -864,13 +886,130 @@ mod tests {
             projected: Vec::new(),
         };
         let layout = sde.ship_layout(tid("Caracal")).unwrap().unwrap();
-        let active = run_dogma(&sde, &hardener(ModuleState::Active), &layout, &|_| 5.0).unwrap();
-        let online = run_dogma(&sde, &hardener(ModuleState::Online), &layout, &|_| 5.0).unwrap();
+        let active = run_dogma(&sde, &hardener(ModuleState::Active), &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
+        let online = run_dogma(&sde, &hardener(ModuleState::Online), &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
         assert!(
             active.tank.ehp > online.tank.ehp,
             "active hardener should raise EHP vs deactivated: {} vs {}",
             active.tank.ehp,
             online.tank.ehp
+        );
+    }
+
+    /// End-to-end (#701): a Rifter with an autocannon, against a Frigate
+    /// target profile, applies less DPS than the paper figure — and the
+    /// DPS-vs-range curve is populated (gated on the SDE).
+    #[test]
+    fn applied_dps_and_range_curve_populate_against_a_target() {
+        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+            return;
+        };
+        let path = std::path::PathBuf::from(&path);
+        if !path.exists() {
+            return;
+        }
+        let sde = Sde::open(&path).unwrap();
+        let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
+        let fit = Fit {
+            id: "t".into(),
+            name: "t".into(),
+            ship_type_id: tid("Rifter"),
+            items: vec![FitItem {
+                type_id: tid("200mm AutoCannon II"),
+                slot: SlotKind::High,
+                index: 0,
+                state: ModuleState::Active,
+                charge_type_id: Some(tid("Republic Fleet EMP S")),
+                quantity: 1,
+                active_drones: None,
+            }],
+            projected: Vec::new(),
+        };
+        let layout = sde.ship_layout(fit.ship_type_id).unwrap().unwrap();
+        let target = crate::modules::fitting::types::TargetProfile {
+            sig_radius: 40.0,
+            speed: 400.0,
+            distance: 20_000.0,
+        };
+        let d = run_dogma(
+            &sde,
+            &fit,
+            &layout,
+            &|_| 5.0,
+            &DamageProfile::default(),
+            0.0,
+            Some(&target),
+            &[],
+        )
+        .unwrap();
+        let applied = d.applied_dps.expect("applied dps when a target is given");
+        assert!(
+            applied.total < d.dps.total,
+            "applied {} should be below paper {}",
+            applied.total,
+            d.dps.total
+        );
+        assert_eq!(d.dps_range_curve.len(), 30, "30 sampled points");
+        assert!(
+            d.dps_range_curve.iter().all(|&(dist, _)| dist >= 0.0),
+            "every sampled distance is non-negative"
+        );
+    }
+
+    /// A T2 skirmish command burst raises the receiving ship's max velocity
+    /// (#705, gated on the SDE) — the fleet-boost module's `GangModifier`
+    /// effect, sourced from the burst charge's magnitude, projects onto the
+    /// ship exactly like a fitted module's outward modifier would.
+    #[test]
+    fn fleet_boost_raises_ship_speed() {
+        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+            eprintln!("fleet_boost_raises_ship_speed: EVE_SDE_PATH unset — skipping");
+            return;
+        };
+        let path = std::path::PathBuf::from(&path);
+        if !path.exists() {
+            return;
+        }
+        let sde = Sde::open(&path).unwrap();
+        let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
+        let fit = Fit {
+            id: "t".into(),
+            name: "t".into(),
+            ship_type_id: tid("Rifter"),
+            items: Vec::new(),
+            projected: Vec::new(),
+        };
+        let layout = sde.ship_layout(fit.ship_type_id).unwrap().unwrap();
+        let baseline = run_dogma(
+            &sde,
+            &fit,
+            &layout,
+            &|_| 5.0,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+        )
+        .unwrap();
+        let boosted = run_dogma(
+            &sde,
+            &fit,
+            &layout,
+            &|_| 5.0,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[(
+                tid("Skirmish Command Burst II"),
+                tid("Rapid Deployment Charge II"),
+            )],
+        )
+        .unwrap();
+        assert!(
+            boosted.navigation.max_velocity > baseline.navigation.max_velocity,
+            "boosted {} should exceed baseline {}",
+            boosted.navigation.max_velocity,
+            baseline.navigation.max_velocity
         );
     }
 

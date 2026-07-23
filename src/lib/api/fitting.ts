@@ -161,6 +161,21 @@ export interface WeaponRange {
   falloff: number;
 }
 
+/** A fleet boost module + optional charge projected onto this fit (#705) —
+ *  a command-burst/fleet-link module the user is "receiving" from a fleet
+ *  member. */
+export interface FleetBoost {
+  moduleTypeId: number;
+  chargeTypeId?: number;
+}
+
+/** Target profile for applied-DPS calculation. */
+export interface TargetProfile {
+  sigRadius: number;
+  speed: number;
+  distance: number;
+}
+
 /** Navigation: speed, agility, align and signature. */
 export interface NavStats {
   maxVelocity: number;
@@ -204,6 +219,12 @@ export interface FitStats {
    * The star-count display cap: some hulls only support a couple of a
    * bandwidth-hungry drone type even though the 5-in-space limit allows more. */
   droneMaxActive?: Array<number | null>;
+  /** Applied DPS against the supplied target profile; absent when no
+   * target profile was given. */
+  appliedDps?: DpsBreakdown;
+  /** DPS-over-range curve as `[distance_m, dps]` pairs; empty when no
+   * target profile was given. */
+  dpsRangeCurve?: [number, number][];
 }
 
 /** One priced line of a whole-fit valuation. */
@@ -262,12 +283,27 @@ export function fittingExportEft(fit: Fit): Promise<string> {
 /** Skills basis for simulation: best-case all-V, or the logged-in character. */
 export type SkillSource = "allFive" | "character";
 
-/** Simulate a fit: validation + dogma stats at the chosen skill basis. */
+/** Simulate a fit: validation + dogma stats at the chosen skill basis.
+ *  `fleetBoosts` (#705) are command-burst/fleet-link modules the fit is
+ *  "receiving" from a fleet member. */
 export function fittingSimulate(
   fit: Fit,
   skillSource: SkillSource = "allFive",
+  damageProfile?: [number, number, number, number],
+  neutGjs?: number,
+  targetProfile?: TargetProfile,
+  fleetBoosts?: FleetBoost[],
 ): Promise<FitStats> {
-  return invoke<FitStats>("fitting_simulate", { fit, skillSource });
+  return invoke<FitStats>("fitting_simulate", {
+    fit,
+    skillSource,
+    damageProfile: damageProfile ?? null,
+    neutGjs: neutGjs ?? null,
+    targetProfile: targetProfile ?? null,
+    fleetBoosts: fleetBoosts
+      ? fleetBoosts.map((b) => [b.moduleTypeId, b.chargeTypeId ?? -1])
+      : null,
+  });
 }
 
 /** Price a whole fit at a market. */

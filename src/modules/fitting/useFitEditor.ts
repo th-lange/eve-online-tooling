@@ -10,9 +10,11 @@ import {
   fittingSimulate,
   sdeTypeNames,
   type Fit,
+  type FleetBoost,
   type ModuleState,
   type SkillSource,
   type SlotKind,
+  type TargetProfile,
   type WeaponRange,
 } from "../../lib/api";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
@@ -35,6 +37,20 @@ export function useFitEditor() {
   // ECM is a chance-to-jam, not a continuous effect — so it's an opt-in "what if
   // the jam lands" view (targeting disabled), never a passive stat (#265).
   const [jammed, setJammed] = useState(false);
+  // Incoming damage profile + neut pressure for the simulate query — undefined
+  // means "let the backend default" (even damage, no neuts).
+  const [damageProfile, setDamageProfile] = useState<
+    [number, number, number, number] | undefined
+  >(undefined);
+  const [neutGjs, setNeutGjs] = useState<number | undefined>(undefined);
+  // Target profile for applied-DPS + the DPS-vs-range curve (#701); undefined
+  // means "no target selected" (paper DPS only).
+  const [targetProfile, setTargetProfile] = useState<
+    TargetProfile | undefined
+  >(undefined);
+  // Command-burst/fleet-link modules the fit is "receiving" from a fleet
+  // member (#705); empty means no fleet boosts applied.
+  const [fleetBoosts, setFleetBoosts] = useState<FleetBoost[]>([]);
 
   const layout = useQuery({
     queryKey: ["fitting", "layout", fit?.shipTypeId],
@@ -51,8 +67,12 @@ export function useFitEditor() {
       if (it.chargeTypeId) s.add(it.chargeTypeId);
     }
     for (const it of fit.projected ?? []) s.add(it.typeId);
+    for (const b of fleetBoosts) {
+      s.add(b.moduleTypeId);
+      if (b.chargeTypeId) s.add(b.chargeTypeId);
+    }
     return [...s];
-  }, [fit]);
+  }, [fit, fleetBoosts]);
   const names = useQuery({
     queryKey: ["fitting", "names", itemIds],
     queryFn: () => sdeTypeNames(itemIds),
@@ -66,8 +86,25 @@ export function useFitEditor() {
 
   const fitKey = useMemo(() => (fit ? JSON.stringify(fit) : ""), [fit]);
   const stats = useQuery({
-    queryKey: ["fitting", "simulate", fitKey, skillSource],
-    queryFn: () => fittingSimulate(fit!, skillSource),
+    queryKey: [
+      "fitting",
+      "simulate",
+      fitKey,
+      skillSource,
+      damageProfile,
+      neutGjs,
+      targetProfile,
+      fleetBoosts,
+    ],
+    queryFn: () =>
+      fittingSimulate(
+        fit!,
+        skillSource,
+        damageProfile,
+        neutGjs,
+        targetProfile,
+        fleetBoosts.length > 0 ? fleetBoosts : undefined,
+      ),
     enabled: fit != null,
   });
   // The jammed view only applies while ECM is actually projected onto the fit.
@@ -246,6 +283,15 @@ export function useFitEditor() {
         : f,
     );
   }
+  // Fleet boosts (#705) are client-side state, not part of `Fit` — added/
+  // removed like projected modules, but kept separate since they're never
+  // saved/exported with the fit.
+  function addFleetBoost(boost: FleetBoost) {
+    setFleetBoosts((prev) => [...prev, boost]);
+  }
+  function removeFleetBoost(idx: number) {
+    setFleetBoosts((prev) => prev.filter((_, i) => i !== idx));
+  }
 
   // Add a module/drone the user picked: the backend classifies its slot and
   // places it at the next free index, then we re-simulate off the new fit.
@@ -266,6 +312,15 @@ export function useFitEditor() {
     jammed,
     setJammed,
     jammedActive,
+    damageProfile,
+    setDamageProfile,
+    neutGjs,
+    setNeutGjs,
+    targetProfile,
+    setTargetProfile,
+    fleetBoosts,
+    addFleetBoost,
+    removeFleetBoost,
     layout,
     nameOf,
     stats,

@@ -2,6 +2,7 @@
 //! reference numbers. Split out of commands.rs (#565) since it exercises the
 //! dogma stats layer (`stats::run_dogma`), not commands.rs or the optimizer.
 
+use super::engine::tank::DamageProfile;
 use super::stats::run_dogma;
 use super::types::{Fit, FitItem, ModuleState, SlotKind};
 use crate::sde::Sde;
@@ -356,7 +357,9 @@ fn golden_pyfa_fits() {
     let mut failures = Vec::new();
     for (label, f, g) in &cases {
         let layout = sde.ship_layout(f.ship_type_id).unwrap().expect("layout");
-        let d = run_dogma(&sde, f, &layout, &all5).expect("dogma");
+        let d =
+            run_dogma(&sde, f, &layout, &all5, &DamageProfile::default(), 0.0, None, &[])
+                .expect("dogma");
         let (dps, ehp, vel, align, stable) = (
             d.dps.total,
             d.tank.ehp,

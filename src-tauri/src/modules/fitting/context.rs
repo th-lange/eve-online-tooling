@@ -85,6 +85,7 @@ impl DogmaContext {
             effect_ids: self.effects.get(&type_id).cloned().unwrap_or_default(),
             group_id: self.groups.get(&type_id).copied().unwrap_or(0),
             required_skills,
+            overheated: false,
         }
     }
 
@@ -109,6 +110,7 @@ impl DogmaContext {
                 effect_ids: self.effects.get(sid).cloned().unwrap_or_default(),
                 group_id: 0,
                 required_skills: Vec::new(),
+                overheated: false,
             });
         }
         skills

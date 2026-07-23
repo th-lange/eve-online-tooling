@@ -8,12 +8,15 @@ import { isAuthRequired, type Fit } from "../../lib/api";
 import { queryErrorText } from "../../components/QueryErrorNotice";
 
 export { BrowseTree, ModuleBrowser } from "./ModuleBrowser";
+export { ComparisonPanel } from "./ComparisonPanel";
 export { FitHeader } from "./FitHeader";
+export { FleetBoostsPanel } from "./FleetBoostsPanel";
 export { ProjectedPanel } from "./ProjectedPanel";
 export { ChargeControl, SlotBadge, SlotGrid } from "./SlotGrid";
 export {
   CapChart,
   CapGauge,
+  DpsRangeCurve,
   EwPanel,
   ResourceBar,
   TankResists,

@@ -1,7 +1,20 @@
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
-import { errorMessage, type FitPrice, type FitStats } from "../../lib/api";
+import {
+  errorMessage,
+  type FitPrice,
+  type FitStats,
+  type FleetBoost,
+  type TargetProfile,
+} from "../../lib/api";
 import { formatDuration, formatInt, formatIsk } from "../../lib/format";
-import { CapGauge, EwPanel, ResourceBar, TankResists } from "./components";
+import {
+  CapGauge,
+  DpsRangeCurve,
+  EwPanel,
+  FleetBoostsPanel,
+  ResourceBar,
+  TankResists,
+} from "./components";
 
 /**
  * The four numbers a fitter actually swaps modules to chase (#708): DPS, EHP,
@@ -10,6 +23,25 @@ import { CapGauge, EwPanel, ResourceBar, TankResists } from "./components";
  * colour-coded good/marginal/bad (stable & comfortable / stable & tight /
  * unstable) — the same three-state read as the resist table's colour scale.
  */
+// Presets: [label, [em, therm, kin, exp]]
+const DAMAGE_PRESETS = [
+  ["Omni (even)", [0.25, 0.25, 0.25, 0.25]],
+  ["Guristas (kin/therm)", [0, 0.5, 0.5, 0]],
+  ["Serpentis (therm/kin)", [0, 0.667, 0.333, 0]],
+  ["Angel (exp/kin)", [0, 0, 0.5, 0.5]],
+  ["Sansha/Blood (em/therm)", [0.5, 0.5, 0, 0]],
+] as const;
+
+// Target presets for applied-DPS + the DPS-vs-range curve (#701): [label, profile].
+const TARGET_PRESETS = [
+  ["None", null],
+  ["Frigate", { sigRadius: 40, speed: 400, distance: 10000 }],
+  ["Destroyer", { sigRadius: 60, speed: 300, distance: 15000 }],
+  ["Cruiser", { sigRadius: 130, speed: 250, distance: 25000 }],
+  ["Battlecruiser", { sigRadius: 280, speed: 180, distance: 35000 }],
+  ["Battleship", { sigRadius: 450, speed: 120, distance: 50000 }],
+] as const;
+
 function Vitals({
   stats,
   jammedActive,
@@ -111,6 +143,16 @@ export function StatsAside({
   onJam,
   jammedActive,
   price,
+  damageProfile,
+  onDamageProfile,
+  neutGjs,
+  onNeutGjs,
+  targetProfile,
+  onTargetProfile,
+  fleetBoosts,
+  onAddFleetBoost,
+  onRemoveFleetBoost,
+  nameOf,
 }: {
   stats: UseQueryResult<FitStats, Error>;
   skillLabel: string;
@@ -118,6 +160,16 @@ export function StatsAside({
   onJam: (jammed: boolean) => void;
   jammedActive: boolean;
   price: UseMutationResult<FitPrice, Error, void, unknown>;
+  damageProfile: [number, number, number, number] | undefined;
+  onDamageProfile: (p: [number, number, number, number] | undefined) => void;
+  neutGjs: number | undefined;
+  onNeutGjs: (n: number | undefined) => void;
+  targetProfile: TargetProfile | undefined;
+  onTargetProfile: (t: TargetProfile | undefined) => void;
+  fleetBoosts: FleetBoost[];
+  onAddFleetBoost: (boost: FleetBoost) => void;
+  onRemoveFleetBoost: (index: number) => void;
+  nameOf: (id: number) => string;
 }) {
   return (
     <aside className="w-72 shrink-0 overflow-auto">
@@ -178,6 +230,25 @@ export function StatsAside({
               unit=""
             />
             {stats.data.capacitor && <CapGauge cap={stats.data.capacitor} />}
+            {stats.data.capacitor && (
+              <div className="space-y-0.5">
+                <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+                  Incoming neut
+                </div>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  placeholder="0 GJ/s"
+                  value={neutGjs ?? ""}
+                  onChange={(e) => {
+                    const v = Number(e.currentTarget.value);
+                    onNeutGjs(v || undefined);
+                  }}
+                  className="w-20 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-100"
+                />
+              </div>
+            )}
             {stats.data.validation.length > 0 && (
               <ul className="mt-2 space-y-1">
                 {stats.data.validation.map((p, i) => (
@@ -195,6 +266,31 @@ export function StatsAside({
             <h3 className="text-xs uppercase tracking-wide text-zinc-500">
               DPS ({skillLabel})
             </h3>
+            <div className="space-y-0.5">
+              <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+                Target
+              </div>
+              <select
+                value={targetProfile ? JSON.stringify(targetProfile) : ""}
+                onChange={(e) =>
+                  onTargetProfile(
+                    e.currentTarget.value
+                      ? (JSON.parse(e.currentTarget.value) as TargetProfile)
+                      : undefined,
+                  )
+                }
+                className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-100"
+              >
+                {TARGET_PRESETS.map(([label, profile]) => (
+                  <option
+                    key={label}
+                    value={profile ? JSON.stringify(profile) : ""}
+                  >
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
             {jammedActive ? (
               <div className="text-sm text-amber-400">
                 Jammed — 0 applied (no lock)
@@ -214,6 +310,19 @@ export function StatsAside({
                       `· drone ${stats.data.dps.drone.toFixed(1)}`}
                   </div>
                 )}
+                {stats.data.appliedDps && (
+                  <div className="text-xs text-zinc-500">
+                    applied:{" "}
+                    <span className="text-amber-400">
+                      {stats.data.appliedDps.total.toFixed(1)} dps
+                    </span>{" "}
+                    (vs paper {stats.data.dps.total.toFixed(1)} dps)
+                  </div>
+                )}
+                {stats.data.dpsRangeCurve &&
+                  stats.data.dpsRangeCurve.length > 1 && (
+                    <DpsRangeCurve curve={stats.data.dpsRangeCurve} />
+                  )}
               </>
             )}
           </div>
@@ -232,6 +341,36 @@ export function StatsAside({
             <h3 className="text-xs uppercase tracking-wide text-zinc-500">
               Tank ({skillLabel})
             </h3>
+            <div className="space-y-0.5">
+              <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+                Incoming damage
+              </div>
+              <select
+                value={damageProfile ? JSON.stringify(damageProfile) : ""}
+                onChange={(e) =>
+                  onDamageProfile(
+                    e.currentTarget.value
+                      ? (JSON.parse(e.currentTarget.value) as [
+                          number,
+                          number,
+                          number,
+                          number,
+                        ])
+                      : undefined,
+                  )
+                }
+                className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-100"
+              >
+                {DAMAGE_PRESETS.map(([label, profile]) => (
+                  <option
+                    key={label}
+                    value={label === "Omni (even)" ? "" : JSON.stringify(profile)}
+                  >
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="text-sm text-zinc-300">
               {formatInt(Math.round(stats.data.tank.ehp))} EHP
             </div>
@@ -302,6 +441,13 @@ export function StatsAside({
           </div>
         )}
       </div>
+
+      <FleetBoostsPanel
+        boosts={fleetBoosts}
+        onAdd={onAddFleetBoost}
+        onRemove={onRemoveFleetBoost}
+        nameOf={nameOf}
+      />
     </aside>
   );
 }
