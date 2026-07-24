@@ -1,9 +1,12 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  ALL_CHARACTERS,
   activeCharacter,
   assetsTree,
   assetsValue,
+  authCharacters,
+  authLogin,
   errorMessage,
   type AssetNode,
   type AssetRow,
@@ -34,11 +37,12 @@ export function AssetsPage() {
   );
 }
 function Workbench() {
+  const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [treeSearch, setTreeSearch] = useState("");
   const [owners, setOwners] = useState<Set<string>>(new Set());
+  const [treeOwners, setTreeOwners] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<AssetsResult | null>(null);
-
   const [tree, setTree] = useState<AssetsTreeResult | null>(null);
 
   const run = useMutation({
@@ -54,6 +58,7 @@ function Workbench() {
     onSuccess: (t) => {
       setTree(t);
       setResult(null);
+      setTreeOwners(new Set());
     },
   });
 
@@ -82,6 +87,15 @@ function Workbench() {
     if (tree) treeRun.mutate();
     else run.mutate();
   }, [active.data, tree, run, treeRun]);
+  const chars = useQuery({
+    queryKey: ["auth", "characters"],
+    queryFn: authCharacters,
+  });
+  const login = useMutation({
+    mutationFn: authLogin,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["auth"] }),
+  });
+
 
   // Distinct owners present in the current result, characters first then
   // corps, each alphabetical — drives the source filter chips.
@@ -97,6 +111,26 @@ function Workbench() {
           Number(a.isCorp) - Number(b.isCorp) || a.name.localeCompare(b.name),
       );
   }, [result]);
+  // Same shape as ownerList but derived from the tree — walks all nodes once
+  // per tree load so the owner chips in tree view match the flat view's UX.
+  const treeOwnerList = useMemo(() => {
+    if (!tree) return [];
+    const seen = new Map<string, boolean>();
+    const walk = (nodes: AssetNode[]) => {
+      for (const n of nodes) {
+        if (n.owner != null && !seen.has(n.owner)) seen.set(n.owner, n.isCorp);
+        walk(n.children);
+      }
+    };
+    walk(tree.roots);
+    return [...seen.entries()]
+      .map(([name, isCorp]) => ({ name, isCorp }))
+      .sort(
+        (a, b) =>
+          Number(a.isCorp) - Number(b.isCorp) || a.name.localeCompare(b.name),
+      );
+  }, [tree]);
+
   // Precompute each row's lowercased search haystack once per result, so
   // typing only scans (indexOf) instead of re-building + re-lowercasing
   // strings for every row on every keystroke.
@@ -144,9 +178,25 @@ function Workbench() {
   const treeSearching = debouncedTreeSearch.trim().length > 0;
   const treeRoots = useMemo(() => {
     if (!tree) return [];
+    let roots = tree.roots;
+    if (treeOwners.size > 0) roots = filterTreeByOwners(roots, treeOwners);
     const q = debouncedTreeSearch.trim().toLowerCase();
-    return q ? filterTree(tree.roots, q, treeHay) : tree.roots;
-  }, [tree, debouncedTreeSearch, treeHay]);
+    return q ? filterTree(roots, q, treeHay) : roots;
+  }, [tree, treeOwners, debouncedTreeSearch, treeHay]);
+  // True when there's no corp asset data for any target character because their
+  // token predates the read_corporation_assets scope addition — a re-login
+  // surfaces the corp hangar chips.
+  const CORP_SCOPE = "esi-assets.read_corporation_assets.v1";
+  const missingCorpScope = useMemo(() => {
+    const list = chars.data;
+    if (!list?.length) return false;
+    const activeId = active.data;
+    const targets =
+      activeId === ALL_CHARACTERS
+        ? list
+        : list.filter((c) => c.characterId === activeId);
+    return targets.some((c) => !c.scopes.includes(CORP_SCOPE));
+  }, [chars.data, active.data]);
 
   return (
     <Page>
@@ -169,6 +219,19 @@ function Workbench() {
         }
       />
 
+      {missingCorpScope && (
+        <p className="mt-2 text-xs text-amber-400">
+          Corp hangar data requires re-login with the current scopes.{" "}
+          <button
+            onClick={() => login.mutate()}
+            disabled={login.isPending}
+            className="underline disabled:opacity-50"
+          >
+            {login.isPending ? "Opening browser…" : "Re-login"}
+          </button>
+        </p>
+      )}
+
       {treeRun.isError && (
         <div className="mt-3 text-sm text-rose-400">
           Failed: {errorMessage(treeRun.error)}
@@ -188,6 +251,47 @@ function Workbench() {
             />
             <Stat label="Locations" value={formatInt(tree.roots.length)} />
           </div>
+          {treeOwnerList.length > 1 && (
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+              <span className="mr-1 text-xs text-zinc-500">Source:</span>
+              <button
+                onClick={() => setTreeOwners(new Set())}
+                className={`rounded px-2 py-0.5 text-xs transition ${
+                  treeOwners.size === 0
+                    ? "bg-indigo-600 text-white"
+                    : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                }`}
+              >
+                All
+              </button>
+              {treeOwnerList.map((o) => {
+                const on = treeOwners.has(o.name);
+                return (
+                  <button
+                    key={o.name}
+                    onClick={() =>
+                      setTreeOwners((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(o.name)) next.delete(o.name);
+                        else next.add(o.name);
+                        return next;
+                      })
+                    }
+                    className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs transition ${
+                      on
+                        ? o.isCorp
+                          ? "bg-sky-700 text-white"
+                          : "bg-indigo-600 text-white"
+                        : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                    }`}
+                  >
+                    {o.isCorp ? <Building2 size={11} /> : <User size={11} />}
+                    {o.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <input
             value={treeSearch}
             onChange={(e) => setTreeSearch(e.currentTarget.value)}
@@ -200,7 +304,9 @@ function Workbench() {
             ))}
             {treeRoots.length === 0 && (
               <div className="px-3 py-6 text-center text-sm text-zinc-500">
-                {treeSearching ? "No matches." : "No assets."}
+                {treeSearching || treeOwners.size > 0
+                  ? "No matches."
+                  : "No assets."}
               </div>
             )}
           </div>
@@ -427,6 +533,25 @@ function filterTree(
       continue;
     }
     const kids = filterTree(n.children, q, hay);
+    if (kids.length > 0) out.push({ ...n, children: kids });
+  }
+  return out;
+}
+
+/** Prune the tree to nodes whose owner is in `owners`: an item node matches
+*  if its owner is selected; location/container nodes survive only to carry
+*  matching descendants. */
+function filterTreeByOwners(
+  nodes: AssetNode[],
+  owners: Set<string>,
+): AssetNode[] {
+  const out: AssetNode[] = [];
+  for (const n of nodes) {
+    if (!n.isLocation && n.owner != null && owners.has(n.owner)) {
+      out.push(n);
+      continue;
+    }
+    const kids = filterTreeByOwners(n.children, owners);
     if (kids.length > 0) out.push({ ...n, children: kids });
   }
   return out;
