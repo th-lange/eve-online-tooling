@@ -26,9 +26,9 @@ import { DataAge } from "../../components/DataAge";
 import { Combo } from "../../components/Combo";
 import {
   SystemGraph,
-  type SystemGraphEdge,
   type SystemGraphNode,
 } from "../../components/SystemGraph";
+import { buildTrailEdges } from "./travelEdges";
 import { kindFromSecurity } from "../../components/systemGraphLayout";
 import { SEC_TEXT_CLASS, secBand } from "../../lib/security";
 import { ZkillSystemLink } from "../../components/ZkillLink";
@@ -462,27 +462,7 @@ function TravelGraph({
     nodeMap.set(e.systemId, node);
   });
 
-  const seen = new Set<string>();
-  const edges: SystemGraphEdge[] = [];
-  for (let i = 1; i < entries.length; i++) {
-    const a = entries[i - 1];
-    const b = entries[i];
-    if (a.systemId === b.systemId) continue;
-    const key = `${a.systemId}-${b.systemId}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    // A k-space↔w-space change can only be a wormhole; otherwise trust the
-    // recorded gate distance: only a 1-gap leg is a real direct connection.
-    const wormhole = a.wspace !== b.wspace || b.gapJumps === -1;
-    const skipped = !wormhole && b.gapJumps > 1;
-    edges.push({
-      source: String(a.systemId),
-      target: String(b.systemId),
-      variant: wormhole ? "wormhole" : "stargate",
-      dashed: wormhole ? a.wspace === b.wspace : skipped,
-      label: skipped ? `${b.gapJumps} jumps` : undefined,
-    });
-  }
+  const edges = buildTrailEdges(entries);
 
   return (
     <div className="mt-3">
