@@ -421,24 +421,56 @@ fn imported_connection(sig: &crate::evescout::TheraSignature, now: u64) -> Optio
 
 /// Merge freshly-imported connections from one auto source into the stored set:
 /// keep every row from other sources untouched (manual + any other import), drop
-/// all previous rows of `source_tag` (the feed is the source of truth, so vanished
-/// holes disappear), and add the imported ones — skipping any that describe the
-/// same hole as a kept row or an earlier import ([`same_hole`]). New ids continue
-/// past the highest existing id. Pure.
+/// previous rows of `source_tag` whose hole vanished from the feed, and add the
+/// imported ones — skipping any that describe the same hole as a kept row or an
+/// earlier import ([`same_hole`]).
+///
+/// A hole that *survived* the refresh keeps its identity (id, created_at) and
+/// the user's lifecycle edits: mass status, jump-mass class, the EOL flag with
+/// its timestamp (EOL merges pessimistically — a feed-reported EOL still
+/// sticks), and sig codes where the feed side is empty. Feed-fresh facts
+/// (expiry) always update. New ids continue past the highest ever seen. Pure.
 fn merge_by_source(
     existing: Vec<Connection>,
     imported: Vec<Connection>,
     source_tag: ConnSource,
 ) -> Vec<Connection> {
-    let mut out: Vec<Connection> = existing
+    let (mut out, previous): (Vec<Connection>, Vec<Connection>) = existing
         .into_iter()
-        .filter(|c| c.source != source_tag)
-        .collect();
-    let mut next_id = out.iter().map(|c| c.id).max().unwrap_or(0) + 1;
+        .partition(|c| c.source != source_tag);
+    // Max over dropped rows too, so a vanished hole's id is never recycled
+    // within the same merge.
+    let mut next_id = out
+        .iter()
+        .chain(previous.iter())
+        .map(|c| c.id)
+        .max()
+        .unwrap_or(0)
+        + 1;
     for mut c in imported {
         // O(n²) over tens of rows — fine, and unlike a hash key this lets the
         // match semantics stay directional/sig tolerant.
         if out.iter().any(|k| same_hole(k, &c)) {
+            continue;
+        }
+        if let Some(prev) = previous.iter().find(|p| same_hole(p, &c)) {
+            c.id = prev.id;
+            c.created_at = prev.created_at;
+            c.mass_status = prev.mass_status;
+            c.jump_mass = prev.jump_mass;
+            c.eol = prev.eol || c.eol;
+            c.eol_updated_at = if c.eol {
+                prev.eol_updated_at.or(c.eol_updated_at)
+            } else {
+                None
+            };
+            if c.source_sig.is_none() {
+                c.source_sig = prev.source_sig.clone();
+            }
+            if c.target_sig.is_none() {
+                c.target_sig = prev.target_sig.clone();
+            }
+            out.push(c);
             continue;
         }
         c.id = next_id;
@@ -1009,6 +1041,47 @@ mod tests {
             ..base
         };
         assert!(same_hole(&hole1, &hole1_rev));
+    }
+
+    #[test]
+    fn refresh_preserves_user_edits_on_surviving_imports() {
+        let now = 1_000_000;
+        // Long-lived hole so the feed itself never flags EOL here.
+        let mut sig = evescout_sig(31000005, 30002086, "ABC", "large");
+        sig.remaining_hours = Some(10.0);
+
+        let first = merge_by_source(
+            vec![],
+            vec![imported_connection(&sig, now).unwrap()],
+            ConnSource::Evescout,
+        );
+        // The user rolls the hole: reduced mass, corrected class, flags EOL.
+        let mut edited = first.clone();
+        edited[0].mass_status = MassStatus::Reduced;
+        edited[0].jump_mass = JumpMass::M;
+        edited[0].eol = true;
+        edited[0].eol_updated_at = Some(now + 100);
+
+        // Refresh with the hole still in the feed → edits + identity survive,
+        // feed-fresh facts (expiry) update.
+        let refreshed = merge_by_source(
+            edited,
+            vec![imported_connection(&sig, now + 200).unwrap()],
+            ConnSource::Evescout,
+        );
+        assert_eq!(refreshed.len(), 1);
+        let c = &refreshed[0];
+        assert_eq!(c.mass_status, MassStatus::Reduced);
+        assert_eq!(c.jump_mass, JumpMass::M);
+        assert!(c.eol);
+        assert_eq!(c.eol_updated_at, Some(now + 100));
+        assert_eq!(c.id, first[0].id);
+        assert_eq!(c.created_at, now);
+        assert_eq!(c.expires_at, Some(now + 200 + 10 * 3600));
+
+        // A hole gone from the feed still drops on the next refresh.
+        let gone = merge_by_source(refreshed, vec![], ConnSource::Evescout);
+        assert!(gone.is_empty());
     }
 
     #[test]
