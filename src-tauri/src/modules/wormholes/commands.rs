@@ -58,6 +58,7 @@ pub fn wh_add_connection(
         source: ConnSource::Manual,
         created_at: crate::util::time::now_secs(),
         eol_updated_at: None,
+        expires_at: None,
     });
     store::save_and_view(&dir, &conns)
 }
@@ -343,13 +344,23 @@ fn dedupe_key(c: &Connection) -> (i64, i64, Option<String>) {
     (a, b, c.source_sig.clone())
 }
 
+/// EVE wormholes visibly flag end-of-life over roughly their final 4 hours;
+/// a feed row at or below this remaining life is already EOL.
+const EVESCOUT_EOL_THRESHOLD_HOURS: f64 = 4.0;
+
 /// Map one EVE-Scout signature to a connection (id assigned later on merge).
 /// Hub side (Thera/Turnur) is the source; the far k-space end is the target.
-/// Non-wormhole signatures and rows missing an endpoint are skipped. Pure.
+/// The feed's `remaining_hours` drives the lifecycle: at/below the EOL window
+/// the row imports as EOL, and the collapse time is stored so pruning drops
+/// the hole when the feed said it dies — not 48h later. Non-wormhole
+/// signatures and rows missing an endpoint are skipped. Pure.
 fn imported_connection(sig: &crate::evescout::TheraSignature, now: u64) -> Option<Connection> {
     if !sig.is_wormhole() || sig.out_system_id == 0 || sig.in_system_id == 0 {
         return None;
     }
+    let eol = sig
+        .remaining_hours
+        .is_some_and(|h| h <= EVESCOUT_EOL_THRESHOLD_HOURS);
     Some(Connection {
         id: 0,
         source_system_id: sig.out_system_id,
@@ -364,12 +375,15 @@ fn imported_connection(sig: &crate::evescout::TheraSignature, now: u64) -> Optio
             "l" => JumpMass::L,
             _ => JumpMass::Xl,
         },
-        eol: false,
+        eol,
         source_sig: sig.out_signature.clone(),
         target_sig: sig.in_signature.clone(),
         source: ConnSource::Evescout,
         created_at: now,
-        eol_updated_at: None,
+        eol_updated_at: eol.then_some(now),
+        expires_at: sig
+            .remaining_hours
+            .map(|h| now + (h.max(0.0) * 3600.0) as u64),
     })
 }
 
@@ -626,6 +640,7 @@ fn tripwire_connections(
                 source: ConnSource::Tripwire,
                 created_at: now,
                 eol_updated_at: eol.then_some(now),
+                expires_at: None,
             })
         })
         .collect()
@@ -838,6 +853,31 @@ mod tests {
     }
 
     #[test]
+    fn evescout_lifetime_drives_eol_and_expiry() {
+        let now = 1_000_000;
+        // The fixture has 3h left (≤ the ~4h EOL window) → imported as EOL,
+        // expiring when the feed says it collapses.
+        let dying =
+            imported_connection(&evescout_sig(31000005, 30002086, "ABC", "large"), now).unwrap();
+        assert!(dying.eol);
+        assert_eq!(dying.eol_updated_at, Some(now));
+        assert_eq!(dying.expires_at, Some(now + 3 * 3600));
+
+        // Plenty of life left → not EOL, expiry still recorded.
+        let mut s = evescout_sig(31000005, 30000142, "DEF", "large");
+        s.remaining_hours = Some(10.0);
+        let healthy = imported_connection(&s, now).unwrap();
+        assert!(!healthy.eol);
+        assert_eq!(healthy.expires_at, Some(now + 10 * 3600));
+
+        // Feed row without a lifetime → no expiry, not EOL.
+        s.remaining_hours = None;
+        let unknown = imported_connection(&s, now).unwrap();
+        assert!(!unknown.eol);
+        assert_eq!(unknown.expires_at, None);
+    }
+
+    #[test]
     fn merge_preserves_manual_and_refreshes_imports() {
         let now = 1_000_000;
         let manual = Connection {
@@ -993,6 +1033,7 @@ mod tests {
             source: ConnSource::Manual,
             created_at: now - age_h * 3600,
             eol_updated_at: eol.then(|| now - eol_age_h * 3600),
+            expires_at: None,
         }
     }
 }

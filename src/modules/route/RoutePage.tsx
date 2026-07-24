@@ -411,7 +411,7 @@ function NearestWormholeCard({
               {r.whType ? ` · ${r.whType}` : ""}
               {r.maxShipSize ? ` · ${r.maxShipSize}` : ""}
               {r.expiresInHours != null
-                ? ` · EOL in ~${r.expiresInHours.toFixed(0)}h`
+                ? ` · collapses in ~${r.expiresInHours.toFixed(0)}h`
                 : ""}
             </span>
           )}

@@ -94,6 +94,11 @@ pub(crate) struct Connection {
     pub(crate) source: ConnSource,
     pub(crate) created_at: u64,
     pub(crate) eol_updated_at: Option<u64>,
+    /// When the hole is expected to collapse (unix seconds), where a feed
+    /// reports it (EVE-Scout `remaining_hours`). `None` for manual rows and
+    /// rows stored before this field existed (serde default).
+    #[serde(default)]
+    pub(crate) expires_at: Option<u64>,
 }
 
 fn default_source() -> ConnSource {
@@ -131,6 +136,11 @@ fn prune(mut conns: Vec<Connection>, now: u64) -> Vec<Connection> {
         }
         let age_h = now.saturating_sub(c.created_at) / 3600;
         if age_h >= WH_MAX_AGE_HOURS {
+            return false;
+        }
+        // A feed-reported collapse time is exact — honour it ahead of the
+        // coarse age/EOL heuristics below.
+        if c.expires_at.is_some_and(|exp| now >= exp) {
             return false;
         }
         if c.eol {
@@ -221,7 +231,36 @@ mod tests {
             source: ConnSource::Manual,
             created_at: now - age_h * 3600,
             eol_updated_at: eol.then(|| now - eol_age_h * 3600),
+            expires_at: None,
         }
+    }
+
+    #[test]
+    fn prunes_wormholes_past_their_feed_expiry() {
+        let now = 1_000_000;
+        let conns = vec![
+            Connection {
+                expires_at: Some(now + 3600),
+                ..wh(1, 1, false, 0, now)
+            }, // collapses in an hour → keep
+            Connection {
+                expires_at: Some(now - 60),
+                ..wh(2, 1, false, 0, now)
+            }, // feed said it's gone → drop, even though it's only 1h old
+        ];
+        let kept: Vec<i64> = prune(conns, now).into_iter().map(|c| c.id).collect();
+        assert_eq!(kept, vec![1]);
+    }
+
+    #[test]
+    fn rows_without_expires_at_still_deserialize() {
+        // Rows persisted before `expires_at` existed must keep loading.
+        let json = serde_json::to_string(&wh(1, 1, false, 0, 1_000_000))
+            .unwrap()
+            .replace(",\"expires_at\":null", "");
+        assert!(!json.contains("expires_at"));
+        let c: Connection = serde_json::from_str(&json).unwrap();
+        assert_eq!(c.expires_at, None);
     }
 
     #[test]
