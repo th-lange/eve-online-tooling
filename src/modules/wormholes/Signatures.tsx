@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   whPasteSignatures,
+  whSignatures,
   type ConnectionView,
   type Signature,
   type SignatureScan,
@@ -10,9 +11,10 @@ import {
 import { Field } from "../../components/forms";
 import { SystemPicker } from "./shared";
 
-/** Paste a probe-scanner result for a system → signature list with the
- * added/removed diff; wormhole sigs already referenced by a connection's
- * endpoint sig are marked "linked". */
+/** Stored signatures for the selected system (loaded on selection, so a
+ * chain-node click shows previous scans immediately), plus the paste flow:
+ * paste a probe-scanner result → updated list with the added/removed diff.
+ * Wormhole sigs referenced by a connection's endpoint sig are marked "linked". */
 export function Signatures({
   connections,
   system,
@@ -22,12 +24,33 @@ export function Signatures({
   system: SystemMatch | null;
   setSystem: (m: SystemMatch | null) => void;
 }) {
+  const qc = useQueryClient();
   const [text, setText] = useState("");
+  // The last paste's diff, remembered with its system so switching the
+  // selection doesn't badge another system's signatures with a foreign diff.
+  const [lastScan, setLastScan] = useState<{
+    systemId: number;
+    scan: SignatureScan;
+  } | null>(null);
+
+  const stored = useQuery({
+    queryKey: ["wh", "signatures", system?.id ?? null],
+    queryFn: () => whSignatures(system!.id),
+    enabled: !!system,
+  });
   const paste = useMutation({
     mutationFn: () => whPasteSignatures(system!.id, text),
-    onSuccess: () => setText(""),
+    onSuccess: (scan) => {
+      setText("");
+      setLastScan({ systemId: system!.id, scan });
+      // The paste response *is* the new stored set — no refetch needed.
+      qc.setQueryData(["wh", "signatures", system!.id], scan.signatures);
+    },
   });
-  const scan: SignatureScan | undefined = paste.data;
+
+  const signatures: Signature[] = stored.data ?? [];
+  const scan =
+    system && lastScan?.systemId === system.id ? lastScan.scan : undefined;
 
   // A sig is "linked" if its id is used as a connection endpoint sig.
   const linkedSigs = new Set(
@@ -58,9 +81,9 @@ export function Signatures({
         rows={3}
         className="mt-2 w-full rounded border border-zinc-800 bg-zinc-900 px-2 py-1 font-mono text-xs text-zinc-100 outline-none placeholder:text-zinc-600"
       />
-      {scan && (
+      {system && (
         <div className="mt-2">
-          {(scan.added.length > 0 || scan.removed.length > 0) && (
+          {scan && (scan.added.length > 0 || scan.removed.length > 0) && (
             <div className="mb-2 text-xs">
               {scan.added.length > 0 && (
                 <span className="text-emerald-400">
@@ -75,17 +98,19 @@ export function Signatures({
             </div>
           )}
           <div className="flex flex-wrap gap-1">
-            {scan.signatures.map((s) => (
+            {signatures.map((s) => (
               <SigChip
                 key={s.id}
                 sig={s}
-                fresh={scan.added.includes(s.id)}
+                fresh={scan?.added.includes(s.id) ?? false}
                 linked={linkedSigs.has(s.id)}
               />
             ))}
-            {scan.signatures.length === 0 && (
+            {signatures.length === 0 && !stored.isFetching && (
               <span className="text-xs text-zinc-500">
-                No signatures parsed.
+                {scan
+                  ? "No signatures parsed."
+                  : "No stored signatures for this system — paste a scan."}
               </span>
             )}
           </div>
