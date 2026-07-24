@@ -227,18 +227,22 @@ export interface RouteResult {
 /**
  * Route origin→destination over stargates ∪ mapped wormhole connections.
  * With a `shipTypeId`, holes whose jump-mass class is below the hull's
- * required class are excluded from the graph.
+ * required class are excluded from the graph. `prefer` = "safer" weights
+ * low/null/w-space hops autopilot-style so an all-highsec route wins when
+ * one exists; "shorter" (default) routes by plain hop count.
  */
 export function whRoute(
   originSystemId: number,
   destinationSystemId: number,
   avoidEol: boolean,
   shipTypeId: number | null = null,
+  prefer: "shorter" | "safer" = "shorter",
 ): Promise<RouteResult> {
   return invoke<RouteResult>("wh_route", {
     originSystemId,
     destinationSystemId,
     avoidEol,
     shipTypeId,
+    prefer,
   });
 }
