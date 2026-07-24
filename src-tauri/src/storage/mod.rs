@@ -228,6 +228,21 @@ pub fn cache_get<T: DeserializeOwned>(app_data_dir: &Path, key: &str) -> Option<
     (env.expires >= crate::util::time::now_secs()).then_some(env.value)
 }
 
+/// Read a cached value even if expired, as long as it aged out no more than
+/// `max_stale_secs` ago. For fallback paths that prefer slightly-stale data
+/// over an error (e.g. a feed host briefly unreachable); use [`cache_get`]
+/// everywhere freshness matters.
+pub fn cache_get_stale<T: DeserializeOwned>(
+    app_data_dir: &Path,
+    key: &str,
+    max_stale_secs: u64,
+) -> Option<T> {
+    let bytes = std::fs::read(cache_path(app_data_dir, key)).ok()?;
+    let env: CacheEnvelope<T> = serde_json::from_slice(&bytes).ok()?;
+    (env.expires.saturating_add(max_stale_secs) >= crate::util::time::now_secs())
+        .then_some(env.value)
+}
+
 /// Drop a cached value so the next read misses (e.g. after a write invalidates it).
 pub fn cache_invalidate(app_data_dir: &Path, key: &str) {
     let _ = std::fs::remove_file(cache_path(app_data_dir, key));
@@ -307,6 +322,26 @@ mod tests {
         // expires == now; treat as fresh this instant, so re-check semantics only
         // for the absent/fresh cases above.
         let _ = cache_get::<i64>(&dir, "old");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cache_get_stale_serves_recently_expired_entries() {
+        let dir = std::env::temp_dir().join(format!("eve-stale-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = cache_path(&dir, "k");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // An entry that expired 100s ago: the strict read misses, the stale
+        // read serves it while within the slack window and not beyond.
+        let now = crate::util::time::now_secs();
+        let env = CacheEnvelope {
+            expires: now - 100,
+            value: 7_i64,
+        };
+        std::fs::write(&path, serde_json::to_vec(&env).unwrap()).unwrap();
+        assert_eq!(cache_get::<i64>(&dir, "k"), None);
+        assert_eq!(cache_get_stale::<i64>(&dir, "k", 3600), Some(7));
+        assert_eq!(cache_get_stale::<i64>(&dir, "k", 50), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

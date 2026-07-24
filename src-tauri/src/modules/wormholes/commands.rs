@@ -419,9 +419,10 @@ fn merge_by_source(
 #[tauri::command]
 pub async fn wh_import_evescout(app: AppHandle) -> Result<Vec<ConnectionView>, String> {
     let (dir, existing) = store::load(&app)?;
-    let sigs = crate::evescout::fetch_signatures(&dir).await?;
+    let feed = crate::evescout::fetch_signatures(&dir).await?;
     let now = crate::util::time::now_secs();
-    let imported: Vec<Connection> = sigs
+    let imported: Vec<Connection> = feed
+        .signatures
         .iter()
         .filter_map(|s| imported_connection(s, now))
         .collect();

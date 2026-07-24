@@ -425,6 +425,11 @@ function NearestWormholeCard({
           </button>
         </div>
       )}
+
+      {/* A result can carry a caveat (e.g. served from a stale feed cache). */}
+      {r && r.found && r.message && (
+        <div className="mt-2 text-xs text-amber-400">{r.message}</div>
+      )}
     </div>
   );
 }
