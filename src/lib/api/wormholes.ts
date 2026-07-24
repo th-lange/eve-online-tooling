@@ -215,6 +215,8 @@ export interface RouteHop {
   wspace: boolean;
   /** "origin" | "stargate" | "wormhole" — edge used to reach this hop. */
   via: string;
+  /** Reached through a mass-critical (<10% left) hole — crossable but risky. */
+  critMass: boolean;
 }
 export interface RouteResult {
   hops: RouteHop[];
@@ -222,15 +224,21 @@ export interface RouteResult {
   jumps: number;
 }
 
-/** Route origin→destination over stargates ∪ mapped wormhole connections. */
+/**
+ * Route origin→destination over stargates ∪ mapped wormhole connections.
+ * With a `shipTypeId`, holes whose jump-mass class is below the hull's
+ * required class are excluded from the graph.
+ */
 export function whRoute(
   originSystemId: number,
   destinationSystemId: number,
   avoidEol: boolean,
+  shipTypeId: number | null = null,
 ): Promise<RouteResult> {
   return invoke<RouteResult>("wh_route", {
     originSystemId,
     destinationSystemId,
     avoidEol,
+    shipTypeId,
   });
 }
