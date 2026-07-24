@@ -180,10 +180,17 @@ function Workbench() {
         </Field>
         <PrimaryButton
           onClick={() => add.mutate()}
-          disabled={!source || !target || add.isPending}
+          disabled={
+            !source || !target || source.id === target.id || add.isPending
+          }
         >
           Add connection
         </PrimaryButton>
+        {add.isError && (
+          <span className="text-[11px] text-rose-400">
+            {errorMessage(add.error)}
+          </span>
+        )}
         <div className="flex w-full flex-wrap gap-4">
           <WhSigHint label="From sig" code={srcSig} types={types} />
           <WhSigHint label="To sig" code={tgtSig} types={types} />

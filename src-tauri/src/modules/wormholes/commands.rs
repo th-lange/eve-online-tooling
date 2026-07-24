@@ -37,16 +37,34 @@ pub fn wh_connections(app: AppHandle) -> Result<Vec<ConnectionView>, String> {
     store::save_and_view(&dir, &conns)
 }
 
-/// Add a connection. New wormholes start fresh, full mass, not EOL.
+/// Validate a manual connection against the stored set: no self-loops, and no
+/// second row for a hole that's already mapped ([`same_hole`] — a second hole
+/// between the same two systems is addable only when both rows carry full sig
+/// pairs that differ, the one provable case). Pure (testable).
+fn validate_new_connection(conns: &[Connection], candidate: &Connection) -> Result<(), String> {
+    if candidate.source_system_id == candidate.target_system_id {
+        return Err("A connection needs two different systems.".to_string());
+    }
+    if conns.iter().any(|c| same_hole(c, candidate)) {
+        return Err(
+            "That connection is already mapped. To map a second hole between the same \
+             systems, label both sig codes on both rows."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// Add a connection. New wormholes start fresh, full mass, not EOL. Rejects
+/// self-loops and rows that duplicate an already-mapped hole.
 #[tauri::command]
 pub fn wh_add_connection(
     app: AppHandle,
     connection: NewConnection,
 ) -> Result<Vec<ConnectionView>, String> {
     let (dir, mut conns) = store::load(&app)?;
-    let id = conns.iter().map(|c| c.id).max().unwrap_or(0) + 1;
-    conns.push(Connection {
-        id,
+    let candidate = Connection {
+        id: conns.iter().map(|c| c.id).max().unwrap_or(0) + 1,
         source_system_id: connection.source_system_id,
         target_system_id: connection.target_system_id,
         scope: connection.scope,
@@ -59,7 +77,9 @@ pub fn wh_add_connection(
         created_at: crate::util::time::now_secs(),
         eol_updated_at: None,
         expires_at: None,
-    });
+    };
+    validate_new_connection(&conns, &candidate)?;
+    conns.push(candidate);
     store::save_and_view(&dir, &conns)
 }
 
@@ -1041,6 +1061,37 @@ mod tests {
             ..base
         };
         assert!(same_hole(&hole1, &hole1_rev));
+    }
+
+    #[test]
+    fn add_validation_rejects_self_loops_and_duplicates() {
+        let existing = vec![Connection {
+            source_system_id: 31000005,
+            target_system_id: 30002086,
+            source_sig: Some("ABC".into()),
+            target_sig: Some("K162".into()),
+            ..wh(1, 1, false, 0, 1_000_000)
+        }];
+
+        // Self-loop.
+        let mut cand = Connection {
+            source_system_id: 30002086,
+            target_system_id: 30002086,
+            source_sig: None,
+            target_sig: None,
+            ..wh(0, 0, false, 0, 1_000_000)
+        };
+        assert!(validate_new_connection(&existing, &cand).is_err());
+
+        // Unlabelled duplicate of the mapped hole (either direction).
+        cand.source_system_id = 30002086;
+        cand.target_system_id = 31000005;
+        assert!(validate_new_connection(&existing, &cand).is_err());
+
+        // A provably distinct second hole (full, different sig pair) is fine.
+        cand.source_sig = Some("QRS".into());
+        cand.target_sig = Some("H296".into());
+        assert!(validate_new_connection(&existing, &cand).is_ok());
     }
 
     #[test]
