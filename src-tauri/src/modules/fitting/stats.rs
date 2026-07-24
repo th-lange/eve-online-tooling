@@ -67,6 +67,7 @@ pub(super) struct DogmaStats {
 /// (#705) are command-burst/fleet-link modules the user is "receiving" from a
 /// fleet member — `(module_type_id, charge_type_id)` pairs, `-1` meaning no
 /// charge loaded — whose `GangModifier` effects project onto this ship.
+#[allow(clippy::too_many_arguments)] // one arg per independent sim input; a struct would just rename them
 pub(super) fn run_dogma(
     sde: &Sde,
     fit: &Fit,
@@ -635,6 +636,7 @@ pub(super) fn dps_of(
 /// (#701) folded onto the paper per-weapon DPS, mirroring [`dps_of`]'s
 /// iteration but scaling each weapon by its `application` factor at
 /// `distance`. `weapon_ranges` gates missiles beyond their flight range.
+#[allow(clippy::too_many_arguments)] // mirrors run_dogma's inputs at one distance
 fn applied_dps_at(
     resolved: &ResolvedFit,
     module_items: &[&FitItem],

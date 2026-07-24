@@ -289,6 +289,10 @@ pub fn wh_signatures(app: AppHandle, system_id: i64) -> Result<Vec<Signature>, S
 /// How a hop is reached.
 pub(crate) type Via = &'static str; // "origin" | "stargate" | "wormhole"
 
+/// The routing graph: system → neighbours, each edge carrying how it's
+/// crossed and whether that hole is mass-critical.
+type UnionAdjacency = HashMap<i64, Vec<(i64, (Via, bool))>>;
+
 /// One hop on a route.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -345,8 +349,8 @@ fn union_adjacency(
     conns: &[Connection],
     avoid_eol: bool,
     min_jump_mass: Option<JumpMass>,
-) -> HashMap<i64, Vec<(i64, (Via, bool))>> {
-    let mut adj: HashMap<i64, Vec<(i64, (Via, bool))>> = HashMap::with_capacity(stargates.len());
+) -> UnionAdjacency {
+    let mut adj: UnionAdjacency = HashMap::with_capacity(stargates.len());
     for (&a, neighbours) in stargates {
         adj.entry(a)
             .or_default()
@@ -1395,7 +1399,7 @@ mod tests {
     #[test]
     fn routes_over_stargates_and_wormholes() {
         // 1-2-3 by stargate; a wormhole 1↔4 lets us reach 4 in one hop.
-        let mut adj: HashMap<i64, Vec<(i64, (Via, bool))>> = HashMap::new();
+        let mut adj: UnionAdjacency = HashMap::new();
         adj.insert(1, vec![(2, ("stargate", false)), (4, ("wormhole", true))]);
         adj.insert(2, vec![(1, ("stargate", false)), (3, ("stargate", false))]);
         adj.insert(3, vec![(2, ("stargate", false))]);

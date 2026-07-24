@@ -558,6 +558,7 @@ pub async fn fitting_esi_list(
 /// member (#705, default none). `price` stays `None` here (priced
 /// separately via [`fitting_price`]).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri command surface — each arg is a distinct optional input
 pub async fn fitting_simulate(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
