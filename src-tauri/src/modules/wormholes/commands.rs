@@ -3,11 +3,12 @@
 //! data (they're scanned in-game), so this is local, hand-entered state with
 //! automatic cleanup of dead links. Modelled on Pathfinder's `ConnectionModel`.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
+use crate::sde::graph;
 use crate::storage;
 
 use super::store::{self, ConnSource, Connection, ConnectionView, JumpMass, MassStatus, Scope};
@@ -253,45 +254,13 @@ pub struct RouteResult {
     pub jumps: i64,
 }
 
-/// BFS shortest path over a unioned adjacency map. Each neighbour carries how
-/// it's reached (`stargate`/`wormhole`) and whether that edge is a
-/// mass-critical hole; returns `(system, via, crit)` from origin to
-/// destination, or `None` if unreachable. Pure (testable).
-pub(crate) fn shortest_path(
-    adj: &HashMap<i64, Vec<(i64, Via, bool)>>,
-    origin: i64,
-    dest: i64,
-) -> Option<Vec<(i64, Via, bool)>> {
-    if origin == dest {
-        return Some(vec![(origin, "origin", false)]);
-    }
-    let mut prev: HashMap<i64, (i64, Via, bool)> = HashMap::new();
-    let mut visited: HashSet<i64> = HashSet::from([origin]);
-    let mut queue: VecDeque<i64> = VecDeque::from([origin]);
-    while let Some(cur) = queue.pop_front() {
-        for &(next, via, crit) in adj.get(&cur).into_iter().flatten() {
-            if visited.insert(next) {
-                prev.insert(next, (cur, via, crit)); // arrived at `next` from `cur`
-                if next == dest {
-                    // Walk predecessors back to origin; each node pairs with the
-                    // edge used to reach it (origin → "origin").
-                    let mut path = Vec::new();
-                    let mut node = dest;
-                    while node != origin {
-                        let (p, v, c) = prev[&node];
-                        path.push((node, v, c));
-                        node = p;
-                    }
-                    path.push((origin, "origin", false));
-                    path.reverse();
-                    return Some(path);
-                }
-                queue.push_back(next);
-            }
-        }
-    }
-    None
-}
+/// Extra cost of entering low-sec, null-sec or w-space under the "safer"
+/// preference — biased hard enough (like the in-game autopilot) that a route
+/// only enters dangerous space when no all-highsec alternative exists.
+const SAFER_DANGEROUS_COST: u64 = 50;
+/// In-game display rounds true security 0.45–0.4999 up to 0.5; that band is
+/// still high-sec (CONCORD responds), so "safer" treats it as safe.
+const HISEC_MIN: f64 = 0.45;
 
 /// Smallest jump-mass class of hole a hull fits through, from its base mass
 /// (kg): the inverse of `tripwire::jump_mass_class`'s hole buckets. Pure.
@@ -317,12 +286,12 @@ fn union_adjacency(
     conns: &[Connection],
     avoid_eol: bool,
     min_jump_mass: Option<JumpMass>,
-) -> HashMap<i64, Vec<(i64, Via, bool)>> {
-    let mut adj: HashMap<i64, Vec<(i64, Via, bool)>> = HashMap::with_capacity(stargates.len());
+) -> HashMap<i64, Vec<(i64, (Via, bool))>> {
+    let mut adj: HashMap<i64, Vec<(i64, (Via, bool))>> = HashMap::with_capacity(stargates.len());
     for (&a, neighbours) in stargates {
         adj.entry(a)
             .or_default()
-            .extend(neighbours.iter().map(|&b| (b, "stargate" as Via, false)));
+            .extend(neighbours.iter().map(|&b| (b, ("stargate" as Via, false))));
     }
     for c in conns {
         if avoid_eol && c.eol {
@@ -335,7 +304,7 @@ fn union_adjacency(
                 }
             }
         }
-        let (via, crit): (Via, bool) = match c.scope {
+        let edge: (Via, bool) = match c.scope {
             Scope::Stargate => ("stargate", false),
             Scope::Wormhole | Scope::Jumpbridge => {
                 ("wormhole", c.mass_status == MassStatus::Critical)
@@ -343,10 +312,10 @@ fn union_adjacency(
         };
         adj.entry(c.source_system_id)
             .or_default()
-            .push((c.target_system_id, via, crit));
+            .push((c.target_system_id, edge));
         adj.entry(c.target_system_id)
             .or_default()
-            .push((c.source_system_id, via, crit));
+            .push((c.source_system_id, edge));
     }
     adj
 }
@@ -355,7 +324,9 @@ fn union_adjacency(
 /// connections. `avoid_eol` drops EOL wormholes from the graph; with a
 /// `ship_type_id`, wormholes whose jump-mass class is below the hull's
 /// required class are dropped too, and hops through mass-critical holes are
-/// flagged in the result.
+/// flagged in the result. `prefer` = "safer" weights low/null/w-space hops
+/// heavily (autopilot-style) so an all-highsec route wins when one exists;
+/// anything else routes by plain hop count.
 #[tauri::command]
 pub fn wh_route(
     app: AppHandle,
@@ -363,6 +334,7 @@ pub fn wh_route(
     destination_system_id: i64,
     avoid_eol: bool,
     ship_type_id: Option<i64>,
+    prefer: Option<String>,
 ) -> Result<RouteResult, String> {
     let (dir, conns) = store::load(&app)?;
 
@@ -379,14 +351,24 @@ pub fn wh_route(
 
     let stargates = crate::sde::cached_adjacency(&dir)?;
     let adj = union_adjacency(&stargates, &conns, avoid_eol, min_jump_mass);
-
-    let path = shortest_path(&adj, origin_system_id, destination_system_id);
     let info = crate::sde::cached_system_info(&dir)?;
+
+    let safer = prefer.as_deref() == Some("safer");
+    let path = graph::dijkstra(&adj, origin_system_id, destination_system_id, |sid| {
+        // A system missing from the map (w-space) counts as dangerous.
+        let hisec = matches!(info.get(&sid), Some((_, sec, _)) if *sec >= HISEC_MIN);
+        if !safer || hisec {
+            1
+        } else {
+            SAFER_DANGEROUS_COST
+        }
+    });
     match path {
         Some(p) => {
             let hops: Vec<RouteHop> = p
                 .into_iter()
-                .map(|(sid, via, crit)| {
+                .map(|(sid, edge)| {
+                    let (via, crit) = edge.unwrap_or(("origin", false));
                     let (name, security, _) = info
                         .get(&sid)
                         .cloned()
@@ -1308,29 +1290,23 @@ mod tests {
     #[test]
     fn routes_over_stargates_and_wormholes() {
         // 1-2-3 by stargate; a wormhole 1↔4 lets us reach 4 in one hop.
-        let mut adj: HashMap<i64, Vec<(i64, Via, bool)>> = HashMap::new();
-        adj.insert(1, vec![(2, "stargate", false), (4, "wormhole", true)]);
-        adj.insert(2, vec![(1, "stargate", false), (3, "stargate", false)]);
-        adj.insert(3, vec![(2, "stargate", false)]);
-        adj.insert(4, vec![(1, "wormhole", true)]);
+        let mut adj: HashMap<i64, Vec<(i64, (Via, bool))>> = HashMap::new();
+        adj.insert(1, vec![(2, ("stargate", false)), (4, ("wormhole", true))]);
+        adj.insert(2, vec![(1, ("stargate", false)), (3, ("stargate", false))]);
+        adj.insert(3, vec![(2, ("stargate", false))]);
+        adj.insert(4, vec![(1, ("wormhole", true))]);
 
-        let p = shortest_path(&adj, 1, 3).unwrap();
-        assert_eq!(
-            p.iter().map(|(s, _, _)| *s).collect::<Vec<_>>(),
-            vec![1, 2, 3]
-        );
+        let p = graph::dijkstra(&adj, 1, 3, |_| 1).unwrap();
+        assert_eq!(p.iter().map(|(s, _)| *s).collect::<Vec<_>>(), vec![1, 2, 3]);
 
         // 4 is only reachable via the (crit-flagged) wormhole edge.
-        let p2 = shortest_path(&adj, 1, 4).unwrap();
-        assert_eq!(p2.last().unwrap(), &(4, "wormhole", true));
+        let p2 = graph::dijkstra(&adj, 1, 4, |_| 1).unwrap();
+        assert_eq!(p2.last().unwrap(), &(4, Some(("wormhole", true))));
 
         // Unreachable.
-        assert!(shortest_path(&adj, 1, 99).is_none());
+        assert!(graph::dijkstra(&adj, 1, 99, |_| 1).is_none());
         // Same system.
-        assert_eq!(
-            shortest_path(&adj, 5, 5).unwrap(),
-            vec![(5, "origin", false)]
-        );
+        assert_eq!(graph::dijkstra(&adj, 5, 5, |_| 1).unwrap(), vec![(5, None)]);
     }
 
     #[test]
@@ -1365,13 +1341,13 @@ mod tests {
 
         // A battleship-class hull: the M hole is impassable, the L hole isn't.
         let adj = union_adjacency(&stargates, &conns, false, Some(JumpMass::L));
-        assert!(adj[&1].iter().all(|&(n, _, _)| n != 4));
-        assert!(adj[&2].iter().any(|&(n, _, crit)| n == 5 && !crit));
+        assert!(adj[&1].iter().all(|&(n, _)| n != 4));
+        assert!(adj[&2].iter().any(|&(n, (_, crit))| n == 5 && !crit));
 
         // No hull constraint: both pass; the crit flag reflects mass status.
         let adj = union_adjacency(&stargates, &conns, false, None);
-        assert!(adj[&1].iter().any(|&(n, _, crit)| n == 4 && crit));
-        assert!(adj[&4].iter().any(|&(n, _, crit)| n == 1 && crit));
+        assert!(adj[&1].iter().any(|&(n, (_, crit))| n == 4 && crit));
+        assert!(adj[&4].iter().any(|&(n, (_, crit))| n == 1 && crit));
     }
 
     fn wh(id: i64, age_h: u64, eol: bool, eol_age_h: u64, now: u64) -> Connection {

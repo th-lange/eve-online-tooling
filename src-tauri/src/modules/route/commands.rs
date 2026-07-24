@@ -5,7 +5,7 @@
 //! These feed the route map / neighbour view (#99/#101); on their own they are a
 //! sortable "where's the action / where's the danger" system table.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -390,30 +390,70 @@ pub fn route_clear_breadcrumb(app: AppHandle) -> Result<(), AppError> {
 
 // --- Nearest wormhole (#298) ---
 
-/// Nearest target from `origin` over an unweighted adjacency (BFS): returns the
-/// first target system reached and its distance in jumps, or `None` if none is
-/// reachable. Pure (testable).
+/// Nearest target from `origin` over an unweighted adjacency (BFS): the first
+/// target system reached (lowest id among equidistant ones, for determinism)
+/// and its distance in jumps, or `None` if none is reachable. Pure (testable).
 fn nearest_of(
     adj: &HashMap<i64, Vec<i64>>,
     origin: i64,
     targets: &HashSet<i64>,
 ) -> Option<(i64, i64)> {
+    nearest_all(adj, origin, targets).map(|(mut ids, dist)| {
+        ids.sort_unstable(); // HashMap order is nondeterministic — pin the pick
+        (ids[0], dist)
+    })
+}
+
+/// *All* nearest targets from `origin` (level-by-level BFS): the full set of
+/// targets first reached at the minimal distance, plus that distance — so the
+/// caller can tie-break equidistant candidates by quality rather than by
+/// whichever the hash order surfaced first. `None` if none reachable. Pure.
+fn nearest_all(
+    adj: &HashMap<i64, Vec<i64>>,
+    origin: i64,
+    targets: &HashSet<i64>,
+) -> Option<(Vec<i64>, i64)> {
     if targets.contains(&origin) {
-        return Some((origin, 0));
+        return Some((vec![origin], 0));
     }
     let mut visited: HashSet<i64> = HashSet::from([origin]);
-    let mut queue: VecDeque<(i64, i64)> = VecDeque::from([(origin, 0)]);
-    while let Some((cur, dist)) = queue.pop_front() {
-        for &next in adj.get(&cur).into_iter().flatten() {
-            if visited.insert(next) {
-                if targets.contains(&next) {
-                    return Some((next, dist + 1));
+    let mut frontier: Vec<i64> = vec![origin];
+    let mut dist = 0;
+    while !frontier.is_empty() {
+        dist += 1;
+        let mut next: Vec<i64> = Vec::new();
+        for &cur in &frontier {
+            for &n in adj.get(&cur).into_iter().flatten() {
+                if visited.insert(n) {
+                    next.push(n);
                 }
-                queue.push_back((next, dist + 1));
             }
         }
+        let found: Vec<i64> = next
+            .iter()
+            .copied()
+            .filter(|id| targets.contains(id))
+            .collect();
+        if !found.is_empty() {
+            return Some((found, dist));
+        }
+        frontier = next;
     }
     None
+}
+
+/// Pick-quality of a public hole: longer expected life first, then a bigger
+/// pipe. Unknown lifetimes sort worst — a hole that may die any moment is the
+/// last one to send a traveller to. Pure.
+fn candidate_quality(s: &crate::evescout::TheraSignature) -> (f64, u8) {
+    let size = match crate::evescout::jump_mass_from_ship_size(s.max_ship_size.as_deref()).as_str()
+    {
+        "s" => 0,
+        "m" => 1,
+        "l" => 2,
+        _ => 3,
+    };
+    (s.remaining_hours.unwrap_or(-1.0), size)
 }
 
 /// The nearest public wormhole entrance, or (in w-space) the nearest scanned exit.
@@ -535,8 +575,19 @@ pub async fn route_nearest_wormhole(app: AppHandle) -> Result<NearestWormhole, A
     let mut cand: HashMap<i64, crate::evescout::TheraSignature> = HashMap::new();
     for s in feed.signatures.into_iter().filter(|s| s.is_wormhole()) {
         // The k-space end (`in_system`) is where a traveller finds the hole.
+        // A system can host several public holes — keep the best one
+        // (longest-lived, then biggest) rather than whichever came first.
         if s.in_system_id != 0 && s.in_system_id < WSPACE_MIN_SYSTEM_ID {
-            cand.entry(s.in_system_id).or_insert(s);
+            match cand.entry(s.in_system_id) {
+                std::collections::hash_map::Entry::Occupied(mut e) => {
+                    if candidate_quality(&s) > candidate_quality(e.get()) {
+                        e.insert(s);
+                    }
+                }
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    e.insert(s);
+                }
+            }
         }
     }
     if cand.is_empty() {
@@ -550,8 +601,19 @@ pub async fn route_nearest_wormhole(app: AppHandle) -> Result<NearestWormhole, A
 
     let adj = cached_adjacency(&dir)?;
     let targets: HashSet<i64> = cand.keys().copied().collect();
-    Ok(match nearest_of(&adj, current.system_id, &targets) {
-        Some((entrance, jumps)) => {
+    Ok(match nearest_all(&adj, current.system_id, &targets) {
+        Some((mut ids, jumps)) => {
+            // Equidistant entrances tie-break on hole quality; ids are sorted
+            // first so equal-quality picks stay deterministic.
+            ids.sort_unstable();
+            let entrance = ids
+                .into_iter()
+                .max_by(|a, b| {
+                    candidate_quality(&cand[a])
+                        .partial_cmp(&candidate_quality(&cand[b]))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .expect("nearest_all never returns an empty set");
             let s = &cand[&entrance];
             NearestWormhole {
                 found: true,
@@ -603,6 +665,43 @@ mod tests {
         assert_eq!(nearest_of(&adj, 4, &targets), Some((4, 0)));
         // No target reachable.
         assert_eq!(nearest_of(&adj, 1, &HashSet::from([99])), None);
+    }
+
+    #[test]
+    fn nearest_all_collects_every_tie_at_the_minimal_distance() {
+        // 1 links to 2 and 3 (both targets, both 1 jump); 4 sits further out.
+        let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
+        adj.insert(1, vec![2, 3]);
+        adj.insert(2, vec![1, 4]);
+        adj.insert(3, vec![1]);
+        adj.insert(4, vec![2]);
+        let targets: HashSet<i64> = HashSet::from([2, 3, 4]);
+        let (mut ids, dist) = nearest_all(&adj, 1, &targets).unwrap();
+        ids.sort_unstable();
+        assert_eq!((ids, dist), (vec![2, 3], 1));
+    }
+
+    #[test]
+    fn candidate_quality_prefers_longest_lived_then_biggest() {
+        let sig = |hours: Option<f64>, size: &str| crate::evescout::TheraSignature {
+            signature_type: "wormhole".into(),
+            out_system_id: 31000005,
+            out_system_name: "Thera".into(),
+            out_signature: None,
+            in_system_id: 30000142,
+            in_system_name: "Jita".into(),
+            in_region_name: None,
+            in_signature: None,
+            wh_type: None,
+            max_ship_size: Some(size.into()),
+            remaining_hours: hours,
+        };
+        // Longer life beats a bigger pipe …
+        assert!(candidate_quality(&sig(Some(8.0), "frigate")) > candidate_quality(&sig(Some(2.0), "large")));
+        // … size only breaks lifetime ties …
+        assert!(candidate_quality(&sig(Some(8.0), "xlarge")) > candidate_quality(&sig(Some(8.0), "frigate")));
+        // … and an unknown lifetime sorts worst.
+        assert!(candidate_quality(&sig(Some(1.0), "frigate")) > candidate_quality(&sig(None, "xlarge")));
     }
 
     #[test]

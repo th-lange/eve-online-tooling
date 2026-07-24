@@ -20,8 +20,10 @@ export function Routing() {
   const [dest, setDest] = useState<SystemMatch | null>(null);
   const [ship, setShip] = useState<IdName | null>(null);
   const [avoidEol, setAvoidEol] = useState(true);
+  const [prefer, setPrefer] = useState<"shorter" | "safer">("shorter");
   const route = useMutation({
-    mutationFn: () => whRoute(origin!.id, dest!.id, avoidEol, ship?.id ?? null),
+    mutationFn: () =>
+      whRoute(origin!.id, dest!.id, avoidEol, ship?.id ?? null, prefer),
   });
   const r: RouteResult | undefined = route.data;
 
@@ -43,6 +45,19 @@ export function Routing() {
             placeholder="Any hull…"
             width="w-40"
           />
+        </Field>
+        <Field label="Prefer">
+          <select
+            value={prefer}
+            onChange={(e) =>
+              setPrefer(e.currentTarget.value as "shorter" | "safer")
+            }
+            title="Safer weights low/null-sec hops heavily, like the in-game autopilot"
+            className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none"
+          >
+            <option value="shorter">shorter</option>
+            <option value="safer">safer</option>
+          </select>
         </Field>
         <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-400">
           <input
