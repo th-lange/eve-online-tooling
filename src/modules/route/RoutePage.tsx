@@ -11,6 +11,7 @@ import {
   systemSearch,
   type BreadcrumbEntry,
   type NearestWormhole,
+  type Neighbourhood,
   type SystemActivity,
   type SystemMatch,
 } from "../../lib/api";
@@ -29,6 +30,10 @@ import {
   type SystemGraphNode,
 } from "../../components/SystemGraph";
 import { buildTrailEdges } from "./travelEdges";
+import {
+  buildNeighbourhoodEdges,
+  buildNeighbourhoodNodes,
+} from "./neighbourhoodGraph";
 import { kindFromSecurity } from "../../components/systemGraphLayout";
 import { SEC_TEXT_CLASS, secBand } from "../../lib/security";
 import { ZkillSystemLink } from "../../components/ZkillLink";
@@ -342,9 +347,50 @@ function Workbench() {
       {mode === "neighbouring" && !centre ? (
         <Centered>Set a Focus above (type a system or “My location”).</Centered>
       ) : (
-        <ActivityTable rows={filtered} />
+        <>
+          {mode === "neighbouring" && hood.data && (
+            <NeighbourhoodGraph hood={hood.data} onFocus={focusSystem} />
+          )}
+          <ActivityTable
+            rows={filtered}
+            withDistance={mode === "neighbouring"}
+          />
+        </>
       )}
     </Page>
+  );
+}
+
+/** The stargate neighbourhood as a node-edge graph ("fog-of-war" view): the
+ * centre highlighted, per-tile last-hour kill heat, gate links from the
+ * backend edge list. Click a node to re-centre on it. */
+function NeighbourhoodGraph({
+  hood,
+  onFocus,
+}: {
+  hood: Neighbourhood;
+  onFocus: (m: SystemMatch) => void;
+}) {
+  const nameById = new Map(hood.nodes.map((n) => [n.systemId, n.name]));
+  return (
+    <div className="mt-4">
+      <div className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">
+        Neighbourhood map{" "}
+        <span className="normal-case tracking-normal text-zinc-600">
+          · click a system to re-centre · drag to rearrange
+        </span>
+      </div>
+      <SystemGraph
+        nodes={buildNeighbourhoodNodes(hood)}
+        edges={buildNeighbourhoodEdges(hood)}
+        rootId={String(hood.center)}
+        height={320}
+        onNodeClick={(id) => {
+          const name = nameById.get(Number(id));
+          if (name) onFocus({ id: Number(id), name });
+        }}
+      />
+    </div>
   );
 }
 
@@ -517,6 +563,7 @@ function SystemHop({
 }
 
 type ActSortKey =
+  | "distance"
   | "name"
   | "region"
   | "security"
@@ -524,6 +571,14 @@ type ActSortKey =
   | "shipKills"
   | "podKills"
   | "npcKills";
+
+/** Jumps-from-centre — only meaningful (and only shown) in Around mode. */
+const DIST_COLUMN: SortColumn<ActSortKey> = {
+  key: "distance",
+  label: "Dist",
+  numeric: true,
+  description: "Jumps from the focused system (0 = the centre).",
+};
 
 const COLUMNS: SortColumn<ActSortKey>[] = [
   {
@@ -569,9 +624,18 @@ const COLUMNS: SortColumn<ActSortKey>[] = [
     description: "NPC kills in the last hour — ratting/activity.",
   },
 ];
-const KEYS = COLUMNS.map((c) => c.key);
+const KEYS = [DIST_COLUMN, ...COLUMNS].map((c) => c.key);
 
-function ActivityTable({ rows }: { rows: SystemActivity[] }) {
+/** Activity rows; in Around mode each row also carries its BFS distance. */
+type ActivityRow = SystemActivity & { distance?: number };
+
+function ActivityTable({
+  rows,
+  withDistance = false,
+}: {
+  rows: ActivityRow[];
+  withDistance?: boolean;
+}) {
   const { sortKey, sortDir, toggleSort } = usePersistentSort<ActSortKey>(
     "sort.route.activity",
     KEYS,
@@ -579,12 +643,15 @@ function ActivityTable({ rows }: { rows: SystemActivity[] }) {
     "desc",
     ["name", "region"],
   );
+  const columns = withDistance ? [DIST_COLUMN, ...COLUMNS] : COLUMNS;
 
   const sorted = useMemo(() => {
     const dir = sortDir === "asc" ? 1 : -1;
     return [...rows].sort((a, b) => {
       if (sortKey === "name") return dir * a.name.localeCompare(b.name);
       if (sortKey === "region") return dir * a.region.localeCompare(b.region);
+      if (sortKey === "distance")
+        return dir * ((a.distance ?? 0) - (b.distance ?? 0));
       return dir * (a[sortKey] - b[sortKey]);
     });
   }, [rows, sortKey, sortDir]);
@@ -594,7 +661,7 @@ function ActivityTable({ rows }: { rows: SystemActivity[] }) {
       <table className="w-full border-collapse text-sm">
         <thead className="bg-zinc-900 text-zinc-400">
           <tr>
-            {COLUMNS.map((c) => (
+            {columns.map((c) => (
               <SortHeaderCell
                 key={c.key}
                 column={c}
@@ -611,6 +678,11 @@ function ActivityTable({ rows }: { rows: SystemActivity[] }) {
               key={r.systemId}
               className="border-t border-zinc-800 text-zinc-300 hover:bg-zinc-800/40"
             >
+              {withDistance && (
+                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                  {r.distance ?? "—"}
+                </td>
+              )}
               <td className="px-3 py-1.5 text-zinc-200">{r.name}</td>
               <td className="px-3 py-1.5 text-zinc-400">{r.region}</td>
               <td
@@ -643,7 +715,7 @@ function ActivityTable({ rows }: { rows: SystemActivity[] }) {
           {rows.length === 0 && (
             <tr>
               <td
-                colSpan={KEYS.length}
+                colSpan={columns.length}
                 className="px-3 py-6 text-center text-zinc-500"
               >
                 No system activity (load may be in progress).

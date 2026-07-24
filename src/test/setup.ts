@@ -16,3 +16,13 @@ if (typeof globalThis.localStorage === "undefined") {
     },
   } as Storage;
 }
+
+// jsdom has no ResizeObserver; @xyflow/react (the SystemGraph renderer)
+// registers one on mount, so tests that render a graph need this stub.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+}

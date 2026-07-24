@@ -20,6 +20,7 @@ const SYSTEM: SystemActivity = {
 
 beforeEach(() => {
   invokeMock.mockReset();
+  localStorage.clear();
 });
 
 describe("RoutePage", () => {
@@ -49,6 +50,41 @@ describe("RoutePage", () => {
     renderWithQuery(<RoutePage />);
 
     expect(await screen.findByText(/zKillboard timed out/)).toBeInTheDocument();
+  });
+
+  it("renders the neighbourhood graph and distance column in Around mode", async () => {
+    localStorage.setItem("route.mode", JSON.stringify("neighbouring"));
+    localStorage.setItem(
+      "route.centre",
+      JSON.stringify({ id: 30000142, name: "Jita" }),
+    );
+    mockInvoke({
+      sde_status: () => SDE_OK,
+      route_system_activity: () => [],
+      route_breadcrumb: () => [],
+      route_system_neighbourhood: () => ({
+        center: 30000142,
+        nodes: [
+          { ...SYSTEM, distance: 0 },
+          {
+            ...SYSTEM,
+            systemId: 30000144,
+            name: "Perimeter",
+            security: 1.0,
+            distance: 1,
+          },
+        ],
+        edges: [[30000142, 30000144]],
+      }),
+    });
+    renderWithQuery(<RoutePage />);
+
+    // Distance column appears, the graph renders both systems (each name
+    // shows in the graph *and* the table), and the centre is marked.
+    expect(await screen.findByText("Dist")).toBeInTheDocument();
+    const perimeters = await screen.findAllByText("Perimeter");
+    expect(perimeters.length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("0.9 · centre")).toBeInTheDocument();
   });
 
   it("prompts to log in when locating the character requires auth", async () => {
