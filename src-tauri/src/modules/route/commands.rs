@@ -13,7 +13,7 @@ use tauri::{AppHandle, State};
 
 use crate::esi::{authed_get, AuthState, EsiClient, SystemKills};
 use crate::model::AppError;
-use crate::sde::{graph, open_from_dir, Sde};
+use crate::sde::{cached_adjacency, cached_system_info, graph};
 use crate::storage;
 
 /// J-space (wormhole) solar systems start at this id.
@@ -93,8 +93,7 @@ async fn activity_map(
     let mut activity = merge_activity(&jumps, &kills);
 
     // Enrich with SDE name / security / region (k-space systems only).
-    let sde = open_from_dir(dir)?;
-    let info = sde.solar_system_info().map_err(|e| e.to_string())?;
+    let info = cached_system_info(dir)?;
     for row in activity.values_mut() {
         if let Some((name, security, region)) = info.get(&row.system_id) {
             row.name = name.clone();
@@ -178,18 +177,18 @@ pub async fn route_system_neighbourhood(
     system_id: i64,
     depth: i64,
 ) -> Result<Neighbourhood, String> {
-    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let depth = depth.clamp(1, MAX_DEPTH);
 
     // BFS over the full stargate graph, capped at `depth`; the edges output
     // is every gate link between two systems inside that radius.
-    let adj = sde.stargate_adjacency().map_err(|e| e.to_string())?;
+    let adj = cached_adjacency(&dir)?;
     let (distance, _) = graph::bfs(&adj, system_id, Some(depth));
     let edges = neighbourhood_edges(&adj, &distance);
 
     // Heat + names for every system in the neighbourhood.
     let activity = activity_map(&dir, &esi, false).await.unwrap_or_default();
-    let info = sde.solar_system_info().map_err(|e| e.to_string())?;
+    let info = cached_system_info(&dir)?;
     let mut nodes: Vec<NeighbourNode> = distance
         .iter()
         .map(|(&sid, &dist)| {
@@ -271,20 +270,17 @@ pub struct BreadcrumbEntry {
 
 /// Gate distance between two systems (BFS over the stargate graph, capped at
 /// `cap` jumps so a runaway search on disconnected inputs stays cheap), or -1
-/// when unreachable by gates within that cap. Returns 0 ("unknown") on SDE
-/// trouble rather than inventing a gap.
-fn gate_distance(sde: &Sde, from: i64, to: i64, cap: i64) -> i64 {
+/// when unreachable by gates within that cap. Callers report 0 ("unknown")
+/// when the adjacency itself can't load, rather than inventing a gap.
+fn gate_distance(adj: &HashMap<i64, Vec<i64>>, from: i64, to: i64, cap: i64) -> i64 {
     if from == to {
         return 0;
     }
-    match sde.stargate_adjacency() {
-        Ok(adj) => graph::bfs(&adj, from, Some(cap))
-            .0
-            .get(&to)
-            .copied()
-            .unwrap_or(-1),
-        Err(_) => 0,
-    }
+    graph::bfs(adj, from, Some(cap))
+        .0
+        .get(&to)
+        .copied()
+        .unwrap_or(-1)
 }
 
 fn breadcrumb_key(app: &AppHandle) -> Result<(std::path::PathBuf, i64, String), AppError> {
@@ -315,8 +311,7 @@ pub async fn route_location(
     let mut trail: Vec<BreadcrumbEntry> = storage::load_data(&dir, &key).unwrap_or_default();
     // Only append when the system actually changed (dedupe rest-in-system polls).
     if trail.last().map(|e| e.system_id) != Some(loc.solar_system_id) {
-        let sde = crate::sde::open_from_app(&app)?;
-        let info = sde.solar_system_info().map_err(|e| e.to_string())?;
+        let info = cached_system_info(&dir)?;
         let (name, security, region) = info
             .get(&loc.solar_system_id)
             .cloned()
@@ -329,7 +324,11 @@ pub async fn route_location(
         let gap_jumps = match trail.last() {
             None => 0,
             Some(prev) if prev.wspace || wspace => -1,
-            Some(prev) => gate_distance(&sde, prev.system_id, loc.solar_system_id, 30),
+            // 0 = "unknown" when the adjacency can't load — never invent a gap.
+            Some(prev) => match cached_adjacency(&dir) {
+                Ok(adj) => gate_distance(&adj, prev.system_id, loc.solar_system_id, 30),
+                Err(_) => 0,
+            },
         };
         trail.push(BreadcrumbEntry {
             system_id: loc.solar_system_id,
@@ -357,28 +356,26 @@ pub fn route_breadcrumb(app: AppHandle) -> Result<Vec<BreadcrumbEntry>, AppError
     let (dir, _id, key) = breadcrumb_key(&app)?;
     let mut trail: Vec<BreadcrumbEntry> = storage::load_data(&dir, &key).unwrap_or_default();
     if trail.iter().skip(1).any(|e| e.gap_jumps == 0) {
-        if let Ok(sde) = crate::sde::open_from_app(&app) {
-            if let Ok(adj) = sde.stargate_adjacency() {
-                for i in 1..trail.len() {
-                    if trail[i].gap_jumps != 0 {
-                        continue;
-                    }
-                    let prev = trail[i - 1].clone();
-                    let cur = &mut trail[i];
-                    cur.gap_jumps = if prev.wspace || cur.wspace {
-                        -1
-                    } else if prev.system_id == cur.system_id {
-                        0
-                    } else {
-                        graph::bfs(&adj, prev.system_id, Some(30))
-                            .0
-                            .get(&cur.system_id)
-                            .copied()
-                            .unwrap_or(-1)
-                    };
+        if let Ok(adj) = cached_adjacency(&dir) {
+            for i in 1..trail.len() {
+                if trail[i].gap_jumps != 0 {
+                    continue;
                 }
-                let _ = storage::save_data(&dir, &key, &trail);
+                let prev = trail[i - 1].clone();
+                let cur = &mut trail[i];
+                cur.gap_jumps = if prev.wspace || cur.wspace {
+                    -1
+                } else if prev.system_id == cur.system_id {
+                    0
+                } else {
+                    graph::bfs(&adj, prev.system_id, Some(30))
+                        .0
+                        .get(&cur.system_id)
+                        .copied()
+                        .unwrap_or(-1)
+                };
             }
+            let _ = storage::save_data(&dir, &key, &trail);
         }
     }
     Ok(trail)
@@ -475,7 +472,7 @@ fn nearest_none(
 /// breadcrumb for "where am I" (populate it via "My location"); no ESI auth here.
 #[tauri::command]
 pub async fn route_nearest_wormhole(app: AppHandle) -> Result<NearestWormhole, AppError> {
-    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
+    let dir = crate::storage::app_data_dir(&app)?;
     let (_dir, _id, key) = breadcrumb_key(&app)?;
     let trail: Vec<BreadcrumbEntry> = storage::load_data(&dir, &key).unwrap_or_default();
     let current = match trail.last() {
@@ -490,7 +487,7 @@ pub async fn route_nearest_wormhole(app: AppHandle) -> Result<NearestWormhole, A
         }
     };
 
-    let info = sde.solar_system_info().map_err(|e| e.to_string())?;
+    let info = cached_system_info(&dir)?;
     let name_of = |id: i64| {
         info.get(&id)
             .map(|(n, _, _)| n.clone())
@@ -551,7 +548,7 @@ pub async fn route_nearest_wormhole(app: AppHandle) -> Result<NearestWormhole, A
         ));
     }
 
-    let adj = sde.stargate_adjacency().map_err(|e| e.to_string())?;
+    let adj = cached_adjacency(&dir)?;
     let targets: HashSet<i64> = cand.keys().copied().collect();
     Ok(match nearest_of(&adj, current.system_id, &targets) {
         Some((entrance, jumps)) => {

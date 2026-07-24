@@ -67,17 +67,10 @@ impl SdePaths {
 /// Open the SDE for the app's data dir. The dir/SDE-open plumbing was
 /// otherwise copy-pasted identically across every command module.
 ///
-/// Design note (#556): several call sites (route/pochven/wormholes/intel/pi
-/// planners, `capabilities.rs`) still load the *entire* `solar_system_info`
-/// or `all_stargate_edges` map on every command invocation just to read one
-/// or a handful of entries. Those maps are immutable between SDE swaps, so a
-/// shared cache is feasible: a `OnceLock<RwLock<HashMap<...>>>` (or
-/// tauri-managed state) keyed by the SDE's generation — e.g. the `db` file's
-/// mtime/size, or a monotonic counter bumped by [`download_sde`] on a
-/// successful swap — with the cache cleared/repopulated whenever that key
-/// changes. Deferred out of #556's scope (which is the `market_current_location`
-/// point-query fix); worth picking up if profiling shows the full-map loads
-/// actually cost something in practice.
+/// Design note (#556 → #720): the generation-keyed caches below
+/// ([`cached_system_info`] / [`cached_adjacency`]) now serve the route and
+/// wormholes hot paths. Remaining full-map call sites (pochven/pi/intel
+/// planners, `capabilities.rs`) can switch to them as they're touched.
 pub fn open_from_app(app: &tauri::AppHandle) -> Result<Sde, String> {
     let dir = storage::app_data_dir(app)?;
     open_from_dir(&dir)
@@ -97,4 +90,122 @@ pub fn dir_and_sde(app: &tauri::AppHandle) -> Result<(PathBuf, Sde), String> {
     let dir = storage::app_data_dir(app)?;
     let sde = open_from_dir(&dir)?;
     Ok((dir, sde))
+}
+
+// --- Generation-keyed caches for the two big whole-universe maps (#720) ---
+//
+// These maps are immutable between SDE swaps but were reloaded from SQLite on
+// every command invocation — hot on the route/wormholes paths, where location
+// polling re-read ~5k system rows and the full jump table every 30s. Each map
+// is cached process-wide, keyed by the database file's identity; a successful
+// [`download_sde`] swap changes that identity and transparently invalidates.
+// Other full-map call sites (pochven/pi/intel planners, capabilities) can
+// adopt these getters as they're touched.
+
+/// System id → (name, security, region name).
+pub type SystemInfoMap = std::collections::HashMap<i64, (String, f64, String)>;
+/// Undirected stargate adjacency, system id → neighbouring system ids.
+pub type AdjacencyMap = std::collections::HashMap<i64, Vec<i64>>;
+
+/// Identity of the SDE database file: (mtime seconds, byte size). Changes
+/// exactly when a new database is swapped into place.
+type Generation = (u64, u64);
+
+/// One cached map slot: the generation it was built for + the shared value.
+type CacheSlot<T> = std::sync::RwLock<Option<(Generation, std::sync::Arc<T>)>>;
+
+fn generation(db: &Path) -> Result<Generation, String> {
+    let meta = std::fs::metadata(db).map_err(|e| e.to_string())?;
+    let mtime = meta
+        .modified()
+        .map_err(|e| e.to_string())?
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_secs();
+    Ok((mtime, meta.len()))
+}
+
+/// Serve `slot`'s value while its generation matches; (re)build otherwise.
+/// Pure over its inputs (testable without an SDE on disk).
+fn get_or_build<T: Clone>(
+    slot: &std::sync::RwLock<Option<(Generation, T)>>,
+    generation: Generation,
+    build: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    if let Some((g, v)) = slot.read().expect("sde cache lock").as_ref() {
+        if *g == generation {
+            return Ok(v.clone());
+        }
+    }
+    let v = build()?;
+    *slot.write().expect("sde cache lock") = Some((generation, v.clone()));
+    Ok(v)
+}
+
+/// The full system-info map, served from the process-wide cache.
+pub fn cached_system_info(dir: &Path) -> Result<std::sync::Arc<SystemInfoMap>, String> {
+    static SLOT: std::sync::OnceLock<CacheSlot<SystemInfoMap>> = std::sync::OnceLock::new();
+    let generation = generation(&SdePaths::new(dir.to_path_buf()).db)?;
+    get_or_build(
+        SLOT.get_or_init(|| std::sync::RwLock::new(None)),
+        generation,
+        || {
+            let sde = open_from_dir(dir)?;
+            Ok(std::sync::Arc::new(
+                sde.solar_system_info().map_err(|e| e.to_string())?,
+            ))
+        },
+    )
+}
+
+/// The full stargate adjacency, served from the process-wide cache.
+pub fn cached_adjacency(dir: &Path) -> Result<std::sync::Arc<AdjacencyMap>, String> {
+    static SLOT: std::sync::OnceLock<CacheSlot<AdjacencyMap>> = std::sync::OnceLock::new();
+    let generation = generation(&SdePaths::new(dir.to_path_buf()).db)?;
+    get_or_build(
+        SLOT.get_or_init(|| std::sync::RwLock::new(None)),
+        generation,
+        || {
+            let sde = open_from_dir(dir)?;
+            Ok(std::sync::Arc::new(
+                sde.stargate_adjacency().map_err(|e| e.to_string())?,
+            ))
+        },
+    )
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    #[test]
+    fn get_or_build_serves_cache_until_the_generation_changes() {
+        let slot = std::sync::RwLock::new(None);
+        let mut builds = 0;
+
+        let v = get_or_build(&slot, (1, 10), || {
+            builds += 1;
+            Ok::<_, String>(42)
+        })
+        .unwrap();
+        assert_eq!(v, 42);
+
+        // Same generation → cached value, no rebuild.
+        let v = get_or_build(&slot, (1, 10), || {
+            builds += 1;
+            Ok(7)
+        })
+        .unwrap();
+        assert_eq!(v, 42);
+        assert_eq!(builds, 1);
+
+        // A swapped database (new generation) rebuilds.
+        let v = get_or_build(&slot, (2, 10), || {
+            builds += 1;
+            Ok(7)
+        })
+        .unwrap();
+        assert_eq!(v, 7);
+        assert_eq!(builds, 2);
+    }
 }
