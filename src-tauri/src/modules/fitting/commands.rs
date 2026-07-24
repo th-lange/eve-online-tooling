@@ -692,8 +692,8 @@ pub fn fitting_delete_local(app: AppHandle, id: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::fitting::stats::run_dogma;
     use crate::modules::fitting::engine::tank::DamageProfile;
+    use crate::modules::fitting::stats::run_dogma;
 
     fn item(type_id: i64, slot: SlotKind, charge: Option<i64>, qty: i32) -> FitItem {
         FitItem {
@@ -736,7 +736,17 @@ mod tests {
             projected: Vec::new(),
         };
         let layout = sde.ship_layout(fit.ship_type_id).unwrap().unwrap();
-        let d = run_dogma(&sde, &fit, &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
+        let d = run_dogma(
+            &sde,
+            &fit,
+            &layout,
+            &|_| 5.0,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+        )
+        .unwrap();
         let r = d.weapon_ranges.first().expect("a weapon range");
         // A turret has both an optimal and a (larger, for autocannons) falloff.
         assert!(r.optimal > 0.0, "optimal should be set: {r:?}");
@@ -761,7 +771,17 @@ mod tests {
             projected: Vec::new(),
         };
         let layout = sde.ship_layout(scorch.ship_type_id).unwrap().unwrap();
-        let d = run_dogma(&sde, &scorch, &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
+        let d = run_dogma(
+            &sde,
+            &scorch,
+            &layout,
+            &|_| 5.0,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+        )
+        .unwrap();
         let r = d.weapon_ranges.first().expect("a laser range");
         assert!(r.falloff > 0.0, "Scorch should keep falloff: {r:?}");
     }
@@ -795,9 +815,39 @@ mod tests {
             projected: Vec::new(),
         };
         let layout = sde.ship_layout(tid("Rifter")).unwrap().unwrap();
-        let active = run_dogma(&sde, &gun(ModuleState::Active), &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
-        let online = run_dogma(&sde, &gun(ModuleState::Online), &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
-        let offline = run_dogma(&sde, &gun(ModuleState::Offline), &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
+        let active = run_dogma(
+            &sde,
+            &gun(ModuleState::Active),
+            &layout,
+            &|_| 5.0,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+        )
+        .unwrap();
+        let online = run_dogma(
+            &sde,
+            &gun(ModuleState::Online),
+            &layout,
+            &|_| 5.0,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+        )
+        .unwrap();
+        let offline = run_dogma(
+            &sde,
+            &gun(ModuleState::Offline),
+            &layout,
+            &|_| 5.0,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+        )
+        .unwrap();
         assert!(active.dps.total > 0.0);
         assert_eq!(offline.dps.total, 0.0, "offline gun should do no DPS");
         assert!(
@@ -845,9 +895,39 @@ mod tests {
             projected: Vec::new(),
         };
         let layout = sde.ship_layout(tid("Rifter")).unwrap().unwrap();
-        let active = run_dogma(&sde, &ab(ModuleState::Active), &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
-        let online = run_dogma(&sde, &ab(ModuleState::Online), &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
-        let offline = run_dogma(&sde, &ab(ModuleState::Offline), &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
+        let active = run_dogma(
+            &sde,
+            &ab(ModuleState::Active),
+            &layout,
+            &|_| 5.0,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+        )
+        .unwrap();
+        let online = run_dogma(
+            &sde,
+            &ab(ModuleState::Online),
+            &layout,
+            &|_| 5.0,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+        )
+        .unwrap();
+        let offline = run_dogma(
+            &sde,
+            &ab(ModuleState::Offline),
+            &layout,
+            &|_| 5.0,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+        )
+        .unwrap();
         assert!(active.capacitor.drain > 0.0, "active AB draws cap");
         assert_eq!(online.capacitor.drain, 0.0, "deactivated AB draws no cap");
         assert_eq!(offline.capacitor.drain, 0.0, "offline AB draws no cap");
@@ -886,8 +966,28 @@ mod tests {
             projected: Vec::new(),
         };
         let layout = sde.ship_layout(tid("Caracal")).unwrap().unwrap();
-        let active = run_dogma(&sde, &hardener(ModuleState::Active), &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
-        let online = run_dogma(&sde, &hardener(ModuleState::Online), &layout, &|_| 5.0, &DamageProfile::default(), 0.0, None, &[]).unwrap();
+        let active = run_dogma(
+            &sde,
+            &hardener(ModuleState::Active),
+            &layout,
+            &|_| 5.0,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+        )
+        .unwrap();
+        let online = run_dogma(
+            &sde,
+            &hardener(ModuleState::Online),
+            &layout,
+            &|_| 5.0,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+        )
+        .unwrap();
         assert!(
             active.tank.ehp > online.tank.ehp,
             "active hardener should raise EHP vs deactivated: {} vs {}",

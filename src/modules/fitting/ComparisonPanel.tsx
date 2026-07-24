@@ -1,10 +1,6 @@
 import { useState } from "react";
 import { BarChart2, Plus, X } from "lucide-react";
-import {
-  fittingSimulate,
-  type Fit,
-  type FitStats,
-} from "../../lib/api";
+import { fittingSimulate, type Fit, type FitStats } from "../../lib/api";
 import { formatInt } from "../../lib/format";
 import { km } from "./fitHelpers";
 import { useFitLibrary } from "./useFitLibrary";
@@ -55,9 +51,7 @@ export function ComparisonPanel({
       const next = await Promise.all(
         slots.map((fit): Promise<Result> => {
           if (!fit) return Promise.resolve(null);
-          return fittingSimulate(fit).catch(
-            (): Result => "error" as const,
-          );
+          return fittingSimulate(fit).catch((): Result => "error" as const);
         }),
       );
       setResults(next);
@@ -170,7 +164,9 @@ export function ComparisonPanel({
                 slots={slots}
                 results={results}
                 baseline={baseline}
-                stat={(r) => (r && typeof r === "object" ? (r.dps?.total ?? null) : null)}
+                stat={(r) =>
+                  r && typeof r === "object" ? (r.dps?.total ?? null) : null
+                }
                 format={(v) => formatInt(v)}
               />
               <StatRow
@@ -178,7 +174,9 @@ export function ComparisonPanel({
                 slots={slots}
                 results={results}
                 baseline={baseline}
-                stat={(r) => (r && typeof r === "object" ? (r.tank?.ehp ?? null) : null)}
+                stat={(r) =>
+                  r && typeof r === "object" ? (r.tank?.ehp ?? null) : null
+                }
                 format={(v) => formatInt(v)}
               />
               <StatRow
@@ -220,7 +218,9 @@ export function ComparisonPanel({
                 results={results}
                 baseline={baseline}
                 stat={(r) =>
-                  r && typeof r === "object" ? (r.targeting?.lockRange ?? null) : null
+                  r && typeof r === "object"
+                    ? (r.targeting?.lockRange ?? null)
+                    : null
                 }
                 format={(v) => km(v)}
               />

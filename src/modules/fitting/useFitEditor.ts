@@ -45,9 +45,9 @@ export function useFitEditor() {
   const [neutGjs, setNeutGjs] = useState<number | undefined>(undefined);
   // Target profile for applied-DPS + the DPS-vs-range curve (#701); undefined
   // means "no target selected" (paper DPS only).
-  const [targetProfile, setTargetProfile] = useState<
-    TargetProfile | undefined
-  >(undefined);
+  const [targetProfile, setTargetProfile] = useState<TargetProfile | undefined>(
+    undefined,
+  );
   // Command-burst/fleet-link modules the fit is "receiving" from a fleet
   // member (#705); empty means no fleet boosts applied.
   const [fleetBoosts, setFleetBoosts] = useState<FleetBoost[]>([]);

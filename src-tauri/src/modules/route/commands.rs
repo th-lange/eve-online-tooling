@@ -226,10 +226,7 @@ pub async fn route_system_neighbourhood(
 /// depth), so a link between two systems both sitting exactly on the depth
 /// frontier is included — both nodes are in the view, and hiding their edge
 /// would draw a false gap. Pure (testable).
-fn neighbourhood_edges(
-    adj: &HashMap<i64, Vec<i64>>,
-    nodes: &HashMap<i64, i64>,
-) -> Vec<[i64; 2]> {
+fn neighbourhood_edges(adj: &HashMap<i64, Vec<i64>>, nodes: &HashMap<i64, i64>) -> Vec<[i64; 2]> {
     let mut edges: HashSet<(i64, i64)> = HashSet::new();
     for &s in nodes.keys() {
         for &n in adj.get(&s).into_iter().flatten() {
@@ -697,11 +694,19 @@ mod tests {
             remaining_hours: hours,
         };
         // Longer life beats a bigger pipe …
-        assert!(candidate_quality(&sig(Some(8.0), "frigate")) > candidate_quality(&sig(Some(2.0), "large")));
+        assert!(
+            candidate_quality(&sig(Some(8.0), "frigate"))
+                > candidate_quality(&sig(Some(2.0), "large"))
+        );
         // … size only breaks lifetime ties …
-        assert!(candidate_quality(&sig(Some(8.0), "xlarge")) > candidate_quality(&sig(Some(8.0), "frigate")));
+        assert!(
+            candidate_quality(&sig(Some(8.0), "xlarge"))
+                > candidate_quality(&sig(Some(8.0), "frigate"))
+        );
         // … and an unknown lifetime sorts worst.
-        assert!(candidate_quality(&sig(Some(1.0), "frigate")) > candidate_quality(&sig(None, "xlarge")));
+        assert!(
+            candidate_quality(&sig(Some(1.0), "frigate")) > candidate_quality(&sig(None, "xlarge"))
+        );
     }
 
     #[test]

@@ -364,7 +364,9 @@ export function StatsAside({
                 {DAMAGE_PRESETS.map(([label, profile]) => (
                   <option
                     key={label}
-                    value={label === "Omni (even)" ? "" : JSON.stringify(profile)}
+                    value={
+                      label === "Omni (even)" ? "" : JSON.stringify(profile)
+                    }
                   >
                     {label}
                   </option>

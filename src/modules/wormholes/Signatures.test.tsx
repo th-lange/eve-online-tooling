@@ -155,9 +155,7 @@ describe("Signatures", () => {
     fireEvent.click(screen.getByRole("button", { name: /update signatures/i }));
 
     expect(await screen.findByText(/sig gone/i)).toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole("button", { name: /delete connection/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /delete connection/i }));
     expect(onDelete).toHaveBeenCalledWith(7);
   });
 
