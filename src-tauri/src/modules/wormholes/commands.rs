@@ -561,9 +561,8 @@ fn merge_by_source(
     imported: Vec<Connection>,
     source_tag: ConnSource,
 ) -> Vec<Connection> {
-    let (mut out, previous): (Vec<Connection>, Vec<Connection>) = existing
-        .into_iter()
-        .partition(|c| c.source != source_tag);
+    let (mut out, previous): (Vec<Connection>, Vec<Connection>) =
+        existing.into_iter().partition(|c| c.source != source_tag);
     // Max over dropped rows too, so a vanished hole's id is never recycled
     // within the same merge.
     let mut next_id = out
@@ -1254,11 +1253,11 @@ mod tests {
             target_sig: None,
             ..wh(7, 1, false, 0, 1_000_000)
         };
-        let imported = vec![imported_connection(
-            &evescout_sig(31000005, 30002086, "ABC", "large"),
-            1_000_000,
-        )
-        .unwrap()];
+        let imported =
+            vec![
+                imported_connection(&evescout_sig(31000005, 30002086, "ABC", "large"), 1_000_000)
+                    .unwrap(),
+            ];
         let merged = merge_by_source(vec![manual], imported, ConnSource::Evescout);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].source, ConnSource::Manual);

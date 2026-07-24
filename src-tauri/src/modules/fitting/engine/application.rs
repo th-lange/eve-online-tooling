@@ -71,7 +71,10 @@ mod tests {
     fn turret_full_application_at_optimal() {
         // At optimal range with zero tracking term: application should be 1.0.
         let app = turret_application(10_000.0, 5_000.0, 1.0, 40.0, 0.0, 40.0, 5_000.0);
-        assert!((app - 1.0).abs() < 1e-6, "expected 1.0 at optimal, got {app}");
+        assert!(
+            (app - 1.0).abs() < 1e-6,
+            "expected 1.0 at optimal, got {app}"
+        );
     }
 
     #[test]

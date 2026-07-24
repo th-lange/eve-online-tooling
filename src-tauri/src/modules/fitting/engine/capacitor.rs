@@ -41,7 +41,12 @@ pub fn capacitor(
     // When unstable, run the discrete-activation sim (matching PYFA's capSim) to
     // the time the capacitor first goes negative.
     let depletion_seconds = if !stable && capacity > 0.0 && recharge_ms > 0.0 {
-        Some(time_to_empty(capacity, recharge_ms, module_drains, neut_gjs))
+        Some(time_to_empty(
+            capacity,
+            recharge_ms,
+            module_drains,
+            neut_gjs,
+        ))
     } else {
         None
     };

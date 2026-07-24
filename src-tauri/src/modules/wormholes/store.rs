@@ -176,7 +176,10 @@ pub(crate) fn load_with_change(
     Ok((dir, conns, changed))
 }
 
-pub(crate) fn views(dir: &std::path::Path, conns: &[Connection]) -> Result<Vec<ConnectionView>, String> {
+pub(crate) fn views(
+    dir: &std::path::Path,
+    conns: &[Connection],
+) -> Result<Vec<ConnectionView>, String> {
     let info = crate::sde::cached_system_info(dir)?;
     let name = |id: i64| {
         info.get(&id)

@@ -339,8 +339,8 @@ pub async fn production_profit(
     let categories = sde.category_names().map_err(|e| e.to_string())?;
     let groups = sde.group_names().map_err(|e| e.to_string())?;
     let base_times = sde.base_times(1).map_err(|e| e.to_string())?; // 1 = manufacturing
-    // Names for the T1 (or T3 relic) blueprint each T2/T3 row is invented
-    // from, so the UI can show what a "build" actually starts from.
+                                                                    // Names for the T1 (or T3 relic) blueprint each T2/T3 row is invented
+                                                                    // from, so the UI can show what a "build" actually starts from.
     let base_bp_ids: Vec<i64> = steps
         .iter()
         .filter_map(|s| s.invention.as_ref().map(|i| i.base_blueprint_type_id))

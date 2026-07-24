@@ -86,7 +86,7 @@ export function Routing() {
         <div className="mt-2 text-sm text-rose-400">
           No route found
           {ship
-            ? " for this hull (try without a ship, or without \"avoid EOL\")."
+            ? ' for this hull (try without a ship, or without "avoid EOL").'
             : ' (try without "avoid EOL").'}
         </div>
       )}

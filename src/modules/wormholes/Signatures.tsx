@@ -146,8 +146,8 @@ export function Signatures({
                   className="flex flex-wrap items-center gap-2 text-xs text-amber-300"
                 >
                   <span>
-                    Sig gone — the {c.sourceName} ↔ {c.targetName} hole may
-                    have collapsed.
+                    Sig gone — the {c.sourceName} ↔ {c.targetName} hole may have
+                    collapsed.
                   </span>
                   <button
                     onClick={() => onDeleteConnection(c.id)}

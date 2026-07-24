@@ -123,7 +123,11 @@ pub(super) fn run_dogma(
     extra_ids.extend(implant_items.iter().map(|i| i.type_id));
     extra_ids.extend(fit.projected.iter().map(|i| i.type_id));
     extra_ids.extend(fleet_boosts.iter().map(|&(m, _)| m));
-    extra_ids.extend(fleet_boosts.iter().filter_map(|&(_, c)| (c > 0).then_some(c)));
+    extra_ids.extend(
+        fleet_boosts
+            .iter()
+            .filter_map(|&(_, c)| (c > 0).then_some(c)),
+    );
     let ctx = DogmaContext::load(sde, &extra_ids)?;
 
     let mut ship = ctx.entity(fit.ship_type_id, Vec::new());
@@ -958,14 +962,7 @@ pub(super) fn tank_of(
         0.0
     };
 
-    let mut t = tank(
-        shield,
-        armor,
-        hull,
-        profile,
-        shield_rep_s,
-        armor_rep_s,
-    );
+    let mut t = tank(shield, armor, hull, profile, shield_rep_s, armor_rep_s);
     t.passive_shield_s = passive_shield_s;
     t
 }
@@ -1320,12 +1317,12 @@ mod tests {
     #[test]
     fn applied_dps_of_reduces_paper_dps_against_a_far_target() {
         let turret = store(&[
-            (64, 5.0),     // damage multiplier
-            (51, 2000.0),  // 2s RoF
+            (64, 5.0),      // damage multiplier
+            (51, 2000.0),   // 2s RoF
             (54, 10_000.0), // optimal
             (158, 5_000.0), // falloff
-            (160, 40.0),   // tracking speed
-            (105, 40.0),   // sig resolution
+            (160, 40.0),    // tracking speed
+            (105, 40.0),    // sig resolution
         ]);
         let charge = store(&[(114, 25.0), (116, 25.0), (117, 25.0), (118, 25.0)]); // 100 dmg
 
@@ -1539,8 +1536,8 @@ mod tests {
     fn tank_of_ehp_varies_with_damage_profile() {
         let mut ship = AttrStore::new();
         ship.set_base(263, 1000.0); // shield HP
-        // [em, thermal, kinetic, explosive] resonances: weak to em (0.75 = 25%
-        // resist), hardened everywhere else (0.25 = 75% resist).
+                                    // [em, thermal, kinetic, explosive] resonances: weak to em (0.75 = 25%
+                                    // resist), hardened everywhere else (0.25 = 75% resist).
         ship.set_base(271, 0.75); // em
         ship.set_base(274, 0.25); // thermal
         ship.set_base(273, 0.25); // kinetic
