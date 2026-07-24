@@ -333,15 +333,47 @@ pub fn wh_route(
 
 // --- EVE-Scout auto-import (#298) ---
 
-/// Dedupe key for a connection: unordered endpoints + the hub-side sig. Endpoints
-/// are sorted so a manual A↔B hole matches an imported B↔A one.
-fn dedupe_key(c: &Connection) -> (i64, i64, Option<String>) {
-    let (a, b) = if c.source_system_id <= c.target_system_id {
+/// Unordered endpoint pair of a connection.
+fn endpoints(c: &Connection) -> (i64, i64) {
+    if c.source_system_id <= c.target_system_id {
         (c.source_system_id, c.target_system_id)
     } else {
         (c.target_system_id, c.source_system_id)
+    }
+}
+
+/// Unordered, case/whitespace-normalized sig pair (empty strings count as
+/// missing). Unordered because which end a row calls "source" depends on who
+/// recorded it: the hub for EVE-Scout, the initial sig for Tripwire, whichever
+/// side the user entered first for manual rows.
+fn sig_pair(c: &Connection) -> (Option<String>, Option<String>) {
+    let norm = |s: &Option<String>| {
+        s.as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_ascii_uppercase)
     };
-    (a, b, c.source_sig.clone())
+    let (a, b) = (norm(&c.source_sig), norm(&c.target_sig));
+    if a <= b {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
+/// Whether two rows describe the same hole. Endpoints must match (in either
+/// direction); sig codes only *separate* rows when both rows are labelled on
+/// both ends and the unordered pairs differ — the one case where two distinct
+/// holes between the same two systems are provable. A manual row entered from
+/// the far side (with the other end's sig, or no sigs at all) therefore still
+/// matches the imported row for the same hole. Pure.
+fn same_hole(a: &Connection, b: &Connection) -> bool {
+    if endpoints(a) != endpoints(b) {
+        return false;
+    }
+    let (pa, pb) = (sig_pair(a), sig_pair(b));
+    let fully = |p: &(Option<String>, Option<String>)| p.0.is_some() && p.1.is_some();
+    !(fully(&pa) && fully(&pb) && pa != pb)
 }
 
 /// EVE wormholes visibly flag end-of-life over roughly their final 4 hours;
@@ -390,8 +422,9 @@ fn imported_connection(sig: &crate::evescout::TheraSignature, now: u64) -> Optio
 /// Merge freshly-imported connections from one auto source into the stored set:
 /// keep every row from other sources untouched (manual + any other import), drop
 /// all previous rows of `source_tag` (the feed is the source of truth, so vanished
-/// holes disappear), and add the imported ones — skipping any that collide with a
-/// kept row or each other. New ids continue past the highest existing id. Pure.
+/// holes disappear), and add the imported ones — skipping any that describe the
+/// same hole as a kept row or an earlier import ([`same_hole`]). New ids continue
+/// past the highest existing id. Pure.
 fn merge_by_source(
     existing: Vec<Connection>,
     imported: Vec<Connection>,
@@ -401,14 +434,16 @@ fn merge_by_source(
         .into_iter()
         .filter(|c| c.source != source_tag)
         .collect();
-    let mut keys: HashSet<(i64, i64, Option<String>)> = out.iter().map(dedupe_key).collect();
     let mut next_id = out.iter().map(|c| c.id).max().unwrap_or(0) + 1;
     for mut c in imported {
-        if keys.insert(dedupe_key(&c)) {
-            c.id = next_id;
-            next_id += 1;
-            out.push(c);
+        // O(n²) over tens of rows — fine, and unlike a hash key this lets the
+        // match semantics stay directional/sig tolerant.
+        if out.iter().any(|k| same_hole(k, &c)) {
+            continue;
         }
+        c.id = next_id;
+        next_id += 1;
+        out.push(c);
     }
     out
 }
@@ -914,6 +949,89 @@ mod tests {
         assert_eq!(imp.len(), 1);
         assert_eq!(imp[0].target_system_id, 30002086);
         assert!(imp[0].id > 1);
+    }
+
+    #[test]
+    fn same_hole_matches_across_direction_and_sig_asymmetry() {
+        let base = wh(1, 1, false, 0, 1_000_000);
+        // Manual row entered from the k-space side with only its local sig …
+        let manual = Connection {
+            source_system_id: 30002086,
+            target_system_id: 31000005,
+            source_sig: Some("xyz".into()),
+            target_sig: None,
+            ..base.clone()
+        };
+        // … the import records the same hole from the hub with the hub sig.
+        let imported = Connection {
+            source_system_id: 31000005,
+            target_system_id: 30002086,
+            source_sig: Some("ABC".into()),
+            target_sig: None,
+            ..base.clone()
+        };
+        assert!(same_hole(&manual, &imported));
+
+        // No sigs at all still matches on endpoints.
+        let bare = Connection {
+            source_system_id: 30002086,
+            target_system_id: 31000005,
+            source_sig: None,
+            target_sig: None,
+            ..base.clone()
+        };
+        assert!(same_hole(&bare, &imported));
+
+        // Fully labelled on both ends with different pairs → provably two
+        // distinct holes between the same systems.
+        let hole1 = Connection {
+            source_system_id: 31000005,
+            target_system_id: 30002086,
+            source_sig: Some("ABC".into()),
+            target_sig: Some("K162".into()),
+            ..base.clone()
+        };
+        let hole2 = Connection {
+            source_system_id: 30002086,
+            target_system_id: 31000005,
+            source_sig: Some("QRS".into()),
+            target_sig: Some("H296".into()),
+            ..base.clone()
+        };
+        assert!(!same_hole(&hole1, &hole2));
+
+        // The same pair recorded from the other side (and other case) matches.
+        let hole1_rev = Connection {
+            source_system_id: 30002086,
+            target_system_id: 31000005,
+            source_sig: Some("k162".into()),
+            target_sig: Some("abc".into()),
+            ..base
+        };
+        assert!(same_hole(&hole1, &hole1_rev));
+    }
+
+    #[test]
+    fn merge_dedupes_manual_far_side_entry_against_import() {
+        // Manual A↔B carrying only the non-hub-side sig; the feed reports the
+        // same hole as B↔A with the hub-side sig → one row, the manual wins.
+        let manual = Connection {
+            id: 7,
+            source: ConnSource::Manual,
+            source_system_id: 30002086,
+            target_system_id: 31000005,
+            source_sig: Some("XYZ".into()),
+            target_sig: None,
+            ..wh(7, 1, false, 0, 1_000_000)
+        };
+        let imported = vec![imported_connection(
+            &evescout_sig(31000005, 30002086, "ABC", "large"),
+            1_000_000,
+        )
+        .unwrap()];
+        let merged = merge_by_source(vec![manual], imported, ConnSource::Evescout);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].source, ConnSource::Manual);
     }
 
     #[test]
