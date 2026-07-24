@@ -56,7 +56,7 @@ pub async fn assets_value(
     auth_state: State<'_, AuthState>,
     market: State<'_, MarketService>,
 ) -> Result<AssetsResult, String> {
-    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
+    let dir = storage::app_data_dir(&app)?;
     // Quantity per (type, owner) for the active selection: a single character
     // (personal hangar + their corp's hangar) when one is picked, or every
     // roster member (each corp fetched once, so alts in the same corp don't
@@ -130,13 +130,7 @@ pub async fn assets_value(
         .price_map_at(location, &ids)
         .await
         .map_err(|e| e.to_string())?;
-    let names = sde.market_items().map_err(|e| e.to_string())?;
-    let name_vol: HashMap<i64, (String, f64)> = names
-        .into_iter()
-        .map(|m| (m.type_id, (m.name, m.volume.unwrap_or(0.0))))
-        .collect();
-    let categories = sde.category_names().map_err(|e| e.to_string())?;
-    let groups = sde.group_names().map_err(|e| e.to_string())?;
+    let item_meta = crate::sde::cached_item_meta(&dir)?;
 
     let (mut sell_total, mut buy_total, mut volume_total) = (0.0, 0.0, 0.0);
     let mut rows: Vec<AssetRow> = Vec::new();
@@ -144,12 +138,10 @@ pub async fn assets_value(
         let model = prices.get(type_id);
         let buy_price = model.and_then(|m| m.buy_percentile);
         let sell_price = model.and_then(basis_price);
-        let (name, vol_each) = name_vol
-            .get(&type_id)
-            .cloned()
-            .unwrap_or_else(|| (format!("Type {type_id}"), 0.0));
-        let category = categories.get(&type_id).cloned();
-        let group = groups.get(&type_id).cloned();
+        let (name, vol_each, category, group) = match item_meta.get(&type_id) {
+            Some(m) => (m.name.clone(), m.volume, m.category.clone(), m.group.clone()),
+            None => (format!("Type {type_id}"), 0.0, None, None),
+        };
         for (owner, (is_corp, quantity)) in owners {
             let q = quantity as f64;
             let sell_value = sell_price.unwrap_or(0.0) * q;
@@ -394,17 +386,7 @@ pub async fn assets_tree(
         .into_iter()
         .filter_map(|m| basis_price(&m).map(|p| (m.type_id, p)))
         .collect();
-    let name_vol: HashMap<i64, (String, f64)> = sde
-        .market_items()
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(|m| (m.type_id, (m.name, m.volume.unwrap_or(0.0))))
-        .collect();
-    let cls = Classifiers {
-        categories: sde.category_names().map_err(|e| e.to_string())?,
-        groups: sde.group_names().map_err(|e| e.to_string())?,
-        metas: sde.meta_group_names().map_err(|e| e.to_string())?,
-    };
+    let item_meta = crate::sde::cached_item_meta(&dir)?;
 
     // Resolve root location names: NPC stations from SDE, systems from SDE,
     // structures by id fallback.
@@ -435,7 +417,7 @@ pub async fn assets_tree(
     };
 
     let bare = build_asset_tree(&assets);
-    let (roots, sell_total, volume_total) = value_nodes(bare, &prices, &name_vol, &loc_name, &cls);
+    let (roots, sell_total, volume_total) = value_nodes(bare, &prices, &item_meta, &loc_name);
     Ok(AssetsTreeResult {
         roots,
         sell_total,
@@ -443,35 +425,26 @@ pub async fn assets_tree(
     })
 }
 
-/// SDE classifiers used to make item nodes searchable (category / group /
-/// meta group), keyed by type id.
-struct Classifiers {
-    categories: HashMap<i64, String>,
-    groups: HashMap<i64, String>,
-    metas: HashMap<i64, String>,
-}
-
 /// Recursively name + value bare nodes, rolling value/volume up to each parent.
 /// Returns the valued nodes plus the total value/volume across them.
 fn value_nodes(
     nodes: Vec<TreeNode>,
     prices: &HashMap<i64, f64>,
-    name_vol: &HashMap<i64, (String, f64)>,
+    item_meta: &crate::sde::ItemMetaMap,
     loc_name: &dyn Fn(i64) -> String,
-    cls: &Classifiers,
 ) -> (Vec<AssetNode>, f64, f64) {
     let mut out = Vec::with_capacity(nodes.len());
     let (mut total_value, mut total_volume) = (0.0, 0.0);
     for n in nodes {
         let (children, child_value, child_volume) =
-            value_nodes(n.children, prices, name_vol, loc_name, cls);
+            value_nodes(n.children, prices, item_meta, loc_name);
         let (name, mut value, mut volume) = if n.is_location {
             (loc_name(n.id), 0.0, 0.0)
         } else {
             let tid = n.type_id.unwrap_or(0);
-            let (nm, vol_each) = name_vol
+            let (nm, vol_each) = item_meta
                 .get(&tid)
-                .cloned()
+                .map(|m| (m.name.clone(), m.volume))
                 .unwrap_or_else(|| (format!("Type {tid}"), 0.0));
             let unit = prices.get(&tid).copied().unwrap_or(0.0);
             (nm, unit * n.quantity as f64, vol_each * n.quantity as f64)
@@ -491,9 +464,9 @@ fn value_nodes(
             is_location: n.is_location,
             owner: n.owner.clone(),
             is_corp: n.is_corp,
-            category: cls.categories.get(&tid).cloned(),
-            group: cls.groups.get(&tid).cloned(),
-            meta_group: cls.metas.get(&tid).cloned(),
+            category: item_meta.get(&tid).and_then(|m| m.category.clone()),
+            group: item_meta.get(&tid).and_then(|m| m.group.clone()),
+            meta_group: item_meta.get(&tid).and_then(|m| m.meta_group.clone()),
             children,
         });
     }

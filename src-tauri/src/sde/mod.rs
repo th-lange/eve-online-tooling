@@ -24,7 +24,7 @@ pub use db::{wormhole_class_label, Sde};
 pub use download::download_sde;
 pub use error::SdeError;
 pub use types::{
-    AttrMeta, BlueprintMaterial, BlueprintProduct, Decryptor, EffectMeta, ModifierInfo,
+    AttrMeta, BlueprintMaterial, BlueprintProduct, Decryptor, EffectMeta, ItemMeta, ModifierInfo,
     PlanetSchematic, Recipe, ReprocessRecipe, ShipLayout, WormholeType,
 };
 
@@ -106,6 +106,8 @@ pub fn dir_and_sde(app: &tauri::AppHandle) -> Result<(PathBuf, Sde), String> {
 pub type SystemInfoMap = std::collections::HashMap<i64, (String, f64, String)>;
 /// Undirected stargate adjacency, system id → neighbouring system ids.
 pub type AdjacencyMap = std::collections::HashMap<i64, Vec<i64>>;
+/// Type id → full item metadata (name, volume, category, group, meta group).
+pub type ItemMetaMap = std::collections::HashMap<i64, ItemMeta>;
 
 /// Identity of the SDE database file: (mtime seconds, byte size). Changes
 /// exactly when a new database is swapped into place.
@@ -172,6 +174,25 @@ pub fn cached_adjacency(dir: &Path) -> Result<std::sync::Arc<AdjacencyMap>, Stri
             ))
         },
     )
+}
+
+/// The full item-metadata catalogue (every `invTypes` row, published or
+/// not — see [`db::Sde::all_item_meta`]), served from the process-wide
+/// cache. One shared, generation-keyed map: every caller — a character's
+/// personal hangar, a corp's hangar, fitting, market, … — resolves names off
+/// the *same* build, so a non-market type (e.g. a corp Office, typeID 27)
+/// never falls back to `Type <id>` just because one caller's query happened
+/// to filter to tradeable items only.
+pub fn cached_item_meta(dir: &Path) -> Result<std::sync::Arc<ItemMetaMap>, String> {
+    static SLOT: std::sync::LazyLock<CacheSlot<ItemMetaMap>> =
+        std::sync::LazyLock::new(|| std::sync::RwLock::new(None));
+    let generation = generation(&SdePaths::new(dir.to_path_buf()).db)?;
+    get_or_build(&SLOT, generation, || {
+        let sde = open_from_dir(dir)?;
+        Ok(std::sync::Arc::new(
+            sde.all_item_meta().map_err(|e| e.to_string())?,
+        ))
+    })
 }
 
 #[cfg(test)]

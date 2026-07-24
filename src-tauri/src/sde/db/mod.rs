@@ -4,7 +4,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use std::collections::HashMap;
 use std::path::Path;
 
-use super::types::{TypeDetail, TypeInfo, TypeNameMap};
+use super::types::{ItemMeta, TypeDetail, TypeInfo, TypeNameMap};
 use super::SdeError;
 
 mod dogma;
@@ -296,6 +296,42 @@ impl Sde {
         Ok(map)
     }
 
+    /// Every known item's name, packaged volume, category/group/meta-group
+    /// names, keyed by type id — the whole `invTypes` catalogue, published or
+    /// not. Complements [`market_items`](Self::market_items): tradeable-only
+    /// lookups miss non-market types (e.g. a corp office rental, typeID 27),
+    /// which otherwise show as `Type <id>`. One bulk query, meant to be built
+    /// once and cached (see [`crate::sde::cached_item_meta`]), not re-run
+    /// per request.
+    pub fn all_item_meta(&self) -> Result<HashMap<i64, ItemMeta>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.typeID, t.typeName, t.groupID, t.volume,
+                    g.groupName, c.categoryName, mg.metaGroupName
+             FROM invTypes t
+             LEFT JOIN invGroups g ON g.groupID = t.groupID
+             LEFT JOIN invCategories c ON c.categoryID = g.categoryID
+             LEFT JOIN invMetaTypes mt ON mt.typeID = t.typeID
+             LEFT JOIN invMetaGroups mg ON mg.metaGroupID = mt.metaGroupID",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let type_id: i64 = row.get(0)?;
+            let name: String = row.get(1)?;
+            let group_id: i64 = row.get(2)?;
+            let assembled: Option<f64> = row.get(3)?;
+            Ok((
+                type_id,
+                ItemMeta {
+                    name,
+                    volume: packaged_volume(group_id, assembled).unwrap_or(0.0),
+                    group: row.get(4)?,
+                    category: row.get(5)?,
+                    meta_group: row.get(6)?,
+                },
+            ))
+        })?;
+        rows.collect::<Result<HashMap<_, _>, _>>().map_err(Into::into)
+    }
+
     #[cfg(test)]
     fn from_connection(conn: Connection) -> Self {
         Self { conn }
@@ -441,5 +477,20 @@ mod tests {
         let meta = sde.meta_group_names().unwrap();
         assert_eq!(meta.get(&100).map(String::as_str), Some("Tech II"));
         assert_eq!(meta.get(&200), None); // no meta entry -> Tech I (absent)
+    }
+
+    #[test]
+    fn all_item_meta_covers_every_type_with_group_category_and_meta() {
+        let sde = fixture();
+        let meta = sde.all_item_meta().unwrap();
+        let widget = meta.get(&100).unwrap();
+        assert_eq!(widget.name, "Widget");
+        assert_eq!(widget.volume, 5.0); // group 10 isn't a ship class -> assembled volume
+        assert_eq!(widget.category.as_deref(), Some("Gadgets"));
+        assert_eq!(widget.group.as_deref(), Some("Widgets"));
+        assert_eq!(widget.meta_group.as_deref(), Some("Tech II"));
+        // No meta entry -> Tech I (absent), same convention as meta_group_names.
+        let tritanium = meta.get(&200).unwrap();
+        assert_eq!(tritanium.meta_group, None);
     }
 }

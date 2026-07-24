@@ -129,6 +129,23 @@ pub struct MarketItem {
     pub volume: Option<f64>,
 }
 
+/// Bulk-resolved item metadata (name, packaged volume, category/group/meta
+/// group names) for the *whole* SDE catalogue — published or not. Unlike
+/// [`MarketItem`]/`market_items`, which only covers tradeable types, this
+/// covers every `invTypes` row, so non-market types (e.g. a corp office
+/// rental, typeID 27) still resolve a real name instead of falling back to
+/// `Type <id>`.
+#[derive(Debug, Clone)]
+pub struct ItemMeta {
+    pub name: String,
+    /// Packaged (hauling) volume — the same per-group constant `market_items`
+    /// uses, so ships/etc. don't report their assembled size.
+    pub volume: f64,
+    pub category: Option<String>,
+    pub group: Option<String>,
+    pub meta_group: Option<String>,
+}
+
 /// A manufacturable blueprint, keyed for ranking/lookup.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
