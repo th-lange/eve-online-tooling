@@ -19,10 +19,12 @@ export function Signatures({
   connections,
   system,
   setSystem,
+  onDeleteConnection,
 }: {
   connections: ConnectionView[];
   system: SystemMatch | null;
   setSystem: (m: SystemMatch | null) => void;
+  onDeleteConnection: (id: number) => void;
 }) {
   const qc = useQueryClient();
   const [text, setText] = useState("");
@@ -39,8 +41,11 @@ export function Signatures({
     enabled: !!system,
   });
   const paste = useMutation({
-    mutationFn: () => whPasteSignatures(system!.id, text),
+    mutationFn: (force: boolean) => whPasteSignatures(system!.id, text, force),
     onSuccess: (scan) => {
+      // A held-back destructive paste keeps the textarea so "Replace anyway"
+      // can resend the same content with force.
+      if (scan.needsConfirmation) return;
       setText("");
       setLastScan({ systemId: system!.id, scan });
       // The paste response *is* the new stored set — no refetch needed.
@@ -51,6 +56,10 @@ export function Signatures({
   const signatures: Signature[] = stored.data ?? [];
   const scan =
     system && lastScan?.systemId === system.id ? lastScan.scan : undefined;
+  const pending = paste.data?.needsConfirmation ? paste.data : undefined;
+  const affected = scan
+    ? connections.filter((c) => scan.affectedConnectionIds.includes(c.id))
+    : [];
 
   // A sig is "linked" if its id is used as a connection endpoint sig.
   const linkedSigs = new Set(
@@ -67,7 +76,7 @@ export function Signatures({
           <SystemPicker picked={system} onPick={setSystem} />
         </Field>
         <button
-          onClick={() => paste.mutate()}
+          onClick={() => paste.mutate(false)}
           disabled={!system || text.trim() === "" || paste.isPending}
           className="rounded bg-indigo-600 px-3 py-1 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
         >
@@ -83,6 +92,21 @@ export function Signatures({
       />
       {system && (
         <div className="mt-2">
+          {pending && (
+            <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-amber-400">
+              <span>
+                This paste removes {pending.removed.length} of{" "}
+                {signatures.length} stored signature(s) — a filtered or partial
+                scanner copy? Nothing was changed.
+              </span>
+              <button
+                onClick={() => paste.mutate(true)}
+                className="rounded border border-amber-600 px-2 py-0.5 text-amber-300 hover:bg-amber-950/40"
+              >
+                Replace anyway
+              </button>
+            </div>
+          )}
           {scan && (scan.added.length > 0 || scan.removed.length > 0) && (
             <div className="mb-2 text-xs">
               {scan.added.length > 0 && (
@@ -114,6 +138,27 @@ export function Signatures({
               </span>
             )}
           </div>
+          {affected.length > 0 && (
+            <div className="mt-2 flex flex-col gap-1">
+              {affected.map((c) => (
+                <div
+                  key={c.id}
+                  className="flex flex-wrap items-center gap-2 text-xs text-amber-300"
+                >
+                  <span>
+                    Sig gone — the {c.sourceName} ↔ {c.targetName} hole may
+                    have collapsed.
+                  </span>
+                  <button
+                    onClick={() => onDeleteConnection(c.id)}
+                    className="rounded border border-zinc-700 px-2 py-0.5 text-zinc-300 hover:bg-zinc-800"
+                  >
+                    Delete connection
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

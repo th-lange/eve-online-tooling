@@ -147,6 +147,13 @@ pub struct SignatureScan {
     pub added: Vec<String>,
     /// Sig ids that disappeared since the last paste.
     pub removed: Vec<String>,
+    /// True when the paste was NOT stored because it would drop more than
+    /// half of the stored signatures — likely a filtered/partial scanner
+    /// copy. Re-run with `force` once the user confirms.
+    pub needs_confirmation: bool,
+    /// Connections whose endpoint sig in this system matches a removed sig —
+    /// the hole is probably gone, so the UI can offer deleting them.
+    pub affected_connection_ids: Vec<i64>,
 }
 
 /// EVE signature id format: `ABC-123`.
@@ -184,13 +191,50 @@ fn sig_key(system_id: i64) -> String {
     format!("wh_sigs_{system_id}")
 }
 
+/// Whether a paste is suspiciously destructive: it would drop more than half
+/// of the stored signatures — the shape of a filtered or partial scanner
+/// copy, not of a normal re-scan. Pure (testable).
+fn destructive_paste(previous: usize, removed: usize) -> bool {
+    previous > 0 && removed * 2 > previous
+}
+
+/// Connection ids whose endpoint sig *in this system* matches a removed sig.
+/// Connection sigs are entered as either the short "ABC" prefix or the full
+/// "ABC-123" scanner id — both spellings match, case-insensitively. Pure.
+fn affected_connections(conns: &[Connection], system_id: i64, removed: &[String]) -> Vec<i64> {
+    let matches = |conn_sig: &Option<String>, id: &str| -> bool {
+        let Some(cs) = conn_sig.as_deref() else {
+            return false;
+        };
+        let cs = cs.trim().to_ascii_uppercase();
+        let id = id.to_ascii_uppercase();
+        !cs.is_empty() && (id == cs || id.split('-').next() == Some(cs.as_str()))
+    };
+    conns
+        .iter()
+        .filter(|c| {
+            removed.iter().any(|id| {
+                (c.source_system_id == system_id && matches(&c.source_sig, id))
+                    || (c.target_system_id == system_id && matches(&c.target_sig, id))
+            })
+        })
+        .map(|c| c.id)
+        .collect()
+}
+
 /// Paste a scanner result for a system: store it, return the new set plus the
-/// added/removed diff vs the previous paste (what changed in the hole).
+/// added/removed diff vs the previous paste (what changed in the hole). A
+/// paste that would drop more than half of the stored sigs is *not* stored
+/// unless `force` — it comes back with `needs_confirmation` so the UI can ask
+/// first. Removed sigs that are referenced by a connection endpoint in this
+/// system are reported so the UI can offer deleting the (probably collapsed)
+/// hole.
 #[tauri::command]
 pub fn wh_paste_signatures(
     app: AppHandle,
     system_id: i64,
     text: String,
+    force: bool,
 ) -> Result<SignatureScan, String> {
     let dir = crate::storage::app_data_dir(&app)?;
     let key = sig_key(system_id);
@@ -210,11 +254,26 @@ pub fn wh_paste_signatures(
         .map(|s| s.id.clone())
         .collect();
 
+    if !force && destructive_paste(previous.len(), removed.len()) {
+        // Nothing stored: hand back the stored set + what *would* vanish.
+        return Ok(SignatureScan {
+            signatures: previous,
+            added: Vec::new(),
+            removed,
+            needs_confirmation: true,
+            affected_connection_ids: Vec::new(),
+        });
+    }
+
     storage::save_data(&dir, &key, &incoming)?;
+    let (_dir, conns) = store::load(&app)?;
+    let affected_connection_ids = affected_connections(&conns, system_id, &removed);
     Ok(SignatureScan {
         signatures: incoming,
         added,
         removed,
+        needs_confirmation: false,
+        affected_connection_ids,
     })
 }
 
@@ -1270,6 +1329,53 @@ mod tests {
         );
         assert!(crit.passes);
         assert!(crit.crit_risk);
+    }
+
+    #[test]
+    fn destructive_paste_trips_past_half_of_stored() {
+        assert!(!destructive_paste(0, 0)); // nothing stored → never destructive
+        assert!(!destructive_paste(4, 2)); // exactly half is fine
+        assert!(destructive_paste(4, 3));
+        assert!(destructive_paste(1, 1)); // wiping the only sig asks first
+    }
+
+    #[test]
+    fn affected_connections_match_short_and_full_sig_spellings() {
+        let now = 1_000_000;
+        let conns = vec![
+            // Endpoint sig stored as the short prefix, on the source side.
+            Connection {
+                id: 7,
+                source_system_id: 31000005,
+                target_system_id: 30000142,
+                source_sig: Some("ABC".into()),
+                target_sig: None,
+                ..wh(7, 1, false, 0, now)
+            },
+            // Full scanner id, on the target side.
+            Connection {
+                id: 8,
+                source_system_id: 30000142,
+                target_system_id: 31000005,
+                target_sig: Some("qrs-456".into()),
+                source_sig: None,
+                ..wh(8, 1, false, 0, now)
+            },
+            // Same sig code but in a different system → untouched.
+            Connection {
+                id: 9,
+                source_system_id: 31000009,
+                target_system_id: 30000144,
+                source_sig: Some("ABC".into()),
+                target_sig: None,
+                ..wh(9, 1, false, 0, now)
+            },
+        ];
+        let removed = vec!["ABC-123".to_string(), "QRS-456".to_string()];
+        let mut hit = affected_connections(&conns, 31000005, &removed);
+        hit.sort_unstable();
+        assert_eq!(hit, vec![7, 8]);
+        assert!(affected_connections(&conns, 31000005, &[]).is_empty());
     }
 
     #[test]
