@@ -38,8 +38,13 @@ where
 
     // 1. Stream the gzip to a temp file so we never hold the whole archive in RAM.
     // A User-Agent is required — Fuzzwork returns 403 for requests without one.
+    // No *total* timeout here — that would abort the large archive on slow
+    // links; instead fail when connecting or when the stream stalls between
+    // chunks.
     let client = reqwest::Client::builder()
         .user_agent(crate::esi::USER_AGENT)
+        .connect_timeout(crate::esi::HTTP_CONNECT_TIMEOUT)
+        .read_timeout(crate::esi::HTTP_REQUEST_TIMEOUT)
         .build()?;
     let resp = client.get(SDE_URL).send().await?.error_for_status()?;
     let total = resp.content_length();

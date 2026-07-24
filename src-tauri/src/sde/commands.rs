@@ -71,8 +71,7 @@ async fn read_local_md5(paths: &SdePaths) -> Option<String> {
 fn metadata_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .user_agent(crate::esi::USER_AGENT)
+        crate::esi::http_client_builder()
             .build()
             .expect("failed to build SDE metadata HTTP client")
     })

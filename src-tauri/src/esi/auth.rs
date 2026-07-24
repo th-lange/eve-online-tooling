@@ -138,8 +138,7 @@ impl AuthState {
     }
 
     fn build(cache: ConditionalCache) -> Self {
-        let http = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
+        let http = super::http_client_builder()
             .build()
             .expect("failed to build HTTP client");
         Self {
