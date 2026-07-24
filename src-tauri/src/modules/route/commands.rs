@@ -182,18 +182,10 @@ pub async fn route_system_neighbourhood(
     let depth = depth.clamp(1, MAX_DEPTH);
 
     // BFS over the full stargate graph, capped at `depth`; the edges output
-    // is every gate link sourced from a system within that radius (mirrors
-    // the level-by-level frontier this used to walk one DB query at a time).
+    // is every gate link between two systems inside that radius.
     let adj = sde.stargate_adjacency().map_err(|e| e.to_string())?;
     let (distance, _) = graph::bfs(&adj, system_id, Some(depth));
-    let mut edges: HashSet<(i64, i64)> = HashSet::new();
-    for (&s, &d) in &distance {
-        if d < depth {
-            for &n in adj.get(&s).into_iter().flatten() {
-                edges.insert(if s <= n { (s, n) } else { (n, s) });
-            }
-        }
-    }
+    let edges = neighbourhood_edges(&adj, &distance);
 
     // Heat + names for every system in the neighbourhood.
     let activity = activity_map(&dir, &esi, false).await.unwrap_or_default();
@@ -226,8 +218,28 @@ pub async fn route_system_neighbourhood(
     Ok(Neighbourhood {
         center: system_id,
         nodes,
-        edges: edges.into_iter().map(|(a, b)| [a, b]).collect(),
+        edges,
     })
+}
+
+/// Every stargate edge whose *both* endpoints are in the neighbourhood, as
+/// unordered deduped pairs. Membership is checked per endpoint (not per BFS
+/// depth), so a link between two systems both sitting exactly on the depth
+/// frontier is included — both nodes are in the view, and hiding their edge
+/// would draw a false gap. Pure (testable).
+fn neighbourhood_edges(
+    adj: &HashMap<i64, Vec<i64>>,
+    nodes: &HashMap<i64, i64>,
+) -> Vec<[i64; 2]> {
+    let mut edges: HashSet<(i64, i64)> = HashSet::new();
+    for &s in nodes.keys() {
+        for &n in adj.get(&s).into_iter().flatten() {
+            if nodes.contains_key(&n) {
+                edges.insert(if s <= n { (s, n) } else { (n, s) });
+            }
+        }
+    }
+    edges.into_iter().map(|(a, b)| [a, b]).collect()
 }
 
 // --- Travel breadcrumb (#99) ---
@@ -594,6 +606,22 @@ mod tests {
         assert_eq!(nearest_of(&adj, 4, &targets), Some((4, 0)));
         // No target reachable.
         assert_eq!(nearest_of(&adj, 1, &HashSet::from([99])), None);
+    }
+
+    #[test]
+    fn neighbourhood_edges_include_frontier_to_frontier_links() {
+        // Triangle 1-2, 2-3, 3-1: centre 1 at depth 1 puts 2 and 3 both on
+        // the frontier; their direct link must still be in the edge set.
+        let adj = graph::undirected_adjacency(&[(1, 2), (2, 3), (3, 1)]);
+        let (distance, _) = graph::bfs(&adj, 1, Some(1));
+        let mut edges = neighbourhood_edges(&adj, &distance);
+        edges.sort();
+        assert_eq!(edges, vec![[1, 2], [1, 3], [2, 3]]);
+
+        // A neighbour outside the radius never contributes an edge.
+        let adj2 = graph::undirected_adjacency(&[(1, 2), (2, 3)]);
+        let (d2, _) = graph::bfs(&adj2, 1, Some(1));
+        assert_eq!(neighbourhood_edges(&adj2, &d2), vec![[1, 2]]);
     }
 
     #[test]
