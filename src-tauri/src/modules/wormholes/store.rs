@@ -51,8 +51,10 @@ impl MassStatus {
     }
 }
 
-/// Largest ship class that can jump a hole.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Largest ship class that can jump a hole. Variant order is ascending
+/// capacity, so `Ord` compares classes (S < M < L < Xl) — the mass-aware
+/// router relies on that to drop holes below a hull's required class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum JumpMass {
     S,
