@@ -12,8 +12,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::esi::USER_AGENT;
-
 /// The public hosted instance (overridable for self-hosters).
 pub const DEFAULT_BASE_URL: &str = "https://tripwire.eve-apps.com";
 /// Storage keys for the (non-secret) config and the keychain password.
@@ -106,8 +104,7 @@ pub async fn fetch(
     password: &str,
     mask: &str,
 ) -> Result<(Vec<RawSignature>, Vec<RawWormhole>), String> {
-    let http = reqwest::Client::builder()
-        .user_agent(USER_AGENT)
+    let http = crate::esi::http_client_builder()
         .build()
         .map_err(|e| e.to_string())?;
     let base = config.base_url.trim_end_matches('/');
@@ -120,8 +117,11 @@ pub async fn fetch(
             .send()
     };
 
-    let whs: Vec<RawWormhole> = parse_body(get("/wormholes").await).await?;
-    let sigs: Vec<RawSignature> = parse_body(get("/signatures").await).await?;
+    // The two queries are independent — issue them concurrently.
+    let (whs_resp, sigs_resp) =
+        futures_util::future::join(get("/wormholes"), get("/signatures")).await;
+    let whs: Vec<RawWormhole> = parse_body(whs_resp).await?;
+    let sigs: Vec<RawSignature> = parse_body(sigs_resp).await?;
     Ok((sigs, whs))
 }
 

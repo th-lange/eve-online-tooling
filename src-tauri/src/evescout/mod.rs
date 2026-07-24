@@ -15,7 +15,6 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::esi::USER_AGENT;
 use crate::storage;
 
 const SIGNATURES_URL: &str = "https://api.eve-scout.com/v2/public/signatures";
@@ -89,8 +88,7 @@ pub async fn fetch_signatures(dir: &Path) -> Result<Vec<TheraSignature>, String>
         return Ok(cached);
     }
 
-    let http = reqwest::Client::builder()
-        .user_agent(USER_AGENT)
+    let http = crate::esi::http_client_builder()
         .build()
         .map_err(|e| e.to_string())?;
     let sigs: Vec<TheraSignature> = http

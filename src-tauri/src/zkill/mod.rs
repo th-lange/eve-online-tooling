@@ -18,7 +18,7 @@ use std::path::Path;
 use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 
-use crate::esi::{fetch_json_url, USER_AGENT};
+use crate::esi::fetch_json_url;
 use crate::storage;
 
 /// zKillboard etiquette: a descriptive UA (we have one) and low concurrency.
@@ -47,10 +47,10 @@ fn stats_cache_key(character_id: i64) -> String {
     format!("zkill_stats_{character_id}")
 }
 
-/// A zKill-etiquette HTTP client carrying our contact User-Agent.
+/// A zKill-etiquette HTTP client carrying our contact User-Agent (and the
+/// shared connect/request timeouts, so a hung host can't stall a command).
 fn client() -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .user_agent(USER_AGENT)
+    crate::esi::http_client_builder()
         .build()
         .map_err(|e| e.to_string())
 }
