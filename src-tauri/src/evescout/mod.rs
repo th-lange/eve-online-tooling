@@ -78,21 +78,60 @@ pub fn jump_mass_from_ship_size(size: Option<&str>) -> String {
     .to_string()
 }
 
+/// How long past its TTL the cached feed may still serve as a fallback when
+/// the live fetch fails. An hour bridges outages without resurrecting
+/// long-dead holes (the shortest-lived public connections last hours).
+const STALE_FALLBACK_SECS: u64 = 3600;
+
+/// The signature feed plus how fresh it is.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SignatureFeed {
+    pub signatures: Vec<TheraSignature>,
+    /// True when the live fetch failed and an expired cache was served —
+    /// surface this to the user wherever the data is shown.
+    pub stale: bool,
+}
+
 /// Fetch the live Thera/Turnur signature feed, served from a ~3 min TTL cache.
-/// Network errors surface as a `String` (the callers are Tauri commands).
+/// When the live fetch fails but a recently-expired snapshot exists on disk,
+/// the snapshot is served with `stale: true` instead of erroring — a feed blip
+/// shouldn't take the whole feature down. Network errors surface as a `String`
+/// (the callers are Tauri commands).
 ///
 /// Note: in a sandboxed/proxied environment the EVE-Scout host may be blocked
 /// (returns 403); on a normal desktop this is an ordinary outbound HTTPS call.
-pub async fn fetch_signatures(dir: &Path) -> Result<Vec<TheraSignature>, String> {
+pub async fn fetch_signatures(dir: &Path) -> Result<SignatureFeed, String> {
     if let Some(cached) = storage::cache_get::<Vec<TheraSignature>>(dir, CACHE_KEY) {
-        return Ok(cached);
+        return Ok(SignatureFeed {
+            signatures: cached,
+            stale: false,
+        });
     }
 
+    match fetch_live().await {
+        Ok(sigs) => {
+            let _ = storage::cache_put(dir, CACHE_KEY, &sigs, TTL_SECS);
+            Ok(SignatureFeed {
+                signatures: sigs,
+                stale: false,
+            })
+        }
+        Err(e) => {
+            storage::cache_get_stale::<Vec<TheraSignature>>(dir, CACHE_KEY, STALE_FALLBACK_SECS)
+                .map(|signatures| SignatureFeed {
+                    signatures,
+                    stale: true,
+                })
+                .ok_or(e)
+        }
+    }
+}
+
+async fn fetch_live() -> Result<Vec<TheraSignature>, String> {
     let http = crate::esi::http_client_builder()
         .build()
         .map_err(|e| e.to_string())?;
-    let sigs: Vec<TheraSignature> = http
-        .get(SIGNATURES_URL)
+    http.get(SIGNATURES_URL)
         .send()
         .await
         .map_err(|e| e.to_string())?
@@ -100,10 +139,7 @@ pub async fn fetch_signatures(dir: &Path) -> Result<Vec<TheraSignature>, String>
         .map_err(|e| e.to_string())?
         .json()
         .await
-        .map_err(|e| e.to_string())?;
-
-    let _ = storage::cache_put(dir, CACHE_KEY, &sigs, TTL_SECS);
-    Ok(sigs)
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

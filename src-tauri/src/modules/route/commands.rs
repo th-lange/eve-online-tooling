@@ -522,9 +522,9 @@ pub async fn route_nearest_wormhole(app: AppHandle) -> Result<NearestWormhole, A
     }
 
     // k-space: nearest public Thera/Turnur entrance over stargates.
-    let sigs = crate::evescout::fetch_signatures(&dir).await?;
+    let feed = crate::evescout::fetch_signatures(&dir).await?;
     let mut cand: HashMap<i64, crate::evescout::TheraSignature> = HashMap::new();
-    for s in sigs.into_iter().filter(|s| s.is_wormhole()) {
+    for s in feed.signatures.into_iter().filter(|s| s.is_wormhole()) {
         // The k-space end (`in_system`) is where a traveller finds the hole.
         if s.in_system_id != 0 && s.in_system_id < WSPACE_MIN_SYSTEM_ID {
             cand.entry(s.in_system_id).or_insert(s);
@@ -546,7 +546,12 @@ pub async fn route_nearest_wormhole(app: AppHandle) -> Result<NearestWormhole, A
             let s = &cand[&entrance];
             NearestWormhole {
                 found: true,
-                message: None,
+                // A stale feed still answers, but the user must know the hole
+                // may already be gone.
+                message: feed.stale.then(|| {
+                    "EVE-Scout is unreachable — showing its last cached data (may be stale)."
+                        .to_string()
+                }),
                 in_wspace: false,
                 current_system_id: current.system_id,
                 current_name: current.name.clone(),
