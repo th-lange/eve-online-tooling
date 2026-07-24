@@ -31,10 +31,16 @@ fn default_scope() -> Scope {
 }
 
 /// Current connections (auto-pruned of dead wormholes), with system names.
+/// A pure read: the pruned set is only written back when pruning actually
+/// removed something, so browsing the page doesn't rewrite the store file.
 #[tauri::command]
 pub fn wh_connections(app: AppHandle) -> Result<Vec<ConnectionView>, String> {
-    let (dir, conns) = store::load(&app)?;
-    store::save_and_view(&dir, &conns)
+    let (dir, conns, changed) = store::load_with_change(&app)?;
+    if changed {
+        store::save_and_view(&dir, &conns)
+    } else {
+        store::views(&dir, &conns)
+    }
 }
 
 /// Validate a manual connection against the stored set: no self-loops, and no
@@ -292,13 +298,15 @@ pub fn wh_route(
     destination_system_id: i64,
     avoid_eol: bool,
 ) -> Result<RouteResult, String> {
-    let (_dir, conns) = store::load(&app)?;
-    let sde = crate::sde::open_from_app(&app)?;
+    let (dir, conns) = store::load(&app)?;
 
     // Build the unioned adjacency: stargates ∪ wormhole/jumpbridge connections.
-    let mut adj: HashMap<i64, Vec<(i64, Via)>> = HashMap::new();
-    for (a, b) in sde.all_stargate_edges().map_err(|e| e.to_string())? {
-        adj.entry(a).or_default().push((b, "stargate"));
+    let stargates = crate::sde::cached_adjacency(&dir)?;
+    let mut adj: HashMap<i64, Vec<(i64, Via)>> = HashMap::with_capacity(stargates.len());
+    for (&a, neighbours) in stargates.iter() {
+        adj.entry(a)
+            .or_default()
+            .extend(neighbours.iter().map(|&b| (b, "stargate" as Via)));
     }
     for c in &conns {
         if avoid_eol && c.eol {
@@ -317,7 +325,7 @@ pub fn wh_route(
     }
 
     let path = shortest_path(&adj, origin_system_id, destination_system_id);
-    let info = sde.solar_system_info().map_err(|e| e.to_string())?;
+    let info = crate::sde::cached_system_info(&dir)?;
     match path {
         Some(p) => {
             let hops: Vec<RouteHop> = p

@@ -11,7 +11,6 @@
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-use crate::sde::open_from_dir;
 use crate::storage;
 
 const STORE_KEY: &str = "wh_connections";
@@ -158,14 +157,25 @@ fn prune(mut conns: Vec<Connection>, now: u64) -> Vec<Connection> {
 /// Load the stored connections (auto-pruned of dead wormholes), alongside the
 /// app data dir the caller will need to save back into.
 pub(crate) fn load(app: &AppHandle) -> Result<(std::path::PathBuf, Vec<Connection>), String> {
-    let dir = crate::storage::app_data_dir(app)?;
-    let conns: Vec<Connection> = storage::load_data(&dir, STORE_KEY).unwrap_or_default();
-    Ok((dir, prune(conns, crate::util::time::now_secs())))
+    let (dir, conns, _changed) = load_with_change(app)?;
+    Ok((dir, conns))
 }
 
-fn views(dir: &std::path::Path, conns: &[Connection]) -> Result<Vec<ConnectionView>, String> {
-    let sde = open_from_dir(dir)?;
-    let info = sde.solar_system_info().map_err(|e| e.to_string())?;
+/// Like [`load`], but also reports whether pruning actually removed rows —
+/// read-only callers use this to skip the write-back when nothing changed.
+pub(crate) fn load_with_change(
+    app: &AppHandle,
+) -> Result<(std::path::PathBuf, Vec<Connection>, bool), String> {
+    let dir = crate::storage::app_data_dir(app)?;
+    let raw: Vec<Connection> = storage::load_data(&dir, STORE_KEY).unwrap_or_default();
+    let before = raw.len();
+    let conns = prune(raw, crate::util::time::now_secs());
+    let changed = conns.len() != before;
+    Ok((dir, conns, changed))
+}
+
+pub(crate) fn views(dir: &std::path::Path, conns: &[Connection]) -> Result<Vec<ConnectionView>, String> {
+    let info = crate::sde::cached_system_info(dir)?;
     let name = |id: i64| {
         info.get(&id)
             .map(|(n, _, _)| n.clone())

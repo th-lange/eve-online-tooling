@@ -13,7 +13,7 @@ use serde::de::DeserializeOwned;
 
 use super::cache::{cache_key, ConditionalCache};
 use super::error::EsiError;
-use super::{ESI_BASE, USER_AGENT};
+use super::ESI_BASE;
 
 #[derive(Clone)]
 pub struct EsiClient {

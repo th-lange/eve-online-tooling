@@ -16,7 +16,6 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use super::cache::ConditionalCache;
-use super::USER_AGENT;
 use crate::model::{AppError, Character};
 
 /// Public Client ID of the registered EVE developer application (PKCE — not a
