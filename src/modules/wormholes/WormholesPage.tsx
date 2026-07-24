@@ -214,6 +214,7 @@ function Workbench() {
         connections={rows}
         system={sigSystem}
         setSystem={setSigSystem}
+        onDeleteConnection={(id) => del.mutate(id)}
       />
 
       <div className="mt-4 overflow-auto rounded border border-zinc-800">

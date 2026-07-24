@@ -193,14 +193,28 @@ export interface SignatureScan {
   signatures: Signature[];
   added: string[];
   removed: string[];
+  /** True when the paste was NOT stored: it would drop more than half of the
+   *  stored sigs (likely a partial scanner copy) — re-run with force. */
+  needsConfirmation: boolean;
+  /** Connections whose endpoint sig in this system matches a removed sig. */
+  affectedConnectionIds: number[];
 }
 
-/** Paste a probe-scanner result for a system; returns the set + added/removed diff. */
+/**
+ * Paste a probe-scanner result for a system; returns the set + added/removed
+ * diff. A paste dropping more than half the stored sigs is held back with
+ * `needsConfirmation` until re-sent with `force`.
+ */
 export function whPasteSignatures(
   systemId: number,
   text: string,
+  force = false,
 ): Promise<SignatureScan> {
-  return invoke<SignatureScan>("wh_paste_signatures", { systemId, text });
+  return invoke<SignatureScan>("wh_paste_signatures", {
+    systemId,
+    text,
+    force,
+  });
 }
 
 /** Stored signatures for a system (from previous pastes). */
