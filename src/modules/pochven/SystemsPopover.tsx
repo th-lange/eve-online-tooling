@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
@@ -7,7 +7,7 @@ import {
   type SystemGraphEdge,
   type SystemGraphNode,
 } from "../../components/SystemGraph";
-import { pochvenMap } from "../../lib/api";
+import { pochvenMap, type ExitTarget } from "../../lib/api";
 import {
   POCHVEN_INTERNAL_LINKS,
   POCHVEN_META,
@@ -18,6 +18,48 @@ import {
 import { SEC_HEX, secBand } from "../../lib/security";
 import { CLADE_HEX, CLADE_KRAI, ROLE_HEX, systemVisual } from "./visual";
 import { homeTriangleLayout } from "./graph";
+
+/** Proximity 'Extraction' filament exit targets for one system — shared by
+ *  the table's expanded row and the map's click popover. */
+function ExitBadges({
+  exits,
+  isLoading,
+}: {
+  exits: ExitTarget[] | undefined;
+  isLoading: boolean;
+}) {
+  if (exits == null) {
+    return (
+      <div className="mt-1 text-zinc-600">
+        {isLoading ? "Loading…" : "No data."}
+      </div>
+    );
+  }
+  if (exits.length === 0) {
+    return (
+      <div className="mt-1 text-zinc-500">
+        No k-space within 2.5 ly — use a Glorification &apos;Devana&apos;
+        filament or a wormhole instead.
+      </div>
+    );
+  }
+  return (
+    <div className="mt-1 flex flex-wrap gap-1">
+      {exits.map((e) => (
+        <span
+          key={e.name}
+          className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs"
+          title={`${e.region} · ${e.lightYears.toFixed(2)} ly`}
+        >
+          <span style={{ color: SEC_HEX[secBand(e.security)] }}>
+            {e.name}
+          </span>
+          <span className="text-zinc-500"> {e.lightYears.toFixed(1)} ly</span>
+        </span>
+      ))}
+    </div>
+  );
+}
 
 // Centred popover: the 27 Pochven systems + their internal connections, coloured
 // by the security you can enter each from (full colour = enterable from k-space,
@@ -56,6 +98,42 @@ export function PochvenSystemsPopover() {
         (topo.data?.systems ?? []).map((s) => [s.name, s.exits] as const),
       ),
     [topo.data],
+  );
+  // id -> name, since real-map nodes are keyed by systemId while the
+  // schematic-fallback nodes are keyed by name directly.
+  const nameById = useMemo(
+    () =>
+      new Map(
+        (topo.data?.systems ?? []).map((s) => [String(s.systemId), s.name]),
+      ),
+    [topo.data],
+  );
+  // Click-to-toggle map popover (#726): the same "which k-space systems can a
+  // Proximity 'Extraction' filament land me in from here" the table's expanded
+  // row already shows, surfaced directly on the map so you don't have to
+  // scroll down and find the row.
+  const nodeTooltip = useCallback(
+    (id: string) => {
+      const name = nameById.get(id) ?? id;
+      const meta = POCHVEN_META[name];
+      if (!meta) return undefined;
+      return (
+        <div className="w-64 rounded-lg border border-zinc-700 bg-zinc-900 p-2.5 text-xs shadow-xl">
+          <div className="font-medium text-zinc-100">{name}</div>
+          <div className="text-[11px] text-zinc-500">
+            {meta.clade} · {meta.role}
+          </div>
+          <div className="mt-2 text-[10px] uppercase tracking-wide text-zinc-500">
+            Proximity &apos;Extraction&apos; filament — k-space within 2.5 ly
+          </div>
+          <ExitBadges
+            exits={exitsByName.get(name)}
+            isLoading={topo.isLoading}
+          />
+        </div>
+      );
+    },
+    [nameById, exitsByName, topo.isLoading],
   );
 
   // Table rows: the 27 system names (from the static clade/role map) enriched
@@ -178,7 +256,8 @@ export function PochvenSystemsPopover() {
                       </span>
                     ))}
                     <span className="text-zinc-600">
-                      sub-label = k-space entries per band
+                      sub-label = k-space entries per band · click a system
+                      for its Proximity Extraction exits
                     </span>
                   </div>
                 </div>
@@ -197,6 +276,7 @@ export function PochvenSystemsPopover() {
                   height={480}
                   storageKey="pochven-systems-ref"
                   defaultMode="star"
+                  nodeTooltip={nodeTooltip}
                 />
                 <table className="mt-3 w-full border-collapse text-sm">
                   <thead className="bg-zinc-900 text-zinc-400">
@@ -313,49 +393,10 @@ export function PochvenSystemsPopover() {
                                   Outbound — Proximity 'Extraction' filament
                                   (k-space within 2.5 ly)
                                 </div>
-                                {(() => {
-                                  const exits = exitsByName.get(s.name);
-                                  if (exits == null)
-                                    return (
-                                      <div className="mt-1 text-xs text-zinc-600">
-                                        {topo.isLoading
-                                          ? "Loading…"
-                                          : "No data."}
-                                      </div>
-                                    );
-                                  if (exits.length === 0)
-                                    return (
-                                      <div className="mt-1 text-xs text-zinc-500">
-                                        No k-space within 2.5 ly — use a
-                                        Glorification 'Devana' filament or a
-                                        wormhole instead.
-                                      </div>
-                                    );
-                                  return (
-                                    <div className="mt-1 flex flex-wrap gap-1">
-                                      {exits.map((e) => (
-                                        <span
-                                          key={e.name}
-                                          className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs"
-                                          title={`${e.region} · ${e.lightYears.toFixed(2)} ly`}
-                                        >
-                                          <span
-                                            style={{
-                                              color:
-                                                SEC_HEX[secBand(e.security)],
-                                            }}
-                                          >
-                                            {e.name}
-                                          </span>
-                                          <span className="text-zinc-500">
-                                            {" "}
-                                            {e.lightYears.toFixed(1)} ly
-                                          </span>
-                                        </span>
-                                      ))}
-                                    </div>
-                                  );
-                                })()}
+                                <ExitBadges
+                                  exits={exitsByName.get(s.name)}
+                                  isLoading={topo.isLoading}
+                                />
                                 <div className="mt-1 text-[11px] text-zinc-600">
                                   Proximity 'Extraction' filaments drop you into
                                   k-space within 2.5 ly of here. A Glorification

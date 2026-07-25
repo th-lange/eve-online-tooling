@@ -4,6 +4,7 @@ import {
   useMemo,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import { Crosshair, Maximize2, Minimize2, Skull, Swords } from "lucide-react";
@@ -15,6 +16,7 @@ import {
   Panel,
   Handle,
   Position,
+  NodeToolbar,
   useNodesState,
   useInternalNode,
   getBezierPath,
@@ -197,6 +199,9 @@ type SystemNodeData = {
   ring?: string;
   bg?: string;
   fill?: string;
+  /** Optional click-to-toggle popover content (shown via NodeToolbar when
+   *  the node is selected — i.e. clicked). */
+  tooltip?: ReactNode;
 };
 
 /** Heat colour for a kill count: dim when quiet, amber when warm, rose when hot. */
@@ -228,6 +233,16 @@ function SystemNode({ data, selected }: NodeProps<Node<SystemNodeData>>) {
   // whether or not the tile is filled.
   if (data.ring) style.boxShadow = `0 0 0 3px ${data.ring}`;
   return (
+    <>
+      {data.tooltip != null && (
+        <NodeToolbar
+          isVisible={selected}
+          position={Position.Top}
+          className="nodrag nopan"
+        >
+          {data.tooltip}
+        </NodeToolbar>
+      )}
     <div
       className={`rounded border px-3 py-1.5 text-xs shadow ${
         filled
@@ -305,6 +320,7 @@ function SystemNode({ data, selected }: NodeProps<Node<SystemNodeData>>) {
         className="!bg-transparent !border-0"
       />
     </div>
+    </>
   );
 }
 
@@ -431,6 +447,7 @@ export function SystemGraph({
   height = 360,
   storageKey,
   defaultMode,
+  nodeTooltip,
 }: {
   nodes: SystemGraphNode[];
   edges: SystemGraphEdge[];
@@ -443,6 +460,10 @@ export function SystemGraph({
   storageKey?: string;
   /** Initial layout when nothing is saved (else star-if-coords, otherwise tree). */
   defaultMode?: LayoutMode;
+  /** Optional per-node popover content, shown via a click-to-toggle
+   *  `NodeToolbar` (uses React Flow's own click-selection state, so it opens
+   *  on a click and closes when you click elsewhere or the node again). */
+  nodeTooltip?: (id: string) => ReactNode | undefined;
 }) {
   const layout = useMemo(
     () => computeLayout(inputNodes, edges, rootId),
@@ -467,9 +488,10 @@ export function SystemGraph({
         ring: n.ring,
         bg: n.bg,
         fill: n.fill,
+        tooltip: nodeTooltip?.(n.id),
       },
     }),
-    [],
+    [nodeTooltip],
   );
 
   // Available layouts: `star` only when the nodes carry real coordinates.
