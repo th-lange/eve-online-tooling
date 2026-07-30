@@ -299,6 +299,11 @@ function ModuleHost({
     setVisited((prev) =>
       prev.has(activeId) ? prev : new Set(prev).add(activeId),
     );
+    try {
+      localStorage.setItem(STORAGE_KEYS.lastVisited, activeId);
+    } catch {
+      // Storage unavailable; non-fatal.
+    }
   }, [activeId]);
 
   // Page chrome (title + hide callback) flows to pages via context; the shared

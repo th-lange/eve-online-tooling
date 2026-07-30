@@ -17,6 +17,8 @@ export const STORAGE_KEYS = {
   sidebarColors: "sidebar.colors",
   sidebarCollapsed: "sidebar.collapsed",
   sidebarHidden: "sidebar.hidden",
+  // Last-visited module — restored on next launch
+  lastVisited: "layout.lastVisited",
   // EVE log folders
   eveChatlogsDir: "eveLogsDir", // legacy value; points at the Chatlogs folder
   eveGamelogsDir: "eveGamelogsDir",
@@ -24,6 +26,8 @@ export const STORAGE_KEYS = {
   shoppingChatTarget: "shopping.chatTarget",
   // DPS meter
   dpsWindowSecs: "dps.windowSecs",
+  dpsChartLayout: "dps.chartLayout",
+  dpsChartBySource: "dps.chartBySource",
   // Local Intel
   localintelSound: "localintel.sound",
   localintelAlertNeutrals: "localintel.alertNeutrals",
