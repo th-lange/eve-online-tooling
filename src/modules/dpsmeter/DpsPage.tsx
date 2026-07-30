@@ -1,6 +1,6 @@
 import { memo, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Page, PageHeader } from "../../components/page";
-import { Play, Square } from "lucide-react";
+import { Columns2, Play, Rows2, Square } from "lucide-react";
 import { ModuleActiveContext } from "../../components/moduleActiveContext";
 import {
   dpsListLogs,
@@ -18,8 +18,12 @@ import {
 import { formatInt } from "../../lib/format";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { useEveLogDir } from "../../lib/useEveLogDir";
+import { usePersistentState } from "../../lib/usePersistentState";
 
 type Mode = "live" | "playback";
+
+/** How the two charts are arranged: side by side or stacked vertically. */
+type ChartLayout = "side" | "stacked";
 
 // How many ticks to keep on screen (~2 min at the 500 ms backend cadence).
 const BUFFER = 240;
@@ -61,6 +65,55 @@ const SERIES = [
   primary: boolean;
 }[];
 
+/** A chart line: identity + colour + a per-tick value accessor. The accessor
+ *  lets the same chart draw aggregate series (tick fields) and per-source
+ *  series (rows inside `byPilot`) without special-casing either. */
+type ChartSeries = {
+  id: string;
+  color: string;
+  primary: boolean;
+  get: (t: DpsTick) => number;
+};
+
+/** Series drawn on the outgoing (dealt) chart. */
+const SERIES_OUT: ChartSeries[] = SERIES.filter((s) =>
+  (
+    ["dpsOut", "logiOut", "capWarfareOut", "capTransferOut"] as string[]
+  ).includes(s.key),
+).map((s) => ({
+  id: s.key,
+  color: s.color,
+  primary: s.primary,
+  get: (t) => t[s.key],
+}));
+/** Series drawn on the incoming (taken) chart. */
+const SERIES_IN: ChartSeries[] = SERIES.filter((s) =>
+  (["dpsIn", "logiIn", "capWarfareIn", "capTransferIn"] as string[]).includes(
+    s.key,
+  ),
+).map((s) => ({
+  id: s.key,
+  color: s.color,
+  primary: s.primary,
+  get: (t) => t[s.key],
+}));
+
+// Palette for per-source (by-pilot) lines — distinct hues, assigned to each
+// source on first sighting and kept for the session so a source never changes
+// colour mid-fight. Wraps past 10 concurrent sources.
+const SOURCE_COLORS = [
+  "#60a5fa", // blue
+  "#f472b6", // pink
+  "#4ade80", // green
+  "#facc15", // yellow
+  "#22d3ee", // cyan
+  "#fb923c", // orange
+  "#a78bfa", // violet
+  "#f87171", // red
+  "#2dd4bf", // teal
+  "#e879f9", // fuchsia
+];
+
 /** Append a tick to the rolling buffer, dropping the oldest past `BUFFER`. */
 function appendTick(prev: DpsTick[], t: DpsTick): DpsTick[] {
   const next = prev.length >= BUFFER ? prev.slice(1) : prev.slice();
@@ -80,6 +133,17 @@ export function DpsPage() {
   const [logs, setLogs] = useState<DpsLogFile[]>([]);
   const [file, setFile] = useState("");
   const [speed, setSpeed] = useState(4);
+  const [selectedPilot, setSelectedPilot] = useState<string | null>(null);
+  // Chart arrangement + breakdown mode — persisted so the meter opens how you
+  // left it.
+  const [chartLayout, setChartLayout] = usePersistentState<ChartLayout>(
+    STORAGE_KEYS.dpsChartLayout,
+    "side",
+  );
+  const [bySource, setBySource] = usePersistentState<boolean>(
+    STORAGE_KEYS.dpsChartBySource,
+    false,
+  );
 
   // The page stays mounted while backgrounded (ModuleHost), so without this it
   // would keep re-rendering ~2×/s off the tick feed while invisible. Track the
@@ -130,6 +194,7 @@ export function DpsPage() {
     persistDir();
     localStorage.setItem(STORAGE_KEYS.dpsWindowSecs, String(windowSecs));
     peaksRef.current = { out: 0, in: 0 };
+    setSelectedPilot(null);
     try {
       await dpsStart({ gamelogsDir: dir, windowSecs });
       setRunning(true);
@@ -159,6 +224,7 @@ export function DpsPage() {
     setError(null);
     setTicks([]);
     peaksRef.current = { out: 0, in: 0 };
+    setSelectedPilot(null);
     try {
       await dpsPlayback({ file, speed, windowSecs });
       setRunning(true);
@@ -173,6 +239,64 @@ export function DpsPage() {
   }
 
   const latest = ticks[ticks.length - 1];
+
+  // Collect every pilot name seen across the whole buffer so buttons stay
+  // visible even after a pilot ages out of the rolling window.
+  const knownPilots = useMemo(
+    () =>
+      [...new Set(ticks.flatMap((t) => t.byPilot.map((p) => p.name)))].sort(),
+    [ticks],
+  );
+
+  // Stable per-source colours: assigned from SOURCE_COLORS the first time a
+  // name is seen and kept for the session (a Map, not per-buffer, so a source
+  // that ages out of the rolling window and returns keeps its colour).
+  const sourceColorsRef = useRef(new Map<string, string>());
+  const sourceColors = sourceColorsRef.current;
+  for (const name of knownPilots) {
+    if (!sourceColors.has(name)) {
+      sourceColors.set(
+        name,
+        SOURCE_COLORS[sourceColors.size % SOURCE_COLORS.length],
+      );
+    }
+  }
+
+  // Per-source chart series (by-source mode): one line per counterparty —
+  // damage dealt to them on the Outgoing chart, taken from them on Incoming.
+  // A selected pilot narrows the breakdown to just that engagement.
+  const { outSeries, inSeries } = useMemo(() => {
+    if (!bySource) return { outSeries: SERIES_OUT, inSeries: SERIES_IN };
+    const names = selectedPilot
+      ? knownPilots.filter((n) => n === selectedPilot)
+      : knownPilots;
+    const mk = (field: "dpsOut" | "dpsIn"): ChartSeries[] =>
+      names.map((name) => ({
+        id: name,
+        color: sourceColorsRef.current.get(name) ?? SOURCE_COLORS[0],
+        primary: true,
+        get: (t) => t.byPilot.find((p) => p.name === name)?.[field] ?? 0,
+      }));
+    return { outSeries: mk("dpsOut"), inSeries: mk("dpsIn") };
+  }, [bySource, knownPilots, selectedPilot]);
+
+  // When a pilot is selected, replace the aggregate dpsOut/dpsIn on each tick
+  // with that pilot's per-engagement values so the charts reflect the filter.
+  // All other series (logi, cap, mining) are not per-pilot and stay unchanged.
+  const filteredTicks = useMemo(() => {
+    if (!selectedPilot) return ticks;
+    return ticks.map((t) => {
+      const p = t.byPilot.find((r) => r.name === selectedPilot);
+      return { ...t, dpsOut: p?.dpsOut ?? 0, dpsIn: p?.dpsIn ?? 0 };
+    });
+  }, [ticks, selectedPilot]);
+
+  const filteredLatest = filteredTicks[filteredTicks.length - 1];
+
+  // byPilot rows scoped to the selection (all rows when unfiltered).
+  const pilotRows = selectedPilot
+    ? (latest?.byPilot.filter((p) => p.name === selectedPilot) ?? [])
+    : (latest?.byPilot ?? []);
 
   return (
     <Page>
@@ -309,7 +433,9 @@ export function DpsPage() {
               }`}
               style={{ color: s.color }}
             >
-              {latest ? formatInt(Math.round(latest[s.key])) : "—"}
+              {filteredLatest
+                ? formatInt(Math.round(filteredLatest[s.key]))
+                : "—"}
             </div>
             {s.key === "dpsOut" && (
               <PrimaryExtras
@@ -338,16 +464,106 @@ export function DpsPage() {
         </div>
       )}
 
-      {/* Graph */}
-      <div className="mt-6">
-        <DpsChart ticks={ticks} />
+      {/* Pilot filter — buttons appear once any combat is seen; click to
+          scope the charts + primary readouts to that engagement */}
+      {knownPilots.length > 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-zinc-500">Filter:</span>
+          <button
+            onClick={() => setSelectedPilot(null)}
+            className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
+              selectedPilot === null
+                ? "bg-zinc-600 text-zinc-100"
+                : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+            }`}
+          >
+            All
+          </button>
+          {knownPilots.map((name) => (
+            <button
+              key={name}
+              onClick={() =>
+                setSelectedPilot(selectedPilot === name ? null : name)
+              }
+              className={`flex items-center gap-1.5 rounded px-2 py-0.5 text-xs font-medium transition-colors ${
+                selectedPilot === name
+                  ? "bg-indigo-600 text-white"
+                  : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+              }`}
+            >
+              <span
+                aria-hidden
+                className="inline-block h-2 w-2 rounded-full"
+                style={{ background: sourceColors.get(name) }}
+              />
+              {name}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Graphs — outgoing and incoming; layout + breakdown toggles */}
+      <div className="mt-6 flex items-center justify-end gap-2">
+        <div className="flex overflow-hidden rounded border border-zinc-800 text-xs">
+          {(
+            [
+              { value: false, label: "Totals" },
+              { value: true, label: "By source" },
+            ] as const
+          ).map(({ value, label }) => (
+            <button
+              key={label}
+              onClick={() => setBySource(value)}
+              aria-pressed={bySource === value}
+              className={`px-2 py-1 ${
+                bySource === value
+                  ? "bg-zinc-700 text-zinc-100"
+                  : "bg-zinc-900 text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="flex overflow-hidden rounded border border-zinc-800">
+          {(
+            [
+              { value: "side", label: "Side by side", Icon: Columns2 },
+              { value: "stacked", label: "Stacked", Icon: Rows2 },
+            ] as const
+          ).map(({ value, label, Icon }) => (
+            <button
+              key={value}
+              onClick={() => setChartLayout(value)}
+              title={label}
+              aria-label={label}
+              aria-pressed={chartLayout === value}
+              className={`p-1.5 ${
+                chartLayout === value
+                  ? "bg-zinc-700 text-zinc-100"
+                  : "bg-zinc-900 text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              <Icon size={14} />
+            </button>
+          ))}
+        </div>
+      </div>
+      <div
+        className={`mt-2 grid gap-4 ${
+          chartLayout === "side" ? "md:grid-cols-2" : "grid-cols-1"
+        }`}
+      >
+        <DpsChart ticks={filteredTicks} series={outSeries} title="Outgoing" />
+        <DpsChart ticks={filteredTicks} series={inSeries} title="Incoming" />
       </div>
 
-      {/* Breakdowns */}
+      {/* Breakdowns: weapons you used · targets you shot · attackers on you */}
       {latest && (latest.byWeapon.length > 0 || latest.byPilot.length > 0) && (
-        <div className="mt-6 grid gap-4 md:grid-cols-2">
+        <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           <WeaponTable rows={latest.byWeapon} />
-          <PilotTable rows={latest.byPilot} />
+          <TargetsTable rows={pilotRows} colors={sourceColors} />
+          <AttackersTable rows={pilotRows} colors={sourceColors} />
         </div>
       )}
 
@@ -395,32 +611,91 @@ const WeaponTable = memo(function WeaponTable({
   );
 });
 
-/** Top counterparties by engaged DPS (dealt vs taken). Memoized like
- *  {@link WeaponTable}. */
-const PilotTable = memo(function PilotTable({ rows }: { rows: PilotRate[] }) {
+/** Enemies you are shooting — ranked by outgoing DPS. Row dots carry the
+ *  per-source colour used by the by-source charts and filter chips. */
+const TargetsTable = memo(function TargetsTable({
+  rows,
+  colors,
+}: {
+  rows: PilotRate[];
+  colors: Map<string, string>;
+}) {
+  const sorted = [...rows]
+    .filter((r) => r.dpsOut > 0)
+    .sort((a, b) => b.dpsOut - a.dpsOut);
   return (
     <div className="rounded border border-zinc-800 bg-zinc-900/40 p-3">
-      <div className="mb-2 flex items-center justify-between text-xs uppercase tracking-wide text-zinc-500">
-        <span>By pilot</span>
-        <span className="flex gap-3 normal-case">
-          <span className="text-emerald-400">dealt</span>
-          <span className="text-rose-400">taken</span>
-        </span>
+      <div className="mb-2 text-xs uppercase tracking-wide text-zinc-500">
+        Targets (dealt)
       </div>
-      {rows.length === 0 ? (
+      {sorted.length === 0 ? (
         <p className="text-xs text-zinc-500">
-          No pilots engaged in the window.
+          No outgoing damage in the window.
         </p>
       ) : (
         <table className="w-full text-sm">
           <tbody>
-            {rows.map((r) => (
+            {sorted.map((r) => (
               <tr key={r.name} className="border-t border-zinc-800/60">
-                <td className="py-1 pr-2 text-zinc-200">{r.name}</td>
+                <td className="py-1 pr-2 text-zinc-200">
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      aria-hidden
+                      className="inline-block h-2 w-2 shrink-0 rounded-full"
+                      style={{ background: colors.get(r.name) }}
+                    />
+                    {r.name}
+                  </span>
+                </td>
                 <td className="py-1 text-right tabular-nums text-emerald-400">
                   {formatInt(Math.round(r.dpsOut))}
                 </td>
-                <td className="py-1 pl-3 text-right tabular-nums text-rose-400">
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+});
+
+/** Enemies attacking you — ranked by incoming DPS. Row dots carry the
+ *  per-source colour used by the by-source charts and filter chips. */
+const AttackersTable = memo(function AttackersTable({
+  rows,
+  colors,
+}: {
+  rows: PilotRate[];
+  colors: Map<string, string>;
+}) {
+  const sorted = [...rows]
+    .filter((r) => r.dpsIn > 0)
+    .sort((a, b) => b.dpsIn - a.dpsIn);
+  return (
+    <div className="rounded border border-zinc-800 bg-zinc-900/40 p-3">
+      <div className="mb-2 text-xs uppercase tracking-wide text-zinc-500">
+        Attackers (taken)
+      </div>
+      {sorted.length === 0 ? (
+        <p className="text-xs text-zinc-500">
+          No incoming damage in the window.
+        </p>
+      ) : (
+        <table className="w-full text-sm">
+          <tbody>
+            {sorted.map((r) => (
+              <tr key={r.name} className="border-t border-zinc-800/60">
+                <td className="py-1 pr-2 text-zinc-200">
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      aria-hidden
+                      className="inline-block h-2 w-2 shrink-0 rounded-full"
+                      style={{ background: colors.get(r.name) }}
+                    />
+                    {r.name}
+                  </span>
+                </td>
+                <td className="py-1 text-right tabular-nums text-rose-400">
                   {formatInt(Math.round(r.dpsIn))}
                 </td>
               </tr>
@@ -471,11 +746,19 @@ function PrimaryExtras({
   );
 }
 
-/** Multi-line rolling chart, inline SVG (no chart dependency — same approach as
- *  the market history chart). All series share one y-scale so out/in compare.
- *  Memoized + path math in a `useMemo` so unrelated re-renders (typing in a
- *  control) don't rebuild all eight polylines; only a new `ticks` array does. */
-const DpsChart = memo(function DpsChart({ ticks }: { ticks: DpsTick[] }) {
+/** Multi-line rolling chart, inline SVG. `series` selects which lines to draw.
+ *  Y-axis labels on both sides scale with the live peak so you can read
+ *  absolute values without hovering. Memoized — only a new `ticks` array or a
+ *  different `series` reference re-runs the path math. */
+const DpsChart = memo(function DpsChart({
+  ticks,
+  series: activeSeries,
+  title,
+}: {
+  ticks: DpsTick[];
+  series: readonly ChartSeries[];
+  title?: string;
+}) {
   const w = 960;
   const h = 280;
   const padX = 8;
@@ -486,22 +769,23 @@ const DpsChart = memo(function DpsChart({ ticks }: { ticks: DpsTick[] }) {
     const n = ticks.length;
     const max = Math.max(
       1,
-      ...ticks.flatMap((t) => SERIES.map((s) => t[s.key] as number)),
+      ...ticks.flatMap((t) => activeSeries.map((s) => s.get(t))),
     );
     const x = (i: number) => padX + (i / Math.max(n - 1, 1)) * (w - 2 * padX);
     const y = (v: number) => padY + (1 - v / max) * (h - padY - padB);
-    const lines = SERIES.map((s) => ({
-      key: s.key,
+    const lines = activeSeries.map((s) => ({
+      key: s.id,
+      color: s.color,
+      primary: s.primary,
       points: ticks
-        .map((t, i) => `${x(i).toFixed(1)},${y(t[s.key] as number).toFixed(1)}`)
+        .map((t, i) => `${x(i).toFixed(1)},${y(s.get(t)).toFixed(1)}`)
         .join(" "),
     }));
     const grid = [0, 0.25, 0.5, 0.75, 1].map(
       (f) => padY + f * (h - padY - padB),
     );
 
-    // Vertical time segments, one per rolling window (coarsened so at most ~8
-    // fit), labelled as seconds back from the newest sample.
+    // Vertical time markers, one per rolling window (coarsened to ≤ 8 labels).
     const windowSecs = ticks[n - 1]?.windowSecs ?? 0;
     const timeMarks: { x: number; label: string }[] = [];
     if (n > 1 && windowSecs > 0) {
@@ -518,69 +802,98 @@ const DpsChart = memo(function DpsChart({ ticks }: { ticks: DpsTick[] }) {
       }
     }
     return { max, lines, grid, n, timeMarks, windowSecs };
-  }, [ticks]);
+  }, [ticks, activeSeries]);
+
+  // Y-axis labels: top→bottom = max → 0. Five labels aligned to the grid lines.
+  // Rendered in CSS divs (not SVG text) so they stay legible regardless of how
+  // narrow the chart is (SVG text scales with the viewBox when preserveAspectRatio
+  // is "none", which would make them tiny in the split-chart layout).
+  const yLabels = [1, 0.75, 0.5, 0.25, 0].map((f) =>
+    formatInt(Math.round(max * f)),
+  );
+  const yAxisStyle = { height: h, paddingTop: padY, paddingBottom: padB };
 
   return (
     <div className="rounded border border-zinc-800 bg-zinc-900 p-2">
       <div className="mb-1 flex items-center justify-between text-xs text-zinc-400">
         <span>
-          Rolling rate (per second)
+          {title ?? "Rolling rate"} (per second)
           {windowSecs > 0 ? ` · ${windowSecs}s window` : ""}
         </span>
         <span className="tabular-nums text-zinc-300">
           peak {formatInt(Math.round(max))}
         </span>
       </div>
-      <svg
-        viewBox={`0 0 ${w} ${h}`}
-        preserveAspectRatio="none"
-        className="w-full"
-        style={{ height: h }}
-      >
-        {grid.map((gy, i) => (
-          <line
-            key={i}
-            x1={padX}
-            x2={w - padX}
-            y1={gy}
-            y2={gy}
-            stroke="#27272a"
-            strokeWidth="0.75"
-          />
-        ))}
-        {timeMarks.map((m, i) => (
-          <g key={`t${i}`}>
+      <div className="flex items-stretch">
+        {/* Left Y-axis */}
+        <div
+          className="flex shrink-0 flex-col justify-between pr-1 text-right text-[10px] tabular-nums text-zinc-500"
+          style={yAxisStyle}
+        >
+          {yLabels.map((lbl, i) => (
+            <span key={i}>{lbl}</span>
+          ))}
+        </div>
+        <svg
+          viewBox={`0 0 ${w} ${h}`}
+          preserveAspectRatio="none"
+          className="min-w-0 flex-1"
+          style={{ height: h }}
+        >
+          {grid.map((gy, i) => (
             <line
-              x1={m.x}
-              x2={m.x}
-              y1={padY}
-              y2={h - padB}
+              key={i}
+              x1={padX}
+              x2={w - padX}
+              y1={gy}
+              y2={gy}
               stroke="#27272a"
               strokeWidth="0.75"
             />
-            <text
-              x={m.x}
-              y={h - 8}
-              textAnchor={i === 0 ? "end" : "middle"}
-              fill="#71717a"
-              fontSize="11"
-            >
-              {m.label}
-            </text>
-          </g>
-        ))}
-        {n > 1 &&
-          SERIES.map((s, i) => (
-            <polyline
-              key={s.key}
-              points={lines[i].points}
-              fill="none"
-              stroke={s.color}
-              strokeWidth={s.primary ? 1.75 : 1}
-              strokeOpacity={s.primary ? 1 : 0.7}
-            />
           ))}
-      </svg>
+          {timeMarks.map((m, i) => (
+            <g key={`t${i}`}>
+              <line
+                x1={m.x}
+                x2={m.x}
+                y1={padY}
+                y2={h - padB}
+                stroke="#27272a"
+                strokeWidth="0.75"
+              />
+              <text
+                x={m.x}
+                y={h - 8}
+                textAnchor={i === 0 ? "end" : "middle"}
+                fill="#71717a"
+                fontSize="11"
+              >
+                {m.label}
+              </text>
+            </g>
+          ))}
+          {n > 1 &&
+            lines.map((l) => (
+              <polyline
+                key={l.key}
+                points={l.points}
+                fill="none"
+                stroke={l.color}
+                strokeWidth={l.primary ? 1.75 : 1}
+                strokeOpacity={l.primary ? 1 : 0.7}
+              />
+            ))}
+        </svg>
+        {/* Right Y-axis */}
+        <div
+          className="flex shrink-0 flex-col justify-between pl-1 text-left text-[10px] tabular-nums text-zinc-500"
+          style={yAxisStyle}
+        >
+          {yLabels.map((lbl, i) => (
+            <span key={i}>{lbl}</span>
+          ))}
+        </div>
+      </div>
     </div>
   );
 });
