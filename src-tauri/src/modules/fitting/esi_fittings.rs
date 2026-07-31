@@ -89,9 +89,34 @@ pub fn fit_to_esi_items(fit: &Fit) -> Vec<EsiFitItemOut> {
     out
 }
 
+/// Where an ESI fitting came from. Character and corporation fitting ids are
+/// issued by separate endpoints with independent id spaces, so the source is
+/// part of a fit's identity — without it two unrelated fittings can collide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EsiFitSource {
+    Character,
+    Corporation,
+}
+
+impl EsiFitSource {
+    /// Id prefix segment, kept short and stable (it appears in stored ids).
+    fn tag(self) -> &'static str {
+        match self {
+            EsiFitSource::Character => "char",
+            EsiFitSource::Corporation => "corp",
+        }
+    }
+}
+
 /// Convert an ESI fitting to a [`Fit`]. `is_charge(type_id)` distinguishes a
-/// loaded charge (which rides on its module) from a module.
-pub fn esi_fitting_to_fit(esi: &EsiFitting, is_charge: &impl Fn(i64) -> bool) -> Fit {
+/// loaded charge (which rides on its module) from a module. `source` namespaces
+/// the generated id so a character and a corporation fitting that happen to
+/// share a numeric id stay distinct.
+pub fn esi_fitting_to_fit(
+    esi: &EsiFitting,
+    source: EsiFitSource,
+    is_charge: &impl Fn(i64) -> bool,
+) -> Fit {
     let mut items: Vec<FitItem> = Vec::new();
     let mut drone_index = 0i32;
     let mut cargo_index = 0i32;
@@ -159,7 +184,7 @@ pub fn esi_fitting_to_fit(esi: &EsiFitting, is_charge: &impl Fn(i64) -> bool) ->
     }
 
     Fit {
-        id: format!("esi:{}", esi.fitting_id),
+        id: format!("esi:{}:{}", source.tag(), esi.fitting_id),
         name: if esi.name.is_empty() {
             format!("Fitting {}", esi.fitting_id)
         } else {
@@ -288,8 +313,8 @@ mod tests {
                 ]}"#,
         );
         // 200 is a charge; 100/300 are not.
-        let fit = esi_fitting_to_fit(&f, &|tid| tid == 200);
-        assert_eq!(fit.id, "esi:7");
+        let fit = esi_fitting_to_fit(&f, EsiFitSource::Character, &|tid| tid == 200);
+        assert_eq!(fit.id, "esi:char:7");
         assert_eq!(fit.ship_type_id, 587);
 
         let gun = fit.items.iter().find(|i| i.type_id == 100).unwrap();
@@ -312,5 +337,20 @@ mod tests {
             .unwrap();
         assert_eq!(cargo.type_id, 200);
         assert_eq!(cargo.quantity, 1000);
+    }
+
+    #[test]
+    fn character_and_corp_fittings_with_one_id_stay_distinct() {
+        // The two endpoints have independent id spaces, so the same numeric id
+        // can name two unrelated fittings.
+        let f = fitting(
+            r#"{"fitting_id": 7, "name": "Rifter", "description": "", "ship_type_id": 587,
+                "items": [{"type_id": 100, "flag": "HiSlot0", "quantity": 1}]}"#,
+        );
+        let mine = esi_fitting_to_fit(&f, EsiFitSource::Character, &|_| false);
+        let ours = esi_fitting_to_fit(&f, EsiFitSource::Corporation, &|_| false);
+        assert_ne!(mine.id, ours.id);
+        assert_eq!(mine.id, "esi:char:7");
+        assert_eq!(ours.id, "esi:corp:7");
     }
 }

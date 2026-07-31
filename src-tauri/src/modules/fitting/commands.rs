@@ -13,6 +13,7 @@ use tauri::{AppHandle, State};
 use super::context::DogmaContext;
 use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule};
 use super::engine::resolve::{resolve, FitInput};
+use super::esi_fittings::EsiFitSource;
 use super::types::{
     Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind, TargetProfile,
 };
@@ -521,27 +522,33 @@ pub async fn fitting_esi_list(
         }
     }
 
-    // Fetch (async) before opening the SDE — its Connection isn't Send.
-    let mut esi = crate::esi::fetch_character_fittings(&auth_state, character_id).await?;
+    // Fetch (async) before opening the SDE — its Connection isn't Send. The two
+    // sources stay separate: their fitting ids come from independent id spaces,
+    // so each fit's id is namespaced by where it came from.
+    let personal = crate::esi::fetch_character_fittings(&auth_state, character_id).await?;
+    let mut corp_fits = Vec::new();
     if let Ok(corp_id) = corporation_id(&auth_state, character_id).await {
-        if let Ok(mut corp) =
-            crate::esi::fetch_corp_fittings(&auth_state, character_id, corp_id).await
+        if let Ok(corp) = crate::esi::fetch_corp_fittings(&auth_state, character_id, corp_id).await
         {
-            esi.append(&mut corp);
+            corp_fits = corp;
         }
     }
 
     // Classify charges (SDE category 8 = Charge) and convert each fitting.
     let sde = crate::sde::open_from_app(&app)?;
-    let ids: Vec<i64> = esi
+    let ids: Vec<i64> = personal
         .iter()
+        .chain(corp_fits.iter())
         .flat_map(|f| f.items.iter().map(|it| it.type_id))
         .collect();
     let cats = sde.types_categories(&ids).unwrap_or_default();
     let is_charge = |tid: i64| cats.get(&tid).copied() == Some(8);
-    let fits: Vec<Fit> = esi
+    let fits: Vec<Fit> = personal
         .iter()
-        .map(|f| super::esi_fittings::esi_fitting_to_fit(f, &is_charge))
+        .map(|f| super::esi_fittings::esi_fitting_to_fit(f, EsiFitSource::Character, &is_charge))
+        .chain(corp_fits.iter().map(|f| {
+            super::esi_fittings::esi_fitting_to_fit(f, EsiFitSource::Corporation, &is_charge)
+        }))
         .collect();
     let _ = storage::cache_put(&dir, &cache_key, &fits, 30 * 60);
     Ok(fits)
