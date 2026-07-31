@@ -39,6 +39,15 @@ export function PriceHistoryView({
   );
 
   const last = series[series.length - 1];
+  // No history for this type/region (or none inside the selected window):
+  // render an empty state rather than dereferencing an absent last point.
+  if (!last) {
+    return (
+      <div className="py-6 text-center text-sm text-zinc-500">
+        No price history for this item here.
+      </div>
+    );
+  }
   const avgVol = Math.round(
     series.reduce((s, p) => s + p.volume, 0) / series.length,
   );

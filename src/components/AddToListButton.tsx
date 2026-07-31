@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { shoppingAddItem, shoppingLists } from "../lib/api";
+import { errorMessage, shoppingAddItem, shoppingLists } from "../lib/api";
 import { SHOPPING_LISTS_KEY } from "../lib/queryKeys";
 
 /** One item to push onto a list. */
@@ -42,6 +42,7 @@ export function AddToListButton({
 }: Props) {
   const [open, setOpen] = useState(false);
   const [added, setAdded] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const qc = useQueryClient();
 
   // Lists are only fetched once the popover is opened.
@@ -55,9 +56,16 @@ export function AddToListButton({
     items ?? (typeId != null ? [{ typeId, quantity }] : []);
 
   async function add(listId: string, listName: string) {
-    for (const it of toAdd) {
-      await shoppingAddItem(listId, it.typeId, it.quantity ?? 1);
+    try {
+      for (const it of toAdd) {
+        await shoppingAddItem(listId, it.typeId, it.quantity ?? 1);
+      }
+    } catch (e) {
+      // Keep the popover open and say so, rather than closing as if it worked.
+      setError(errorMessage(e));
+      return;
     }
+    setError(null);
     setOpen(false);
     setAdded(listName);
     window.setTimeout(() => setAdded(null), 1500);
@@ -102,6 +110,9 @@ export function AddToListButton({
             ))}
             {lists.data?.length === 0 && (
               <div className="px-2 py-1 text-zinc-500">No lists</div>
+            )}
+            {error && (
+              <div className="px-2 py-1 text-xs text-rose-400">{error}</div>
             )}
           </div>
         </>

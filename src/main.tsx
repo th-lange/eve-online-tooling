@@ -10,6 +10,7 @@ import { queryClient } from "./lib/queryClient";
 import { Layout } from "./components/Layout";
 import { modules } from "./modules/registry";
 import { STORAGE_KEYS } from "./lib/storageKeys";
+import { resolveStartModule } from "./lib/startModule";
 import { ScriptsRunnerProvider } from "./modules/scripts/runner";
 import { InfoAlertsProvider } from "./modules/info/InfoAlertsProvider";
 import "./index.css";
@@ -21,7 +22,11 @@ import "./index.css";
 // active page is chosen from the URL and kept mounted across navigation.
 let savedModule = modules[0].id;
 try {
-  savedModule = localStorage.getItem(STORAGE_KEYS.lastVisited) ?? modules[0].id;
+  savedModule = resolveStartModule(
+    localStorage.getItem(STORAGE_KEYS.lastVisited),
+    modules.map((m) => m.id),
+    modules[0].id,
+  );
 } catch {
   // localStorage unavailable — fall back to the first module.
 }
