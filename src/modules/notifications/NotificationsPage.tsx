@@ -33,7 +33,9 @@ export function NotificationsPage() {
   const [cat, setCat] = useState<string>("All");
 
   const dismiss = useMutation({
-    mutationFn: notificationDismiss,
+    // Dismissed sets are per character, so a row is hidden for its own owner.
+    mutationFn: (n: { id: number; characterId: number }) =>
+      notificationDismiss(n.id, n.characterId),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
   });
   const reset = useMutation({
@@ -123,7 +125,9 @@ export function NotificationsPage() {
             key={n.id}
             row={n}
             showCharacter={multiCharacter}
-            onDismiss={() => dismiss.mutate(n.id)}
+            onDismiss={() =>
+              dismiss.mutate({ id: n.id, characterId: n.characterId })
+            }
           />
         ))}
       </div>

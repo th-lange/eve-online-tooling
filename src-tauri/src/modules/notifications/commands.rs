@@ -155,11 +155,18 @@ pub async fn notifications_list(
     Ok(rows)
 }
 
-/// Hide a notification from the feed (durable, per character). Under "all
-/// characters" this applies to the primary (first) character.
+/// Hide a notification from the feed (durable, per character). The dismissed
+/// set is per character and [`notifications_list`] filters each character's
+/// feed against its own set, so the caller passes the row's owning character;
+/// without one we fall back to the primary character.
 #[tauri::command]
-pub fn notifications_dismiss(app: AppHandle, notification_id: i64) -> Result<(), AppError> {
-    let (dir, character_id) = storage::dir_and_primary_character(&app)?;
+pub fn notifications_dismiss(
+    app: AppHandle,
+    notification_id: i64,
+    character_id: Option<i64>,
+) -> Result<(), AppError> {
+    let (dir, primary) = storage::dir_and_primary_character(&app)?;
+    let character_id = character_id.unwrap_or(primary);
     let key = format!("notifications_dismissed_{character_id}");
     let mut dismissed: Vec<i64> = storage::load_data(&dir, &key).unwrap_or_default();
     if !dismissed.contains(&notification_id) {
