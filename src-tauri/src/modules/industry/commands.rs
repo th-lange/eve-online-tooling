@@ -287,6 +287,13 @@ async fn character_industry_jobs(
 /// character when "All characters" is active (rows tagged, slots summed; a
 /// character whose ESI fetch fails is skipped rather than failing the whole
 /// call), otherwise just the active one (errors propagate, as before). The
+/// Append `incoming` rows that haven't been seen yet, by job id. Corporation
+/// jobs are returned to every character in that corp, so aggregating a roster
+/// without this lists each corp job once per member. Pure (testable).
+fn append_new_jobs(rows: &mut Vec<JobRow>, seen: &mut HashSet<i64>, incoming: Vec<JobRow>) {
+    rows.extend(incoming.into_iter().filter(|j| seen.insert(j.job_id)));
+}
+
 /// Tauri command's core, factored out so `capabilities::cap_industry_jobs` can
 /// call it with a [`HostCtx`](crate::capabilities::HostCtx)-supplied dir/auth
 /// instead of a Tauri `AppHandle`/`State`.
@@ -315,6 +322,9 @@ pub async fn industry_jobs_core(
     let names = storage::character_names(dir);
 
     let mut rows: Vec<JobRow> = Vec::new();
+    // Corp jobs come back once per character in the corp, so aggregating a
+    // roster would list them repeatedly; keep the first sighting of each job.
+    let mut seen_jobs: HashSet<i64> = HashSet::new();
     let mut slots = Slots {
         manufacturing: Slot { used: 0, total: 0 },
         science: Slot { used: 0, total: 0 },
@@ -324,8 +334,8 @@ pub async fn industry_jobs_core(
     for cid in targets {
         let name = names.get(&cid).cloned().unwrap_or_else(|| cid.to_string());
         match character_industry_jobs(dir, auth, cid, &name).await {
-            Ok((mut r, s)) => {
-                rows.append(&mut r);
+            Ok((r, s)) => {
+                append_new_jobs(&mut rows, &mut seen_jobs, r);
                 slots.manufacturing.used += s.manufacturing.used;
                 slots.manufacturing.total += s.manufacturing.total;
                 slots.science.used += s.science.used;
@@ -433,8 +443,34 @@ pub fn line_status(result: &JobsResult) -> LineStatusResult {
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_slots, line_status, slot_pool};
+    use super::{append_new_jobs, compute_slots, line_status, slot_pool};
     use super::{CharacterSlots, JobRow, JobsResult, Slot, Slots};
+    use std::collections::HashSet;
+
+    #[test]
+    fn corp_jobs_appear_once_across_same_corp_characters() {
+        // Two roster characters in one corp: each returns its own personal job
+        // plus the same shared corp job (id 900).
+        let corp_job = |cid: i64| JobRow {
+            job_id: 900,
+            owner: "Corp".to_string(),
+            ..job_row(cid, "Manufacturing", "active")
+        };
+        let personal = |cid: i64, id: i64| JobRow {
+            job_id: id,
+            ..job_row(cid, "Manufacturing", "active")
+        };
+
+        let mut rows: Vec<JobRow> = Vec::new();
+        let mut seen: HashSet<i64> = HashSet::new();
+        append_new_jobs(&mut rows, &mut seen, vec![personal(1, 1), corp_job(1)]);
+        append_new_jobs(&mut rows, &mut seen, vec![personal(2, 2), corp_job(2)]);
+
+        let ids: Vec<i64> = rows.iter().map(|r| r.job_id).collect();
+        assert_eq!(ids, vec![1, 900, 2], "the shared corp job is listed once");
+        // The first sighting wins, so the corp job keeps character 1's tagging.
+        assert_eq!(rows[1].character_id, 1);
+    }
 
     #[test]
     fn slot_pool_maps_activities() {
