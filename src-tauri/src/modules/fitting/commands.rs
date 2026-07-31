@@ -592,6 +592,12 @@ pub async fn fitting_simulate(
     )
 }
 
+/// What a price line is worth in total: unit buy price × quantity (unpriced
+/// lines count as zero). Pure (testable).
+fn line_value(line: &FitPriceLine) -> f64 {
+    line.buy_unit.unwrap_or(0.0) * line.quantity as f64
+}
+
 /// Price a whole fit (hull + modules + charges + drones/cargo) at a market
 /// (#163), reusing the shared market service's bulk aggregates.
 #[tauri::command]
@@ -638,11 +644,11 @@ pub async fn fitting_price(
             sell_unit,
         });
     }
-    // Most valuable lines first.
+    // Most valuable lines first — by what the line is worth in total, so a big
+    // stack of cheap charges outranks one cheap-per-unit module.
     lines.sort_by(|a, b| {
-        b.buy_unit
-            .unwrap_or(0.0)
-            .partial_cmp(&a.buy_unit.unwrap_or(0.0))
+        line_value(b)
+            .partial_cmp(&line_value(a))
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
@@ -702,6 +708,24 @@ mod tests {
     use super::*;
     use crate::modules::fitting::engine::tank::DamageProfile;
     use crate::modules::fitting::stats::run_dogma;
+
+    #[test]
+    fn price_lines_rank_by_total_line_value() {
+        let line = |name: &str, qty: i32, unit: Option<f64>| FitPriceLine {
+            type_id: 1,
+            name: name.into(),
+            quantity: qty,
+            buy_unit: unit,
+            sell_unit: None,
+        };
+        // 1000 rounds at 50 ISK (50k) beat one module at 20k, even though the
+        // module is far dearer per unit.
+        let ammo = line("Ammo", 1000, Some(50.0));
+        let module = line("Module", 1, Some(20_000.0));
+        assert!(line_value(&ammo) > line_value(&module));
+        // Unpriced lines sort last rather than blowing up.
+        assert_eq!(line_value(&line("Unknown", 5, None)), 0.0);
+    }
 
     fn item(type_id: i64, slot: SlotKind, charge: Option<i64>, qty: i32) -> FitItem {
         FitItem {
