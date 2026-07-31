@@ -107,6 +107,23 @@ pub fn sde_status(app: AppHandle) -> Result<SdeStatus, String> {
     Ok(status_of(&paths, false))
 }
 
+/// Whether [`sde_update`] should actually (re)download. A missing local copy or
+/// an explicit `force` always downloads; otherwise only a published md5 that
+/// differs from the stored one counts as changed. When either md5 is unknown
+/// (no sidecar yet, or the fetch failed) we keep what we have rather than
+/// surprising the user with a multi-hundred-MB transfer. Pure (testable).
+fn needs_download(
+    installed: bool,
+    force: bool,
+    local_md5: Option<&str>,
+    remote_md5: Option<&str>,
+) -> bool {
+    if !installed || force {
+        return true;
+    }
+    matches!((local_md5, remote_md5), (Some(l), Some(r)) if l != r)
+}
+
 /// Download/refresh the SDE, emitting `sde://progress` throughout.
 ///
 /// When already installed and `force` is false, it only re-downloads if
@@ -116,16 +133,22 @@ pub fn sde_status(app: AppHandle) -> Result<SdeStatus, String> {
 pub async fn sde_update(app: AppHandle, force: bool) -> Result<SdeStatus, String> {
     let paths = paths(&app)?;
 
-    if paths.is_installed() && !force {
-        let changed = match (read_local_md5(&paths).await, fetch_remote_md5().await) {
-            (Some(local), Some(remote)) => local != remote,
-            // Can't determine (no stored md5 or fetch failed): don't surprise
-            // the user with a multi-hundred-MB re-download.
-            _ => false,
-        };
-        if !changed {
-            return Ok(status_of(&paths, false));
-        }
+    // The md5 that describes the dump we are about to fetch. Read *before* the
+    // download (and reused for the freshness check below), because Fuzzwork
+    // republishes daily: re-reading it afterwards could record the md5 of a
+    // dump that was published while we were downloading the previous one, and
+    // future checks would then think the older local database were current.
+    // If it does rotate mid-download, the stored md5 simply differs from the
+    // next published one and we re-download — the safe direction to err in.
+    let remote_md5 = fetch_remote_md5().await;
+
+    if !needs_download(
+        paths.is_installed(),
+        force,
+        read_local_md5(&paths).await.as_deref(),
+        remote_md5.as_deref(),
+    ) {
+        return Ok(status_of(&paths, false));
     }
 
     let app_for_events = app.clone();
@@ -136,10 +159,30 @@ pub async fn sde_update(app: AppHandle, force: bool) -> Result<SdeStatus, String
     .map_err(|e| e.to_string())?;
 
     // Record the md5 we just installed so future checks can short-circuit.
-    if let Some(remote) = fetch_remote_md5().await {
+    if let Some(remote) = remote_md5 {
         let _ = tokio::fs::write(md5_path(&paths), remote).await;
     }
     Ok(status_of(&paths, true))
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::needs_download;
+
+    #[test]
+    fn downloads_only_when_the_published_md5_actually_changed() {
+        // Not installed, or forced → always download.
+        assert!(needs_download(false, false, None, None));
+        assert!(needs_download(true, true, Some("a"), Some("a")));
+        // Installed and the published md5 matches → nothing to do.
+        assert!(!needs_download(true, false, Some("a"), Some("a")));
+        // A new dump → download.
+        assert!(needs_download(true, false, Some("a"), Some("b")));
+        // Unknown either side (no sidecar yet / fetch failed) → keep what we
+        // have rather than re-pulling hundreds of MB on a guess.
+        assert!(!needs_download(true, false, None, Some("b")));
+        assert!(!needs_download(true, false, Some("a"), None));
+    }
 }
 
 /// Storage key for the last startup SDE freshness check (epoch secs).
