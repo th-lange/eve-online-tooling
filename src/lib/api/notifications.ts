@@ -24,9 +24,16 @@ export function notifications(): Promise<NotifRow[]> {
   return invoke<NotifRow[]>("notifications_list");
 }
 
-/** Hide a notification from the feed (durable, per character). */
-export function notificationDismiss(notificationId: number): Promise<void> {
-  return invoke<void>("notifications_dismiss", { notificationId });
+/**
+ * Hide a notification from the feed (durable, per character). Pass the row's
+ * owning `characterId` — dismissed sets are per character, so omitting it
+ * hides the id for the primary character only.
+ */
+export function notificationDismiss(
+  notificationId: number,
+  characterId: number | null = null,
+): Promise<void> {
+  return invoke<void>("notifications_dismiss", { notificationId, characterId });
 }
 
 /** Un-dismiss everything so the full feed shows again. */
