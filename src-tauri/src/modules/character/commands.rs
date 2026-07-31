@@ -47,16 +47,13 @@ pub async fn character_skills(
     let (_, character_id) = storage::dir_and_primary_character(&app)?;
     let sde = crate::sde::open_from_app(&app)?;
 
-    let skills = character_skill_levels(&auth_state, character_id)
-        .await
-        .map_err(|e| e.to_string())?;
+    let skills = character_skill_levels(&auth_state, character_id).await?;
     let queue: Vec<EsiQueueItem> = authed_get(
         &auth_state,
         character_id,
         &format!("/latest/characters/{character_id}/skillqueue/"),
     )
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
     let name = |type_id: i64| {
         sde.type_info(type_id)
@@ -224,9 +221,7 @@ pub async fn character_trade_fees(
 ) -> Result<TradeFees, AppError> {
     let (_, character_id) = storage::dir_and_primary_character(&app)?;
 
-    let skills = character_skill_levels(&auth_state, character_id)
-        .await
-        .map_err(|e| e.to_string())?;
+    let skills = character_skill_levels(&auth_state, character_id).await?;
     let level = |id: i64| skills.level(id);
     let accounting = level(16622);
     let broker_relations = level(3446);
@@ -238,8 +233,7 @@ pub async fn character_trade_fees(
         character_id,
         &format!("/latest/characters/{character_id}/standings/"),
     )
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
     let ids: Vec<i64> = standings.iter().map(|s| s.from_id).collect();
     let names = resolve_names(&auth_state, &ids).await;
     // Resolve owner name → base standing, so hubs can be matched by owner name.
@@ -321,8 +315,7 @@ pub async fn character_research(
         character_id,
         &format!("/latest/characters/{character_id}/agents_research/"),
     )
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
     let ids: Vec<i64> = agents.iter().map(|a| a.agent_id).collect();
     let names = resolve_names(&auth_state, &ids).await;
@@ -406,8 +399,7 @@ pub async fn character_mining(
         character_id,
         &format!("/latest/characters/{character_id}/mining/"),
     )
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
     // Price the distinct ore types at Jita buy.
     let type_ids: Vec<i64> = {
@@ -547,8 +539,7 @@ pub async fn character_fleet(
         character_id,
         &format!("/latest/fleets/{}/members/", fleet.fleet_id),
     )
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
     let char_ids: Vec<i64> = members.iter().map(|m| m.character_id).collect();
     let names = resolve_names(&auth_state, &char_ids).await;

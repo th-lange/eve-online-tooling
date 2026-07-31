@@ -329,7 +329,8 @@ impl Sde {
                 },
             ))
         })?;
-        rows.collect::<Result<HashMap<_, _>, _>>().map_err(Into::into)
+        rows.collect::<Result<HashMap<_, _>, _>>()
+            .map_err(Into::into)
     }
 
     #[cfg(test)]
