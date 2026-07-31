@@ -975,6 +975,14 @@ pub(super) type EffectMap = HashMap<i64, Vec<i64>>;
 
 pub(super) type GroupMap = HashMap<i64, i64>;
 
+/// Whether an item draws CPU / powergrid / calibration: only fitted ship
+/// modules do. Cargo, implants and boosters are carried rather than fitted,
+/// and an offline module holds its slot without drawing anything. Mirrors the
+/// dogma path's treatment so the base-attribute fallback agrees with it. Pure.
+pub(super) fn draws_fitting_resources(slot: SlotKind, state: ModuleState) -> bool {
+    is_ship_module(slot) && state != ModuleState::Offline
+}
+
 /// Whether a slot kind is a ship module that affects stats (drones/cargo/
 /// implants don't). Shared by the resolution pass and the optimizer.
 pub(super) fn is_ship_module(slot: SlotKind) -> bool {
@@ -1051,11 +1059,12 @@ pub(crate) fn simulate_fit(
         } else {
             0.0
         };
+        let fitted = draws_fitting_resources(item.slot, item.state);
         val_items.push(ValItem {
             slot: item.slot,
-            cpu: get(50),           // cpu usage
-            powergrid: get(30),     // power usage
-            calibration: get(1153), // rig calibration cost
+            cpu: if fitted { get(50) } else { 0.0 }, // cpu usage
+            powergrid: if fitted { get(30) } else { 0.0 }, // power usage
+            calibration: if fitted { get(1153) } else { 0.0 }, // rig calibration
             is_turret,
             is_launcher,
             drone_volume,
@@ -1210,6 +1219,40 @@ fn ew_label(cat: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_fitted_modules_draw_cpu_pg_calibration() {
+        // Fitted module slots draw resources …
+        for slot in [
+            SlotKind::High,
+            SlotKind::Mid,
+            SlotKind::Low,
+            SlotKind::Rig,
+            SlotKind::Subsystem,
+        ] {
+            assert!(
+                draws_fitting_resources(slot, ModuleState::Active),
+                "{slot:?}"
+            );
+        }
+        // … carried items never do, whatever state they carry …
+        for slot in [
+            SlotKind::Cargo,
+            SlotKind::Implant,
+            SlotKind::Booster,
+            SlotKind::Drone,
+        ] {
+            assert!(
+                !draws_fitting_resources(slot, ModuleState::Active),
+                "{slot:?}"
+            );
+        }
+        // … and an offline module holds its slot without drawing anything.
+        assert!(!draws_fitting_resources(
+            SlotKind::High,
+            ModuleState::Offline
+        ));
+    }
 
     #[test]
     fn classifies_ew_groups_and_flags() {
