@@ -435,11 +435,14 @@ fn jump_distances(
     let is_highsec = |sid: i64| info.get(&sid).map(|i| i.1 >= 0.45).unwrap_or(false);
 
     // Optionally restrict to high-sec-endpoint edges before building adjacency.
+    // Edges incident to the origin always survive: a traveller starting in
+    // low-sec can still reach the neighbouring high-sec systems (they're one
+    // gate away), and dropping those would strand the search at the origin.
     let filtered: Vec<(i64, i64)> = if high_sec_only {
         edges
             .iter()
             .copied()
-            .filter(|&(a, b)| is_highsec(a) && is_highsec(b))
+            .filter(|&(a, b)| (is_highsec(a) || a == origin) && (is_highsec(b) || b == origin))
             .collect()
     } else {
         edges.to_vec()
@@ -484,6 +487,23 @@ mod tests {
         assert_eq!(dist[&2], 1);
         assert!(!dist.contains_key(&3));
         assert!(!dist.contains_key(&4));
+    }
+
+    #[test]
+    fn high_sec_only_still_leaves_a_low_sec_origin() {
+        // Origin 3 is low-sec with high-sec neighbours 2 and 4: both are one
+        // gate away and must be reachable, while the search must not transit
+        // any *other* low-sec system.
+        let mut info = info();
+        info.insert(5, ("E".into(), 0.2, "R".into())); // another low-sec
+        let edges = [(3, 2), (3, 4), (3, 5), (5, 1)];
+        let dist = jump_distances(3, &edges, &info, true);
+        assert_eq!(dist[&3], 0);
+        assert_eq!(dist[&2], 1);
+        assert_eq!(dist[&4], 1);
+        // Low-sec 5 (and high-sec 1 behind it) stay unreachable.
+        assert!(!dist.contains_key(&5));
+        assert!(!dist.contains_key(&1));
     }
 
     fn order(price: f64, is_buy: bool, volume: i64) -> Order {
