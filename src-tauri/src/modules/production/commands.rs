@@ -416,19 +416,20 @@ pub async fn production_profit(
             .best_sell_hubs(&product_ids)
             .await
             .map_err(|e| e.to_string())?;
+        // Same revenue basis the engine used, so repriced and untouched rows
+        // stay comparable.
+        let sales_cost = if params.include_sales_cost {
+            params.sales_tax + params.broker_fee
+        } else {
+            0.0
+        };
         for bd in &mut out {
             if let Some(b) = best.get(&bd.product_type_id) {
                 if b.price > bd.product_price.unwrap_or(0.0) {
-                    reprice_product(bd, b.price, &b.hub);
+                    reprice_product(bd, b.price, &b.hub, sales_cost);
                 }
             }
         }
-        out.sort_by(|a, b| {
-            b.profit
-                .partial_cmp(&a.profit)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-        return Ok(out);
     }
 
     out.sort_by(|a, b| {
@@ -440,12 +441,15 @@ pub async fn production_profit(
 }
 
 /// Re-price a breakdown's product at `unit_price` (the best hub's sell price)
-/// and recompute the dependent profit fields. Production values revenue gross
-/// (no sales cost), so revenue = units × price; cost is unchanged.
-fn reprice_product(bd: &mut ProfitBreakdown, unit_price: f64, hub: &str) {
+/// and recompute the dependent profit fields. `sales_cost` is the combined
+/// sales-tax + broker-fee fraction taken off revenue (0.0 when the caller
+/// values revenue gross) — it must match the basis the engine used, or
+/// repriced rows would not be comparable with the rest. Cost is unchanged.
+/// Pure (testable).
+fn reprice_product(bd: &mut ProfitBreakdown, unit_price: f64, hub: &str, sales_cost: f64) {
     let cost = bd.material_cost + bd.job_fee + bd.blueprint_cost + bd.invention_cost;
     bd.product_price = Some(unit_price);
-    bd.revenue = bd.units_produced as f64 * unit_price;
+    bd.revenue = bd.units_produced as f64 * unit_price * (1.0 - sales_cost);
     bd.profit = bd.revenue - cost;
     bd.margin = (bd.revenue > 0.0).then(|| bd.profit / bd.revenue);
     bd.roi = (cost > 0.0).then(|| bd.profit / cost);
@@ -777,5 +781,90 @@ mod resolve_input_tests {
         // Root (built) + B (built) + C (bought leaf) must all be present, or
         // downstream pricing silently drops whichever id is missing.
         assert_eq!(needed, HashSet::from([10, 20, 30]));
+    }
+}
+
+#[cfg(test)]
+mod reprice_tests {
+    use super::*;
+
+    /// A 10-unit row costing 100 ISK total, currently priced at 20/unit.
+    fn breakdown() -> ProfitBreakdown {
+        ProfitBreakdown {
+            blueprint_type_id: 1,
+            product_type_id: 2,
+            product_name: "Widget".into(),
+            runs: 1,
+            me: 0,
+            materials: Vec::new(),
+            job_time_seconds: 0.0,
+            units_produced: 10,
+            material_cost: 60.0,
+            job_fee: 40.0,
+            blueprint_cost: 0.0,
+            invention_cost: 0.0,
+            invention: None,
+            product_price: Some(20.0),
+            revenue: 200.0,
+            profit: 100.0,
+            margin: Some(0.5),
+            roi: Some(1.0),
+            profit_per_unit: 10.0,
+            meta_group: None,
+            category: None,
+            group: None,
+            market: None,
+            sell_hub: None,
+            favorite: false,
+            product_volume: None,
+            missing_prices: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn reprices_gross_when_sales_costs_are_off() {
+        let mut bd = breakdown();
+        reprice_product(&mut bd, 30.0, "Jita", 0.0);
+        assert_eq!(bd.product_price, Some(30.0));
+        assert_eq!(bd.revenue, 300.0);
+        assert_eq!(bd.profit, 200.0); // 300 − 100 cost
+        assert_eq!(bd.margin, Some(200.0 / 300.0));
+        assert_eq!(bd.roi, Some(2.0));
+        assert_eq!(bd.profit_per_unit, 20.0);
+        assert_eq!(bd.sell_hub.as_deref(), Some("Jita"));
+    }
+
+    #[test]
+    fn applies_the_engines_sales_cost_basis() {
+        // 8% off revenue must land on the repriced row too, or a best-hub row
+        // would be compared against net-revenue rows on a gross basis.
+        let mut bd = breakdown();
+        reprice_product(&mut bd, 30.0, "Amarr", 0.08);
+        assert_eq!(bd.revenue, 300.0 * 0.92);
+        assert_eq!(bd.profit, 300.0 * 0.92 - 100.0);
+    }
+
+    #[test]
+    fn zero_valued_edges_stay_finite() {
+        // Zero price → zero revenue: margin undefined, ROI still defined.
+        let mut bd = breakdown();
+        reprice_product(&mut bd, 0.0, "Jita", 0.0);
+        assert_eq!(bd.revenue, 0.0);
+        assert_eq!(bd.margin, None);
+        assert_eq!(bd.roi, Some(-1.0));
+
+        // Zero cost → ROI undefined rather than infinite.
+        let mut free = breakdown();
+        free.material_cost = 0.0;
+        free.job_fee = 0.0;
+        reprice_product(&mut free, 5.0, "Jita", 0.0);
+        assert_eq!(free.roi, None);
+        assert_eq!(free.profit, 50.0);
+
+        // Zero units → no division by zero in the per-unit figure.
+        let mut empty = breakdown();
+        empty.units_produced = 0;
+        reprice_product(&mut empty, 5.0, "Jita", 0.0);
+        assert_eq!(empty.profit_per_unit, 0.0);
     }
 }
