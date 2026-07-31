@@ -107,6 +107,11 @@ impl From<AuthError> for AppError {
 pub struct AuthState {
     http: reqwest::Client,
     tokens: Mutex<HashMap<i64, CachedToken>>,
+    /// One async lock per character, serialising that character's refreshes.
+    /// EVE SSO *rotates* refresh tokens, so two concurrent refreshes would each
+    /// invalidate the other's token and the loser's write would strand the
+    /// character — see [`AuthState::access_token_for`].
+    refresh_locks: Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>,
     cache: Arc<ConditionalCache>,
     /// SSO token endpoint. Always [`TOKEN_URL`] outside tests; overridable via
     /// [`AuthState::with_token_url`] so tests can point it at a local stub.
@@ -143,6 +148,7 @@ impl AuthState {
         Self {
             http,
             tokens: Mutex::new(HashMap::new()),
+            refresh_locks: Mutex::new(HashMap::new()),
             cache: Arc::new(cache),
             token_url: TOKEN_URL.to_string(),
         }
@@ -184,14 +190,48 @@ impl AuthState {
         );
     }
 
+    /// The cached access token for a character if it is still valid.
+    fn valid_cached_token(&self, character_id: i64) -> Option<String> {
+        self.tokens
+            .lock()
+            .unwrap()
+            .get(&character_id)
+            .filter(|t| t.expires_at > Instant::now())
+            .map(|t| t.access_token.clone())
+    }
+
+    /// The lock guarding this character's refreshes, created on first use.
+    fn refresh_lock(&self, character_id: i64) -> Arc<tokio::sync::Mutex<()>> {
+        self.refresh_locks
+            .lock()
+            .unwrap()
+            .entry(character_id)
+            .or_default()
+            .clone()
+    }
+
     /// A valid (cached or refreshed) access token for a character, loading its
     /// refresh token from the keychain.
+    ///
+    /// Refreshes are single-flighted per character: concurrent callers queue on
+    /// that character's lock and whoever loses the race finds the winner's
+    /// freshly cached token instead of starting a second refresh. Without this,
+    /// both would POST the same refresh token, EVE SSO would rotate it twice,
+    /// and the token persisted last would already be invalid — logging the
+    /// character out with no visible cause.
     pub async fn access_token_for(&self, character_id: i64) -> Result<String, AuthError> {
-        if let Some(t) = self.tokens.lock().unwrap().get(&character_id) {
-            if t.expires_at > Instant::now() {
-                return Ok(t.access_token.clone());
-            }
+        if let Some(token) = self.valid_cached_token(character_id) {
+            return Ok(token);
         }
+
+        let lock = self.refresh_lock(character_id);
+        let _guard = lock.lock().await;
+        // Re-check under the lock: another caller may have refreshed while we
+        // were queued, in which case its token is now cached and good.
+        if let Some(token) = self.valid_cached_token(character_id) {
+            return Ok(token);
+        }
+
         let refresh_token = crate::storage::load_refresh_token(character_id)
             .map_err(AuthError::Storage)?
             .ok_or(AuthError::NotLoggedIn)?;
@@ -678,6 +718,73 @@ mod tests {
             }
         });
         (format!("http://{addr}/"), handle)
+    }
+
+    /// Bind a stub that answers *every* request with `body`, counting them, so
+    /// a test can assert how many refreshes actually went out.
+    fn start_counting_token_stub(
+        body: String,
+    ) -> (
+        String,
+        Arc<std::sync::atomic::AtomicUsize>,
+        std::thread::JoinHandle<()>,
+    ) {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("bind stub sso");
+        let addr = server.server_addr().to_ip().expect("ip addr");
+        let hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = hits.clone();
+        let handle = std::thread::spawn(move || {
+            for request in server.incoming_requests() {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let _ = request.respond(tiny_http::Response::from_string(body.clone()));
+            }
+        });
+        (format!("http://{addr}/"), hits, handle)
+    }
+
+    #[test]
+    fn concurrent_callers_share_one_refresh() {
+        counting_credential::install();
+        let character_id = 910_104;
+        crate::storage::store_refresh_token(character_id, "old-refresh-token")
+            .expect("seed initial refresh token");
+
+        let body = serde_json::json!({
+            "access_token": "fresh-access-token",
+            "refresh_token": "rotated-refresh-token",
+            "expires_in": 1200,
+        })
+        .to_string();
+        let (url, hits, _server) = start_counting_token_stub(body);
+        let state = Arc::new(AuthState::new().with_token_url(url));
+
+        // Several commands asking at once — the normal case when a page mounts
+        // and fires its queries together.
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let tokens: Vec<String> = rt.block_on(async {
+            let calls = (0..4).map(|_| {
+                let state = state.clone();
+                tokio::spawn(async move { state.access_token_for(character_id).await })
+            });
+            futures_util::future::join_all(calls)
+                .await
+                .into_iter()
+                .map(|j| j.expect("task").expect("refresh should succeed"))
+                .collect()
+        });
+
+        assert!(tokens.iter().all(|t| t == "fresh-access-token"));
+        // Exactly one refresh POST: any more would have rotated the refresh
+        // token again and invalidated whichever result was stored last.
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(
+            crate::storage::load_refresh_token(character_id).unwrap(),
+            Some("rotated-refresh-token".to_string())
+        );
     }
 
     #[test]
