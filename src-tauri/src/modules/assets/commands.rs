@@ -139,7 +139,12 @@ pub async fn assets_value(
         let buy_price = model.and_then(|m| m.buy_percentile);
         let sell_price = model.and_then(basis_price);
         let (name, vol_each, category, group) = match item_meta.get(&type_id) {
-            Some(m) => (m.name.clone(), m.volume, m.category.clone(), m.group.clone()),
+            Some(m) => (
+                m.name.clone(),
+                m.volume,
+                m.category.clone(),
+                m.group.clone(),
+            ),
             None => (format!("Type {type_id}"), 0.0, None, None),
         };
         for (owner, (is_corp, quantity)) in owners {

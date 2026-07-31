@@ -101,15 +101,13 @@ pub async fn accounting_wallet_sync(
         character_id,
         &format!("/latest/characters/{character_id}/wallet/journal/"),
     )
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
     let new_tx: Vec<Transaction> = authed_get_paged_pub(
         &auth_state,
         character_id,
         &format!("/latest/characters/{character_id}/wallet/transactions/"),
     )
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
 
     let journal = merge_by(
         storage::load_data(&dir, &jkey).unwrap_or_default(),
@@ -225,8 +223,7 @@ pub async fn accounting_transaction_ledger(
         character_id,
         &format!("/latest/characters/{character_id}/wallet/transactions/"),
     )
-    .await
-    .map_err(|e| e.to_string())?;
+    .await?;
     let transactions = merge_by(
         storage::load_data(&dir, &tkey).unwrap_or_default(),
         new_tx,

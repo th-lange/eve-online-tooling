@@ -449,6 +449,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn not_logged_in_converts_to_the_auth_required_kind() {
+        // Commands returning AppError must propagate auth failures with `?`
+        // (not stringify them), or the frontend's login prompt never fires.
+        let converted: AppError = AuthError::NotLoggedIn.into();
+        assert!(matches!(converted, AppError::AuthRequired { .. }));
+
+        // A non-auth failure still degrades to a plain message.
+        let other: AppError = AuthError::Jwt("bad token".into()).into();
+        assert!(matches!(other, AppError::Message { .. }));
+    }
+
+    #[test]
     fn authorize_url_uses_the_registered_redirect_uri() {
         let url = authorize_url("chal", "st");
         assert!(url.contains("redirect_uri=http%3A%2F%2Flocalhost%3A8765%2Fcallback"));
