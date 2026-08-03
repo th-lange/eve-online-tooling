@@ -366,6 +366,8 @@ fn golden_pyfa_fits() {
             0.0,
             None,
             &[],
+            None,
+            None,
         )
         .expect("dogma");
         let (dps, ehp, vel, align, stable) = (

@@ -121,6 +121,16 @@ function appendTick(prev: DpsTick[], t: DpsTick): DpsTick[] {
   return next;
 }
 
+// Finest mining bucket granularity (s). Volumes accumulate at this resolution;
+// the panel's 30 s view merges adjacent pairs, so both intervals share one store.
+const MINING_BUCKET_SECS = 15;
+// How many intervals the mining rate line shows.
+const MINING_BARS = 24;
+// Trailing window (s) each mining-rate point averages over. Mining lasers book
+// ore in cycle-sized chunks (a strip miner ~1000 m³ every ~60 s), so anything
+// shorter than a cycle would show spikes instead of the sustained rate.
+const MINING_SMOOTH_SECS = 60;
+
 export function DpsPage() {
   const [dir, setDir, persistDir] = useEveLogDir("gamelogs");
   const [windowSecs, setWindowSecs] = useState(() =>
@@ -144,6 +154,10 @@ export function DpsPage() {
     STORAGE_KEYS.dpsChartBySource,
     false,
   );
+  const [miningInterval, setMiningInterval] = usePersistentState<15 | 30>(
+    STORAGE_KEYS.dpsMiningInterval,
+    30,
+  );
 
   // The page stays mounted while backgrounded (ModuleHost), so without this it
   // would keep re-rendering ~2×/s off the tick feed while invisible. Track the
@@ -155,6 +169,17 @@ export function DpsPage() {
   const bufferedRef = useRef<DpsTick[]>([]);
   // Session peaks for the two primary readouts (reset on Start / Play).
   const peaksRef = useRef({ out: 0, in: 0 });
+  // Mined volume per 15 s bucket (bucket start-epoch → m³), session-lifetime.
+  // Accumulated in the tick subscription (not from the `ticks` state) so mining
+  // history is not capped by the 2-min chart buffer and keeps counting while
+  // the page is hidden. Reset on Start / Play.
+  const miningRef = useRef<{
+    buckets: Map<number, number>;
+    lastAt: number | null;
+  }>({
+    buckets: new Map(),
+    lastAt: null,
+  });
 
   // Subscribe once; the feed survives navigation. Ticks only arrive while a
   // capture is running.
@@ -164,6 +189,23 @@ export function DpsPage() {
       const peaks = peaksRef.current;
       peaks.out = Math.max(peaks.out, t.dpsOut);
       peaks.in = Math.max(peaks.in, t.dpsIn);
+      // Integrate the windowed mining rate into interval buckets: rate × the
+      // gap since the previous tick (clamped — a stall must not book a huge
+      // spurious volume into one bucket).
+      const mining = miningRef.current;
+      const dt =
+        mining.lastAt == null
+          ? 0
+          : Math.min(Math.max(t.at - mining.lastAt, 0), 5);
+      mining.lastAt = t.at;
+      if (t.miningM3 > 0 && dt > 0) {
+        const bucket =
+          Math.floor(t.at / MINING_BUCKET_SECS) * MINING_BUCKET_SECS;
+        mining.buckets.set(
+          bucket,
+          (mining.buckets.get(bucket) ?? 0) + t.miningM3 * dt,
+        );
+      }
       if (!activeRef.current) {
         // Hidden: accumulate without triggering a render; flushed on re-show.
         const buf = bufferedRef.current;
@@ -194,6 +236,7 @@ export function DpsPage() {
     persistDir();
     localStorage.setItem(STORAGE_KEYS.dpsWindowSecs, String(windowSecs));
     peaksRef.current = { out: 0, in: 0 };
+    miningRef.current = { buckets: new Map(), lastAt: null };
     setSelectedPilot(null);
     try {
       await dpsStart({ gamelogsDir: dir, windowSecs });
@@ -224,6 +267,7 @@ export function DpsPage() {
     setError(null);
     setTicks([]);
     peaksRef.current = { out: 0, in: 0 };
+    miningRef.current = { buckets: new Map(), lastAt: null };
     setSelectedPilot(null);
     try {
       await dpsPlayback({ file, speed, windowSecs });
@@ -297,6 +341,49 @@ export function DpsPage() {
   const pilotRows = selectedPilot
     ? (latest?.byPilot.filter((p) => p.name === selectedPilot) ?? [])
     : (latest?.byPilot ?? []);
+
+  // Mining overview: session total + a normalized rate series over the last
+  // MINING_BARS intervals ending at the newest tick. Mining lasers deliver ore
+  // in cycle-sized chunks (a strip miner books ~1000 m³ every ~60 s), so the
+  // raw per-interval volumes are spiky; each point is instead a trailing
+  // average over MINING_SMOOTH_SECS of buckets — chunky input, steady line.
+  // The in-progress interval is divided by its elapsed time (not the full
+  // step) so the line doesn't droop at the right edge while a bucket fills.
+  // Recomputed per tick (`latest` changes) — the buckets live in a ref, so
+  // `latest` is the reactive trigger here.
+  const { miningPoints, miningTotal } = useMemo(() => {
+    const buckets = miningRef.current.buckets;
+    let miningTotal = 0;
+    for (const v of buckets.values()) miningTotal += v;
+    if (miningTotal <= 0 || !latest) {
+      return {
+        miningPoints: [] as { age: number; rate: number }[],
+        miningTotal,
+      };
+    }
+    const step = miningInterval;
+    const end = Math.floor(latest.at / step) * step;
+    // Raw m³ per interval (30 s = two 15 s buckets merged).
+    const raw = Array.from({ length: MINING_BARS }, (_, i) => {
+      const t0 = end - (MINING_BARS - 1 - i) * step;
+      let m3 = buckets.get(t0) ?? 0;
+      if (step === 30) m3 += buckets.get(t0 + MINING_BUCKET_SECS) ?? 0;
+      return m3;
+    });
+    const elapsedCur = Math.max(latest.at - end, 1);
+    const span = Math.max(1, Math.round(MINING_SMOOTH_SECS / step));
+    const miningPoints = raw.map((_, i) => {
+      const j0 = Math.max(0, i - span + 1);
+      let m3 = 0;
+      for (let j = j0; j <= i; j++) m3 += raw[j];
+      // Seconds actually covered: full steps for closed intervals, elapsed
+      // time for the still-filling newest one.
+      const secs =
+        (i - j0) * step + (i === MINING_BARS - 1 ? elapsedCur : step);
+      return { age: (MINING_BARS - 1 - i) * step, rate: m3 / secs };
+    });
+    return { miningPoints, miningTotal };
+  }, [latest, miningInterval]);
 
   return (
     <Page>
@@ -453,17 +540,6 @@ export function DpsPage() {
         ))}
       </div>
 
-      {/* Mining (only when there's yield — most fits never mine) */}
-      {latest && latest.miningM3 > 0 && (
-        <div className="mt-3 inline-flex items-center gap-2 rounded border border-zinc-800 bg-zinc-900/40 px-3 py-2">
-          <span className="inline-block h-2.5 w-2.5 rounded-sm bg-amber-300" />
-          <span className="text-xs text-zinc-400">Mining</span>
-          <span className="tabular-nums text-xl text-amber-300">
-            {latest.miningM3.toFixed(1)} m³/s
-          </span>
-        </div>
-      )}
-
       {/* Pilot filter — buttons appear once any combat is seen; click to
           scope the charts + primary readouts to that engagement */}
       {knownPilots.length > 0 && (
@@ -557,6 +633,18 @@ export function DpsPage() {
         <DpsChart ticks={filteredTicks} series={outSeries} title="Outgoing" />
         <DpsChart ticks={filteredTicks} series={inSeries} title="Incoming" />
       </div>
+
+      {/* Mining overview — only once this session has actually mined. History
+          is bucketed into 15/30 s intervals, independent of the chart buffer. */}
+      {miningTotal > 0 && (
+        <MiningPanel
+          points={miningPoints}
+          total={miningTotal}
+          rate={latest?.miningM3 ?? 0}
+          intervalSecs={miningInterval}
+          onSetInterval={setMiningInterval}
+        />
+      )}
 
       {/* Breakdowns: weapons you used · targets you shot · attackers on you */}
       {latest && (latest.byWeapon.length > 0 || latest.byPilot.length > 0) && (
@@ -706,6 +794,111 @@ const AttackersTable = memo(function AttackersTable({
     </div>
   );
 });
+
+/** Mining overview: session total, current live rate, and a normalized rate
+ *  line (m³/s, newest right). Each point is a trailing MINING_SMOOTH_SECS
+ *  average so laser-cycle chunks flatten into the sustained yield. Shown only
+ *  once the session has mined anything. */
+function MiningPanel({
+  points,
+  total,
+  rate,
+  intervalSecs,
+  onSetInterval,
+}: {
+  points: { age: number; rate: number }[];
+  total: number;
+  rate: number;
+  intervalSecs: 15 | 30;
+  onSetInterval: (s: 15 | 30) => void;
+}) {
+  const w = 960;
+  const h = 90;
+  const pad = 4;
+  const max = Math.max(1e-9, ...points.map((p) => p.rate));
+  const x = (i: number) =>
+    pad + (i / Math.max(points.length - 1, 1)) * (w - 2 * pad);
+  const y = (v: number) => pad + (1 - v / max) * (h - 2 * pad);
+  const line = points
+    .map((p, i) => `${x(i).toFixed(1)},${y(p.rate).toFixed(1)}`)
+    .join(" ");
+  // Close the polyline down to the baseline for a soft area fill.
+  const area = `${pad},${h - pad} ${line} ${w - pad},${h - pad}`;
+  return (
+    <div className="mt-4 rounded border border-zinc-800 bg-zinc-900/40 p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span className="flex items-center gap-1.5 text-xs uppercase tracking-wide text-zinc-500">
+          <span className="inline-block h-2.5 w-2.5 rounded-sm bg-amber-300" />
+          Mining
+        </span>
+        <span className="text-xs text-zinc-400">
+          rate{" "}
+          <span className="tabular-nums text-amber-300">
+            {rate.toFixed(1)} m³/s
+          </span>
+        </span>
+        <span className="text-xs text-zinc-400">
+          session{" "}
+          <span className="tabular-nums text-amber-300">
+            {formatInt(Math.round(total))} m³
+          </span>
+        </span>
+        <span className="text-xs text-zinc-400">
+          peak{" "}
+          <span className="tabular-nums text-amber-300">
+            {max.toFixed(1)} m³/s
+          </span>
+        </span>
+        <div className="ml-auto flex overflow-hidden rounded border border-zinc-800 text-xs">
+          {([15, 30] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => onSetInterval(s)}
+              aria-pressed={intervalSecs === s}
+              className={`px-2 py-0.5 ${
+                intervalSecs === s
+                  ? "bg-zinc-700 text-zinc-100"
+                  : "bg-zinc-900 text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              {s}s
+            </button>
+          ))}
+        </div>
+      </div>
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        preserveAspectRatio="none"
+        className="w-full"
+        style={{ height: h }}
+      >
+        <line
+          x1={pad}
+          x2={w - pad}
+          y1={h - pad}
+          y2={h - pad}
+          stroke="#27272a"
+          strokeWidth="0.75"
+        />
+        {points.length > 1 && (
+          <>
+            <polygon points={area} fill="#fcd34d" fillOpacity="0.08" />
+            <polyline
+              points={line}
+              fill="none"
+              stroke="#fcd34d"
+              strokeWidth="1.75"
+            />
+          </>
+        )}
+      </svg>
+      <div className="mt-1 flex justify-between text-[10px] tabular-nums text-zinc-500">
+        <span>-{points.length * intervalSecs}s</span>
+        <span>now</span>
+      </div>
+    </div>
+  );
+}
 
 /** Session peak + hit-quality indicators under a primary DPS readout.
  *  "pen"/"smash"/"wreck" count the high-quality hits inside the rolling

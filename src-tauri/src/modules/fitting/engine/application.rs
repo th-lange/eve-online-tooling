@@ -8,14 +8,16 @@
 /// - `optimal_m`, `falloff_m` — attrs 54 / 158 from the resolved module store.
 /// - `tracking_speed` — attr 160 (rad/s).
 /// - `sig_resolution` — attr 105 (m) — the turret’s own resolution (40m light, etc.).
-/// - `target_speed`, `target_sig` — from the target profile (m/s, m).
-/// - `distance` — range to target (m).
+/// - `angular_velocity` — from the target profile (rad/s), given directly
+///   rather than derived from speed ÷ distance.
+/// - `target_sig` — target signature radius (m), from the target profile.
+/// - `distance` — range to target (m), for the falloff term only.
 pub fn turret_application(
     optimal_m: f64,
     falloff_m: f64,
     tracking_speed: f64,
     sig_resolution: f64,
-    target_speed: f64,
+    angular_velocity: f64,
     target_sig: f64,
     distance: f64,
 ) -> f64 {
@@ -26,8 +28,8 @@ pub fn turret_application(
     } else {
         0.0
     };
-    let tracking_term = if distance > 0.0 && tracking_speed > 0.0 && target_sig > 0.0 {
-        (target_speed / distance) * (sig_resolution / (target_sig * tracking_speed))
+    let tracking_term = if tracking_speed > 0.0 && target_sig > 0.0 {
+        angular_velocity * (sig_resolution / (target_sig * tracking_speed))
     } else {
         0.0
     };
@@ -82,6 +84,18 @@ mod tests {
         // At optimal + 1*falloff with zero tracking: 0.5^1 = 0.5.
         let app = turret_application(10_000.0, 5_000.0, 1.0, 40.0, 0.0, 40.0, 15_000.0);
         assert!((app - 0.5).abs() < 1e-6, "expected 0.5, got {app}");
+    }
+
+    #[test]
+    fn turret_tracking_loss_from_angular_velocity_directly() {
+        // At optimal (no falloff), tracking_speed=1.0 rad/s, sig_resolution=
+        // target_sig=40 → tracking_term == angular_velocity exactly.
+        let app = turret_application(10_000.0, 5_000.0, 1.0, 40.0, 0.02, 40.0, 10_000.0);
+        let expected = 0.5f64.powf(0.02f64.powi(2));
+        assert!(
+            (app - expected).abs() < 1e-9,
+            "expected {expected}, got {app}"
+        );
     }
 
     #[test]

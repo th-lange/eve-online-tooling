@@ -37,10 +37,11 @@ export function SlotBadge({ slot }: { slot?: SlotKind }) {
 }
 
 /**
- * Per-weapon ammo picker (a small crosshair on hover, amber when loaded). Opens
- * a popover listing only charges that actually load into this module (right
- * group + size + capacity), so you can't pick incompatible ammo. Selecting sets
- * the charge; "Remove ammo" clears it.
+ * Per-weapon ammo picker: a crosshair icon (amber when loaded) that opens a
+ * popover listing only charges that actually load into this module (right
+ * group + size + capacity), so you can't pick incompatible ammo. Renders
+ * nothing for a module that takes no charge at all. Selecting sets the
+ * charge; "Remove ammo" clears it.
  */
 export function ChargeControl({
   typeId,
@@ -68,7 +69,6 @@ export function ChargeControl({
   const charges = useQuery({
     queryKey: ["fitting", "charges", typeId],
     queryFn: () => fittingCompatibleCharges(typeId),
-    enabled: open,
   });
   const allCharges = charges.data ?? [];
   const list = q.trim()
@@ -81,19 +81,24 @@ export function ChargeControl({
     (all ? onSetChargeAll : onSetCharge)(c);
     setOpen(false);
   };
+  // Nothing to load: hide the control entirely rather than offering a picker
+  // that always says "no compatible charges" (still loading is treated the
+  // same as "has charges" to avoid a flash-then-vanish on first render).
+  if (charges.isSuccess && allCharges.length === 0 && !chargeTypeId) {
+    return null;
+  }
   return (
     <span className="relative ml-auto shrink-0">
       <button
         onClick={() => setOpen((o) => !o)}
         title={chargeTypeId ? "Change ammo / charge" : "Add ammo / charge"}
-        className={`flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] ${
+        className={`flex items-center rounded border p-1 ${
           chargeTypeId
             ? "border-amber-700/60 text-amber-400 hover:bg-amber-900/20"
             : "border-zinc-700 text-zinc-400 hover:border-zinc-600 hover:text-amber-300"
         }`}
       >
         <Crosshair size={11} />
-        {chargeTypeId ? "ammo" : "add ammo"}
       </button>
       {open && (
         <>
@@ -357,7 +362,7 @@ export function SlotGrid({
         key={i}
         className="group flex flex-col gap-1 rounded px-1 py-0.5 hover:bg-zinc-800/70"
       >
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
           <button
             onClick={() => onRemove(i)}
             className="flex shrink-0 items-center rounded p-0.5 text-zinc-500 group-hover:text-red-400"

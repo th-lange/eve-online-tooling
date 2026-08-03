@@ -28,6 +28,7 @@ export const STORAGE_KEYS = {
   dpsWindowSecs: "dps.windowSecs",
   dpsChartLayout: "dps.chartLayout",
   dpsChartBySource: "dps.chartBySource",
+  dpsMiningInterval: "dps.miningInterval",
   // Local Intel
   localintelSound: "localintel.sound",
   localintelAlertNeutrals: "localintel.alertNeutrals",

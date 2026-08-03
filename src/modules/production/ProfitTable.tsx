@@ -5,10 +5,16 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  Copy,
+  ExternalLink,
   Star,
   TrendingUp,
 } from "lucide-react";
-import type { ProfitBreakdown } from "../../lib/api";
+import {
+  errorMessage,
+  openMarketWindow,
+  type ProfitBreakdown,
+} from "../../lib/api";
 import {
   formatDuration,
   formatInt,
@@ -267,6 +273,20 @@ export function ProfitTable({
                     <td className="px-3 py-1.5">
                       <div className="flex items-center gap-1 text-zinc-200">
                         <span>{r.productName}</span>
+                        <CopyNameButton name={r.productName} />
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openMarketWindow(r.productTypeId).catch((err) =>
+                              alert(errorMessage(err)),
+                            );
+                          }}
+                          title="Open this item's market window in the EVE client (place a sell order there)"
+                          aria-label={`Open ${r.productName} in EVE`}
+                          className="rounded p-0.5 text-zinc-500 hover:text-indigo-400"
+                        >
+                          <ExternalLink size={13} />
+                        </button>
                         {incomplete && (
                           <AlertTriangle
                             size={13}
@@ -339,6 +359,26 @@ export function ProfitTable({
         </table>
       </div>
     </div>
+  );
+}
+
+/** Small icon button that copies an item name to the clipboard, with a
+ *  transient checkmark acknowledgement. Stops propagation so it doesn't
+ *  toggle the row's expanded breakdown. */
+function CopyNameButton({ name }: { name: string }) {
+  const { copied, copy } = useCopyToClipboard();
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        copy(name);
+      }}
+      title="Copy item name"
+      aria-label="Copy item name"
+      className="rounded p-0.5 text-zinc-500 hover:text-zinc-200"
+    >
+      {copied ? <Check size={13} /> : <Copy size={13} />}
+    </button>
   );
 }
 

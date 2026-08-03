@@ -533,8 +533,17 @@ fn cap_fitting_stats(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
         .ok_or("\"eft\" (string) is required")?;
     let sde = open_from_dir(ctx.app_data_dir)?;
     let fit: Fit = fitting::commands::import_eft_to_fit(&sde, eft_text)?;
-    let stats: FitStats =
-        fitting::simulate_fit(&sde, &fit, &|_skill_id| 5.0, None, None, None, None)?;
+    let stats: FitStats = fitting::simulate_fit(
+        &sde,
+        &fit,
+        &|_skill_id| 5.0,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )?;
     serde_json::to_value(stats).map_err(|e| e.to_string())
 }
 
@@ -746,9 +755,12 @@ mod tests {
     }
 
     /// Golden-fact regression pin for `docs/testing-mcp.md`'s fitting-stats
-    /// section: an empty Rifter's slot layout and CPU/PG output are the raw
-    /// hull attributes (no modules to trigger skill/rig modifiers). Gated on a
-    /// real SDE.
+    /// section: an empty Rifter's slot layout, plus CPU/PG output at the
+    /// all-V skill basis `simulate_fit` always resolves at. CPU/Power Grid
+    /// Management V apply their +25% to the hull unconditionally — no module
+    /// needs to be fitted to "trigger" them — so these are the raw hull
+    /// attributes (130 CPU / 41 PG) ×1.25, not the bare SDE values. Gated on
+    /// a real SDE.
     #[test]
     fn golden_fitting_stats_rifter_layout() {
         let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
@@ -761,12 +773,17 @@ mod tests {
         }
         let sde = Sde::open(&path).unwrap();
         let fit = fitting::commands::import_eft_to_fit(&sde, "[Rifter, Golden Test]").unwrap();
-        let stats = fitting::simulate_fit(&sde, &fit, &|_| 5.0, None, None, None, None).unwrap();
+        let stats =
+            fitting::simulate_fit(&sde, &fit, &|_| 5.0, None, None, None, None, None, None)
+                .unwrap();
         let layout = stats.layout.expect("dogma engine should resolve a layout");
         assert_eq!(layout.high_slots, 3);
         assert_eq!(layout.mid_slots, 3);
         assert_eq!(layout.low_slots, 4);
-        assert_eq!(layout.cpu_output, 130.0);
-        assert_eq!(layout.powergrid_output, 41.0);
+        assert_eq!(layout.cpu_output, 162.5, "130 base × 1.25 (CPU Management V)");
+        assert_eq!(
+            layout.powergrid_output, 51.25,
+            "41 base × 1.25 (Power Grid Management V)"
+        );
     }
 }

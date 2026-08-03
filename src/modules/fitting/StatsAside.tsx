@@ -4,7 +4,6 @@ import {
   type FitPrice,
   type FitStats,
   type FleetBoost,
-  type TargetProfile,
 } from "../../lib/api";
 import { formatDuration, formatInt, formatIsk } from "../../lib/format";
 import {
@@ -30,16 +29,6 @@ const DAMAGE_PRESETS = [
   ["Serpentis (therm/kin)", [0, 0.667, 0.333, 0]],
   ["Angel (exp/kin)", [0, 0, 0.5, 0.5]],
   ["Sansha/Blood (em/therm)", [0.5, 0.5, 0, 0]],
-] as const;
-
-// Target presets for applied-DPS + the DPS-vs-range curve (#701): [label, profile].
-const TARGET_PRESETS = [
-  ["None", null],
-  ["Frigate", { sigRadius: 40, speed: 400, distance: 10000 }],
-  ["Destroyer", { sigRadius: 60, speed: 300, distance: 15000 }],
-  ["Cruiser", { sigRadius: 130, speed: 250, distance: 25000 }],
-  ["Battlecruiser", { sigRadius: 280, speed: 180, distance: 35000 }],
-  ["Battleship", { sigRadius: 450, speed: 120, distance: 50000 }],
 ] as const;
 
 function Vitals({
@@ -147,8 +136,6 @@ export function StatsAside({
   onDamageProfile,
   neutGjs,
   onNeutGjs,
-  targetProfile,
-  onTargetProfile,
   fleetBoosts,
   onAddFleetBoost,
   onRemoveFleetBoost,
@@ -164,8 +151,6 @@ export function StatsAside({
   onDamageProfile: (p: [number, number, number, number] | undefined) => void;
   neutGjs: number | undefined;
   onNeutGjs: (n: number | undefined) => void;
-  targetProfile: TargetProfile | undefined;
-  onTargetProfile: (t: TargetProfile | undefined) => void;
   fleetBoosts: FleetBoost[];
   onAddFleetBoost: (boost: FleetBoost) => void;
   onRemoveFleetBoost: (index: number) => void;
@@ -266,31 +251,6 @@ export function StatsAside({
             <h3 className="text-xs uppercase tracking-wide text-zinc-500">
               DPS ({skillLabel})
             </h3>
-            <div className="space-y-0.5">
-              <div className="text-[10px] uppercase tracking-wide text-zinc-500">
-                Target
-              </div>
-              <select
-                value={targetProfile ? JSON.stringify(targetProfile) : ""}
-                onChange={(e) =>
-                  onTargetProfile(
-                    e.currentTarget.value
-                      ? (JSON.parse(e.currentTarget.value) as TargetProfile)
-                      : undefined,
-                  )
-                }
-                className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-100"
-              >
-                {TARGET_PRESETS.map(([label, profile]) => (
-                  <option
-                    key={label}
-                    value={profile ? JSON.stringify(profile) : ""}
-                  >
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </div>
             {jammedActive ? (
               <div className="text-sm text-amber-400">
                 Jammed — 0 applied (no lock)

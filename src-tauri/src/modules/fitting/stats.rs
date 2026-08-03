@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 
 use super::context::DogmaContext;
+use super::engine::abyssal::apply_abyssal_weather;
 use super::engine::application::{missile_application, turret_application};
 use super::engine::attr::{attr, AttrStore};
 use super::engine::capacitor::capacitor;
@@ -18,8 +19,9 @@ use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
 use super::engine::tank::{tank, DamageProfile, Layer};
 use super::engine::validate::{validate, ValItem};
 use super::types::{
-    CapStats, DpsBreakdown, EwTag, Fit, FitItem, FitProblem, FitStats, ModuleState, NavStats,
-    ResourceUsage, SlotKind, TankStats, TargetProfile, TargetStats, WeaponRange,
+    AbyssalWeatherSelection, CapStats, DpsBreakdown, EwTag, Fit, FitItem, FitProblem, FitStats,
+    ModuleState, NavStats, ResourceUsage, SlotKind, TankStats, TargetProfile, TargetStats,
+    WeaponRange,
 };
 use crate::sde::{Sde, ShipLayout};
 
@@ -67,6 +69,15 @@ pub(super) struct DogmaStats {
 /// (#705) are command-burst/fleet-link modules the user is "receiving" from a
 /// fleet member — `(module_type_id, charge_type_id)` pairs, `-1` meaning no
 /// charge loaded — whose `GangModifier` effects project onto this ship.
+/// `environment_effect` is a wormhole-class or Pochven-metaliminal-storm
+/// "environment beacon" type id the fit is sitting in (e.g. "Class 5 Pulsar
+/// Effects" or "Strong Metaliminal Plasma Firestorm"): its own
+/// `ItemModifier`/`LocationRequiredSkillModifier` effects target `shipID`
+/// exactly like a fleet-boost module, so it resolves through the same
+/// external-modifier pass. `abyssal_weather` is a *separate*, mutually
+/// exclusive choice — Abyssal Deadspace weather, applied as a hardcoded
+/// post-resolve adjustment (see `engine::abyssal`) since it has no dogma
+/// representation in the SDE at all.
 #[allow(clippy::too_many_arguments)] // one arg per independent sim input; a struct would just rename them
 pub(super) fn run_dogma(
     sde: &Sde,
@@ -77,6 +88,8 @@ pub(super) fn run_dogma(
     neut_gjs: f64,
     target_profile: Option<&TargetProfile>,
     fleet_boosts: &[(i64, i64)],
+    environment_effect: Option<i64>,
+    abyssal_weather: Option<AbyssalWeatherSelection>,
 ) -> Result<DogmaStats, String> {
     // Only slots that affect ship stats (drones/cargo/implants don't here).
     let module_items: Vec<&FitItem> = fit
@@ -115,7 +128,8 @@ pub(super) fn run_dogma(
             + drone_items.len()
             + implant_items.len()
             + fit.projected.len()
-            + fleet_boosts.len() * 2,
+            + fleet_boosts.len() * 2
+            + environment_effect.is_some() as usize,
     );
     extra_ids.push(fit.ship_type_id);
     extra_ids.extend(module_items.iter().map(|i| i.type_id));
@@ -129,6 +143,7 @@ pub(super) fn run_dogma(
             .iter()
             .filter_map(|&(_, c)| (c > 0).then_some(c)),
     );
+    extra_ids.extend(environment_effect);
     let ctx = DogmaContext::load(sde, &extra_ids)?;
 
     let mut ship = ctx.entity(fit.ship_type_id, Vec::new());
@@ -199,8 +214,12 @@ pub(super) fn run_dogma(
     // "receiving". Built as ordinary entities; a loaded charge's base
     // attributes merge in on top of the module's own (command-burst charges
     // carry the burst's magnitude attribute, which the module's GangModifier
-    // effect reads to scale its bonus).
-    let mut gang_modules = Vec::with_capacity(fleet_boosts.len());
+    // effect reads to scale its bonus). A wormhole/Pochven `environment_effect`
+    // beacon is appended the same way — its `ItemModifier`/
+    // `LocationRequiredSkillModifier` effects already target `shipID`, so it
+    // needs no special-casing beyond sitting in this external-modifier list.
+    let mut gang_modules =
+        Vec::with_capacity(fleet_boosts.len() + environment_effect.is_some() as usize);
     for &(mod_id, charge_id) in fleet_boosts {
         let mut e = ctx.entity(mod_id, required_skills_of(&ctx.attrs, mod_id));
         if charge_id > 0 {
@@ -209,6 +228,9 @@ pub(super) fn run_dogma(
             }
         }
         gang_modules.push(e);
+    }
+    if let Some(env_id) = environment_effect {
+        gang_modules.push(ctx.entity(env_id, required_skills_of(&ctx.attrs, env_id)));
     }
 
     let mut resolved = resolve(
@@ -241,6 +263,13 @@ pub(super) fn run_dogma(
         })
         .collect();
     apply_projection(&mut resolved.ship, &projected);
+
+    // Abyssal Deadspace weather (#env-selector): hardcoded bonus/penalty pair,
+    // not dogma-driven — must land before weapon_ranges_of/tank_of/
+    // capacitor_of/navigation read the attributes it touches.
+    if let Some(selection) = abyssal_weather {
+        apply_abyssal_weather(&mut resolved.ship, &mut resolved.modules, selection);
+    }
 
     // T3 subsystems grant slots/hardpoints to the ship procedurally (#178).
     for (it, store) in module_items.iter().zip(&resolved.modules) {
@@ -636,17 +665,23 @@ pub(super) fn dps_of(
 /// (#701) folded onto the paper per-weapon DPS, mirroring [`dps_of`]'s
 /// iteration but scaling each weapon by its `application` factor at
 /// `distance`. `weapon_ranges` gates missiles beyond their flight range.
-#[allow(clippy::too_many_arguments)] // mirrors run_dogma's inputs at one distance
+/// `target.speed` feeds the missile explosion-velocity comparison;
+/// `target.angular_velocity` (rad/s, distance-independent) feeds turret/
+/// drone tracking loss — see [`TargetProfile`], including its two optional
+/// speed-vs-target gates (`drones_keep_pace`, `missiles_need_overtake`).
 fn applied_dps_at(
     resolved: &ResolvedFit,
     module_items: &[&FitItem],
     drone_items: &[&FitItem],
     drone_active: &[i32],
-    target_sig: f64,
-    target_speed: f64,
+    target: &TargetProfile,
     distance: f64,
     weapon_ranges: &[WeaponRange],
 ) -> DpsBreakdown {
+    let target_sig = target.sig_radius;
+    let target_speed = target.speed;
+    let angular_velocity = target.angular_velocity;
+
     let mut turret_dps = 0.0;
     let mut missile_dps = 0.0;
     for (i, store) in resolved.modules.iter().enumerate() {
@@ -682,7 +717,7 @@ fn applied_dps_at(
                 falloff,
                 tracking_speed,
                 sig_resolution,
-                target_speed,
+                angular_velocity,
                 target_sig,
                 distance,
             );
@@ -692,13 +727,20 @@ fn applied_dps_at(
             if explosion_radius <= 0.0 {
                 continue; // not a missile weapon
             }
-            let explosion_velocity = charge.get(104);
-            let mut app = missile_application(
-                explosion_radius,
-                explosion_velocity,
-                target_sig,
-                target_speed,
-            );
+            // Missile flight velocity (37) — the missile's own speed, distinct
+            // from `explosionVelocity` (104), which only governs the damage
+            // taper for fast/small targets it *does* reach.
+            let missile_speed = charge.get(37);
+            let outrun = target.missiles_need_overtake
+                && target_speed > 0.0
+                && missile_speed > 0.0
+                && missile_speed < target_speed;
+            let mut app = if outrun {
+                0.0
+            } else {
+                let explosion_velocity = charge.get(104);
+                missile_application(explosion_radius, explosion_velocity, target_sig, target_speed)
+            };
             let item = module_items.get(i);
             let in_range = item.is_none_or(|it| {
                 weapon_ranges
@@ -734,20 +776,37 @@ fn applied_dps_at(
                 40.0
             }
         };
-        // Drones are always within optimal of their orbited target in normal
-        // use, so the falloff term is forced to zero — pass the tracking
-        // distance as both `optimal` and `distance` so `turret_application`
-        // only picks up the tracking penalty.
-        let tracking_distance = store.get(54).max(1000.0);
-        let app = turret_application(
-            tracking_distance,
-            0.0,
-            tracking_speed,
-            sig_resolution,
-            target_speed,
-            target_sig,
-            tracking_distance,
-        );
+        // A drone at or above the target's speed is assumed to catch up and
+        // orbit perfectly (PYFA's "auto" drone mode) — full application, no
+        // tracking formula. Otherwise it can't keep formation: unlike a
+        // turret (whose tracking uses the target's `angular_velocity`
+        // directly, independent of range, since distance is swept by the
+        // curve), a drone's engagement distance is synthetic — its own
+        // optimal range, not a user input — so its worst-case angular
+        // velocity is derived from the target's *actual* speed ÷ that
+        // distance. This is what makes an absurdly fast target crush a slow
+        // drone's application toward zero instead of being silently capped
+        // by whatever `angular_velocity` a turret preset happens to carry.
+        // Falloff is forced to zero (drones stay in optimal in normal use)
+        // by passing the tracking distance as both `optimal` and `distance`.
+        let drone_speed = store.get(37);
+        let keeps_pace =
+            target.drones_keep_pace && drone_speed > 1.0 && drone_speed >= target_speed;
+        let app = if keeps_pace {
+            1.0
+        } else {
+            let tracking_distance = store.get(54).max(1000.0);
+            let drone_angular_velocity = target_speed / tracking_distance;
+            turret_application(
+                tracking_distance,
+                0.0,
+                tracking_speed,
+                sig_resolution,
+                drone_angular_velocity,
+                target_sig,
+                tracking_distance,
+            )
+        };
         drone_dps += mult * damage_per_shot * count as f64 / rof_seconds * app;
     }
 
@@ -761,7 +820,10 @@ fn applied_dps_at(
 
 /// Applied DPS against a target profile (#701): same weapon set as
 /// [`dps_of`], each scaled by its hit-quality `application` factor at
-/// `target.distance`.
+/// point-blank range (distance 0 — no falloff loss, isolating the
+/// tracking/explosion-velocity penalties `target` describes). The DPS-vs-
+/// range curve ([`dps_range_curve_of`]) is where falloff enters, sweeping
+/// distance while applying this same target profile at every sample.
 pub(super) fn applied_dps_of(
     resolved: &ResolvedFit,
     module_items: &[&FitItem],
@@ -775,9 +837,8 @@ pub(super) fn applied_dps_of(
         module_items,
         drone_items,
         drone_active,
-        target.sig_radius,
-        target.speed,
-        target.distance,
+        target,
+        0.0,
         weapon_ranges,
     )
 }
@@ -785,7 +846,9 @@ pub(super) fn applied_dps_of(
 /// DPS-over-range curve (#701): 30 linearly spaced `(distance_m,
 /// total_applied_dps)` samples from 0 to the fit's maximum effective range
 /// (the largest turret optimal+3×falloff or missile flight range, capped at
-/// 1000km). Empty when the fit has no ranged weapon.
+/// 1000km). Empty when the fit has no ranged weapon. `target`'s angular
+/// velocity applies unchanged at every sampled distance — only the falloff
+/// term (and missile flight-range gate) vary along the curve.
 pub(super) fn dps_range_curve_of(
     resolved: &ResolvedFit,
     module_items: &[&FitItem],
@@ -814,8 +877,7 @@ pub(super) fn dps_range_curve_of(
                 module_items,
                 drone_items,
                 drone_active,
-                target.sig_radius,
-                target.speed,
+                target,
                 distance,
                 weapon_ranges,
             )
@@ -1012,6 +1074,10 @@ pub(super) fn required_skills_of(attrs: &AttrMap, type_id: i64) -> Vec<i64> {
 /// assemble [`FitStats`]. Kept engine-identical so both surfaces agree.
 /// `fleet_boosts` (#705) is `[module_type_id, charge_type_id]` pairs (`-1` for
 /// no charge) of command-burst/fleet-link modules the fit is "receiving".
+/// `environment_effect` is a wormhole-class or Pochven-metaliminal-storm
+/// beacon type id the fit is sitting in — see [`run_dogma`].
+/// `abyssal_weather` is the separate, mutually exclusive Abyssal Deadspace
+/// weather choice (also see [`run_dogma`]).
 pub(crate) fn simulate_fit(
     sde: &Sde,
     fit: &Fit,
@@ -1020,6 +1086,8 @@ pub(crate) fn simulate_fit(
     neut_gjs: Option<f64>,
     target_profile: Option<TargetProfile>,
     fleet_boosts: Option<Vec<[i64; 2]>>,
+    environment_effect: Option<i64>,
+    abyssal_weather: Option<AbyssalWeatherSelection>,
 ) -> Result<FitStats, String> {
     let Some(ship) = sde
         .ship_layout(fit.ship_type_id)
@@ -1094,6 +1162,8 @@ pub(crate) fn simulate_fit(
         neut,
         target_profile.as_ref(),
         &boosts,
+        environment_effect,
+        abyssal_weather,
     )
     .ok();
 
@@ -1356,11 +1426,12 @@ mod tests {
         assert_eq!(dps.total, dps.turret + dps.drone);
     }
 
-    /// A turret-armed fit against a far/small/fast target profile applies
-    /// less DPS than the paper (full-application) figure — falloff and
-    /// tracking both bite (#701).
+    /// A turret-armed fit against a small/fast (hard-to-track) target profile
+    /// applies less DPS than the paper (full-application) figure — tracking
+    /// bites. `applied_dps_of` evaluates at point-blank range, so falloff
+    /// never enters here; that's the DPS-vs-range curve's job (below).
     #[test]
-    fn applied_dps_of_reduces_paper_dps_against_a_far_target() {
+    fn applied_dps_of_reduces_paper_dps_from_tracking_loss() {
         let turret = store(&[
             (64, 5.0),      // damage multiplier
             (51, 2000.0),   // 2s RoF
@@ -1378,7 +1449,9 @@ mod tests {
         let target = TargetProfile {
             sig_radius: 40.0, // small, fast frigate — hard to track
             speed: 400.0,
-            distance: 40_000.0, // well beyond optimal + falloff
+            angular_velocity: 0.05, // rad/s — well past this turret's tracking
+            drones_keep_pace: false,
+            missiles_need_overtake: false,
         };
 
         let paper = dps_of(&resolved, &module_items, &[], &[]);
@@ -1391,6 +1464,179 @@ mod tests {
         );
         assert!(applied.turret > 0.0, "some rounds should still land");
         assert_eq!(applied.total, applied.turret);
+    }
+
+    /// The DPS-vs-range curve applies the same (distance-independent)
+    /// angular velocity at every sample, so it's falloff alone that makes it
+    /// monotonically non-increasing past optimal (#701).
+    #[test]
+    fn dps_range_curve_of_falls_off_with_distance() {
+        let turret = store(&[
+            (64, 5.0),
+            (51, 2000.0),
+            (54, 1_000.0), // optimal: 1km, so the curve exercises falloff early
+            (158, 2_000.0),
+            (160, 40.0),
+            (105, 40.0),
+        ]);
+        let charge = store(&[(114, 25.0), (116, 25.0), (117, 25.0), (118, 25.0)]);
+        let resolved = resolved_fit(vec![turret], vec![Some(charge)], Vec::new());
+        let it = item(100, Some(200), ModuleState::Active, 1);
+        let module_items: Vec<&FitItem> = vec![&it];
+        let ranges = [WeaponRange {
+            type_id: 100,
+            charge_type_id: Some(200),
+            optimal: 1_000.0,
+            falloff: 2_000.0,
+        }];
+        let target = TargetProfile {
+            sig_radius: 100.0,
+            speed: 200.0,
+            angular_velocity: 0.0, // isolate falloff from tracking
+            drones_keep_pace: false,
+            missiles_need_overtake: false,
+        };
+
+        let curve = dps_range_curve_of(&resolved, &module_items, &[], &[], &target, &ranges);
+        assert_eq!(curve.len(), 30);
+        let (d0, dps0) = curve[0];
+        assert_eq!(d0, 0.0, "first sample is point-blank");
+        assert!(dps0 > 0.0, "full damage at point-blank (within optimal)");
+        let (_, dps_last) = curve[curve.len() - 1];
+        assert!(
+            dps_last < dps0,
+            "DPS at max range {dps_last} should be below point-blank {dps0}"
+        );
+    }
+
+    /// A drone at or above the target's speed is assumed to catch up and
+    /// orbit perfectly when `drones_keep_pace` is set — full application,
+    /// bypassing what would otherwise be a crippling tracking penalty
+    /// (PYFA's "auto" drone mode). Off (the default), the ordinary tracking
+    /// formula still bites.
+    #[test]
+    fn drones_keep_pace_skips_tracking_loss_when_fast_enough() {
+        let drone = store(&[
+            (64, 1.0),      // damage multiplier
+            (51, 1_000.0),  // 1s RoF
+            (54, 20_000.0), // optimal
+            (160, 0.5),     // tracking speed — poor
+            (105, 40.0),    // sig resolution
+            (37, 3_000.0),  // drone max velocity — faster than the target
+            (114, 25.0),
+            (116, 25.0),
+            (117, 25.0),
+            (118, 25.0), // 100 dmg per shot
+        ]);
+        let resolved = resolved_fit(Vec::new(), Vec::new(), vec![drone]);
+        let d_item = drone_item(300, 1, Some(1));
+        let drone_items: Vec<&FitItem> = vec![&d_item];
+
+        let target = TargetProfile {
+            sig_radius: 40.0,
+            speed: 2_000.0,        // slower than the drone's 3000 m/s
+            angular_velocity: 0.5, // would otherwise cripple this drone's tracking
+            drones_keep_pace: true,
+            missiles_need_overtake: false,
+        };
+        let applied = applied_dps_of(&resolved, &[], &drone_items, &[1], &target, &[]);
+        assert_eq!(
+            applied.drone,
+            1.0 * 100.0 / 1.0,
+            "full application: mult × dmg ÷ rof, no tracking loss"
+        );
+
+        let target_off = TargetProfile {
+            drones_keep_pace: false,
+            ..target
+        };
+        let applied_off = applied_dps_of(&resolved, &[], &drone_items, &[1], &target_off, &[]);
+        assert!(
+            applied_off.drone < applied.drone,
+            "toggle off: the tracking formula bites as usual"
+        );
+    }
+
+    /// Regression: when a drone can't keep pace, its tracking must be driven
+    /// by the *target's actual speed*, not the turret-only `angular_velocity`
+    /// knob — otherwise an absurdly fast target (which any drone obviously
+    /// can't track) would silently land full-ish damage because the modest
+    /// `angular_velocity` a preset happens to carry never sees the real speed.
+    #[test]
+    fn drone_application_vanishes_against_an_absurdly_fast_target() {
+        let drone = store(&[
+            (64, 1.0),
+            (51, 1_000.0),
+            (54, 20_000.0), // optimal / engagement distance
+            (160, 40.0),    // tracking speed — decent, irrelevant at this speed
+            (105, 40.0),
+            (37, 3_000.0), // drone max velocity — utterly outpaced below
+            (114, 25.0),
+            (116, 25.0),
+            (117, 25.0),
+            (118, 25.0),
+        ]);
+        let resolved = resolved_fit(Vec::new(), Vec::new(), vec![drone]);
+        let d_item = drone_item(300, 1, Some(1));
+        let drone_items: Vec<&FitItem> = vec![&d_item];
+
+        let target = TargetProfile {
+            sig_radius: 40.0,
+            speed: 4e14, // absurd — no drone can ever catch this
+            angular_velocity: 0.04, // a modest, unrelated turret-preset value
+            drones_keep_pace: true,
+            missiles_need_overtake: false,
+        };
+        let applied = applied_dps_of(&resolved, &[], &drone_items, &[1], &target, &[]);
+        assert_eq!(
+            applied.drone, 0.0,
+            "an inescapably fast target should crush drone application to (near) zero"
+        );
+    }
+
+    /// A missile slower than the target's own speed (attr 37 — flight
+    /// velocity, not `explosionVelocity`) can never catch it: zero
+    /// application when `missiles_need_overtake` is set. Off (the default,
+    /// matching PYFA — it doesn't model this), the ordinary explosion-
+    /// velocity reduction applies instead of a hard miss.
+    #[test]
+    fn missiles_need_overtake_zeroes_dps_against_faster_target() {
+        let launcher = store(&[(51, 2_000.0)]); // 2s RoF, no damage mult → missile branch
+        let charge = store(&[
+            (114, 25.0),
+            (116, 25.0),
+            (117, 25.0),
+            (118, 25.0), // 100 dmg
+            (103, 40.0),    // explosion radius
+            (104, 2_000.0), // explosion velocity
+            (37, 1_000.0),  // missile flight velocity — slower than the target
+        ]);
+        let resolved = resolved_fit(vec![launcher], vec![Some(charge)], Vec::new());
+        let it = item(100, Some(200), ModuleState::Active, 1);
+        let module_items: Vec<&FitItem> = vec![&it];
+
+        let target = TargetProfile {
+            sig_radius: 100.0,
+            speed: 5_000.0, // faster than the missile's own 1000 m/s
+            angular_velocity: 0.0,
+            drones_keep_pace: false,
+            missiles_need_overtake: true,
+        };
+        let applied = applied_dps_of(&resolved, &module_items, &[], &[], &target, &[]);
+        assert_eq!(
+            applied.missile, 0.0,
+            "a missile slower than the target should never connect"
+        );
+
+        let target_off = TargetProfile {
+            missiles_need_overtake: false,
+            ..target
+        };
+        let applied_off = applied_dps_of(&resolved, &module_items, &[], &[], &target_off, &[]);
+        assert!(
+            applied_off.missile > 0.0,
+            "toggle off: falls back to the explosion-velocity model"
+        );
     }
 
     fn drone_item(type_id: i64, qty: i32, active: Option<i32>) -> FitItem {

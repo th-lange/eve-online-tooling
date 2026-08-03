@@ -174,16 +174,75 @@ pub struct WeaponRange {
     pub falloff: f64,
 }
 
-/// Target profile for applied-DPS calculation (#701).
+/// Target profile for applied-DPS calculation (#701). Signature radius and
+/// speed feed the missile explosion-velocity comparison directly; turret
+/// tracking uses `angular_velocity` (rad/s) as given, rather than deriving a
+/// worst-case value from speed ÷ distance — distance is swept separately by
+/// the DPS-vs-range curve, which applies this same (distance-independent)
+/// angular velocity at every sampled range.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TargetProfile {
     /// Signature radius (m).
     pub sig_radius: f64,
-    /// Speed (m/s).
+    /// Speed (m/s) — compared against a missile's explosion velocity, and
+    /// (when the toggles below are set) against drones'/missiles' own speed.
     pub speed: f64,
-    /// Distance from the shooter (m).
-    pub distance: f64,
+    /// Angular velocity (rad/s) — drives turret tracking loss directly. A
+    /// drone that can't keep pace (see `drones_keep_pace` below) derives its
+    /// *own* worst-case angular velocity from the target's actual `speed`
+    /// instead of this field, since a drone's engagement distance is
+    /// synthetic (its own optimal range) rather than a swept/user input —
+    /// this is what makes an inescapably fast target crush a slow drone's
+    /// application toward zero rather than being capped by whatever value
+    /// happens to be set here for turrets.
+    pub angular_velocity: f64,
+    /// Drones at or above the target's speed assume perfect application
+    /// (skip the tracking formula entirely) instead of a plain tracking-loss
+    /// calc — mirrors PYFA's "auto" drone mode ("hard to simulate drone
+    /// behavior, so assume chance to hit is 1 for mobile drones which catch
+    /// up with target"). A drone slower than the target still runs the
+    /// tracking formula (driven by `speed`, see `angular_velocity`).
+    pub drones_keep_pace: bool,
+    /// Missiles slower than the target's own speed (attr 37, the missile's
+    /// flight velocity — not `explosionVelocity`) can never catch it: zero
+    /// application, instead of the explosion-velocity-only reduction.
+    /// PYFA doesn't model this; off by default to match it.
+    pub missiles_need_overtake: bool,
+}
+
+/// Which Abyssal Deadspace weather a fit is sitting in (#env-selector). See
+/// [`AbyssalWeatherSelection`] and `engine::abyssal` — these bonus/penalty
+/// magnitudes are hardcoded from community reference data, not the SDE
+/// (Abyssal weather has no dogma-attribute representation there at all,
+/// unlike Pochven metaliminal storms).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AbyssalWeather {
+    Dark,
+    Electrical,
+    Exotic,
+    Firestorm,
+    Gamma,
+}
+
+/// An Abyssal Deadspace weather + its penalty severity. Each weather's
+/// bonus is a fixed 50% regardless of tier; only the penalty scales:
+///
+/// | Weather | Penalty | Bonus |
+/// |---|---|---|
+/// | Dark | −tier% turret optimal + falloff range | +50% max velocity |
+/// | Electrical | −tier% EM resist (shield/armor/hull) | −50% cap recharge time |
+/// | Exotic | −tier% kinetic resist (shield/armor/hull) | +50% scan resolution |
+/// | Firestorm | −tier% thermal resist (shield/armor/hull) | +50% armor HP |
+/// | Gamma | −tier% explosive resist (shield/armor/hull) | +50% shield HP |
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AbyssalWeatherSelection {
+    pub weather: AbyssalWeather,
+    /// Penalty magnitude (%) — commonly 30/50/70 per filament tier, but any
+    /// value is accepted (the frontend offers those three as presets).
+    pub tier_pct: f64,
 }
 
 /// Navigation: speed, agility, align and signature (#175).

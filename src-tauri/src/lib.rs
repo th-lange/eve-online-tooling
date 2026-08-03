@@ -282,6 +282,7 @@ pub fn run() {
             modules::fitting::commands::fitting_classify_slots,
             modules::fitting::commands::fitting_module_info,
             modules::fitting::commands::fitting_compatible_charges,
+            modules::fitting::commands::fitting_environment_effects,
             modules::fitting::commands::fitting_export_eft,
             modules::fitting::commands::fitting_esi_list,
             modules::fitting::commands::fitting_esi_push,

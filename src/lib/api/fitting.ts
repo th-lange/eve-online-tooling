@@ -169,11 +169,20 @@ export interface FleetBoost {
   chargeTypeId?: number;
 }
 
-/** Target profile for applied-DPS calculation. */
+/** Target profile for applied-DPS calculation. `speed` feeds the missile
+ *  explosion-velocity comparison; `angularVelocity` (rad/s) drives turret/
+ *  drone tracking loss directly, independent of range — falloff and missile
+ *  range gating come from the DPS-vs-range curve, which sweeps distance.
+ *  `dronesKeepPace`: drones at/above the target's speed assume perfect
+ *  application instead of the tracking formula (PYFA's "auto" drone mode).
+ *  `missilesNeedOvertake`: missiles slower than the target's speed never
+ *  connect at all — not modeled by PYFA, off by default to match it. */
 export interface TargetProfile {
   sigRadius: number;
   speed: number;
-  distance: number;
+  angularVelocity: number;
+  dronesKeepPace: boolean;
+  missilesNeedOvertake: boolean;
 }
 
 /** Navigation: speed, agility, align and signature. */
@@ -275,6 +284,42 @@ export function fittingCompatibleCharges(typeId: number): Promise<IdName[]> {
   return invoke<IdName[]>("fitting_compatible_charges", { typeId });
 }
 
+/** Wormhole-class ("Class N \<effect\> Effects") and Pochven metaliminal-storm
+ *  ("Weak/Strong Metaliminal \<weather\> Storm") environment beacons a fit can
+ *  be sitting in — drives the environment selector (#env-selector). Not
+ *  Abyssal Deadspace weather (that's a per-filament-pocket mechanic with no
+ *  static SDE data — see [`AbyssalWeatherSelection`], a separate, hardcoded
+ *  path). */
+export function fittingEnvironmentEffects(): Promise<IdName[]> {
+  return invoke<IdName[]>("fitting_environment_effects");
+}
+
+/** Which Abyssal Deadspace weather a fit is sitting in. Hardcoded from
+ *  community reference data — Abyssal weather has no dogma-attribute
+ *  representation in the SDE at all (unlike Pochven metaliminal storms,
+ *  which are dogma-driven via [`fittingEnvironmentEffects`]). Each weather's
+ *  bonus is a flat 50% regardless of tier; only the resist penalty scales:
+ *
+ *  | Weather | Penalty | Bonus |
+ *  |---|---|---|
+ *  | Dark | −tier% turret optimal + falloff | +50% max velocity |
+ *  | Electrical | −tier% EM resist | −50% cap recharge time |
+ *  | Exotic | −tier% kinetic resist | +50% scan resolution |
+ *  | Firestorm | −tier% thermal resist | +50% armor HP |
+ *  | Gamma | −tier% explosive resist | +50% shield HP | */
+export type AbyssalWeather =
+  | "dark"
+  | "electrical"
+  | "exotic"
+  | "firestorm"
+  | "gamma";
+
+export interface AbyssalWeatherSelection {
+  weather: AbyssalWeather;
+  /** Penalty magnitude (%) — 30/50/70 per filament tier. */
+  tierPct: number;
+}
+
 /** Serialize a fit to an EFT clipboard string. */
 export function fittingExportEft(fit: Fit): Promise<string> {
   return invoke<string>("fitting_export_eft", { fit });
@@ -285,7 +330,10 @@ export type SkillSource = "allFive" | "character";
 
 /** Simulate a fit: validation + dogma stats at the chosen skill basis.
  *  `fleetBoosts` (#705) are command-burst/fleet-link modules the fit is
- *  "receiving" from a fleet member. */
+ *  "receiving" from a fleet member. `environmentEffect` is a wormhole-class
+ *  or Pochven-metaliminal-storm environment beacon type id the fit is
+ *  sitting in. `abyssalWeather` is the separate, mutually exclusive Abyssal
+ *  Deadspace weather choice. */
 export function fittingSimulate(
   fit: Fit,
   skillSource: SkillSource = "allFive",
@@ -293,6 +341,8 @@ export function fittingSimulate(
   neutGjs?: number,
   targetProfile?: TargetProfile,
   fleetBoosts?: FleetBoost[],
+  environmentEffect?: number | null,
+  abyssalWeather?: AbyssalWeatherSelection | null,
 ): Promise<FitStats> {
   return invoke<FitStats>("fitting_simulate", {
     fit,
@@ -303,6 +353,8 @@ export function fittingSimulate(
     fleetBoosts: fleetBoosts
       ? fleetBoosts.map((b) => [b.moduleTypeId, b.chargeTypeId ?? -1])
       : null,
+    environmentEffect: environmentEffect ?? null,
+    abyssalWeather: abyssalWeather ?? null,
   });
 }
 
