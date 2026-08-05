@@ -281,6 +281,8 @@ pub struct ShipLayout {
     pub low_slots: i64,
     pub rig_slots: i64,
     pub subsystem_slots: i64,
+    /// 1 for Tactical Destroyers (groupID 1305); 0 for all other hulls.
+    pub mode_slots: i64,
     pub turret_hardpoints: i64,
     pub launcher_hardpoints: i64,
     pub cpu_output: f64,

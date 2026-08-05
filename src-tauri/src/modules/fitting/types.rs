@@ -20,6 +20,8 @@ pub enum SlotKind {
     Implant,
     Booster,
     Cargo,
+    /// Tactical Destroyer mode slot (one per T3D hull).
+    Mode,
 }
 
 /// A module's activation state (affects which effects apply and its resource use).

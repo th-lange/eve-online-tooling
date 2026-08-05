@@ -154,6 +154,7 @@ pub(super) fn slot_capacity(layout: &ShipLayout, slot: SlotKind) -> i64 {
         SlotKind::Low => layout.low_slots,
         SlotKind::Rig => layout.rig_slots,
         SlotKind::Subsystem => layout.subsystem_slots,
+        SlotKind::Mode => layout.mode_slots,
         _ => 0,
     }
 }
@@ -1215,6 +1216,7 @@ mod tests {
             low_slots: 2,
             rig_slots: 1,
             subsystem_slots: 0,
+            mode_slots: 0,
             turret_hardpoints: 4,
             launcher_hardpoints: 0,
             cpu_output: 100.0,

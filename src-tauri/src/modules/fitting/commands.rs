@@ -79,13 +79,7 @@ pub(crate) fn import_eft_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
         let Some((type_id, _)) = sde.type_by_name(&m.name).map_err(|e| e.to_string())? else {
             continue; // unknown module — skip
         };
-        let effects: Vec<i64> = sde
-            .type_effects(type_id)
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|(e, _)| e)
-            .collect();
-        let slot = eft::slot_for_effects(&effects).unwrap_or(SlotKind::Cargo);
+        let slot = classify_slot(sde, type_id)?;
         let charge_type_id = match &m.charge {
             Some(c) => sde
                 .type_by_name(c)
@@ -153,12 +147,16 @@ fn next_slot_index(items: &[FitItem], slot: SlotKind) -> i32 {
 }
 
 /// Classify a type's slot: drones (category 18) and implants (20) by category,
-/// otherwise from its slot-defining dogma effects, falling back to Cargo.
+/// mode items (group 1306 — Ship Modifiers) by group, otherwise from its
+/// slot-defining dogma effects, falling back to Cargo.
 fn classify_slot(sde: &Sde, type_id: i64) -> Result<SlotKind, String> {
     match sde.type_category(type_id).map_err(|e| e.to_string())? {
         Some(18) => return Ok(SlotKind::Drone),
         Some(20) => return Ok(SlotKind::Implant),
         _ => {}
+    }
+    if sde.type_group(type_id).map_err(|e| e.to_string())? == Some(1306) {
+        return Ok(SlotKind::Mode);
     }
     let effects: Vec<i64> = sde
         .type_effects(type_id)
@@ -169,13 +167,14 @@ fn classify_slot(sde: &Sde, type_id: i64) -> Result<SlotKind, String> {
     Ok(eft::slot_for_effects(&effects).unwrap_or(SlotKind::Cargo))
 }
 
-/// [`classify_slot`], batched over the whole candidate set: two bulk SDE
-/// queries (categories, effects) instead of two per candidate (#761).
+/// [`classify_slot`], batched over the whole candidate set: three bulk SDE
+/// queries (categories, groups, effects) instead of three per candidate (#761).
 fn classify_slots_batch(
     sde: &Sde,
     type_ids: &[i64],
 ) -> Result<HashMap<i64, SlotKind>, String> {
     let categories = sde.types_categories(type_ids).map_err(|e| e.to_string())?;
+    let groups = sde.types_groups(type_ids).map_err(|e| e.to_string())?;
     let effects = sde.types_effects(type_ids).map_err(|e| e.to_string())?;
     Ok(type_ids
         .iter()
@@ -184,8 +183,12 @@ fn classify_slots_batch(
                 Some(18) => SlotKind::Drone,
                 Some(20) => SlotKind::Implant,
                 _ => {
-                    let effs = effects.get(&id).cloned().unwrap_or_default();
-                    eft::slot_for_effects(&effs).unwrap_or(SlotKind::Cargo)
+                    if groups.get(&id).copied() == Some(1306) {
+                        SlotKind::Mode
+                    } else {
+                        let effs = effects.get(&id).cloned().unwrap_or_default();
+                        eft::slot_for_effects(&effs).unwrap_or(SlotKind::Cargo)
+                    }
                 }
             };
             (id, slot)

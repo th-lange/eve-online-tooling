@@ -49,6 +49,7 @@ pub fn validate(ship: &ShipLayout, items: &[ValItem]) -> (ResourceUsage, Vec<Fit
         (SlotKind::Low, ship.low_slots, "low"),
         (SlotKind::Rig, ship.rig_slots, "rig"),
         (SlotKind::Subsystem, ship.subsystem_slots, "subsystem"),
+        (SlotKind::Mode, ship.mode_slots, "mode"),
     ] {
         let used = items.iter().filter(|i| i.slot == slot).count() as i64;
         if used > max {
@@ -135,6 +136,7 @@ mod tests {
             low_slots: 4,
             rig_slots: 3,
             subsystem_slots: 0,
+            mode_slots: 0,
             turret_hardpoints: 3,
             launcher_hardpoints: 2,
             cpu_output: 130.0,

@@ -349,17 +349,17 @@ impl Sde {
     /// Reads the relevant dogma attributes by id (verified against the SDE);
     /// `None` if the type doesn't exist.
     pub fn ship_layout(&self, type_id: i64) -> Result<Option<ShipLayout>, SdeError> {
-        let found: Option<(String, String)> = self
+        let found: Option<(String, String, i64)> = self
             .conn
             .query_row(
-                "SELECT t.typeName, COALESCE(g.groupName, '')
+                "SELECT t.typeName, COALESCE(g.groupName, ''), COALESCE(t.groupID, 0)
                  FROM invTypes t LEFT JOIN invGroups g ON g.groupID = t.groupID
                  WHERE t.typeID = ?1",
                 params![type_id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .optional()?;
-        let Some((name, group_name)) = found else {
+        let Some((name, group_name, group_id)) = found else {
             return Ok(None);
         };
         // attributeID -> value for this hull; missing attributes default to 0.
@@ -374,6 +374,8 @@ impl Sde {
             low_slots: a(12) as i64,            // lowSlots
             rig_slots: a(1137) as i64,          // rigSlots
             subsystem_slots: a(1367) as i64,    // maxSubSystems
+            // Tactical Destroyers (groupID 1305) have exactly 1 mode slot.
+            mode_slots: (group_id == 1305) as i64,
             turret_hardpoints: a(102) as i64,   // turretSlotsLeft
             launcher_hardpoints: a(101) as i64, // launcherSlotsLeft
             cpu_output: a(48),                  // cpuOutput

@@ -170,6 +170,19 @@ impl Sde {
             .map_err(Into::into)
     }
 
+    /// The group id for a type, or `None` if the type is unknown.
+    /// Used by the fitting classifier to detect mode items (groupID 1306).
+    pub fn type_group(&self, type_id: i64) -> Result<Option<i64>, SdeError> {
+        self.conn
+            .query_row(
+                "SELECT groupID FROM invTypes WHERE typeID = ?1",
+                params![type_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
     /// Resolve an item by (case-insensitive) name → `(type_id, packaged_volume)`.
     /// For the appraisal tool's clipboard parsing.
     pub fn type_by_name(&self, name: &str) -> Result<Option<(i64, Option<f64>)>, SdeError> {

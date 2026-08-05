@@ -80,6 +80,7 @@ fn empty_slot_kind(word: &str) -> Option<SlotKind> {
         "low" => Some(SlotKind::Low),
         "rig" => Some(SlotKind::Rig),
         "subsystem" => Some(SlotKind::Subsystem),
+        "mode" => Some(SlotKind::Mode),
         _ => None,
     }
 }
@@ -194,7 +195,7 @@ fn slot_word(slot: SlotKind) -> &'static str {
         SlotKind::Low => "Low",
         SlotKind::Rig => "Rig",
         SlotKind::Subsystem => "Subsystem",
-        // Non-slot kinds never appear as empty placeholders.
+        SlotKind::Mode => "Mode",
         _ => "High",
     }
 }

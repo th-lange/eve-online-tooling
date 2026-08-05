@@ -105,6 +105,7 @@ pub(super) fn run_dogma(
                     | SlotKind::Low
                     | SlotKind::Rig
                     | SlotKind::Subsystem
+                    | SlotKind::Mode
             )
         })
         .collect();
@@ -470,6 +471,8 @@ pub(super) fn resolved_feasibility(
         low_slots: s.get(12) as i64,
         rig_slots: s.get(1137) as i64,
         subsystem_slots: s.get(1367) as i64,
+        // mode_slots is not a dogma attribute — carry it from the base layout.
+        mode_slots: base_layout.mode_slots,
         turret_hardpoints: s.get(102) as i64,
         launcher_hardpoints: s.get(101) as i64,
         cpu_output: s.get(48),

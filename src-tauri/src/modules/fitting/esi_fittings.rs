@@ -52,7 +52,7 @@ pub fn slot_to_flag(slot: SlotKind, index: i32) -> Option<String> {
         SlotKind::Subsystem => format!("SubSystemSlot{index}"),
         SlotKind::Drone => "DroneBay".into(),
         SlotKind::Cargo => "Cargo".into(),
-        SlotKind::Implant | SlotKind::Booster => return None,
+        SlotKind::Implant | SlotKind::Booster | SlotKind::Mode => return None,
     })
 }
 
