@@ -10,6 +10,7 @@ use crate::esi::{fetch_killmail, resolve_character_ids, AuthState};
 use crate::modules::fitting::{simulate_fit, Fit, FitItem, FitStats, ModuleState, SlotKind};
 use crate::sde::Sde;
 use crate::storage;
+use crate::util::text::parse_names;
 use crate::zkill::{self, ZkillStatsRaw};
 
 /// Cap on pasted names per lookup.
@@ -60,18 +61,6 @@ pub struct PvpProfilesResult {
     pub unresolved: Vec<String>,
 }
 
-/// Pasted names: one per line, trimmed, blanks dropped, deduped (order kept,
-/// case-insensitive), capped.
-fn parse_names(text: &str) -> Vec<String> {
-    let mut seen = HashSet::new();
-    text.lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .filter(|l| seen.insert(l.to_lowercase()))
-        .take(NAME_CAP)
-        .map(str::to_string)
-        .collect()
-}
 
 /// Pods and shuttles aren't real PvP hulls — drop them from every hull list.
 /// Matches by name (English, as zKill/SDE return it): covers "Capsule",
@@ -126,7 +115,7 @@ pub async fn pvp_profiles(
     auth_state: State<'_, AuthState>,
     text: String,
 ) -> Result<PvpProfilesResult, String> {
-    let names = parse_names(&text);
+    let names = parse_names(&text, NAME_CAP);
     if names.is_empty() {
         return Ok(PvpProfilesResult {
             pilots: Vec::new(),
@@ -424,7 +413,7 @@ fn analysis_from_stats(
 /// Reconstruct one killmail into a displayable + analysed lost fit: names,
 /// module list by slot, and the all-V dogma analysis. `lost_count` is how many
 /// times the hull was seen (or a community sample size, for typical fits).
-fn build_lost_fit(sde: &Sde, km: &Killmail, lost_count: i64) -> LostFit {
+fn build_lost_fit(sde: &Sde, dir: &std::path::Path, km: &Killmail, lost_count: i64) -> LostFit {
     let mut ids: Vec<i64> = vec![km.victim.ship_type_id];
     for it in &km.victim.items {
         if slot_of(it.flag).is_some() {
@@ -447,7 +436,7 @@ fn build_lost_fit(sde: &Sde, km: &Killmail, lost_count: i64) -> LostFit {
         })
         .collect();
     let fit = build_engine_fit(km.victim.ship_type_id, &km.victim.items, &cat_of);
-    let analysis = simulate_fit(sde, &fit, &|_| 5.0, None, None, None, None, None, None)
+    let analysis = simulate_fit(sde, dir, &fit, &|_| 5.0, None, None, None, None, None, None)
         .ok()
         .map(|s| analysis_from_stats(&s, &attrs, &fit, &name_of));
     LostFit {
@@ -552,7 +541,7 @@ pub async fn pvp_pilot_fits(
 
     let fits: Vec<LostFit> = order
         .iter()
-        .map(|h| build_lost_fit(&sde, &rep[h], count[h]))
+        .map(|h| build_lost_fit(&sde, &dir, &rep[h], count[h]))
         .collect();
 
     Ok(fits)
@@ -587,19 +576,12 @@ pub async fn pvp_typical_fit(
     };
 
     let sde = crate::sde::open_from_app(&app)?;
-    Ok(Some(build_lost_fit(&sde, &km, sampled)))
+    Ok(Some(build_lost_fit(&sde, &dir, &km, sampled)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_names_trims_dedupes_and_caps() {
-        let names = parse_names("  Alice \n\nBob\nalice\n Bob \n");
-        // Case-insensitive dedup, order preserved, blanks dropped.
-        assert_eq!(names, vec!["Alice".to_string(), "Bob".to_string()]);
-    }
 
     #[test]
     fn raw_stats_map_to_surface_and_activepvp_sets_active() {

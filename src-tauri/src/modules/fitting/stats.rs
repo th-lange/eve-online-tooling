@@ -4,6 +4,7 @@
 //! commands.rs (#331).
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use super::context::DogmaContext;
 use super::engine::abyssal::apply_abyssal_weather;
@@ -81,6 +82,7 @@ pub(super) struct DogmaStats {
 #[allow(clippy::too_many_arguments)] // one arg per independent sim input; a struct would just rename them
 pub(super) fn run_dogma(
     sde: &Sde,
+    dir: &Path,
     fit: &Fit,
     base_layout: &ShipLayout,
     skill_level_for: &dyn Fn(i64) -> f64,
@@ -144,7 +146,7 @@ pub(super) fn run_dogma(
             .filter_map(|&(_, c)| (c > 0).then_some(c)),
     );
     extra_ids.extend(environment_effect);
-    let ctx = DogmaContext::load(sde, &extra_ids)?;
+    let ctx = DogmaContext::load(sde, dir, &extra_ids)?;
 
     let mut ship = ctx.entity(fit.ship_type_id, Vec::new());
     // Seed the hull's base mass (4) if it's only on the type row, not a dogma
@@ -1080,6 +1082,7 @@ pub(super) fn required_skills_of(attrs: &AttrMap, type_id: i64) -> Vec<i64> {
 /// weather choice (also see [`run_dogma`]).
 pub(crate) fn simulate_fit(
     sde: &Sde,
+    dir: &Path,
     fit: &Fit,
     skill_level_for: &dyn Fn(i64) -> f64,
     damage_profile: Option<[f64; 4]>,
@@ -1155,6 +1158,7 @@ pub(crate) fn simulate_fit(
         .collect();
     let dogma = run_dogma(
         sde,
+        dir,
         fit,
         &ship,
         skill_level_for,

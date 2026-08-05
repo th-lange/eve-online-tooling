@@ -17,8 +17,10 @@ use serde::{Deserialize, Serialize};
 use crate::market::PriceModel;
 use crate::sde::{BlueprintMaterial, BlueprintProduct};
 
-/// Industry activity. Only [`Activity::Manufacturing`] is costed in v1; the
-/// other variants are reserved for invention/T2 (#9) and reactions/T3 (#10).
+/// Industry activity for a build step. Manufacturing and Reaction (T3,
+/// activity id 11) are both costed the same way in [`evaluate`]; T2 invention
+/// cost is amortized separately via [`BuildStep::invention`], not through a
+/// dedicated `Activity` variant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[allow(dead_code)]
@@ -47,7 +49,7 @@ pub enum PriceBasis {
 pub enum Sourcing {
     /// Value the input at market (v1 default).
     Buy,
-    /// Build it from a sub-step (recursive build-vs-buy; reserved for #10).
+    /// Build it from a sub-step (recursive build-vs-buy across the input tree).
     Build(Box<BuildStep>),
 }
 

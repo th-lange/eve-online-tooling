@@ -1,8 +1,9 @@
 //! Shared types for the Scripts module.
 //!
 //! A [`Script`] is a small, user-authored snippet — Rhai or JavaScript — that
-//! is persisted verbatim and run on demand or on a timed loop (the loop lives
-//! in the frontend). Running one yields a [`ScriptRun`].
+//! is persisted verbatim and run on demand or on a timed loop (a single Rust
+//! background scheduler — see [`super::scheduler`]). Running one yields a
+//! [`ScriptRun`].
 
 use serde::{Deserialize, Serialize};
 

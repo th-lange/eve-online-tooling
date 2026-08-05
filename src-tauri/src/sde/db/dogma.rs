@@ -129,7 +129,6 @@ impl Sde {
     /// Batched [`type_attributes_raw`](Self::type_attributes_raw): one query for
     /// many types (a whole fit + its skills), grouped by typeID in Rust. Avoids
     /// the per-item round-trips that resolving a full fit would otherwise need.
-    #[allow(dead_code)] // consumed by the dogma engine (P2, #171)
     pub fn types_attributes_raw(
         &self,
         type_ids: &[i64],

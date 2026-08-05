@@ -9,9 +9,7 @@ use std::sync::OnceLock;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use super::types::{
-    BlueprintMaterial, BlueprintProduct, ManufacturableBlueprint, TypeDetail, TypeInfo,
-};
+use super::types::{TypeDetail, TypeInfo};
 use super::{download_sde, Sde, SdePaths};
 
 pub use crate::model::{id_names, IdName};
@@ -214,42 +212,10 @@ pub async fn auto_refresh(app: &AppHandle) {
     let _ = sde_update(app.clone(), false).await;
 }
 
-/// Manufacturing inputs for a blueprint.
-#[tauri::command]
-pub fn sde_blueprint_materials(
-    app: AppHandle,
-    blueprint_type_id: i64,
-) -> Result<Vec<BlueprintMaterial>, String> {
-    open(&app)?
-        .blueprint_materials(blueprint_type_id)
-        .map_err(|e| e.to_string())
-}
-
-/// What a blueprint manufactures.
-#[tauri::command]
-pub fn sde_blueprint_product(
-    app: AppHandle,
-    blueprint_type_id: i64,
-) -> Result<Option<BlueprintProduct>, String> {
-    open(&app)?
-        .blueprint_product(blueprint_type_id)
-        .map_err(|e| e.to_string())
-}
-
 /// Type name/group/volume for a type id.
 #[tauri::command]
 pub fn sde_type_info(app: AppHandle, type_id: i64) -> Result<Option<TypeInfo>, String> {
     open(&app)?.type_info(type_id).map_err(|e| e.to_string())
-}
-
-/// Every manufacturable blueprint.
-#[tauri::command]
-pub fn sde_manufacturable_blueprints(
-    app: AppHandle,
-) -> Result<Vec<ManufacturableBlueprint>, String> {
-    open(&app)?
-        .manufacturable_blueprints()
-        .map_err(|e| e.to_string())
 }
 
 // --- Universe browser ---

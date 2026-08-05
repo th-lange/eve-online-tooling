@@ -28,6 +28,70 @@ impl SdeProgress {
     }
 }
 
+/// Minimum percentage-of-total progress between emitted updates.
+const PROGRESS_MIN_DELTA_PCT: f64 = 0.5;
+/// Minimum wall-clock time between emitted updates, so a slow link (tiny
+/// chunks trickling in) still shows *some* movement even below the delta
+/// threshold.
+const PROGRESS_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Pure throttle decision, factored out of [`ProgressThrottle`] so it's
+/// testable without real sleeps or a network stream: given how much progress
+/// and time have passed since the last emitted update, should this one fire?
+fn should_emit_progress(
+    downloaded: u64,
+    last_emitted_downloaded: u64,
+    total: Option<u64>,
+    elapsed_since_last_emit: std::time::Duration,
+) -> bool {
+    if elapsed_since_last_emit >= PROGRESS_MIN_INTERVAL {
+        return true;
+    }
+    match total {
+        Some(total) if total > 0 => {
+            let delta = downloaded.saturating_sub(last_emitted_downloaded);
+            (delta as f64 / total as f64) * 100.0 >= PROGRESS_MIN_DELTA_PCT
+        }
+        // No known total: percentage gating is meaningless, so only the
+        // time-based path (above) can fire.
+        _ => false,
+    }
+}
+
+/// Coalesces per-chunk progress into at most one update per
+/// [`PROGRESS_MIN_DELTA_PCT`] of total progress or [`PROGRESS_MIN_INTERVAL`]
+/// of wall-clock time — a stream delivers ~16-64 KiB chunks, far too fine-
+/// grained to forward one UI event each.
+struct ProgressThrottle {
+    last_emit_at: std::time::Instant,
+    last_emitted_downloaded: u64,
+}
+
+impl ProgressThrottle {
+    fn new() -> Self {
+        Self {
+            last_emit_at: std::time::Instant::now(),
+            last_emitted_downloaded: 0,
+        }
+    }
+
+    /// Records `downloaded` and returns whether it clears the throttle.
+    fn tick(&mut self, downloaded: u64, total: Option<u64>) -> bool {
+        let now = std::time::Instant::now();
+        let fire = should_emit_progress(
+            downloaded,
+            self.last_emitted_downloaded,
+            total,
+            now.duration_since(self.last_emit_at),
+        );
+        if fire {
+            self.last_emit_at = now;
+            self.last_emitted_downloaded = downloaded;
+        }
+        fire
+    }
+}
+
 /// Fetch the SDE, decompress and verify it, then atomically replace any
 /// existing database. `progress` is called as the work advances.
 pub async fn download_sde<F>(paths: &SdePaths, progress: F) -> Result<(), SdeError>
@@ -51,13 +115,19 @@ where
     let mut stream = resp.bytes_stream();
     let mut file = tokio::fs::File::create(&paths.tmp_archive).await?;
     let mut downloaded = 0u64;
+    let mut throttle = ProgressThrottle::new();
     progress(SdeProgress::new("downloading", 0, total));
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
         file.write_all(&chunk).await?;
         downloaded += chunk.len() as u64;
-        progress(SdeProgress::new("downloading", downloaded, total));
+        if throttle.tick(downloaded, total) {
+            progress(SdeProgress::new("downloading", downloaded, total));
+        }
     }
+    // Always report the final byte count, even if the last chunk(s) were
+    // coalesced away by the throttle.
+    progress(SdeProgress::new("downloading", downloaded, total));
     file.flush().await?;
     drop(file);
 
@@ -124,6 +194,7 @@ fn verify(db: &Path) -> Result<(), SdeError> {
 mod tests {
     use super::*;
     use std::io::Write as _;
+    use std::time::Duration;
 
     /// Per-process scratch dir, following the repo convention of using the
     /// real filesystem (not the `tempfile` crate) for on-disk fixtures.
@@ -234,5 +305,56 @@ mod tests {
         assert!(verify(&db).is_ok());
 
         let _ = std::fs::remove_file(&db);
+    }
+
+    /// Simulates a stream of tiny (well below the 0.5% threshold) chunks
+    /// covering a whole download and asserts the throttle coalesces them
+    /// into far fewer than one emission per chunk.
+    #[test]
+    fn progress_throttle_bounds_emission_count_for_many_small_chunks() {
+        let total = Some(1_000_000u64);
+        let chunk_size = 1_000u64; // 0.1% of total per chunk.
+        let chunk_count = 1_000; // Covers exactly 100% of `total`.
+
+        let mut last_emitted = 0u64;
+        let mut downloaded = 0u64;
+        let mut emitted = 0usize;
+        for _ in 0..chunk_count {
+            downloaded += chunk_size;
+            // Zero elapsed time isolates the percentage-delta gate so the
+            // count is deterministic regardless of how fast this loop runs.
+            if should_emit_progress(downloaded, last_emitted, total, Duration::ZERO) {
+                last_emitted = downloaded;
+                emitted += 1;
+            }
+        }
+
+        assert!(
+            emitted < chunk_count,
+            "throttle should coalesce most per-chunk updates, got {emitted} for {chunk_count} chunks"
+        );
+        // 0.1%/chunk crossing a 0.5% gate fires roughly every 5th chunk.
+        assert!(
+            (150..=250).contains(&emitted),
+            "expected roughly one emission per 0.5% of progress, got {emitted}"
+        );
+    }
+
+    /// Even when progress hasn't crossed the percentage threshold, enough
+    /// elapsed wall-clock time must still let an update through.
+    #[test]
+    fn progress_throttle_time_based_path_fires_independent_of_delta() {
+        assert!(should_emit_progress(
+            1,
+            0,
+            Some(1_000_000),
+            Duration::from_millis(300)
+        ));
+        assert!(!should_emit_progress(
+            1,
+            0,
+            Some(1_000_000),
+            Duration::from_millis(100)
+        ));
     }
 }

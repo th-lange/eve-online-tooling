@@ -257,26 +257,23 @@ pub async fn appraisal_reprocess(
     let sde = crate::sde::open_from_app(&app)?;
     let eff = params.efficiency.clamp(0.0, 1.0);
 
-    // Resolve each line to its reprocess recipe.
-    struct Resolved {
+    // Resolve each line to its type, then to its reprocess recipe.
+    struct ReprocessLine {
         name: String,
         quantity: i64,
         type_id: Option<i64>,
         recipe: Option<crate::sde::ReprocessRecipe>,
     }
     let mut resolved = Vec::with_capacity(params.items.len());
-    for item in &params.items {
-        let lookup = sde
-            .type_by_name(item.name.trim())
-            .map_err(|e| e.to_string())?;
-        let recipe = match lookup {
-            Some((id, _)) => sde.reprocess_recipe(id).map_err(|e| e.to_string())?,
+    for r in resolve_items(&sde, &params.items)? {
+        let recipe = match r.type_id {
+            Some(id) => sde.reprocess_recipe(id).map_err(|e| e.to_string())?,
             None => None,
         };
-        resolved.push(Resolved {
-            name: item.name.clone(),
-            quantity: item.quantity.max(0),
-            type_id: lookup.map(|(id, _)| id),
+        resolved.push(ReprocessLine {
+            name: r.name,
+            quantity: r.quantity,
+            type_id: r.type_id,
             recipe,
         });
     }

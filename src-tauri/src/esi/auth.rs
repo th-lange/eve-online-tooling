@@ -159,6 +159,13 @@ impl AuthState {
         &self.cache
     }
 
+    /// The SSO token endpoint — always [`TOKEN_URL`] outside tests. Passed
+    /// explicitly to [`exchange_code`] so tests can stub it the same way
+    /// [`AuthState::access_token_for`] stubs [`refresh`].
+    pub fn token_url(&self) -> &str {
+        &self.token_url
+    }
+
     /// Point the SSO token endpoint at a local stub instead of EVE's real
     /// server. Test-only.
     #[cfg(test)]
@@ -308,15 +315,19 @@ pub fn authorize_url(challenge: &str, state: &str) -> String {
     )
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct TokenResponse {
     pub access_token: String,
     pub refresh_token: String,
     pub expires_in: u64,
 }
 
+/// Exchange an authorization code for tokens. `token_url` is the SSO token
+/// endpoint — always [`TOKEN_URL`] outside tests; overridable so tests can
+/// point it at a local stub, mirroring [`refresh`].
 pub async fn exchange_code(
     http: &reqwest::Client,
+    token_url: &str,
     code: &str,
     verifier: &str,
 ) -> Result<TokenResponse, AuthError> {
@@ -327,7 +338,7 @@ pub async fn exchange_code(
         ("code_verifier", verifier),
     ];
     let resp = http
-        .post(TOKEN_URL)
+        .post(token_url)
         .form(&params)
         .send()
         .await?
@@ -883,6 +894,86 @@ mod tests {
             1,
             "unchanged refresh token must not trigger a redundant store"
         );
+
+        server_thread.join().expect("server thread");
+    }
+
+    #[test]
+    fn exchange_code_posts_expected_form_params() {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("bind stub sso");
+        let addr = server.server_addr().to_ip().expect("ip addr");
+        let captured: Arc<parking_lot::Mutex<Option<String>>> =
+            Arc::new(parking_lot::Mutex::new(None));
+        let captured_writer = captured.clone();
+        let body = serde_json::json!({
+            "access_token": "fresh-access-token",
+            "refresh_token": "fresh-refresh-token",
+            "expires_in": 1200,
+        })
+        .to_string();
+        let server_thread = std::thread::spawn(move || {
+            if let Ok(mut request) = server.recv() {
+                let mut form = String::new();
+                let _ = request.as_reader().read_to_string(&mut form);
+                *captured_writer.lock() = Some(form);
+                let _ = request.respond(tiny_http::Response::from_string(body));
+            }
+        });
+        let token_url = format!("http://{addr}/");
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let http = reqwest::Client::new();
+        let tokens = rt
+            .block_on(exchange_code(&http, &token_url, "the-code", "the-verifier"))
+            .expect("exchange should succeed");
+        assert_eq!(tokens.access_token, "fresh-access-token");
+
+        server_thread.join().expect("server thread");
+        let form = captured.lock().clone().expect("request captured");
+        // Values in this test are plain ASCII, so a bare `k=v` split (no
+        // percent-decoding) is enough to assert the params `reqwest::form`
+        // sent.
+        let params: HashMap<&str, &str> = form
+            .split('&')
+            .filter_map(|pair| pair.split_once('='))
+            .collect();
+        assert_eq!(params.get("grant_type"), Some(&"authorization_code"));
+        assert_eq!(params.get("code"), Some(&"the-code"));
+        assert_eq!(params.get("client_id"), Some(&CLIENT_ID));
+        assert_eq!(params.get("code_verifier"), Some(&"the-verifier"));
+    }
+
+    #[test]
+    fn exchange_code_maps_a_400_to_a_status_bearing_http_error() {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("bind stub sso");
+        let addr = server.server_addr().to_ip().expect("ip addr");
+        let server_thread = std::thread::spawn(move || {
+            if let Ok(request) = server.recv() {
+                let _ = request.respond(
+                    tiny_http::Response::from_string(r#"{"error":"invalid_grant"}"#)
+                        .with_status_code(400),
+                );
+            }
+        });
+        let token_url = format!("http://{addr}/");
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let http = reqwest::Client::new();
+        let err = rt
+            .block_on(exchange_code(&http, &token_url, "stale-code", "verifier"))
+            .expect_err("400 must surface as an error");
+        match err {
+            AuthError::Http(e) => {
+                assert_eq!(e.status(), Some(reqwest::StatusCode::BAD_REQUEST));
+            }
+            other => panic!("expected AuthError::Http(400), got {other:?}"),
+        }
 
         server_thread.join().expect("server thread");
     }

@@ -66,7 +66,7 @@ pub struct DpsEvent {
 }
 
 /// Parse one gamelog line into a [`DpsEvent`], or `None` if it isn't a combat
-/// line we track (chat, system messages, mining, malformed lines, …).
+/// or mining line we track (chat, system messages, malformed lines, …).
 pub fn parse_line(line: &str) -> Option<DpsEvent> {
     if line.contains("(mining)") {
         return parse_mining(line);

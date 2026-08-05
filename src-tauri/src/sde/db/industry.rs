@@ -34,12 +34,54 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Materials for *every* blueprint/formula at a given activity, with
+    /// names, grouped by blueprint type id — one query instead of one per
+    /// blueprint. Backs [`all_blueprint_materials`](Self::all_blueprint_materials)
+    /// and the invention datacore lookup in
+    /// [`all_invention_products`](Self::all_invention_products) (#765).
+    fn materials_for_all(
+        &self,
+        activity_id: i64,
+    ) -> Result<HashMap<i64, Vec<BlueprintMaterial>>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT iam.typeID, iam.materialTypeID, t.typeName, iam.quantity
+             FROM industryActivityMaterials iam
+             JOIN invTypes t ON t.typeID = iam.materialTypeID
+             WHERE iam.activityID = ?1
+             ORDER BY iam.typeID, iam.materialTypeID",
+        )?;
+        let rows = stmt.query_map(params![activity_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                BlueprintMaterial {
+                    material_type_id: row.get(1)?,
+                    name: row.get(2)?,
+                    quantity: row.get(3)?,
+                },
+            ))
+        })?;
+        let mut out: HashMap<i64, Vec<BlueprintMaterial>> = HashMap::new();
+        for row in rows {
+            let (type_id, material) = row?;
+            out.entry(type_id).or_default().push(material);
+        }
+        Ok(out)
+    }
+
     /// Manufacturing inputs (activity 1) for a blueprint, with material names.
     pub fn blueprint_materials(
         &self,
         blueprint_type_id: i64,
     ) -> Result<Vec<BlueprintMaterial>, SdeError> {
         self.materials_for(blueprint_type_id, activity::MANUFACTURING)
+    }
+
+    /// Manufacturing inputs (activity 1) for *every* blueprint, keyed by
+    /// blueprint type id — one query for the whole catalogue instead of one
+    /// per blueprint (#765). A blueprint absent from the map simply has no
+    /// manufacturing materials.
+    pub fn all_blueprint_materials(&self) -> Result<HashMap<i64, Vec<BlueprintMaterial>>, SdeError> {
+        self.materials_for_all(activity::MANUFACTURING)
     }
 
     /// How to build a product directly: its manufacturing blueprint (preferred)
@@ -119,6 +161,7 @@ impl Sde {
 
     /// The invention (activity 8) that produces this blueprint, if it's a T2
     /// blueprint invented from a T1 one. `None` for T1 (uninvented) blueprints.
+    #[allow(dead_code)]
     pub fn invention_for(&self, blueprint_type_id: i64) -> Result<Option<InventionData>, SdeError> {
         let inv: Option<(i64, i64)> = self
             .conn
@@ -202,6 +245,78 @@ impl Sde {
             datacores,
             relic,
         }))
+    }
+
+    /// Invention (activity 8) data for *every* T2/T3 blueprint, keyed by the
+    /// invented blueprint's type id — three queries total instead of two
+    /// point lookups plus a materials scan per blueprint (#765). Mirrors
+    /// [`invention_for`](Self::invention_for) row-for-row.
+    pub fn all_invention_products(&self) -> Result<HashMap<i64, InventionData>, SdeError> {
+        // (inventing_blueprint_type_id, invented_blueprint_type_id) ->
+        // (runs_per_success, probability, inventing type's name + category).
+        let mut stmt = self.conn.prepare(
+            "SELECT iap.productTypeID, iap.typeID, iap.quantity,
+                    COALESCE(iapr.probability, 0.0),
+                    t.typeName, c.categoryName
+             FROM industryActivityProducts iap
+             JOIN invTypes t ON t.typeID = iap.typeID
+             JOIN invGroups g ON g.groupID = t.groupID
+             JOIN invCategories c ON c.categoryID = g.categoryID
+             LEFT JOIN industryActivityProbabilities iapr
+               ON iapr.activityID = ?1
+              AND iapr.typeID = iap.typeID
+              AND iapr.productTypeID = iap.productTypeID
+             WHERE iap.activityID = ?1",
+        )?;
+        let rows = stmt.query_map(params![activity::INVENTION], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, f64>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })?;
+        let rows = rows.collect::<Result<Vec<_>, _>>()?;
+
+        // Datacores (and any other invention inputs) for every inventing
+        // blueprint, grouped in one pass rather than per-row.
+        let datacores_by_inventor = self.materials_for_all(activity::INVENTION)?;
+
+        let mut out = HashMap::with_capacity(rows.len());
+        for (
+            invented_blueprint_type_id,
+            inventing_blueprint_type_id,
+            runs_per_success,
+            probability,
+            inventing_name,
+            inventing_category,
+        ) in rows
+        {
+            let datacores = datacores_by_inventor
+                .get(&inventing_blueprint_type_id)
+                .cloned()
+                .unwrap_or_default();
+            // T3 (strategic cruiser / subsystem) invention consumes an Ancient
+            // Relic bought at market, rather than copying a T1 blueprint (#12).
+            let relic = (inventing_category == "Ancient Relics").then(|| BlueprintMaterial {
+                material_type_id: inventing_blueprint_type_id,
+                name: inventing_name,
+                quantity: 1,
+            });
+            out.insert(
+                invented_blueprint_type_id,
+                InventionData {
+                    inventing_blueprint_type_id,
+                    runs_per_success,
+                    probability,
+                    datacores,
+                    relic,
+                },
+            );
+        }
+        Ok(out)
     }
 
     /// The invention decryptors and their modifiers (probability / ME / runs),

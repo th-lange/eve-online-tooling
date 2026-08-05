@@ -218,7 +218,11 @@ pub async fn production_profit(
     };
 
     // Build a manufacturing step for every manufacturable blueprint, collecting
-    // the type ids we need prices for.
+    // the type ids we need prices for. Materials and invention data are
+    // fetched once for the whole catalogue up front (#765) — the loop below
+    // no longer issues a per-blueprint SDE query.
+    let all_materials = sde.all_blueprint_materials().map_err(|e| e.to_string())?;
+    let all_invention = sde.all_invention_products().map_err(|e| e.to_string())?;
     let mut steps = Vec::new();
     let mut needed = std::collections::HashSet::new();
     let mut recipe_cache: HashMap<i64, Option<Recipe>> = HashMap::new();
@@ -231,9 +235,10 @@ pub async fn production_profit(
             name: bp.product_name,
             quantity: bp.product_quantity,
         };
-        let materials = sde
-            .blueprint_materials(bp.blueprint_type_id)
-            .map_err(|e| e.to_string())?;
+        let materials = all_materials
+            .get(&bp.blueprint_type_id)
+            .cloned()
+            .unwrap_or_default();
         needed.insert(product.product_type_id);
 
         let mut step = manufacturing_step(bp.blueprint_type_id, &product, &materials);
@@ -255,14 +260,12 @@ pub async fn production_profit(
         }
         step.inputs = inputs;
         // T2 items: attach the invention so its expected cost is amortized in.
-        if let Some(inv) = sde
-            .invention_for(bp.blueprint_type_id)
-            .map_err(|e| e.to_string())?
-        {
+        if let Some(inv) = all_invention.get(&bp.blueprint_type_id) {
             // T1 product's manufacturing materials estimate the copy job fee.
-            let copy_materials = sde
-                .blueprint_materials(inv.inventing_blueprint_type_id)
-                .map_err(|e| e.to_string())?;
+            let copy_materials = all_materials
+                .get(&inv.inventing_blueprint_type_id)
+                .cloned()
+                .unwrap_or_default();
             needed.extend(inv.datacores.iter().map(|d| d.material_type_id));
             needed.extend(copy_materials.iter().map(|m| m.material_type_id));
             let to_input = |m: &crate::sde::BlueprintMaterial| InputLine {
@@ -335,9 +338,9 @@ pub async fn production_profit(
         broker_fee: params.broker_fee,
     };
 
-    let meta = sde.meta_group_names().map_err(|e| e.to_string())?;
-    let categories = sde.category_names().map_err(|e| e.to_string())?;
-    let groups = sde.group_names().map_err(|e| e.to_string())?;
+    let meta = crate::sde::cached_meta_group_names(&dir)?;
+    let categories = crate::sde::cached_category_names(&dir)?;
+    let groups = crate::sde::cached_group_names(&dir)?;
     let base_times = sde.base_times(1).map_err(|e| e.to_string())?; // 1 = manufacturing
                                                                     // Names for the T1 (or T3 relic) blueprint each T2/T3 row is invented
                                                                     // from, so the UI can show what a "build" actually starts from.

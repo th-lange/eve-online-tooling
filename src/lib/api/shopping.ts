@@ -79,19 +79,8 @@ export function shoppingClearList(id: string): Promise<void> {
   return invoke<void>("shopping_clear_list", { id });
 }
 
-/** Move an item between lists (whole entry unless `quantity` is given). */
-export function shoppingMoveItem(
-  fromId: string,
-  toId: string,
-  typeId: number,
-  quantity?: number,
-): Promise<void> {
-  return invoke<void>("shopping_move_item", { fromId, toId, typeId, quantity });
-}
-
 /** Move multiple items between lists in one call (each moving its whole
- * available quantity, upserted on the destination — same semantics as
- * `shoppingMoveItem` with no quantity given). */
+ * available quantity, upserted on the destination). */
 export function shoppingMoveItems(
   fromId: string,
   toId: string,

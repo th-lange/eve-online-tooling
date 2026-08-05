@@ -31,8 +31,20 @@ import { useCopyToClipboard } from "../../lib/useCopyToClipboard";
 import { usePersistentState } from "../../lib/usePersistentState";
 import { Page, PageHeader, Centered } from "../../components/page";
 
-const SUBTITLE =
-  "Installed plugins are inert until you activate them. Each shows the capabilities it declares — activate only what you trust.";
+const SUBTITLE = (
+  <>
+    Installed plugins are inert until you activate them. Each shows the
+    capabilities it declares — activate only what you trust.{" "}
+    <a
+      href="https://github.com/th-lange/eve-online-tooling-plugins"
+      target="_blank"
+      rel="noreferrer"
+      className="text-zinc-300 underline hover:text-white"
+    >
+      Browse example plugins →
+    </a>
+  </>
+);
 
 export function PluginsPage() {
   const plugins = useQuery({ queryKey: ["plugins"], queryFn: pluginsList });

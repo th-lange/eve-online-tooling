@@ -29,6 +29,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { computeLayout } from "./systemGraphLayout";
+import { SEC_HEX } from "../lib/security";
 
 /** Visual class of a system node — drives its colour. */
 export type NodeKind = "wspace" | "hisec" | "lowsec" | "nullsec" | "unknown";
@@ -74,12 +75,13 @@ export interface SystemGraphEdge {
   label?: string;
 }
 
-/** Hex colour of a node by kind — used to fill it when selected. */
+/** Hex colour of a node by kind — used to fill it when selected. Sec-band
+ *  colours are derived from `SEC_HEX` (the shared source of truth) rather
+ *  than re-hardcoded; w-space/unknown have no security band, so those stay
+ *  local. */
 const KIND_HEX: Record<NodeKind, string> = {
   wspace: "#a855f7",
-  hisec: "#34d399",
-  lowsec: "#fbbf24",
-  nullsec: "#fb7185",
+  ...SEC_HEX,
   unknown: "#a1a1aa",
 };
 

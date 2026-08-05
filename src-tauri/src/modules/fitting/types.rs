@@ -1,9 +1,9 @@
 //! Shared domain types for the fitting module.
 //!
 //! [`Fit`] is the editable document (also the EFT/ESI import target and the
-//! local-storage record); [`FitStats`] is the computed result the engine
-//! produces. P1 populates `resources`, `validation` and `price`; the dogma
-//! engine (P2) fills the combat/tank/cap fields as they land.
+//! local-storage record); [`FitStats`] is the computed result the dogma
+//! engine produces: resources, validation, price, capacitor, tank, DPS,
+//! navigation and targeting.
 
 use serde::{Deserialize, Serialize};
 
@@ -266,9 +266,9 @@ pub struct TargetStats {
     pub sensor_strength: [f64; 4],
 }
 
-/// Computed result of simulating a fit. Filled incrementally: P1 populates
-/// `resources`, `validation` and `price`; the dogma engine (P2) adds capacitor,
-/// tank, DPS, navigation and targeting.
+/// Computed result of simulating a fit: resources, validation and price come
+/// from the command layer; the dogma engine fills capacitor, tank, DPS,
+/// navigation and targeting (`None` until it runs — see `fitting_simulate`).
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FitStats {

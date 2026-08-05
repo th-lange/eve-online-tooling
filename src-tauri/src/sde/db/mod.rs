@@ -14,6 +14,7 @@ mod market;
 mod pi;
 mod wormholes;
 
+pub use map::SystemGeo;
 pub use wormholes::wormhole_class_label;
 
 /// A read-only handle to the SDE database. Opening is cheap, so callers may

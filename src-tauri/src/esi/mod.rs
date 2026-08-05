@@ -1,10 +1,7 @@
 //! EVE SSO authentication + ESI HTTP client and endpoint wrappers.
 //!
-//! Today this provides the unauthenticated [`EsiClient`] used by the market
-//! service. Planned: OAuth2 PKCE login (loopback redirect), token refresh via
-//! the OS keychain, and full error-budget-aware backoff.
-//!
-//! Tracking: issues #3 (SSO), #4 (assets/blueprints), #5 (market).
+//! Provides OAuth2 PKCE login (loopback redirect), OS-keychain-backed token
+//! refresh, and the unauthenticated [`EsiClient`] used by the market service.
 
 mod auth;
 mod cache;
@@ -23,7 +20,7 @@ pub use character::{
     character_skill_levels, corporation_id, create_character_fitting, fetch_assets,
     fetch_character_fittings, fetch_corp_assets, fetch_corp_fittings, fetch_killmail,
     resolve_character_ids, resolve_names, set_autopilot_waypoint, CharacterAffiliation, EsiFitting,
-    SkillLevels,
+    RawAsset, SkillLevels,
 };
 pub use client::EsiClient;
 pub use error::EsiError;
@@ -55,4 +52,12 @@ pub fn http_client_builder() -> reqwest::ClientBuilder {
         .user_agent(USER_AGENT)
         .connect_timeout(HTTP_CONNECT_TIMEOUT)
         .timeout(HTTP_REQUEST_TIMEOUT)
+}
+
+/// Startup maintenance for the on-disk conditional cache: drop entries whose
+/// TTL has been expired for longer than the retention window. Call once,
+/// early, before any [`EsiClient::with_cache`]/[`AuthState::with_cache`]
+/// construction reads from the same directory.
+pub fn prune_cache_startup(dir: &std::path::Path) {
+    cache::ConditionalCache::prune_disk_startup(dir);
 }

@@ -93,7 +93,7 @@ pub async fn reprocessing_scan(
 
     let (blacklist, favorites) =
         lists::load_filter_sets(&dir, REPROCESSING_BLACKLIST_KEY, REPROCESSING_FAVORITES_KEY);
-    let groups = sde.group_names().map_err(|e| e.to_string())?;
+    let groups = crate::sde::cached_group_names(&dir)?;
 
     let mut out: Vec<ReprocessRow> = recipes
         .iter()

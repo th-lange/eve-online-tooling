@@ -5,7 +5,7 @@
 //! Requires the `esi-industry.read_character_jobs.v1` scope (must be enabled on
 //! the EVE app + a re-login before this returns data).
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
@@ -38,6 +38,35 @@ struct StoredJob {
     facility_id: Option<i64>,
     #[serde(default)]
     station_id: Option<i64>,
+}
+
+/// How long a delivered job is kept in the durable store after its
+/// `end_date` before being pruned — generous enough to cover a typical
+/// profit-tracker lookback while keeping the per-character store from
+/// growing forever.
+const JOB_RETENTION_SECS: u64 = 90 * 24 * 60 * 60;
+
+/// Merge `incoming` jobs into `stored`, keyed by job id (an incoming job
+/// overwrites the stored one so status/end_date stay current — O(1) per job
+/// instead of a linear scan), then drop any job whose `end_date` is older
+/// than [`JOB_RETENTION_SECS`]. Pure — no I/O — so the merge/pruning
+/// behaviour is directly unit-testable. Jobs with an unparseable/empty
+/// `end_date` (still running) are never pruned.
+fn merge_jobs(stored: Vec<StoredJob>, incoming: Vec<StoredJob>, now: u64) -> Vec<StoredJob> {
+    let mut by_id: BTreeMap<i64, StoredJob> =
+        stored.into_iter().map(|j| (j.job_id, j)).collect();
+    for j in incoming {
+        by_id.insert(j.job_id, j);
+    }
+    let cutoff = now.saturating_sub(JOB_RETENTION_SECS);
+    by_id
+        .into_values()
+        .filter(|j| {
+            crate::util::time::parse_rfc3339_epoch(&j.end_date)
+                .map(|end| end >= cutoff)
+                .unwrap_or(true)
+        })
+        .collect()
 }
 
 /// One industry job for display.
@@ -195,19 +224,11 @@ async fn character_industry_jobs(
     )
     .await?;
 
-    // Merge into the durable store, keyed by job id (delivered jobs persist).
+    // Merge into the durable store, keyed by job id (delivered jobs persist
+    // past ESI's window, but only up to `JOB_RETENTION_SECS`).
     let key = format!("industry_jobs_{character_id}");
     let stored: Vec<StoredJob> = storage::load_data(dir, &key).unwrap_or_default();
-    let mut seen: HashSet<i64> = stored.iter().map(|j| j.job_id).collect();
-    let mut jobs = stored;
-    for j in incoming {
-        if seen.insert(j.job_id) {
-            jobs.push(j);
-        } else if let Some(existing) = jobs.iter_mut().find(|e| e.job_id == j.job_id) {
-            // Refresh mutable fields (status/end_date) on a job we already track.
-            *existing = j;
-        }
-    }
+    let jobs = merge_jobs(stored, incoming, crate::util::time::now_secs());
     let _ = storage::save_data(dir, &key, &jobs);
 
     // Slot usage: max slots come from skills (1 base + each rank), used = jobs
@@ -443,9 +464,25 @@ pub fn line_status(result: &JobsResult) -> LineStatusResult {
 
 #[cfg(test)]
 mod tests {
-    use super::{append_new_jobs, compute_slots, line_status, slot_pool};
-    use super::{CharacterSlots, JobRow, JobsResult, Slot, Slots};
+    use super::{append_new_jobs, compute_slots, line_status, merge_jobs, slot_pool};
+    use super::{CharacterSlots, JobRow, JobsResult, Slot, Slots, StoredJob, JOB_RETENTION_SECS};
     use std::collections::HashSet;
+
+    fn stored_job(job_id: i64, end_date: &str) -> StoredJob {
+        StoredJob {
+            job_id,
+            activity_id: 1,
+            blueprint_type_id: 1,
+            product_type_id: None,
+            runs: 1,
+            cost: None,
+            status: "active".to_string(),
+            start_date: String::new(),
+            end_date: end_date.to_string(),
+            facility_id: None,
+            station_id: None,
+        }
+    }
 
     #[test]
     fn corp_jobs_appear_once_across_same_corp_characters() {
@@ -567,5 +604,39 @@ mod tests {
         assert!(!find(&status.invention, 2)); // char 2: active Invention job -> busy
         assert!(find(&status.reactions, 1));
         assert!(find(&status.reactions, 2)); // reactions.used == 0 for both
+    }
+
+    #[test]
+    fn merge_jobs_prunes_old_jobs_and_merges_by_id() {
+        let now = 1_700_000_000u64; // arbitrary fixed "now" for determinism
+        let old_end = crate::util::time::format_rfc3339(now - JOB_RETENTION_SECS - 3600);
+        let recent_end = crate::util::time::format_rfc3339(now - 3600);
+
+        let stored = vec![
+            stored_job(1, &old_end),    // past the 90-day retention window
+            stored_job(2, &recent_end), // within the window
+        ];
+        // Incoming re-delivers job 2 with an updated status and adds job 3.
+        let incoming = vec![
+            StoredJob {
+                status: "delivered".to_string(),
+                ..stored_job(2, &recent_end)
+            },
+            stored_job(3, &recent_end),
+        ];
+
+        let merged = merge_jobs(stored, incoming, now);
+        let ids: Vec<i64> = merged.iter().map(|j| j.job_id).collect();
+        assert_eq!(
+            ids,
+            vec![2, 3],
+            "job 1 (past retention) is pruned; jobs 2/3 kept, merged by job id"
+        );
+
+        let job2 = merged.iter().find(|j| j.job_id == 2).unwrap();
+        assert_eq!(
+            job2.status, "delivered",
+            "incoming overwrites the stored entry for the same job id"
+        );
     }
 }

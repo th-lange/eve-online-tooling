@@ -137,18 +137,11 @@ pub async fn resolve_names(
         if batch.is_empty() {
             continue;
         }
-        let result = async {
-            let resp = send_retrying(|| {
-                auth.http()
-                    .post(format!("{ESI_BASE}/latest/universe/names/"))
-                    .json(&batch)
-            })
-            .await
-            .ok()?
-            .error_for_status()
-            .ok()?;
-            resp.json::<Vec<NameRow>>().await.ok()
-        }
+        let result = post_json::<Vec<NameRow>, _>(
+            auth.http(),
+            &format!("{ESI_BASE}/latest/universe/names/"),
+            &batch,
+        )
         .await;
 
         match result {
@@ -205,19 +198,11 @@ pub async fn resolve_character_ids(
         .cloned()
         .collect();
     if !missing.is_empty() {
-        if let Some(ids) = (async {
-            send_retrying(|| {
-                http.post(format!("{ESI_BASE}/latest/universe/ids/"))
-                    .json(&missing)
-            })
-            .await
-            .ok()?
-            .error_for_status()
-            .ok()?
-            .json::<UniverseIds>()
-            .await
-            .ok()
-        })
+        if let Some(ids) = post_json::<UniverseIds, _>(
+            http,
+            &format!("{ESI_BASE}/latest/universe/ids/"),
+            &missing,
+        )
         .await
         {
             for c in ids.characters {

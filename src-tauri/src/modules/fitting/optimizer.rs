@@ -489,8 +489,8 @@ pub async fn fitting_optimize(
     // `scripts_run` (#611). The SDE handle is opened inside the closure
     // because `Sde` is not `Send`.
     tokio::task::spawn_blocking(move || {
-        let sde = crate::sde::open_from_app(&app)?;
-        optimize_fit(&sde, fit, obj, meta, mode, &prices, constraints)
+        let (dir, sde) = crate::sde::dir_and_sde(&app)?;
+        optimize_fit(&sde, &dir, fit, obj, meta, mode, &prices, constraints)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -863,6 +863,7 @@ type Candidates = (Vec<(SlotKind, Vec<i64>)>, DogmaContext);
 /// rather than a second time by the caller.
 fn build_candidates(
     sde: &Sde,
+    dir: &std::path::Path,
     fit: &Fit,
     obj: Objective,
     meta: &[i64],
@@ -901,7 +902,7 @@ fn build_candidates(
     for (_, ts) in &slot_candidates {
         extra_ids.extend(ts);
     }
-    let ctx = DogmaContext::load(sde, &extra_ids)?;
+    let ctx = DogmaContext::load(sde, dir, &extra_ids)?;
 
     // Steer the damage optimizer to the hull's *bonused* weapons. Without this it
     // maximizes raw paper-DPS and fits, say, hybrid blasters on an Amarr laser
@@ -1081,6 +1082,7 @@ fn load_ammo(fit: &mut Fit, attrs: &AttrMap, charge_cands: &[(i64, i64)], charge
 /// ISK budget).
 pub(super) fn optimize_fit(
     sde: &Sde,
+    dir: &std::path::Path,
     fit: Fit,
     obj: Objective,
     meta: Vec<i64>,
@@ -1095,7 +1097,7 @@ pub(super) fn optimize_fit(
         return Err(format!("unknown ship: {}", fit.ship_type_id));
     };
 
-    let (slot_candidates, ctx) = build_candidates(sde, &fit, obj, &meta)?;
+    let (slot_candidates, ctx) = build_candidates(sde, dir, &fit, obj, &meta)?;
 
     // The optimizer doesn't have real character skills, so it scores at all-V.
     let skills: Vec<EntityInput> = ctx.skill_entities(|_| 5.0);

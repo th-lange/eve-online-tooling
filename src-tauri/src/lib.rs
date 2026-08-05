@@ -160,6 +160,7 @@ pub fn run() {
             // First run: seed the bundled example plugin so there's something to
             // activate out of the box (no-op once `plugins/` exists).
             plugins::seed_example_plugin(&dir);
+            esi::prune_cache_startup(&dir);
             app.manage(market::MarketService::with_cache(dir.clone()));
             app.manage(esi::EsiClient::with_cache(dir.clone()));
             app.manage(std::sync::Arc::new(plugins::PluginRegistry::load(&dir)));
@@ -229,10 +230,7 @@ pub fn run() {
             esi::commands::esi_open_info_window,
             sde::commands::sde_status,
             sde::commands::sde_update,
-            sde::commands::sde_blueprint_materials,
-            sde::commands::sde_blueprint_product,
             sde::commands::sde_type_info,
-            sde::commands::sde_manufacturable_blueprints,
             sde::commands::sde_categories,
             sde::commands::sde_market_categories,
             sde::commands::sde_groups,
@@ -265,7 +263,6 @@ pub fn run() {
             modules::daytrading::commands::daytrading_set_list,
             modules::shopping::commands::shopping_lists,
             modules::shopping::commands::shopping_create_list,
-            modules::shopping::commands::shopping_rename_list,
             modules::shopping::commands::shopping_delete_list,
             modules::shopping::commands::shopping_add_item,
             modules::shopping::commands::shopping_add_text,
@@ -279,7 +276,6 @@ pub fn run() {
             modules::fitting::commands::fitting_ship_layout,
             modules::fitting::commands::fitting_import_eft,
             modules::fitting::commands::fitting_add_item,
-            modules::fitting::commands::fitting_classify_slots,
             modules::fitting::commands::fitting_module_info,
             modules::fitting::commands::fitting_compatible_charges,
             modules::fitting::commands::fitting_environment_effects,
@@ -291,7 +287,6 @@ pub fn run() {
             modules::fitting::commands::fitting_price,
             modules::fitting::commands::fitting_save_local,
             modules::fitting::commands::fitting_list_local,
-            modules::fitting::commands::fitting_load_local,
             modules::fitting::commands::fitting_delete_local,
             modules::appraisal::commands::appraisal_run,
             modules::appraisal::commands::appraisal_reprocess,

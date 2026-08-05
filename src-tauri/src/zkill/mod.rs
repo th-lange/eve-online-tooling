@@ -14,6 +14,7 @@
 //! loss *list* isn't worth caching on its own).
 
 use std::path::Path;
+use std::sync::LazyLock;
 
 use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -49,11 +50,13 @@ fn stats_cache_key(character_id: i64) -> String {
 
 /// A zKill-etiquette HTTP client carrying our contact User-Agent (and the
 /// shared connect/request timeouts, so a hung host can't stall a command).
-fn client() -> Result<reqwest::Client, String> {
+/// Built once and reused — like [`crate::sde::commands::metadata_client`] —
+/// rather than spinning up a fresh connection pool on every call.
+static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     crate::esi::http_client_builder()
         .build()
-        .map_err(|e| e.to_string())
-}
+        .expect("failed to build zKill HTTP client")
+});
 
 /// Raw zKill `/stats/` document (defensive: pilots with no kills omit fields).
 /// A superset of every field either caller needs; callers project only what
@@ -134,7 +137,7 @@ pub async fn stats_for_characters(
         }
     }
 
-    let http = client()?;
+    let http = CLIENT.clone();
     let fetched: Vec<(i64, ZkillStatsRaw)> = stream::iter(to_fetch)
         .map(|id| {
             let http = http.clone();
@@ -169,10 +172,7 @@ pub struct ZkillZkb {
 }
 
 async fn fetch_losses(url: String) -> Vec<ZkillLossRef> {
-    let Ok(http) = client() else {
-        return Vec::new();
-    };
-    fetch_json_url(&http, &url).await.unwrap_or_default()
+    fetch_json_url(&CLIENT, &url).await.unwrap_or_default()
 }
 
 /// Recent losses for one character, newest first. Killmails themselves aren't

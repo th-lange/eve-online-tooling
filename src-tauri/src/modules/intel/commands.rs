@@ -300,8 +300,8 @@ pub async fn intel_fw_systems(app: AppHandle, esi: State<'_, EsiClient>) -> Resu
         .map(|j| (j.system_id, j.ship_jumps))
         .collect();
 
-    let info = sde.solar_system_info().map_err(|e| e.to_string())?;
-    let pos = sde.solar_system_positions().map_err(|e| e.to_string())?;
+    let info = crate::sde::cached_system_info(&dir)?;
+    let pos = crate::sde::cached_positions(&dir)?;
 
     let fw_ids: HashSet<i64> = systems.iter().map(|s| s.solar_system_id).collect();
     let ids_vec: Vec<i64> = fw_ids.iter().copied().collect();

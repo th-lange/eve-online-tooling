@@ -35,10 +35,26 @@ const APPRAISE_MAX_ITEMS: usize = 500;
 
 /// What a capability handler is allowed to touch. Borrows so any surface can
 /// build one from its own (managed or transient) service handles.
+///
+/// `auth` is `None` for surfaces with no `AuthState` at all (the MCP bridge —
+/// see [`crate::mcp`]'s module docs): no auth-gated capability is ever
+/// MCP-exposed (pinned by `mcp_never_reaches_auth_gated_data`), so building a
+/// real `AuthState` just to satisfy this field would be pure waste on every
+/// MCP tool call.
 pub struct HostCtx<'a> {
     pub app_data_dir: &'a Path,
     pub market: &'a MarketService,
-    pub auth: &'a AuthState,
+    pub auth: Option<&'a AuthState>,
+}
+
+impl<'a> HostCtx<'a> {
+    /// The auth handle for an auth-gated capability. Panics if `auth` is
+    /// absent — unreachable in practice since no auth-gated capability is
+    /// ever exposed on a surface without one.
+    fn require_auth(&self) -> &'a AuthState {
+        self.auth
+            .expect("auth-gated capability invoked on an auth-free HostCtx")
+    }
 }
 
 /// One argument a capability accepts (drives the MCP input schema + docs).
@@ -381,7 +397,7 @@ fn cap_route(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
     let sde = open_from_dir(ctx.app_data_dir)?;
     let from = resolve_system(&sde, from_name)?;
     let to = resolve_system(&sde, to_name)?;
-    let adj = sde.stargate_adjacency().map_err(|e| e.to_string())?;
+    let adj = crate::sde::cached_adjacency(ctx.app_data_dir)?;
     let jumps = shortest_path(&adj, from.0, to.0);
     Ok(json!({
         "from": from.1, "to": to.1,
@@ -392,7 +408,7 @@ fn cap_route(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
 fn cap_assets(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
     let character_id =
         storage::primary_character(ctx.app_data_dir).ok_or("no character logged in")?;
-    let assets = tauri::async_runtime::block_on(esi::fetch_assets(ctx.auth, character_id))
+    let assets = tauri::async_runtime::block_on(esi::fetch_assets(ctx.require_auth(), character_id))
         .map_err(|e| e.to_string())?;
     serde_json::to_value(assets).map_err(|e| e.to_string())
 }
@@ -401,10 +417,10 @@ fn cap_corp_assets(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
     let character_id =
         storage::primary_character(ctx.app_data_dir).ok_or("no character logged in")?;
     let corporation_id =
-        tauri::async_runtime::block_on(esi::corporation_id(ctx.auth, character_id))
+        tauri::async_runtime::block_on(esi::corporation_id(ctx.require_auth(), character_id))
             .map_err(|e| e.to_string())?;
     let assets = tauri::async_runtime::block_on(esi::fetch_corp_assets(
-        ctx.auth,
+        ctx.require_auth(),
         character_id,
         corporation_id,
     ))
@@ -415,7 +431,7 @@ fn cap_corp_assets(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
 fn cap_my_orders(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
     let rows = tauri::async_runtime::block_on(crate::market::orders::collect_orders(
         ctx.app_data_dir,
-        ctx.auth,
+        ctx.require_auth(),
         ctx.market,
     ))
     .map_err(|e| e.to_string())?;
@@ -423,14 +439,14 @@ fn cap_my_orders(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
 }
 
 /// Colonies overview (extractor timers, storage, commodity balance) for
-/// every target character. Touches `ctx.auth` (per-character ESI) — never
+/// every target character. Touches `auth` (per-character ESI) — never
 /// exposed on the MCP bridge.
 fn cap_pi_overview(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
     let sde = open_from_dir(ctx.app_data_dir)?;
     let views = tauri::async_runtime::block_on(pi::commands::pi_overview_core(
         ctx.app_data_dir,
         sde,
-        ctx.auth,
+        ctx.require_auth(),
     ))
     .map_err(|e| e.to_string())?;
     serde_json::to_value(views).map_err(|e| e.to_string())
@@ -438,12 +454,12 @@ fn cap_pi_overview(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
 
 /// Running + recently-delivered industry jobs and job-slot usage for every
 /// target character (`None` defaults to the app's active selection — the
-/// whole roster when "All characters" is active). Touches `ctx.auth` — never
+/// whole roster when "All characters" is active). Touches `auth` — never
 /// exposed on the MCP bridge.
 fn cap_industry_jobs(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
     let result = tauri::async_runtime::block_on(industry::commands::industry_jobs_core(
         ctx.app_data_dir,
-        ctx.auth,
+        ctx.require_auth(),
         None,
     ))
     .map_err(|e| e.to_string())?;
@@ -457,7 +473,7 @@ fn cap_pi_idle_colonies(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
     let views = tauri::async_runtime::block_on(pi::commands::pi_overview_core(
         ctx.app_data_dir,
         sde,
-        ctx.auth,
+        ctx.require_auth(),
     ))
     .map_err(|e| e.to_string())?;
     serde_json::to_value(pi::commands::idle_colonies(&views)).map_err(|e| e.to_string())
@@ -469,7 +485,7 @@ fn cap_pi_idle_colonies(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
 fn cap_industry_line_status(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
     let result = tauri::async_runtime::block_on(industry::commands::industry_jobs_core(
         ctx.app_data_dir,
-        ctx.auth,
+        ctx.require_auth(),
         None,
     ))
     .map_err(|e| e.to_string())?;
@@ -480,7 +496,7 @@ fn cap_industry_line_status(ctx: &HostCtx, _args: &Value) -> Result<Value, Strin
 /// materials priced at market, no recursive sub-build resolution; that keeps
 /// the result reproducible from the SDE + a price vector alone, per
 /// CLAUDE.md's "Profit / EIV" formulas). Touches only SDE + market, never
-/// `ctx.auth` — pinned by `mcp_never_reaches_auth_gated_data`.
+/// `auth` — pinned by `mcp_never_reaches_auth_gated_data`.
 fn cap_production_profit(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
     let blueprint_type_id = req_i64(args, "blueprintTypeId")?;
     let runs = args.get("runs").and_then(Value::as_i64).unwrap_or(1).max(1);
@@ -525,7 +541,7 @@ fn cap_production_profit(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
 
 /// Dev-tier: dogma stats (resources, validation, DPS, tank, capacitor) for a
 /// fit given as EFT text, at all-V skills. Touches only SDE — no ESI, no
-/// `ctx.auth` — so the result is deterministic from the SDE alone.
+/// `auth` — so the result is deterministic from the SDE alone.
 fn cap_fitting_stats(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
     let eft_text = args
         .get("eft")
@@ -535,6 +551,7 @@ fn cap_fitting_stats(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
     let fit: Fit = fitting::commands::import_eft_to_fit(&sde, eft_text)?;
     let stats: FitStats = fitting::simulate_fit(
         &sde,
+        ctx.app_data_dir,
         &fit,
         &|_skill_id| 5.0,
         None,
@@ -548,7 +565,7 @@ fn cap_fitting_stats(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
 }
 
 /// Dev-tier: reprocess-vs-sell value for one item at a given refine
-/// efficiency. Touches only SDE + market, never `ctx.auth`.
+/// efficiency. Touches only SDE + market, never `auth`.
 fn cap_reprocessing_yield(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
     let type_id = req_i64(args, "typeId")?;
     let region_id = args
@@ -684,10 +701,10 @@ mod tests {
     /// The MCP bridge (public `mcp` or dev-tier `mcp_dev`) must never reach a
     /// capability gated on personal/auth data (`assets`, `corp_assets`,
     /// `my_orders` all use `AssetsRead`/`OrdersRead`). This is structural: a
-    /// capability's `run` fn is handed a `HostCtx` that *does* carry `auth`
-    /// (scripts/plugins need it), so the invariant lives here, not in
-    /// `HostCtx`'s shape — flip `mcp_dev`/`mcp` on an auth-gated capability
-    /// and this test fails.
+    /// capability's `run` fn is handed a `HostCtx` whose `auth` is `None` on
+    /// the MCP bridge (scripts/plugins pass a real one), so the invariant
+    /// lives here, not in `HostCtx`'s shape — flip `mcp_dev`/`mcp` on an
+    /// auth-gated capability and this test fails.
     #[test]
     fn mcp_never_reaches_auth_gated_data() {
         let auth_gated = |p: Permission| {
@@ -772,9 +789,10 @@ mod tests {
             return;
         }
         let sde = Sde::open(&path).unwrap();
+        let dir = path.parent().unwrap();
         let fit = fitting::commands::import_eft_to_fit(&sde, "[Rifter, Golden Test]").unwrap();
         let stats =
-            fitting::simulate_fit(&sde, &fit, &|_| 5.0, None, None, None, None, None, None)
+            fitting::simulate_fit(&sde, dir, &fit, &|_| 5.0, None, None, None, None, None, None)
                 .unwrap();
         let layout = stats.layout.expect("dogma engine should resolve a layout");
         assert_eq!(layout.high_slots, 3);

@@ -5,6 +5,7 @@
 //! formula `t = −ln(0.25) · mass · agility / 1e6` (time to reach 75% velocity,
 //! the warp threshold).
 
+use crate::modules::fitting::engine::stacking;
 use crate::modules::fitting::types::{NavStats, TargetStats};
 
 /// `−ln(0.25)` — the align-time constant.
@@ -32,7 +33,7 @@ pub fn prop_velocity(base_velocity: f64, mass: f64, props: &[(f64, f64)]) -> f64
     let total: f64 = bonuses
         .iter()
         .enumerate()
-        .map(|(i, b)| b * (-((i as f64) / 2.67).powi(2)).exp())
+        .map(|(i, b)| b * stacking::penalty(i))
         .sum();
     base_velocity * (1.0 + total)
 }
