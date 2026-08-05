@@ -23,6 +23,7 @@ fn golden_pyfa_fits() {
         return;
     }
     let sde = Sde::open(&path).expect("open sde");
+    let dir = path.parent().unwrap();
     let tid = |name: &str| {
         sde.type_by_name(name)
             .unwrap()
@@ -357,16 +358,15 @@ fn golden_pyfa_fits() {
     let mut failures = Vec::new();
     for (label, f, g) in &cases {
         let layout = sde.ship_layout(f.ship_type_id).unwrap().expect("layout");
-        let d = run_dogma(
-            &sde,
-            f,
-            &layout,
-            &all5,
-            &DamageProfile::default(),
-            0.0,
-            None,
-            &[],
-        )
+        let d = run_dogma(&sde, dir, f,
+        &layout,
+        &all5,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,)
         .expect("dogma");
         let (dps, ehp, vel, align, stable) = (
             d.dps.total,

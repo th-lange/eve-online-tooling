@@ -200,7 +200,7 @@ pub async fn pi_overview_core(
     }
 
     let schematics = sde.planet_schematics().map_err(|e| e.to_string())?;
-    let systems = sde.solar_system_info().map_err(|e| e.to_string())?;
+    let systems = crate::sde::cached_system_info(dir)?;
     let locked: HashSet<i64> = storage::load_id_list(dir, LOCKED_LIST)
         .into_iter()
         .collect();

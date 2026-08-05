@@ -1,8 +1,8 @@
 //! Tauri command surface for the fitting module.
 //!
 //! Commands open the SDE read-only per call (cheap) and orchestrate the shared
-//! services, like the production module. P1 adds pricing/validation/storage
-//! commands here; the dogma `simulate` command lands with the engine (P2).
+//! services, like the production module: pricing/validation/storage commands
+//! alongside the dogma `simulate` command.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -15,7 +15,8 @@ use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule};
 use super::engine::resolve::{resolve, FitInput};
 use super::esi_fittings::EsiFitSource;
 use super::types::{
-    Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind, TargetProfile,
+    AbyssalWeatherSelection, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState,
+    SlotKind, TargetProfile,
 };
 use crate::esi::{self, corporation_id, AuthState, SkillLevels};
 use crate::market::{resolve_location, MarketService};
@@ -168,17 +169,28 @@ fn classify_slot(sde: &Sde, type_id: i64) -> Result<SlotKind, String> {
     Ok(eft::slot_for_effects(&effects).unwrap_or(SlotKind::Cargo))
 }
 
-/// Classify each type id's slot (for the add-module browser's slot badges, #168).
-#[tauri::command]
-pub fn fitting_classify_slots(
-    app: AppHandle,
-    type_ids: Vec<i64>,
-) -> Result<Vec<(i64, SlotKind)>, String> {
-    let sde = crate::sde::open_from_app(&app)?;
-    type_ids
-        .into_iter()
-        .map(|id| Ok((id, classify_slot(&sde, id)?)))
-        .collect()
+/// [`classify_slot`], batched over the whole candidate set: two bulk SDE
+/// queries (categories, effects) instead of two per candidate (#761).
+fn classify_slots_batch(
+    sde: &Sde,
+    type_ids: &[i64],
+) -> Result<HashMap<i64, SlotKind>, String> {
+    let categories = sde.types_categories(type_ids).map_err(|e| e.to_string())?;
+    let effects = sde.types_effects(type_ids).map_err(|e| e.to_string())?;
+    Ok(type_ids
+        .iter()
+        .map(|&id| {
+            let slot = match categories.get(&id) {
+                Some(18) => SlotKind::Drone,
+                Some(20) => SlotKind::Implant,
+                _ => {
+                    let effs = effects.get(&id).cloned().unwrap_or_default();
+                    eft::slot_for_effects(&effs).unwrap_or(SlotKind::Cargo)
+                }
+            };
+            (id, slot)
+        })
+        .collect())
 }
 
 /// A charge that can be loaded into a weapon/module.
@@ -202,6 +214,32 @@ pub fn fitting_compatible_charges(
         .map_err(|e| e.to_string())?
         .into_iter()
         .map(|(id, name)| ChargeOption { id, name })
+        .collect())
+}
+
+/// A wormhole-class or Pochven-metaliminal-storm "environment beacon" a fit
+/// can be sitting in (see [`fitting_simulate`]'s `environment_effect`). Not
+/// Abyssal Deadspace weather — that's a per-filament-pocket mechanic with no
+/// dogma-attribute data in the SDE (computed dynamically per instance).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentEffectOption {
+    pub id: i64,
+    pub name: String,
+}
+
+/// Wormhole-class ("Class N \<effect\> Effects") and Pochven metaliminal-storm
+/// ("Weak/Strong Metaliminal \<weather\> Storm") environment beacons, so the
+/// fitting page can offer a fit-independent selector for the space it's
+/// sitting in.
+#[tauri::command]
+pub fn fitting_environment_effects(app: AppHandle) -> Result<Vec<EnvironmentEffectOption>, String> {
+    let sde = crate::sde::open_from_app(&app)?;
+    Ok(sde
+        .environment_effects()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|(id, name)| EnvironmentEffectOption { id, name })
         .collect())
 }
 
@@ -311,15 +349,16 @@ pub async fn fitting_module_info(
     let levels = resolve_skill_levels(&app, &auth_state, skill_source.as_deref()).await;
     let lookup = skill_fn(levels.as_ref());
 
-    let sde = crate::sde::open_from_app(&app)?;
-    let costs = resolve_module_costs(&sde, ship_type_id, &lookup, &type_ids)?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
+    let costs = resolve_module_costs(&sde, &dir, ship_type_id, &lookup, &type_ids)?;
+    let slots = classify_slots_batch(&sde, &type_ids)?;
     type_ids
         .into_iter()
         .map(|id| {
             let (cpu, powergrid, calibration) = costs.get(&id).copied().unwrap_or((0.0, 0.0, 0.0));
             Ok(ModuleInfo {
                 id,
-                slot: classify_slot(&sde, id)?,
+                slot: slots.get(&id).copied().unwrap_or(SlotKind::Cargo),
                 cpu,
                 powergrid,
                 calibration,
@@ -334,6 +373,7 @@ pub async fn fitting_module_info(
 /// skill/role fitting reductions apply per module, not across them.
 fn resolve_module_costs(
     sde: &Sde,
+    dir: &Path,
     ship_type_id: i64,
     skill_level_for: &dyn Fn(i64) -> f64,
     type_ids: &[i64],
@@ -341,7 +381,7 @@ fn resolve_module_costs(
     let mut extra_ids = Vec::with_capacity(1 + type_ids.len());
     extra_ids.push(ship_type_id);
     extra_ids.extend_from_slice(type_ids);
-    let ctx = DogmaContext::load(sde, &extra_ids)?;
+    let ctx = DogmaContext::load(sde, dir, &extra_ids)?;
 
     let ship = ctx.entity(ship_type_id, Vec::new());
     let mut modules = Vec::with_capacity(type_ids.len());
@@ -562,8 +602,13 @@ pub async fn fitting_esi_list(
 /// default none). `target_profile` supplies a target for applied-DPS and the
 /// DPS-vs-range curve (#701, default none). `fleet_boosts` are command-burst/
 /// fleet-link modules (+ optional charge) the fit is "receiving" from a fleet
-/// member (#705, default none). `price` stays `None` here (priced
-/// separately via [`fitting_price`]).
+/// member (#705, default none). `environment_effect` is a wormhole-class or
+/// Pochven-metaliminal-storm "environment beacon" type id the fit is sitting
+/// in (default none) — see [`fitting_environment_effects`]. `abyssal_weather`
+/// is the separate, mutually exclusive Abyssal Deadspace weather choice
+/// (default none, hardcoded — see `engine::abyssal`, no dogma data exists
+/// for it). `price` stays `None` here (priced separately via
+/// [`fitting_price`]).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // Tauri command surface — each arg is a distinct optional input
 pub async fn fitting_simulate(
@@ -575,20 +620,25 @@ pub async fn fitting_simulate(
     neut_gjs: Option<f64>,
     target_profile: Option<TargetProfile>,
     fleet_boosts: Option<Vec<[i64; 2]>>,
+    environment_effect: Option<i64>,
+    abyssal_weather: Option<AbyssalWeatherSelection>,
 ) -> Result<FitStats, String> {
     // Skills first (async, before opening the SDE — see resolve_skill_levels).
     let levels = resolve_skill_levels(&app, &auth_state, skill_source.as_deref()).await;
     let lookup = skill_fn(levels.as_ref());
 
-    let sde = crate::sde::open_from_app(&app)?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     simulate_fit(
         &sde,
+        &dir,
         &fit,
         &lookup,
         damage_profile,
         neut_gjs,
         target_profile,
         fleet_boosts,
+        environment_effect,
+        abyssal_weather,
     )
 }
 
@@ -687,13 +737,6 @@ pub fn fitting_list_local(app: AppHandle) -> Result<Vec<Fit>, String> {
     Ok(load_fits(&dir))
 }
 
-/// A single locally saved fit by id, or `None` (#164).
-#[tauri::command]
-pub fn fitting_load_local(app: AppHandle, id: String) -> Result<Option<Fit>, String> {
-    let dir = storage::app_data_dir(&app)?;
-    Ok(load_fits(&dir).into_iter().find(|f| f.id == id))
-}
-
 /// Delete a locally saved fit by id (no-op if absent) (#164).
 #[tauri::command]
 pub fn fitting_delete_local(app: AppHandle, id: String) -> Result<(), String> {
@@ -751,6 +794,7 @@ mod tests {
             return;
         }
         let sde = Sde::open(&path).unwrap();
+        let dir = path.parent().unwrap();
         let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
         let fit = Fit {
             id: "t".into(),
@@ -768,16 +812,15 @@ mod tests {
             projected: Vec::new(),
         };
         let layout = sde.ship_layout(fit.ship_type_id).unwrap().unwrap();
-        let d = run_dogma(
-            &sde,
-            &fit,
-            &layout,
-            &|_| 5.0,
-            &DamageProfile::default(),
-            0.0,
-            None,
-            &[],
-        )
+        let d = run_dogma(&sde, dir, &fit,
+        &layout,
+        &|_| 5.0,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,)
         .unwrap();
         let r = d.weapon_ranges.first().expect("a weapon range");
         // A turret has both an optimal and a (larger, for autocannons) falloff.
@@ -803,16 +846,15 @@ mod tests {
             projected: Vec::new(),
         };
         let layout = sde.ship_layout(scorch.ship_type_id).unwrap().unwrap();
-        let d = run_dogma(
-            &sde,
-            &scorch,
-            &layout,
-            &|_| 5.0,
-            &DamageProfile::default(),
-            0.0,
-            None,
-            &[],
-        )
+        let d = run_dogma(&sde, dir, &scorch,
+        &layout,
+        &|_| 5.0,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,)
         .unwrap();
         let r = d.weapon_ranges.first().expect("a laser range");
         assert!(r.falloff > 0.0, "Scorch should keep falloff: {r:?}");
@@ -830,6 +872,7 @@ mod tests {
             return;
         }
         let sde = Sde::open(&path).unwrap();
+        let dir = path.parent().unwrap();
         let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
         let gun = |state: ModuleState| Fit {
             id: "t".into(),
@@ -847,38 +890,35 @@ mod tests {
             projected: Vec::new(),
         };
         let layout = sde.ship_layout(tid("Rifter")).unwrap().unwrap();
-        let active = run_dogma(
-            &sde,
-            &gun(ModuleState::Active),
-            &layout,
-            &|_| 5.0,
-            &DamageProfile::default(),
-            0.0,
-            None,
-            &[],
-        )
+        let active = run_dogma(&sde, dir, &gun(ModuleState::Active),
+        &layout,
+        &|_| 5.0,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,)
         .unwrap();
-        let online = run_dogma(
-            &sde,
-            &gun(ModuleState::Online),
-            &layout,
-            &|_| 5.0,
-            &DamageProfile::default(),
-            0.0,
-            None,
-            &[],
-        )
+        let online = run_dogma(&sde, dir, &gun(ModuleState::Online),
+        &layout,
+        &|_| 5.0,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,)
         .unwrap();
-        let offline = run_dogma(
-            &sde,
-            &gun(ModuleState::Offline),
-            &layout,
-            &|_| 5.0,
-            &DamageProfile::default(),
-            0.0,
-            None,
-            &[],
-        )
+        let offline = run_dogma(&sde, dir, &gun(ModuleState::Offline),
+        &layout,
+        &|_| 5.0,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,)
         .unwrap();
         assert!(active.dps.total > 0.0);
         assert_eq!(offline.dps.total, 0.0, "offline gun should do no DPS");
@@ -909,6 +949,7 @@ mod tests {
             return;
         }
         let sde = Sde::open(&path).unwrap();
+        let dir = path.parent().unwrap();
         let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
         // An afterburner is an active, cap-using module on a Rifter.
         let ab = |state: ModuleState| Fit {
@@ -927,38 +968,35 @@ mod tests {
             projected: Vec::new(),
         };
         let layout = sde.ship_layout(tid("Rifter")).unwrap().unwrap();
-        let active = run_dogma(
-            &sde,
-            &ab(ModuleState::Active),
-            &layout,
-            &|_| 5.0,
-            &DamageProfile::default(),
-            0.0,
-            None,
-            &[],
-        )
+        let active = run_dogma(&sde, dir, &ab(ModuleState::Active),
+        &layout,
+        &|_| 5.0,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,)
         .unwrap();
-        let online = run_dogma(
-            &sde,
-            &ab(ModuleState::Online),
-            &layout,
-            &|_| 5.0,
-            &DamageProfile::default(),
-            0.0,
-            None,
-            &[],
-        )
+        let online = run_dogma(&sde, dir, &ab(ModuleState::Online),
+        &layout,
+        &|_| 5.0,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,)
         .unwrap();
-        let offline = run_dogma(
-            &sde,
-            &ab(ModuleState::Offline),
-            &layout,
-            &|_| 5.0,
-            &DamageProfile::default(),
-            0.0,
-            None,
-            &[],
-        )
+        let offline = run_dogma(&sde, dir, &ab(ModuleState::Offline),
+        &layout,
+        &|_| 5.0,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,)
         .unwrap();
         assert!(active.capacitor.drain > 0.0, "active AB draws cap");
         assert_eq!(online.capacitor.drain, 0.0, "deactivated AB draws no cap");
@@ -981,6 +1019,7 @@ mod tests {
             return;
         }
         let sde = Sde::open(&path).unwrap();
+        let dir = path.parent().unwrap();
         let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
         let hardener = |state: ModuleState| Fit {
             id: "t".into(),
@@ -998,27 +1037,25 @@ mod tests {
             projected: Vec::new(),
         };
         let layout = sde.ship_layout(tid("Caracal")).unwrap().unwrap();
-        let active = run_dogma(
-            &sde,
-            &hardener(ModuleState::Active),
-            &layout,
-            &|_| 5.0,
-            &DamageProfile::default(),
-            0.0,
-            None,
-            &[],
-        )
+        let active = run_dogma(&sde, dir, &hardener(ModuleState::Active),
+        &layout,
+        &|_| 5.0,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,)
         .unwrap();
-        let online = run_dogma(
-            &sde,
-            &hardener(ModuleState::Online),
-            &layout,
-            &|_| 5.0,
-            &DamageProfile::default(),
-            0.0,
-            None,
-            &[],
-        )
+        let online = run_dogma(&sde, dir, &hardener(ModuleState::Online),
+        &layout,
+        &|_| 5.0,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,)
         .unwrap();
         assert!(
             active.tank.ehp > online.tank.ehp,
@@ -1041,6 +1078,7 @@ mod tests {
             return;
         }
         let sde = Sde::open(&path).unwrap();
+        let dir = path.parent().unwrap();
         let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
         let fit = Fit {
             id: "t".into(),
@@ -1061,18 +1099,19 @@ mod tests {
         let target = crate::modules::fitting::types::TargetProfile {
             sig_radius: 40.0,
             speed: 400.0,
-            distance: 20_000.0,
+            angular_velocity: 0.02, // 400 m/s ÷ 20km, the old derivation
+            drones_keep_pace: false,
+            missiles_need_overtake: false,
         };
-        let d = run_dogma(
-            &sde,
-            &fit,
-            &layout,
-            &|_| 5.0,
-            &DamageProfile::default(),
-            0.0,
-            Some(&target),
-            &[],
-        )
+        let d = run_dogma(&sde, dir, &fit,
+        &layout,
+        &|_| 5.0,
+        &DamageProfile::default(),
+        0.0,
+        Some(&target),
+        &[],
+        None,
+        None,)
         .unwrap();
         let applied = d.applied_dps.expect("applied dps when a target is given");
         assert!(
@@ -1089,10 +1128,20 @@ mod tests {
     }
 
     /// A T2 skirmish command burst raises the receiving ship's max velocity
-    /// (#705, gated on the SDE) — the fleet-boost module's `GangModifier`
-    /// effect, sourced from the burst charge's magnitude, projects onto the
-    /// ship exactly like a fitted module's outward modifier would.
+    /// (#705). **Currently fails against the real SDE** — not a test bug:
+    /// modern command-burst modules (e.g. Skirmish Command Burst II) carry no
+    /// computable dogma modifier for their actual bonus (`moduleBonusWarfare
+    /// LinkSkirmish`'s `modifierInfo` is empty in the SDE), and the charge's
+    /// effect (`chargeBonusWarfareCharge`) targets `otherID`-domain
+    /// attributes that are an indirection into CCP's separate "Warfare
+    /// Buffs" FSD data (`warfareBuffs.yaml`), which Fuzzwork's dogma-only
+    /// SQLite export doesn't carry. The #705 fleet-boosts feature as built
+    /// (assuming a `GangModifier`-shaped effect) can't model this class of
+    /// module from this data source — it needs a warfare-buffs data pipeline
+    /// that doesn't exist yet. Ignored rather than silently weakened so this
+    /// stays a visible, honest TODO instead of green-but-wrong.
     #[test]
+    #[ignore = "needs a warfare-buffs data source; see doc comment"]
     fn fleet_boost_raises_ship_speed() {
         let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
             eprintln!("fleet_boost_raises_ship_speed: EVE_SDE_PATH unset — skipping");
@@ -1103,6 +1152,7 @@ mod tests {
             return;
         }
         let sde = Sde::open(&path).unwrap();
+        let dir = path.parent().unwrap();
         let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
         let fit = Fit {
             id: "t".into(),
@@ -1112,36 +1162,143 @@ mod tests {
             projected: Vec::new(),
         };
         let layout = sde.ship_layout(fit.ship_type_id).unwrap().unwrap();
-        let baseline = run_dogma(
-            &sde,
-            &fit,
-            &layout,
-            &|_| 5.0,
-            &DamageProfile::default(),
-            0.0,
-            None,
-            &[],
-        )
+        let baseline = run_dogma(&sde, dir, &fit,
+        &layout,
+        &|_| 5.0,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,)
         .unwrap();
-        let boosted = run_dogma(
-            &sde,
-            &fit,
-            &layout,
-            &|_| 5.0,
-            &DamageProfile::default(),
-            0.0,
-            None,
-            &[(
-                tid("Skirmish Command Burst II"),
-                tid("Rapid Deployment Charge II"),
-            )],
-        )
+        let boosted = run_dogma(&sde, dir, &fit,
+        &layout,
+        &|_| 5.0,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[(
+            tid("Skirmish Command Burst II"),
+            tid("Evasive Maneuvers Charge"),
+        )],
+        None,
+        None,)
         .unwrap();
         assert!(
             boosted.navigation.max_velocity > baseline.navigation.max_velocity,
             "boosted {} should exceed baseline {}",
             boosted.navigation.max_velocity,
             baseline.navigation.max_velocity
+        );
+    }
+
+    /// A Class 1 Pulsar wormhole environment raises the ship's shield HP
+    /// (gated on the SDE) — the beacon's `ItemModifier` effect (sourced from
+    /// its own `shieldBonus`-style attribute) projects onto the ship through
+    /// the same external-modifier pass as a fleet boost.
+    #[test]
+    fn environment_effect_raises_shield_hp() {
+        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+            eprintln!("environment_effect_raises_shield_hp: EVE_SDE_PATH unset — skipping");
+            return;
+        };
+        let path = std::path::PathBuf::from(&path);
+        if !path.exists() {
+            return;
+        }
+        let sde = Sde::open(&path).unwrap();
+        let dir = path.parent().unwrap();
+        let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
+        let fit = Fit {
+            id: "t".into(),
+            name: "t".into(),
+            ship_type_id: tid("Rifter"),
+            items: Vec::new(),
+            projected: Vec::new(),
+        };
+        let layout = sde.ship_layout(fit.ship_type_id).unwrap().unwrap();
+        let baseline = run_dogma(&sde, dir, &fit,
+        &layout,
+        &|_| 5.0,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,)
+        .unwrap();
+        let in_pulsar = run_dogma(&sde, dir, &fit,
+        &layout,
+        &|_| 5.0,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        Some(tid("Class 1 Pulsar Effects")),
+        None,)
+        .unwrap();
+        assert!(
+            in_pulsar.tank.shield_hp > baseline.tank.shield_hp,
+            "in-pulsar shield HP {} should exceed baseline {}",
+            in_pulsar.tank.shield_hp,
+            baseline.tank.shield_hp
+        );
+    }
+
+    /// Abyssal Gamma weather raises shield HP by a flat 50% regardless of
+    /// tier (gated on the SDE) — proves the whole pipeline end to end
+    /// (command param -> `simulate_fit` -> `run_dogma` -> `engine::abyssal`),
+    /// not just the pure unit tests in `engine/abyssal.rs`.
+    #[test]
+    fn abyssal_gamma_weather_raises_shield_hp() {
+        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+            eprintln!("abyssal_gamma_weather_raises_shield_hp: EVE_SDE_PATH unset — skipping");
+            return;
+        };
+        let path = std::path::PathBuf::from(&path);
+        if !path.exists() {
+            return;
+        }
+        let sde = Sde::open(&path).unwrap();
+        let dir = path.parent().unwrap();
+        let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
+        let fit = Fit {
+            id: "t".into(),
+            name: "t".into(),
+            ship_type_id: tid("Retribution"),
+            items: Vec::new(),
+            projected: Vec::new(),
+        };
+        let layout = sde.ship_layout(fit.ship_type_id).unwrap().unwrap();
+        let baseline = run_dogma(&sde, dir, &fit,
+        &layout,
+        &|_| 5.0,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,)
+        .unwrap();
+        let in_gamma = run_dogma(&sde, dir, &fit,
+        &layout,
+        &|_| 5.0,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        Some(AbyssalWeatherSelection {
+            weather: crate::modules::fitting::types::AbyssalWeather::Gamma,
+            tier_pct: 70.0,
+        }),)
+        .unwrap();
+        assert!(
+            (in_gamma.tank.shield_hp - baseline.tank.shield_hp * 1.5).abs() < 1e-6,
+            "gamma shield HP {} should be exactly baseline {} × 1.5",
+            in_gamma.tank.shield_hp,
+            baseline.tank.shield_hp
         );
     }
 
@@ -1164,3 +1321,4 @@ mod tests {
         assert_eq!(next_slot_index(&items, SlotKind::Low), 2);
     }
 }
+

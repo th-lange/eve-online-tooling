@@ -51,6 +51,31 @@ fn merge_by<T: Clone, F: Fn(&T) -> i64>(stored: Vec<T>, incoming: Vec<T>, key: F
     out
 }
 
+/// Fetch this character's market transactions from ESI and merge them into the
+/// durable store (keyed by transaction id), persisting and returning the
+/// merged set. Shared by `accounting_wallet_sync` and
+/// `accounting_transaction_ledger` so both stay on one durable-merge path.
+async fn sync_transactions(
+    auth: &AuthState,
+    dir: &std::path::Path,
+    character_id: i64,
+) -> Result<Vec<Transaction>, AppError> {
+    let tkey = format!("transactions_{character_id}");
+    let new_tx: Vec<Transaction> = authed_get_paged_pub(
+        auth,
+        character_id,
+        &format!("/latest/characters/{character_id}/wallet/transactions/"),
+    )
+    .await?;
+    let transactions = merge_by(
+        storage::load_data(dir, &tkey).unwrap_or_default(),
+        new_tx,
+        |t: &Transaction| t.transaction_id,
+    );
+    let _ = storage::save_data(dir, &tkey, &transactions);
+    Ok(transactions)
+}
+
 // --- Wallet journal + transactions (#53) ---
 
 #[derive(Serialize)]
@@ -94,7 +119,6 @@ pub async fn accounting_wallet_sync(
 ) -> Result<WalletView, AppError> {
     let (dir, character_id) = storage::dir_and_primary_character(&app)?;
     let jkey = format!("journal_{character_id}");
-    let tkey = format!("transactions_{character_id}");
 
     let new_journal: Vec<JournalEntry> = authed_get_paged_pub(
         &auth_state,
@@ -102,25 +126,13 @@ pub async fn accounting_wallet_sync(
         &format!("/latest/characters/{character_id}/wallet/journal/"),
     )
     .await?;
-    let new_tx: Vec<Transaction> = authed_get_paged_pub(
-        &auth_state,
-        character_id,
-        &format!("/latest/characters/{character_id}/wallet/transactions/"),
-    )
-    .await?;
-
     let journal = merge_by(
         storage::load_data(&dir, &jkey).unwrap_or_default(),
         new_journal,
         |e: &JournalEntry| e.id,
     );
-    let transactions = merge_by(
-        storage::load_data(&dir, &tkey).unwrap_or_default(),
-        new_tx,
-        |t: &Transaction| t.transaction_id,
-    );
     let _ = storage::save_data(&dir, &jkey, &journal);
-    let _ = storage::save_data(&dir, &tkey, &transactions);
+    let transactions = sync_transactions(&auth_state, &dir, character_id).await?;
 
     // Latest balance (entries aren't guaranteed sorted; take max date).
     let balance = journal
@@ -216,20 +228,7 @@ pub async fn accounting_transaction_ledger(
 ) -> Result<LedgerView, AppError> {
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     let character_id = storage::require_primary_character(&dir)?;
-    let tkey = format!("transactions_{character_id}");
-
-    let new_tx: Vec<Transaction> = authed_get_paged_pub(
-        &auth_state,
-        character_id,
-        &format!("/latest/characters/{character_id}/wallet/transactions/"),
-    )
-    .await?;
-    let transactions = merge_by(
-        storage::load_data(&dir, &tkey).unwrap_or_default(),
-        new_tx,
-        |t: &Transaction| t.transaction_id,
-    );
-    let _ = storage::save_data(&dir, &tkey, &transactions);
+    let transactions = sync_transactions(&auth_state, &dir, character_id).await?;
 
     // Resolve item names from the SDE in one batch.
     let type_ids: Vec<i64> = transactions.iter().map(|t| t.type_id).collect();

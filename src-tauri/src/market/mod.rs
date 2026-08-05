@@ -4,8 +4,6 @@
 //! adjusted prices, and aggregates them into a multi-vector price model
 //! (spot sell/buy, daily average, N-day moving average, volume, order count),
 //! cached with ESI-aware TTLs.
-//!
-//! Tracking: issue #5. Consumed by the production engine (issue #6).
 
 pub mod commands;
 pub mod orders;

@@ -67,11 +67,13 @@ on `EVE_SDE_PATH`) pins the same values against the live SDE.
 
 ### 5. Fitting stats — hull layout
 
-An empty `[Rifter, Golden Test]` EFT string (no modules, so no skill/rig
-modifiers apply) exposes the raw hull attributes: 3 high slots, 3 mid slots,
-4 low slots, 130.0 CPU output, 41.0 PG output. Call `fitting_stats` with that
-EFT text and diff `layout.{high,mid,low}Slots` and
-`layout.{cpu,powergrid}Output` against these — pinned by
+An empty `[Rifter, Golden Test]` EFT string (no modules fitted) still
+resolves at the all-V skill basis `fitting_stats` always uses: 3 high slots,
+3 mid slots, 4 low slots, 162.5 CPU output (130 base × 1.25, CPU Management
+V), 51.25 PG output (41 base × 1.25, Power Grid Management V) — those two
+skills bonus the hull unconditionally, no module needed to "trigger" them.
+Call `fitting_stats` with that EFT text and diff `layout.{high,mid,low}Slots`
+and `layout.{cpu,powergrid}Output` against these — pinned by
 `golden_fitting_stats_rifter_layout` in `capabilities.rs`.
 
 ## Auth boundary (must always fail to reach)

@@ -58,18 +58,16 @@ pub async fn pochven_routes(app: AppHandle) -> Result<PochvenRoutes, String> {
 
 /// The CPU-bound body of [`pochven_routes`], run on the blocking pool.
 fn pochven_routes_blocking(app: &AppHandle) -> Result<PochvenRoutes, String> {
-    let (dir, sde) = crate::sde::dir_and_sde(app)?;
+    let dir = storage::app_data_dir(app)?;
     if let Some(cached) = storage::cache_get::<PochvenRoutes>(&dir, "pochven_routes") {
         return Ok(cached);
     }
 
     // k-space stargate adjacency (undirected) + security per system.
-    let adj = sde.stargate_adjacency().map_err(|e| e.to_string())?;
-    let sec: HashMap<i64, f64> = sde
-        .solar_system_info()
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(|(id, (_, s, _))| (id, s))
+    let adj = crate::sde::cached_adjacency(&dir)?;
+    let sec: HashMap<i64, f64> = crate::sde::cached_system_info(&dir)?
+        .iter()
+        .map(|(&id, (_, s, _))| (id, *s))
         .collect();
 
     // One distance map per (hub, preference) — 5 × 3 Dijkstra passes.
@@ -263,10 +261,9 @@ fn pochven_search_blocking(
     system_id: i64,
     max_jumps: Option<i64>,
 ) -> Result<EntrySearch, String> {
-    let sde = crate::sde::open_from_dir(dir)?;
-    let adj = sde.stargate_adjacency().map_err(|e| e.to_string())?;
+    let adj = crate::sde::cached_adjacency(dir)?;
     let (dist, pred) = graph::bfs(&adj, system_id, None);
-    let info = sde.solar_system_info().map_err(|e| e.to_string())?;
+    let info = crate::sde::cached_system_info(dir)?;
     let name = |id: i64| {
         info.get(&id)
             .map(|(n, _, _)| n.clone())
@@ -460,11 +457,11 @@ pub async fn pochven_map(app: AppHandle) -> Result<PochvenTopology, String> {
 
 /// The CPU-bound body of [`pochven_map`], run on the blocking pool.
 fn pochven_map_blocking(app: &AppHandle) -> Result<PochvenTopology, String> {
-    let sde = crate::sde::open_from_app(app)?;
+    let dir = crate::storage::app_data_dir(app)?;
     let poch_ids: HashSet<i64> = POCHVEN_CANDIDATES.iter().map(|&(_, id, _)| id).collect();
-    let info = sde.solar_system_info().map_err(|e| e.to_string())?;
-    let pos = sde.solar_system_positions().map_err(|e| e.to_string())?;
-    let geo = sde.solar_system_geo().map_err(|e| e.to_string())?;
+    let info = crate::sde::cached_system_info(&dir)?;
+    let pos = crate::sde::cached_positions(&dir)?;
+    let geo = crate::sde::cached_geo(&dir)?;
 
     // K-space systems (known space, i.e. regionID < 11_000_000 — excludes
     // w-space / Abyssal — and not Pochven itself) for the 2.5 ly 'Extraction'
@@ -554,7 +551,7 @@ fn pochven_map_blocking(app: &AppHandle) -> Result<PochvenTopology, String> {
     // Internal gate links = stargate edges with both ends inside Pochven.
     let mut seen: HashSet<(i64, i64)> = HashSet::new();
     let mut edges = Vec::new();
-    for (a, b) in sde.all_stargate_edges().map_err(|e| e.to_string())? {
+    for &(a, b) in crate::sde::cached_stargate_edges(&dir)?.iter() {
         if poch_ids.contains(&a) && poch_ids.contains(&b) {
             let key = if a <= b { (a, b) } else { (b, a) };
             if seen.insert(key) {

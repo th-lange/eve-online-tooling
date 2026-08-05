@@ -9,9 +9,9 @@
 //! Tools are **read-only**: SDE lookups, market prices, and (behind the
 //! opt-in dev-tier toggle, #592) the compute engines. The tool layer is
 //! handed a [`ToolCtx`] with the query services plus live plugin state.
-//! Registry-backed calls construct the shared [`capabilities::HostCtx`],
-//! which *does* carry an `AuthState` (scripts and plugins share that host
-//! layer and need it) — so what keeps MCP away from personal data is
+//! Registry-backed calls construct the shared [`capabilities::HostCtx`] with
+//! `auth: None` — no `AuthState` is ever built on the MCP path, since none of
+//! its capabilities are auth-gated. What keeps MCP away from personal data is
 //! **policy, not construction**: only capabilities flagged `mcp` (or
 //! `mcp_dev` when the toggle is on) are reachable, none of them is
 //! auth-gated, and the `mcp_never_reaches_auth_gated_data` test in
@@ -34,7 +34,6 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, State};
 
 use crate::capabilities;
-use crate::esi::AuthState;
 use crate::market::MarketService;
 use crate::model::AppError;
 use crate::plugins::manager::run_plugin;
@@ -44,12 +43,12 @@ use crate::plugins::{PluginManager, PluginRegistry};
 const PROTOCOL_VERSION: &str = "2024-11-05";
 
 /// What the MCP tool layer holds: read-only game-data services plus live
-/// plugin state for plugin-contributed tools. `AuthState` is deliberately
-/// absent here, but note that registry-backed tool calls still build one to
-/// satisfy the shared `capabilities::HostCtx` — the guard against personal
-/// data is the registry's `mcp`/`mcp_dev` exposure flags (no auth-gated
-/// capability is MCP-exposed; pinned by `mcp_never_reaches_auth_gated_data`),
-/// not this struct's shape.
+/// plugin state for plugin-contributed tools. `AuthState` is absent — and
+/// stays absent through `capabilities::HostCtx` too, which registry-backed
+/// tool calls build with `auth: None`. The guard against personal data is
+/// the registry's `mcp`/`mcp_dev` exposure flags (no auth-gated capability
+/// is MCP-exposed; pinned by `mcp_never_reaches_auth_gated_data`), not this
+/// struct's shape.
 pub struct ToolCtx {
     app_data_dir: PathBuf,
     market: MarketService,
@@ -352,11 +351,10 @@ fn call_tool(params: Option<&Value>, ctx: &ToolCtx) -> Result<Value, (i64, Strin
             if capabilities::find(other)
                 .is_some_and(|c| c.mcp || (c.mcp_dev && dev_tier_enabled(&ctx.app_data_dir))) =>
         {
-            let auth = AuthState::with_cache(ctx.app_data_dir.clone());
             let hctx = capabilities::HostCtx {
                 app_data_dir: &ctx.app_data_dir,
                 market: &ctx.market,
-                auth: &auth,
+                auth: None,
             };
             let value = capabilities::invoke(&hctx, other, args).map_err(|e| (-32602, e))?;
             json_content(&value)

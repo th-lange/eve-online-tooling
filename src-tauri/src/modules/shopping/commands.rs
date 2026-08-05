@@ -246,19 +246,6 @@ pub fn shopping_create_list(app: AppHandle, name: String) -> Result<ShoppingList
     Ok(resolve(&sde, &list))
 }
 
-/// Rename a list (built-in lists included).
-#[tauri::command]
-pub fn shopping_rename_list(app: AppHandle, id: String, name: String) -> Result<(), String> {
-    let name = name.trim().to_string();
-    if name.is_empty() {
-        return Err("list name can't be empty".into());
-    }
-    let (dir, _sde) = crate::sde::dir_and_sde(&app)?;
-    let mut store = load(&dir);
-    list_mut(&mut store, &id)?.name = name;
-    save(&dir, &store)
-}
-
 /// Delete a list. Refuses the built-in `default` / `production` lists.
 #[tauri::command]
 pub fn shopping_delete_list(app: AppHandle, id: String) -> Result<(), String> {
@@ -343,14 +330,7 @@ pub fn shopping_set_quantity(
 ) -> Result<(), String> {
     let (dir, _sde) = crate::sde::dir_and_sde(&app)?;
     let mut store = load(&dir);
-    let list = list_mut(&mut store, &id)?;
-    if quantity <= 0 {
-        list.items.retain(|e| e.type_id != type_id);
-    } else if let Some(entry) = list.items.iter_mut().find(|e| e.type_id == type_id) {
-        entry.quantity = quantity;
-    } else {
-        list.items.push(StoredEntry { type_id, quantity });
-    }
+    list_mut(&mut store, &id)?.set_quantities(&[(type_id, quantity)]);
     save(&dir, &store)
 }
 

@@ -9,10 +9,12 @@ use super::Sde;
 
 impl Sde {
     /// Charges usable in `weapon_type_id`: published types whose group is one of
-    /// the weapon's `chargeGroup1..5` (attrs 604–608), whose `chargeSize` (128)
-    /// matches when the weapon is sized, and that physically fit its ammo capacity
-    /// (charge volume ≤ module capacity). Ordered Tech I → II → Faction then name.
-    /// Empty when the module takes no charge. Drives the per-weapon ammo picker.
+    /// the weapon's `chargeGroup1..5` (attrs 604, 605, 606, 609, 610 — not a
+    /// contiguous range: 607 doesn't exist and 608 is `powerNeed`, unrelated),
+    /// whose `chargeSize` (128) matches when the weapon is sized, and that
+    /// physically fit its ammo capacity (charge volume ≤ module capacity).
+    /// Ordered Tech I → II → Faction then name. Empty when the module takes no
+    /// charge. Drives the per-weapon ammo picker.
     pub fn compatible_charges(&self, weapon_type_id: i64) -> Result<Vec<(i64, String)>, SdeError> {
         let mut stmt = self.conn.prepare(
             "SELECT t.typeID, t.typeName
@@ -20,7 +22,7 @@ impl Sde {
              WHERE t.published = 1
                AND t.groupID IN (
                  SELECT CAST(valueFloat AS INTEGER) FROM dgmTypeAttributes
-                 WHERE typeID = ?1 AND attributeID IN (604, 605, 606, 607, 608)
+                 WHERE typeID = ?1 AND attributeID IN (604, 605, 606, 609, 610)
                    AND valueFloat IS NOT NULL
                )
                -- Fits the ammo capacity (skip when the module records none).
@@ -41,6 +43,36 @@ impl Sde {
                t.typeName",
         )?;
         let rows = stmt.query_map(params![weapon_type_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Wormhole-class and Pochven-space "environment beacon" effects a fit
+    /// can be sitting in: published `groupID = 920` ("Effect Beacon") types
+    /// named "Class N \<effect\> Effects" (wormholes, classes 1–6) or "Weak/Strong
+    /// Metaliminal \<weather\> Storm" (**Pochven metaliminal storms** — a
+    /// nullsec/Pochven mechanic, distinct from Abyssal Deadspace's per-
+    /// filament weather, which has no dogma-attribute data in the SDE at
+    /// all: it's computed dynamically per pocket instance, not carried by
+    /// any static type) — the two naming shapes that actually carry
+    /// `shipID`-targeted dogma modifiers (verified against the SDE: e.g.
+    /// "Class 1 Pulsar Effects" boosts capacitor recharge and shield HP;
+    /// "Strong Metaliminal Electrical Storm" boosts capacitor recharge by
+    /// 25%, Weak by 10%). Excludes the unrelated Drifter/SOE/Triglavian/
+    /// holiday-event beacons that also live in this group. Drives the
+    /// environment selector.
+    pub fn environment_effects(&self) -> Result<Vec<(i64, String)>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT typeID, typeName FROM invTypes
+             WHERE groupID = 920 AND published = 1
+               AND (
+                 typeName LIKE 'Class % Effects'
+                 OR typeName LIKE 'Weak Metaliminal %'
+                 OR typeName LIKE 'Strong Metaliminal %'
+               )
+               AND typeName NOT LIKE '%Festival%'
+             ORDER BY typeName",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
@@ -97,7 +129,6 @@ impl Sde {
     /// Batched [`type_attributes_raw`](Self::type_attributes_raw): one query for
     /// many types (a whole fit + its skills), grouped by typeID in Rust. Avoids
     /// the per-item round-trips that resolving a full fit would otherwise need.
-    #[allow(dead_code)] // consumed by the dogma engine (P2, #171)
     pub fn types_attributes_raw(
         &self,
         type_ids: &[i64],
@@ -393,6 +424,73 @@ mod tests {
 
         // A module with no chargeGroup attrs takes no charge.
         assert!(sde.compatible_charges(1).unwrap().is_empty());
+    }
+
+    #[test]
+    fn finds_charges_in_charge_group_4() {
+        // Regression test (#T2-ammo-bug): the launcher stores its Advanced
+        // (T2) ammo group in chargeGroup4 (attribute 609), not a contiguous
+        // 604..608 range — 607 doesn't exist and 608 is `powerNeed`,
+        // unrelated. A Rapid Light Missile Launcher II-shaped fixture: T1
+        // ammo in chargeGroup1 (604), T2 "Fury" ammo in a second group
+        // (chargeGroup4, 609) — both must come back.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE invTypes(typeID INT, typeName TEXT, groupID INT, published INT, volume REAL, capacity REAL);
+             CREATE TABLE dgmTypeAttributes(typeID INT, attributeID INT, valueFloat REAL);
+             CREATE TABLE invMetaTypes(typeID INT, parentTypeID INT, metaGroupID INT);
+
+             -- Launcher: chargeGroup1=384 (Light Missile), chargeGroup4=653
+             -- (Advanced Light Missile), no chargeSize (unsized, like real RLML).
+             INSERT INTO invTypes VALUES (1877,'Rapid Light Missile Launcher II',511,1,10.0,0.3);
+             INSERT INTO dgmTypeAttributes VALUES (1877,604,384.0),(1877,609,653.0);
+
+             INSERT INTO invTypes VALUES
+               (2629,'Scourge Light Missile',384,1,0.03,0),
+               (24495,'Scourge Fury Light Missile',653,1,0.015,0);
+             INSERT INTO invMetaTypes VALUES (24495,2629,2)",
+        )
+        .unwrap();
+        let sde = Sde::from_connection(conn);
+
+        let charges = sde.compatible_charges(1877).unwrap();
+        let names: Vec<_> = charges.iter().map(|(_, n)| n.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["Scourge Light Missile", "Scourge Fury Light Missile"]
+        );
+    }
+
+    #[test]
+    fn finds_wormhole_and_pochven_storm_environment_beacons_only() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE invTypes(typeID INT, typeName TEXT, groupID INT, published INT, volume REAL, capacity REAL);
+
+             -- Matches: a wormhole class effect and a Pochven metaliminal storm tier.
+             INSERT INTO invTypes VALUES
+               (30844,'Class 1 Pulsar Effects',920,1,20,0),
+               (56061,'Strong Metaliminal Gamma Ray Storm',920,1,20,0);
+             -- Non-matches: unpublished, wrong group, and an unrelated group-920
+             -- beacon (Drifter/holiday-event) whose name doesn't fit either shape.
+             INSERT INTO invTypes VALUES
+               (37542,'Tournament Effects',920,0,20,0),
+               (99999,'Class 1 Pulsar Effects (unpublished dupe)',921,1,20,0),
+               (56968,'Strong Lowsec Metaliminal Yoiul Festival YC122 Storm',920,1,20,0);",
+        )
+        .unwrap();
+        let sde = Sde::from_connection(conn);
+
+        let names: Vec<_> = sde
+            .environment_effects()
+            .unwrap()
+            .into_iter()
+            .map(|(_, n)| n)
+            .collect();
+        assert_eq!(
+            names,
+            vec!["Class 1 Pulsar Effects", "Strong Metaliminal Gamma Ray Storm"]
+        );
     }
 
     /// A tiny dogma fixture: a hull (587) with slots/resources and a module

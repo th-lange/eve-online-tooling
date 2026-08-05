@@ -53,9 +53,9 @@ pub async fn trading_scan(
         .map_err(|e| e.to_string())?;
 
     let (blacklist, favorites) = lists::load_filter_sets(&dir, "blacklist", "favorites");
-    let categories = sde.category_names().map_err(|e| e.to_string())?;
-    let groups = sde.group_names().map_err(|e| e.to_string())?;
-    let meta = sde.meta_group_names().map_err(|e| e.to_string())?;
+    let categories = crate::sde::cached_category_names(&dir)?;
+    let groups = crate::sde::cached_group_names(&dir)?;
+    let meta = crate::sde::cached_meta_group_names(&dir)?;
     let config = TradeConfig {
         broker_fee: params.broker_fee,
         sales_tax: params.sales_tax,

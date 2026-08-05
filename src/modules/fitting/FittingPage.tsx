@@ -19,11 +19,13 @@ import { SdeGate } from "../../components/SdeGate";
 import {
   Centered,
   ComparisonPanel,
+  EnvironmentEffectSelector,
   EsiFitStatus,
   FitHeader,
   ModuleBrowser,
   ProjectedPanel,
   SlotGrid,
+  TargetProfileBox,
 } from "./components";
 import { StatsAside } from "./StatsAside";
 import { useFitEditor } from "./useFitEditor";
@@ -323,6 +325,16 @@ function Workbench() {
                 onAdd={editor.addProjected}
                 onRemove={editor.removeProjected}
               />
+              <EnvironmentEffectSelector
+                value={editor.environmentEffect}
+                onChange={editor.setEnvironmentEffect}
+                abyssalWeather={editor.abyssalWeather}
+                onAbyssalWeather={editor.setAbyssalWeather}
+              />
+              <TargetProfileBox
+                value={editor.targetProfile}
+                onChange={editor.setTargetProfile}
+              />
             </section>
 
             {/* Right: stats */}
@@ -337,8 +349,6 @@ function Workbench() {
               onDamageProfile={editor.setDamageProfile}
               neutGjs={editor.neutGjs}
               onNeutGjs={editor.setNeutGjs}
-              targetProfile={editor.targetProfile}
-              onTargetProfile={editor.setTargetProfile}
               fleetBoosts={editor.fleetBoosts}
               onAddFleetBoost={editor.addFleetBoost}
               onRemoveFleetBoost={editor.removeFleetBoost}

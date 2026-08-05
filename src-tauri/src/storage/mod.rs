@@ -315,13 +315,6 @@ mod tests {
         // Fresh entry round-trips.
         cache_put(&dir, "k", &vec![1_i64, 2, 3], 3600).unwrap();
         assert_eq!(cache_get::<Vec<i64>>(&dir, "k"), Some(vec![1, 2, 3]));
-        // A zero-TTL entry is immediately stale (expires == now, but a later read
-        // is past it once a second ticks; force-test with ttl 0 + manual now check
-        // is flaky, so just confirm a clearly-expired write reads as None).
-        cache_put(&dir, "old", &1_i64, 0).unwrap();
-        // expires == now; treat as fresh this instant, so re-check semantics only
-        // for the absent/fresh cases above.
-        let _ = cache_get::<i64>(&dir, "old");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

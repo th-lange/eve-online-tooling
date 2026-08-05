@@ -91,6 +91,7 @@ pub async fn daytrading_scan(
     market: State<'_, MarketService>,
     params: DayTradeParams,
 ) -> Result<Vec<DayTradeRow>, String> {
+    let market: &MarketService = market.inner();
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     // Whitelist scan: only price the chosen categories (default Ships/Modules/
     // Charges) instead of the whole ~19k catalogue — the headline win of #87.
@@ -109,32 +110,36 @@ pub async fn daytrading_scan(
         return Err("pick at least two hubs to compare".into());
     }
 
-    // Price the whole catalogue at each selected hub (Fuzzwork aggregates, cached).
-    let mut hubs: Vec<HubPrices> = Vec::with_capacity(selected.len());
-    for hub in &selected {
-        let station_id = hub.stations.first().map(|s| s.id);
-        let label = hub
-            .stations
-            .first()
-            .map(|s| s.name.clone())
-            .unwrap_or_else(|| hub.name.clone());
-        let location = resolve_location(hub.id, station_id);
-        let prices = market
-            .price_map_at(location, &ids)
-            .await
-            .map_err(|e| e.to_string())?;
-        hubs.push(HubPrices {
-            region_id: hub.id,
-            label,
-            prices,
-        });
-    }
+    // Price the whole catalogue at each selected hub (Fuzzwork aggregates,
+    // cached). Hubs are independent Fuzzwork requests, so fetch them
+    // concurrently instead of one-at-a-time.
+    let hub_fetches = selected.iter().map(|hub| {
+        let ids = &ids;
+        async move {
+            let station_id = hub.stations.first().map(|s| s.id);
+            let label = hub
+                .stations
+                .first()
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| hub.name.clone());
+            let location = resolve_location(hub.id, station_id);
+            let prices = market.price_map_at(location, ids).await?;
+            Ok::<_, crate::esi::EsiError>(HubPrices {
+                region_id: hub.id,
+                label,
+                prices,
+            })
+        }
+    });
+    let hubs: Vec<HubPrices> = futures_util::future::try_join_all(hub_fetches)
+        .await
+        .map_err(|e| e.to_string())?;
 
     let (blacklist, favorites) =
         lists::load_filter_sets(&dir, DAYTRADING_BLACKLIST_KEY, DAYTRADING_FAVORITES_KEY);
-    let categories = sde.category_names().map_err(|e| e.to_string())?;
-    let groups = sde.group_names().map_err(|e| e.to_string())?;
-    let meta = sde.meta_group_names().map_err(|e| e.to_string())?;
+    let categories = crate::sde::cached_category_names(&dir)?;
+    let groups = crate::sde::cached_group_names(&dir)?;
+    let meta = crate::sde::cached_meta_group_names(&dir)?;
     let config = DayTradeConfig {
         sales_tax: params.sales_tax,
         broker_fee: params.broker_fee,
@@ -194,11 +199,20 @@ pub async fn daytrading_scan(
             .or_default()
             .push(row.type_id);
     }
+    // Regions are independent history fetches — run them concurrently.
+    let volume_fetches = by_region.iter().map(|(region_id, type_ids)| {
+        let market = &market;
+        async move {
+            (
+                *region_id,
+                market
+                    .daily_traded_volumes(*region_id, type_ids, TRADED_VOLUME_DAYS)
+                    .await,
+            )
+        }
+    });
     let mut traded: HashMap<i64, i64> = HashMap::new();
-    for (region_id, type_ids) in &by_region {
-        let vols = market
-            .daily_traded_volumes(*region_id, type_ids, TRADED_VOLUME_DAYS)
-            .await;
+    for (_region_id, vols) in futures_util::future::join_all(volume_fetches).await {
         traded.extend(vols);
     }
     for row in &mut out {

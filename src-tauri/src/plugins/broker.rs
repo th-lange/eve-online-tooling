@@ -25,18 +25,31 @@ use crate::capabilities;
 use crate::esi::AuthState;
 use crate::market::MarketService;
 
-/// Everything a plugin's host functions are allowed to know about it: where its
-/// private storage lives. Shared (immutably) into each host-fn closure.
+/// Everything a plugin's host functions are allowed to know about it: where
+/// its private storage lives, plus the shared `MarketService`/`AuthState`
+/// instances the host-call capability dispatcher runs against. `market`/
+/// `auth` are process-shared (one per [`super::manager::PluginManager`], not
+/// per plugin) so repeated `host_call`s hit warm TTL caches instead of
+/// building a fresh client + empty caches every call (#764).
 pub struct BrokerCtx {
     app_data_dir: PathBuf,
     plugin_id: String,
+    market: Arc<MarketService>,
+    auth: Arc<AuthState>,
 }
 
 impl BrokerCtx {
-    pub fn new(app_data_dir: PathBuf, plugin_id: String) -> Self {
+    pub fn new(
+        app_data_dir: PathBuf,
+        plugin_id: String,
+        market: Arc<MarketService>,
+        auth: Arc<AuthState>,
+    ) -> Self {
         Self {
             app_data_dir,
             plugin_id,
+            market,
+            auth,
         }
     }
 
@@ -133,12 +146,10 @@ pub fn host_functions(granted: &HashSet<Permission>, ctx: Arc<BrokerCtx>) -> Vec
                 // the capability registry (cap_sde_type_info) instead of
                 // re-implementing the SDE lookup here, so the two callers
                 // can't drift.
-                let market = MarketService::with_cache(sde_ctx.app_data_dir.clone());
-                let auth = AuthState::with_cache(sde_ctx.app_data_dir.clone());
                 let hctx = capabilities::HostCtx {
                     app_data_dir: &sde_ctx.app_data_dir,
-                    market: &market,
-                    auth: &auth,
+                    market: &sde_ctx.market,
+                    auth: Some(&sde_ctx.auth),
                 };
                 let args = serde_json::json!({ "typeId": type_id });
                 let json = capabilities::invoke(&hctx, "sde_type_info", &args)
@@ -235,14 +246,14 @@ pub fn host_functions(granted: &HashSet<Permission>, ctx: Arc<BrokerCtx>) -> Vec
                     "capability {name:?} requires a permission this plugin wasn't granted"
                 )));
             }
-            // Transient services (share the on-disk cache); no auth is available
-            // for a plugin unless a character is logged in on the host side.
-            let market = MarketService::with_cache(call_ctx.app_data_dir.clone());
-            let auth = AuthState::with_cache(call_ctx.app_data_dir.clone());
+            // Shared long-lived services (see `BrokerCtx` docs): warm TTL
+            // caches persist across calls instead of being rebuilt each time.
+            // No auth is available for a plugin unless a character is logged
+            // in on the host side.
             let hctx = capabilities::HostCtx {
                 app_data_dir: &call_ctx.app_data_dir,
-                market: &market,
-                auth: &auth,
+                market: &call_ctx.market,
+                auth: Some(&call_ctx.auth),
             };
             let result = capabilities::invoke(&hctx, &name, &args).map_err(Error::msg)?;
             let out = serde_json::to_string(&result).map_err(|e| Error::msg(e.to_string()))?;
@@ -258,9 +269,18 @@ pub fn host_functions(granted: &HashSet<Permission>, ctx: Arc<BrokerCtx>) -> Vec
 mod tests {
     use super::*;
 
+    fn test_ctx(dir: &str, plugin_id: &str) -> BrokerCtx {
+        BrokerCtx::new(
+            PathBuf::from(dir),
+            plugin_id.into(),
+            Arc::new(MarketService::new()),
+            Arc::new(AuthState::new()),
+        )
+    }
+
     #[test]
     fn key_path_stays_inside_the_plugin_kv_dir() {
-        let ctx = BrokerCtx::new(PathBuf::from("/data"), "acme".into());
+        let ctx = test_ctx("/data", "acme");
         let ok = key_path(&ctx, "prefs").unwrap();
         assert_eq!(ok, PathBuf::from("/data/plugins/acme/kv/prefs"));
         // A traversal attempt is rejected outright, never resolved.
@@ -269,13 +289,13 @@ mod tests {
 
     #[test]
     fn empty_key_is_rejected() {
-        let ctx = BrokerCtx::new(PathBuf::from("/data"), "acme".into());
+        let ctx = test_ctx("/data", "acme");
         assert!(key_path(&ctx, "///").is_err());
     }
 
     #[test]
     fn host_functions_track_grants() {
-        let ctx = Arc::new(BrokerCtx::new(PathBuf::from("/data"), "acme".into()));
+        let ctx = Arc::new(test_ctx("/data", "acme"));
         // `host_call` (the generic gateway) is always linked, so every count
         // includes it.
         assert_eq!(host_functions(&HashSet::new(), ctx.clone()).len(), 1);

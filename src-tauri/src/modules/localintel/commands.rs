@@ -16,6 +16,7 @@ use crate::esi::{
     resolve_names, AuthState, CharacterAffiliation,
 };
 use crate::storage;
+use crate::util::text::parse_names;
 use crate::zkill;
 
 /// Cap on pasted names per scan (Local tops out well below this).
@@ -31,8 +32,9 @@ pub struct LocalPilot {
     pub corporation: String,
     pub alliance_id: Option<i64>,
     pub alliance: Option<String>,
-    /// Your standing toward the most-specific entity that has one (corp →
-    /// alliance → faction), or null if you have none.
+    /// Your standing toward the most-specific entity that has one (pilot →
+    /// corp → alliance; NPC faction standings are never applied), or null if
+    /// you have none.
     pub standing: Option<f64>,
     /// "blue" (standing > 0) / "red" (< 0) / "neutral" (0 or unknown).
     pub threat: String,
@@ -49,18 +51,6 @@ pub struct LocalScanResult {
     pub unresolved: Vec<String>,
 }
 
-/// Parse the in-game Local member-list copy: one character name per line. Trims,
-/// drops blanks, dedupes (preserving order), and caps the count.
-fn parse_names(text: &str) -> Vec<String> {
-    let mut seen = HashSet::new();
-    text.lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .filter(|l| seen.insert(l.to_lowercase()))
-        .take(NAME_CAP)
-        .map(str::to_string)
-        .collect()
-}
 
 /// Classify a standing into a threat band. `None`/0.0 = neutral.
 fn threat_of(standing: Option<f64>) -> &'static str {
@@ -128,15 +118,16 @@ struct CorpInfo {
 }
 
 /// Resolve a pasted Local member list to classified pilots. Name→id and
-/// affiliation use public ESI POST endpoints; standings use the logged-in
-/// character (`esi-characters.read_standings.v1`, already granted).
+/// affiliation use public ESI POST endpoints; standings come from the logged-in
+/// character's alliance/corp/personal contacts endpoints (each layer skipped
+/// if its scope/role isn't granted), not a standings endpoint.
 #[tauri::command]
 pub async fn localintel_scan(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
     text: String,
 ) -> Result<LocalScanResult, String> {
-    let names = parse_names(&text);
+    let names = parse_names(&text, NAME_CAP);
     if names.is_empty() {
         return Ok(LocalScanResult {
             pilots: Vec::new(),
@@ -264,8 +255,6 @@ pub async fn localintel_scan(
         let alliance = aff
             .and_then(|a| a.alliance_id)
             .and_then(|al| org_names.get(&al).cloned());
-        // Standing: most specific entry wins — a personal contact on the pilot
-        // themselves, then corp → alliance → faction.
         // Most specific player standing wins: the pilot, then their corp, then
         // their alliance. NPC *faction* standings are deliberately NOT applied —
         // your standing toward an empire faction (e.g. −10 from missions) must
@@ -514,12 +503,6 @@ pub fn localintel_set_watchlist(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parses_dedupes_and_trims_names() {
-        let text = "  Alice \nBob\n\nAlice\n  \nCharlie\n";
-        assert_eq!(parse_names(text), vec!["Alice", "Bob", "Charlie"]);
-    }
 
     #[test]
     fn classifies_standing_bands() {

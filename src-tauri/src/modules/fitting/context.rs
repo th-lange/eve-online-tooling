@@ -2,18 +2,24 @@
 //! attributes, effects, type→group, effect metadata, attribute defaults) that
 //! `run_dogma`, `resolve_module_costs` and `optimize_fit` each ran on their own
 //! before this, plus the skill/entity construction built off them. One preload
-//! path shared by all three entry points (#559).
+//! path shared by all three entry points (#559). The two static, SDE-swap-wide
+//! maps — effect metadata and attribute defaults — are served from the
+//! generation-keyed process cache instead of re-scanning `dgmEffects` (with
+//! its per-row `modifierInfo` JSON parse) and `dgmAttributeTypes` on every
+//! call (#761).
 
-use std::collections::HashMap;
+use std::path::Path;
+use std::sync::Arc;
 
 use super::engine::resolve::EntityInput;
 use super::stats::{AttrMap, EffectMap, GroupMap};
-use crate::sde::{AttrMeta, EffectMeta, Sde};
+use crate::sde::{AttrDefaultsMap, EffectMetaMap, Sde};
 
 /// Bulk-preloaded dogma-engine inputs for one fitting operation (simulate,
 /// resolve candidate costs, optimize): every type id the caller needs —
 /// published skills plus whatever `extra_ids` it adds (ship/modules/charges/
-/// drones/candidates) — resolved in five bulk queries instead of one per type.
+/// drones/candidates) — resolved in three bulk per-call SDE queries plus two
+/// process-wide cached maps, instead of one query per type.
 /// Fields are `pub(super)`: sibling fitting files (notably the optimizer's
 /// per-candidate `evaluate` hot loop) borrow the maps directly; nothing outside
 /// `fitting` reaches them.
@@ -21,20 +27,21 @@ pub(super) struct DogmaContext {
     pub(super) attrs: AttrMap,
     pub(super) effects: EffectMap,
     pub(super) groups: GroupMap,
-    pub(super) effect_meta: HashMap<i64, EffectMeta>,
-    pub(super) defaults: HashMap<i64, AttrMeta>,
+    pub(super) effect_meta: Arc<EffectMetaMap>,
+    pub(super) defaults: Arc<AttrDefaultsMap>,
     /// Published skill type ids, cached alongside the maps above so
     /// [`Self::skill_entities`] doesn't need a second SDE round-trip.
     skill_ids: Vec<i64>,
 }
 
 impl DogmaContext {
-    /// Preload every dogma-engine input in five bulk SDE queries: base
-    /// attributes, effects, type→group, effect metadata and attribute
-    /// defaults, for the game's published skills plus `extra_ids` (ship,
-    /// fitted/candidate modules, charges, drones, implants, projected items —
-    /// whatever the caller resolves entities for).
-    pub(super) fn load(sde: &Sde, extra_ids: &[i64]) -> Result<Self, String> {
+    /// Preload every dogma-engine input: three bulk SDE queries scoped to
+    /// this call's type ids (base attributes, effects, type→group) plus the
+    /// two static catalogues (effect metadata, attribute defaults) served
+    /// from the process-wide cache, for the game's published skills plus
+    /// `extra_ids` (ship, fitted/candidate modules, charges, drones,
+    /// implants, projected items — whatever the caller resolves entities for).
+    pub(super) fn load(sde: &Sde, dir: &Path, extra_ids: &[i64]) -> Result<Self, String> {
         let skill_ids = sde.skill_type_ids().map_err(|e| e.to_string())?;
         let mut all_ids = Vec::with_capacity(extra_ids.len() + skill_ids.len());
         all_ids.extend_from_slice(extra_ids);
@@ -45,8 +52,8 @@ impl DogmaContext {
             .map_err(|e| e.to_string())?;
         let effects = sde.types_effects(&all_ids).map_err(|e| e.to_string())?;
         let groups = sde.types_groups(&all_ids).map_err(|e| e.to_string())?;
-        let effect_meta = sde.effect_meta().map_err(|e| e.to_string())?;
-        let defaults = sde.attribute_defaults().map_err(|e| e.to_string())?;
+        let effect_meta = crate::sde::cached_effect_meta(dir)?;
+        let defaults = crate::sde::cached_attribute_defaults(dir)?;
 
         Ok(Self {
             attrs,

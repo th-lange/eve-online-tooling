@@ -206,7 +206,7 @@ pub async fn market_sell_orders(
     service: State<'_, MarketService>,
     params: SellOrdersParams,
 ) -> Result<Vec<SellOrder>, String> {
-    let sde = crate::sde::open_from_app(&app)?;
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
 
     // Resolve the region set + any narrower (system/station) filter, then fetch.
     let Scope {
@@ -234,10 +234,10 @@ pub async fn market_sell_orders(
     sells.truncate(MAX_ORDERS);
 
     // Jumps from the origin system over the stargate graph (optionally hi-sec).
-    let info = sde.solar_system_info().map_err(|e| e.to_string())?;
+    let info = crate::sde::cached_system_info(&dir)?;
     let distances = match params.origin_system_id {
         Some(origin) => {
-            let edges = sde.all_stargate_edges().map_err(|e| e.to_string())?;
+            let edges = crate::sde::cached_stargate_edges(&dir)?;
             jump_distances(origin, &edges, &info, params.high_sec_only)
         }
         None => HashMap::new(),

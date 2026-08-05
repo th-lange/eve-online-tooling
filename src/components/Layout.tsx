@@ -393,12 +393,6 @@ function NavRow({
 }) {
   const hex = color ? COLOR_HEX.get(color) : undefined;
   const { unseen, hasEntries } = useInfoAlerts();
-  // Shares the ["scripts"] query cache with the Scripts page, so this stays
-  // live the moment a script is armed/disarmed/saved there — no polling.
-  const scriptsQ = useQuery({ queryKey: ["scripts"], queryFn: scriptsList });
-  const runningScripts = (scriptsQ.data ?? []).filter(
-    (s) => s.enabled && s.intervalMin != null,
-  ).length;
   return (
     <div
       onDragOver={
@@ -482,14 +476,7 @@ function NavRow({
             {unseen}
           </span>
         )}
-        {module.id === "scripts" && runningScripts > 0 && (
-          <span
-            title={`${runningScripts} script${runningScripts === 1 ? "" : "s"} running on a loop`}
-            className="ml-auto min-w-4 rounded-full bg-emerald-600 px-1.5 text-center text-[10px] font-semibold leading-4 text-white"
-          >
-            {runningScripts}
-          </span>
-        )}
+        {module.id === "scripts" && <ScriptsBadge />}
       </NavLink>
       <ColorPicker
         title={module.title}
@@ -509,6 +496,28 @@ function NavRow({
         <Star size={14} fill={pinned ? "currentColor" : "none"} />
       </button>
     </div>
+  );
+}
+
+/**
+ * The "N scripts running on a loop" badge, mounted only on the Scripts nav
+ * row — so its `["scripts"]` query runs once total instead of once per nav
+ * row (~30 of them). Shares the query cache with the Scripts page, so this
+ * stays live the moment a script is armed/disarmed/saved there — no polling.
+ */
+function ScriptsBadge() {
+  const scriptsQ = useQuery({ queryKey: ["scripts"], queryFn: scriptsList });
+  const runningScripts = (scriptsQ.data ?? []).filter(
+    (s) => s.enabled && s.intervalMin != null,
+  ).length;
+  if (runningScripts === 0) return null;
+  return (
+    <span
+      title={`${runningScripts} script${runningScripts === 1 ? "" : "s"} running on a loop`}
+      className="ml-auto min-w-4 rounded-full bg-emerald-600 px-1.5 text-center text-[10px] font-semibold leading-4 text-white"
+    >
+      {runningScripts}
+    </span>
   );
 }
 

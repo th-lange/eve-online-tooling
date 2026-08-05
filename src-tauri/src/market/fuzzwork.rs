@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use futures_util::stream::{self, StreamExt};
 use serde::Deserialize;
 
-use crate::esi::{EsiError, USER_AGENT};
+use crate::esi::{self, EsiError};
 
 use super::markets::Location;
 
@@ -110,8 +110,7 @@ impl Default for FuzzworkClient {
 
 impl FuzzworkClient {
     pub fn new() -> Self {
-        let http = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
+        let http = esi::http_client_builder()
             .build()
             .expect("failed to build HTTP client");
         Self { http }

@@ -10,8 +10,10 @@ import { queryErrorText } from "../../components/QueryErrorNotice";
 export { BrowseTree, ModuleBrowser } from "./ModuleBrowser";
 export { ComparisonPanel } from "./ComparisonPanel";
 export { FitHeader } from "./FitHeader";
+export { EnvironmentEffectSelector } from "./EnvironmentEffectSelector";
 export { FleetBoostsPanel } from "./FleetBoostsPanel";
 export { ProjectedPanel } from "./ProjectedPanel";
+export { TargetProfileBox } from "./TargetProfileBox";
 export { ChargeControl, SlotBadge, SlotGrid } from "./SlotGrid";
 export {
   CapChart,

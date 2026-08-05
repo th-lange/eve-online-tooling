@@ -391,8 +391,8 @@ pub async fn character_mining(
     auth_state: State<'_, AuthState>,
     market: State<'_, MarketService>,
 ) -> Result<MiningView, AppError> {
-    let (_, character_id) = storage::dir_and_primary_character(&app)?;
-    let sde = crate::sde::open_from_app(&app)?;
+    let (dir, character_id) = storage::dir_and_primary_character(&app)?;
+    let sde = crate::sde::open_from_dir(&dir)?;
 
     let ledger: Vec<EsiMining> = authed_get_paged_pub(
         &auth_state,
@@ -416,7 +416,7 @@ pub async fn character_mining(
         .into_iter()
         .filter_map(|m| m.buy_percentile.map(|p| (m.type_id, p)))
         .collect();
-    let systems = sde.system_names().map_err(|e| e.to_string())?;
+    let systems = crate::sde::cached_system_names(&dir)?;
 
     let now = crate::util::time::now_secs() as f64;
     let (d1, d7, d30) = (now - 86_400.0, now - 7.0 * 86_400.0, now - 30.0 * 86_400.0);
@@ -515,8 +515,7 @@ pub async fn character_fleet(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<FleetView, AppError> {
-    let (_, character_id) = storage::dir_and_primary_character(&app)?;
-    let sde = crate::sde::open_from_app(&app)?;
+    let (dir, character_id) = storage::dir_and_primary_character(&app)?;
 
     // Not in a fleet → ESI 404; treat as "no fleet" rather than an error.
     let fleet: EsiFleet = match authed_get(
@@ -543,7 +542,8 @@ pub async fn character_fleet(
 
     let char_ids: Vec<i64> = members.iter().map(|m| m.character_id).collect();
     let names = resolve_names(&auth_state, &char_ids).await;
-    let systems = sde.system_names().map_err(|e| e.to_string())?;
+    let systems = crate::sde::cached_system_names(&dir)?;
+    let sde = crate::sde::open_from_dir(&dir)?;
 
     let rows = members
         .into_iter()

@@ -20,7 +20,7 @@ mod types;
 
 #[cfg(test)]
 pub(crate) use db::test_sde;
-pub use db::{wormhole_class_label, Sde};
+pub use db::{wormhole_class_label, Sde, SystemGeo};
 pub use download::download_sde;
 pub use error::SdeError;
 pub use types::{
@@ -67,10 +67,9 @@ impl SdePaths {
 /// Open the SDE for the app's data dir. The dir/SDE-open plumbing was
 /// otherwise copy-pasted identically across every command module.
 ///
-/// Design note (#556 → #720): the generation-keyed caches below
-/// ([`cached_system_info`] / [`cached_adjacency`]) now serve the route and
-/// wormholes hot paths. Remaining full-map call sites (pochven/pi/intel
-/// planners, `capabilities.rs`) can switch to them as they're touched.
+/// Design note (#556 → #720 → #758): the generation-keyed caches below
+/// serve every remaining whole-table SDE call site — system info,
+/// adjacency, positions, geo, system/group/category/meta-group names.
 pub fn open_from_app(app: &tauri::AppHandle) -> Result<Sde, String> {
     let dir = storage::app_data_dir(app)?;
     open_from_dir(&dir)
@@ -92,22 +91,37 @@ pub fn dir_and_sde(app: &tauri::AppHandle) -> Result<(PathBuf, Sde), String> {
     Ok((dir, sde))
 }
 
-// --- Generation-keyed caches for the two big whole-universe maps (#720) ---
+// --- Generation-keyed caches for the whole-universe / whole-catalogue SDE
+// tables (#720, #758) ---
 //
-// These maps are immutable between SDE swaps but were reloaded from SQLite on
-// every command invocation — hot on the route/wormholes paths, where location
-// polling re-read ~5k system rows and the full jump table every 30s. Each map
-// is cached process-wide, keyed by the database file's identity; a successful
-// [`download_sde`] swap changes that identity and transparently invalidates.
-// Other full-map call sites (pochven/pi/intel planners, capabilities) can
-// adopt these getters as they're touched.
+// These maps and name catalogues are immutable between SDE swaps but were
+// reloaded from SQLite on every command invocation — hot on routing,
+// pochven/FW map, PI/mining/fleet, and trading/production paths, several of
+// which re-scanned ~50k-row `invTypes` joins per call. Each is cached
+// process-wide, keyed by the database file's identity; a successful
+// [`download_sde`] swap changes that identity and transparently invalidates
+// every slot below.
 
 /// System id → (name, security, region name).
 pub type SystemInfoMap = std::collections::HashMap<i64, (String, f64, String)>;
 /// Undirected stargate adjacency, system id → neighbouring system ids.
 pub type AdjacencyMap = std::collections::HashMap<i64, Vec<i64>>;
+/// Raw stargate edges `(from, to)` — the list form some callers filter
+/// before building adjacency (e.g. a high-sec-only route).
+pub type StargateEdges = Vec<(i64, i64)>;
 /// Type id → full item metadata (name, volume, category, group, meta group).
 pub type ItemMetaMap = std::collections::HashMap<i64, ItemMeta>;
+/// Galactic map-plane coordinates `(x, z)` for every solar system.
+pub type PositionsMap = std::collections::HashMap<i64, (f64, f64)>;
+/// Full 3D galactic coordinates `(regionID, x, y, z)` per solar system.
+pub type GeoMap = std::collections::HashMap<i64, SystemGeo>;
+/// Type/system id → plain name (system names, group/category/meta-group
+/// names — every id-keyed name lookup the generation cache serves).
+pub type NameMap = std::collections::HashMap<i64, String>;
+/// Effect id → static dogma effect metadata (category, modifier info, …).
+pub type EffectMetaMap = std::collections::HashMap<i64, EffectMeta>;
+/// Attribute id → its default value + stacking metadata.
+pub type AttrDefaultsMap = std::collections::HashMap<i64, AttrMeta>;
 
 /// Identity of the SDE database file: (mtime seconds, byte size). Changes
 /// exactly when a new database is swapped into place.
@@ -176,6 +190,21 @@ pub fn cached_adjacency(dir: &Path) -> Result<std::sync::Arc<AdjacencyMap>, Stri
     )
 }
 
+/// The raw stargate edge list, served from the process-wide cache. Distinct
+/// from [`cached_adjacency`]: callers that filter edges before building
+/// adjacency (e.g. market's high-sec-only routing) need the flat list.
+pub fn cached_stargate_edges(dir: &Path) -> Result<std::sync::Arc<StargateEdges>, String> {
+    static SLOT: std::sync::LazyLock<CacheSlot<StargateEdges>> =
+        std::sync::LazyLock::new(|| std::sync::RwLock::new(None));
+    let generation = generation(&SdePaths::new(dir.to_path_buf()).db)?;
+    get_or_build(&SLOT, generation, || {
+        let sde = open_from_dir(dir)?;
+        Ok(std::sync::Arc::new(
+            sde.all_stargate_edges().map_err(|e| e.to_string())?,
+        ))
+    })
+}
+
 /// The full item-metadata catalogue (every `invTypes` row, published or
 /// not — see [`db::Sde::all_item_meta`]), served from the process-wide
 /// cache. One shared, generation-keyed map: every caller — a character's
@@ -191,6 +220,122 @@ pub fn cached_item_meta(dir: &Path) -> Result<std::sync::Arc<ItemMetaMap>, Strin
         let sde = open_from_dir(dir)?;
         Ok(std::sync::Arc::new(
             sde.all_item_meta().map_err(|e| e.to_string())?,
+        ))
+    })
+}
+
+/// Galactic map-plane positions for every solar system, served from the
+/// process-wide cache. Backs the pochven/FW map layouts (#758).
+pub fn cached_positions(dir: &Path) -> Result<std::sync::Arc<PositionsMap>, String> {
+    static SLOT: std::sync::LazyLock<CacheSlot<PositionsMap>> =
+        std::sync::LazyLock::new(|| std::sync::RwLock::new(None));
+    let generation = generation(&SdePaths::new(dir.to_path_buf()).db)?;
+    get_or_build(&SLOT, generation, || {
+        let sde = open_from_dir(dir)?;
+        Ok(std::sync::Arc::new(
+            sde.solar_system_positions().map_err(|e| e.to_string())?,
+        ))
+    })
+}
+
+/// Full 3D galactic coordinates for every solar system, served from the
+/// process-wide cache. Backs true light-year distance filters (#758).
+pub fn cached_geo(dir: &Path) -> Result<std::sync::Arc<GeoMap>, String> {
+    static SLOT: std::sync::LazyLock<CacheSlot<GeoMap>> =
+        std::sync::LazyLock::new(|| std::sync::RwLock::new(None));
+    let generation = generation(&SdePaths::new(dir.to_path_buf()).db)?;
+    get_or_build(&SLOT, generation, || {
+        let sde = open_from_dir(dir)?;
+        Ok(std::sync::Arc::new(
+            sde.solar_system_geo().map_err(|e| e.to_string())?,
+        ))
+    })
+}
+
+/// System id → name, served from the process-wide cache. Backs mining
+/// ledger / fleet / hangar location labelling (#758).
+pub fn cached_system_names(dir: &Path) -> Result<std::sync::Arc<NameMap>, String> {
+    static SLOT: std::sync::LazyLock<CacheSlot<NameMap>> =
+        std::sync::LazyLock::new(|| std::sync::RwLock::new(None));
+    let generation = generation(&SdePaths::new(dir.to_path_buf()).db)?;
+    get_or_build(&SLOT, generation, || {
+        let sde = open_from_dir(dir)?;
+        Ok(std::sync::Arc::new(
+            sde.system_names().map_err(|e| e.to_string())?,
+        ))
+    })
+}
+
+/// Type id → group name, served from the process-wide cache. The
+/// `invTypes` ⋈ `invGroups` join is ~50k rows; trading/daytrading/production
+/// all classify every row against it (#758).
+pub fn cached_group_names(dir: &Path) -> Result<std::sync::Arc<NameMap>, String> {
+    static SLOT: std::sync::LazyLock<CacheSlot<NameMap>> =
+        std::sync::LazyLock::new(|| std::sync::RwLock::new(None));
+    let generation = generation(&SdePaths::new(dir.to_path_buf()).db)?;
+    get_or_build(&SLOT, generation, || {
+        let sde = open_from_dir(dir)?;
+        Ok(std::sync::Arc::new(
+            sde.group_names().map_err(|e| e.to_string())?,
+        ))
+    })
+}
+
+/// Type id → category name, served from the process-wide cache. See
+/// [`cached_group_names`] — same join shape, same hot callers (#758).
+pub fn cached_category_names(dir: &Path) -> Result<std::sync::Arc<NameMap>, String> {
+    static SLOT: std::sync::LazyLock<CacheSlot<NameMap>> =
+        std::sync::LazyLock::new(|| std::sync::RwLock::new(None));
+    let generation = generation(&SdePaths::new(dir.to_path_buf()).db)?;
+    get_or_build(&SLOT, generation, || {
+        let sde = open_from_dir(dir)?;
+        Ok(std::sync::Arc::new(
+            sde.category_names().map_err(|e| e.to_string())?,
+        ))
+    })
+}
+
+/// Type id → meta group name (Tech II, Faction, …), served from the
+/// process-wide cache. See [`cached_group_names`] (#758).
+pub fn cached_meta_group_names(dir: &Path) -> Result<std::sync::Arc<NameMap>, String> {
+    static SLOT: std::sync::LazyLock<CacheSlot<NameMap>> =
+        std::sync::LazyLock::new(|| std::sync::RwLock::new(None));
+    let generation = generation(&SdePaths::new(dir.to_path_buf()).db)?;
+    get_or_build(&SLOT, generation, || {
+        let sde = open_from_dir(dir)?;
+        Ok(std::sync::Arc::new(
+            sde.meta_group_names().map_err(|e| e.to_string())?,
+        ))
+    })
+}
+
+/// Static dogma effect metadata (every `dgmEffects` row, `modifierInfo` JSON
+/// pre-parsed), served from the process-wide cache. Backs the fitting
+/// module's dogma-context preload, which otherwise re-scanned and
+/// re-parsed this table on every simulate/module-info/optimize call (#761).
+pub fn cached_effect_meta(dir: &Path) -> Result<std::sync::Arc<EffectMetaMap>, String> {
+    static SLOT: std::sync::LazyLock<CacheSlot<EffectMetaMap>> =
+        std::sync::LazyLock::new(|| std::sync::RwLock::new(None));
+    let generation = generation(&SdePaths::new(dir.to_path_buf()).db)?;
+    get_or_build(&SLOT, generation, || {
+        let sde = open_from_dir(dir)?;
+        Ok(std::sync::Arc::new(
+            sde.effect_meta().map_err(|e| e.to_string())?,
+        ))
+    })
+}
+
+/// Static attribute default values + stacking metadata (every
+/// `dgmAttributeTypes` row), served from the process-wide cache. See
+/// [`cached_effect_meta`] (#761).
+pub fn cached_attribute_defaults(dir: &Path) -> Result<std::sync::Arc<AttrDefaultsMap>, String> {
+    static SLOT: std::sync::LazyLock<CacheSlot<AttrDefaultsMap>> =
+        std::sync::LazyLock::new(|| std::sync::RwLock::new(None));
+    let generation = generation(&SdePaths::new(dir.to_path_buf()).db)?;
+    get_or_build(&SLOT, generation, || {
+        let sde = open_from_dir(dir)?;
+        Ok(std::sync::Arc::new(
+            sde.attribute_defaults().map_err(|e| e.to_string())?,
         ))
     })
 }

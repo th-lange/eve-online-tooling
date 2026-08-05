@@ -9,6 +9,7 @@ import {
   fittingShipLayout,
   fittingSimulate,
   sdeTypeNames,
+  type AbyssalWeatherSelection,
   type Fit,
   type FleetBoost,
   type ModuleState,
@@ -51,6 +52,25 @@ export function useFitEditor() {
   // Command-burst/fleet-link modules the fit is "receiving" from a fleet
   // member (#705); empty means no fleet boosts applied.
   const [fleetBoosts, setFleetBoosts] = useState<FleetBoost[]>([]);
+  // Wormhole-class or Pochven metaliminal-storm environment the fit is
+  // sitting in; null means no environment effect applied. Mutually
+  // exclusive with `abyssalWeather` below — a fit sits in one space.
+  const [environmentEffect, setEnvironmentEffectRaw] = useState<
+    number | null
+  >(null);
+  // Abyssal Deadspace weather the fit is sitting in — separate from
+  // `environmentEffect` since it's hardcoded (no SDE type backs it), not a
+  // beacon type id. Mutually exclusive with `environmentEffect`.
+  const [abyssalWeather, setAbyssalWeatherRaw] =
+    useState<AbyssalWeatherSelection | null>(null);
+  function setEnvironmentEffect(id: number | null) {
+    setEnvironmentEffectRaw(id);
+    if (id != null) setAbyssalWeatherRaw(null);
+  }
+  function setAbyssalWeather(selection: AbyssalWeatherSelection | null) {
+    setAbyssalWeatherRaw(selection);
+    if (selection != null) setEnvironmentEffectRaw(null);
+  }
 
   const layout = useQuery({
     queryKey: ["fitting", "layout", fit?.shipTypeId],
@@ -95,6 +115,8 @@ export function useFitEditor() {
       neutGjs,
       targetProfile,
       fleetBoosts,
+      environmentEffect,
+      abyssalWeather,
     ],
     queryFn: () =>
       fittingSimulate(
@@ -104,12 +126,13 @@ export function useFitEditor() {
         neutGjs,
         targetProfile,
         fleetBoosts.length > 0 ? fleetBoosts : undefined,
+        environmentEffect,
+        abyssalWeather,
       ),
     enabled: fit != null,
   });
   // The jammed view only applies while ECM is actually projected onto the fit.
   const jammedActive = jammed && !!stats.data?.projectedEw?.some((t) => t.jam);
-
   // Per-weapon ranges keyed by (typeId, chargeTypeId), for the slot grid.
   const rangeOf = useMemo(() => {
     const m = new Map<string, WeaponRange>();
@@ -321,6 +344,10 @@ export function useFitEditor() {
     fleetBoosts,
     addFleetBoost,
     removeFleetBoost,
+    environmentEffect,
+    setEnvironmentEffect,
+    abyssalWeather,
+    setAbyssalWeather,
     layout,
     nameOf,
     stats,

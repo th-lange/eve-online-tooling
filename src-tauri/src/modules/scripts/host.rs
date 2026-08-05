@@ -119,7 +119,7 @@ impl HostCtx {
         let ctx = crate::capabilities::HostCtx {
             app_data_dir: &self.app_data_dir,
             market: &market,
-            auth: &auth,
+            auth: Some(&auth),
         };
         crate::capabilities::invoke(&ctx, name, args)
     }

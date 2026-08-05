@@ -135,6 +135,8 @@ function renderFitting(fit: Fit = FIT, stats: FitStats = STATS) {
       { id: 2185, name: "Hobgoblin II" },
     ],
     fitting_simulate: () => stats,
+    fitting_compatible_charges: () => [],
+    fitting_environment_effects: () => [],
     fitting_delete_local: () => undefined,
     fitting_import_eft: () => ({ ...fit, id: "", name: "Imported fit" }),
     fitting_optimize: () => ({ fit, capStable: true, withinBudget: true }),

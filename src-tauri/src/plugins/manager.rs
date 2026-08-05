@@ -21,6 +21,8 @@ use tauri::{AppHandle, State};
 use super::broker::{host_functions, BrokerCtx};
 use super::manifest::Permission;
 use super::{PluginEntry, PluginRegistry};
+use crate::esi::AuthState;
+use crate::market::MarketService;
 use crate::model::AppError;
 
 /// Resource ceilings applied to every plugin instance.
@@ -86,12 +88,33 @@ fn build_plugin(
 pub struct PluginManager {
     loaded: Mutex<HashMap<String, Arc<Mutex<Plugin>>>>,
     limits: Limits,
+    /// One long-lived `MarketService`/`AuthState` per manager, shared across
+    /// every plugin's host functions instead of a fresh instance (new
+    /// reqwest client, empty TTL caches) on every `host_call` — so repeated
+    /// plugin market/auth calls actually hit the warm cache (#764). Built
+    /// lazily from the first `app_data_dir` seen, which is constant in
+    /// practice (one app data dir per running app / per test).
+    market: std::sync::OnceLock<Arc<MarketService>>,
+    auth: std::sync::OnceLock<Arc<AuthState>>,
 }
 
 impl PluginManager {
     pub fn new() -> Self {
         Self::default()
     }
+
+    fn shared_market(&self, app_data_dir: &Path) -> Arc<MarketService> {
+        self.market
+            .get_or_init(|| Arc::new(MarketService::with_cache(app_data_dir.to_path_buf())))
+            .clone()
+    }
+
+    fn shared_auth(&self, app_data_dir: &Path) -> Arc<AuthState> {
+        self.auth
+            .get_or_init(|| Arc::new(AuthState::with_cache(app_data_dir.to_path_buf())))
+            .clone()
+    }
+
 
     /// Call `func` on plugin `id`, building it on first use with the host
     /// functions its `granted` permissions allow. Input/output are opaque bytes
@@ -120,7 +143,12 @@ impl PluginManager {
             None => {
                 let bytes = std::fs::read(wasm_path)
                     .map_err(|e| format!("cannot read plugin wasm {wasm_path:?}: {e}"))?;
-                let ctx = Arc::new(BrokerCtx::new(app_data_dir.to_path_buf(), id.to_string()));
+                let ctx = Arc::new(BrokerCtx::new(
+                    app_data_dir.to_path_buf(),
+                    id.to_string(),
+                    self.shared_market(app_data_dir),
+                    self.shared_auth(app_data_dir),
+                ));
                 let functions = host_functions(granted, ctx);
                 let built = Arc::new(Mutex::new(build_plugin(
                     &bytes,

@@ -6,7 +6,9 @@ use std::collections::{HashMap, HashSet};
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
-use crate::esi::{corporation_id, fetch_assets, fetch_corp_assets, resolve_names, AuthState};
+use crate::esi::{
+    corporation_id, fetch_assets, fetch_corp_assets, resolve_names, AuthState, RawAsset,
+};
 use crate::market::{default_region_id, resolve_location, MarketService, PriceModel};
 use crate::storage;
 
@@ -17,6 +19,67 @@ const JITA_STATION_ID: i64 = 60003760;
 /// one, else the Jita sell price (realistic percentile, then order-book min).
 fn basis_price(m: &PriceModel) -> Option<f64> {
     m.average_price.or(m.sell_percentile).or(m.sell_min)
+}
+
+/// One raw asset row plus the owner (character or corp name) it belongs to.
+struct RosterAssetRow {
+    asset: RawAsset,
+    owner: String,
+    is_corp: bool,
+}
+
+/// Walk the active selection's roster (a single character, or every roster
+/// member when "all characters" is active), gathering each character's
+/// personal assets plus their corp hangar — each corp fetched once, so alts
+/// in the same corp don't double up (mirrors [`resolve_names`]'s corp-name
+/// resolution). A character's or corp's asset fetch failing (missing
+/// scope/role, network) skips just that owner; the rest of the roster is
+/// unaffected. Shared by `assets_value` (per-type aggregation) and
+/// `assets_tree` (item-level nesting) — same gathering walk, different
+/// downstream shape.
+async fn gather_roster_assets(
+    auth_state: &AuthState,
+    dir: &std::path::Path,
+) -> Vec<RosterAssetRow> {
+    let names = storage::character_names(dir);
+    let mut out = Vec::new();
+    let mut seen_corps: HashSet<i64> = HashSet::new();
+    for cid in storage::target_characters(dir) {
+        let cname = names
+            .get(&cid)
+            .cloned()
+            .unwrap_or_else(|| format!("Character #{cid}"));
+        if let Ok(assets) = fetch_assets(auth_state, cid).await {
+            out.extend(assets.into_iter().map(|asset| RosterAssetRow {
+                asset,
+                owner: cname.clone(),
+                is_corp: false,
+            }));
+        }
+        let Ok(corp_id) = corporation_id(auth_state, cid).await else {
+            continue;
+        };
+        if !seen_corps.insert(corp_id) {
+            continue;
+        }
+        let Ok(corp_assets) = fetch_corp_assets(auth_state, cid, corp_id).await else {
+            continue;
+        };
+        if corp_assets.is_empty() {
+            continue;
+        }
+        let corp_name = resolve_names(auth_state, &[corp_id])
+            .await
+            .get(&corp_id)
+            .cloned()
+            .unwrap_or_else(|| format!("Corporation #{corp_id}"));
+        out.extend(corp_assets.into_iter().map(|asset| RosterAssetRow {
+            asset,
+            owner: corp_name.clone(),
+            is_corp: true,
+        }));
+    }
+    out
 }
 
 /// One owned item type for one owner (a character, or a corporation hangar),
@@ -67,49 +130,14 @@ pub async fn assets_value(
         match storage::cache_get(&dir, &cache_key) {
             Some(s) => s,
             None => {
-                let names = storage::character_names(&dir);
                 let mut s: HashMap<i64, HashMap<String, (bool, i64)>> = HashMap::new();
-                let mut seen_corps: HashSet<i64> = HashSet::new();
-                for cid in storage::target_characters(&dir) {
-                    let cname = names
-                        .get(&cid)
-                        .cloned()
-                        .unwrap_or_else(|| format!("Character #{cid}"));
-                    if let Ok(assets) = fetch_assets(&auth_state, cid).await {
-                        for a in assets {
-                            let entry = s
-                                .entry(a.type_id)
-                                .or_default()
-                                .entry(cname.clone())
-                                .or_insert((false, 0));
-                            entry.1 += a.quantity;
-                        }
-                    }
-                    let Ok(corp_id) = corporation_id(&auth_state, cid).await else {
-                        continue;
-                    };
-                    if !seen_corps.insert(corp_id) {
-                        continue;
-                    }
-                    let Ok(corp_assets) = fetch_corp_assets(&auth_state, cid, corp_id).await else {
-                        continue;
-                    };
-                    if corp_assets.is_empty() {
-                        continue;
-                    }
-                    let corp_name = resolve_names(&auth_state, &[corp_id])
-                        .await
-                        .get(&corp_id)
-                        .cloned()
-                        .unwrap_or_else(|| format!("Corporation #{corp_id}"));
-                    for a in corp_assets {
-                        let entry = s
-                            .entry(a.type_id)
-                            .or_default()
-                            .entry(corp_name.clone())
-                            .or_insert((true, 0));
-                        entry.1 += a.quantity;
-                    }
+                for row in gather_roster_assets(&auth_state, &dir).await {
+                    let entry = s
+                        .entry(row.asset.type_id)
+                        .or_default()
+                        .entry(row.owner)
+                        .or_insert((row.is_corp, 0));
+                    entry.1 += row.asset.quantity;
                 }
                 let _ = storage::cache_put(&dir, &cache_key, &s, 600);
                 s
@@ -313,59 +341,21 @@ pub async fn assets_tree(
 ) -> Result<AssetsTreeResult, String> {
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
 
-    // Gather assets for the active selection (a single character, or the whole
-    // roster when "all characters" is active), item-level for nesting, each
-    // tagged with its owner: the character's personal hangar plus that
-    // character's corp hangar (each corp fetched once — same 403-tolerant path
-    // as assets_value).
-    let names = storage::character_names(&dir);
-    let mut assets: Vec<FlatAsset> = Vec::new();
-    let mut seen_corps: HashSet<i64> = HashSet::new();
-    for cid in storage::target_characters(&dir) {
-        let cname = names
-            .get(&cid)
-            .cloned()
-            .unwrap_or_else(|| format!("Character #{cid}"));
-        if let Ok(rows) = fetch_assets(&auth_state, cid).await {
-            for a in rows {
-                assets.push(FlatAsset {
-                    item_id: a.item_id,
-                    location_id: a.location_id,
-                    type_id: a.type_id,
-                    quantity: a.quantity,
-                    owner: cname.clone(),
-                    is_corp: false,
-                });
-            }
-        }
-        let Ok(corp_id) = corporation_id(&auth_state, cid).await else {
-            continue;
-        };
-        if !seen_corps.insert(corp_id) {
-            continue;
-        }
-        let Ok(corp_rows) = fetch_corp_assets(&auth_state, cid, corp_id).await else {
-            continue;
-        };
-        if corp_rows.is_empty() {
-            continue;
-        }
-        let corp_name = resolve_names(&auth_state, &[corp_id])
-            .await
-            .get(&corp_id)
-            .cloned()
-            .unwrap_or_else(|| format!("Corporation #{corp_id}"));
-        for a in corp_rows {
-            assets.push(FlatAsset {
-                item_id: a.item_id,
-                location_id: a.location_id,
-                type_id: a.type_id,
-                quantity: a.quantity,
-                owner: corp_name.clone(),
-                is_corp: true,
-            });
-        }
-    }
+    // Gather assets for the active selection (a single character, or the
+    // whole roster when "all characters" is active), item-level for nesting,
+    // each tagged with its owner.
+    let assets: Vec<FlatAsset> = gather_roster_assets(&auth_state, &dir)
+        .await
+        .into_iter()
+        .map(|row| FlatAsset {
+            item_id: row.asset.item_id,
+            location_id: row.asset.location_id,
+            type_id: row.asset.type_id,
+            quantity: row.asset.quantity,
+            owner: row.owner,
+            is_corp: row.is_corp,
+        })
+        .collect();
     if assets.is_empty() {
         return Ok(AssetsTreeResult {
             roots: Vec::new(),
@@ -406,7 +396,7 @@ pub async fn assets_tree(
             .collect()
     };
     let stations = sde.station_names(&root_ids).map_err(|e| e.to_string())?;
-    let systems = sde.system_names().map_err(|e| e.to_string())?;
+    let systems = crate::sde::cached_system_names(&dir)?;
     let loc_name = |id: i64| -> String {
         stations
             .get(&id)

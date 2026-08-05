@@ -121,6 +121,11 @@ export function CapGauge({ cap }: { cap: CapStats }) {
           </span>
         )}
       </div>
+      <div className="flex flex-wrap justify-between gap-x-2 text-[10px] text-zinc-500">
+        <span>size {formatInt(cap.capacity)} GJ</span>
+        <span>recharge {formatDuration(cap.rechargeSeconds)}</span>
+        <span>peak {cap.peakRecharge.toFixed(1)} GJ/s</span>
+      </div>
       {cap.trajectory.length > 1 ? (
         <CapChart trajectory={cap.trajectory} color={color} />
       ) : (

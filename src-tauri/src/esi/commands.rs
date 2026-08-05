@@ -32,7 +32,13 @@ pub async fn auth_login(
         .await
         .map_err(|e| e.to_string())??;
 
-    let tokens = auth::exchange_code(auth_state.http(), &code, &pkce.verifier).await?;
+    let tokens = auth::exchange_code(
+        auth_state.http(),
+        auth_state.token_url(),
+        &code,
+        &pkce.verifier,
+    )
+    .await?;
     let token_character = auth::character_from_token(&tokens.access_token)?;
 
     // Persist the refresh token (keychain) and the roster (json), de-duping.
@@ -102,32 +108,45 @@ pub async fn esi_owned_blueprints(
 ) -> Result<Vec<OwnedBlueprint>, String> {
     let dir = crate::storage::app_data_dir(&app)?;
     let roster = storage::load_roster(&dir);
-    let mut out = Vec::new();
-    for c in roster {
-        let to_owned = |b: character::RawBlueprint, corporation: bool| OwnedBlueprint {
-            character_id: c.character_id,
-            character_name: c.name.clone(),
-            corporation,
-            type_id: b.type_id,
-            name: String::new(),
-            material_efficiency: b.material_efficiency,
-            time_efficiency: b.time_efficiency,
-            runs: b.runs,
-            quantity: b.quantity,
-        };
 
-        if let Ok(blueprints) = character::fetch_blueprints(&auth_state, c.character_id).await {
-            out.extend(blueprints.into_iter().map(|b| to_owned(b, false)));
-        }
-        // Corp blueprints (empty if the character lacks the role/scope).
-        if let Ok(corp_id) = character::corporation_id(&auth_state, c.character_id).await {
-            if let Ok(blueprints) =
-                character::fetch_corp_blueprints(&auth_state, c.character_id, corp_id).await
+    // Characters have independent refresh tokens, so their ESI fetches are
+    // safe to run concurrently instead of one-at-a-time.
+    let fetches = roster.into_iter().map(|c| {
+        let auth_state = &auth_state;
+        async move {
+            let to_owned = |b: character::RawBlueprint, corporation: bool| OwnedBlueprint {
+                character_id: c.character_id,
+                character_name: c.name.clone(),
+                corporation,
+                type_id: b.type_id,
+                name: String::new(),
+                material_efficiency: b.material_efficiency,
+                time_efficiency: b.time_efficiency,
+                runs: b.runs,
+                quantity: b.quantity,
+            };
+
+            let mut owned = Vec::new();
+            if let Ok(blueprints) = character::fetch_blueprints(auth_state, c.character_id).await
             {
-                out.extend(blueprints.into_iter().map(|b| to_owned(b, true)));
+                owned.extend(blueprints.into_iter().map(|b| to_owned(b, false)));
             }
+            // Corp blueprints (empty if the character lacks the role/scope).
+            if let Ok(corp_id) = character::corporation_id(auth_state, c.character_id).await {
+                if let Ok(blueprints) =
+                    character::fetch_corp_blueprints(auth_state, c.character_id, corp_id).await
+                {
+                    owned.extend(blueprints.into_iter().map(|b| to_owned(b, true)));
+                }
+            }
+            owned
         }
-    }
+    });
+    let mut out: Vec<OwnedBlueprint> = futures_util::future::join_all(fetches)
+        .await
+        .into_iter()
+        .flatten()
+        .collect();
 
     // Resolve blueprint names from the SDE (cached per type id).
     if let Ok(sde) = crate::sde::open_from_dir(&dir) {
@@ -162,8 +181,13 @@ pub async fn esi_roster_stock(
     // Track whether every character contributed. One failed fetch means the
     // totals are incomplete, and incomplete totals must not be cached below.
     let mut complete = true;
-    for c in storage::load_roster(&dir) {
-        match character::fetch_assets(&auth_state, c.character_id).await {
+    // Characters have independent refresh tokens, so their ESI fetches are
+    // safe to run concurrently instead of one-at-a-time.
+    let fetches = storage::load_roster(&dir)
+        .into_iter()
+        .map(|c| character::fetch_assets(&auth_state, c.character_id));
+    for result in futures_util::future::join_all(fetches).await {
+        match result {
             Ok(assets) => {
                 for a in assets {
                     *stock.entry(a.type_id).or_default() += a.quantity;

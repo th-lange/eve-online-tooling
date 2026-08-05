@@ -22,6 +22,21 @@ pub fn truncate_to_char_boundary(s: &mut String, max_bytes: usize) {
     s.truncate(idx);
 }
 
+/// Parse pasted names, one per line: trims, drops blanks, dedupes
+/// (case-insensitive, preserving first-seen order/casing), and caps the
+/// count at `cap`. Shared by Local Intel (in-game Local member-list paste)
+/// and PVP profiles (pasted pilot list) — same parsing, different caps.
+pub fn parse_names(raw: &str, cap: usize) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    raw.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .filter(|l| seen.insert(l.to_lowercase()))
+        .take(cap)
+        .map(str::to_string)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,5 +96,23 @@ mod tests {
         let mut s = String::from("héllo");
         truncate_to_char_boundary(&mut s, 0);
         assert_eq!(s, "");
+    }
+
+    #[test]
+    fn parse_names_trims_dedupes_and_drops_blanks() {
+        let text = "  Alice \nBob\n\nAlice\n  \nCharlie\n";
+        assert_eq!(parse_names(text, 256), vec!["Alice", "Bob", "Charlie"]);
+    }
+
+    #[test]
+    fn parse_names_dedupes_case_insensitively_keeping_first_seen_casing() {
+        let names = parse_names("  Alice \n\nBob\nalice\n Bob \n", 128);
+        assert_eq!(names, vec!["Alice".to_string(), "Bob".to_string()]);
+    }
+
+    #[test]
+    fn parse_names_caps_the_count() {
+        let text = "A\nB\nC\nD\nE\n";
+        assert_eq!(parse_names(text, 3), vec!["A", "B", "C"]);
     }
 }
