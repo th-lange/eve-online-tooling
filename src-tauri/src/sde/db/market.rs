@@ -156,13 +156,29 @@ impl Sde {
     /// Every known-space market region `(id, name)`, sorted by name. Region ids
     /// below 11000000 are k-space (wormhole/abyssal regions start at 11000000
     /// and have no public market); a handful of these (Jove space, dev regions)
-    /// trade nothing, but ESI simply returns no orders for them.
+    /// trade nothing, but ESI simply returns no orders for them. One exception:
+    /// 19000001 is the Global PLEX Market CCP introduced 2026-07-07 — PLEX no
+    /// longer trades in any regular region (ESI returns empty for e.g. The
+    /// Forge), only here, so it's explicitly let through the id cutoff and
+    /// given its display name (the SDE only carries the internal "GPMR-01").
     pub fn market_regions(&self) -> Result<Vec<(i64, String)>, SdeError> {
         let mut stmt = self.conn.prepare(
             "SELECT regionID, regionName FROM mapRegions
-             WHERE regionID < 11000000 ORDER BY regionName",
+             WHERE regionID < 11000000 OR regionID = 19000001
+             ORDER BY regionName",
         )?;
-        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let rows = stmt.query_map([], |r| {
+            let id: i64 = r.get(0)?;
+            let name: String = r.get(1)?;
+            Ok((
+                id,
+                if id == 19000001 {
+                    "Global PLEX Market".to_string()
+                } else {
+                    name
+                },
+            ))
+        })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 }
@@ -180,6 +196,29 @@ mod tests {
         assert_eq!(packaged_volume(18, Some(0.01)), Some(0.01)); // Mineral
         assert_eq!(packaged_volume(513, Some(16_250_000.0)), Some(16_250_000.0));
         // Freighter (fallback)
+    }
+
+    #[test]
+    fn market_regions_includes_kspace_and_the_global_plex_market_but_not_wormholes() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE mapRegions(regionID INT, regionName TEXT);
+             INSERT INTO mapRegions VALUES
+               (10000002, 'The Forge'),
+               (11000001, 'A-R00001'),
+               (19000001, 'GPMR-01');",
+        )
+        .unwrap();
+        let sde = Sde::from_connection(conn);
+
+        let regions = sde.market_regions().unwrap();
+        assert_eq!(
+            regions,
+            vec![
+                (19000001, "Global PLEX Market".to_string()),
+                (10000002, "The Forge".to_string()),
+            ]
+        );
     }
 
     #[test]
