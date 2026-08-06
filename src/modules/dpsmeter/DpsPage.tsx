@@ -4,12 +4,14 @@ import { Columns2, Play, Rows2, Square } from "lucide-react";
 import { ModuleActiveContext } from "../../components/moduleActiveContext";
 import {
   dpsListLogs,
+  dpsLogSummary,
   dpsPlayback,
   dpsStart,
   dpsStop,
   errorMessage,
   onDpsTick,
   type DpsLogFile,
+  type DpsLogSummary,
   type DpsTick,
   type HitQuality,
   type PilotRate,
@@ -131,6 +133,234 @@ const MINING_BARS = 24;
 // shorter than a cycle would show spikes instead of the sustained rate.
 const MINING_SMOOTH_SECS = 60;
 
+/** Compact local date/time for a gamelog's mtime, e.g. "Aug 6, 15:32" — so
+ *  picking a file from the list tells you which session it was (#dps-search). */
+function formatLogDate(epochSecs: number): string {
+  return new Date(epochSecs * 1000).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/** Bare time-of-day for a playback timestamp, e.g. "15:32:07" — playback
+ *  never spans more than one gamelog session, so the date doesn't matter. */
+function formatClock(epochSecs: number): string {
+  return new Date(epochSecs * 1000).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+/** Searchable gamelog picker: type to filter by filename; each row (and the
+ *  collapsed field once picked) shows the file's modified date, so you can
+ *  tell sessions apart at a glance instead of reading raw filenames (#719). */
+function LogFilePicker({
+  logs,
+  file,
+  onPick,
+}: {
+  logs: DpsLogFile[];
+  file: string;
+  onPick: (path: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const selected = logs.find((l) => l.path === file) ?? null;
+  const label = selected
+    ? `${selected.name} — ${formatLogDate(selected.modified)}`
+    : "";
+  const q = query.trim().toLowerCase();
+  const matches = q ? logs.filter((l) => l.name.toLowerCase().includes(q)) : logs;
+
+  return (
+    <div className="relative flex-1 min-w-[16rem]">
+      <span className="mb-1 block text-xs uppercase tracking-wide text-zinc-500">
+        Log file
+      </span>
+      <input
+        value={open ? query : label}
+        onChange={(e) => setQuery(e.currentTarget.value)}
+        onFocus={() => {
+          setQuery("");
+          setOpen(true);
+        }}
+        onBlur={() => setOpen(false)}
+        placeholder={logs.length === 0 ? "No logs found" : "search by filename…"}
+        className="w-full rounded bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+      />
+      {open && (
+        // Keep focus on the input on mousedown (no default) so blur never
+        // fires before the row's onClick runs — the dropdown closes there.
+        <div
+          onMouseDown={(e) => e.preventDefault()}
+          className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded border border-zinc-700 bg-zinc-900 text-sm shadow-lg"
+        >
+          {matches.length === 0 && (
+            <div className="px-2 py-1.5 text-xs text-zinc-500">No matches.</div>
+          )}
+          {matches.map((l) => (
+            <button
+              key={l.path}
+              onClick={() => {
+                onPick(l.path);
+                setQuery("");
+                setOpen(false);
+              }}
+              className={`flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left hover:bg-zinc-800 ${
+                l.path === file ? "bg-zinc-800/70 text-zinc-100" : "text-zinc-300"
+              }`}
+            >
+              <span className="truncate">{l.name}</span>
+              <span className="ml-2 shrink-0 text-[11px] tabular-nums text-zinc-500">
+                {formatLogDate(l.modified)}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Timeline swatch color per event category — reused from the primary
+ *  readouts (dpsOut/dpsIn) and the mining panel's amber, so the same color
+ *  means the same thing everywhere on this page. */
+const TIMELINE_COLORS = {
+  damageOut: "#34d399",
+  damageIn: "#f87171",
+  mining: "#fcd34d",
+} as const;
+
+function TimelineLegend({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="flex items-center gap-1">
+      <span
+        className="inline-block h-1.5 w-1.5 rounded-sm"
+        style={{ background: color }}
+      />
+      {label}
+    </span>
+  );
+}
+
+/** Playback scrubber (#dps-timeline): a slider over the log's full time span,
+ *  with a density strip underneath roughly showing where damage/mining
+ *  happened — three thin rows (dealt / taken / mined), each bucket's height
+ *  scaled to its own category's busiest moment in the file. Dragging the
+ *  slider or clicking the strip both seek; releasing restarts playback from
+ *  that point with the moving-average window pre-warmed (backend side). */
+function PlaybackTimeline({
+  summary,
+  position,
+  onSeek,
+}: {
+  summary: DpsLogSummary;
+  position: number | null;
+  onSeek: (ts: number) => void;
+}) {
+  const [preview, setPreview] = useState<number | null>(null);
+  const { start, end, buckets } = summary;
+  const span = Math.max(1, end - start);
+  const value = preview ?? position ?? start;
+
+  const w = 960;
+  const h = 36;
+  const rowH = h / 3;
+  const barW = w / Math.max(1, buckets.length);
+
+  const seekFromClientX = (clientX: number, el: Element) => {
+    const rect = el.getBoundingClientRect();
+    const frac = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    return Math.round(start + frac * span);
+  };
+
+  return (
+    <div className="mt-4 rounded border border-zinc-800 bg-zinc-900/40 p-3">
+      <div className="mb-1 flex items-center justify-between text-[11px] tabular-nums text-zinc-500">
+        <span>{formatClock(start)}</span>
+        <span className="flex items-center gap-3 normal-case tracking-normal text-zinc-400">
+          <TimelineLegend color={TIMELINE_COLORS.damageOut} label="dmg out" />
+          <TimelineLegend color={TIMELINE_COLORS.damageIn} label="dmg in" />
+          <TimelineLegend color={TIMELINE_COLORS.mining} label="mining" />
+        </span>
+        <span>{formatClock(end)}</span>
+      </div>
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        preserveAspectRatio="none"
+        className="w-full cursor-pointer"
+        style={{ height: h }}
+        onClick={(e) => onSeek(seekFromClientX(e.clientX, e.currentTarget))}
+      >
+        <g fill={TIMELINE_COLORS.damageOut}>
+          {buckets.map((b, i) => (
+            <rect
+              key={i}
+              x={i * barW}
+              y={rowH * (1 - b.damageOut)}
+              width={Math.max(1, barW - 0.5)}
+              height={rowH * b.damageOut}
+            />
+          ))}
+        </g>
+        <g fill={TIMELINE_COLORS.damageIn}>
+          {buckets.map((b, i) => (
+            <rect
+              key={i}
+              x={i * barW}
+              y={rowH + rowH * (1 - b.damageIn)}
+              width={Math.max(1, barW - 0.5)}
+              height={rowH * b.damageIn}
+            />
+          ))}
+        </g>
+        <g fill={TIMELINE_COLORS.mining}>
+          {buckets.map((b, i) => (
+            <rect
+              key={i}
+              x={i * barW}
+              y={rowH * 2 + rowH * (1 - b.mining)}
+              width={Math.max(1, barW - 0.5)}
+              height={rowH * b.mining}
+            />
+          ))}
+        </g>
+        <line
+          x1={((value - start) / span) * w}
+          x2={((value - start) / span) * w}
+          y1={0}
+          y2={h}
+          stroke="#e4e4e7"
+          strokeWidth="1.5"
+        />
+      </svg>
+      <input
+        type="range"
+        min={start}
+        max={end}
+        step={1}
+        value={value}
+        onChange={(e) => setPreview(Number(e.currentTarget.value))}
+        onMouseUp={(e) => {
+          onSeek(Number(e.currentTarget.value));
+          setPreview(null);
+        }}
+        onTouchEnd={(e) => {
+          onSeek(Number(e.currentTarget.value));
+          setPreview(null);
+        }}
+        className="mt-1 w-full accent-indigo-500"
+      />
+      <div className="mt-0.5 text-center text-[11px] tabular-nums text-zinc-400">
+        {formatClock(value)}
+      </div>
+    </div>
+  );
+}
+
 export function DpsPage() {
   const [dir, setDir, persistDir] = useEveLogDir("gamelogs");
   const [windowSecs, setWindowSecs] = useState(() =>
@@ -144,6 +374,9 @@ export function DpsPage() {
   const [file, setFile] = useState("");
   const [speed, setSpeed] = useState(4);
   const [selectedPilot, setSelectedPilot] = useState<string | null>(null);
+  // Timeline summary for the selected playback file — activity buckets for
+  // the scrubber's density strip; null while loading/unavailable (no chart).
+  const [summary, setSummary] = useState<DpsLogSummary | null>(null);
   // Chart arrangement + breakdown mode — persisted so the meter opens how you
   // left it.
   const [chartLayout, setChartLayout] = usePersistentState<ChartLayout>(
@@ -263,19 +496,43 @@ export function DpsPage() {
     }
   }
 
-  async function playback() {
+  /** Play from the start, or (when scrubbing the timeline) jump straight to
+   *  `seekTs` — the backend pre-warms the moving-average window so the DPS
+   *  readout isn't cold at the seek point. */
+  async function playback(seekTs?: number) {
     setError(null);
     setTicks([]);
     peaksRef.current = { out: 0, in: 0 };
     miningRef.current = { buckets: new Map(), lastAt: null };
     setSelectedPilot(null);
     try {
-      await dpsPlayback({ file, speed, windowSecs });
+      await dpsPlayback({ file, speed, windowSecs, seekTs });
       setRunning(true);
     } catch (e) {
       setError(errorMessage(e));
     }
   }
+
+  // Load the selected file's activity summary for the timeline scrubber
+  // whenever it changes; cleared outside playback mode or on failure (the
+  // timeline just doesn't render — it's a bonus, not required to play).
+  useEffect(() => {
+    if (mode !== "playback" || !file) {
+      setSummary(null);
+      return;
+    }
+    let cancelled = false;
+    dpsLogSummary(file)
+      .then((s) => {
+        if (!cancelled) setSummary(s);
+      })
+      .catch(() => {
+        if (!cancelled) setSummary(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, file]);
 
   function switchMode(m: Mode) {
     setMode(m);
@@ -442,23 +699,7 @@ export function DpsPage() {
 
         {mode === "playback" && (
           <>
-            <label className="flex-1 min-w-[16rem]">
-              <span className="mb-1 block text-xs uppercase tracking-wide text-zinc-500">
-                Log file
-              </span>
-              <select
-                value={file}
-                onChange={(e) => setFile(e.currentTarget.value)}
-                className="w-full rounded bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100 outline-none"
-              >
-                {logs.length === 0 && <option value="">No logs found</option>}
-                {logs.map((l) => (
-                  <option key={l.path} value={l.path}>
-                    {l.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <LogFilePicker logs={logs} file={file} onPick={setFile} />
             <label>
               <span className="mb-1 block text-xs uppercase tracking-wide text-zinc-500">
                 Speed ×
@@ -487,7 +728,7 @@ export function DpsPage() {
           </button>
         ) : (
           <button
-            onClick={mode === "live" ? start : playback}
+            onClick={() => (mode === "live" ? start() : playback())}
             disabled={mode === "live" ? !dir.trim() : !file}
             className="flex items-center gap-1.5 rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
           >
@@ -495,6 +736,14 @@ export function DpsPage() {
           </button>
         )}
       </div>
+
+      {mode === "playback" && summary && (
+        <PlaybackTimeline
+          summary={summary}
+          position={latest?.at ?? null}
+          onSeek={(ts) => void playback(ts)}
+        />
+      )}
 
       {error && <p className="mt-3 text-sm text-rose-400">{error}</p>}
 

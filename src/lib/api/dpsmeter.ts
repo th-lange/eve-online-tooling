@@ -72,6 +72,26 @@ export interface DpsPlaybackSettings {
   /** Replay speed multiplier (1.0 = real time). */
   speed: number;
   windowSecs: number;
+  /** Start the virtual clock here instead of the file's first event (epoch
+   *  seconds) — set when scrubbing the timeline slider. */
+  seekTs?: number;
+}
+
+/** One time bucket's activity, normalized 0..1 against that category's
+ *  busiest bucket in the log — for the playback timeline density strip. */
+export interface DpsEventBucket {
+  /** Bucket start, epoch seconds. */
+  at: number;
+  damageOut: number;
+  damageIn: number;
+  mining: number;
+}
+
+/** A log's time span + activity buckets (see {@link dpsLogSummary}). */
+export interface DpsLogSummary {
+  start: number;
+  end: number;
+  buckets: DpsEventBucket[];
 }
 
 /** Start (or restart) tailing the newest gamelog. Ticks arrive via {@link onDpsTick}. */
@@ -92,6 +112,12 @@ export function dpsStop(): Promise<void> {
 /** List gamelog files in a folder, newest first. */
 export function dpsListLogs(gamelogsDir: string): Promise<DpsLogFile[]> {
   return invoke<DpsLogFile[]>("dps_list_logs", { gamelogsDir });
+}
+
+/** Time span + activity-density buckets for a log file, for the playback
+ *  timeline slider. */
+export function dpsLogSummary(file: string): Promise<DpsLogSummary> {
+  return invoke<DpsLogSummary>("dps_log_summary", { file });
 }
 
 /** Subscribe to live DPS ticks. */
