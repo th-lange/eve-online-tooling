@@ -36,7 +36,8 @@ export type SlotKind =
   | "drone"
   | "implant"
   | "booster"
-  | "cargo";
+  | "cargo"
+  | "mode";
 
 /** A module's activation state. */
 export type ModuleState = "offline" | "online" | "active" | "overheated";
@@ -75,6 +76,8 @@ export interface ShipLayout {
   lowSlots: number;
   rigSlots: number;
   subsystemSlots: number;
+  /** Tactical Destroyer mode slot: 1 for a T3D hull, 0 otherwise. */
+  modeSlots: number;
   turretHardpoints: number;
   launcherHardpoints: number;
   cpuOutput: number;

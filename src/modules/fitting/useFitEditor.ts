@@ -164,6 +164,7 @@ export function useFitEditor() {
         low: free("low", ship.lowSlots),
         rig: free("rig", ship.rigSlots),
         subsystem: free("subsystem", ship.subsystemSlots),
+        mode: free("mode", ship.modeSlots),
       },
       cpu: (res?.cpuOutput ?? ship.cpuOutput) - (res?.cpuUsed ?? 0),
       pg:

@@ -15,6 +15,7 @@ const RIFTER_LAYOUT: ShipLayout = {
   lowSlots: 4,
   rigSlots: 3,
   subsystemSlots: 0,
+  modeSlots: 0,
   turretHardpoints: 3,
   launcherHardpoints: 2,
   cpuOutput: 130,
@@ -351,5 +352,66 @@ describe("FittingPage", () => {
       name: /Set active drones to/,
     });
     expect(stars).toHaveLength(2);
+  });
+
+  it("renders a fitted Tactical Destroyer mode in its own bank (#761 follow-up)", async () => {
+    const jackdawLayout: ShipLayout = {
+      ...RIFTER_LAYOUT,
+      typeId: 34828,
+      name: "Jackdaw",
+      groupName: "Tactical Destroyer",
+      highSlots: 6,
+      midSlots: 5,
+      lowSlots: 3,
+      rigSlots: 3,
+      modeSlots: 1,
+      launcherHardpoints: 5,
+      turretHardpoints: 0,
+    };
+    const modeFit: Fit = {
+      ...FIT,
+      shipTypeId: 34828,
+      items: [
+        {
+          typeId: 35676,
+          slot: "mode",
+          index: 0,
+          state: "online",
+          quantity: 1,
+        },
+      ],
+    };
+    const modeStats: FitStats = { ...STATS, layout: jackdawLayout };
+    mockInvoke({
+      sde_status: () => SDE_OK,
+      fitting_list_local: () => [modeFit],
+      fitting_esi_list: () => [],
+      sde_type_infos: () => [
+        { id: 34828, name: "Jackdaw", group: "Tactical Destroyer" },
+      ],
+      fitting_ship_layout: () => jackdawLayout,
+      sde_type_names: () => [
+        { id: 34828, name: "Jackdaw" },
+        { id: 35676, name: "Jackdaw Defense Mode" },
+      ],
+      fitting_simulate: () => modeStats,
+      fitting_compatible_charges: () => [],
+      fitting_environment_effects: () => [],
+      fitting_delete_local: () => undefined,
+      fitting_import_eft: () => ({ ...modeFit, id: "", name: "Imported fit" }),
+      fitting_optimize: () => ({
+        fit: modeFit,
+        capStable: true,
+        withinBudget: true,
+      }),
+      market_regions: () => [],
+    });
+    renderWithQuery(<FittingPage />);
+    await loadTheFit();
+    await screen.findByText("Solo brawl");
+
+    const modeBank = screen.getByText("Mode").closest("div")!;
+    expect(within(modeBank).getByText("1/1")).toBeInTheDocument();
+    expect(screen.getByText("Jackdaw Defense Mode")).toBeInTheDocument();
   });
 });

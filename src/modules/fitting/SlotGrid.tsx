@@ -18,6 +18,7 @@ const PRIMARY_BANKS: [SlotKind, string][] = [
 ];
 /** Secondary banks — permanent or non-combat slots, shown quieter and below. */
 const SECONDARY_BANKS: [SlotKind, string][] = [
+  ["mode", "Mode"],
   ["rig", "Rig"],
   ["subsystem", "Subsystem"],
   ["implant", "Implants"],
@@ -275,6 +276,7 @@ export function SlotGrid({
     midSlots: number;
     lowSlots: number;
     rigSlots: number;
+    modeSlots: number;
   };
   nameOf: (id: number) => string;
   onRemove: (globalIndex: number) => void;
@@ -297,6 +299,7 @@ export function SlotGrid({
     mid: layout.midSlots,
     low: layout.lowSlots,
     rig: layout.rigSlots,
+    mode: layout.modeSlots,
   };
 
   function renderItem(it: Fit["items"][number], i: number, slot: SlotKind) {

@@ -13,6 +13,7 @@ export const SLOT_BADGE: Partial<Record<SlotKind, string>> = {
   implant: "Implant",
   drone: "Drone",
   cargo: "Cargo",
+  mode: "Mode",
 };
 
 /** What the hull has free right now, for deciding whether a candidate fits. */
