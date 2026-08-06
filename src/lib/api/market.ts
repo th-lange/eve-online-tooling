@@ -28,7 +28,10 @@ export interface PriceModel {
   sellPercentile?: number | null;
   buyPercentile?: number | null;
   adjustedPrice?: number | null;
+  /** Global average price (ESI /markets/prices/), both pricing paths. */
   averagePrice?: number | null;
+  /** Location-local sell-side weighted average (bulk path only). */
+  weightedAverage?: number | null;
   dailyAverage?: number | null;
   dailyVolume?: number | null;
   buyVolume?: number | null;

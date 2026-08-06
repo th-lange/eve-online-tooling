@@ -15,10 +15,14 @@ use crate::storage;
 /// Jita IV-4 in The Forge — the reference market all valuation prices against.
 const JITA_STATION_ID: i64 = 60003760;
 
-/// Valuation basis for one type: ESI's global average price when it supplies
-/// one, else the Jita sell price (realistic percentile, then order-book min).
+/// Valuation basis for one type: the location-local weighted average when the
+/// bulk path supplied one, else ESI's global average, else the Jita sell price
+/// (realistic percentile, then order-book min) (#776).
 fn basis_price(m: &PriceModel) -> Option<f64> {
-    m.average_price.or(m.sell_percentile).or(m.sell_min)
+    m.weighted_average
+        .or(m.average_price)
+        .or(m.sell_percentile)
+        .or(m.sell_min)
 }
 
 /// One raw asset row plus the owner (character or corp name) it belongs to.

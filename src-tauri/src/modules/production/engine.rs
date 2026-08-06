@@ -333,7 +333,9 @@ fn price_for(model: Option<&PriceModel>, basis: PriceBasis) -> Option<f64> {
         PriceBasis::SellPercentile => m.sell_percentile,
         PriceBasis::BuyPercentile => m.buy_percentile,
         PriceBasis::AdjustedPrice => m.adjusted_price,
-        PriceBasis::AveragePrice => m.average_price,
+        // "Weighted average" in the UI: the location-local weighted average
+        // when the bulk path supplied one, else the ESI global average (#776).
+        PriceBasis::AveragePrice => m.weighted_average.or(m.average_price),
     }
 }
 

@@ -55,8 +55,12 @@ pub struct PriceModel {
     pub buy_percentile: Option<f64>,
     /// Global adjusted price (industry job-fee / EIV basis).
     pub adjusted_price: Option<f64>,
-    /// Global average price.
+    /// Global average price (ESI `/markets/prices/`), identical semantics on
+    /// both pricing paths (#776).
     pub average_price: Option<f64>,
+    /// Location-local sell-side weighted average of the current order book.
+    /// Bulk (Fuzzwork) path only — the per-item ESI path has no depth data.
+    pub weighted_average: Option<f64>,
     /// Most recent daily average from market history.
     pub daily_average: Option<f64>,
     /// Sell-side order-book volume — units currently listed in sell orders. (In

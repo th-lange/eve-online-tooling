@@ -518,11 +518,26 @@ struct EsiCostIndex {
     cost_index: f64,
 }
 
+/// Max staleness accepted for the on-disk cost-index map when a live ESI
+/// refresh fails: 24h past expiry. Cost indices drift slowly, so a day-old
+/// map beats erroring out (#774).
+const COST_INDEX_MAX_STALE_SECS: u64 = 24 * 3600;
+
+/// Fallback decision for a failed refresh: prefer the bounded-stale cached
+/// map, else surface the fetch error. Pure, for the unit test (#774).
+fn cost_index_fallback(
+    stale: Option<HashMap<i64, f64>>,
+    fetch_err: String,
+) -> Result<HashMap<i64, f64>, String> {
+    stale.ok_or(fetch_err)
+}
+
 /// The **manufacturing** cost index CCP applies to job fees in a solar system,
 /// from ESI `/industry/systems/` (public). The full list is fetched once and
 /// cached ~1h on disk, then looked up per system. `None` when the system isn't
 /// listed (e.g. wormhole space). Lets the production tab use the real index
-/// instead of a hand-entered guess.
+/// instead of a hand-entered guess. When the refresh fails but a map ≤24h past
+/// expiry sits on disk, the stale map is served instead of an error (#774).
 #[tauri::command]
 pub async fn production_system_cost_index(
     app: AppHandle,
@@ -533,24 +548,52 @@ pub async fn production_system_cost_index(
     let map: HashMap<i64, f64> = match storage::cache_get(&dir, "industry_cost_indices") {
         Some(cached) => cached,
         None => {
-            let systems: Vec<EsiIndustrySystem> = esi
+            let fetched: Result<Vec<EsiIndustrySystem>, String> = esi
                 .get_json("/latest/industry/systems/", &[])
                 .await
-                .map_err(|e| e.to_string())?;
-            let map: HashMap<i64, f64> = systems
-                .into_iter()
-                .filter_map(|s| {
-                    s.cost_indices
-                        .iter()
-                        .find(|c| c.activity == "manufacturing")
-                        .map(|c| (s.solar_system_id, c.cost_index))
-                })
-                .collect();
-            let _ = storage::cache_put(&dir, "industry_cost_indices", &map, 3600);
-            map
+                .map_err(|e| e.to_string());
+            match fetched {
+                Ok(systems) => {
+                    let map: HashMap<i64, f64> = systems
+                        .into_iter()
+                        .filter_map(|s| {
+                            s.cost_indices
+                                .iter()
+                                .find(|c| c.activity == "manufacturing")
+                                .map(|c| (s.solar_system_id, c.cost_index))
+                        })
+                        .collect();
+                    let _ = storage::cache_put(&dir, "industry_cost_indices", &map, 3600);
+                    map
+                }
+                Err(e) => cost_index_fallback(
+                    storage::cache_get_stale(&dir, "industry_cost_indices", COST_INDEX_MAX_STALE_SECS),
+                    e,
+                )?,
+            }
         }
     };
     Ok(map.get(&system_id).copied())
+}
+
+#[cfg(test)]
+mod cost_index_fallback_tests {
+    use super::*;
+
+    /// Expired-but-recoverable cache + failing ESI → the stale map is served.
+    #[test]
+    fn stale_map_beats_fetch_error() {
+        let stale: HashMap<i64, f64> = [(30000142, 0.041)].into();
+        let got = cost_index_fallback(Some(stale.clone()), "esi down".into());
+        assert_eq!(got.unwrap(), stale);
+    }
+
+    /// No usable cache + failing ESI → the fetch error surfaces unchanged.
+    #[test]
+    fn no_cache_surfaces_the_error() {
+        let got = cost_index_fallback(None, "esi down".into());
+        assert_eq!(got.unwrap_err(), "esi down");
+    }
 }
 
 #[cfg(test)]

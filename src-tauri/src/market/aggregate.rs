@@ -119,6 +119,7 @@ pub fn assemble_price_model(
         buy_percentile: None,
         adjusted_price: adjusted.and_then(|a| a.adjusted_price),
         average_price: adjusted.and_then(|a| a.average_price),
+        weighted_average: None,
         daily_average: latest.map(|h| h.average),
         daily_volume: latest.map(|h| h.volume),
         // Buy-side order-book depth isn't modelled in the per-item ESI path
