@@ -14,18 +14,10 @@ export interface AssetRow {
   /** Character name, or the corporation name for corp-hangar stock. */
   owner: string;
   isCorp: boolean;
-}
-
-export interface AssetsResult {
-  rows: AssetRow[];
-  sellTotal: number;
-  buyTotal: number;
-  volumeTotal: number;
-}
-
-/** Value the roster's holdings against Jita (ESI average price, else Jita sell). */
-export function assetsValue(): Promise<AssetsResult> {
-  return invoke<AssetsResult>("assets_value");
+  /** NPC station name or "Structure {id}" for player structures. */
+  station: string;
+  /** Solar system the station sits in, if resolvable from SDE. */
+  solarSystem: string | null;
 }
 
 export interface AssetNode {
@@ -37,8 +29,7 @@ export interface AssetNode {
   sellValue: number;
   volume: number;
   isLocation: boolean;
-  /** Owning character or corp (set on item nodes; used for the per-item
-   *  owner badge and owner search — the tree is not grouped by owner). */
+  /** Owning character or corp (set on item nodes). */
   owner: string | null;
   isCorp: boolean;
   /** Classifiers for item nodes, for tree search. */
@@ -47,13 +38,17 @@ export interface AssetNode {
   metaGroup: string | null;
   children: AssetNode[];
 }
-export interface AssetsTreeResult {
+
+/** Both views derived from one ESI load. */
+export interface AssetsPayload {
+  rows: AssetRow[];
   roots: AssetNode[];
   sellTotal: number;
+  buyTotal: number;
   volumeTotal: number;
 }
 
-/** The roster's assets as a nested location tree, valued against Jita. */
-export function assetsTree(): Promise<AssetsTreeResult> {
-  return invoke<AssetsTreeResult>("assets_tree");
+/** Load the roster's assets — flat rows + location tree — in one call. */
+export function assetsLoad(): Promise<AssetsPayload> {
+  return invoke<AssetsPayload>("assets_load");
 }

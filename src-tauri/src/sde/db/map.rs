@@ -124,6 +124,28 @@ impl Sde {
         Ok(map)
     }
 
+    /// NPC station info (name + solar system id) for the given station ids.
+    /// Player structures (citadels) aren't in the SDE and are absent from the result.
+    pub fn station_infos(&self, ids: &[i64]) -> Result<HashMap<i64, (String, i64)>, SdeError> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let placeholders = vec!["?"; ids.len()].join(", ");
+        let sql = format!(
+            "SELECT stationID, stationName, solarSystemID FROM staStations WHERE stationID IN ({placeholders})",
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(ids.iter()), |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+        })?;
+        let mut map = HashMap::new();
+        for row in rows {
+            let (id, name, sys_id) = row?;
+            map.insert(id, (name, sys_id));
+        }
+        Ok(map)
+    }
+
     /// Every stargate edge `(from, to)` in known space — the full adjacency for
     /// in-memory route BFS (~13k rows). Cross-chain routing unions wormhole
     /// connections onto this.

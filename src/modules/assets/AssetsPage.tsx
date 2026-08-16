@@ -3,15 +3,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ALL_CHARACTERS,
   activeCharacter,
-  assetsTree,
-  assetsValue,
+  assetsLoad,
   authCharacters,
   authLogin,
   errorMessage,
   type AssetNode,
   type AssetRow,
-  type AssetsResult,
-  type AssetsTreeResult,
+  type AssetsPayload,
 } from "../../lib/api";
 import { formatInt, formatIsk, sortRows } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
@@ -23,7 +21,7 @@ import { Page, PageHeader } from "../../components/page";
 import { Stat } from "../../components/Stat";
 import { SdeGate } from "../../components/SdeGate";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
-import { Building2, User } from "lucide-react";
+import { Building2, Copy, User } from "lucide-react";
 
 const TITLE = "Assets";
 const SUBTITLE =
@@ -36,36 +34,29 @@ export function AssetsPage() {
     </SdeGate>
   );
 }
+
 function Workbench() {
   const qc = useQueryClient();
+  // View toggle — no reload needed, both views already in `assets`.
+  const [view, setView] = useState<"flat" | "tree">("flat");
   const [search, setSearch] = useState("");
   const [treeSearch, setTreeSearch] = useState("");
   const [owners, setOwners] = useState<Set<string>>(new Set());
   const [treeOwners, setTreeOwners] = useState<Set<string>>(new Set());
-  const [result, setResult] = useState<AssetsResult | null>(null);
-  const [tree, setTree] = useState<AssetsTreeResult | null>(null);
+  const [assets, setAssets] = useState<AssetsPayload | null>(null);
 
-  const run = useMutation({
-    mutationFn: () => assetsValue(),
-    onSuccess: (r) => {
-      setResult(r);
-      setTree(null);
+  const loadMut = useMutation({
+    mutationFn: () => assetsLoad(),
+    onSuccess: (d) => {
+      setAssets(d);
       setOwners(new Set());
-    },
-  });
-  const treeRun = useMutation({
-    mutationFn: () => assetsTree(),
-    onSuccess: (t) => {
-      setTree(t);
-      setResult(null);
       setTreeOwners(new Set());
     },
   });
 
-  // The Assets view follows the global character selector: when it changes,
-  // re-run whichever view is loaded so it reflects the new selection (a single
-  // character's assets, or everyone's under "all characters"). The guard keys
-  // on the active id so unrelated re-renders don't re-value.
+  // Follow the global character selector: reload whenever the active
+  // character changes. Guard on the previous value so unrelated re-renders
+  // don't trigger a reload.
   const active = useQuery({
     queryKey: ["auth", "active"],
     queryFn: activeCharacter,
@@ -75,8 +66,8 @@ function Workbench() {
   useEffect(() => {
     if (inited.current) return;
     inited.current = true;
-    run.mutate();
-  }, [run]);
+    loadMut.mutate();
+  }, [loadMut]);
   useEffect(() => {
     if (prevActive.current === undefined) {
       prevActive.current = active.data;
@@ -84,9 +75,9 @@ function Workbench() {
     }
     if (active.data === prevActive.current) return;
     prevActive.current = active.data;
-    if (tree) treeRun.mutate();
-    else run.mutate();
-  }, [active.data, tree, run, treeRun]);
+    loadMut.mutate();
+  }, [active.data, loadMut]);
+
   const chars = useQuery({
     queryKey: ["auth", "characters"],
     queryFn: authCharacters,
@@ -96,12 +87,11 @@ function Workbench() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["auth"] }),
   });
 
+  // ── Flat view ────────────────────────────────────────────────────────────
 
-  // Distinct owners present in the current result, characters first then
-  // corps, each alphabetical — drives the source filter chips.
   const ownerList = useMemo(() => {
     const seen = new Map<string, boolean>();
-    for (const r of result?.rows ?? []) {
+    for (const r of assets?.rows ?? []) {
       if (!seen.has(r.owner)) seen.set(r.owner, r.isCorp);
     }
     return [...seen.entries()]
@@ -110,11 +100,35 @@ function Workbench() {
         (a, b) =>
           Number(a.isCorp) - Number(b.isCorp) || a.name.localeCompare(b.name),
       );
-  }, [result]);
-  // Same shape as ownerList but derived from the tree — walks all nodes once
-  // per tree load so the owner chips in tree view match the flat view's UX.
+  }, [assets]);
+
+  // Precompute each row's lowercased search haystack once per load.
+  const haystacks = useMemo(() => {
+    const m = new Map<AssetRow, string>();
+    for (const r of assets?.rows ?? []) {
+      m.set(
+        r,
+        [r.name, r.category, r.group, r.owner, r.station, r.solarSystem]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase(),
+      );
+    }
+    return m;
+  }, [assets]);
+  const debouncedSearch = useDebouncedValue(search);
+  const rows = useMemo(() => {
+    const q = debouncedSearch.trim().toLowerCase();
+    let all = assets?.rows ?? [];
+    if (owners.size > 0) all = all.filter((r) => owners.has(r.owner));
+    if (!q) return all;
+    return all.filter((r) => (haystacks.get(r) ?? "").includes(q));
+  }, [assets, debouncedSearch, owners, haystacks]);
+
+  // ── Tree view ─────────────────────────────────────────────────────────────
+
   const treeOwnerList = useMemo(() => {
-    if (!tree) return [];
+    if (!assets) return [];
     const seen = new Map<string, boolean>();
     const walk = (nodes: AssetNode[]) => {
       for (const n of nodes) {
@@ -122,41 +136,15 @@ function Workbench() {
         walk(n.children);
       }
     };
-    walk(tree.roots);
+    walk(assets.roots);
     return [...seen.entries()]
       .map(([name, isCorp]) => ({ name, isCorp }))
       .sort(
         (a, b) =>
           Number(a.isCorp) - Number(b.isCorp) || a.name.localeCompare(b.name),
       );
-  }, [tree]);
+  }, [assets]);
 
-  // Precompute each row's lowercased search haystack once per result, so
-  // typing only scans (indexOf) instead of re-building + re-lowercasing
-  // strings for every row on every keystroke.
-  const haystacks = useMemo(() => {
-    const m = new Map<AssetRow, string>();
-    for (const r of result?.rows ?? []) {
-      m.set(
-        r,
-        [r.name, r.category, r.group, r.owner]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase(),
-      );
-    }
-    return m;
-  }, [result]);
-  const debouncedSearch = useDebouncedValue(search);
-  const rows = useMemo(() => {
-    const q = debouncedSearch.trim().toLowerCase();
-    let all = result?.rows ?? [];
-    if (owners.size > 0) all = all.filter((r) => owners.has(r.owner));
-    if (!q) return all;
-    return all.filter((r) => (haystacks.get(r) ?? "").includes(q));
-  }, [result, debouncedSearch, owners, haystacks]);
-  // Same precompute for the tree: one lowercased haystack per node, cached
-  // for the life of the tree, so filtering only scans.
   const treeHay = useMemo(() => {
     const m = new WeakMap<AssetNode, string>();
     const walk = (ns: AssetNode[]) => {
@@ -171,21 +159,20 @@ function Workbench() {
         walk(n.children);
       }
     };
-    if (tree) walk(tree.roots);
+    if (assets) walk(assets.roots);
     return m;
-  }, [tree]);
+  }, [assets]);
   const debouncedTreeSearch = useDebouncedValue(treeSearch);
   const treeSearching = debouncedTreeSearch.trim().length > 0;
   const treeRoots = useMemo(() => {
-    if (!tree) return [];
-    let roots = tree.roots;
+    if (!assets) return [];
+    let roots = assets.roots;
     if (treeOwners.size > 0) roots = filterTreeByOwners(roots, treeOwners);
     const q = debouncedTreeSearch.trim().toLowerCase();
     return q ? filterTree(roots, q, treeHay) : roots;
-  }, [tree, treeOwners, debouncedTreeSearch, treeHay]);
-  // True when there's no corp asset data for any target character because their
-  // token predates the read_corporation_assets scope addition — a re-login
-  // surfaces the corp hangar chips.
+  }, [assets, treeOwners, debouncedTreeSearch, treeHay]);
+
+  // ── Corp scope hint ───────────────────────────────────────────────────────
   const CORP_SCOPE = "esi-assets.read_corporation_assets.v1";
   const missingCorpScope = useMemo(() => {
     const list = chars.data;
@@ -198,24 +185,32 @@ function Workbench() {
     return targets.some((c) => !c.scopes.includes(CORP_SCOPE));
   }, [chars.data, active.data]);
 
+  const isTree = view === "tree";
+
   return (
     <Page>
       <PageHeader
         title={TITLE}
         subtitle={SUBTITLE}
         actions={
-          <button
-            onClick={() => (tree ? run.mutate() : treeRun.mutate())}
-            disabled={run.isPending || treeRun.isPending}
-            className="rounded border border-zinc-700 px-4 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
-            title="Toggle between a flat valued list and the nested location tree (both valued at Jita)"
-          >
-            {tree
-              ? "Flat list"
-              : treeRun.isPending
-                ? "Loading…"
-                : "Location tree"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setView((v) => (v === "flat" ? "tree" : "flat"))}
+              disabled={!assets}
+              className="rounded border border-zinc-700 px-4 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+              title="Toggle between the flat valued list and the nested location tree"
+            >
+              {isTree ? "Flat list" : "Location tree"}
+            </button>
+            <button
+              onClick={() => loadMut.mutate()}
+              disabled={loadMut.isPending}
+              className="rounded border border-zinc-700 px-4 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+              title="Reload assets from ESI"
+            >
+              {loadMut.isPending ? "Loading…" : "Refresh"}
+            </button>
+          </div>
         }
       />
 
@@ -232,65 +227,33 @@ function Workbench() {
         </p>
       )}
 
-      {treeRun.isError && (
+      {loadMut.isError && (
         <div className="mt-3 text-sm text-rose-400">
-          Failed: {errorMessage(treeRun.error)}
+          Failed: {errorMessage(loadMut.error)} — log in a character with the
+          assets scope.
         </div>
       )}
-      {tree && (
+
+      {assets && isTree && (
         <>
           <div className="mt-4 flex flex-wrap gap-6 text-sm">
             <Stat
               label="Sell value"
-              value={formatIsk(tree.sellTotal)}
+              value={formatIsk(assets.sellTotal)}
               accent="text-emerald-400"
             />
             <Stat
               label="Volume"
-              value={`${formatInt(Math.round(tree.volumeTotal))} m³`}
+              value={`${formatInt(Math.round(assets.volumeTotal))} m³`}
             />
-            <Stat label="Locations" value={formatInt(tree.roots.length)} />
+            <Stat label="Locations" value={formatInt(assets.roots.length)} />
           </div>
           {treeOwnerList.length > 1 && (
-            <div className="mt-3 flex flex-wrap items-center gap-1.5">
-              <span className="mr-1 text-xs text-zinc-500">Source:</span>
-              <button
-                onClick={() => setTreeOwners(new Set())}
-                className={`rounded px-2 py-0.5 text-xs transition ${
-                  treeOwners.size === 0
-                    ? "bg-indigo-600 text-white"
-                    : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-                }`}
-              >
-                All
-              </button>
-              {treeOwnerList.map((o) => {
-                const on = treeOwners.has(o.name);
-                return (
-                  <button
-                    key={o.name}
-                    onClick={() =>
-                      setTreeOwners((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(o.name)) next.delete(o.name);
-                        else next.add(o.name);
-                        return next;
-                      })
-                    }
-                    className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs transition ${
-                      on
-                        ? o.isCorp
-                          ? "bg-sky-700 text-white"
-                          : "bg-indigo-600 text-white"
-                        : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-                    }`}
-                  >
-                    {o.isCorp ? <Building2 size={11} /> : <User size={11} />}
-                    {o.name}
-                  </button>
-                );
-              })}
-            </div>
+            <OwnerChips
+              ownerList={treeOwnerList}
+              selected={treeOwners}
+              setSelected={setTreeOwners}
+            />
           )}
           <input
             value={treeSearch}
@@ -300,7 +263,7 @@ function Workbench() {
           />
           <div className="mt-2 rounded border border-zinc-800">
             {treeRoots.map((n) => (
-              <TreeRow key={n.id} node={n} depth={0} />
+              <TreeRow key={n.id} node={n} depth={0} searching={treeSearching} />
             ))}
             {treeRoots.length === 0 && (
               <div className="px-3 py-6 text-center text-sm text-zinc-500">
@@ -313,71 +276,30 @@ function Workbench() {
         </>
       )}
 
-      {run.isError && (
-        <div className="mt-3 text-sm text-rose-400">
-          Failed: {errorMessage(run.error)} — log in a character with the assets
-          scope.
-        </div>
-      )}
-
-      {result && (
+      {assets && !isTree && (
         <>
           <div className="mt-4 flex flex-wrap gap-6 text-sm">
             <Stat
               label="Sell value (net worth)"
-              value={formatIsk(result.sellTotal)}
+              value={formatIsk(assets.sellTotal)}
               accent="text-emerald-400"
             />
-            <Stat label="Buy value" value={formatIsk(result.buyTotal)} />
+            <Stat label="Buy value" value={formatIsk(assets.buyTotal)} />
             <Stat
               label="Volume"
-              value={`${formatInt(Math.round(result.volumeTotal))} m³`}
+              value={`${formatInt(Math.round(assets.volumeTotal))} m³`}
             />
             <Stat
               label="Item types"
-              value={formatInt(new Set(result.rows.map((r) => r.typeId)).size)}
+              value={formatInt(new Set(assets.rows.map((r) => r.typeId)).size)}
             />
           </div>
           {ownerList.length > 1 && (
-            <div className="mt-3 flex flex-wrap items-center gap-1.5">
-              <span className="mr-1 text-xs text-zinc-500">Source:</span>
-              <button
-                onClick={() => setOwners(new Set())}
-                className={`rounded px-2 py-0.5 text-xs transition ${
-                  owners.size === 0
-                    ? "bg-indigo-600 text-white"
-                    : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-                }`}
-              >
-                All
-              </button>
-              {ownerList.map((o) => {
-                const on = owners.has(o.name);
-                return (
-                  <button
-                    key={o.name}
-                    onClick={() =>
-                      setOwners((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(o.name)) next.delete(o.name);
-                        else next.add(o.name);
-                        return next;
-                      })
-                    }
-                    className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs transition ${
-                      on
-                        ? o.isCorp
-                          ? "bg-sky-700 text-white"
-                          : "bg-indigo-600 text-white"
-                        : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-                    }`}
-                  >
-                    {o.isCorp ? <Building2 size={11} /> : <User size={11} />}
-                    {o.name}
-                  </button>
-                );
-              })}
-            </div>
+            <OwnerChips
+              ownerList={ownerList}
+              selected={owners}
+              setSelected={setOwners}
+            />
           )}
           <input
             value={search}
@@ -392,14 +314,89 @@ function Workbench() {
   );
 }
 
+// ── Shared owner filter chips ─────────────────────────────────────────────────
+
+function OwnerChips({
+  ownerList,
+  selected,
+  setSelected,
+}: {
+  ownerList: { name: string; isCorp: boolean }[];
+  selected: Set<string>;
+  setSelected: React.Dispatch<React.SetStateAction<Set<string>>>;
+}) {
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+      <span className="mr-1 text-xs text-zinc-500">Source:</span>
+      <button
+        onClick={() => setSelected(new Set())}
+        className={`rounded px-2 py-0.5 text-xs transition ${
+          selected.size === 0
+            ? "bg-indigo-600 text-white"
+            : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+        }`}
+      >
+        All
+      </button>
+      {ownerList.map((o) => {
+        const on = selected.has(o.name);
+        return (
+          <button
+            key={o.name}
+            onClick={() =>
+              setSelected((prev) => {
+                const next = new Set(prev);
+                if (next.has(o.name)) next.delete(o.name);
+                else next.add(o.name);
+                return next;
+              })
+            }
+            className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs transition ${
+              on
+                ? o.isCorp
+                  ? "bg-sky-700 text-white"
+                  : "bg-indigo-600 text-white"
+                : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+            }`}
+          >
+            {o.isCorp ? <Building2 size={11} /> : <User size={11} />}
+            {o.name}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Flat list table ───────────────────────────────────────────────────────────
+
 type AssetSortKey =
-  "name" | "owner" | "quantity" | "sellPrice" | "sellValue" | "volume";
+  | "name"
+  | "solarSystem"
+  | "station"
+  | "owner"
+  | "quantity"
+  | "sellPrice"
+  | "sellValue"
+  | "volume";
 const ASSET_COLUMNS: SortColumn<AssetSortKey>[] = [
   {
     key: "name",
     label: "Item",
     numeric: false,
-    description: "The item (+ best sell hub).",
+    description: "The item (+ category / group).",
+  },
+  {
+    key: "solarSystem",
+    label: "System",
+    numeric: false,
+    description: "Solar system the location sits in.",
+  },
+  {
+    key: "station",
+    label: "Station",
+    numeric: false,
+    description: "Station or structure where this stack is stored.",
   },
   {
     key: "owner",
@@ -445,10 +442,9 @@ const AssetTable = memo(function AssetTable({ rows }: { rows: AssetRow[] }) {
     "desc",
     ["name"],
   );
-  // The row set is uncapped (one row per typeId × owner — easily 5k-20k for a
-  // multi-character roster), so memoize the O(n log n) sort instead of
-  // re-running it in the render body — same pattern as DayTradeTable and
-  // TradeTable.
+  // The row set is uncapped (one row per typeId × owner × location — easily
+  // 5k-20k for a multi-character roster), so memoize the O(n log n) sort
+  // instead of re-running it in the render body.
   const sorted = useMemo(
     () => sortRows(rows, sortKey, sortDir).slice(0, 500),
     [rows, sortKey, sortDir],
@@ -471,7 +467,7 @@ const AssetTable = memo(function AssetTable({ rows }: { rows: AssetRow[] }) {
         </thead>
         <tbody>
           {sorted.map((r) => (
-            <Row key={`${r.typeId}-${r.owner}`} r={r} />
+            <Row key={`${r.typeId}-${r.owner}-${r.station}`} r={r} />
           ))}
         </tbody>
       </table>
@@ -480,47 +476,96 @@ const AssetTable = memo(function AssetTable({ rows }: { rows: AssetRow[] }) {
 });
 
 function Row({ r }: { r: AssetRow }) {
+  const [expanded, setExpanded] = useState(false);
   return (
-    <tr className="border-t border-zinc-800">
-      <td className="px-3 py-1.5">
-        <div className="text-zinc-200">{r.name}</div>
-        {(r.category || r.group) && (
-          <div className="text-xs text-zinc-500">
-            {[r.category, r.group].filter(Boolean).join(" · ")}
+    <>
+      <tr
+        className="cursor-pointer border-t border-zinc-800 hover:bg-zinc-800/20"
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <td className="px-3 py-1.5">
+          <div className="flex items-center gap-1.5">
+            <span className="text-zinc-200">{r.name}</span>
+            <button
+              className="text-zinc-600 transition hover:text-zinc-300"
+              title="Copy name"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigator.clipboard?.writeText(r.name).catch(() => {});
+              }}
+            >
+              <Copy size={11} />
+            </button>
           </div>
-        )}
-      </td>
-      <td className="px-3 py-1.5">
-        <span
-          className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs ${
-            r.isCorp ? "bg-sky-950 text-sky-300" : "bg-zinc-800 text-zinc-300"
-          }`}
-          title={r.isCorp ? "Corporation hangar" : "Personal hangar"}
+          {(r.category || r.group) && (
+            <div className="text-xs text-zinc-500">
+              {[r.category, r.group].filter(Boolean).join(" · ")}
+            </div>
+          )}
+        </td>
+        <td className="px-3 py-1.5 text-zinc-400">
+          {r.solarSystem ?? <span className="text-zinc-600">—</span>}
+        </td>
+        <td
+          className="max-w-[200px] truncate px-3 py-1.5 text-zinc-400"
+          title={r.station}
         >
-          {r.isCorp ? <Building2 size={11} /> : <User size={11} />}
-          {r.owner}
-        </span>
-      </td>
-      <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-        {formatInt(r.quantity)}
-      </td>
-      <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-        {formatIsk(r.sellPrice)}
-      </td>
-      <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
-        {formatIsk(r.sellValue)}
-      </td>
-      <td className="px-3 py-1.5 text-right tabular-nums text-zinc-500">
-        {formatInt(Math.round(r.volume))}
-      </td>
-    </tr>
+          {r.station}
+        </td>
+        <td className="px-3 py-1.5">
+          <span
+            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs ${
+              r.isCorp ? "bg-sky-950 text-sky-300" : "bg-zinc-800 text-zinc-300"
+            }`}
+            title={r.isCorp ? "Corporation hangar" : "Personal hangar"}
+          >
+            {r.isCorp ? <Building2 size={11} /> : <User size={11} />}
+            {r.owner}
+          </span>
+        </td>
+        <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+          {formatInt(r.quantity)}
+        </td>
+        <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+          {formatIsk(r.sellPrice)}
+        </td>
+        <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
+          {formatIsk(r.sellValue)}
+        </td>
+        <td className="px-3 py-1.5 text-right tabular-nums text-zinc-500">
+          {formatInt(Math.round(r.volume))}
+        </td>
+      </tr>
+      {expanded && (
+        <tr className="border-t border-zinc-800/30 bg-zinc-900/40">
+          <td colSpan={8} className="px-4 py-1.5">
+            <div className="flex items-center gap-1.5 text-xs">
+              {r.solarSystem && (
+                <>
+                  <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-300">
+                    {r.solarSystem}
+                  </span>
+                  <span className="text-zinc-600">›</span>
+                </>
+              )}
+              <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-300">
+                {r.station}
+              </span>
+              <span className="text-zinc-600">›</span>
+              <span className="text-zinc-500">Items</span>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
+// ── Tree view helpers ─────────────────────────────────────────────────────────
+
 /** Prune the tree to nodes matching `q` (already lowercased): a matching node
  *  keeps its whole subtree; a non-match survives only to carry a matching
- *  descendant. Uses the precomputed per-node haystack cache so filtering only
- *  scans. */
+ *  descendant. */
 function filterTree(
   nodes: AssetNode[],
   q: string,
@@ -538,9 +583,7 @@ function filterTree(
   return out;
 }
 
-/** Prune the tree to nodes whose owner is in `owners`: an item node matches
-*  if its owner is selected; location/container nodes survive only to carry
-*  matching descendants. */
+/** Prune the tree to nodes whose owner is in `owners`. */
 function filterTreeByOwners(
   nodes: AssetNode[],
   owners: Set<string>,
@@ -557,13 +600,27 @@ function filterTreeByOwners(
   return out;
 }
 
-/** A collapsible row in the asset location tree (locations open by default,
- *  everything else collapsed — searching filters but never auto-expands, so
- *  matches inside a container stay tucked until you open it). Top-level items
- *  (direct children of a location) carry an owner badge; contents inherit it. */
-function TreeRow({ node, depth }: { node: AssetNode; depth: number }) {
+/** A collapsible row in the asset location tree. Locations (depth 0) open by
+ *  default; containers stay collapsed unless toggled. When `searching`, any
+ *  node with filtered children auto-expands — but the user can explicitly
+ *  close a container to override the auto-expand. */
+function TreeRow({
+  node,
+  depth,
+  searching,
+}: {
+  node: AssetNode;
+  depth: number;
+  searching: boolean;
+}) {
   const [open, setOpen] = useState(depth === 0);
+  // Track when the user explicitly closes a container that would auto-expand
+  // during search. Without this, `isOpen` would always be true for containers
+  // with children when searching, making the toggle button appear broken.
+  const [closedByUser, setClosedByUser] = useState(false);
   const hasChildren = node.children.length > 0;
+  const wouldAutoExpand = searching && hasChildren;
+  const isOpen = !closedByUser && (open || wouldAutoExpand);
   const showOwner = depth === 1 && !node.isLocation && node.owner;
   return (
     <>
@@ -574,10 +631,18 @@ function TreeRow({ node, depth }: { node: AssetNode; depth: number }) {
         <span className="flex items-center gap-1">
           {hasChildren ? (
             <button
-              onClick={() => setOpen(!open)}
+              onClick={() => {
+                if (isOpen) {
+                  setClosedByUser(true);
+                  setOpen(false);
+                } else {
+                  setClosedByUser(false);
+                  setOpen(true);
+                }
+              }}
               className="w-4 text-zinc-500"
             >
-              {open ? "▾" : "▸"}
+              {isOpen ? "▾" : "▸"}
             </button>
           ) : (
             <span className="w-4" />
@@ -612,9 +677,9 @@ function TreeRow({ node, depth }: { node: AssetNode; depth: number }) {
           {formatIsk(node.sellValue)}
         </span>
       </div>
-      {open &&
+      {isOpen &&
         node.children.map((c) => (
-          <TreeRow key={c.id} node={c} depth={depth + 1} />
+          <TreeRow key={c.id} node={c} depth={depth + 1} searching={searching} />
         ))}
     </>
   );

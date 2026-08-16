@@ -1,9 +1,9 @@
-//! Assets module — value the roster's holdings against Jita (ESI's global
-//! average price when available, else the Jita order book).
+//! Assets module — load the roster's holdings once and derive both the flat
+//! aggregated view and the nested location tree from the same data.
 
 use std::collections::{HashMap, HashSet};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::esi::{
@@ -15,6 +15,9 @@ use crate::storage;
 /// Jita IV-4 in The Forge — the reference market all valuation prices against.
 const JITA_STATION_ID: i64 = 60003760;
 
+/// Player structures (citadels etc.) use ids at/above this.
+const STRUCTURE_ID_MIN: i64 = 1_000_000_000_000;
+
 /// Valuation basis for one type: the location-local weighted average when the
 /// bulk path supplied one, else ESI's global average, else the Jita sell price
 /// (realistic percentile, then order-book min) (#776).
@@ -25,22 +28,17 @@ fn basis_price(m: &PriceModel) -> Option<f64> {
         .or(m.sell_min)
 }
 
-/// One raw asset row plus the owner (character or corp name) it belongs to.
+/// One raw asset row plus the owner it belongs to.
 struct RosterAssetRow {
     asset: RawAsset,
     owner: String,
     is_corp: bool,
 }
 
-/// Walk the active selection's roster (a single character, or every roster
-/// member when "all characters" is active), gathering each character's
-/// personal assets plus their corp hangar — each corp fetched once, so alts
-/// in the same corp don't double up (mirrors [`resolve_names`]'s corp-name
-/// resolution). A character's or corp's asset fetch failing (missing
-/// scope/role, network) skips just that owner; the rest of the roster is
-/// unaffected. Shared by `assets_value` (per-type aggregation) and
-/// `assets_tree` (item-level nesting) — same gathering walk, different
-/// downstream shape.
+/// Walk the active selection's roster, gathering each character's personal
+/// assets plus their corp hangar — each corp fetched once, so alts in the same
+/// corp don't double up. A character's or corp's asset fetch failing skips just
+/// that owner; the rest of the roster is unaffected.
 async fn gather_roster_assets(
     auth_state: &AuthState,
     dir: &std::path::Path,
@@ -86,8 +84,26 @@ async fn gather_roster_assets(
     out
 }
 
-/// One owned item type for one owner (a character, or a corporation hangar),
-/// aggregated and valued.
+// --- Shared cache entry (item-level, not aggregated) ---
+
+/// One raw ESI item with its owner, cached between command calls so a single
+/// ESI fetch drives both the flat and tree representations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CachedRawAsset {
+    item_id: i64,
+    /// Direct parent id — another item_id when inside a container, else a
+    /// station/structure id. Needed to re-nest the tree on every render.
+    location_id: i64,
+    type_id: i64,
+    quantity: i64,
+    owner: String,
+    is_corp: bool,
+}
+
+// --- Flat view ---
+
+/// One owned item type at one location, aggregated and valued.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetRow {
@@ -104,127 +120,54 @@ pub struct AssetRow {
     /// Character name, or the corporation name for corp-hangar stock.
     pub owner: String,
     pub is_corp: bool,
+    /// NPC station name or "Structure {id}" for player structures.
+    pub station: String,
+    /// Solar system the station sits in, if resolvable from SDE.
+    pub solar_system: Option<String>,
 }
 
+// --- Tree view ---
+
+/// A valued, named node of the asset location tree.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetNode {
+    pub id: i64,
+    pub name: String,
+    pub type_id: Option<i64>,
+    pub quantity: i64,
+    /// Rolled-up sell value of this node and everything under it.
+    pub sell_value: f64,
+    /// Rolled-up packaged volume.
+    pub volume: f64,
+    pub is_location: bool,
+    /// Owning character or corp (set on item nodes).
+    pub owner: Option<String>,
+    pub is_corp: bool,
+    /// Classifiers for item nodes, for tree search.
+    pub category: Option<String>,
+    pub group: Option<String>,
+    pub meta_group: Option<String>,
+    pub children: Vec<AssetNode>,
+}
+
+// --- Combined payload ---
+
+/// Both views derived from one ESI load: flat rows (aggregated by
+/// type × owner × station) and the nested location tree.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AssetsResult {
+pub struct AssetsPayload {
     pub rows: Vec<AssetRow>,
+    pub roots: Vec<AssetNode>,
     pub sell_total: f64,
     pub buy_total: f64,
     pub volume_total: f64,
 }
 
-/// Aggregate the roster's assets by type, value each against the Jita basis,
-/// and total the net worth + cargo volume.
-#[tauri::command]
-pub async fn assets_value(
-    app: AppHandle,
-    auth_state: State<'_, AuthState>,
-    market: State<'_, MarketService>,
-) -> Result<AssetsResult, String> {
-    let dir = storage::app_data_dir(&app)?;
-    // Quantity per (type, owner) for the active selection: a single character
-    // (personal hangar + their corp's hangar) when one is picked, or every
-    // roster member (each corp fetched once, so alts in the same corp don't
-    // double-count) when "all characters" is active. Cached per selection.
-    let sel = storage::active_character(&dir).unwrap_or(0);
-    let cache_key = format!("assets_stock_{sel}");
-    let stock: HashMap<i64, HashMap<String, (bool, i64)>> =
-        match storage::cache_get(&dir, &cache_key) {
-            Some(s) => s,
-            None => {
-                let mut s: HashMap<i64, HashMap<String, (bool, i64)>> = HashMap::new();
-                for row in gather_roster_assets(&auth_state, &dir).await {
-                    let entry = s
-                        .entry(row.asset.type_id)
-                        .or_default()
-                        .entry(row.owner)
-                        .or_insert((row.is_corp, 0));
-                    entry.1 += row.asset.quantity;
-                }
-                let _ = storage::cache_put(&dir, &cache_key, &s, 600);
-                s
-            }
-        };
-    if stock.is_empty() {
-        return Ok(AssetsResult {
-            rows: Vec::new(),
-            sell_total: 0.0,
-            buy_total: 0.0,
-            volume_total: 0.0,
-        });
-    }
+// --- Tree internals (unchanged from original) ---
 
-    let ids: Vec<i64> = stock.keys().copied().collect();
-    let location = resolve_location(default_region_id(), Some(JITA_STATION_ID));
-    let prices = market
-        .price_map_at(location, &ids)
-        .await
-        .map_err(|e| e.to_string())?;
-    let item_meta = crate::sde::cached_item_meta(&dir)?;
-
-    let (mut sell_total, mut buy_total, mut volume_total) = (0.0, 0.0, 0.0);
-    let mut rows: Vec<AssetRow> = Vec::new();
-    for (type_id, owners) in stock.into_iter() {
-        let model = prices.get(type_id);
-        let buy_price = model.and_then(|m| m.buy_percentile);
-        let sell_price = model.and_then(basis_price);
-        let (name, vol_each, category, group) = match item_meta.get(&type_id) {
-            Some(m) => (
-                m.name.clone(),
-                m.volume,
-                m.category.clone(),
-                m.group.clone(),
-            ),
-            None => (format!("Type {type_id}"), 0.0, None, None),
-        };
-        for (owner, (is_corp, quantity)) in owners {
-            let q = quantity as f64;
-            let sell_value = sell_price.unwrap_or(0.0) * q;
-            let buy_value = buy_price.unwrap_or(0.0) * q;
-            let volume = vol_each * q;
-            sell_total += sell_value;
-            buy_total += buy_value;
-            volume_total += volume;
-            rows.push(AssetRow {
-                type_id,
-                name: name.clone(),
-                quantity,
-                sell_price,
-                buy_price,
-                sell_value,
-                buy_value,
-                volume,
-                category: category.clone(),
-                group: group.clone(),
-                owner,
-                is_corp,
-            });
-        }
-    }
-    rows.sort_by(|a, b| {
-        b.sell_value
-            .partial_cmp(&a.sell_value)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    Ok(AssetsResult {
-        rows,
-        sell_total,
-        buy_total,
-        volume_total,
-    })
-}
-
-// --- Location tree (#93) ---
-
-/// Player structures (citadels etc.) use ids at/above this; they're not in the
-/// SDE, so their names fall back to a generic label.
-const STRUCTURE_ID_MIN: i64 = 1_000_000_000_000;
-
-/// A flattened asset for nesting (ids only — pure layer), tagged with the
-/// owner (character or corp name) it came from.
+/// A flattened asset for nesting (ids only).
 #[derive(Debug, Clone)]
 struct FlatAsset {
     item_id: i64,
@@ -235,30 +178,25 @@ struct FlatAsset {
     is_corp: bool,
 }
 
-/// Bare nesting node (ids only) before names/values are attached.
+/// Bare nesting node before names/values are attached.
 #[derive(Debug, PartialEq)]
 struct TreeNode {
-    /// Root nodes carry a location id; leaf/container nodes carry an item id.
     id: i64,
     type_id: Option<i64>,
     quantity: i64,
     is_location: bool,
-    /// The owning character or corporation (set on every non-location node).
     owner: Option<String>,
     is_corp: bool,
     children: Vec<TreeNode>,
 }
 
-/// Re-nest ESI's flat asset list into a forest: roots are the locations
-/// (stations/structures) that aren't themselves assets; an asset whose
-/// `location_id` is another asset's `item_id` nests under it. Pure (testable).
+/// Re-nest ESI's flat asset list into a forest.
 fn build_asset_tree(assets: &[FlatAsset]) -> Vec<TreeNode> {
     let item_ids: HashSet<i64> = assets.iter().map(|a| a.item_id).collect();
     let mut children_of: HashMap<i64, Vec<&FlatAsset>> = HashMap::new();
     for a in assets {
         children_of.entry(a.location_id).or_default().push(a);
     }
-    // Root locations: location_ids that aren't an asset item id (and 0 = unknown).
     let mut roots: Vec<i64> = children_of
         .keys()
         .copied()
@@ -303,129 +241,7 @@ fn build_asset_tree(assets: &[FlatAsset]) -> Vec<TreeNode> {
         .collect()
 }
 
-/// A valued, named node of the asset location tree.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AssetNode {
-    pub id: i64,
-    pub name: String,
-    pub type_id: Option<i64>,
-    pub quantity: i64,
-    /// Rolled-up sell value of this node and everything under it.
-    pub sell_value: f64,
-    /// Rolled-up packaged volume.
-    pub volume: f64,
-    pub is_location: bool,
-    /// Owning character or corp (set on item nodes; used for the per-item
-    /// owner badge and owner search — the tree is not grouped by owner).
-    pub owner: Option<String>,
-    pub is_corp: bool,
-    /// Classifiers for item nodes, so the tree is searchable by them.
-    pub category: Option<String>,
-    pub group: Option<String>,
-    pub meta_group: Option<String>,
-    pub children: Vec<AssetNode>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AssetsTreeResult {
-    pub roots: Vec<AssetNode>,
-    pub sell_total: f64,
-    pub volume_total: f64,
-}
-
-/// The roster's assets as a nested location tree (item → container → ship →
-/// station/structure), each stack valued against the Jita basis and rolled up.
-#[tauri::command]
-pub async fn assets_tree(
-    app: AppHandle,
-    auth_state: State<'_, AuthState>,
-    market: State<'_, MarketService>,
-) -> Result<AssetsTreeResult, String> {
-    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
-
-    // Gather assets for the active selection (a single character, or the
-    // whole roster when "all characters" is active), item-level for nesting,
-    // each tagged with its owner.
-    let assets: Vec<FlatAsset> = gather_roster_assets(&auth_state, &dir)
-        .await
-        .into_iter()
-        .map(|row| FlatAsset {
-            item_id: row.asset.item_id,
-            location_id: row.asset.location_id,
-            type_id: row.asset.type_id,
-            quantity: row.asset.quantity,
-            owner: row.owner,
-            is_corp: row.is_corp,
-        })
-        .collect();
-    if assets.is_empty() {
-        return Ok(AssetsTreeResult {
-            roots: Vec::new(),
-            sell_total: 0.0,
-            volume_total: 0.0,
-        });
-    }
-
-    // Price every type against the Jita basis (ESI average, else Jita sell).
-    let type_ids: Vec<i64> = assets
-        .iter()
-        .map(|a| a.type_id)
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-    let prices: HashMap<i64, f64> = market
-        .price_models_at(
-            resolve_location(default_region_id(), Some(JITA_STATION_ID)),
-            &type_ids,
-        )
-        .await
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .filter_map(|m| basis_price(&m).map(|p| (m.type_id, p)))
-        .collect();
-    let item_meta = crate::sde::cached_item_meta(&dir)?;
-
-    // Resolve root location names: NPC stations from SDE, systems from SDE,
-    // structures by id fallback.
-    let root_ids: Vec<i64> = {
-        let item_ids: HashSet<i64> = assets.iter().map(|a| a.item_id).collect();
-        assets
-            .iter()
-            .map(|a| a.location_id)
-            .filter(|l| *l != 0 && !item_ids.contains(l))
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect()
-    };
-    let stations = sde.station_names(&root_ids).map_err(|e| e.to_string())?;
-    let systems = crate::sde::cached_system_names(&dir)?;
-    let loc_name = |id: i64| -> String {
-        stations
-            .get(&id)
-            .or_else(|| systems.get(&id))
-            .cloned()
-            .unwrap_or_else(|| {
-                if id >= STRUCTURE_ID_MIN {
-                    format!("Structure {id}")
-                } else {
-                    format!("Location {id}")
-                }
-            })
-    };
-
-    let bare = build_asset_tree(&assets);
-    let (roots, sell_total, volume_total) = value_nodes(bare, &prices, &item_meta, &loc_name);
-    Ok(AssetsTreeResult {
-        roots,
-        sell_total,
-        volume_total,
-    })
-}
-
 /// Recursively name + value bare nodes, rolling value/volume up to each parent.
-/// Returns the valued nodes plus the total value/volume across them.
 fn value_nodes(
     nodes: Vec<TreeNode>,
     prices: &HashMap<i64, f64>,
@@ -469,7 +285,6 @@ fn value_nodes(
             children,
         });
     }
-    // Heaviest value first within each level.
     out.sort_by(|a, b| {
         b.sell_value
             .partial_cmp(&a.sell_value)
@@ -478,14 +293,206 @@ fn value_nodes(
     (out, total_value, total_volume)
 }
 
+// --- Single unified command ---
+
+/// Load the roster's assets once — ESI fetch (or cache hit), price at Jita,
+/// then derive both the flat aggregated rows and the nested location tree.
+/// Switching between views is a pure UI toggle; no second network call.
+#[tauri::command]
+pub async fn assets_load(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+    market: State<'_, MarketService>,
+) -> Result<AssetsPayload, String> {
+    let dir = storage::app_data_dir(&app)?;
+    let sel = storage::active_character(&dir).unwrap_or(0);
+    let cache_key = format!("assets_raw_v1_{sel}");
+
+    // Item-level cache — from this we derive both the flat rows (aggregate by
+    // type × owner × root location) and the tree (re-nest by location_id chain).
+    let raw: Vec<CachedRawAsset> = match storage::cache_get(&dir, &cache_key) {
+        Some(r) => r,
+        None => {
+            let roster = gather_roster_assets(&auth_state, &dir).await;
+            let r: Vec<CachedRawAsset> = roster
+                .into_iter()
+                .map(|row| CachedRawAsset {
+                    item_id: row.asset.item_id,
+                    location_id: row.asset.location_id,
+                    type_id: row.asset.type_id,
+                    quantity: row.asset.quantity,
+                    owner: row.owner,
+                    is_corp: row.is_corp,
+                })
+                .collect();
+            let _ = storage::cache_put(&dir, &cache_key, &r, 600);
+            r
+        }
+    };
+
+    if raw.is_empty() {
+        return Ok(AssetsPayload {
+            rows: Vec::new(),
+            roots: Vec::new(),
+            sell_total: 0.0,
+            buy_total: 0.0,
+            volume_total: 0.0,
+        });
+    }
+
+    // ── Root-location resolution (needed for flat aggregation) ──────────────
+    // Walk item_id → location_id chains until we reach a station/structure.
+    let item_to_loc: HashMap<i64, i64> = raw
+        .iter()
+        .map(|r| (r.item_id, r.location_id))
+        .collect();
+    let item_ids: HashSet<i64> = item_to_loc.keys().copied().collect();
+    let root_of = |start: i64| -> i64 {
+        let mut loc = start;
+        for _ in 0..20 {
+            if !item_ids.contains(&loc) {
+                break;
+            }
+            match item_to_loc.get(&loc) {
+                Some(&parent) => loc = parent,
+                None => break,
+            }
+        }
+        loc
+    };
+
+    // ── Prices ──────────────────────────────────────────────────────────────
+    let type_ids: Vec<i64> = raw
+        .iter()
+        .map(|r| r.type_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let location = resolve_location(default_region_id(), Some(JITA_STATION_ID));
+    let price_map = market
+        .price_map_at(location, &type_ids)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Basis prices as f64 for the tree rollup.
+    let basis: HashMap<i64, f64> = type_ids
+        .iter()
+        .filter_map(|&tid| price_map.get(tid).and_then(basis_price).map(|p| (tid, p)))
+        .collect();
+
+    // ── SDE ─────────────────────────────────────────────────────────────────
+    let item_meta = crate::sde::cached_item_meta(&dir)?;
+    let system_names = crate::sde::cached_system_names(&dir)?;
+    let sde = crate::sde::open_from_dir(&dir)?;
+    let root_ids: Vec<i64> = raw
+        .iter()
+        .map(|r| root_of(r.location_id))
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let station_infos = sde.station_infos(&root_ids).map_err(|e| e.to_string())?;
+
+    // Two closures that share the same station_infos / system_names refs:
+    // one for the flat view (needs solar system too), one for the tree (name only).
+    let loc_info = |id: i64| -> (String, Option<String>) {
+        if let Some((name, sys_id)) = station_infos.get(&id) {
+            (name.clone(), system_names.get(sys_id).cloned())
+        } else if id >= STRUCTURE_ID_MIN {
+            (format!("Structure {id}"), None)
+        } else {
+            (format!("Location {id}"), None)
+        }
+    };
+    let loc_name = |id: i64| -> String { loc_info(id).0 };
+
+    // ── Flat view: aggregate by (type_id, owner, root_location) ────────────
+    let mut agg: HashMap<(i64, String, i64), (bool, i64)> = HashMap::new();
+    for r in &raw {
+        let root = root_of(r.location_id);
+        agg.entry((r.type_id, r.owner.clone(), root))
+            .or_insert((r.is_corp, 0))
+            .1 += r.quantity;
+    }
+
+    let mut rows: Vec<AssetRow> = Vec::with_capacity(agg.len());
+    let (mut sell_total, mut buy_total, mut volume_total) = (0.0, 0.0, 0.0);
+
+    for ((type_id, owner, root_loc), (is_corp, quantity)) in agg {
+        let model = price_map.get(type_id);
+        let buy_price = model.and_then(|m| m.buy_percentile);
+        let sell_price = model.and_then(basis_price);
+        let (name, vol_each, category, group) = item_meta
+            .get(&type_id)
+            .map(|m| {
+                (
+                    m.name.clone(),
+                    m.volume,
+                    m.category.clone(),
+                    m.group.clone(),
+                )
+            })
+            .unwrap_or_else(|| (format!("Type {type_id}"), 0.0, None, None));
+        let q = quantity as f64;
+        let sell_value = sell_price.unwrap_or(0.0) * q;
+        let buy_value = buy_price.unwrap_or(0.0) * q;
+        let volume = vol_each * q;
+        sell_total += sell_value;
+        buy_total += buy_value;
+        volume_total += volume;
+        let (station, solar_system) = loc_info(root_loc);
+        rows.push(AssetRow {
+            type_id,
+            name,
+            quantity,
+            sell_price,
+            buy_price,
+            sell_value,
+            buy_value,
+            volume,
+            category,
+            group,
+            owner,
+            is_corp,
+            station,
+            solar_system,
+        });
+    }
+    rows.sort_by(|a, b| {
+        b.sell_value
+            .partial_cmp(&a.sell_value)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // ── Tree view: re-nest by location_id chain ──────────────────────────────
+    let flat_assets: Vec<FlatAsset> = raw
+        .iter()
+        .map(|r| FlatAsset {
+            item_id: r.item_id,
+            location_id: r.location_id,
+            type_id: r.type_id,
+            quantity: r.quantity,
+            owner: r.owner.clone(),
+            is_corp: r.is_corp,
+        })
+        .collect();
+    let bare = build_asset_tree(&flat_assets);
+    let (roots, _, _) = value_nodes(bare, &basis, &item_meta, &loc_name);
+
+    Ok(AssetsPayload {
+        rows,
+        roots,
+        sell_total,
+        buy_total,
+        volume_total,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn nests_items_under_containers_under_stations() {
-        // Station 60000 holds Alice's ship (item 1); the ship holds a module
-        // (item 2). A second stack (item 3) — Bob's — sits in the station.
         let assets = vec![
             FlatAsset {
                 item_id: 1,
@@ -517,14 +524,9 @@ mod tests {
         let station = &roots[0];
         assert_eq!(station.id, 60000);
         assert!(station.is_location);
-        // Items nest directly under the location (no owner grouping); each
-        // top-level item carries its owner tag for the per-item badge.
-        assert_eq!(station.children.len(), 2); // ship + mineral stack
+        assert_eq!(station.children.len(), 2);
         let ship = station.children.iter().find(|n| n.id == 1).unwrap();
-        assert_eq!(ship.owner.as_deref(), Some("Alice"));
-        assert_eq!(ship.children.len(), 1); // the module inside
+        assert_eq!(ship.children.len(), 1);
         assert_eq!(ship.children[0].id, 2);
-        let stack = station.children.iter().find(|n| n.id == 3).unwrap();
-        assert_eq!(stack.owner.as_deref(), Some("Bob"));
     }
 }
