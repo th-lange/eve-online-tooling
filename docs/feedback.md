@@ -93,10 +93,11 @@ EVE_TOOLING_FIREBASE_API_KEY=AIza... \
   npm run tauri build
 ```
 
-A build **without** them is fine — `feedback_status` reports
+A **local** build without them is fine — `feedback_status` reports
 `configured: false`, the send button is disabled, and the UI offers the
-prefilled GitHub-issue route instead. That is also what dev builds do by
-default, so local development never writes to the real collection.
+prefilled GitHub-issue route instead. That is what dev builds do by default, so
+local development never writes to the real collection. (Release builds are a
+different matter — see below.)
 
 ### In CI
 
@@ -108,13 +109,20 @@ secrets of the same names**:
 | `EVE_TOOLING_FIREBASE_PROJECT_ID` | the Firebase project id |
 | `EVE_TOOLING_FIREBASE_API_KEY` | the Firebase **web** API key |
 
-Set them under *Settings → Secrets and variables → Actions*. A build where
-they're absent — a fork, or a release run before they were added — ships with
-feedback disabled rather than failing, so nothing breaks; it just quietly won't
-collect anything. Check a release binary once after adding them.
+Set them under *Settings → Secrets and variables → Actions*, as **Repository
+secrets** — not Environment secrets. `${{ secrets.NAME }}` only resolves
+environment secrets for a job that declares an `environment:` key, and no job
+here does; an environment secret would arrive as an empty string.
 
-`ci.yml` deliberately does **not** set them: test runs must never write into
-the real collection.
+**A release fails if either is missing.** The `setup` job checks both before
+any build runner starts, so the workflow stops in seconds with an explicit
+error naming the missing secret. The alternative was worse: an empty secret
+builds perfectly and the only symptom is that no feedback ever arrives. A
+consequence worth knowing — a **fork cannot run the release workflow** without
+setting its own two secrets.
+
+`ci.yml` deliberately does **not** set them, and is not gated: test runs must
+never write into the real collection.
 
 Note `src-tauri/build.rs` emits `cargo:rerun-if-env-changed` for both. Cargo
 doesn't track `option_env!` on its own, and CI restores a warm `target` cache —
