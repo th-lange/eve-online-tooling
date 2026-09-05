@@ -198,7 +198,7 @@ fn save_store(dir: &std::path::Path, store: &mut Store) -> Result<(), AppError> 
     // Newest first, bounded — the authoritative copy lives server-side.
     store
         .entries
-        .sort_by(|a, b| b.submitted_at.cmp(&a.submitted_at));
+        .sort_by_key(|e| std::cmp::Reverse(e.submitted_at));
     store.entries.truncate(HISTORY_CAP);
     storage::save_data(dir, STORE_KEY, store)?;
     Ok(())
