@@ -42,6 +42,10 @@ pure-frontend commands (`vite`, `vitest`) do not.
   sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
     libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev pkg-config
   ```
+- **Firebase project** (optional, Feedback module only): the project id + web API key are baked in
+  at build time via `EVE_TOOLING_FIREBASE_PROJECT_ID` / `EVE_TOOLING_FIREBASE_API_KEY`. A build
+  without them disables sending and falls back to a prefilled GitHub issue, which is what dev
+  builds do — see `docs/feedback.md`.
 - **EVE developer application** (needed once SSO lands, issue #3): register at
   https://developers.eveonline.com for a **Client ID**, set the callback to the app's loopback
   `http://localhost:8765/callback`, scopes `publicData`, `esi-assets.read_assets.v1`,
@@ -71,8 +75,8 @@ so the UI wires itself up.
   - `util/` — cross-cutting helpers (`time`: epoch-now, civil-date math, RFC-3339 parsing)
   - `lists.rs` — shared persisted type-id lists (blacklist/favorites) reused across modules
   - `evescout` — EVE-Scout public Thera/Turnur wormhole connections
-- `modules/` — the feature modules (24 today: production, trading, fitting, wormholes, PI, the DPS
-  meter, …), each exposing its own commands. See `src/modules/registry.ts` for the full list. The
+- `modules/` — the feature modules (25 today: production, trading, fitting, wormholes, PI, the DPS
+  meter, feedback, …), each exposing its own commands. See `src/modules/registry.ts` for the full list. The
   mapping to `src/modules/registry.ts` entries isn't strictly 1:1: some frontend modules are views
   over a shared service (`universe` → `sde`, `market-search` → `market`), some frontend modules
   share one Rust module (`incursions` + `faction-warfare` → `modules/intel`; `transactions` →
@@ -130,7 +134,7 @@ Vitest (jsdom), config in `vite.config.ts`, setup in `src/test/setup.ts`. To tes
 - Expose frontend↔Rust calls through `lib/api.ts`, not inline `invoke("name")`.
 - Tauri command naming: every command a module exposes uses one stable prefix unique to that
   module (e.g. `orders_*`, `trading_*`, `accounting_*`, `localintel_*`, `intel_*`, `route_*`,
-  `appraisal_*`, `notifications_*`). Shared-service prefixes (`market_`, `sde_`, `auth_`, `esi_`) are
+  `appraisal_*`, `notifications_*`, `feedback_*`). Shared-service prefixes (`market_`, `sde_`, `auth_`, `esi_`) are
   reserved for services, not feature modules — a module never claims a service's prefix even if
   it only calls that service. `wh_`, `lp_`, `dps_`, and `pi_` are exempted as already-established
   module abbreviations predating this policy; leave them as-is.

@@ -32,3 +32,4 @@ export * from "./plugins";
 export * from "./mcp";
 export * from "./scripts";
 export * from "./info";
+export * from "./feedback";

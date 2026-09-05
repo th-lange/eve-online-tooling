@@ -2,6 +2,7 @@ import type { ComponentType } from "react";
 import {
   Crosshair,
   Heart,
+  MessageSquare,
   Puzzle,
   Terminal,
   Bell,
@@ -35,6 +36,7 @@ import { FittingPage } from "./fitting/FittingPage";
 import { ShoppingPage } from "./shopping/ShoppingPage";
 import { DpsPage } from "./dpsmeter/DpsPage";
 import { PvpPage } from "./pvp/PvpPage";
+import { FeedbackPage } from "./feedback/FeedbackPage";
 import { SupportPage } from "./support/SupportPage";
 import { PluginsPage } from "./plugins/PluginsPage";
 import { ScriptsPage } from "./scripts/ScriptsPage";
@@ -311,6 +313,15 @@ export const modules: ModuleDef[] = [
     group: "support",
     icon: Puzzle,
     Component: PluginsPage,
+  },
+  {
+    id: "feedback",
+    title: "Feedback",
+    description:
+      "Rate a module, report a bug, or ask for a feature — straight to the maintainer.",
+    group: "support",
+    icon: MessageSquare,
+    Component: FeedbackPage,
   },
   {
     id: "support",

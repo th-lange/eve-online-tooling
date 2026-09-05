@@ -15,7 +15,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "tauri": "tauri",
-    "gen:wh-systems": "node scripts/gen-wh-systems.mjs"
+    "gen:wh-systems": "node scripts/gen-wh-systems.mjs",
+    "feedback:pull": "node scripts/feedback-pull.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
