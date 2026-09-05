@@ -302,7 +302,7 @@ impl Sde {
                 .unwrap_or_default();
             // T3 (strategic cruiser / subsystem) invention consumes an Ancient
             // Relic bought at market, rather than copying a T1 blueprint (#12).
-            let relic = (inventing_category == "Ancient Relics").then(|| BlueprintMaterial {
+            let relic = (inventing_category == "Ancient Relics").then_some(BlueprintMaterial {
                 material_type_id: inventing_blueprint_type_id,
                 name: inventing_name,
                 quantity: 1,

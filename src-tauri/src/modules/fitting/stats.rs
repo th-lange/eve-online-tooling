@@ -1088,6 +1088,7 @@ pub(super) fn required_skills_of(attrs: &AttrMap, type_id: i64) -> Vec<i64> {
 /// beacon type id the fit is sitting in — see [`run_dogma`].
 /// `abyssal_weather` is the separate, mutually exclusive Abyssal Deadspace
 /// weather choice (also see [`run_dogma`]).
+#[allow(clippy::too_many_arguments)] // one arg per independent sim input; a struct would just rename them
 pub(crate) fn simulate_fit(
     sde: &Sde,
     dir: &Path,
