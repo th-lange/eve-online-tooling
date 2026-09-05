@@ -19,6 +19,7 @@ use std::sync::{LazyLock, Mutex};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
+use super::commands::FeedbackPayload;
 use super::now_secs;
 use crate::storage;
 
@@ -152,13 +153,11 @@ async fn session() -> Result<Session, String> {
 
     // A stored refresh token means this install already has an identity; keep
     // it so the uid stays stable.
+    // A refresh token Google has revoked (project deleted, account purged)
+    // falls through to a fresh sign-up rather than failing the submission.
     let stored = storage::load_secret(REFRESH_TOKEN_SECRET).ok().flatten();
     let fresh = match stored {
-        Some(token) => match refresh_session(&token).await {
-            Ok(session) => Some(session),
-            // Revoked/invalid refresh token: fall through and sign up again.
-            Err(_) => None,
-        },
+        Some(token) => refresh_session(&token).await.ok(),
         None => None,
     };
 
@@ -273,30 +272,23 @@ fn null_value() -> Value {
 /// Note what is *not* here: no timestamp. Firestore stamps every document with
 /// a server-side `createTime`, which a client cannot forge or backdate — so
 /// taking the client's word for the time would be strictly worse.
-pub fn document_fields(
-    kind: &str,
-    module: &str,
-    rating: i64,
-    body: &str,
-    character: Option<&str>,
-    app_version: &str,
-    os: &str,
-    uid: &str,
-) -> Value {
+/// `uid` is passed separately because it is the *session's* account id, known
+/// only once signed in — the payload's own `uid` is whatever the UI last saw.
+pub fn document_fields(payload: &FeedbackPayload, uid: &str) -> Value {
     let mut fields = Map::new();
-    fields.insert("kind".into(), string_value(kind));
-    fields.insert("module".into(), string_value(module));
-    fields.insert("rating".into(), integer_value(rating));
-    fields.insert("body".into(), string_value(body));
+    fields.insert("kind".into(), string_value(payload.kind.as_str()));
+    fields.insert("module".into(), string_value(&payload.module));
+    fields.insert("rating".into(), integer_value(payload.rating));
+    fields.insert("body".into(), string_value(&payload.body));
     fields.insert(
         "character".into(),
-        match character {
+        match payload.character.as_deref() {
             Some(name) => string_value(name),
             None => null_value(),
         },
     );
-    fields.insert("appVersion".into(), string_value(app_version));
-    fields.insert("os".into(), string_value(os));
+    fields.insert("appVersion".into(), string_value(&payload.app_version));
+    fields.insert("os".into(), string_value(&payload.os));
     fields.insert("uid".into(), string_value(uid));
     json!({ "fields": Value::Object(fields) })
 }
@@ -318,36 +310,19 @@ struct CreatedDocument {
 
 /// Sign in (or reuse a session) and create one document. Returns the new
 /// document's id and the uid it was attributed to.
-pub async fn create(
-    kind: &str,
-    module: &str,
-    rating: i64,
-    body: &str,
-    character: Option<&str>,
-    app_version: &str,
-    os: &str,
-) -> Result<(String, String), String> {
+pub async fn create(payload: &FeedbackPayload) -> Result<(String, String), String> {
     if !is_configured() {
         return Err("This build has no feedback endpoint configured.".into());
     }
     let session = session().await?;
-    let payload = document_fields(
-        kind,
-        module,
-        rating,
-        body,
-        character,
-        app_version,
-        os,
-        &session.uid,
-    );
+    let document = document_fields(payload, &session.uid);
     let url = format!(
         "https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents/{COLLECTION}"
     );
     let response = CLIENT
         .post(url)
         .bearer_auth(&session.id_token)
-        .json(&payload)
+        .json(&document)
         .send()
         .await
         .map_err(|e| format!("could not reach the feedback service: {e}"))?;
@@ -367,6 +342,21 @@ pub async fn create(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::modules::feedback::commands::FeedbackKind;
+
+    /// A submission with everything filled in; tests tweak what they care about.
+    fn payload(kind: FeedbackKind, character: Option<&str>, rating: i64) -> FeedbackPayload {
+        FeedbackPayload {
+            kind,
+            module: "production".into(),
+            rating,
+            body: "boom".into(),
+            character: character.map(str::to_string),
+            app_version: "0.57.1".into(),
+            os: "linux".into(),
+            uid: None,
+        }
+    }
 
     #[test]
     fn integers_are_serialized_as_strings() {
@@ -377,21 +367,18 @@ mod tests {
 
     #[test]
     fn document_wraps_every_field_in_a_typed_value() {
-        let doc = document_fields(
-            "bug",
-            "production",
-            0,
-            "boom",
-            None,
-            "0.57.1",
-            "linux",
-            "u1",
-        );
+        let doc = document_fields(&payload(FeedbackKind::Bug, None, 0), "u1");
         let fields = doc["fields"].as_object().expect("fields object");
         assert_eq!(fields["kind"], json!({ "stringValue": "bug" }));
         assert_eq!(fields["module"], json!({ "stringValue": "production" }));
         assert_eq!(fields["rating"], json!({ "integerValue": "0" }));
+        assert_eq!(fields["body"], json!({ "stringValue": "boom" }));
+        assert_eq!(fields["appVersion"], json!({ "stringValue": "0.57.1" }));
+        assert_eq!(fields["os"], json!({ "stringValue": "linux" }));
+        // The session's uid wins over whatever the payload was carrying.
         assert_eq!(fields["uid"], json!({ "stringValue": "u1" }));
+        // Exactly the key set `firestore.rules` pins with `hasOnly`.
+        assert_eq!(fields.len(), 8);
         // An omitted character must be an explicit null, not a missing key —
         // the security rules pin the exact key set with `hasOnly`.
         assert_eq!(fields["character"], json!({ "nullValue": null }));
@@ -400,13 +387,7 @@ mod tests {
     #[test]
     fn document_carries_the_character_when_attached() {
         let doc = document_fields(
-            "rating",
-            "general",
-            5,
-            "nice",
-            Some("Some Capsuleer"),
-            "0.57.1",
-            "windows",
+            &payload(FeedbackKind::Rating, Some("Some Capsuleer"), 5),
             "u1",
         );
         assert_eq!(
@@ -419,7 +400,7 @@ mod tests {
     fn document_never_carries_a_client_timestamp() {
         // Firestore's server-side `createTime` is the record of when a
         // submission happened; a client-supplied time would be forgeable.
-        let doc = document_fields("bug", "general", 0, "x", None, "0.1.0", "macos", "u1");
+        let doc = document_fields(&payload(FeedbackKind::Bug, None, 0), "u1");
         let fields = doc["fields"].as_object().expect("fields object");
         assert!(!fields.contains_key("createdAt"));
         assert!(!fields.contains_key("created_at"));

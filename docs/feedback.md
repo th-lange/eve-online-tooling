@@ -77,6 +77,12 @@ There is no App Check option for a desktop app (its attestation providers are
 web/iOS/Android only). If the collection is ever abused in volume, the escape
 hatch is to put a Cloudflare Worker in front and ship a new endpoint.
 
+Worth doing anyway: in the Google Cloud console, **APIs & Services →
+Credentials → the browser key → API restrictions**, limit the key to the
+*Identity Toolkit API* and *Cloud Firestore API*. It can't stop someone writing
+feedback (the rules handle that), but it stops an extracted key being used
+against any other Google API enabled on the project.
+
 ## Build-time configuration
 
 The project id and API key are baked in at compile time:
@@ -91,6 +97,29 @@ A build **without** them is fine — `feedback_status` reports
 `configured: false`, the send button is disabled, and the UI offers the
 prefilled GitHub-issue route instead. That is also what dev builds do by
 default, so local development never writes to the real collection.
+
+### In CI
+
+`.github/workflows/release.yml` passes both to `tauri-action` from **repository
+secrets of the same names**:
+
+| Secret | Value |
+| --- | --- |
+| `EVE_TOOLING_FIREBASE_PROJECT_ID` | the Firebase project id |
+| `EVE_TOOLING_FIREBASE_API_KEY` | the Firebase **web** API key |
+
+Set them under *Settings → Secrets and variables → Actions*. A build where
+they're absent — a fork, or a release run before they were added — ships with
+feedback disabled rather than failing, so nothing breaks; it just quietly won't
+collect anything. Check a release binary once after adding them.
+
+`ci.yml` deliberately does **not** set them: test runs must never write into
+the real collection.
+
+Note `src-tauri/build.rs` emits `cargo:rerun-if-env-changed` for both. Cargo
+doesn't track `option_env!` on its own, and CI restores a warm `target` cache —
+without that, a build could reuse an object file compiled before the variables
+existed and silently ship with feedback disabled.
 
 ## Reading the corpus
 

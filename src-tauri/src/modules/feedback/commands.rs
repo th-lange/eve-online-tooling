@@ -58,7 +58,7 @@ pub enum FeedbackKind {
 
 impl FeedbackKind {
     /// The wire spelling stored in Firestore.
-    fn as_str(self) -> &'static str {
+    pub(super) fn as_str(self) -> &'static str {
         match self {
             FeedbackKind::Rating => "rating",
             FeedbackKind::Bug => "bug",
@@ -263,18 +263,7 @@ fn build_payload(
 
 /// Try to deliver one payload, folding the outcome into `entry`.
 async fn deliver(entry: &mut FeedbackEntry) {
-    let payload = &entry.payload;
-    match firebase::create(
-        payload.kind.as_str(),
-        &payload.module,
-        payload.rating,
-        &payload.body,
-        payload.character.as_deref(),
-        &payload.app_version,
-        &payload.os,
-    )
-    .await
-    {
+    match firebase::create(&entry.payload).await {
         Ok((doc_id, uid)) => {
             entry.doc_id = Some(doc_id);
             entry.payload.uid = Some(uid);

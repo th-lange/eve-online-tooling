@@ -82,6 +82,16 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Bakes the Feedback module's endpoint into the release binary. These
+          # are not secrets in the cryptographic sense — a Firebase *web* API
+          # key is an identifier, and it is extractable from any shipped build;
+          # the Firestore security rules (firestore.rules) are what actually
+          # gate writes. They live in repo secrets so they can be rotated
+          # without a code change, and so builds that don't have them — a fork,
+          # or CI — simply ship with feedback disabled and the GitHub-issue
+          # fallback instead. See docs/feedback.md.
+          EVE_TOOLING_FIREBASE_PROJECT_ID: ${{ secrets.EVE_TOOLING_FIREBASE_PROJECT_ID }}
+          EVE_TOOLING_FIREBASE_API_KEY: ${{ secrets.EVE_TOOLING_FIREBASE_API_KEY }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "EVE Online Tooling ${{ github.ref_name }}"
