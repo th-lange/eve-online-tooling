@@ -198,12 +198,9 @@ pub async fn resolve_character_ids(
         .cloned()
         .collect();
     if !missing.is_empty() {
-        if let Some(ids) = post_json::<UniverseIds, _>(
-            http,
-            &format!("{ESI_BASE}/latest/universe/ids/"),
-            &missing,
-        )
-        .await
+        if let Some(ids) =
+            post_json::<UniverseIds, _>(http, &format!("{ESI_BASE}/latest/universe/ids/"), &missing)
+                .await
         {
             for c in ids.characters {
                 id_cache.insert(lower(&c.name), c.id);

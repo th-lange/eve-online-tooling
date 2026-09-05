@@ -245,83 +245,85 @@ function SystemNode({ data, selected }: NodeProps<Node<SystemNodeData>>) {
           {data.tooltip}
         </NodeToolbar>
       )}
-    <div
-      className={`rounded border px-3 py-1.5 text-xs shadow ${
-        filled
-          ? "font-semibold"
-          : data.accent
-            ? "bg-zinc-900 text-zinc-100"
-            : kindClass(data.kind)
-      } ${
-        data.current
-          ? "ring-2 ring-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.45)]"
-          : ""
-      }`}
-      style={filled || data.accent || data.ring || data.bg ? style : undefined}
-    >
-      {/* Hidden connection points so edges attach cleanly left↔right. */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="!bg-transparent !border-0"
-      />
-      <div className="flex items-center gap-1 font-medium leading-tight">
-        {/* Location marker: this tile is where you are right now. */}
-        {data.current && (
-          <Crosshair size={11} className="shrink-0 text-emerald-400" />
-        )}
-        <span>{data.label}</span>
-      </div>
-      {data.sub && (
-        <div className="text-[10px] opacity-70 leading-tight">{data.sub}</div>
-      )}
-      {data.stats && (
-        <div
-          role={data.stats.zkillId != null ? "link" : undefined}
-          title={
-            data.stats.zkillId != null
-              ? "Open this system on zKillboard"
-              : undefined
-          }
-          onClick={(e) => {
-            const id = data.stats?.zkillId;
-            if (id == null) return;
-            e.stopPropagation();
-            void openUrl(`https://zkillboard.com/system/${id}/`).catch(
-              () => {},
-            );
-          }}
-          // "nodrag" stops React Flow from treating the click as a node drag.
-          className={`mt-0.5 flex items-center gap-2 text-[10px] leading-tight tabular-nums ${
-            data.stats.zkillId != null
-              ? "nodrag cursor-pointer hover:underline"
-              : ""
-          }`}
-        >
-          {/* Ship kills (last hour): grey = quiet, amber = warm, rose = hot. */}
-          <span
-            title="Ship kills (last hour)"
-            className={`flex items-center gap-0.5 ${killHeat(data.stats.kills, 10)}`}
-          >
-            <Swords size={9} className="shrink-0" />
-            {data.stats.kills}
-          </span>
-          {/* Pod kills — rarer and nastier, so they run hot sooner. */}
-          <span
-            title="Pod kills (last hour)"
-            className={`flex items-center gap-0.5 ${killHeat(data.stats.podKills, 3)}`}
-          >
-            <Skull size={9} className="shrink-0" />
-            {data.stats.podKills}
-          </span>
+      <div
+        className={`rounded border px-3 py-1.5 text-xs shadow ${
+          filled
+            ? "font-semibold"
+            : data.accent
+              ? "bg-zinc-900 text-zinc-100"
+              : kindClass(data.kind)
+        } ${
+          data.current
+            ? "ring-2 ring-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.45)]"
+            : ""
+        }`}
+        style={
+          filled || data.accent || data.ring || data.bg ? style : undefined
+        }
+      >
+        {/* Hidden connection points so edges attach cleanly left↔right. */}
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="!bg-transparent !border-0"
+        />
+        <div className="flex items-center gap-1 font-medium leading-tight">
+          {/* Location marker: this tile is where you are right now. */}
+          {data.current && (
+            <Crosshair size={11} className="shrink-0 text-emerald-400" />
+          )}
+          <span>{data.label}</span>
         </div>
-      )}
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="!bg-transparent !border-0"
-      />
-    </div>
+        {data.sub && (
+          <div className="text-[10px] opacity-70 leading-tight">{data.sub}</div>
+        )}
+        {data.stats && (
+          <div
+            role={data.stats.zkillId != null ? "link" : undefined}
+            title={
+              data.stats.zkillId != null
+                ? "Open this system on zKillboard"
+                : undefined
+            }
+            onClick={(e) => {
+              const id = data.stats?.zkillId;
+              if (id == null) return;
+              e.stopPropagation();
+              void openUrl(`https://zkillboard.com/system/${id}/`).catch(
+                () => {},
+              );
+            }}
+            // "nodrag" stops React Flow from treating the click as a node drag.
+            className={`mt-0.5 flex items-center gap-2 text-[10px] leading-tight tabular-nums ${
+              data.stats.zkillId != null
+                ? "nodrag cursor-pointer hover:underline"
+                : ""
+            }`}
+          >
+            {/* Ship kills (last hour): grey = quiet, amber = warm, rose = hot. */}
+            <span
+              title="Ship kills (last hour)"
+              className={`flex items-center gap-0.5 ${killHeat(data.stats.kills, 10)}`}
+            >
+              <Swords size={9} className="shrink-0" />
+              {data.stats.kills}
+            </span>
+            {/* Pod kills — rarer and nastier, so they run hot sooner. */}
+            <span
+              title="Pod kills (last hour)"
+              className={`flex items-center gap-0.5 ${killHeat(data.stats.podKills, 3)}`}
+            >
+              <Skull size={9} className="shrink-0" />
+              {data.stats.podKills}
+            </span>
+          </div>
+        )}
+        <Handle
+          type="source"
+          position={Position.Right}
+          className="!bg-transparent !border-0"
+        />
+      </div>
     </>
   );
 }

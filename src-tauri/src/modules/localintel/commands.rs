@@ -51,7 +51,6 @@ pub struct LocalScanResult {
     pub unresolved: Vec<String>,
 }
 
-
 /// Classify a standing into a threat band. `None`/0.0 = neutral.
 fn threat_of(standing: Option<f64>) -> &'static str {
     match standing {

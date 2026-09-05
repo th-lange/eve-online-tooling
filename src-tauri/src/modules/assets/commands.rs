@@ -342,10 +342,7 @@ pub async fn assets_load(
 
     // ── Root-location resolution (needed for flat aggregation) ──────────────
     // Walk item_id → location_id chains until we reach a station/structure.
-    let item_to_loc: HashMap<i64, i64> = raw
-        .iter()
-        .map(|r| (r.item_id, r.location_id))
-        .collect();
+    let item_to_loc: HashMap<i64, i64> = raw.iter().map(|r| (r.item_id, r.location_id)).collect();
     let item_ids: HashSet<i64> = item_to_loc.keys().copied().collect();
     let root_of = |start: i64| -> i64 {
         let mut loc = start;

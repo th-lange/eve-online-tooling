@@ -369,11 +369,11 @@ impl Sde {
             type_id,
             name,
             group_name,
-            high_slots: a(14) as i64,           // hiSlots
-            mid_slots: a(13) as i64,            // medSlots
-            low_slots: a(12) as i64,            // lowSlots
-            rig_slots: a(1137) as i64,          // rigSlots
-            subsystem_slots: a(1367) as i64,    // maxSubSystems
+            high_slots: a(14) as i64,        // hiSlots
+            mid_slots: a(13) as i64,         // medSlots
+            low_slots: a(12) as i64,         // lowSlots
+            rig_slots: a(1137) as i64,       // rigSlots
+            subsystem_slots: a(1367) as i64, // maxSubSystems
             // Tactical Destroyers (groupID 1305) have exactly 1 mode slot.
             mode_slots: (group_id == 1305) as i64,
             turret_hardpoints: a(102) as i64,   // turretSlotsLeft
@@ -491,7 +491,10 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            vec!["Class 1 Pulsar Effects", "Strong Metaliminal Gamma Ray Storm"]
+            vec![
+                "Class 1 Pulsar Effects",
+                "Strong Metaliminal Gamma Ray Storm"
+            ]
         );
     }
 

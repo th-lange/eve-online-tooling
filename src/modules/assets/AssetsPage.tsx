@@ -263,7 +263,12 @@ function Workbench() {
           />
           <div className="mt-2 rounded border border-zinc-800">
             {treeRoots.map((n) => (
-              <TreeRow key={n.id} node={n} depth={0} searching={treeSearching} />
+              <TreeRow
+                key={n.id}
+                node={n}
+                depth={0}
+                searching={treeSearching}
+              />
             ))}
             {treeRoots.length === 0 && (
               <div className="px-3 py-6 text-center text-sm text-zinc-500">
@@ -679,7 +684,12 @@ function TreeRow({
       </div>
       {isOpen &&
         node.children.map((c) => (
-          <TreeRow key={c.id} node={c} depth={depth + 1} searching={searching} />
+          <TreeRow
+            key={c.id}
+            node={c}
+            depth={depth + 1}
+            searching={searching}
+          />
         ))}
     </>
   );

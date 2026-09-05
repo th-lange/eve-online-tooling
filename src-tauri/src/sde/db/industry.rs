@@ -80,7 +80,9 @@ impl Sde {
     /// blueprint type id — one query for the whole catalogue instead of one
     /// per blueprint (#765). A blueprint absent from the map simply has no
     /// manufacturing materials.
-    pub fn all_blueprint_materials(&self) -> Result<HashMap<i64, Vec<BlueprintMaterial>>, SdeError> {
+    pub fn all_blueprint_materials(
+        &self,
+    ) -> Result<HashMap<i64, Vec<BlueprintMaterial>>, SdeError> {
         self.materials_for_all(activity::MANUFACTURING)
     }
 

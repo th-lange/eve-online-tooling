@@ -18,7 +18,8 @@ import {
  *  require it, or Firestorm silently falls out of the group. */
 function classify(name: string): { kind: string; label: string } {
   const wormhole = /^Class (\d) (.+) Effects$/.exec(name);
-  if (wormhole) return { kind: "Wormhole", label: `Class ${wormhole[1]} ${wormhole[2]}` };
+  if (wormhole)
+    return { kind: "Wormhole", label: `Class ${wormhole[1]} ${wormhole[2]}` };
   const pochven = /^(Weak|Strong) Metaliminal (.+)$/.exec(name);
   if (pochven) {
     const weather = pochven[2].replace(/ Storm$/, "");
@@ -110,8 +111,10 @@ export function EnvironmentEffectSelector({
         )
       : classified;
     const byKind = new Map<string, typeof filtered>();
-    for (const o of filtered) byKind.set(o.kind, [...(byKind.get(o.kind) ?? []), o]);
-    for (const opts of byKind.values()) opts.sort((a, b) => a.label.localeCompare(b.label));
+    for (const o of filtered)
+      byKind.set(o.kind, [...(byKind.get(o.kind) ?? []), o]);
+    for (const opts of byKind.values())
+      opts.sort((a, b) => a.label.localeCompare(b.label));
     return [...byKind.entries()];
   }, [options.data, q]);
 
@@ -174,7 +177,13 @@ export function EnvironmentEffectSelector({
                 </div>
                 <ul>
                   {opts.map((o) => (
-                    <li key={o.source === "sde" ? `sde-${o.id}` : `${o.weather}-${o.tierPct}`}>
+                    <li
+                      key={
+                        o.source === "sde"
+                          ? `sde-${o.id}`
+                          : `${o.weather}-${o.tierPct}`
+                      }
+                    >
                       <button
                         onClick={() => pick(o)}
                         className={`block w-full truncate rounded px-2 py-1 text-left text-xs hover:bg-zinc-800 ${

@@ -127,8 +127,7 @@ pub async fn esi_owned_blueprints(
             };
 
             let mut owned = Vec::new();
-            if let Ok(blueprints) = character::fetch_blueprints(auth_state, c.character_id).await
-            {
+            if let Ok(blueprints) = character::fetch_blueprints(auth_state, c.character_id).await {
                 owned.extend(blueprints.into_iter().map(|b| to_owned(b, false)));
             }
             // Corp blueprints (empty if the character lacks the role/scope).

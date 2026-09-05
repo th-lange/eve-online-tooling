@@ -744,7 +744,12 @@ fn applied_dps_at(
                 0.0
             } else {
                 let explosion_velocity = charge.get(104);
-                missile_application(explosion_radius, explosion_velocity, target_sig, target_speed)
+                missile_application(
+                    explosion_radius,
+                    explosion_velocity,
+                    target_sig,
+                    target_speed,
+                )
             };
             let item = module_items.get(i);
             let in_range = item.is_none_or(|it| {
@@ -1589,7 +1594,7 @@ mod tests {
 
         let target = TargetProfile {
             sig_radius: 40.0,
-            speed: 4e14, // absurd — no drone can ever catch this
+            speed: 4e14,            // absurd — no drone can ever catch this
             angular_velocity: 0.04, // a modest, unrelated turret-preset value
             drones_keep_pace: true,
             missiles_need_overtake: false,
@@ -1613,7 +1618,7 @@ mod tests {
             (114, 25.0),
             (116, 25.0),
             (117, 25.0),
-            (118, 25.0), // 100 dmg
+            (118, 25.0),    // 100 dmg
             (103, 40.0),    // explosion radius
             (104, 2_000.0), // explosion velocity
             (37, 1_000.0),  // missile flight velocity — slower than the target
