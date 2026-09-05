@@ -173,7 +173,9 @@ function LogFilePicker({
     ? `${selected.name} — ${formatLogDate(selected.modified)}`
     : "";
   const q = query.trim().toLowerCase();
-  const matches = q ? logs.filter((l) => l.name.toLowerCase().includes(q)) : logs;
+  const matches = q
+    ? logs.filter((l) => l.name.toLowerCase().includes(q))
+    : logs;
 
   return (
     <div className="relative flex-1 min-w-[16rem]">
@@ -188,7 +190,9 @@ function LogFilePicker({
           setOpen(true);
         }}
         onBlur={() => setOpen(false)}
-        placeholder={logs.length === 0 ? "No logs found" : "search by filename…"}
+        placeholder={
+          logs.length === 0 ? "No logs found" : "search by filename…"
+        }
         className="w-full rounded bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
       />
       {open && (
@@ -210,7 +214,9 @@ function LogFilePicker({
                 setOpen(false);
               }}
               className={`flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left hover:bg-zinc-800 ${
-                l.path === file ? "bg-zinc-800/70 text-zinc-100" : "text-zinc-300"
+                l.path === file
+                  ? "bg-zinc-800/70 text-zinc-100"
+                  : "text-zinc-300"
               }`}
             >
               <span className="truncate">{l.name}</span>

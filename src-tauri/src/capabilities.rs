@@ -408,8 +408,9 @@ fn cap_route(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
 fn cap_assets(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
     let character_id =
         storage::primary_character(ctx.app_data_dir).ok_or("no character logged in")?;
-    let assets = tauri::async_runtime::block_on(esi::fetch_assets(ctx.require_auth(), character_id))
-        .map_err(|e| e.to_string())?;
+    let assets =
+        tauri::async_runtime::block_on(esi::fetch_assets(ctx.require_auth(), character_id))
+            .map_err(|e| e.to_string())?;
     serde_json::to_value(assets).map_err(|e| e.to_string())
 }
 
@@ -791,14 +792,27 @@ mod tests {
         let sde = Sde::open(&path).unwrap();
         let dir = path.parent().unwrap();
         let fit = fitting::commands::import_eft_to_fit(&sde, "[Rifter, Golden Test]").unwrap();
-        let stats =
-            fitting::simulate_fit(&sde, dir, &fit, &|_| 5.0, None, None, None, None, None, None)
-                .unwrap();
+        let stats = fitting::simulate_fit(
+            &sde,
+            dir,
+            &fit,
+            &|_| 5.0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
         let layout = stats.layout.expect("dogma engine should resolve a layout");
         assert_eq!(layout.high_slots, 3);
         assert_eq!(layout.mid_slots, 3);
         assert_eq!(layout.low_slots, 4);
-        assert_eq!(layout.cpu_output, 162.5, "130 base × 1.25 (CPU Management V)");
+        assert_eq!(
+            layout.cpu_output, 162.5,
+            "130 base × 1.25 (CPU Management V)"
+        );
         assert_eq!(
             layout.powergrid_output, 51.25,
             "41 base × 1.25 (Power Grid Management V)"

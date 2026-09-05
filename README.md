@@ -18,7 +18,10 @@ character and intel tools over one shared data layer. Built with **Tauri 2**
   live in your **OS keychain**), or use the public market/industry tools with no
   login at all. Switch modules from a grouped sidebar or the ⌘K / Ctrl+K palette.
 - **Local & private.** Everything runs on your machine; ESI and SDE data is
-  cached locally. No account, no server, no telemetry.
+  cached locally. No account, no telemetry, nothing phoning home in the
+  background. The one thing that ever leaves your machine is a **Feedback**
+  submission — only when you press send, and the app shows you the exact
+  payload first.
 - **Free & open source** under the **MIT** license.
 
 ## What it provides

@@ -1,0 +1,51 @@
+rules_version = '2';
+
+// Security rules for the in-app Feedback module.
+//
+// These rules ARE the access model. The app ships a Firebase web API key in a
+// public binary — that key is an identifier, not a credential, so anyone can
+// point a client at this project. What they can *do* is decided entirely here.
+//
+// The collection is create-only. Nobody reads a submission back through the
+// client API: not another user, not the person who wrote it, not the app. The
+// maintainer reads the corpus with a service-account key (see
+// scripts/feedback-pull.mjs), which bypasses rules by design and never leaves
+// their machine.
+//
+// Keep the checks below in step with `validate()` in
+// src-tauri/src/modules/feedback/commands.rs. The Rust side exists to give a
+// good error message before the round trip; this side is what actually holds.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /feedback/{submission} {
+      allow create: if isWellFormedSubmission();
+      // Write-only, forever. No client path reads, edits or deletes feedback.
+      allow read, update, delete: if false;
+    }
+
+    // Anything else in this project is closed.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isWellFormedSubmission() {
+      let d = request.resource.data;
+      return request.auth != null
+        // Pin the exact field set: no smuggling extra data into the corpus,
+        // and no submission missing a field the analysis expects.
+        && d.keys().hasOnly(['kind', 'module', 'rating', 'body', 'character', 'appVersion', 'os', 'uid'])
+        && d.keys().hasAll(['kind', 'module', 'rating', 'body', 'character', 'appVersion', 'os', 'uid'])
+        && d.kind in ['rating', 'bug', 'feature']
+        && d.module is string && d.module.size() > 0 && d.module.size() <= 40
+        && d.rating is int && d.rating >= 0 && d.rating <= 5
+        && d.body is string && d.body.size() <= 4000
+        // Optional by design — a user who unticks the box sends an explicit null.
+        && (d.character == null || (d.character is string && d.character.size() <= 64))
+        && d.appVersion is string && d.appVersion.size() <= 32
+        && d.os is string && d.os.size() <= 32
+        // A client cannot attribute a submission to somebody else's account.
+        && d.uid is string && d.uid == request.auth.uid;
+    }
+  }
+}

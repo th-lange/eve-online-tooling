@@ -8,6 +8,7 @@ pub mod character;
 pub mod contracts;
 pub mod daytrading;
 pub mod dpsmeter;
+pub mod feedback;
 pub mod fitting;
 pub mod industry;
 pub mod intel;

@@ -21,11 +21,42 @@ on:
 jobs:
   # Decide the build matrix from the tag: full 3-platform set on a `.0` (minor)
   # release, else Windows-only. Manual runs can force the full set.
+  #
+  # Also the gate for the Feedback module's build-time config: checking it here
+  # fails the whole workflow in seconds, before any build runner starts.
   setup:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.pick.outputs.matrix }}
     steps:
+      # A release must never ship with the Feedback module silently disabled.
+      # A renamed, deleted or mistyped secret arrives as an empty string, the
+      # build succeeds, and the only symptom is that no feedback ever arrives —
+      # so refuse to build instead. Note this means a fork cannot run the
+      # release workflow without setting its own secrets, which is deliberate.
+      - name: Require the Firebase build config
+        shell: bash
+        env:
+          EVE_TOOLING_FIREBASE_PROJECT_ID: ${{ secrets.EVE_TOOLING_FIREBASE_PROJECT_ID }}
+          EVE_TOOLING_FIREBASE_API_KEY: ${{ secrets.EVE_TOOLING_FIREBASE_API_KEY }}
+        run: |
+          fail=0
+          if [ -z "$EVE_TOOLING_FIREBASE_PROJECT_ID" ]; then
+            echo "::error::Missing repository secret EVE_TOOLING_FIREBASE_PROJECT_ID"
+            fail=1
+          fi
+          if [ -z "$EVE_TOOLING_FIREBASE_API_KEY" ]; then
+            echo "::error::Missing repository secret EVE_TOOLING_FIREBASE_API_KEY"
+            fail=1
+          fi
+          if [ "$fail" -ne 0 ]; then
+            echo "Set them under Settings -> Secrets and variables -> Actions"
+            echo "(Repository secrets, not Environment secrets). See docs/feedback.md."
+            echo "Without them the build would succeed but ship with feedback disabled."
+            exit 1
+          fi
+          echo "Firebase build config present."
+
       - id: pick
         shell: bash
         run: |
@@ -82,6 +113,15 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Bakes the Feedback module's endpoint into the release binary. These
+          # are not secrets in the cryptographic sense — a Firebase *web* API
+          # key is an identifier, and it is extractable from any shipped build;
+          # the Firestore security rules (firestore.rules) are what actually
+          # gate writes. They live in repo secrets so they can be rotated
+          # without a code change. The `setup` job has already refused to build
+          # if either is missing. See docs/feedback.md.
+          EVE_TOOLING_FIREBASE_PROJECT_ID: ${{ secrets.EVE_TOOLING_FIREBASE_PROJECT_ID }}
+          EVE_TOOLING_FIREBASE_API_KEY: ${{ secrets.EVE_TOOLING_FIREBASE_API_KEY }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "EVE Online Tooling ${{ github.ref_name }}"

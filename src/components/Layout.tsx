@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ModuleActiveContext } from "./moduleActiveContext";
 import { ModuleChromeContext } from "./moduleChromeContext";
@@ -13,7 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { modules, MODULE_GROUPS, type ModuleDef } from "../modules/registry";
-import { usePluginModules } from "../modules/plugins/pluginModules";
+import { useAvailableModules } from "../modules/availableModules";
 import { BridgeStatus } from "./BridgeStatus";
 import { Characters } from "./Characters";
 import { CommandPalette } from "./CommandPalette";
@@ -99,13 +99,10 @@ export function Layout() {
   );
   const order = sanitizeIds(orderRaw);
   // Active plugins that ship a UI become first-class nav modules, merged after
-  // the built-ins. Everything below (ordering, pin/hide, the host) treats them
-  // like any other module.
-  const pluginModules = usePluginModules();
-  const allModules = useMemo(
-    () => [...modules, ...pluginModules],
-    [pluginModules],
-  );
+  // the built-ins; modules gated on a logged-in character drop out while the
+  // roster is empty. Everything below (ordering, pin/hide, the host) treats
+  // what's left like any other module.
+  const allModules = useAvailableModules();
   const [colorsRaw, setColors] = usePersistentState<Record<string, string>>(
     COLORS_KEY,
     {},

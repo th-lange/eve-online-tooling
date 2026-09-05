@@ -311,11 +311,7 @@ export function fittingEnvironmentEffects(): Promise<IdName[]> {
  *  | Firestorm | −tier% thermal resist | +50% armor HP |
  *  | Gamma | −tier% explosive resist | +50% shield HP | */
 export type AbyssalWeather =
-  | "dark"
-  | "electrical"
-  | "exotic"
-  | "firestorm"
-  | "gamma";
+  "dark" | "electrical" | "exotic" | "firestorm" | "gamma";
 
 export interface AbyssalWeatherSelection {
   weather: AbyssalWeather;

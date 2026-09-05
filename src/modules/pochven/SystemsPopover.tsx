@@ -51,9 +51,7 @@ function ExitBadges({
           className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs"
           title={`${e.region} · ${e.lightYears.toFixed(2)} ly`}
         >
-          <span style={{ color: SEC_HEX[secBand(e.security)] }}>
-            {e.name}
-          </span>
+          <span style={{ color: SEC_HEX[secBand(e.security)] }}>{e.name}</span>
           <span className="text-zinc-500"> {e.lightYears.toFixed(1)} ly</span>
         </span>
       ))}
@@ -256,8 +254,8 @@ export function PochvenSystemsPopover() {
                       </span>
                     ))}
                     <span className="text-zinc-600">
-                      sub-label = k-space entries per band · click a system
-                      for its Proximity Extraction exits
+                      sub-label = k-space entries per band · click a system for
+                      its Proximity Extraction exits
                     </span>
                   </div>
                 </div>

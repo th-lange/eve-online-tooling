@@ -173,7 +173,7 @@ pub(super) fn steiner_tree(adj: &HashMap<i64, Vec<i64>>, terminals: &[i64]) -> V
         } else {
             // Merge step: split `mask` into two non-empty parts meeting at v.
             // Enumerate sub-masks that contain the lowest set bit (avoids dupes).
-            let low = mask & mask.wrapping_neg();
+            let low = mask.isolate_lowest_one();
             let mut sub = (mask - 1) & mask;
             while sub > 0 {
                 if sub & low != 0 {

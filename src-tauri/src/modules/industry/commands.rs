@@ -53,8 +53,7 @@ const JOB_RETENTION_SECS: u64 = 90 * 24 * 60 * 60;
 /// behaviour is directly unit-testable. Jobs with an unparseable/empty
 /// `end_date` (still running) are never pruned.
 fn merge_jobs(stored: Vec<StoredJob>, incoming: Vec<StoredJob>, now: u64) -> Vec<StoredJob> {
-    let mut by_id: BTreeMap<i64, StoredJob> =
-        stored.into_iter().map(|j| (j.job_id, j)).collect();
+    let mut by_id: BTreeMap<i64, StoredJob> = stored.into_iter().map(|j| (j.job_id, j)).collect();
     for j in incoming {
         by_id.insert(j.job_id, j);
     }
