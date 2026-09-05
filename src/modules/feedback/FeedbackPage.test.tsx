@@ -10,8 +10,14 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));
 
+const ROSTER = [
+  { characterId: 1, name: "Some Capsuleer", scopes: [] },
+  { characterId: 2, name: "Alt Toon", scopes: [] },
+];
+
 const READY: FeedbackStatus = {
   configured: true,
+  active: true,
   appVersion: "0.57.1",
   uid: "anon-uid-1",
   pending: 0,
@@ -43,6 +49,7 @@ let submitted: Record<string, unknown> | undefined;
 function mockBridge(
   status: FeedbackStatus = READY,
   history: FeedbackEntry[] = [],
+  roster: typeof ROSTER = ROSTER,
 ) {
   submitted = undefined;
   invokeMock.mockImplementation(
@@ -50,6 +57,10 @@ function mockBridge(
       switch (cmd) {
         case "feedback_status":
           return Promise.resolve(status);
+        case "auth_characters":
+          return Promise.resolve(roster);
+        case "auth_active_character":
+          return Promise.resolve(roster[0]?.characterId ?? null);
         case "feedback_history":
         case "feedback_retry_pending":
           return Promise.resolve(history);
@@ -59,7 +70,9 @@ function mockBridge(
             module: args?.module,
             rating: args?.rating,
             body: args?.body,
-            character: args?.attachCharacter ? "Some Capsuleer" : null,
+            character:
+              roster.find((c) => c.characterId === args?.characterId)?.name ??
+              null,
             appVersion: "0.57.1",
             os: "linux",
             uid: "anon-uid-1",
@@ -114,6 +127,8 @@ describe("FeedbackPage", () => {
 
   it("sends the rating, module and character choice the user made", async () => {
     renderPage();
+    // The reply-to defaults to the active character, so wait for the roster.
+    await screen.findByRole("option", { name: "Some Capsuleer" });
     fireEvent.change(screen.getByLabelText(/which part of the app/i), {
       target: { value: "production" },
     });
@@ -125,7 +140,8 @@ describe("FeedbackPage", () => {
       kind: "rating",
       module: "production",
       rating: 5,
-      attachCharacter: true,
+      // The active character is the default reply-to.
+      characterId: 1,
     });
     expect(await screen.findByText(/DOC123/)).toBeInTheDocument();
   });
@@ -143,6 +159,7 @@ describe("FeedbackPage", () => {
 
   it("never sends stars on a bug report", async () => {
     renderPage();
+    await screen.findByRole("option", { name: "Some Capsuleer" });
     // Pick stars first, then switch kind — the rating must not tag along.
     fireEvent.click(screen.getByRole("button", { name: "5 stars" }));
     fireEvent.click(screen.getByRole("button", { name: /^bug$/i }));
@@ -160,12 +177,46 @@ describe("FeedbackPage", () => {
     expect(await screen.findByText(/Some Capsuleer/)).toBeInTheDocument();
   });
 
-  it("drops the character from the payload when the user unticks the box", async () => {
+  it("lets the user be reachable as any of their characters", async () => {
     renderPage();
-    fireEvent.click(screen.getByRole("checkbox"));
+    await screen.findByRole("option", { name: "Some Capsuleer" });
+    const picker = screen.getByLabelText(/reply to me as/i);
+    const names = [...picker.querySelectorAll("option")].map((o) => o.text);
+    expect(names).toContain("Some Capsuleer");
+    expect(names).toContain("Alt Toon");
+
+    fireEvent.change(picker, { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "4 stars" }));
+    fireEvent.click(screen.getByRole("button", { name: /send feedback/i }));
+    await waitFor(() => expect(submitted).toBeDefined());
+    expect(submitted).toMatchObject({ characterId: 2 });
+  });
+
+  it("sends no character at all when the user picks anonymous", async () => {
+    renderPage();
+    await screen.findByRole("option", { name: "Some Capsuleer" });
+    fireEvent.change(screen.getByLabelText(/reply to me as/i), {
+      target: { value: "" },
+    });
     fireEvent.click(screen.getByText(/show exactly what gets sent/i));
-    const preview = await screen.findByText(/"character": null/);
-    expect(preview).toBeInTheDocument();
+    expect(await screen.findByText(/"character": null/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "4 stars" }));
+    fireEvent.click(screen.getByRole("button", { name: /send feedback/i }));
+    await waitFor(() => expect(submitted).toBeDefined());
+    expect(submitted).toMatchObject({ characterId: null });
+  });
+
+  it("says the module is inactive when no character is registered", async () => {
+    mockBridge({ ...READY, active: false }, [], []);
+    renderPage();
+    expect(
+      await screen.findByText(/module inactive — registered account required/i),
+    ).toBeInTheDocument();
+    // No way to submit anything from this state.
+    expect(
+      screen.queryByRole("button", { name: /send feedback/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("explains itself and offers GitHub when the build has no endpoint", async () => {

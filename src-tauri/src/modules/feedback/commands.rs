@@ -119,6 +119,11 @@ pub struct FeedbackStatus {
     /// False in a build with no Firebase project wired up — the UI then offers
     /// the GitHub-issue route instead of a send button that cannot work.
     pub configured: bool,
+    /// False when no character is logged in. The module is inactive then: the
+    /// nav hides it and the page refuses to send. Feedback is tied to a
+    /// character so a report can be answered by EVE mail and so the corpus
+    /// isn't open to anyone who merely downloaded the binary.
+    pub active: bool,
     /// This build's version — the UI needs it for the GitHub-issue fallback.
     pub app_version: String,
     pub uid: Option<String>,
@@ -205,12 +210,32 @@ fn local_id() -> String {
     format!("{:016x}", rand::random::<u64>())
 }
 
-/// The active character's name, or `None` when nobody is logged in. Only the
-/// *name* is ever read — never the id, which would be a stable public
-/// identifier we have no use for.
-fn character_name(dir: &std::path::Path) -> Option<String> {
-    let id = storage::primary_character(dir)?;
-    storage::character_names(dir).get(&id).cloned()
+/// Whether any character is logged in. Feedback is gated on this: the module
+/// reports itself inactive and refuses to send with an empty roster.
+fn has_character(dir: &std::path::Path) -> bool {
+    !storage::character_names(dir).is_empty()
+}
+
+/// Resolve the character whose name may be attached, from the id the user
+/// picked. `None` is the deliberate "stay anonymous" choice.
+///
+/// The *name* is looked up here from the roster rather than taken from the
+/// frontend, so a submission can only ever name a character this install
+/// actually has. An id that isn't in the roster is an error rather than a
+/// silent `None`: the user asked to be contactable, and quietly sending
+/// anonymously instead would misrepresent that.
+fn resolve_character(
+    dir: &std::path::Path,
+    character_id: Option<i64>,
+) -> Result<Option<String>, String> {
+    match character_id {
+        None => Ok(None),
+        Some(id) => storage::character_names(dir)
+            .get(&id)
+            .cloned()
+            .map(Some)
+            .ok_or_else(|| "That character isn't logged in any more.".to_string()),
+    }
 }
 
 /// Assemble the record that will be sent. The single source of truth for the
@@ -218,23 +243,18 @@ fn character_name(dir: &std::path::Path) -> Option<String> {
 /// so the preview cannot drift from reality.
 fn build_payload(
     app: &AppHandle,
-    dir: &std::path::Path,
     kind: FeedbackKind,
     module: &str,
     rating: i64,
     body: &str,
-    attach_character: bool,
+    character: Option<String>,
 ) -> FeedbackPayload {
     FeedbackPayload {
         kind,
         module: module.to_string(),
         rating,
         body: body.trim().to_string(),
-        character: if attach_character {
-            character_name(dir)
-        } else {
-            None
-        },
+        character,
         app_version: app.package_info().version.to_string(),
         os: std::env::consts::OS.to_string(),
         uid: firebase::cached_uid(),
@@ -273,10 +293,11 @@ async fn deliver(entry: &mut FeedbackEntry) {
 /// Whether feedback can be sent from this build, plus the local queue state.
 #[tauri::command]
 pub fn feedback_status(app: AppHandle) -> Result<FeedbackStatus, AppError> {
-    let (_, store) = load_store(&app)?;
+    let (dir, store) = load_store(&app)?;
     let (cooldown_secs, submitted_today) = rate_limit(&store.entries, now_secs());
     Ok(FeedbackStatus {
         configured: firebase::is_configured(),
+        active: has_character(&dir),
         app_version: app.package_info().version.to_string(),
         uid: firebase::cached_uid(),
         pending: store
@@ -298,18 +319,11 @@ pub fn feedback_preview(
     module: String,
     rating: i64,
     body: String,
-    attach_character: bool,
+    character_id: Option<i64>,
 ) -> Result<FeedbackPayload, AppError> {
     let dir = storage::app_data_dir(&app)?;
-    Ok(build_payload(
-        &app,
-        &dir,
-        kind,
-        &module,
-        rating,
-        &body,
-        attach_character,
-    ))
+    let character = resolve_character(&dir, character_id)?;
+    Ok(build_payload(&app, kind, &module, rating, &body, character))
 }
 
 /// Validate, record locally, and try to upload. A network failure is *not* an
@@ -322,11 +336,17 @@ pub async fn feedback_submit(
     module: String,
     rating: i64,
     body: String,
-    attach_character: bool,
+    character_id: Option<i64>,
 ) -> Result<FeedbackEntry, AppError> {
     validate(kind, &module, rating, &body)?;
 
     let (dir, mut store) = load_store(&app)?;
+    // The module is inactive without a logged-in character — the nav hides it,
+    // but a direct route (or a stale page) can still reach this command.
+    if !has_character(&dir) {
+        return Err(AppError::auth_required());
+    }
+    let character = resolve_character(&dir, character_id)?;
     let now = now_secs();
     let (cooldown, today) = rate_limit(&store.entries, now);
     if cooldown > 0 {
@@ -339,7 +359,7 @@ pub async fn feedback_submit(
     let mut entry = FeedbackEntry {
         id: local_id(),
         doc_id: None,
-        payload: build_payload(&app, &dir, kind, &module, rating, &body, attach_character),
+        payload: build_payload(&app, kind, &module, rating, &body, character),
         submitted_at: now,
         status: EntryStatus::Pending,
         error: None,
@@ -523,6 +543,61 @@ mod tests {
         save_store(&dir, &mut store).expect("saves");
         assert_eq!(store.entries.len(), HISTORY_CAP);
         assert!(store.entries[0].submitted_at > store.entries[1].submitted_at);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A throwaway app-data dir holding `roster` as the logged-in characters.
+    fn dir_with_roster(roster: &[(i64, &str)]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("eve-feedback-test-{}", local_id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let characters: Vec<crate::model::Character> = roster
+            .iter()
+            .map(|(id, name)| crate::model::Character {
+                character_id: *id,
+                name: (*name).to_string(),
+                scopes: vec![],
+            })
+            .collect();
+        storage::save_roster(&dir, &characters).expect("roster saved");
+        dir
+    }
+
+    #[test]
+    fn the_module_is_inactive_until_a_character_is_logged_in() {
+        let empty = dir_with_roster(&[]);
+        assert!(!has_character(&empty));
+        std::fs::remove_dir_all(&empty).ok();
+
+        let dir = dir_with_roster(&[(1, "Some Capsuleer")]);
+        assert!(has_character(&dir));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_chosen_character_is_named_from_the_roster() {
+        // The name is never taken from the frontend — only an id is, and it is
+        // resolved here, so a submission can't name a character we don't have.
+        let dir = dir_with_roster(&[(1, "Some Capsuleer"), (2, "Alt Toon")]);
+        assert_eq!(
+            resolve_character(&dir, Some(2)).unwrap(),
+            Some("Alt Toon".to_string())
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn choosing_nobody_stays_anonymous() {
+        let dir = dir_with_roster(&[(1, "Some Capsuleer")]);
+        assert_eq!(resolve_character(&dir, None).unwrap(), None);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_unknown_character_is_refused_rather_than_dropped() {
+        // Silently sending anonymously would misrepresent a user who asked to
+        // be contactable, so this is an error, not a `None`.
+        let dir = dir_with_roster(&[(1, "Some Capsuleer")]);
+        assert!(resolve_character(&dir, Some(999)).is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
 }

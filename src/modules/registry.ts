@@ -77,6 +77,9 @@ export interface ModuleDef {
   group: ModuleGroup;
   /** Optional nav icon (lucide) shown before the title. */
   icon?: LucideIcon;
+  /** When true the module is inactive until a character is logged in: the nav
+   *  and command palette leave it out, and its page says so. */
+  requiresCharacter?: boolean;
   /** Page component rendered for this module. */
   Component: ComponentType;
 }
@@ -321,6 +324,7 @@ export const modules: ModuleDef[] = [
       "Rate a module, report a bug, or ask for a feature — straight to the maintainer.",
     group: "support",
     icon: MessageSquare,
+    requiresCharacter: true,
     Component: FeedbackPage,
   },
   {

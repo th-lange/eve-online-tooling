@@ -46,6 +46,9 @@ export interface FeedbackStatus {
   /** False when this build has no feedback endpoint — the UI then offers the
    *  GitHub-issue route instead of a send button that cannot work. */
   configured: boolean;
+  /** False when no character is logged in: the module is inactive, the nav
+   *  hides it, and the page refuses to send. */
+  active: boolean;
   /** This build's version, for the GitHub-issue fallback. */
   appVersion: string;
   uid: string | null;
@@ -61,7 +64,10 @@ export interface FeedbackDraft {
   module: string;
   rating: number;
   body: string;
-  attachCharacter: boolean;
+  /** Which character to be reachable as, or `null` to stay anonymous. Only the
+   *  id crosses the bridge — the name is resolved from the roster in Rust, so a
+   *  submission can only ever name a character this install actually has. */
+  characterId: number | null;
 }
 
 /** Whether feedback can be sent from this build, plus local queue state. */

@@ -9,6 +9,8 @@ import {
   Trash2,
 } from "lucide-react";
 import {
+  activeCharacter,
+  authCharacters,
   errorMessage,
   feedbackForget,
   feedbackHistory,
@@ -124,10 +126,33 @@ export function FeedbackPage() {
   const [moduleId, setModuleId] = useState(GENERAL);
   const [rating, setRating] = useState(0);
   const [body, setBody] = useState("");
-  const [attachCharacter, setAttachCharacter] = useState(true);
+  // `undefined` means "the user hasn't chosen" — the active character is the
+  // default until they do. `null` is the deliberate "stay anonymous" choice, so
+  // the two cannot be conflated.
+  const [chosenCharacter, setChosenCharacter] = useState<
+    number | null | undefined
+  >(undefined);
   const [showPayload, setShowPayload] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState<FeedbackEntry | null>(null);
+
+  const status = useQuery({
+    queryKey: ["feedback", "status"],
+    queryFn: feedbackStatus,
+  });
+  const characters = useQuery({
+    queryKey: ["auth", "characters"],
+    queryFn: authCharacters,
+  });
+  const activeChar = useQuery({
+    queryKey: ["auth", "active"],
+    queryFn: activeCharacter,
+  });
+
+  const roster = characters.data ?? [];
+  const defaultCharacter = activeChar.data ?? roster[0]?.characterId ?? null;
+  const characterId =
+    chosenCharacter === undefined ? defaultCharacter : chosenCharacter;
 
   const draft: FeedbackDraft = {
     kind,
@@ -135,13 +160,8 @@ export function FeedbackPage() {
     // Stars only mean something on a rating; other kinds send 0.
     rating: kind === "rating" ? rating : 0,
     body,
-    attachCharacter,
+    characterId,
   };
-
-  const status = useQuery({
-    queryKey: ["feedback", "status"],
-    queryFn: feedbackStatus,
-  });
 
   // Opening the page is also when we flush anything that failed to send while
   // the user was offline — but only on a build that can send at all, otherwise
@@ -182,14 +202,45 @@ export function FeedbackPage() {
     onSuccess: (entries) => qc.setQueryData(["feedback", "history"], entries),
   });
 
-  const active = KINDS.find((k) => k.id === kind)!;
+  const activeKind = KINDS.find((k) => k.id === kind)!;
   const configured = status.data?.configured ?? true;
   const cooldown = status.data?.cooldownSecs ?? 0;
   const moduleTitle = cats.find((c) => c.id === moduleId)?.title ?? moduleId;
   const canSubmit =
     !submit.isPending &&
     configured &&
+    // Until the roster has loaded the reply-to defaults to null, so a fast
+    // click would quietly send anonymously — wait for it rather than guess.
+    characters.isSuccess &&
     (kind === "rating" ? rating > 0 : body.trim().length > 0);
+
+  // Inactive without a logged-in character. The nav already leaves the module
+  // out in that state, so this is what a direct route or a restored
+  // "last visited" lands on — and what the user sees the moment they remove
+  // their last character while the page is open.
+  if (status.isSuccess && !status.data.active) {
+    return (
+      <Page width="narrow">
+        <PageHeader
+          title={
+            <>
+              <MessageSquare size={22} className="text-zinc-500" /> Feedback
+            </>
+          }
+        />
+        <div className="mt-6 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 text-sm text-zinc-400">
+          <p className="font-medium text-zinc-300">
+            Module inactive — registered account required
+          </p>
+          <p className="mt-2 leading-relaxed">
+            Feedback is tied to a character, so a report can be answered by EVE
+            mail in-game. Add a character with <strong>Add</strong> under
+            Character in the sidebar and this module comes back.
+          </p>
+        </div>
+      </Page>
+    );
+  }
 
   return (
     <Page width="narrow">
@@ -264,7 +315,7 @@ export function FeedbackPage() {
             onChange={(e) => setBody(e.currentTarget.value)}
             rows={6}
             maxLength={4000}
-            placeholder={active.hint}
+            placeholder={activeKind.hint}
             className="w-full rounded bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
           />
           <span className="self-end text-[11px] text-zinc-600">
@@ -272,16 +323,28 @@ export function FeedbackPage() {
           </span>
         </label>
 
-        <label className="flex items-start gap-2 text-xs text-zinc-400">
-          <input
-            type="checkbox"
-            checked={attachCharacter}
-            onChange={(e) => setAttachCharacter(e.currentTarget.checked)}
-            className="mt-0.5"
-          />
-          <span>
-            Include my character name, so I can reply by EVE mail in-game.
-            Untick to stay anonymous.
+        <label className="flex flex-col gap-1 text-xs text-zinc-400">
+          Reply to me as
+          <select
+            value={characterId ?? ""}
+            onChange={(e) =>
+              setChosenCharacter(
+                e.currentTarget.value === ""
+                  ? null
+                  : Number(e.currentTarget.value),
+              )
+            }
+            className="w-full rounded bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100 outline-none"
+          >
+            {roster.map((c) => (
+              <option key={c.characterId} value={c.characterId}>
+                {c.name}
+              </option>
+            ))}
+            <option value="">Don't include a character (anonymous)</option>
+          </select>
+          <span className="text-[11px] text-zinc-600">
+            Only the name is sent, and only so I can reply by EVE mail in-game.
           </span>
         </label>
 

@@ -7,12 +7,33 @@ no card) and needs nothing running.
 
 This page is for the maintainer. Users need none of it.
 
+## The module is gated on a logged-in character
+
+With an empty character roster the module is **inactive**: the sidebar and the
+⌘K palette leave it out, its page says *"Module inactive — registered account
+required"*, and `feedback_submit` refuses. Feedback is tied to a character so a
+report can be answered by EVE mail, and so the corpus isn't open to anyone who
+merely downloaded the binary.
+
+Gating is declared in the registry (`requiresCharacter: true` on the module
+entry) and applied by `useAvailableModules()`, which both nav surfaces build
+from. The *route* still exists either way — that is what a direct link or a
+restored "last visited" lands on, which is why the page states the reason
+itself rather than relying on being unreachable.
+
 ## The privacy posture, stated plainly
 
 - A submission carries **only**: kind (rating/bug/feature), module id, star
-  rating, the user's text, app version, OS, an anonymous account id, and the
-  character name — the last only when the user leaves the "include my character
-  name" box ticked.
+  rating, the user's text, app version, OS, an anonymous account id, and a
+  character name.
+- The character is **chosen per submission** from a picker listing the logged-in
+  roster, defaulting to the active character. "Don't include a character" is
+  always an option, and sends an explicit null.
+- Only the character *id* crosses the Tauri bridge; the name is resolved from
+  the roster in Rust, so a submission can only ever name a character that
+  install actually has. An id that isn't in the roster is refused rather than
+  silently downgraded to anonymous — a user who asked to be contactable should
+  not be quietly made anonymous.
 - **Never** sent: character id, ESI data, assets, wallet, logs, file paths,
   anything about the machine beyond the OS name.
 - Nothing is sent until the user presses the button. The app shows the exact
@@ -103,7 +124,8 @@ backdated — which is why the client sends no timestamp at all.
 ## Replying to a reporter
 
 A submission that carries a `character` name can be answered with an **in-game
-EVE mail**, sent manually from your own client. This deliberately needs no extra
+EVE mail**, sent manually from your own client — the reporter picked that
+character precisely so you could. This deliberately needs no extra
 ESI scope from the user: EVE exposes no email address through ESI at all, and
 sending mail *as* the user would require a `esi-mail.send_mail.v1` token from
 them, which would be backwards.
