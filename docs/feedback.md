@@ -99,6 +99,30 @@ prefilled GitHub-issue route instead. That is what dev builds do by default, so
 local development never writes to the real collection. (Release builds are a
 different matter — see below.)
 
+### Local dev via `.env`
+
+To exercise the real endpoint from `npm run tauri dev` without prefixing every
+command, copy `.env.example` to `.env` at the repo root and fill in the two
+keys:
+
+```sh
+cp .env.example .env
+# then edit .env:
+#   EVE_TOOLING_FIREBASE_PROJECT_ID=your-project-id
+#   EVE_TOOLING_FIREBASE_API_KEY=AIza...
+```
+
+`.env` is git-ignored, so this stays a local, opt-in choice — a checkout with no
+`.env` still reports `configured: false`. `src-tauri/build.rs` loads it at
+compile time; a real environment variable of the same name overrides it, so CI
+is unaffected. Editing `.env` triggers a rebuild on the next `tauri dev`. Only
+those two keys are read — the Rust client speaks Firebase's REST API directly
+and needs nothing else from a Firebase web config.
+
+Test submissions land in the **real** `feedback` collection; delete them from
+the Firestore console (or use a throwaway project) if you'd rather not mix them
+with genuine feedback.
+
 ### In CI
 
 `.github/workflows/release.yml` passes both to `tauri-action` from **repository
@@ -124,10 +148,11 @@ setting its own two secrets.
 `ci.yml` deliberately does **not** set them, and is not gated: test runs must
 never write into the real collection.
 
-Note `src-tauri/build.rs` emits `cargo:rerun-if-env-changed` for both. Cargo
-doesn't track `option_env!` on its own, and CI restores a warm `target` cache —
-without that, a build could reuse an object file compiled before the variables
-existed and silently ship with feedback disabled.
+Note `src-tauri/build.rs` emits `cargo:rerun-if-env-changed` for both and also
+loads the git-ignored `.env` described above. Cargo doesn't track `option_env!`
+on its own, and CI restores a warm `target` cache — without that, a build could
+reuse an object file compiled before the variables existed and silently ship
+with feedback disabled.
 
 ## Reading the corpus
 
