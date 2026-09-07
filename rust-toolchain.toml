@@ -1,0 +1,14 @@
+# Pin the exact Rust toolchain so `cargo fmt` / `cargo clippy` are reproducible
+# locally and in CI, and a toolchain bump becomes a deliberate, reviewed change
+# instead of a surprise red build. This is the root-cause fix for issue #792:
+# CI floated on `dtolnay/rust-toolchain@stable`, so every new stable shipped new
+# clippy lints / rustfmt output and the gates went red with zero code changes.
+#
+# rustup honours this file for any cargo command run from the repo (it wins over
+# the default toolchain), so it is the single source of truth. Keep the version
+# in step with the `toolchain:` inputs in .github/workflows/{ci,release}.yml,
+# which pre-install the same toolchain in CI.
+[toolchain]
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
