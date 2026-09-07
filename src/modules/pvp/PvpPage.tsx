@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ExternalLink } from "lucide-react";
+import { Copy, ExternalLink, SlidersHorizontal } from "lucide-react";
 import {
   pvpProfiles,
   pvpPilotFits,
   pvpTypicalFit,
+  lostFitToEft,
   type PvpStats,
   type LostFit,
   type HullUsage,
@@ -12,6 +13,9 @@ import {
 import { formatInt } from "../../lib/format";
 import { Page, PageHeader } from "../../components/page";
 import { Stat } from "../../components/Stat";
+import { useNavigate } from "react-router-dom";
+import { openFitInFitting } from "../../lib/deepLink";
+import { useCopyToClipboard } from "../../lib/useCopyToClipboard";
 
 /** Compact ISK (52.3B, 1.4M) for the dense stat grid. */
 function iskShort(n: number): string {
@@ -52,6 +56,9 @@ function km(m: number): string {
 
 /** A single lost fit: hull header (links to the kill) + modules by slot. */
 function FitView({ fit, community }: { fit: LostFit; community?: boolean }) {
+  const navigate = useNavigate();
+  const { copied, copy } = useCopyToClipboard();
+  const eft = lostFitToEft(fit);
   const last = fmtDate(fit.lastLost);
   return (
     <div className="rounded border border-zinc-800 bg-zinc-950/60 p-2">
@@ -69,6 +76,26 @@ function FitView({ fit, community }: { fit: LostFit; community?: boolean }) {
             ? "typical · community"
             : `${last ? `last ${last} · ` : ""}lost ×${formatInt(fit.lostCount)}`}
         </span>
+      </div>
+      <div className="mt-1.5 flex gap-2">
+        <button
+          type="button"
+          onClick={() => copy(eft, "eft")}
+          className="flex items-center gap-1 rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+        >
+          <Copy size={10} /> {copied === "eft" ? "Copied" : "Copy EFT"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            openFitInFitting(eft);
+            navigate("/fitting");
+          }}
+          title="Load this fit in the Fitting module to simulate it"
+          className="flex items-center gap-1 rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+        >
+          <SlidersHorizontal size={10} /> Simulate
+        </button>
       </div>
       <div className="mt-1 flex flex-col gap-0.5">
         {SLOT_ORDER.map((slot) => {

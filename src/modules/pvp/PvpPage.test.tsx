@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { PvpProfilesResult, LostFit } from "../../lib/api";
+import { MemoryRouter } from "react-router-dom";
+import { takePendingFitImport } from "../../lib/deepLink";
 
 const RESULT: PvpProfilesResult = {
   pilots: [
@@ -60,7 +62,9 @@ function renderPage() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <PvpPage />
+      <MemoryRouter>
+        <PvpPage />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -127,6 +131,34 @@ describe("PvpPage", () => {
     // The all-V analysis renders (scram range + EHP).
     expect(screen.getByText(/9\.0 km/)).toBeInTheDocument();
     expect(screen.getByText(/12,000/)).toBeInTheDocument();
+  });
+
+  it("offers Copy EFT and Simulate on a lost fit", async () => {
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === "pvp_pilot_fits"
+        ? Promise.resolve(FITS)
+        : Promise.resolve(RESULT),
+    );
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText(/paste pilot names/i), {
+      target: { value: "Hunter" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /profile pilots/i }));
+    await screen.findByText("Hunter");
+    fireEvent.click(screen.getByRole("button", { name: /show lost fits/i }));
+    await screen.findByText(/Warp Scrambler II/);
+
+    // Copy EFT acknowledges with a transient "Copied".
+    fireEvent.click(screen.getByRole("button", { name: /copy eft/i }));
+    expect(
+      await screen.findByRole("button", { name: /copied/i }),
+    ).toBeInTheDocument();
+
+    // Simulate stashes the fit for the Fitting module to pick up.
+    fireEvent.click(screen.getByRole("button", { name: /simulate/i }));
+    const eft = takePendingFitImport();
+    expect(eft).toContain("[Rifter, Rifter]");
+    expect(eft).toContain("Warp Scrambler II");
   });
 
   it("offers a community typical fit for a flown-but-not-lost hull", async () => {

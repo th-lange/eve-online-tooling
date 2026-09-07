@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   errorMessage,
@@ -19,6 +19,7 @@ import {
   type WeaponRange,
 } from "../../lib/api";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
+import { subscribeFitImport, takePendingFitImport } from "../../lib/deepLink";
 import type { FitContext } from "./fitHelpers";
 
 /**
@@ -184,6 +185,23 @@ export function useFitEditor() {
     },
     onError: (e) => alert(`Import failed: ${errorMessage(e)}`),
   });
+
+  // A fit handed in from another module (e.g. the PVP tab's "Simulate") — load
+  // it as soon as it arrives, or on first mount if it was stashed before this
+  // page existed. Pages keep-alive in the Layout host, so we handle both, the
+  // same way Market Search consumes a deep-linked item.
+  useEffect(() => {
+    const load = async (text: string) => {
+      try {
+        setFit(await fittingImportEft(text));
+      } catch (e) {
+        alert(`Import failed: ${errorMessage(e)}`);
+      }
+    };
+    const stashed = takePendingFitImport();
+    if (stashed) void load(stashed);
+    return subscribeFitImport(load);
+  }, []);
   const save = useMutation({
     mutationFn: () => fittingSaveLocal(fit!),
     onSuccess: (id) => {
