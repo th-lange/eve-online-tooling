@@ -96,8 +96,9 @@ jobs:
         with:
           node-version: 20
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: 1.98.1
           targets: ${{ matrix.rust-targets }}
 
       - uses: swatinem/rust-cache@v2
