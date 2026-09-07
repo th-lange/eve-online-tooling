@@ -212,6 +212,9 @@ pub struct LostFit {
     /// pilot last flew this hull.
     pub last_lost: String,
     pub modules: Vec<FitModule>,
+    /// The fit as an EFT string, with charges loaded into their weapons — for
+    /// copy-out and the "Simulate" hand-off to the Fitting module.
+    pub eft: String,
     /// All-V dogma analysis of this fit (`None` if the engine couldn't run).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub analysis: Option<FitAnalysis>,
@@ -438,6 +441,7 @@ fn build_lost_fit(sde: &Sde, dir: &std::path::Path, km: &Killmail, lost_count: i
     let analysis = simulate_fit(sde, dir, &fit, &|_| 5.0, None, None, None, None, None, None)
         .ok()
         .map(|s| analysis_from_stats(&s, &attrs, &fit, &name_of));
+    let eft = crate::modules::fitting::fit_to_eft(sde, &fit);
     LostFit {
         hull_type_id: km.victim.ship_type_id,
         hull_name: name_of(km.victim.ship_type_id),
@@ -445,6 +449,7 @@ fn build_lost_fit(sde: &Sde, dir: &std::path::Path, km: &Killmail, lost_count: i
         killmail_id: km.killmail_id,
         last_lost: km.killmail_time.clone(),
         modules,
+        eft,
         analysis,
     }
 }

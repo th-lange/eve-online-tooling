@@ -39,6 +39,7 @@ const FITS: LostFit[] = [
       { typeId: 100, name: "200mm AutoCannon II", slot: "high", quantity: 1 },
       { typeId: 200, name: "Warp Scrambler II", slot: "mid", quantity: 1 },
     ],
+    eft: "[Rifter, Rifter]\n\n200mm AutoCannon II\nWarp Scrambler II",
     analysis: {
       ehp: 12000,
       dpsTotal: 180,
@@ -176,6 +177,7 @@ describe("PvpPage", () => {
           quantity: 1,
         },
       ],
+      eft: "[Caracal, Caracal]\n\nCaldari Navy Ballistic Control System",
     };
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "pvp_pilot_fits") return Promise.resolve(FITS); // lost: Rifter

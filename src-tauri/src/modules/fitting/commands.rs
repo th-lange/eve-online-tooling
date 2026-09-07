@@ -439,15 +439,13 @@ pub fn fitting_add_item(
     Ok(fit)
 }
 
-/// Serialize a [`Fit`] to an EFT clipboard string (#162). Modules are grouped by
-/// slot (high → mid → low → rig → subsystem) in index order; drones and cargo
-/// follow as `Name xN` lines.
-#[tauri::command]
-pub fn fitting_export_eft(app: AppHandle, fit: Fit) -> Result<String, String> {
-    let sde = crate::sde::open_from_app(&app)?;
-
+/// Serialize a resolved [`Fit`] to EFT text: modules grouped high→mid→low→rig→
+/// subsystem in index order, each with its loaded charge (`Module, Charge`);
+/// drones and cargo follow as `Name xN`. Shared by [`fitting_export_eft`] and
+/// the PVP fit analyzer, so a simulated enemy fit imports with its ammo loaded
+/// into the weapons rather than dumped into cargo.
+pub(crate) fn fit_to_eft(sde: &Sde, fit: &Fit) -> String {
     let ship_name = sde.type_name_or_id(fit.ship_type_id);
-
     let mut modules = Vec::new();
     for slot in [
         SlotKind::High,
@@ -467,7 +465,6 @@ pub fn fitting_export_eft(app: AppHandle, fit: Fit) -> Result<String, String> {
             });
         }
     }
-
     let mut extras = Vec::new();
     for i in fit
         .items
@@ -479,13 +476,19 @@ pub fn fitting_export_eft(app: AppHandle, fit: Fit) -> Result<String, String> {
             quantity: i.quantity,
         });
     }
-
-    Ok(eft::format_eft(&ParsedEft {
+    eft::format_eft(&ParsedEft {
         ship_name,
         fit_name: fit.name.clone(),
         modules,
         extras,
-    }))
+    })
+}
+
+/// Serialize a [`Fit`] to an EFT clipboard string (#162).
+#[tauri::command]
+pub fn fitting_export_eft(app: AppHandle, fit: Fit) -> Result<String, String> {
+    let sde = crate::sde::open_from_app(&app)?;
+    Ok(fit_to_eft(&sde, &fit))
 }
 
 /// Save a fit to the active character's in-game fittings via ESI (#178). Needs

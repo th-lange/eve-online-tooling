@@ -20,6 +20,7 @@ pub mod optimizer;
 mod stats;
 pub mod types;
 
+pub(crate) use commands::fit_to_eft;
 /// Curated cross-module surface: the PVP fit analyzer is fitting's only other
 /// consumer, and it should reach the simulation engine through here rather than
 /// poking into `commands` (the Tauri command layer) or `stats`/`engine` directly.
