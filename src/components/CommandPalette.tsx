@@ -2,8 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { CornerDownLeft, Package, Search } from "lucide-react";
-import { modules } from "../modules/registry";
-import { usePluginModules } from "../modules/plugins/pluginModules";
+import { useAvailableModules } from "../modules/availableModules";
 import { sdeKeys } from "../lib/queryKeys";
 import { openItemInMarketSearch } from "../lib/deepLink";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
@@ -55,10 +54,10 @@ export function CommandPalette() {
     }
   }, [open]);
 
-  const pluginModules = usePluginModules();
+  const availableModules = useAvailableModules();
   const moduleEntries: Entry[] = useMemo(
     () =>
-      [...modules, ...pluginModules]
+      availableModules
         .filter((m) => fuzzy(m.title, q.trim()))
         .map((m) => ({
           kind: "module",
@@ -66,7 +65,7 @@ export function CommandPalette() {
           title: m.title,
           subtitle: m.description,
         })),
-    [q, pluginModules],
+    [q, availableModules],
   );
 
   // Item lookup only kicks in once it looks like a real query. The typed

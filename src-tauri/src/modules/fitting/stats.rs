@@ -744,7 +744,12 @@ fn applied_dps_at(
                 0.0
             } else {
                 let explosion_velocity = charge.get(104);
-                missile_application(explosion_radius, explosion_velocity, target_sig, target_speed)
+                missile_application(
+                    explosion_radius,
+                    explosion_velocity,
+                    target_sig,
+                    target_speed,
+                )
             };
             let item = module_items.get(i);
             let in_range = item.is_none_or(|it| {
@@ -1083,6 +1088,7 @@ pub(super) fn required_skills_of(attrs: &AttrMap, type_id: i64) -> Vec<i64> {
 /// beacon type id the fit is sitting in — see [`run_dogma`].
 /// `abyssal_weather` is the separate, mutually exclusive Abyssal Deadspace
 /// weather choice (also see [`run_dogma`]).
+#[allow(clippy::too_many_arguments)] // one arg per independent sim input; a struct would just rename them
 pub(crate) fn simulate_fit(
     sde: &Sde,
     dir: &Path,
@@ -1589,7 +1595,7 @@ mod tests {
 
         let target = TargetProfile {
             sig_radius: 40.0,
-            speed: 4e14, // absurd — no drone can ever catch this
+            speed: 4e14,            // absurd — no drone can ever catch this
             angular_velocity: 0.04, // a modest, unrelated turret-preset value
             drones_keep_pace: true,
             missiles_need_overtake: false,
@@ -1613,7 +1619,7 @@ mod tests {
             (114, 25.0),
             (116, 25.0),
             (117, 25.0),
-            (118, 25.0), // 100 dmg
+            (118, 25.0),    // 100 dmg
             (103, 40.0),    // explosion radius
             (104, 2_000.0), // explosion velocity
             (37, 1_000.0),  // missile flight velocity — slower than the target

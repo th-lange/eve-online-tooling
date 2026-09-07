@@ -117,7 +117,9 @@ export function TargetProfileBox({
               type="number"
               min="0"
               value={value.sigRadius}
-              onChange={(e) => set({ sigRadius: Number(e.currentTarget.value) })}
+              onChange={(e) =>
+                set({ sigRadius: Number(e.currentTarget.value) })
+              }
               className="w-full rounded bg-zinc-800 px-2 py-1 text-zinc-100 outline-none"
             />
           </Field>
@@ -130,7 +132,10 @@ export function TargetProfileBox({
               className="w-full rounded bg-zinc-800 px-2 py-1 text-zinc-100 outline-none"
             />
           </Field>
-          <Field label="Angular vel. (rad/s)" title="Drives tracking loss directly — falloff comes from the DPS-vs-range curve, not this box.">
+          <Field
+            label="Angular vel. (rad/s)"
+            title="Drives tracking loss directly — falloff comes from the DPS-vs-range curve, not this box."
+          >
             <input
               type="number"
               min="0"
@@ -148,7 +153,7 @@ export function TargetProfileBox({
         <div className="mt-2 space-y-1 text-xs text-zinc-400">
           <label
             className="flex items-center gap-2"
-            title='Drones at or above the target&apos;s speed assume perfect application instead of running the tracking formula — PYFA&apos;s "auto" drone mode.'
+            title="Drones at or above the target's speed assume perfect application instead of running the tracking formula — PYFA's &quot;auto&quot; drone mode."
           >
             <input
               type="checkbox"

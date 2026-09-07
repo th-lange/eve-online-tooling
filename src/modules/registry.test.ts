@@ -12,6 +12,11 @@ describe("module registry", () => {
     expect(ids).toContain("fitting");
   });
 
+  it("registers the feedback module", () => {
+    const ids = modules.map((m) => m.id);
+    expect(ids).toContain("feedback");
+  });
+
   it("gives every module a unique id, title and component", () => {
     const ids = modules.map((m) => m.id);
     expect(new Set(ids).size).toBe(ids.length);

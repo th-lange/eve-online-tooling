@@ -1081,6 +1081,7 @@ fn load_ammo(fit: &mut Fit, attrs: &AttrMap, charge_cands: &[(i64, i64)], charge
 /// supplies unit costs for the budget constraint (empty ⇒ cost unused);
 /// `constraints` are kept as hard limits on the returned fit (cap-stable /
 /// ISK budget).
+#[allow(clippy::too_many_arguments)] // one arg per independent search input; a struct would just rename them
 pub(super) fn optimize_fit(
     sde: &Sde,
     dir: &std::path::Path,

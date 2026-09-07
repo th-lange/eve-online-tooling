@@ -2,7 +2,11 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { invokeMock, mockInvoke, renderWithQuery } from "../../test/harness";
 import { DpsPage } from "./DpsPage";
-import type { DpsLogFile, DpsLogSummary, DpsPlaybackSettings } from "../../lib/api";
+import type {
+  DpsLogFile,
+  DpsLogSummary,
+  DpsPlaybackSettings,
+} from "../../lib/api";
 
 // DpsPage subscribes to live ticks via `listen`; capture the callback so
 // tests could push one if needed (unused here — these tests exercise the
@@ -85,9 +89,7 @@ describe("DpsPage — playback file picker", () => {
     // Auto-selects the first (newest) log; the field shows name + date.
     const input = await screen.findByPlaceholderText("search by filename…");
     await waitFor(() =>
-      expect(input).toHaveValue(
-        `${LOGS[0].name} — ${logDate(OLDER_MTIME)}`,
-      ),
+      expect(input).toHaveValue(`${LOGS[0].name} — ${logDate(OLDER_MTIME)}`),
     );
 
     // Typing narrows the dropdown to matching filenames.
@@ -115,9 +117,7 @@ describe("DpsPage — playback timeline", () => {
     await screen.findByText("dmg out");
     // (`clock(SUMMARY_START)` also doubles as the idle position readout
     // below the slider, since it defaults to `start` before any tick.)
-    expect(screen.getAllByText(clock(SUMMARY_START)).length).toBeGreaterThan(
-      0,
-    );
+    expect(screen.getAllByText(clock(SUMMARY_START)).length).toBeGreaterThan(0);
     expect(screen.getByText(clock(SUMMARY_END))).toBeInTheDocument();
 
     // Dragging the slider and releasing seeks: dps_playback is called again
@@ -127,7 +127,9 @@ describe("DpsPage — playback timeline", () => {
     fireEvent.mouseUp(slider, { target: { value: String(SEEK_TS) } });
 
     await waitFor(() => {
-      const call = invokeMock.mock.calls.find(([cmd]) => cmd === "dps_playback");
+      const call = invokeMock.mock.calls.find(
+        ([cmd]) => cmd === "dps_playback",
+      );
       expect(call).toBeDefined();
       // The mock's args are untyped (`unknown[]`) — assert the one shape
       // `dpsPlayback` ever sends, named so the assertions below read a

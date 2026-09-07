@@ -61,7 +61,6 @@ pub struct PvpProfilesResult {
     pub unresolved: Vec<String>,
 }
 
-
 /// Pods and shuttles aren't real PvP hulls — drop them from every hull list.
 /// Matches by name (English, as zKill/SDE return it): covers "Capsule",
 /// the Genolution capsule variants, and every faction shuttle.

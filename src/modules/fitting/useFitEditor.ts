@@ -55,9 +55,9 @@ export function useFitEditor() {
   // Wormhole-class or Pochven metaliminal-storm environment the fit is
   // sitting in; null means no environment effect applied. Mutually
   // exclusive with `abyssalWeather` below — a fit sits in one space.
-  const [environmentEffect, setEnvironmentEffectRaw] = useState<
-    number | null
-  >(null);
+  const [environmentEffect, setEnvironmentEffectRaw] = useState<number | null>(
+    null,
+  );
   // Abyssal Deadspace weather the fit is sitting in — separate from
   // `environmentEffect` since it's hardcoded (no SDE type backs it), not a
   // beacon type id. Mutually exclusive with `environmentEffect`.

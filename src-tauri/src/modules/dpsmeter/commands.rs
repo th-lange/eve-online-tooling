@@ -111,7 +111,6 @@ pub struct LogSummary {
     pub buckets: Vec<EventBucket>,
 }
 
-
 /// Start (or restart) tailing the newest gamelog in `settings.gamelogs_dir`.
 /// Returns immediately; ticks arrive on the `dps://tick` event.
 #[tauri::command]
@@ -352,7 +351,11 @@ fn bucket_events(events: &[super::parser::DpsEvent]) -> LogSummary {
         })
         .collect();
 
-    LogSummary { start, end, buckets }
+    LogSummary {
+        start,
+        end,
+        buckets,
+    }
 }
 
 /// Time span + activity-density buckets for `file`, for the playback timeline
@@ -640,11 +643,11 @@ not a combat line, ignored";
         let mut events: Vec<_> = text.lines().filter_map(parse_line).collect();
         events.sort_by_key(|e| e.ts);
         assert_eq!(events.len(), 4); // the chat-noise line is dropped.
-        // `parse_line` leaves mining volume at 0.0 — only the SDE-backed
-        // `resolve_ore_volumes` step in `load_and_resolve_events` fills it
-        // in, which needs a live `AppHandle` this pure test doesn't have.
-        // Mirror its effect (34 units × a made-up 0.1 m³/unit) so bucketing
-        // sees a realistic nonzero mining amount, same as production.
+                                     // `parse_line` leaves mining volume at 0.0 — only the SDE-backed
+                                     // `resolve_ore_volumes` step in `load_and_resolve_events` fills it
+                                     // in, which needs a live `AppHandle` this pure test doesn't have.
+                                     // Mirror its effect (34 units × a made-up 0.1 m³/unit) so bucketing
+                                     // sees a realistic nonzero mining amount, same as production.
         for ev in &mut events {
             if ev.kind == EventKind::Mining {
                 ev.volume = ev.amount as f64 * 0.1;

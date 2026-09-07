@@ -16,7 +16,9 @@ the **SDE**.
   live in your OS keychain), or use the public market/industry tools with no
   login at all.
 - **Local & private** — everything runs on your machine; ESI/SDE data is cached
-  locally. No account, no server, no telemetry.
+  locally. No account, no telemetry, nothing phoning home in the background.
+  The one thing that ever leaves your machine is a **Feedback** submission —
+  only when you press send, and the app shows you the exact payload first.
 - **Free & open source** under the **MIT** license.
 
 ## Modules
@@ -39,6 +41,9 @@ Warfare, Exploration.
 
 **Extend it** — [Scripts](scripts.md) (Rhai/JS on a timer),
 [Plugins](plugins.md) (sandboxed WASM + UI), and an [MCP bridge](mcp.md).
+
+**Support** — [Feedback](feedback.md) (rate a module, report a bug, ask for a
+feature), Info Panel.
 
 ## Install
 

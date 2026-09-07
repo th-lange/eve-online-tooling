@@ -115,7 +115,6 @@ impl PluginManager {
             .clone()
     }
 
-
     /// Call `func` on plugin `id`, building it on first use with the host
     /// functions its `granted` permissions allow. Input/output are opaque bytes
     /// (the command layer speaks JSON). A failed call evicts the cached

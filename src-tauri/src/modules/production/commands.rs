@@ -567,7 +567,11 @@ pub async fn production_system_cost_index(
                     map
                 }
                 Err(e) => cost_index_fallback(
-                    storage::cache_get_stale(&dir, "industry_cost_indices", COST_INDEX_MAX_STALE_SECS),
+                    storage::cache_get_stale(
+                        &dir,
+                        "industry_cost_indices",
+                        COST_INDEX_MAX_STALE_SECS,
+                    ),
                     e,
                 )?,
             }

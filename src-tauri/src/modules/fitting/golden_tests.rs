@@ -358,15 +358,19 @@ fn golden_pyfa_fits() {
     let mut failures = Vec::new();
     for (label, f, g) in &cases {
         let layout = sde.ship_layout(f.ship_type_id).unwrap().expect("layout");
-        let d = run_dogma(&sde, dir, f,
-        &layout,
-        &all5,
-        &DamageProfile::default(),
-        0.0,
-        None,
-        &[],
-        None,
-        None,)
+        let d = run_dogma(
+            &sde,
+            dir,
+            f,
+            &layout,
+            &all5,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+            None,
+            None,
+        )
         .expect("dogma");
         let (dps, ehp, vel, align, stable) = (
             d.dps.total,

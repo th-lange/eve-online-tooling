@@ -25,3 +25,6 @@ dist-ssr
 
 # local agent token-tracking state (not part of the project)
 .tokensave/
+
+# maintainer-only working files (pulled feedback, service-account keys)
+.local/

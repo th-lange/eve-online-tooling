@@ -7,32 +7,27 @@
 
 /** user-defined commands **/
 
-
 export const commands = {
-/**
- * Open market orders across the target characters (the whole roster when
- * "All characters" is active, else just the active one), each flagged as
- * undercut or top-of-book against the current best price **at the order's
- * own station**. A character whose orders can't be fetched is skipped
- * rather than failing the whole call.
- */
-async ordersList() : Promise<Result<OrderRow[], AppError>> {
+  /**
+   * Open market orders across the target characters (the whole roster when
+   * "All characters" is active, else just the active one), each flagged as
+   * undercut or top-of-book against the current best price **at the order's
+   * own station**. A character whose orders can't be fetched is skipped
+   * rather than failing the whole call.
+   */
+  async ordersList(): Promise<Result<OrderRow[], AppError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("orders_list") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-}
-}
+      return { status: "ok", data: await TAURI_INVOKE("orders_list") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
+};
 
 /** user-defined events **/
 
-
-
 /** user-defined constants **/
-
-
 
 /** user-defined types **/
 
@@ -41,95 +36,107 @@ async ordersList() : Promise<Result<OrderRow[], AppError>> {
  * `{ "kind": …, "message": … }` so the frontend can tell an auth-required
  * state apart from a generic failure and show a clearer message, rather than
  * pattern-matching on a raw error string.
- * 
+ *
  * Commands return `Result<T, AppError>`; because `AppError: From<String>`, an
  * existing `.map_err(|e| e.to_string())?` inside such a command still works —
  * `?` wraps the string as [`AppError::Message`].
  */
-export type AppError = 
-/**
- * No character is logged in, or a required ESI scope isn't granted.
- */
-{ kind: "authRequired"; message: string } | 
-/**
- * Any other failure, carrying a human-readable message.
- */
-{ kind: "message"; message: string }
+export type AppError =
+  /**
+   * No character is logged in, or a required ESI scope isn't granted.
+   */
+  | { kind: "authRequired"; message: string }
+  /**
+   * Any other failure, carrying a human-readable message.
+   */
+  | { kind: "message"; message: string };
 /**
  * One of the character's open market orders, with undercut status.
  */
-export type OrderRow = { characterId: number; characterName: string; orderId: number; typeId: number; name: string; isBuy: boolean; price: number; volumeRemain: number; volumeTotal: number; location: string; regionId: number; 
-/**
- * The station/structure the order sits in (ESI `location_id`).
- */
-locationId: number; 
-/**
- * Current best competing price at the order's **station** (sell-min for a
- * sell order, buy-max for a buy order), or null if unpriced (e.g. a private
- * structure with no public market data).
- */
-bestPrice: number | null; 
-/**
- * True when someone is beating this order (cheaper sell / higher buy).
- */
-undercut: boolean; issued: string }
+export type OrderRow = {
+  characterId: number;
+  characterName: string;
+  orderId: number;
+  typeId: number;
+  name: string;
+  isBuy: boolean;
+  price: number;
+  volumeRemain: number;
+  volumeTotal: number;
+  location: string;
+  regionId: number;
+  /**
+   * The station/structure the order sits in (ESI `location_id`).
+   */
+  locationId: number;
+  /**
+   * Current best competing price at the order's **station** (sell-min for a
+   * sell order, buy-max for a buy order), or null if unpriced (e.g. a private
+   * structure with no public market data).
+   */
+  bestPrice: number | null;
+  /**
+   * True when someone is beating this order (cheaper sell / higher buy).
+   */
+  undercut: boolean;
+  issued: string;
+};
 
 /** tauri-specta globals **/
 
 import {
-	invoke as TAURI_INVOKE,
-	Channel as TAURI_CHANNEL,
+  invoke as TAURI_INVOKE,
+  Channel as TAURI_CHANNEL,
 } from "@tauri-apps/api/core";
 import * as TAURI_API_EVENT from "@tauri-apps/api/event";
 import { type WebviewWindow as __WebviewWindow__ } from "@tauri-apps/api/webviewWindow";
 
 type __EventObj__<T> = {
-	listen: (
-		cb: TAURI_API_EVENT.EventCallback<T>,
-	) => ReturnType<typeof TAURI_API_EVENT.listen<T>>;
-	once: (
-		cb: TAURI_API_EVENT.EventCallback<T>,
-	) => ReturnType<typeof TAURI_API_EVENT.once<T>>;
-	emit: null extends T
-		? (payload?: T) => ReturnType<typeof TAURI_API_EVENT.emit>
-		: (payload: T) => ReturnType<typeof TAURI_API_EVENT.emit>;
+  listen: (
+    cb: TAURI_API_EVENT.EventCallback<T>,
+  ) => ReturnType<typeof TAURI_API_EVENT.listen<T>>;
+  once: (
+    cb: TAURI_API_EVENT.EventCallback<T>,
+  ) => ReturnType<typeof TAURI_API_EVENT.once<T>>;
+  emit: null extends T
+    ? (payload?: T) => ReturnType<typeof TAURI_API_EVENT.emit>
+    : (payload: T) => ReturnType<typeof TAURI_API_EVENT.emit>;
 };
 
 export type Result<T, E> =
-	| { status: "ok"; data: T }
-	| { status: "error"; error: E };
+  { status: "ok"; data: T } | { status: "error"; error: E };
 
 function __makeEvents__<T extends Record<string, any>>(
-	mappings: Record<keyof T, string>,
+  mappings: Record<keyof T, string>,
 ) {
-	return new Proxy(
-		{} as unknown as {
-			[K in keyof T]: __EventObj__<T[K]> & {
-				(handle: __WebviewWindow__): __EventObj__<T[K]>;
-			};
-		},
-		{
-			get: (_, event) => {
-				const name = mappings[event as keyof T];
+  return new Proxy(
+    {} as unknown as {
+      [K in keyof T]: __EventObj__<T[K]> & {
+        (handle: __WebviewWindow__): __EventObj__<T[K]>;
+      };
+    },
+    {
+      get: (_, event) => {
+        const name = mappings[event as keyof T];
 
-				return new Proxy((() => {}) as any, {
-					apply: (_, __, [window]: [__WebviewWindow__]) => ({
-						listen: (arg: any) => window.listen(name, arg),
-						once: (arg: any) => window.once(name, arg),
-						emit: (arg: any) => window.emit(name, arg),
-					}),
-					get: (_, command: keyof __EventObj__<any>) => {
-						switch (command) {
-							case "listen":
-								return (arg: any) => TAURI_API_EVENT.listen(name, arg);
-							case "once":
-								return (arg: any) => TAURI_API_EVENT.once(name, arg);
-							case "emit":
-								return (arg: any) => TAURI_API_EVENT.emit(name, arg);
-						}
-					},
-				});
-			},
-		},
-	);
+        return new Proxy((() => {}) as any, {
+          apply: (_, __, [window]: [__WebviewWindow__]) => ({
+            listen: (arg: any) => window.listen(name, arg),
+            once: (arg: any) => window.once(name, arg),
+            emit: (arg: any) => window.emit(name, arg),
+          }),
+          get: (_, command: keyof __EventObj__<any>) => {
+            switch (command) {
+              case "listen":
+                return (arg: any) => TAURI_API_EVENT.listen(name, arg);
+              case "once":
+                return (arg: any) => TAURI_API_EVENT.once(name, arg);
+              case "emit":
+                return (arg: any) => TAURI_API_EVENT.emit(name, arg);
+            }
+          },
+        });
+      },
+    },
+  );
 }

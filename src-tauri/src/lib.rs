@@ -365,6 +365,12 @@ pub fn run() {
             info::info_list,
             info::info_clear,
             info::info_clear_source,
+            modules::feedback::commands::feedback_status,
+            modules::feedback::commands::feedback_preview,
+            modules::feedback::commands::feedback_submit,
+            modules::feedback::commands::feedback_history,
+            modules::feedback::commands::feedback_retry_pending,
+            modules::feedback::commands::feedback_forget,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
