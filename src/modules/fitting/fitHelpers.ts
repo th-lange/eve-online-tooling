@@ -1,7 +1,7 @@
 // Fit-context math + small shared helpers for the Fitting module — a
 // non-component file so react-refresh hot-reloads the panels cleanly.
 
-import type { ModuleInfo, SlotKind } from "../../lib/api";
+import type { Fit, FitItem, ModuleInfo, SlotKind } from "../../lib/api";
 
 /** Short slot labels for badges/tags. */
 export const SLOT_BADGE: Partial<Record<SlotKind, string>> = {
@@ -84,4 +84,33 @@ export function resistClass(v: number): string {
   if (v >= 0.3) return "text-emerald-500/80";
   if (v > 0) return "text-zinc-300";
   return "text-zinc-600";
+}
+
+/** Collapse a fit's cargo hold to one stack per item type: identical cargo
+ *  entries (common after an import that couldn't attach a charge to a weapon,
+ *  e.g. the PVP "Simulate") are merged and their quantities summed. Non-cargo
+ *  items are left exactly as they are, so drones, modules and rigs are
+ *  untouched. Idempotent — safe to run on every fit change. */
+export function stackCargo(fit: Fit): Fit {
+  const byType = new Map<number, FitItem>();
+  const items: FitItem[] = [];
+  for (const it of fit.items) {
+    if (it.slot !== "cargo") {
+      items.push(it);
+      continue;
+    }
+    const existing = byType.get(it.typeId);
+    if (existing) {
+      existing.quantity += Math.max(1, it.quantity);
+    } else {
+      const merged: FitItem = {
+        ...it,
+        quantity: Math.max(1, it.quantity),
+        index: byType.size,
+      };
+      byType.set(it.typeId, merged);
+      items.push(merged);
+    }
+  }
+  return { ...fit, items };
 }

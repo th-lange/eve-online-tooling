@@ -258,25 +258,25 @@ export function StatsAside({
             ) : (
               <>
                 <div className="text-sm text-zinc-300">
-                  {stats.data.dps.total.toFixed(1)} dps
+                  {stats.data.dps.total.toFixed(0)} dps
                 </div>
                 {stats.data.dps.total > 0 && (
                   <div className="text-xs text-zinc-500">
                     {stats.data.dps.turret > 0 &&
-                      `turret ${stats.data.dps.turret.toFixed(1)} `}
+                      `turret ${stats.data.dps.turret.toFixed(0)} `}
                     {stats.data.dps.missile > 0 &&
-                      `· missile ${stats.data.dps.missile.toFixed(1)} `}
+                      `· missile ${stats.data.dps.missile.toFixed(0)} `}
                     {stats.data.dps.drone > 0 &&
-                      `· drone ${stats.data.dps.drone.toFixed(1)}`}
+                      `· drone ${stats.data.dps.drone.toFixed(0)}`}
                   </div>
                 )}
                 {stats.data.appliedDps && (
                   <div className="text-xs text-zinc-500">
                     applied:{" "}
                     <span className="text-amber-400">
-                      {stats.data.appliedDps.total.toFixed(1)} dps
+                      {stats.data.appliedDps.total.toFixed(0)} dps
                     </span>{" "}
-                    (vs paper {stats.data.dps.total.toFixed(1)} dps)
+                    (vs paper {stats.data.dps.total.toFixed(0)} dps)
                   </div>
                 )}
                 {stats.data.dpsRangeCurve &&
