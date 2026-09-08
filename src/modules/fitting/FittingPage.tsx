@@ -28,6 +28,7 @@ import {
   TargetProfileBox,
 } from "./components";
 import { StatsAside } from "./StatsAside";
+import { AmmoTable } from "./AmmoTable";
 import { useFitEditor } from "./useFitEditor";
 import { useFitLibrary } from "./useFitLibrary";
 
@@ -308,6 +309,8 @@ function Workbench() {
                   activatable={activatable}
                 />
               )}
+
+              <AmmoTable fit={fit} skillSource={editor.skillSource} />
 
               <ModuleBrowser
                 onAdd={(typeId) => editor.addItem.mutate(typeId)}

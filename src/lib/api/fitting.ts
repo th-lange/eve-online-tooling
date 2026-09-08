@@ -162,6 +162,8 @@ export interface WeaponRange {
   /** Optimal (m); for missiles this is the flight range, for mining its reach. */
   optimal: number;
   falloff: number;
+  /** Turret tracking (rad/s); 0 for missiles and mining. */
+  tracking?: number;
 }
 
 /** A fleet boost module + optional charge projected onto this fit (#705) —
@@ -355,6 +357,28 @@ export function fittingSimulate(
     environmentEffect: environmentEffect ?? null,
     abyssalWeather: abyssalWeather ?? null,
   });
+}
+
+/** One ammo option for the fit's weapons: whole-fit weapon DPS, engagement
+ *  range and tracking with that charge loaded. */
+export interface AmmoRow {
+  typeId: number;
+  name: string;
+  dps: number;
+  optimal: number;
+  falloff: number;
+  /** Turret tracking (rad/s); 0 for missiles. */
+  tracking: number;
+}
+
+/** DPS / range / tracking for each cargo ammo the fitted weapons can load, best
+ *  DPS first. Empty when the fit has no chargeable weapons or no loadable cargo
+ *  ammo. */
+export function fittingAmmoTable(
+  fit: Fit,
+  skillSource: SkillSource = "allFive",
+): Promise<AmmoRow[]> {
+  return invoke<AmmoRow[]>("fitting_ammo_table", { fit, skillSource });
 }
 
 /** Price a whole fit at a market. */

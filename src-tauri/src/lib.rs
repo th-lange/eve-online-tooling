@@ -283,6 +283,7 @@ pub fn run() {
             modules::fitting::commands::fitting_esi_list,
             modules::fitting::commands::fitting_esi_push,
             modules::fitting::commands::fitting_simulate,
+            modules::fitting::commands::fitting_ammo_table,
             modules::fitting::optimizer::fitting_optimize,
             modules::fitting::commands::fitting_price,
             modules::fitting::commands::fitting_save_local,

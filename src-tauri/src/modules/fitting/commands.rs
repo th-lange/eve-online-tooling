@@ -642,6 +642,138 @@ pub async fn fitting_simulate(
     )
 }
 
+/// One row of the ammo comparison: what a cargo ammo does when loaded.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AmmoRow {
+    pub type_id: i64,
+    pub name: String,
+    /// Whole-fit weapon DPS (turret + missile) with this ammo loaded.
+    pub dps: f64,
+    pub optimal: f64,
+    pub falloff: f64,
+    /// Turret tracking (rad/s); 0 for missiles.
+    pub tracking: f64,
+}
+
+/// Cargo ammo type ids at least one fitted weapon can load, in cargo order and
+/// de-duplicated. `weapon_charges[w]` is weapon w's loadable charge ids. Pure.
+fn cargo_ammo_candidates(weapon_charges: &[Vec<i64>], cargo: &[i64]) -> Vec<i64> {
+    let loadable: std::collections::HashSet<i64> =
+        weapon_charges.iter().flatten().copied().collect();
+    let mut seen = std::collections::HashSet::new();
+    cargo
+        .iter()
+        .copied()
+        .filter(|c| loadable.contains(c) && seen.insert(*c))
+        .collect()
+}
+
+/// For every ammo type in the cargo hold that a fitted weapon can load, the
+/// fit's weapon DPS, engagement range and tracking with that ammo loaded — an
+/// ammo comparison for picking the right load for the range. Empty when the fit
+/// has no chargeable weapons or no loadable cargo ammo. `skill_source` matches
+/// [`fitting_simulate`]'s basis.
+#[tauri::command]
+pub async fn fitting_ammo_table(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+    fit: Fit,
+    skill_source: Option<String>,
+) -> Result<Vec<AmmoRow>, String> {
+    // Skills first (async), before opening the SDE — see resolve_skill_levels.
+    let levels = resolve_skill_levels(&app, &auth_state, skill_source.as_deref()).await;
+    let lookup = skill_fn(levels.as_ref());
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
+
+    // Fitted high-slot weapons that accept a charge (turrets/launchers), each
+    // mapped to the charges it can load. Ancillary reps are low slot;
+    // smartbombs/neuts take none, so `compatible_charges` is empty for them.
+    let mut weapon_charges: HashMap<i64, Vec<i64>> = HashMap::new();
+    for it in fit.items.iter().filter(|i| i.slot == SlotKind::High) {
+        if weapon_charges.contains_key(&it.type_id) {
+            continue;
+        }
+        let charges = sde
+            .compatible_charges(it.type_id)
+            .map_err(|e| e.to_string())?;
+        if !charges.is_empty() {
+            weapon_charges.insert(it.type_id, charges.into_iter().map(|(id, _)| id).collect());
+        }
+    }
+    if weapon_charges.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let cargo: Vec<i64> = fit
+        .items
+        .iter()
+        .filter(|i| i.slot == SlotKind::Cargo)
+        .map(|i| i.type_id)
+        .collect();
+    let sets: Vec<Vec<i64>> = weapon_charges.values().cloned().collect();
+    let candidates = cargo_ammo_candidates(&sets, &cargo);
+
+    let mut rows = Vec::with_capacity(candidates.len());
+    for ammo in candidates {
+        // Load this ammo into every high-slot weapon that can take it.
+        let mut probe = fit.clone();
+        for item in probe.items.iter_mut().filter(|i| i.slot == SlotKind::High) {
+            if weapon_charges
+                .get(&item.type_id)
+                .is_some_and(|cs| cs.contains(&ammo))
+            {
+                item.charge_type_id = Some(ammo);
+            }
+        }
+        let stats = simulate_fit(
+            &sde, &dir, &probe, &lookup, None, None, None, None, None, None,
+        )?;
+        let dps = stats
+            .dps
+            .as_ref()
+            .map(|d| d.turret + d.missile)
+            .unwrap_or(0.0);
+        let wr = stats
+            .weapon_ranges
+            .iter()
+            .find(|w| w.charge_type_id == Some(ammo));
+        rows.push(AmmoRow {
+            type_id: ammo,
+            name: sde.type_name_or_id(ammo),
+            dps,
+            optimal: wr.map(|w| w.optimal).unwrap_or(0.0),
+            falloff: wr.map(|w| w.falloff).unwrap_or(0.0),
+            tracking: wr.map(|w| w.tracking).unwrap_or(0.0),
+        });
+    }
+    rows.sort_by(|a, b| {
+        b.dps
+            .partial_cmp(&a.dps)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    Ok(rows)
+}
+
+#[cfg(test)]
+mod ammo_table_tests {
+    use super::cargo_ammo_candidates;
+
+    #[test]
+    fn candidates_keep_only_loadable_cargo_ammo_deduped_in_order() {
+        // Weapon 0 loads {10,11}; weapon 1 loads {11,12}. Cargo has a
+        // non-loadable (99), loadables, and a duplicate (11).
+        let weapons = vec![vec![10, 11], vec![11, 12]];
+        let cargo = vec![99, 12, 11, 11, 10, 42];
+        assert_eq!(cargo_ammo_candidates(&weapons, &cargo), vec![12, 11, 10]);
+    }
+
+    #[test]
+    fn no_weapons_yields_no_candidates() {
+        assert!(cargo_ammo_candidates(&[], &[10, 11]).is_empty());
+    }
+}
+
 /// What a price line is worth in total: unit buy price × quantity (unpriced
 /// lines count as zero). Pure (testable).
 fn line_value(line: &FitPriceLine) -> f64 {
