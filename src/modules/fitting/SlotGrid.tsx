@@ -405,15 +405,10 @@ export function SlotGrid({
             </button>
           )}
           {ammo ? (
-            <button
-              type="button"
-              onClick={() => onFitAmmo?.(it.typeId)}
-              title="Fit this ammo to all compatible weapons"
-              className="group/ammo relative flex min-w-0 flex-1 items-center gap-1 text-left hover:text-sky-300"
-            >
+            <span className="group/ammo relative flex min-w-0 flex-1 items-center gap-1">
               <span className="truncate">{nameOf(it.typeId)}</span>
               <Info size={11} className="shrink-0 text-sky-500/70" />
-              <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden w-max rounded border border-zinc-700 bg-zinc-900 p-2 text-left text-[11px] font-normal normal-case leading-relaxed text-zinc-400 shadow-lg group-hover/ammo:block">
+              <span className="absolute left-0 top-full z-30 mt-1 hidden w-max rounded border border-zinc-700 bg-zinc-900 p-2 text-left text-[11px] font-normal normal-case leading-relaxed text-zinc-400 shadow-lg group-hover/ammo:block">
                 <span className="mb-1 block font-medium text-zinc-200">
                   On your turrets
                 </span>
@@ -432,8 +427,15 @@ export function SlotGrid({
                     {ammo.tracking > 0 ? ammo.tracking.toFixed(3) : "—"}
                   </span>
                 </span>
+                <button
+                  type="button"
+                  onClick={() => onFitAmmo?.(it.typeId)}
+                  className="mt-1.5 block w-full rounded bg-sky-700 px-2 py-1 text-center font-medium text-white hover:bg-sky-600"
+                >
+                  Click to fit to all weapons
+                </button>
               </span>
-            </button>
+            </span>
           ) : (
             <span
               className={`min-w-0 flex-1 truncate ${
@@ -502,7 +504,15 @@ export function SlotGrid({
       .filter((x) => x.it.slot === slot)
       .sort((a, b) => a.it.index - b.it.index);
     const cap = counts[slot];
-    if (items.length === 0 && cap == null) return null;
+    // Always show the drone bay and cargo hold, even when empty, so they read as
+    // available; other capless banks (implants/subsystems/…) still hide empty.
+    if (
+      items.length === 0 &&
+      cap == null &&
+      slot !== "drone" &&
+      slot !== "cargo"
+    )
+      return null;
     const free = cap != null ? cap - items.length : 0;
     const full = cap != null && free === 0 && cap > 0;
     return (
