@@ -381,6 +381,12 @@ export function fittingAmmoTable(
   return invoke<AmmoRow[]>("fitting_ammo_table", { fit, skillSource });
 }
 
+/** Load an ammo/charge into every fitted weapon that can take it. Returns the
+ *  updated fit. */
+export function fittingLoadAmmo(fit: Fit, ammoTypeId: number): Promise<Fit> {
+  return invoke<Fit>("fitting_load_ammo", { fit, ammoTypeId });
+}
+
 /** Price a whole fit at a market. */
 export function fittingPrice(
   fit: Fit,
