@@ -1,7 +1,7 @@
 //! Tauri commands backing the Feedback module.
 //!
 //! One submission is a small, fixed record: what kind of feedback it is, which
-//! module it is about, an optional star rating, the user's text, and — only if
+//! module it is about, an optional star rating, a subject, the user's text, and — only if
 //! they leave the box ticked — their character name so the maintainer can reply
 //! by in-game EVE mail. Nothing else. No ESI data, no asset lists, no logs, no
 //! character *id*; the payload is built in exactly one place ([`build_payload`])
@@ -32,6 +32,9 @@ const MAX_BODY_LEN: usize = 4000;
 
 /// Longest accepted module id. Registry ids are short slugs.
 const MAX_MODULE_LEN: usize = 40;
+
+/// Longest accepted subject/headline. A one-liner, not an essay.
+const MAX_SUBJECT_LEN: usize = 120;
 
 /// Minimum gap between two submissions from one install, in seconds. Stops a
 /// stuck button or an impatient double-click from filing the same report twice.
@@ -78,6 +81,8 @@ pub struct FeedbackPayload {
     pub module: String,
     /// 1–5 stars, or 0 when this submission carries no rating.
     pub rating: i64,
+    /// A short headline for the report; may be empty (a rating often has none).
+    pub subject: String,
     pub body: String,
     /// Character name, present only when the user left the box ticked.
     pub character: Option<String>,
@@ -146,7 +151,13 @@ struct Store {
 
 /// Reject a submission the security rules would reject anyway, with a message
 /// worth showing. Pure, so the rules below are unit-tested rather than trusted.
-fn validate(kind: FeedbackKind, module: &str, rating: i64, body: &str) -> Result<(), String> {
+fn validate(
+    kind: FeedbackKind,
+    module: &str,
+    rating: i64,
+    subject: &str,
+    body: &str,
+) -> Result<(), String> {
     if module.is_empty() || module.len() > MAX_MODULE_LEN {
         return Err("Pick a category.".into());
     }
@@ -166,6 +177,11 @@ fn validate(kind: FeedbackKind, module: &str, rating: i64, body: &str) -> Result
     }
     if body.chars().count() > MAX_BODY_LEN {
         return Err(format!("Please keep it under {MAX_BODY_LEN} characters."));
+    }
+    if subject.chars().count() > MAX_SUBJECT_LEN {
+        return Err(format!(
+            "Please keep the subject under {MAX_SUBJECT_LEN} characters."
+        ));
     }
     // A rating can stand on its own; a bug or feature request with no text is
     // nothing anyone can act on.
@@ -246,6 +262,7 @@ fn build_payload(
     kind: FeedbackKind,
     module: &str,
     rating: i64,
+    subject: &str,
     body: &str,
     character: Option<String>,
 ) -> FeedbackPayload {
@@ -253,6 +270,7 @@ fn build_payload(
         kind,
         module: module.to_string(),
         rating,
+        subject: subject.trim().to_string(),
         body: body.trim().to_string(),
         character,
         app_version: app.package_info().version.to_string(),
@@ -307,12 +325,15 @@ pub fn feedback_preview(
     kind: FeedbackKind,
     module: String,
     rating: i64,
+    subject: String,
     body: String,
     character_id: Option<i64>,
 ) -> Result<FeedbackPayload, AppError> {
     let dir = storage::app_data_dir(&app)?;
     let character = resolve_character(&dir, character_id)?;
-    Ok(build_payload(&app, kind, &module, rating, &body, character))
+    Ok(build_payload(
+        &app, kind, &module, rating, &subject, &body, character,
+    ))
 }
 
 /// Validate, record locally, and try to upload. A network failure is *not* an
@@ -324,10 +345,11 @@ pub async fn feedback_submit(
     kind: FeedbackKind,
     module: String,
     rating: i64,
+    subject: String,
     body: String,
     character_id: Option<i64>,
 ) -> Result<FeedbackEntry, AppError> {
-    validate(kind, &module, rating, &body)?;
+    validate(kind, &module, rating, &subject, &body)?;
 
     let (dir, mut store) = load_store(&app)?;
     // The module is inactive without a logged-in character — the nav hides it,
@@ -348,7 +370,7 @@ pub async fn feedback_submit(
     let mut entry = FeedbackEntry {
         id: local_id(),
         doc_id: None,
-        payload: build_payload(&app, kind, &module, rating, &body, character),
+        payload: build_payload(&app, kind, &module, rating, &subject, &body, character),
         submitted_at: now,
         status: EntryStatus::Pending,
         error: None,
@@ -407,6 +429,7 @@ mod tests {
                 kind: FeedbackKind::Bug,
                 module: "general".into(),
                 rating: 0,
+                subject: String::new(),
                 body: "x".into(),
                 character: None,
                 app_version: "0.0.0".into(),
@@ -421,48 +444,48 @@ mod tests {
 
     #[test]
     fn a_rating_needs_stars_but_no_words() {
-        assert!(validate(FeedbackKind::Rating, "production", 4, "").is_ok());
-        assert!(validate(FeedbackKind::Rating, "production", 0, "great").is_err());
+        assert!(validate(FeedbackKind::Rating, "production", 4, "", "").is_ok());
+        assert!(validate(FeedbackKind::Rating, "production", 0, "", "great").is_err());
     }
 
     #[test]
     fn a_bug_needs_words_but_no_stars() {
-        assert!(validate(FeedbackKind::Bug, "production", 0, "it crashed").is_ok());
-        assert!(validate(FeedbackKind::Bug, "production", 0, "   ").is_err());
+        assert!(validate(FeedbackKind::Bug, "production", 0, "", "it crashed").is_ok());
+        assert!(validate(FeedbackKind::Bug, "production", 0, "", "   ").is_err());
     }
 
     #[test]
     fn general_is_a_valid_category() {
-        assert!(validate(FeedbackKind::Feature, "general", 0, "dark mode").is_ok());
+        assert!(validate(FeedbackKind::Feature, "general", 0, "", "dark mode").is_ok());
     }
 
     #[test]
     fn hyphenated_module_ids_are_accepted() {
         // Real registry ids look like this; rejecting them would silently make
         // whole modules un-reportable.
-        assert!(validate(FeedbackKind::Bug, "faction-warfare", 0, "broken").is_ok());
+        assert!(validate(FeedbackKind::Bug, "faction-warfare", 0, "", "broken").is_ok());
     }
 
     #[test]
     fn made_up_categories_are_rejected() {
-        assert!(validate(FeedbackKind::Bug, "", 0, "x").is_err());
-        assert!(validate(FeedbackKind::Bug, "Production", 0, "x").is_err());
-        assert!(validate(FeedbackKind::Bug, "prod uction", 0, "x").is_err());
-        assert!(validate(FeedbackKind::Bug, &"a".repeat(41), 0, "x").is_err());
+        assert!(validate(FeedbackKind::Bug, "", 0, "", "x").is_err());
+        assert!(validate(FeedbackKind::Bug, "Production", 0, "", "x").is_err());
+        assert!(validate(FeedbackKind::Bug, "prod uction", 0, "", "x").is_err());
+        assert!(validate(FeedbackKind::Bug, &"a".repeat(41), 0, "", "x").is_err());
     }
 
     #[test]
     fn rating_stays_in_range() {
-        assert!(validate(FeedbackKind::Rating, "general", 6, "").is_err());
-        assert!(validate(FeedbackKind::Rating, "general", -1, "").is_err());
+        assert!(validate(FeedbackKind::Rating, "general", 6, "", "").is_err());
+        assert!(validate(FeedbackKind::Rating, "general", -1, "", "").is_err());
     }
 
     #[test]
     fn overlong_bodies_are_rejected_before_the_round_trip() {
         let long = "a".repeat(MAX_BODY_LEN + 1);
-        assert!(validate(FeedbackKind::Bug, "general", 0, &long).is_err());
+        assert!(validate(FeedbackKind::Bug, "general", 0, "", &long).is_err());
         let ok = "a".repeat(MAX_BODY_LEN);
-        assert!(validate(FeedbackKind::Bug, "general", 0, &ok).is_ok());
+        assert!(validate(FeedbackKind::Bug, "general", 0, "", &ok).is_ok());
     }
 
     #[test]
@@ -471,7 +494,15 @@ mod tests {
         // being over the *byte* cap.
         let text = "\u{00e9}".repeat(MAX_BODY_LEN);
         assert!(text.len() > MAX_BODY_LEN);
-        assert!(validate(FeedbackKind::Bug, "general", 0, &text).is_ok());
+        assert!(validate(FeedbackKind::Bug, "general", 0, "", &text).is_ok());
+    }
+
+    #[test]
+    fn overlong_subjects_are_rejected() {
+        let long = "a".repeat(MAX_SUBJECT_LEN + 1);
+        assert!(validate(FeedbackKind::Bug, "general", 0, &long, "body").is_err());
+        let ok = "a".repeat(MAX_SUBJECT_LEN);
+        assert!(validate(FeedbackKind::Bug, "general", 0, &ok, "body").is_ok());
     }
 
     #[test]
@@ -510,6 +541,7 @@ mod tests {
             kind: FeedbackKind::Feature,
             module: "trading".into(),
             rating: 0,
+            subject: "Add a thing".into(),
             body: "add a thing".into(),
             character: Some("Some Capsuleer".into()),
             app_version: "0.57.1".into(),
@@ -520,6 +552,7 @@ mod tests {
         assert_eq!(json["kind"], "feature");
         assert_eq!(json["appVersion"], "0.57.1");
         assert_eq!(json["character"], "Some Capsuleer");
+        assert_eq!(json["subject"], "Add a thing");
     }
 
     #[test]

@@ -24,8 +24,8 @@ itself rather than relying on being unreachable.
 ## The privacy posture, stated plainly
 
 - A submission carries **only**: kind (rating/bug/feature), module id, star
-  rating, the user's text, app version, OS, an anonymous account id, and a
-  character name.
+  rating, an optional subject/headline, the user's text (which may be Markdown),
+  app version, OS, an anonymous account id, and a character name.
 - The character is **chosen per submission** from a picker listing the logged-in
   roster, defaulting to the active character. "Don't include a character" is
   always an option, and sends an explicit null.

@@ -280,6 +280,7 @@ pub fn document_fields(payload: &FeedbackPayload, uid: &str) -> Value {
     fields.insert("module".into(), string_value(&payload.module));
     fields.insert("rating".into(), integer_value(payload.rating));
     fields.insert("body".into(), string_value(&payload.body));
+    fields.insert("subject".into(), string_value(&payload.subject));
     fields.insert(
         "character".into(),
         match payload.character.as_deref() {
@@ -350,6 +351,7 @@ mod tests {
             kind,
             module: "production".into(),
             rating,
+            subject: "Title".into(),
             body: "boom".into(),
             character: character.map(str::to_string),
             app_version: "0.57.1".into(),
@@ -373,12 +375,13 @@ mod tests {
         assert_eq!(fields["module"], json!({ "stringValue": "production" }));
         assert_eq!(fields["rating"], json!({ "integerValue": "0" }));
         assert_eq!(fields["body"], json!({ "stringValue": "boom" }));
+        assert_eq!(fields["subject"], json!({ "stringValue": "Title" }));
         assert_eq!(fields["appVersion"], json!({ "stringValue": "0.57.1" }));
         assert_eq!(fields["os"], json!({ "stringValue": "linux" }));
         // The session's uid wins over whatever the payload was carrying.
         assert_eq!(fields["uid"], json!({ "stringValue": "u1" }));
         // Exactly the key set `firestore.rules` pins with `hasOnly`.
-        assert_eq!(fields.len(), 8);
+        assert_eq!(fields.len(), 9);
         // An omitted character must be an explicit null, not a missing key —
         // the security rules pin the exact key set with `hasOnly`.
         assert_eq!(fields["character"], json!({ "nullValue": null }));

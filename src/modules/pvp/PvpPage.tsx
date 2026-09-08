@@ -5,7 +5,6 @@ import {
   pvpProfiles,
   pvpPilotFits,
   pvpTypicalFit,
-  lostFitToEft,
   type PvpStats,
   type LostFit,
   type HullUsage,
@@ -58,7 +57,6 @@ function km(m: number): string {
 function FitView({ fit, community }: { fit: LostFit; community?: boolean }) {
   const navigate = useNavigate();
   const { copied, copy } = useCopyToClipboard();
-  const eft = lostFitToEft(fit);
   const last = fmtDate(fit.lastLost);
   return (
     <div className="rounded border border-zinc-800 bg-zinc-950/60 p-2">
@@ -80,7 +78,7 @@ function FitView({ fit, community }: { fit: LostFit; community?: boolean }) {
       <div className="mt-1.5 flex gap-2">
         <button
           type="button"
-          onClick={() => copy(eft, "eft")}
+          onClick={() => copy(fit.eft, "eft")}
           className="flex items-center gap-1 rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
         >
           <Copy size={10} /> {copied === "eft" ? "Copied" : "Copy EFT"}
@@ -88,7 +86,7 @@ function FitView({ fit, community }: { fit: LostFit; community?: boolean }) {
         <button
           type="button"
           onClick={() => {
-            openFitInFitting(eft);
+            openFitInFitting(fit.eft);
             navigate("/fitting");
           }}
           title="Load this fit in the Fitting module to simulate it"

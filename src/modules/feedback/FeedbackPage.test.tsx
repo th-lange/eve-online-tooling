@@ -32,6 +32,7 @@ const SENT: FeedbackEntry = {
     kind: "rating",
     module: "production",
     rating: 5,
+    subject: "",
     body: "",
     character: "Some Capsuleer",
     appVersion: "0.57.1",
@@ -70,6 +71,7 @@ function mockBridge(
             module: args?.module,
             rating: args?.rating,
             body: args?.body,
+            subject: args?.subject,
             character:
               roster.find((c) => c.characterId === args?.characterId)?.name ??
               null,
@@ -254,5 +256,28 @@ describe("FeedbackPage", () => {
     expect(await screen.findByText("sent")).toBeInTheDocument();
     expect(screen.getByText("queued")).toBeInTheDocument();
     expect(screen.getByText("offline")).toBeInTheDocument();
+  });
+
+  it("carries a subject headline to the backend", async () => {
+    renderPage();
+    await screen.findByRole("option", { name: "Some Capsuleer" });
+    fireEvent.click(screen.getByRole("button", { name: /^bug$/i }));
+    fireEvent.change(screen.getByLabelText(/^subject/i), {
+      target: { value: "Crash on export" },
+    });
+    fireEvent.change(screen.getByLabelText(/tell us about it/i), {
+      target: { value: "boom" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send feedback/i }));
+    await waitFor(() => expect(submitted).toBeDefined());
+    expect(submitted).toMatchObject({
+      subject: "Crash on export",
+      body: "boom",
+    });
+  });
+
+  it("tells the user Markdown is supported", () => {
+    renderPage();
+    expect(screen.getByText(/supports markdown/i)).toBeInTheDocument();
   });
 });
