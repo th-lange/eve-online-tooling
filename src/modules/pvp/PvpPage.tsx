@@ -197,7 +197,7 @@ function TypicalFit({ hull }: { hull: HullUsage }) {
 
 /** Lazy "lost fits" section — fetches the pilot's killmail fits only when the
  * user expands it, so pasting many pilots stays cheap. */
-function LostFits({ p }: { p: PvpStats }) {
+function LostFits({ p, fitLimit }: { p: PvpStats; fitLimit: number }) {
   const [open, setOpen] = useState(false);
   const fits = useQuery({
     queryKey: ["pvp", "fits", p.characterId],
@@ -232,9 +232,14 @@ function LostFits({ p }: { p: PvpStats }) {
           {fits.data && fits.data.length === 0 && (
             <span className="text-xs text-zinc-500">No recent losses.</span>
           )}
-          {fits.data?.map((f) => (
+          {fits.data?.slice(0, fitLimit).map((f) => (
             <FitView key={f.killmailId} fit={f} />
           ))}
+          {fits.data && fits.data.length > fitLimit && (
+            <span className="text-[11px] text-zinc-600">
+              +{fits.data.length - fitLimit} more (raise the limit above).
+            </span>
+          )}
           {flownNotLost.length > 0 && (
             <div className="mt-1 flex flex-col gap-1 border-t border-zinc-800/60 pt-2">
               <span className="text-[10px] uppercase tracking-wide text-zinc-500">
@@ -251,7 +256,7 @@ function LostFits({ p }: { p: PvpStats }) {
   );
 }
 
-function PilotCard({ p }: { p: PvpStats }) {
+function PilotCard({ p, fitLimit }: { p: PvpStats; fitLimit: number }) {
   const eff = efficiency(p.iskDestroyed, p.iskLost);
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
@@ -336,13 +341,14 @@ function PilotCard({ p }: { p: PvpStats }) {
           </p>
         )}
       </div>
-      <LostFits p={p} />
+      <LostFits p={p} fitLimit={fitLimit} />
     </div>
   );
 }
 
 export function PvpPage() {
   const [text, setText] = useState("");
+  const [fitLimit, setFitLimit] = useState(5);
   const scan = useMutation({ mutationFn: () => pvpProfiles(text) });
   const result = scan.data;
 
@@ -387,10 +393,30 @@ export function PvpPage() {
 
       {result && (
         <div className="mt-4 flex flex-col gap-3">
+          {result.pilots.length > 0 && (
+            <div className="flex items-center gap-2 text-xs text-zinc-400">
+              <span>Lost fits per pilot:</span>
+              {[5, 10].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setFitLimit(n)}
+                  className={`rounded px-2 py-0.5 ${
+                    fitLimit === n
+                      ? "bg-indigo-600 text-white"
+                      : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          )}
           {result.pilots.length === 0 ? (
             <p className="text-sm text-zinc-500">No pilots resolved.</p>
           ) : (
-            result.pilots.map((p) => <PilotCard key={p.characterId} p={p} />)
+            result.pilots.map((p) => (
+              <PilotCard key={p.characterId} p={p} fitLimit={fitLimit} />
+            ))
           )}
           {result.unresolved.length > 0 && (
             <p className="text-xs text-zinc-500">
