@@ -352,6 +352,12 @@ export function PvpPage() {
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              if (!scan.isPending && text.trim() !== "") scan.mutate();
+            }
+          }}
           placeholder="Paste pilot names, one per line…"
           rows={5}
           className="w-full rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-sm text-zinc-100 placeholder:text-zinc-600"
@@ -364,6 +370,9 @@ export function PvpPage() {
           >
             {scan.isPending ? "Profiling…" : "Profile pilots"}
           </button>
+          <span className="text-xs text-zinc-500">
+            Enter to submit · Shift+Enter for a new line
+          </span>
           {scan.isError && (
             <span className="text-sm text-red-400">
               Lookup failed — try again.
