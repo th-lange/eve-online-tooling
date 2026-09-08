@@ -34,12 +34,13 @@ service cloud.firestore {
       return request.auth != null
         // Pin the exact field set: no smuggling extra data into the corpus,
         // and no submission missing a field the analysis expects.
-        && d.keys().hasOnly(['kind', 'module', 'rating', 'body', 'character', 'appVersion', 'os', 'uid'])
-        && d.keys().hasAll(['kind', 'module', 'rating', 'body', 'character', 'appVersion', 'os', 'uid'])
+        && d.keys().hasOnly(['kind', 'module', 'rating', 'subject', 'body', 'character', 'appVersion', 'os', 'uid'])
+        && d.keys().hasAll(['kind', 'module', 'rating', 'subject', 'body', 'character', 'appVersion', 'os', 'uid'])
         && d.kind in ['rating', 'bug', 'feature']
         && d.module is string && d.module.size() > 0 && d.module.size() <= 40
         && d.rating is int && d.rating >= 0 && d.rating <= 5
         && d.body is string && d.body.size() <= 4000
+        && d.subject is string && d.subject.size() <= 120
         // Optional by design — a user who unticks the box sends an explicit null.
         && (d.character == null || (d.character is string && d.character.size() <= 64))
         && d.appVersion is string && d.appVersion.size() <= 32

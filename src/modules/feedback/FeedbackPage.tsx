@@ -126,6 +126,7 @@ export function FeedbackPage() {
   const [moduleId, setModuleId] = useState(GENERAL);
   const [rating, setRating] = useState(0);
   const [body, setBody] = useState("");
+  const [subject, setSubject] = useState("");
   // `undefined` means "the user hasn't chosen" — the active character is the
   // default until they do. `null` is the deliberate "stay anonymous" choice, so
   // the two cannot be conflated.
@@ -159,6 +160,7 @@ export function FeedbackPage() {
     module: moduleId,
     // Stars only mean something on a rating; other kinds send 0.
     rating: kind === "rating" ? rating : 0,
+    subject,
     body,
     characterId,
   };
@@ -188,6 +190,7 @@ export function FeedbackPage() {
       setSent(entry);
       setError(null);
       setBody("");
+      setSubject("");
       setRating(0);
       qc.invalidateQueries({ queryKey: ["feedback"] });
     },
@@ -307,6 +310,18 @@ export function FeedbackPage() {
         )}
 
         <label className="flex flex-col gap-1 text-xs text-zinc-400">
+          Subject <span className="text-zinc-600">(optional)</span>
+          <input
+            type="text"
+            value={subject}
+            onChange={(e) => setSubject(e.currentTarget.value)}
+            maxLength={120}
+            placeholder="A one-line headline"
+            className="w-full rounded bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
+          />
+        </label>
+
+        <label className="flex flex-col gap-1 text-xs text-zinc-400">
           {kind === "rating"
             ? "Anything to add? (optional)"
             : "Tell us about it"}
@@ -318,8 +333,12 @@ export function FeedbackPage() {
             placeholder={activeKind.hint}
             className="w-full rounded bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
           />
-          <span className="self-end text-[11px] text-zinc-600">
-            {body.length} / 4000
+          <span className="flex items-center justify-between text-[11px] text-zinc-600">
+            <span>
+              Supports Markdown — **bold**, lists, `code`, [links](url). It
+              renders when I read it and on GitHub.
+            </span>
+            <span>{body.length} / 4000</span>
           </span>
         </label>
 
