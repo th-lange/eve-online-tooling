@@ -1023,7 +1023,21 @@ pub(super) fn tank_of(
         }
         let ar = store.get(84);
         if ar > 0.0 {
-            armor_rep_s += ar / (dur / 1000.0);
+            // Ancillary armor repairers rep more while loaded with Nanite Repair
+            // Paste: apply chargedArmorDamageMultiplier (1886) when a charge is
+            // fitted. A normal repairer has no such attribute (multiplier 1).
+            // (Cap use is unchanged — the AAR draws the same capacitorNeed either
+            // way, unlike the cap-free Ancillary Shield Booster.)
+            let loaded = module_items
+                .get(i)
+                .and_then(|it| it.charge_type_id)
+                .is_some();
+            let mult = if loaded {
+                store.get(1886).max(1.0)
+            } else {
+                1.0
+            };
+            armor_rep_s += ar * mult / (dur / 1000.0);
         }
     }
 
@@ -1891,5 +1905,33 @@ mod tests {
             t_with_neut < t_no_neut,
             "with-neut depletion {t_with_neut} should be < no-neut {t_no_neut}"
         );
+    }
+
+    /// An ancillary armor repairer reps ~3x while loaded with Nanite Repair
+    /// Paste (chargedArmorDamageMultiplier 1886); unloaded — or a normal
+    /// repairer without that attribute — it reps at 1x.
+    #[test]
+    fn ancillary_armor_repairer_boosts_with_paste() {
+        // 120 armor / 6s cycle = 20/s base; x3 with paste = 60/s.
+        let module = store(&[(84, 120.0), (73, 6000.0), (1886, 3.0)]);
+        let resolved = resolved_fit(vec![module], vec![None], Vec::new());
+
+        let unloaded = [item(100, None, ModuleState::Active, 1)];
+        let loaded = [item(100, Some(28668), ModuleState::Active, 1)];
+        let base = tank_of(
+            &resolved,
+            &unloaded.iter().collect::<Vec<_>>(),
+            &DamageProfile::default(),
+        )
+        .armor_rep_s;
+        let boosted = tank_of(
+            &resolved,
+            &loaded.iter().collect::<Vec<_>>(),
+            &DamageProfile::default(),
+        )
+        .armor_rep_s;
+
+        assert!((base - 20.0).abs() < 1e-9, "base rep {base}");
+        assert!((boosted - 60.0).abs() < 1e-9, "boosted rep {boosted}");
     }
 }

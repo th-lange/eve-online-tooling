@@ -1,4 +1,10 @@
-import { useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type SetStateAction,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   errorMessage,
@@ -19,7 +25,8 @@ import {
   type WeaponRange,
 } from "../../lib/api";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
-import type { FitContext } from "./fitHelpers";
+import { subscribeFitImport, takePendingFitImport } from "../../lib/deepLink";
+import { stackCargo, type FitContext } from "./fitHelpers";
 
 /**
  * The fit-editing state machine: the current `Fit`, the immutable-update
@@ -31,7 +38,17 @@ import type { FitContext } from "./fitHelpers";
  */
 export function useFitEditor() {
   const qc = useQueryClient();
-  const [fit, setFit] = useState<Fit | null>(null);
+  const [fit, setFitRaw] = useState<Fit | null>(null);
+  // Every fit that lands in the editor is normalized so the cargo hold shows
+  // one stack per item type — imports (e.g. the PVP "Simulate") can otherwise
+  // land the same charge as several separate cargo lines. Idempotent, so
+  // ordinary edits pass through unchanged.
+  const setFit = useCallback((value: SetStateAction<Fit | null>) => {
+    setFitRaw((prev) => {
+      const next = typeof value === "function" ? value(prev) : value;
+      return next ? stackCargo(next) : next;
+    });
+  }, []);
   const [eft, setEft] = useState("");
   const [skillSource, setSkillSource] = useState<SkillSource>("allFive");
   const skillLabel = skillSource === "character" ? "character" : "all V";
@@ -184,6 +201,23 @@ export function useFitEditor() {
     },
     onError: (e) => alert(`Import failed: ${errorMessage(e)}`),
   });
+
+  // A fit handed in from another module (e.g. the PVP tab's "Simulate") — load
+  // it as soon as it arrives, or on first mount if it was stashed before this
+  // page existed. Pages keep-alive in the Layout host, so we handle both, the
+  // same way Market Search consumes a deep-linked item.
+  useEffect(() => {
+    const load = async (text: string) => {
+      try {
+        setFit(await fittingImportEft(text));
+      } catch (e) {
+        alert(`Import failed: ${errorMessage(e)}`);
+      }
+    };
+    const stashed = takePendingFitImport();
+    if (stashed) void load(stashed);
+    return subscribeFitImport(load);
+  }, []);
   const save = useMutation({
     mutationFn: () => fittingSaveLocal(fit!),
     onSuccess: (id) => {
