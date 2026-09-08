@@ -251,7 +251,7 @@ function LostFits({ p }: { p: PvpStats }) {
   );
 }
 
-function PilotCard({ p, topN }: { p: PvpStats; topN: number }) {
+function PilotCard({ p }: { p: PvpStats }) {
   const eff = efficiency(p.iskDestroyed, p.iskLost);
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
@@ -313,13 +313,13 @@ function PilotCard({ p, topN }: { p: PvpStats; topN: number }) {
         <Stat label="Gang ratio" value={`${p.gangRatio}%`} dense />
         <Stat label="Solo losses" value={formatInt(p.soloLosses)} dense />
       </div>
-      {p.hulls.length > 0 && (
-        <div className="mt-3 border-t border-zinc-800 pt-3">
-          <span className="text-[10px] uppercase tracking-wide text-zinc-500">
-            Flies (top {Math.min(topN, p.hulls.length)} by kills)
-          </span>
+      <div className="mt-3 border-t border-zinc-800 pt-3">
+        <span className="text-[10px] uppercase tracking-wide text-zinc-500">
+          Flies (by kills)
+        </span>
+        {p.hulls.length > 0 ? (
           <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {p.hulls.slice(0, topN).map((h) => (
+            {p.hulls.map((h) => (
               <span
                 key={h.typeId}
                 className="rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-200"
@@ -329,8 +329,13 @@ function PilotCard({ p, topN }: { p: PvpStats; topN: number }) {
               </span>
             ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="mt-1 text-xs text-zinc-600">
+            No flown-ship data from zKill — they may fly ships they haven&apos;t
+            killed in; check their lost fits.
+          </p>
+        )}
+      </div>
       <LostFits p={p} />
     </div>
   );
@@ -338,7 +343,6 @@ function PilotCard({ p, topN }: { p: PvpStats; topN: number }) {
 
 export function PvpPage() {
   const [text, setText] = useState("");
-  const [topN, setTopN] = useState(5);
   const scan = useMutation({ mutationFn: () => pvpProfiles(text) });
   const result = scan.data;
 
@@ -383,30 +387,10 @@ export function PvpPage() {
 
       {result && (
         <div className="mt-4 flex flex-col gap-3">
-          {result.pilots.length > 0 && (
-            <div className="flex items-center gap-2 text-xs text-zinc-400">
-              <span>Top hulls:</span>
-              {[5, 10].map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setTopN(n)}
-                  className={`rounded px-2 py-0.5 ${
-                    topN === n
-                      ? "bg-indigo-600 text-white"
-                      : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-                  }`}
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
-          )}
           {result.pilots.length === 0 ? (
             <p className="text-sm text-zinc-500">No pilots resolved.</p>
           ) : (
-            result.pilots.map((p) => (
-              <PilotCard key={p.characterId} p={p} topN={topN} />
-            ))
+            result.pilots.map((p) => <PilotCard key={p.characterId} p={p} />)
           )}
           {result.unresolved.length > 0 && (
             <p className="text-xs text-zinc-500">
