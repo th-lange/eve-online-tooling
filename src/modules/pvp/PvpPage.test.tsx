@@ -207,4 +207,22 @@ describe("PvpPage", () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/typical · community/)).toBeInTheDocument();
   });
+
+  it("submits on Enter and not on Shift+Enter", async () => {
+    invokeMock.mockReset();
+    invokeMock.mockResolvedValue(RESULT);
+    renderPage();
+    const box = screen.getByPlaceholderText(/paste pilot names/i);
+    fireEvent.change(box, { target: { value: "Hunter" } });
+    // Shift+Enter is a newline, not a submit.
+    fireEvent.keyDown(box, { key: "Enter", shiftKey: true });
+    expect(invokeMock).not.toHaveBeenCalled();
+    // Plain Enter submits.
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("pvp_profiles", {
+        text: "Hunter",
+      }),
+    );
+  });
 });

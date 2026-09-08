@@ -142,12 +142,6 @@ function Workbench() {
     onSuccess: (f) => editor.setFit(f),
     onError: (e) => alert(`Couldn't load ammo: ${errorMessage(e)}`),
   });
-  // Clicking a cargo ammo offers to load it into every compatible weapon.
-  const onFitAmmo = (typeId: number) => {
-    if (window.confirm(`Fit ${nameOf(typeId)} to all compatible weapons?`)) {
-      loadAmmo.mutate(typeId);
-    }
-  };
 
   return (
     <Page>
@@ -333,7 +327,7 @@ function Workbench() {
                   rangeOf={rangeOf}
                   activatable={activatable}
                   ammoStats={ammoStats}
-                  onFitAmmo={onFitAmmo}
+                  onFitAmmo={(typeId) => loadAmmo.mutate(typeId)}
                 />
               )}
 

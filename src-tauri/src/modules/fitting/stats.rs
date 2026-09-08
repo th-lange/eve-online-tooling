@@ -410,11 +410,7 @@ pub(super) fn run_dogma(
                 .modules
                 .iter()
                 .enumerate()
-                .filter(|(i, _)| {
-                    module_items
-                        .get(*i)
-                        .is_none_or(|it| it.state == ModuleState::Active)
-                })
+                .filter(|(i, _)| module_items.get(*i).is_none_or(|it| is_running(it.state)))
                 .map(|(_, m)| m)
                 .collect();
             let props: Vec<(f64, f64)> = active_props
@@ -622,11 +618,8 @@ pub(super) fn dps_of(
     let mut turrets = Vec::new();
     let mut missiles = Vec::new();
     for (i, store) in resolved.modules.iter().enumerate() {
-        if module_items
-            .get(i)
-            .is_some_and(|it| it.state != ModuleState::Active)
-        {
-            continue; // only active weapons fire (offline/online = no DPS)
+        if module_items.get(i).is_some_and(|it| !is_running(it.state)) {
+            continue; // active/overheated weapons fire; inactive/offline = none
         }
         let Some(Some(charge)) = resolved.charges.get(i) else {
             continue;
@@ -690,11 +683,8 @@ fn applied_dps_at(
     let mut turret_dps = 0.0;
     let mut missile_dps = 0.0;
     for (i, store) in resolved.modules.iter().enumerate() {
-        if module_items
-            .get(i)
-            .is_some_and(|it| it.state != ModuleState::Active)
-        {
-            continue; // only active weapons fire
+        if module_items.get(i).is_some_and(|it| !is_running(it.state)) {
+            continue; // active/overheated weapons fire
         }
         let Some(Some(charge)) = resolved.charges.get(i) else {
             continue;
@@ -953,11 +943,8 @@ pub(super) fn capacitor_of(
     let mut drain = 0.0;
     let mut module_drains: Vec<(f64, f64)> = Vec::new();
     for (i, store) in resolved.modules.iter().enumerate() {
-        if module_items
-            .get(i)
-            .is_some_and(|it| it.state != ModuleState::Active)
-        {
-            continue; // only active modules draw capacitor
+        if module_items.get(i).is_some_and(|it| !is_running(it.state)) {
+            continue; // active/overheated modules draw capacitor
         }
         let need = store.get(6);
         // Cap-using modules cycle on `duration` (73); weapons (lasers, hybrids)
@@ -1010,11 +997,8 @@ pub(super) fn tank_of(
 
     let (mut shield_rep_s, mut armor_rep_s) = (0.0, 0.0);
     for (i, store) in resolved.modules.iter().enumerate() {
-        if module_items
-            .get(i)
-            .is_some_and(|it| it.state != ModuleState::Active)
-        {
-            continue; // only active reps cycle (offline/online = no local reps)
+        if module_items.get(i).is_some_and(|it| !is_running(it.state)) {
+            continue; // active/overheated reps cycle
         }
         let dur = store.get(73);
         if dur <= 0.0 {
@@ -1070,6 +1054,13 @@ pub(super) type GroupMap = HashMap<i64, i64>;
 /// dogma path's treatment so the base-attribute fallback agrees with it. Pure.
 pub(super) fn draws_fitting_resources(slot: SlotKind, state: ModuleState) -> bool {
     is_ship_module(slot) && state != ModuleState::Offline
+}
+
+/// A module is "running" — firing, repping, drawing cap, boosting speed — when
+/// it's active or **overheated**. Offline and online (inactive) don't count.
+/// Overload bonuses themselves are applied in `resolve.rs` (category-5 effects).
+pub(super) fn is_running(state: ModuleState) -> bool {
+    matches!(state, ModuleState::Active | ModuleState::Overheated)
 }
 
 /// Whether a slot kind is a ship module that affects stats (drones/cargo/
@@ -1940,5 +1931,32 @@ mod tests {
 
         assert!((base - 20.0).abs() < 1e-9, "base rep {base}");
         assert!((boosted - 60.0).abs() < 1e-9, "boosted rep {boosted}");
+    }
+
+    /// Overheated modules still contribute: an overheated armor repairer reps,
+    /// while an online (inactive) one does not. Guards the active|overheated
+    /// gate — before the fix an overheated module was skipped as "not active".
+    #[test]
+    fn overheated_modules_still_run() {
+        let module = store(&[(84, 60.0), (73, 6000.0)]); // 60 armor / 6s = 10/s
+        let resolved = resolved_fit(vec![module], vec![None], Vec::new());
+        let overheated = [item(100, None, ModuleState::Overheated, 1)];
+        let online = [item(100, None, ModuleState::Online, 1)];
+        let hot = tank_of(
+            &resolved,
+            &overheated.iter().collect::<Vec<_>>(),
+            &DamageProfile::default(),
+        )
+        .armor_rep_s;
+        let idle = tank_of(
+            &resolved,
+            &online.iter().collect::<Vec<_>>(),
+            &DamageProfile::default(),
+        )
+        .armor_rep_s;
+        assert_eq!(hot, 10.0, "overheated rep should run");
+        assert_eq!(idle, 0.0, "online (inactive) rep should not");
+        assert!(is_running(ModuleState::Overheated));
+        assert!(!is_running(ModuleState::Online));
     }
 }
