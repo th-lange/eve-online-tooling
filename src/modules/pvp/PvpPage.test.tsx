@@ -134,6 +134,37 @@ describe("PvpPage", () => {
     expect(screen.getByText(/12,000/)).toBeInTheDocument();
   });
 
+  it("limits how many lost fits render, with a 'more' hint", async () => {
+    const manyFits: LostFit[] = Array.from({ length: 6 }, (_, i) => ({
+      hullTypeId: 587,
+      hullName: "Rifter",
+      lostCount: 1,
+      killmailId: 1000 + i,
+      lastLost: "2026-07-01T00:00:00Z",
+      modules: [],
+      eft: "[Rifter, Rifter]",
+    }));
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === "pvp_pilot_fits"
+        ? Promise.resolve(manyFits)
+        : Promise.resolve(RESULT),
+    );
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText(/paste pilot names/i), {
+      target: { value: "Hunter" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /profile pilots/i }));
+    await screen.findByText("Hunter");
+    fireEvent.click(screen.getByRole("button", { name: /show lost fits/i }));
+    // Default limit is 5, so the 6th is hidden behind a "+1 more" hint.
+    expect(await screen.findByText(/\+1 more/)).toBeInTheDocument();
+    // Raising the limit to 10 shows them all — the hint disappears.
+    fireEvent.click(screen.getByRole("button", { name: "10" }));
+    await waitFor(() =>
+      expect(screen.queryByText(/\+1 more/)).not.toBeInTheDocument(),
+    );
+  });
+
   it("offers Copy EFT and Simulate on a lost fit", async () => {
     invokeMock.mockImplementation((cmd: string) =>
       cmd === "pvp_pilot_fits"
