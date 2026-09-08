@@ -356,6 +356,30 @@ fn build_engine_fit(hull: i64, items: &[KmItem], cat_of: &dyn Fn(i64) -> i64) ->
             });
         }
     }
+
+    // Spare charges from the victim's cargo hold (flag 5), summed per type — kept
+    // so a simulated fit's cargo isn't empty and the ammo comparison has other
+    // loads to weigh. Non-charge cargo (loot, modules) is skipped.
+    let mut cargo: BTreeMap<i64, i64> = BTreeMap::new();
+    for it in items {
+        if it.flag == 5 && cat_of(it.item_type_id) == 8 {
+            *cargo.entry(it.item_type_id).or_default() +=
+                (it.quantity_destroyed + it.quantity_dropped).max(1);
+        }
+    }
+    let mut cargo_idx = 0i32;
+    for (type_id, quantity) in cargo {
+        fit_items.push(FitItem {
+            type_id,
+            slot: SlotKind::Cargo,
+            index: cargo_idx,
+            state: ModuleState::Active,
+            charge_type_id: None,
+            quantity: quantity as i32,
+            active_drones: None,
+        });
+        cargo_idx += 1;
+    }
     Fit {
         id: String::new(),
         name: String::new(),
@@ -729,9 +753,15 @@ mod tests {
                 quantity_destroyed: 0,
                 quantity_dropped: 1,
             },
+            KmItem {
+                item_type_id: 201,
+                flag: 5,
+                quantity_destroyed: 0,
+                quantity_dropped: 500,
+            },
         ];
         // Type 200 is the loaded charge (category 8); everything else a module.
-        let cat_of = |id: i64| if id == 200 { 8 } else { 0 };
+        let cat_of = |id: i64| if id == 200 || id == 201 { 8 } else { 0 };
         let fit = build_engine_fit(587, &items, &cat_of);
         assert_eq!(fit.ship_type_id, 587);
         // Launcher in hi0 with the missiles paired as its charge.
@@ -753,6 +783,16 @@ mod tests {
         assert_eq!(drones[0].quantity, 5);
         // Cargo (flag 5) never enters the fit.
         assert!(!fit.items.iter().any(|i| i.type_id == 999));
+        // Spare ammo in cargo (flag 5, a charge) is kept as a cargo stack; the
+        // non-charge cargo item (999) is still dropped.
+        let cargo: Vec<_> = fit
+            .items
+            .iter()
+            .filter(|i| i.slot == SlotKind::Cargo)
+            .collect();
+        assert_eq!(cargo.len(), 1);
+        assert_eq!(cargo[0].type_id, 201);
+        assert_eq!(cargo[0].quantity, 500);
     }
 
     #[test]

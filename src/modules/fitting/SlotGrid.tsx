@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  Circle,
   Crosshair,
   Flame,
   Info,
   Minus,
   Plus,
-  Power,
   Star,
   X,
 } from "lucide-react";
@@ -328,51 +328,42 @@ export function SlotGrid({
     const editableQuantity = slot === "cargo" || slot === "drone";
     const canActivate = activatable.has(it.typeId);
     const offline = it.state === "offline";
-    let next: ModuleState;
-    let stateTag: { label: string; cls: string } | null = null;
-    let toggleTitle: string;
-    let toggleCls: string;
-    if (canActivate) {
-      next =
-        it.state === "active"
-          ? "overheated"
-          : it.state === "overheated"
-            ? "online"
-            : it.state === "online"
-              ? "offline"
-              : "active";
-      stateTag =
-        it.state === "active"
-          ? { label: "active", cls: "text-emerald-400" }
-          : it.state === "overheated"
-            ? { label: "overheat", cls: "text-orange-400" }
-            : it.state === "online"
-              ? { label: "inactive", cls: "text-red-400" }
-              : { label: "offline", cls: "text-zinc-400" };
-      toggleTitle =
-        it.state === "active"
-          ? "Overheat"
-          : it.state === "overheated"
-            ? "Deactivate overheat (online)"
-            : it.state === "online"
-              ? "Disable (offline)"
-              : "Activate";
-      toggleCls =
-        it.state === "active"
-          ? "text-zinc-600 group-hover:text-zinc-300"
-          : it.state === "overheated"
-            ? "text-orange-500 hover:text-orange-400"
-            : it.state === "online"
-              ? "text-amber-500 hover:text-amber-400"
-              : "text-zinc-500 hover:text-emerald-400";
-    } else {
-      next = offline ? "online" : "offline";
-      stateTag = offline ? { label: "offline", cls: "text-zinc-400" } : null;
-      toggleTitle = offline ? "Enable" : "Disable (offline)";
-      toggleCls = offline
-        ? "text-zinc-500 hover:text-emerald-400"
-        : "text-zinc-600 group-hover:text-zinc-300";
-    }
+    // One icon shows the module's state and cycles it on click: activatable
+    // modules run active → overheated → online → offline → active; passive /
+    // power-only ones just toggle online ↔ offline (they start online).
+    const next: ModuleState = canActivate
+      ? it.state === "active"
+        ? "overheated"
+        : it.state === "overheated"
+          ? "online"
+          : it.state === "online"
+            ? "offline"
+            : "active"
+      : offline
+        ? "online"
+        : "offline";
+    // Current-state glyph: green dot active, white dot online, grey dot offline,
+    // red flame overheated.
+    const stateIcon =
+      it.state === "overheated"
+        ? { Icon: Flame, cls: "text-red-400", label: "overheated" }
+        : it.state === "active"
+          ? {
+              Icon: Circle,
+              cls: "fill-current text-emerald-400",
+              label: "active",
+            }
+          : it.state === "offline"
+            ? {
+                Icon: Circle,
+                cls: "fill-current text-zinc-500",
+                label: "offline",
+              }
+            : {
+                Icon: Circle,
+                cls: "fill-current text-zinc-100",
+                label: "online",
+              };
     // Dim the name when the module isn't contributing.
     const dimmed = offline || (canActivate && it.state === "online");
     return (
@@ -392,33 +383,13 @@ export function SlotGrid({
           {canToggle && (
             <button
               onClick={() => onSetState(i, next)}
-              title={toggleTitle}
-              aria-label="Cycle module state"
-              className={`flex shrink-0 items-center rounded p-0.5 ${toggleCls}`}
+              title={`${stateIcon.label} — click to cycle state`}
+              aria-label={`Module state: ${stateIcon.label}`}
+              className="flex shrink-0 items-center rounded p-0.5 hover:bg-zinc-700"
             >
-              <Power size={13} />
+              <stateIcon.Icon size={12} className={stateIcon.cls} />
             </button>
           )}
-          {canActivate &&
-            (it.state === "active" || it.state === "overheated") && (
-              <button
-                onClick={() =>
-                  onSetState(
-                    i,
-                    it.state === "overheated" ? "active" : "overheated",
-                  )
-                }
-                title={it.state === "overheated" ? "Un-overheat" : "Overheat"}
-                aria-label="Toggle overheat"
-                className={`flex shrink-0 items-center rounded p-0.5 ${
-                  it.state === "overheated"
-                    ? "text-orange-400"
-                    : "text-orange-700 hover:text-orange-500"
-                }`}
-              >
-                <Flame size={13} />
-              </button>
-            )}
           {ammo ? (
             <span className="group/ammo relative flex min-w-0 flex-1 items-center gap-1">
               <span className="truncate">{nameOf(it.typeId)}</span>
@@ -453,13 +424,6 @@ export function SlotGrid({
               {nameOf(it.typeId)}
               {it.chargeTypeId ? ` + ${nameOf(it.chargeTypeId)}` : ""}
               {!editableQuantity && it.quantity > 1 ? ` x${it.quantity}` : ""}
-              {stateTag && (
-                <span
-                  className={`ml-1.5 rounded bg-zinc-800/80 px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide ${stateTag.cls}`}
-                >
-                  {stateTag.label}
-                </span>
-              )}
             </span>
           )}
           {editableQuantity && (
