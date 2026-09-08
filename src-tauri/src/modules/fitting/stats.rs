@@ -932,6 +932,9 @@ pub(super) fn weapon_ranges_of(
                 charge_type_id: item.charge_type_id,
                 optimal,
                 falloff,
+                // Turret tracking (rad/s); 0 for missiles/mining. Reflects the
+                // loaded charge, so an ammo comparison can read it per ammo.
+                tracking: store.get(160),
             });
         }
     }
@@ -1515,6 +1518,7 @@ mod tests {
             charge_type_id: Some(200),
             optimal: 1_000.0,
             falloff: 2_000.0,
+            tracking: 0.0,
         }];
         let target = TargetProfile {
             sig_radius: 100.0,
@@ -1802,18 +1806,21 @@ mod tests {
                     charge_type_id: Some(200),
                     optimal: 5000.0,
                     falloff: 2000.0,
+                    tracking: 0.0,
                 },
                 WeaponRange {
                     type_id: 300,
                     charge_type_id: Some(400),
                     optimal: 2000.0,
                     falloff: 0.0,
+                    tracking: 0.0,
                 },
                 WeaponRange {
                     type_id: 600,
                     charge_type_id: None,
                     optimal: 3000.0,
                     falloff: 1000.0,
+                    tracking: 0.0,
                 },
             ]
         );

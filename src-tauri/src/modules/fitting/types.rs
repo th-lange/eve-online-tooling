@@ -174,6 +174,8 @@ pub struct WeaponRange {
     /// mining lasers it's their reach.
     pub optimal: f64,
     pub falloff: f64,
+    /// Turret tracking speed (rad/s). 0 for missiles and mining lasers.
+    pub tracking: f64,
 }
 
 /// Target profile for applied-DPS calculation (#701). Signature radius and

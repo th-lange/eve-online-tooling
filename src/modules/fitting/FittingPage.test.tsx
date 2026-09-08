@@ -136,6 +136,7 @@ function renderFitting(fit: Fit = FIT, stats: FitStats = STATS) {
       { id: 2185, name: "Hobgoblin II" },
     ],
     fitting_simulate: () => stats,
+    fitting_ammo_table: () => [],
     fitting_compatible_charges: () => [],
     fitting_environment_effects: () => [],
     fitting_delete_local: () => undefined,

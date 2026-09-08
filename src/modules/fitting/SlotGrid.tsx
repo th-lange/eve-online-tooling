@@ -1,14 +1,25 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Crosshair, Flame, Minus, Plus, Power, Star, X } from "lucide-react";
+import {
+  Crosshair,
+  Flame,
+  Info,
+  Minus,
+  Plus,
+  Power,
+  Star,
+  X,
+} from "lucide-react";
 import {
   fittingCompatibleCharges,
+  type AmmoRow,
   type Fit,
   type ModuleState,
   type SlotKind,
   type WeaponRange,
 } from "../../lib/api";
 import { SLOT_BADGE, km } from "./fitHelpers";
+import { formatInt } from "../../lib/format";
 
 /** Combat racks — the banks a fitter reads first, given equal prominence. */
 const PRIMARY_BANKS: [SlotKind, string][] = [
@@ -269,6 +280,7 @@ export function SlotGrid({
   droneMaxActive,
   rangeOf,
   activatable,
+  ammoStats,
 }: {
   fit: Fit;
   layout: {
@@ -293,6 +305,7 @@ export function SlotGrid({
   droneMaxActive?: Array<number | null>;
   rangeOf: Map<string, WeaponRange>;
   activatable: Set<number>;
+  ammoStats?: Record<number, AmmoRow>;
 }) {
   const counts: Partial<Record<SlotKind, number>> = {
     high: layout.highSlots,
@@ -304,6 +317,8 @@ export function SlotGrid({
 
   function renderItem(it: Fit["items"][number], i: number, slot: SlotKind) {
     const range = rangeOf.get(`${it.typeId}:${it.chargeTypeId ?? 0}`);
+    // Turret DPS/range/tracking for this ammo (cargo only) → hover popover.
+    const ammo = slot === "cargo" ? ammoStats?.[it.typeId] : undefined;
     // Only high/mid/low modules toggle (rigs/subsystems are permanent).
     // Activatable modules cycle active → inactive → offline; passive
     // ones only toggle online ↔ offline and never read "active".
@@ -404,22 +419,49 @@ export function SlotGrid({
                 <Flame size={13} />
               </button>
             )}
-          <span
-            className={`min-w-0 flex-1 truncate ${
-              offline ? "text-zinc-500" : dimmed ? "text-zinc-400" : ""
-            }`}
-          >
-            {nameOf(it.typeId)}
-            {it.chargeTypeId ? ` + ${nameOf(it.chargeTypeId)}` : ""}
-            {!editableQuantity && it.quantity > 1 ? ` x${it.quantity}` : ""}
-            {stateTag && (
-              <span
-                className={`ml-1.5 rounded bg-zinc-800/80 px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide ${stateTag.cls}`}
-              >
-                {stateTag.label}
+          {ammo ? (
+            <span className="group/ammo relative flex min-w-0 flex-1 items-center gap-1">
+              <span className="truncate">{nameOf(it.typeId)}</span>
+              <Info size={11} className="shrink-0 text-sky-500/70" />
+              <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden w-max rounded border border-zinc-700 bg-zinc-900 p-2 text-left text-[11px] font-normal normal-case leading-relaxed text-zinc-400 shadow-lg group-hover/ammo:block">
+                <span className="mb-1 block font-medium text-zinc-200">
+                  On your turrets
+                </span>
+                <span className="block">
+                  DPS{" "}
+                  <span className="text-zinc-100">{formatInt(ammo.dps)}</span>
+                </span>
+                <span className="block">
+                  Optimal{" "}
+                  <span className="text-zinc-100">{km(ammo.optimal)}</span>
+                  {ammo.falloff > 0 ? ` +${km(ammo.falloff)}` : ""}
+                </span>
+                <span className="block">
+                  Tracking{" "}
+                  <span className="text-zinc-100">
+                    {ammo.tracking > 0 ? ammo.tracking.toFixed(3) : "—"}
+                  </span>
+                </span>
               </span>
-            )}
-          </span>
+            </span>
+          ) : (
+            <span
+              className={`min-w-0 flex-1 truncate ${
+                offline ? "text-zinc-500" : dimmed ? "text-zinc-400" : ""
+              }`}
+            >
+              {nameOf(it.typeId)}
+              {it.chargeTypeId ? ` + ${nameOf(it.chargeTypeId)}` : ""}
+              {!editableQuantity && it.quantity > 1 ? ` x${it.quantity}` : ""}
+              {stateTag && (
+                <span
+                  className={`ml-1.5 rounded bg-zinc-800/80 px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide ${stateTag.cls}`}
+                >
+                  {stateTag.label}
+                </span>
+              )}
+            </span>
+          )}
           {editableQuantity && (
             <QuantityControl
               value={it.quantity}
