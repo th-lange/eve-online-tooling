@@ -225,4 +225,17 @@ describe("PvpPage", () => {
       }),
     );
   });
+
+  it("notes when a pilot has no flown-ship data", async () => {
+    invokeMock.mockResolvedValue({
+      pilots: [{ ...RESULT.pilots[0], hulls: [] }],
+      unresolved: [],
+    });
+    renderPage();
+    fireEvent.change(screen.getByPlaceholderText(/paste pilot names/i), {
+      target: { value: "Hunter" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /profile pilots/i }));
+    expect(await screen.findByText(/no flown-ship data/i)).toBeInTheDocument();
+  });
 });
