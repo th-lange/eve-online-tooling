@@ -3,31 +3,19 @@ name: Release
 # Builds installers and attaches them to the GitHub Release when a v* tag is
 # pushed. Can also be run manually against a tag via "Run workflow".
 #
-# Windows builds on every tagged release. macOS (universal) + Linux build only
-# on **minor** releases (tags ending in `.0`, e.g. v0.27.0) — patch releases
-# (v0.27.1, …) are Windows-only to save Actions minutes. A manual run can force
-# the full matrix with the `all_platforms` input.
+# Builds the full set — Windows, macOS (universal) and Linux — on every tagged
+# release.
 on:
   push:
     tags:
       - "v*"
   workflow_dispatch:
-    inputs:
-      all_platforms:
-        description: "Build macOS + Linux too (default: only on x.y.0 releases)"
-        type: boolean
-        default: false
 
 jobs:
-  # Decide the build matrix from the tag: full 3-platform set on a `.0` (minor)
-  # release, else Windows-only. Manual runs can force the full set.
-  #
-  # Also the gate for the Feedback module's build-time config: checking it here
-  # fails the whole workflow in seconds, before any build runner starts.
+  # Gate for the Feedback module's build-time config: checking it here fails the
+  # whole workflow in seconds, before any build runner starts.
   setup:
     runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.pick.outputs.matrix }}
     steps:
       # A release must never ship with the Feedback module silently disabled.
       # A renamed, deleted or mistyped secret arrives as an empty string, the
@@ -57,27 +45,23 @@ jobs:
           fi
           echo "Firebase build config present."
 
-      - id: pick
-        shell: bash
-        run: |
-          WIN='{"platform":"windows-latest","args":"","rust-targets":""}'
-          MAC='{"platform":"macos-latest","args":"--target universal-apple-darwin","rust-targets":"aarch64-apple-darwin,x86_64-apple-darwin"}'
-          LNX='{"platform":"ubuntu-22.04","args":"","rust-targets":""}'
-          if [[ "${{ github.ref_name }}" == *.0 || "${{ github.event.inputs.all_platforms }}" == "true" ]]; then
-            echo "Full multi-platform build (minor release or forced)."
-            echo "matrix={\"include\":[$MAC,$LNX,$WIN]}" >> "$GITHUB_OUTPUT"
-          else
-            echo "Patch release — Windows only."
-            echo "matrix={\"include\":[$WIN]}" >> "$GITHUB_OUTPUT"
-          fi
-
   release:
     needs: setup
     permissions:
       contents: write
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            args: ""
+            rust-targets: ""
+          - platform: windows-latest
+            args: ""
+            rust-targets: ""
 
     runs-on: ${{ matrix.platform }}
     steps:
