@@ -281,6 +281,7 @@ export function SlotGrid({
   rangeOf,
   activatable,
   ammoStats,
+  onFitAmmo,
 }: {
   fit: Fit;
   layout: {
@@ -306,6 +307,7 @@ export function SlotGrid({
   rangeOf: Map<string, WeaponRange>;
   activatable: Set<number>;
   ammoStats?: Record<number, AmmoRow>;
+  onFitAmmo?: (ammoTypeId: number) => void;
 }) {
   const counts: Partial<Record<SlotKind, number>> = {
     high: layout.highSlots,
@@ -338,6 +340,18 @@ export function SlotGrid({
           ? "online"
           : it.state === "online"
             ? "offline"
+            : "active"
+      : offline
+        ? "online"
+        : "offline";
+    // Shift-click runs the cycle backwards.
+    const prev: ModuleState = canActivate
+      ? it.state === "active"
+        ? "offline"
+        : it.state === "offline"
+          ? "online"
+          : it.state === "online"
+            ? "overheated"
             : "active"
       : offline
         ? "online"
@@ -382,8 +396,8 @@ export function SlotGrid({
           </button>
           {canToggle && (
             <button
-              onClick={() => onSetState(i, next)}
-              title={`${stateIcon.label} — click to cycle state`}
+              onClick={(e) => onSetState(i, e.shiftKey ? prev : next)}
+              title={`${stateIcon.label} — click to cycle, shift-click to reverse`}
               aria-label={`Module state: ${stateIcon.label}`}
               className="flex shrink-0 items-center rounded p-0.5 hover:bg-zinc-700"
             >
@@ -391,7 +405,12 @@ export function SlotGrid({
             </button>
           )}
           {ammo ? (
-            <span className="group/ammo relative flex min-w-0 flex-1 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onFitAmmo?.(it.typeId)}
+              title="Fit this ammo to all compatible weapons"
+              className="group/ammo relative flex min-w-0 flex-1 items-center gap-1 text-left hover:text-sky-300"
+            >
               <span className="truncate">{nameOf(it.typeId)}</span>
               <Info size={11} className="shrink-0 text-sky-500/70" />
               <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden w-max rounded border border-zinc-700 bg-zinc-900 p-2 text-left text-[11px] font-normal normal-case leading-relaxed text-zinc-400 shadow-lg group-hover/ammo:block">
@@ -414,7 +433,7 @@ export function SlotGrid({
                   </span>
                 </span>
               </span>
-            </span>
+            </button>
           ) : (
             <span
               className={`min-w-0 flex-1 truncate ${

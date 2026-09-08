@@ -35,7 +35,10 @@ const AMMO: Record<number, AmmoRow> = {
   },
 };
 
-function renderGrid(ammoStats?: Record<number, AmmoRow>) {
+function renderGrid(
+  ammoStats?: Record<number, AmmoRow>,
+  onFitAmmo?: (typeId: number) => void,
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={qc}>{children}</QueryClientProvider>
@@ -55,6 +58,7 @@ function renderGrid(ammoStats?: Record<number, AmmoRow>) {
       rangeOf={new Map()}
       activatable={new Set()}
       ammoStats={ammoStats}
+      onFitAmmo={onFitAmmo}
     />,
     { wrapper },
   );
@@ -73,6 +77,13 @@ describe("SlotGrid cargo ammo popover", () => {
     renderGrid(undefined);
     expect(screen.getByText("Barrage S")).toBeInTheDocument();
     expect(screen.queryByText("On your turrets")).toBeNull();
+  });
+
+  it("asks to fit an ammo to all weapons on click", () => {
+    const onFitAmmo = vi.fn();
+    renderGrid(AMMO, onFitAmmo);
+    fireEvent.click(screen.getByTitle(/fit this ammo/i));
+    expect(onFitAmmo).toHaveBeenCalledWith(28668);
   });
 });
 
@@ -126,5 +137,15 @@ describe("SlotGrid module state icon", () => {
       screen.getByRole("button", { name: /module state: active/i }),
     );
     expect(onSetState).toHaveBeenCalledWith(0, "overheated");
+  });
+
+  it("cycles backwards on shift-click", () => {
+    const onSetState = vi.fn();
+    renderHighModule(onSetState);
+    fireEvent.click(
+      screen.getByRole("button", { name: /module state: active/i }),
+      { shiftKey: true },
+    );
+    expect(onSetState).toHaveBeenCalledWith(0, "offline");
   });
 });

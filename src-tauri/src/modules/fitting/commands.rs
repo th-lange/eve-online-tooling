@@ -777,6 +777,25 @@ mod ammo_table_tests {
     }
 }
 
+/// Load `ammo_type_id` into every fitted high-slot weapon that can take it —
+/// the "fit this cargo ammo to all my weapons" action. Weapons that can't load
+/// it are left untouched. Returns the updated fit.
+#[tauri::command]
+pub fn fitting_load_ammo(app: AppHandle, fit: Fit, ammo_type_id: i64) -> Result<Fit, String> {
+    let sde = crate::sde::open_from_app(&app)?;
+    let mut out = fit;
+    for item in out.items.iter_mut().filter(|i| i.slot == SlotKind::High) {
+        let loadable = sde
+            .compatible_charges(item.type_id)
+            .map(|cs| cs.iter().any(|(id, _)| *id == ammo_type_id))
+            .unwrap_or(false);
+        if loadable {
+            item.charge_type_id = Some(ammo_type_id);
+        }
+    }
+    Ok(out)
+}
+
 /// What a price line is worth in total: unit buy price × quantity (unpriced
 /// lines count as zero). Pure (testable).
 fn line_value(line: &FitPriceLine) -> f64 {

@@ -357,9 +357,10 @@ fn build_engine_fit(hull: i64, items: &[KmItem], cat_of: &dyn Fn(i64) -> i64) ->
         }
     }
 
-    // Spare charges from the victim's cargo hold (flag 5), summed per type — kept
-    // so a simulated fit's cargo isn't empty and the ammo comparison has other
-    // loads to weigh. Non-charge cargo (loot, modules) is skipped.
+    // Cargo ammo for the simulated fit: the charges the weapons are loaded with,
+    // plus any spare charges from the victim's cargo hold (flag 5), summed per
+    // type — so the fit always carries the ammo it used and the ammo comparison
+    // has real alternatives. Non-charge cargo (loot, modules) is skipped.
     let mut cargo: BTreeMap<i64, i64> = BTreeMap::new();
     for it in items {
         if it.flag == 5 && cat_of(it.item_type_id) == 8 {
@@ -367,18 +368,19 @@ fn build_engine_fit(hull: i64, items: &[KmItem], cat_of: &dyn Fn(i64) -> i64) ->
                 (it.quantity_destroyed + it.quantity_dropped).max(1);
         }
     }
-    let mut cargo_idx = 0i32;
-    for (type_id, quantity) in cargo {
+    for charge in fit_items.iter().filter_map(|i| i.charge_type_id) {
+        cargo.entry(charge).or_insert(1);
+    }
+    for (cargo_idx, (type_id, quantity)) in cargo.into_iter().enumerate() {
         fit_items.push(FitItem {
             type_id,
             slot: SlotKind::Cargo,
-            index: cargo_idx,
+            index: cargo_idx as i32,
             state: ModuleState::Active,
             charge_type_id: None,
             quantity: quantity as i32,
             active_drones: None,
         });
-        cargo_idx += 1;
     }
     Fit {
         id: String::new(),
@@ -783,16 +785,19 @@ mod tests {
         assert_eq!(drones[0].quantity, 5);
         // Cargo (flag 5) never enters the fit.
         assert!(!fit.items.iter().any(|i| i.type_id == 999));
-        // Spare ammo in cargo (flag 5, a charge) is kept as a cargo stack; the
-        // non-charge cargo item (999) is still dropped.
-        let cargo: Vec<_> = fit
+        // Cargo carries the loaded ammo (200, copied at count 1) plus the spare
+        // ammo from the hold (201, at its dropped count); non-charge loot (999)
+        // is still dropped.
+        let cargo: std::collections::HashMap<i64, i32> = fit
             .items
             .iter()
             .filter(|i| i.slot == SlotKind::Cargo)
+            .map(|i| (i.type_id, i.quantity))
             .collect();
-        assert_eq!(cargo.len(), 1);
-        assert_eq!(cargo[0].type_id, 201);
-        assert_eq!(cargo[0].quantity, 500);
+        assert_eq!(cargo.len(), 2);
+        assert_eq!(cargo.get(&200), Some(&1));
+        assert_eq!(cargo.get(&201), Some(&500));
+        assert!(!cargo.contains_key(&999));
     }
 
     #[test]
