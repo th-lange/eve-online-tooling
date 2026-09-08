@@ -82,7 +82,9 @@ describe("SlotGrid cargo ammo popover", () => {
   it("asks to fit an ammo to all weapons on click", () => {
     const onFitAmmo = vi.fn();
     renderGrid(AMMO, onFitAmmo);
-    fireEvent.click(screen.getByTitle(/fit this ammo/i));
+    fireEvent.click(
+      screen.getByRole("button", { name: /fit to all weapons/i }),
+    );
     expect(onFitAmmo).toHaveBeenCalledWith(28668);
   });
 });
@@ -147,5 +149,33 @@ describe("SlotGrid module state icon", () => {
       { shiftKey: true },
     );
     expect(onSetState).toHaveBeenCalledWith(0, "offline");
+  });
+});
+
+describe("SlotGrid always shows drone + cargo banks", () => {
+  it("renders empty Drones and Cargo banks", () => {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <SlotGrid
+          fit={{ id: "", name: "t", shipTypeId: 587, items: [] }}
+          layout={LAYOUT}
+          nameOf={(id) => String(id)}
+          onRemove={() => {}}
+          onAddToSlot={() => {}}
+          onSetCharge={() => {}}
+          onSetChargeForType={() => {}}
+          onSetState={() => {}}
+          onSetQuantity={() => {}}
+          onSetActiveDrones={() => {}}
+          rangeOf={new Map()}
+          activatable={new Set()}
+        />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText("Drones")).toBeInTheDocument();
+    expect(screen.getByText("Cargo")).toBeInTheDocument();
   });
 });
