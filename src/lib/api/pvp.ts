@@ -56,6 +56,10 @@ export interface LostFit {
   /** ISO timestamp of the most-recent loss — when they last flew this hull. */
   lastLost: string;
   modules: FitModule[];
+  /** The fit as an EFT string with charges loaded into their weapons — for
+   *  copy-out and the "Simulate" hand-off. Built server-side from the paired
+   *  fit, so ammo lands in the guns rather than as loose cargo. */
+  eft: string;
   /** All-V dogma analysis of the fit (absent if the engine couldn't run). */
   analysis?: FitAnalysis;
 }
@@ -89,25 +93,4 @@ export function pvpPilotFits(characterId: number): Promise<LostFit[]> {
  *  lose — sampled from recent public losses of that ship type. `null` if none. */
 export function pvpTypicalFit(hullTypeId: number): Promise<LostFit | null> {
   return invoke<LostFit | null>("pvp_typical_fit", { hullTypeId });
-}
-
-/** Build an EFT clipboard string from a reconstructed lost fit, so it can be
- *  copied out or loaded into the Fitting module. Modules are grouped by slot
- *  (low → mid → high → rig → subsystem) and repeated once per unit of quantity;
- *  drones (and anything not in a module slot) follow a blank line as
- *  `name x<qty>`, the shape EFT parsers expect for the cargo/drone block. */
-export function lostFitToEft(fit: LostFit): string {
-  const SLOTS = ["low", "mid", "high", "rig", "subsystem"];
-  const lines = [`[${fit.hullName}, ${fit.hullName}]`];
-  for (const slot of SLOTS) {
-    for (const m of fit.modules.filter((m) => m.slot === slot)) {
-      for (let i = 0; i < Math.max(1, m.quantity); i++) lines.push(m.name);
-    }
-  }
-  const extras = fit.modules.filter((m) => !SLOTS.includes(m.slot));
-  if (extras.length > 0) {
-    lines.push("");
-    for (const m of extras) lines.push(`${m.name} x${Math.max(1, m.quantity)}`);
-  }
-  return lines.join("\n");
 }
