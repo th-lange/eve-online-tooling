@@ -22,6 +22,8 @@ export interface FeedbackPayload {
   module: string;
   /** 1–5 stars, or 0 when the submission carries no rating. */
   rating: number;
+  /** A short headline for the report; may be empty. */
+  subject: string;
   body: string;
   /** Character name, only when the user left the attach box ticked. */
   character: string | null;
@@ -63,6 +65,8 @@ export interface FeedbackDraft {
   kind: FeedbackKind;
   module: string;
   rating: number;
+  /** A short headline; may be empty. */
+  subject: string;
   body: string;
   /** Which character to be reachable as, or `null` to stay anonymous. Only the
    *  id crosses the bridge — the name is resolved from the roster in Rust, so a
@@ -119,7 +123,7 @@ const REPO = "https://github.com/th-lange/eve-online-tooling";
  * the declared options, so the module goes into the body where it survives.
  */
 export function githubIssueUrl(
-  draft: Pick<FeedbackDraft, "kind" | "module" | "body">,
+  draft: Pick<FeedbackDraft, "kind" | "module" | "body" | "subject">,
   appVersion: string,
   moduleTitle: string,
 ): string {
@@ -132,5 +136,7 @@ export function githubIssueUrl(
     .trim();
   params.set(isFeature ? "problem" : "what_happened", text);
   if (!isFeature) params.set("version", appVersion);
+  const subject = draft.subject.trim();
+  if (subject) params.set("title", subject);
   return `${REPO}/issues/new?${params.toString()}`;
 }

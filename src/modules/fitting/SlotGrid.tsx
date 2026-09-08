@@ -435,8 +435,9 @@ export function SlotGrid({
               {range.falloff > 0 ? ` +${km(range.falloff)}` : ""}
             </span>
           )}
-          {/* Ammo picker for high/mid weapons & script-takers. */}
-          {(slot === "high" || slot === "mid") && (
+          {/* Ammo / charge picker for weapons, scripts and ancillary reps —
+              self-hides when the module takes no charge. */}
+          {(slot === "high" || slot === "mid" || slot === "low") && (
             <ChargeControl
               typeId={it.typeId}
               chargeTypeId={it.chargeTypeId ?? null}

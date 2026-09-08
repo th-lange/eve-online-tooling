@@ -173,9 +173,17 @@ export function digest(entries) {
     for (const e of rows) {
       const who = e.character ? ` — ${e.character}` : "";
       const stars = e.rating > 0 ? ` ${"★".repeat(e.rating)}` : "";
+      const title = e.subject?.trim() || e.module;
+      // Body kept verbatim (indented into the bullet) so Markdown survives —
+      // collapsing newlines would flatten lists and code blocks.
+      const body = (e.body ?? "")
+        .trim()
+        .split("\n")
+        .map((l) => `  ${l}`)
+        .join("\n");
       lines.push(
-        `- **${e.module}**${stars} · ${e.createdAt?.slice(0, 10)} · v${e.appVersion} · ${e.os}${who}`,
-        `  ${(e.body ?? "").replace(/\n+/g, " ").trim()}`,
+        `- **${title}**${stars} · ${e.module} · ${e.createdAt?.slice(0, 10)} · v${e.appVersion} · ${e.os}${who}`,
+        ...(body ? [body] : []),
         `  <sub>${e.id}</sub>`,
       );
     }
