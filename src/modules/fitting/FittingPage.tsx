@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BarChart2, ClipboardPaste, SlidersHorizontal } from "lucide-react";
 import {
@@ -7,7 +7,9 @@ import {
   fittingEsiPush,
   fittingOptimize,
   fittingPrice,
+  fittingAmmoTable,
   sdeSearchShips,
+  type AmmoRow,
   type OptimizeMode,
   type OptimizeObjective,
   type SlotKind,
@@ -28,7 +30,6 @@ import {
   TargetProfileBox,
 } from "./components";
 import { StatsAside } from "./StatsAside";
-import { AmmoTable } from "./AmmoTable";
 import { useFitEditor } from "./useFitEditor";
 import { useFitLibrary } from "./useFitLibrary";
 
@@ -123,6 +124,18 @@ function Workbench() {
   const { fit, nameOf, layout, stats, rangeOf, activatable, fitContext } =
     editor;
   const resolvedLayout = stats.data?.layout ?? layout.data;
+
+  // DPS/range/tracking for each cargo ammo the fit's turrets can load, keyed by
+  // type id — surfaced as a hover popover on the cargo rows (see SlotGrid).
+  const ammoTable = useQuery({
+    queryKey: ["fitting", "ammoTable", fit, editor.skillSource],
+    queryFn: () => fittingAmmoTable(fit!, editor.skillSource),
+    enabled: fit != null,
+  });
+  const ammoStats: Record<number, AmmoRow> = useMemo(
+    () => Object.fromEntries((ammoTable.data ?? []).map((r) => [r.typeId, r])),
+    [ammoTable.data],
+  );
 
   return (
     <Page>
@@ -307,10 +320,9 @@ function Workbench() {
                   droneMaxActive={stats.data?.droneMaxActive}
                   rangeOf={rangeOf}
                   activatable={activatable}
+                  ammoStats={ammoStats}
                 />
               )}
-
-              <AmmoTable fit={fit} skillSource={editor.skillSource} />
 
               <ModuleBrowser
                 onAdd={(typeId) => editor.addItem.mutate(typeId)}
