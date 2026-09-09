@@ -1,9 +1,16 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Navigation } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
+  activeCharacter,
+  authCharacters,
   errorMessage,
   fwSystems,
+  intelFwJumps,
   intelFwStats,
+  setWaypoint,
+  type FwJumpResult,
   type FwMap,
   type FwSystemNode,
 } from "../../lib/api";
@@ -331,6 +338,29 @@ function Warzone({ data, zone }: { data: FwMap; zone: string }) {
 }
 
 function SystemTable({ systems }: { systems: FwSystemNode[] }) {
+  const characters = useQuery({
+    queryKey: ["auth", "characters"],
+    queryFn: authCharacters,
+  });
+  const hasCharacter = (characters.data?.length ?? 0) > 0;
+
+  const activeChar = useQuery({
+    queryKey: ["auth", "active"],
+    queryFn: activeCharacter,
+    enabled: hasCharacter,
+  });
+  // Jump distances from the character's current location to every visible
+  // FW system. Polled every 90 s so it updates as the character moves.
+  const systemIds = systems.map((s) => s.systemId);
+  const jumpResult = useQuery<FwJumpResult>({
+    queryKey: ["intel", "fw-jumps", systemIds],
+    queryFn: () => intelFwJumps(systemIds),
+    enabled: !!activeChar.data,
+    staleTime: 90_000,
+    refetchInterval: 90_000,
+  });
+  const dist = jumpResult.data?.jumps ?? {};
+
   return (
     <div className="mt-4 overflow-auto rounded-lg border border-zinc-800">
       <table className="w-full border-collapse text-sm">
@@ -343,6 +373,12 @@ function SystemTable({ systems }: { systems: FwSystemNode[] }) {
             <th className="px-3 py-1.5 text-right font-medium">Capture</th>
             <th className="px-3 py-1.5 text-right font-medium">Kills 1h</th>
             <th className="px-3 py-1.5 text-right font-medium">Jumps 1h</th>
+            <th
+              className="px-3 py-1.5 text-right font-medium"
+              title="Shortest stargate route from your current location"
+            >
+              Dist.
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -351,8 +387,41 @@ function SystemTable({ systems }: { systems: FwSystemNode[] }) {
               key={s.systemId}
               className="border-t border-zinc-800 text-zinc-300"
             >
-              <td className="px-3 py-1.5 font-medium text-zinc-100">
-                {s.name}
+              <td className="px-3 py-1.5">
+                <div className="flex items-center gap-2">
+                  {/* System name → Dotlan for map + info (ESI can't open an
+                      in-game info window for solar systems, esi-issues#358). */}
+                  <button
+                    onClick={() =>
+                      void openUrl(
+                        `https://evemaps.dotlan.net/system/${s.name}`,
+                      ).catch(() => {})
+                    }
+                    title={`Open ${s.name} on Dotlan`}
+                    className="font-medium text-zinc-100 hover:text-indigo-300"
+                  >
+                    {s.name}
+                  </button>
+                  {hasCharacter && (
+                    <div className="group relative">
+                      <button
+                        onClick={() =>
+                          setWaypoint(s.systemId).catch((e) =>
+                            alert(
+                              `Couldn't set destination: ${errorMessage(e)}`,
+                            ),
+                          )
+                        }
+                        className="text-zinc-600 hover:text-indigo-400"
+                      >
+                        <Navigation size={12} />
+                      </button>
+                      <span className="pointer-events-none absolute bottom-full left-1/2 mb-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300 ring-1 ring-zinc-700 group-hover:block">
+                        Set route
+                      </span>
+                    </div>
+                  )}
+                </div>
               </td>
               <td className="px-3 py-1.5 text-zinc-500">{s.region}</td>
               <td className="px-3 py-1.5">
@@ -389,6 +458,13 @@ function SystemTable({ systems }: { systems: FwSystemNode[] }) {
               </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
                 {s.jumps > 0 ? formatInt(s.jumps) : "—"}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                {dist[String(s.systemId)] != null
+                  ? dist[String(s.systemId)] === 0
+                    ? "here"
+                    : formatInt(dist[String(s.systemId)]!)
+                  : "—"}
               </td>
             </tr>
           ))}
