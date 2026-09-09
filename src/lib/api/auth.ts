@@ -68,6 +68,13 @@ export function openInfoWindow(targetId: number): Promise<void> {
   return invoke<void>("esi_open_info_window", { targetId });
 }
 
+/** Set the active character's autopilot destination to a solar system id
+ * (needs a logged-in character + the esi-ui.write_waypoint.v1 scope).
+ * Clears other waypoints — direct route. */
+export function setWaypoint(systemId: number): Promise<void> {
+  return invoke<void>("esi_set_waypoint", { systemId });
+}
+
 /**
  * Total owned quantity per type across the whole roster (durably cached ~10min).
  * Keys are type ids (as strings, per JSON object keys).

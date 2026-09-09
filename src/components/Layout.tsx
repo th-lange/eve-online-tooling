@@ -125,6 +125,9 @@ export function Layout() {
   const [drag, setDrag] = useState<{ id: string; section: string } | null>(
     null,
   );
+  // Which row the pointer is hovering over during a drag — drives the drop
+  // indicator line so the user can see where the item will land.
+  const [dragTarget, setDragTarget] = useState<string | null>(null);
 
   const toggleSection = (id: string) =>
     setCollapsed((prev) =>
@@ -150,16 +153,30 @@ export function Layout() {
       prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id],
     );
 
+
   // Drop the dragged row onto `targetId` — only reorders within the same visible
   // section (the row carries the section it was dragged from), so dragging never
   // (un)pins an item or hops it between sections. Reordering the shared custom
   // order reorders the row wherever it appears.
   const handleDrop = (targetId: string, targetSection: string) => {
     if (drag === null) return;
-    if (drag.section === targetSection && drag.id !== targetId) {
-      setOrder((prev) => moveBefore(prev, drag.id, targetId));
-    }
+    const { id: dragId, section: dragSection } = drag;
     setDrag(null);
+    setDragTarget(null);
+    if (dragSection === targetSection && dragId !== targetId) {
+      setOrder((prev) => {
+        // Modules added to the registry after the user's order was last saved
+        // appear in `ordered` (via applyOrder's fallback) but not in the
+        // persisted array. If either id is missing, append it first so
+        // moveBefore can always find its target.
+        const known = new Set(prev);
+        const full = [
+          ...prev,
+          ...[dragId, targetId].filter((id) => !known.has(id)),
+        ];
+        return moveBefore(full, dragId, targetId);
+      });
+    }
   };
 
   const ordered = applyOrder(allModules, order);
@@ -180,9 +197,20 @@ export function Layout() {
     // Only the Pinned section is drag-sortable; group sections keep a fixed order.
     sortable: section === "pinned",
     isDragging: drag?.id === m.id && drag.section === section,
+    // True when this row is the current drop target AND the drag started in
+    // the same section AND it's not the row being dragged itself.
+    isDropTarget:
+      drag !== null &&
+      drag.section === section &&
+      drag.id !== m.id &&
+      dragTarget === m.id,
     onDragStart: () => setDrag({ id: m.id, section }),
-    onDragEnd: () => setDrag(null),
+    onDragEnd: () => {
+      setDrag(null);
+      setDragTarget(null);
+    },
     onDropRow: () => handleDrop(m.id, section),
+    onDragOverRow: () => setDragTarget(m.id),
   });
 
   return (
@@ -373,9 +401,11 @@ function NavRow({
   onSetColor,
   sortable,
   isDragging,
+  isDropTarget,
   onDragStart,
   onDragEnd,
   onDropRow,
+  onDragOverRow,
 }: {
   module: ModuleDef;
   pinned: boolean;
@@ -384,9 +414,11 @@ function NavRow({
   onSetColor: (id: string, key: string | null) => void;
   sortable: boolean;
   isDragging: boolean;
+  isDropTarget: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
   onDropRow: () => void;
+  onDragOverRow: () => void;
 }) {
   const hex = color ? COLOR_HEX.get(color) : undefined;
   const { unseen, hasEntries } = useInfoAlerts();
@@ -398,6 +430,7 @@ function NavRow({
               // Only react while a row drag is in progress.
               e.preventDefault();
               if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+              onDragOverRow();
             }
           : undefined
       }
@@ -409,8 +442,16 @@ function NavRow({
             }
           : undefined
       }
-      className={`group flex items-center gap-1 ${isDragging ? "opacity-40" : ""}`}
+      className={`group relative flex items-center gap-1 ${isDragging ? "opacity-40" : ""}`}
     >
+      {/* Drop-position indicator: a 2 px line above the row that will receive
+          the dragged item. Only visible while actively dragging over this row. */}
+      {isDropTarget && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-1 -top-px h-0.5 rounded-full bg-indigo-500"
+        />
+      )}
       {sortable ? (
         <span
           draggable

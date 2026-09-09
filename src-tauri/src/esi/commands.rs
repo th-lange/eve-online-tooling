@@ -247,6 +247,22 @@ pub async fn esi_open_info_window(
     Ok(())
 }
 
+/// Set the active character's autopilot destination to a solar system.
+/// Requires `esi-ui.write_waypoint.v1`. This is the in-game equivalent of
+/// "Set destination" — ESI's show-info endpoint does not support solar systems
+/// (esi-issues#358), so setting a waypoint is the closest working hook.
+/// Clears other waypoints so the route is direct.
+#[tauri::command]
+pub async fn esi_set_waypoint(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+    system_id: i64,
+) -> Result<(), crate::model::AppError> {
+    let (_, character_id) = storage::dir_and_primary_character(&app)?;
+    character::set_autopilot_waypoint(&auth_state, character_id, system_id).await?;
+    Ok(())
+}
+
 /// Best-effort startup warm-up: pull the active character's assets so the
 /// ESI conditional cache is primed and Production/Assets open without waiting on
 /// a cold network fetch. Silent on any failure (offline, no character, etc.).

@@ -78,3 +78,18 @@ export interface FwMap {
 export function fwSystems(): Promise<FwMap> {
   return invoke<FwMap>("intel_fw_systems");
 }
+
+/** Shortest stargate jump counts from the active character's current system to
+ * each given FW system id. `jumps` is keyed by `String(systemId)`; absent =
+ * unreachable (e.g. wormhole space). Requires a logged-in character with the
+ * esi-location.read_location.v1 scope. */
+export interface FwJumpResult {
+  /** The system the character is currently in. */
+  characterSystemId: number;
+  /** Hop counts per system id (key = String(systemId)). */
+  jumps: Record<string, number>;
+}
+
+export function intelFwJumps(systemIds: number[]): Promise<FwJumpResult> {
+  return invoke<FwJumpResult>("intel_fw_jumps", { systemIds });
+}

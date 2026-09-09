@@ -1,17 +1,18 @@
 //! Intel commands: active incursions and faction-warfare warzone control.
 //!
-//! Both come from **public** ESI aggregates (`/incursions/`, `/fw/stats/`), so
-//! no token is needed — the only auth touch is [`resolve_names`], which POSTs to
-//! the public `/universe/names/` to turn system/constellation/faction ids into
-//! names. Results are cached briefly on disk so flipping to the panel is instant
-//! and we don't hammer ESI.
+//! Public FW data (`/incursions/`, `/fw/stats/`, `/fw/systems/`) needs no
+//! token. [`intel_fw_jumps`] is the one authed call: it reads the active
+//! character's current location so the table can show hop-counts to each FW
+//! system. Results are cached briefly on disk so flipping to the panel is
+//! instant and we don't hammer ESI.
 
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-use crate::esi::{resolve_names, AuthState, EsiClient};
+use crate::esi::{authed_get, resolve_names, AuthState, EsiClient};
+use crate::sde::{cached_adjacency, graph};
 use crate::storage;
 
 // ------------------------------------------------------------------ Incursions
@@ -360,6 +361,62 @@ pub async fn intel_fw_systems(app: AppHandle, esi: State<'_, EsiClient>) -> Resu
     let map = FwMap { nodes, edges };
     let _ = storage::cache_put(&dir, "intel_fw_systems", &map, 300);
     Ok(map)
+}
+
+// --------------------------------------------------------------- Jump distances
+
+/// Raw location response from `/characters/{id}/location/`.
+#[derive(Deserialize)]
+struct EsiCharacterLoc {
+    solar_system_id: i64,
+}
+
+/// Shortest jump counts from the active character's current system to a set of
+/// FW systems.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FwJumpResult {
+    /// The system the character is currently in.
+    pub character_system_id: i64,
+    /// Shortest jump counts per FW system (key = system_id as string). Systems
+    /// unreachable from the character's position (e.g. wormhole) are absent.
+    pub jumps: HashMap<String, i64>,
+}
+
+/// Shortest stargate-only hop count from the active character's current
+/// location to each given FW system. A single BFS over the full stargate
+/// graph gives all distances at once; only the requested system ids are
+/// returned. Requires `esi-location.read_location.v1`.
+#[tauri::command]
+pub async fn intel_fw_jumps(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+    system_ids: Vec<i64>,
+) -> Result<FwJumpResult, String> {
+    let (dir, character_id) = storage::dir_and_primary_character(&app).map_err(|e| e.to_string())?;
+
+    let loc: EsiCharacterLoc = authed_get(
+        &auth_state,
+        character_id,
+        &format!("/latest/characters/{character_id}/location/"),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let adj = cached_adjacency(&dir)?;
+    let (distances, _) = graph::bfs(&adj, loc.solar_system_id, None);
+
+    let targets: HashSet<i64> = system_ids.into_iter().collect();
+    let jumps = distances
+        .into_iter()
+        .filter(|(id, _)| targets.contains(id))
+        .map(|(id, dist)| (id.to_string(), dist))
+        .collect();
+
+    Ok(FwJumpResult {
+        character_system_id: loc.solar_system_id,
+        jumps,
+    })
 }
 
 #[cfg(test)]
