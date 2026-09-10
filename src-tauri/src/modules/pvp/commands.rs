@@ -228,6 +228,9 @@ pub struct WeaponLine {
     /// Optimal range (m); for missiles this is flight range (falloff 0).
     pub optimal: f64,
     pub falloff: f64,
+    /// Turret tracking speed (rad/s). 0 for missiles and non-weapon modules
+    /// (neuts, webs, damps) — used to distinguish DPS weapons from utility.
+    pub tracking: f64,
 }
 
 /// Dogma-engine read of a reconstructed fit, at all-V (skills unknown), so
@@ -432,6 +435,7 @@ fn analysis_from_stats(
             name: name_of(w.type_id),
             optimal: w.optimal,
             falloff: w.falloff,
+            tracking: w.tracking,
         })
         .collect();
     let dps = stats.dps.as_ref();

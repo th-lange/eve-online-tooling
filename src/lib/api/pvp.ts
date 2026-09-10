@@ -70,6 +70,8 @@ export interface WeaponLine {
   /** Optimal range (m); for missiles this is flight range (falloff 0). */
   optimal: number;
   falloff: number;
+  /** Turret tracking (rad/s); 0 for missiles and non-weapon modules. */
+  tracking: number;
 }
 
 /** All-V dogma read of a fit: tank, damage, tackle range, speed. Upper-bound estimate. */

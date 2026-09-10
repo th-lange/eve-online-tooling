@@ -50,7 +50,7 @@ const FITS: LostFit[] = [
       maxVelocity: 3200,
       hasProp: true,
       lockRange: 60000,
-      weapons: [{ name: "200mm AutoCannon II", optimal: 2000, falloff: 6000 }],
+      weapons: [{ name: "200mm AutoCannon II", optimal: 2000, falloff: 6000, tracking: 0.18 }],
     },
   },
 ];
