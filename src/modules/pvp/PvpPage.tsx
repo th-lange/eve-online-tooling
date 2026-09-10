@@ -15,6 +15,11 @@ import { Stat } from "../../components/Stat";
 import { useNavigate } from "react-router-dom";
 import { openFitInFitting } from "../../lib/deepLink";
 import { useCopyToClipboard } from "../../lib/useCopyToClipboard";
+import {
+  classifyArchetype,
+  ARCHETYPE_LABEL,
+  ARCHETYPE_CLASS,
+} from "../../lib/shipArchetype";
 
 /** Compact ISK (52.3B, 1.4M) for the dense stat grid. */
 function iskShort(n: number): string {
@@ -158,7 +163,27 @@ function FitView({ fit, community }: { fit: LostFit; community?: boolean }) {
                 )}
               </span>
             )}
+            {fit.analysis.lockRange > 0 && (
+              <span>
+                Lock{" "}
+                <span className="text-zinc-200">
+                  {km(fit.analysis.lockRange)}
+                </span>
+              </span>
+            )}
           </div>
+          {(() => {
+            const arch = classifyArchetype(fit.analysis.weapons);
+            return arch ? (
+              <div className="mt-1.5">
+                <span
+                  className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${ARCHETYPE_CLASS[arch]}`}
+                >
+                  {ARCHETYPE_LABEL[arch]}
+                </span>
+              </div>
+            ) : null;
+          })()}
           {fit.analysis.weapons.length > 0 && (
             <div className="mt-1 flex flex-col gap-0.5">
               {fit.analysis.weapons.map((w, i) => (

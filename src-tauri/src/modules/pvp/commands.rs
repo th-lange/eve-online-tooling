@@ -249,6 +249,8 @@ pub struct FitAnalysis {
     /// True when at least one afterburner or MWD is fitted; `max_velocity`
     /// already reflects the boost.
     pub has_prop: bool,
+    /// Target lock range (m) from the dogma engine.
+    pub lock_range: f64,
     pub weapons: Vec<WeaponLine>,
 }
 
@@ -447,6 +449,11 @@ fn analysis_from_stats(
         .as_ref()
         .map(|n| n.max_velocity)
         .unwrap_or(0.0);
+    let lock_range = stats
+        .targeting
+        .as_ref()
+        .map(|t| t.lock_range)
+        .unwrap_or(0.0);
     FitAnalysis {
         ehp: stats.tank.as_ref().map(|t| t.ehp).unwrap_or(0.0),
         dps_total: dps.map(|d| d.total).unwrap_or(0.0),
@@ -456,6 +463,7 @@ fn analysis_from_stats(
         scram_range,
         max_velocity,
         has_prop,
+        lock_range,
         weapons,
     }
 }

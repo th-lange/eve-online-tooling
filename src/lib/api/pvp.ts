@@ -85,6 +85,8 @@ export interface FitAnalysis {
   maxVelocity: number;
   /** True when the fit has at least one afterburner or MWD. */
   hasProp: boolean;
+  /** Target lock range (m). */
+  lockRange: number;
   weapons: WeaponLine[];
 }
 

@@ -6,6 +6,12 @@ import {
   type FleetBoost,
 } from "../../lib/api";
 import { formatDuration, formatInt, formatIsk } from "../../lib/format";
+import { km } from "./fitHelpers";
+import {
+  classifyArchetype,
+  ARCHETYPE_LABEL,
+  ARCHETYPE_CLASS,
+} from "../../lib/shipArchetype";
 import {
   CapGauge,
   DpsRangeCurve,
@@ -42,6 +48,7 @@ function Vitals({
   const ehp = stats.tank?.ehp ?? null;
   const cap = stats.capacitor ?? null;
   const speed = stats.navigation?.maxVelocity ?? null;
+  const archetype = classifyArchetype(stats.weaponRanges ?? []);
 
   const capTone: "good" | "warn" | "bad" | "neutral" = !cap
     ? "neutral"
@@ -85,6 +92,15 @@ function Vitals({
         label="Speed"
         value={speed == null ? "—" : `${Math.round(speed)} m/s`}
       />
+      {archetype && (
+        <div className="col-span-2 mt-0.5">
+          <span
+            className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${ARCHETYPE_CLASS[archetype]}`}
+          >
+            {ARCHETYPE_LABEL[archetype]}
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -379,6 +395,9 @@ export function StatsAside({
               {Math.round(stats.data.navigation.maxVelocity)} m/s · align{" "}
               {stats.data.navigation.alignTime.toFixed(1)}s · sig{" "}
               {Math.round(stats.data.navigation.signatureRadius)}m
+              {stats.data.targeting?.lockRange
+                ? ` · lock ${km(stats.data.targeting.lockRange)}`
+                : ""}
             </div>
           </div>
         )}
