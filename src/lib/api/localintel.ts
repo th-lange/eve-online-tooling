@@ -79,3 +79,40 @@ export function localintelSetWatchlist(
 ): Promise<WatchEntry[]> {
   return invoke<WatchEntry[]>("localintel_set_watchlist", { id, name, add });
 }
+
+export interface SystemKillModule {
+  name: string;
+  slot: string;
+  quantity: number;
+}
+
+export interface SystemKillVictim {
+  characterId: number;
+  characterName: string;
+  corporationName: string;
+  shipTypeId: number;
+  shipName: string;
+  modules: SystemKillModule[];
+}
+
+export interface SystemKillAttacker {
+  characterId: number;
+  characterName: string;
+  corporationName: string;
+  shipTypeId: number;
+  shipName: string;
+  finalBlow: boolean;
+}
+
+export interface SystemKill {
+  killmailId: number;
+  time: string;
+  totalValue: number;
+  victim: SystemKillVictim;
+  attackers: SystemKillAttacker[];
+}
+
+/** Recent kills in the given solar system (up to 25, newest first). */
+export function localintelSystemKills(systemId: number): Promise<SystemKill[]> {
+  return invoke<SystemKill[]>("localintel_system_kills", { systemId });
+}

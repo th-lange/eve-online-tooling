@@ -169,6 +169,9 @@ pub struct ZkillLossRef {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ZkillZkb {
     pub hash: String,
+    /// ISK value of the kill, as estimated by zKillboard.
+    #[serde(default, rename = "totalValue")]
+    pub total_value: f64,
 }
 
 async fn fetch_losses(url: String) -> Vec<ZkillLossRef> {
@@ -185,6 +188,14 @@ pub async fn losses_for_character(character_id: i64) -> Vec<ZkillLossRef> {
 /// Recent community losses of one ship type, newest first.
 pub async fn losses_for_ship_type(type_id: i64) -> Vec<ZkillLossRef> {
     fetch_losses(losses_by_ship_type_url(type_id)).await
+}
+
+/// Recent kills in one solar system, newest first.
+pub async fn kills_for_system(system_id: i64) -> Vec<ZkillLossRef> {
+    fetch_losses(format!(
+        "https://zkillboard.com/api/kills/solarSystemID/{system_id}/"
+    ))
+    .await
 }
 
 #[cfg(test)]

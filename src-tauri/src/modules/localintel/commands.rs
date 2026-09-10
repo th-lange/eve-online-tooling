@@ -499,6 +499,257 @@ pub fn localintel_set_watchlist(
     Ok(list)
 }
 
+// --------------------------------------------------------------- System kills
+
+/// How many recent kills to fetch per system.
+const SYSTEM_KILLS_CAP: usize = 25;
+/// Killmails are immutable — cache effectively forever.
+const SYSTEM_KILL_TTL_SECS: u64 = 60 * 60 * 24 * 3650;
+
+/// Full killmail from ESI, including attackers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FullKillmail {
+    killmail_id: i64,
+    #[serde(default)]
+    killmail_time: String,
+    victim: FullVictim,
+    #[serde(default)]
+    attackers: Vec<FullAttacker>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FullVictim {
+    #[serde(default)]
+    character_id: i64,
+    #[serde(default)]
+    ship_type_id: i64,
+    #[serde(default)]
+    corporation_id: i64,
+    #[serde(default)]
+    items: Vec<KillmailItem>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FullAttacker {
+    #[serde(default)]
+    character_id: i64,
+    #[serde(default)]
+    ship_type_id: i64,
+    #[serde(default)]
+    corporation_id: i64,
+    #[serde(default)]
+    final_blow: bool,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct KillmailItem {
+    item_type_id: i64,
+    flag: i64,
+    #[serde(default)]
+    quantity_destroyed: i64,
+    #[serde(default)]
+    quantity_dropped: i64,
+}
+
+/// Which display slot a killmail item flag maps to, or None for non-fit cargo.
+fn flag_slot(flag: i64) -> Option<&'static str> {
+    match flag {
+        11..=18 => Some("low"),
+        19..=26 => Some("mid"),
+        27..=34 => Some("high"),
+        92..=99 => Some("rig"),
+        125..=132 => Some("subsystem"),
+        159 => Some("drone"),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemKillModule {
+    pub name: String,
+    pub slot: String,
+    pub quantity: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemKillVictim {
+    pub character_id: i64,
+    pub character_name: String,
+    pub corporation_name: String,
+    pub ship_type_id: i64,
+    pub ship_name: String,
+    pub modules: Vec<SystemKillModule>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemKillAttacker {
+    pub character_id: i64,
+    pub character_name: String,
+    pub corporation_name: String,
+    pub ship_type_id: i64,
+    pub ship_name: String,
+    pub final_blow: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemKill {
+    pub killmail_id: i64,
+    pub time: String,
+    pub total_value: f64,
+    pub victim: SystemKillVictim,
+    pub attackers: Vec<SystemKillAttacker>,
+}
+
+/// Recent kills in the given solar system (newest first, up to 25).
+/// Fetches kill refs from zKillboard, then each killmail from public ESI
+/// (permanent cache). Resolves character, corp and ship names in one batch.
+#[tauri::command]
+pub async fn localintel_system_kills(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+    system_id: i64,
+) -> Result<Vec<SystemKill>, String> {
+    let dir = storage::app_data_dir(&app)?;
+    let http = auth_state.http();
+    let sde = crate::sde::open_from_app(&app)?;
+
+    // Pull recent kill refs from zKillboard.
+    let refs: Vec<zkill::ZkillLossRef> = zkill::kills_for_system(system_id)
+        .await
+        .into_iter()
+        .take(SYSTEM_KILLS_CAP)
+        .collect();
+    if refs.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Fetch each killmail from ESI (permanent cache; killmails never change).
+    let mut kms: Vec<(FullKillmail, f64)> = Vec::new();
+    for r in refs {
+        let total_value = r.zkb.total_value;
+        let key = format!("localintel_km_{}", r.killmail_id);
+        let km: Option<FullKillmail> = if let Some(cached) = storage::cache_get(&dir, &key) {
+            Some(cached)
+        } else {
+            let fetched: Option<FullKillmail> =
+                crate::esi::fetch_killmail(&http, r.killmail_id, &r.zkb.hash).await;
+            if let Some(ref k) = fetched {
+                let _ = storage::cache_put(&dir, &key, k, SYSTEM_KILL_TTL_SECS);
+            }
+            fetched
+        };
+        if let Some(km) = km {
+            kms.push((km, total_value));
+        }
+    }
+
+    // Collect all entity IDs for bulk name resolution.
+    let mut entity_ids: Vec<i64> = Vec::new();
+    let mut type_ids: Vec<i64> = Vec::new();
+    for (km, _) in &kms {
+        if km.victim.character_id > 0 {
+            entity_ids.push(km.victim.character_id);
+        }
+        if km.victim.corporation_id > 0 {
+            entity_ids.push(km.victim.corporation_id);
+        }
+        if km.victim.ship_type_id > 0 {
+            type_ids.push(km.victim.ship_type_id);
+        }
+        for item in &km.victim.items {
+            if flag_slot(item.flag).is_some() {
+                type_ids.push(item.item_type_id);
+            }
+        }
+        for att in &km.attackers {
+            if att.character_id > 0 {
+                entity_ids.push(att.character_id);
+            }
+            if att.corporation_id > 0 {
+                entity_ids.push(att.corporation_id);
+            }
+            if att.ship_type_id > 0 {
+                type_ids.push(att.ship_type_id);
+            }
+        }
+    }
+    entity_ids.sort_unstable();
+    entity_ids.dedup();
+    type_ids.sort_unstable();
+    type_ids.dedup();
+    type_ids.retain(|id| *id > 0);
+
+    // Character + corp names from ESI; ship/module names from SDE.
+    let names = resolve_names(&auth_state, &entity_ids).await;
+    let type_names = sde.type_name_map(&type_ids).map_err(|e| e.to_string())?;
+    let name = |id: i64| names.get(&id).cloned().unwrap_or_default();
+    let type_name = |id: i64| type_names.get(id);
+
+    // Aggregate items by (type_id, slot) so duplicate modules stack.
+    fn aggregate_modules(
+        items: &[KillmailItem],
+        type_name: &impl Fn(i64) -> String,
+    ) -> Vec<SystemKillModule> {
+        let mut agg: HashMap<(i64, &'static str), i64> = HashMap::new();
+        for it in items {
+            let Some(slot) = flag_slot(it.flag) else { continue };
+            *agg.entry((it.item_type_id, slot)).or_default() +=
+                (it.quantity_destroyed + it.quantity_dropped).max(1);
+        }
+        let order = ["high", "mid", "low", "rig", "subsystem", "drone"];
+        let mut mods: Vec<SystemKillModule> = agg
+            .into_iter()
+            .map(|((tid, slot), qty)| SystemKillModule {
+                name: type_name(tid),
+                slot: slot.to_string(),
+                quantity: qty,
+            })
+            .collect();
+        mods.sort_by_key(|m| {
+            (
+                order.iter().position(|&s| s == m.slot).unwrap_or(99),
+                m.name.clone(),
+            )
+        });
+        mods
+    }
+
+    let mut result = Vec::with_capacity(kms.len());
+    for (km, total_value) in kms {
+        let modules = aggregate_modules(&km.victim.items, &type_name);
+        let victim = SystemKillVictim {
+            character_id: km.victim.character_id,
+            character_name: name(km.victim.character_id),
+            corporation_name: name(km.victim.corporation_id),
+            ship_type_id: km.victim.ship_type_id,
+            ship_name: type_name(km.victim.ship_type_id),
+            modules,
+        };
+        let attackers = km
+            .attackers
+            .iter()
+            .filter(|a| a.ship_type_id > 0)
+            .map(|a| SystemKillAttacker {
+                character_id: a.character_id,
+                character_name: name(a.character_id),
+                corporation_name: name(a.corporation_id),
+                ship_type_id: a.ship_type_id,
+                ship_name: type_name(a.ship_type_id),
+                final_blow: a.final_blow,
+            })
+            .collect();
+        result.push(SystemKill {
+            killmail_id: km.killmail_id,
+            time: km.killmail_time,
+            total_value,
+            victim,
+            attackers,
+        });
+    }
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
