@@ -25,19 +25,18 @@ export interface ArchetypeWeapon {
 }
 
 /**
- * Classify a fit's archetype from its weapon lines. Returns null when the
- * range falls in a gap, exceeds the kiter ceiling, or no DPS weapons are
- * present.
+ * Classify a fit's archetype from its weapon lines. Returns null when no
+ * turret weapons are present or the range falls outside a defined band.
  *
- * Only turrets (tracking > 0) and missiles/smartbombs (falloff === 0) are
- * considered. Utility modules that also carry a maxRange (neuts, webs, damps,
- * remote reps) have falloff > 0 and no tracking — they are skipped.
+ * Only turrets (tracking > 0 AND falloff > 0) are considered. Missiles have
+ * no falloff (flight range only), so `optimal + falloff/2` is meaningless for
+ * them. Neuts, webs, and damps are excluded by the tracking check.
  */
 export function classifyArchetype(
   weapons: ArchetypeWeapon[],
 ): Archetype | null {
   const dps = weapons.filter(
-    (w) => (w.tracking ?? 0) > 0 || w.falloff === 0,
+    (w) => (w.tracking ?? 0) > 0 && w.falloff > 0,
   );
   if (dps.length === 0) return null;
   const maxRange = Math.max(...dps.map((w) => w.optimal + w.falloff / 2));
