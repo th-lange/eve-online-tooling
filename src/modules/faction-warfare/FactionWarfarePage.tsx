@@ -14,13 +14,18 @@ import {
   type FwMap,
   type FwSystemNode,
 } from "../../lib/api";
-import { formatInt } from "../../lib/format";
+import { formatInt, sortRows } from "../../lib/format";
 import {
   SystemGraph,
   type SystemGraphNode,
   type SystemGraphEdge,
 } from "../../components/SystemGraph";
 import { Page, PageHeader } from "../../components/page";
+import {
+  SortHeaderCell,
+  type SortColumn,
+} from "../../components/SortHeaderCell";
+import { usePersistentSort } from "../../lib/usePersistentSort";
 
 /** Militia faction id → accent hex, used for the map + legend. */
 const FACTION_HEX: Record<number, string> = {
@@ -62,6 +67,46 @@ const CONTEST_RGB: Record<string, [number, number, number]> = {
 };
 /** Colour the background deepens toward as a system's kills rise. */
 const HEAT_RGB: [number, number, number] = [200, 32, 32];
+
+/** Numeric rank for sorting contested state: uncontested → captured. */
+const CONTEST_RANK: Record<string, number> = {
+  uncontested: 0,
+  contested: 1,
+  vulnerable: 2,
+  captured: 3,
+};
+
+type FwSortKey =
+  | "name"
+  | "region"
+  | "occupier"
+  | "contestedRank"
+  | "vpPct"
+  | "kills"
+  | "jumps"
+  | "hops";
+
+const FW_SORT_KEYS: readonly FwSortKey[] = [
+  "name",
+  "region",
+  "occupier",
+  "contestedRank",
+  "vpPct",
+  "kills",
+  "jumps",
+  "hops",
+];
+
+const FW_COLUMNS: SortColumn<FwSortKey>[] = [
+  { key: "name",          label: "System",       numeric: false, description: "Solar system name" },
+  { key: "region",        label: "Region",       numeric: false, description: "Region the system belongs to" },
+  { key: "occupier",      label: "Controlled by",numeric: false, description: "Faction currently occupying this system" },
+  { key: "contestedRank", label: "State",        numeric: false, description: "Contest state: uncontested → contested → vulnerable → captured" },
+  { key: "vpPct",         label: "Capture",      numeric: true,  description: "Victory-point capture progress (% toward flip)" },
+  { key: "kills",         label: "Kills 1h",     numeric: true,  description: "Ship kills in the last hour" },
+  { key: "jumps",         label: "Jumps 1h",     numeric: true,  description: "Stargate jumps through this system in the last hour" },
+  { key: "hops",          label: "Dist.",        numeric: true,  description: "Shortest stargate route from your current location" },
+];
 
 /**
  * A tile's solid background: the contest-state base, deepened toward red as the
@@ -233,6 +278,30 @@ function Warzone({ data, zone }: { data: FwMap; zone: string }) {
   );
   const ids = useMemo(() => new Set(systems.map((s) => s.systemId)), [systems]);
 
+  // Auth: needed for jump distances + waypoint button in the table.
+  const characters = useQuery({
+    queryKey: ["auth", "characters"],
+    queryFn: authCharacters,
+  });
+  const hasCharacter = (characters.data?.length ?? 0) > 0;
+  const activeChar = useQuery({
+    queryKey: ["auth", "active"],
+    queryFn: activeCharacter,
+    enabled: hasCharacter,
+  });
+  // Jump distances from the active character's location to every system in this
+  // warzone. Polled every 90 s so the map updates as the character moves.
+  const systemIds = useMemo(() => systems.map((s) => s.systemId), [systems]);
+  const jumpResult = useQuery<FwJumpResult>({
+    queryKey: ["intel", "fw-jumps", systemIds],
+    queryFn: () => intelFwJumps(systemIds),
+    enabled: !!activeChar.data,
+    staleTime: 90_000,
+    refetchInterval: 90_000,
+  });
+  const dist = jumpResult.data?.jumps ?? {};
+  const characterSystemId = jumpResult.data?.characterSystemId ?? null;
+
   // Lay the tiles out as a top-down star map from real galactic X/Z coords
   // (x → horizontal, z → vertical, flipped so north is up), scaled to fit.
   const graphNodes: SystemGraphNode[] = useMemo(() => {
@@ -259,22 +328,29 @@ function Warzone({ data, zone }: { data: FwMap; zone: string }) {
     );
     return systems.map((n) => {
       const p = placed.get(String(n.systemId)) ?? { x: 0, y: 0 };
+      const hops = dist[String(n.systemId)];
+      const isCurrent = n.systemId === characterSystemId;
       return {
         id: String(n.systemId),
         label: n.name,
         kind: "lowsec" as const,
         sub: `${n.security.toFixed(1)}${
           n.contested !== "uncontested" ? ` · ${n.contested}` : ""
-        }${n.kills > 0 ? ` · ${n.kills} kills` : ""}`,
+        }${n.kills > 0 ? ` · ${n.kills} kills` : ""}${
+          hops != null
+            ? ` · ${isCurrent ? "here" : `${hops}j`}`
+            : ""
+        }`,
         accent: FACTION_HEX[n.occupierId] ?? "#a1a1aa",
         ring: CONTEST_RING[n.contested],
         bg: tileBg(n.contested, n.kills, maxKills),
+        current: isCurrent,
         group: n.region,
         x: p.x,
         y: p.y,
       };
     });
-  }, [systems]);
+  }, [systems, dist, characterSystemId]);
   const graphEdges: SystemGraphEdge[] = data.edges
     .filter(([a, b]) => ids.has(a) && ids.has(b))
     .map(([a, b]) => ({
@@ -292,7 +368,9 @@ function Warzone({ data, zone }: { data: FwMap; zone: string }) {
 
   return (
     <div className="mt-4">
-      <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-zinc-400">
+      <SystemTable systems={systems} dist={dist} hasCharacter={hasCharacter} />
+
+      <div className="mt-4 mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-zinc-400">
         <span>{systems.length} systems</span>
         {factions.map(([id, name]) => (
           <span key={id} className="flex items-center gap-1.5">
@@ -331,58 +409,59 @@ function Warzone({ data, zone }: { data: FwMap; zone: string }) {
           storageKey={`fw-map3-${zone}`}
         />
       </div>
-
-      <SystemTable systems={systems} />
     </div>
   );
 }
 
-function SystemTable({ systems }: { systems: FwSystemNode[] }) {
-  const characters = useQuery({
-    queryKey: ["auth", "characters"],
-    queryFn: authCharacters,
-  });
-  const hasCharacter = (characters.data?.length ?? 0) > 0;
+function SystemTable({
+  systems,
+  dist,
+  hasCharacter,
+}: {
+  systems: FwSystemNode[];
+  /** Hop counts keyed by String(systemId), from the active character's location. */
+  dist: Record<string, number>;
+  hasCharacter: boolean;
+}) {
+  const { sortKey, sortDir, toggleSort } = usePersistentSort<FwSortKey>(
+    "sort.fw-systems",
+    FW_SORT_KEYS,
+    "name",
+    "asc",
+    ["name", "region", "occupier"],
+  );
 
-  const activeChar = useQuery({
-    queryKey: ["auth", "active"],
-    queryFn: activeCharacter,
-    enabled: hasCharacter,
-  });
-  // Jump distances from the character's current location to every visible
-  // FW system. Polled every 90 s so it updates as the character moves.
-  const systemIds = systems.map((s) => s.systemId);
-  const jumpResult = useQuery<FwJumpResult>({
-    queryKey: ["intel", "fw-jumps", systemIds],
-    queryFn: () => intelFwJumps(systemIds),
-    enabled: !!activeChar.data,
-    staleTime: 90_000,
-    refetchInterval: 90_000,
-  });
-  const dist = jumpResult.data?.jumps ?? {};
+  // Augment rows with sort-friendly scalar fields, then sort.
+  const rows = useMemo(() => {
+    type AugRow = FwSystemNode & { contestedRank: number; hops: number | null };
+    const augmented: AugRow[] = systems.map((s) => ({
+      ...s,
+      contestedRank: CONTEST_RANK[s.contested] ?? 0,
+      hops: dist[String(s.systemId)] ?? null,
+    }));
+    return sortRows(augmented, sortKey, sortDir, {
+      nullsLast: sortKey === "hops",
+    });
+  }, [systems, dist, sortKey, sortDir]);
 
   return (
-    <div className="mt-4 overflow-auto rounded-lg border border-zinc-800">
+    <div className="overflow-auto rounded-lg border border-zinc-800">
       <table className="w-full border-collapse text-sm">
-        <thead className="bg-zinc-900 text-zinc-400">
+        <thead className="bg-zinc-900">
           <tr>
-            <th className="px-3 py-1.5 text-left font-medium">System</th>
-            <th className="px-3 py-1.5 text-left font-medium">Region</th>
-            <th className="px-3 py-1.5 text-left font-medium">Controlled by</th>
-            <th className="px-3 py-1.5 text-left font-medium">State</th>
-            <th className="px-3 py-1.5 text-right font-medium">Capture</th>
-            <th className="px-3 py-1.5 text-right font-medium">Kills 1h</th>
-            <th className="px-3 py-1.5 text-right font-medium">Jumps 1h</th>
-            <th
-              className="px-3 py-1.5 text-right font-medium"
-              title="Shortest stargate route from your current location"
-            >
-              Dist.
-            </th>
+            {FW_COLUMNS.map((col) => (
+              <SortHeaderCell
+                key={col.key}
+                column={col}
+                active={sortKey === col.key}
+                dir={sortDir}
+                onClick={toggleSort}
+              />
+            ))}
           </tr>
         </thead>
         <tbody>
-          {systems.map((s) => (
+          {rows.map((s) => (
             <tr
               key={s.systemId}
               className="border-t border-zinc-800 text-zinc-300"
@@ -460,10 +539,10 @@ function SystemTable({ systems }: { systems: FwSystemNode[] }) {
                 {s.jumps > 0 ? formatInt(s.jumps) : "—"}
               </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {dist[String(s.systemId)] != null
-                  ? dist[String(s.systemId)] === 0
+                {s.hops != null
+                  ? s.hops === 0
                     ? "here"
-                    : formatInt(dist[String(s.systemId)]!)
+                    : formatInt(s.hops)
                   : "—"}
               </td>
             </tr>
