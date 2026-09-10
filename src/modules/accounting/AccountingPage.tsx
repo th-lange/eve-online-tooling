@@ -1,8 +1,11 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   profitFifo,
+  transactionLedger,
   walletSync,
+  type LedgerRow,
+  type LedgerView,
   type ProfitView,
   type WalletView,
 } from "../../lib/api";
@@ -20,8 +23,9 @@ import {
 } from "../../components/SortHeaderCell";
 import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { Stat } from "../../components/Stat";
+import { useDebouncedValue } from "../../lib/useDebouncedValue";
 
-type Tab = "wallet" | "profit";
+type Tab = "wallet" | "profit" | "transactions";
 
 const TITLE = "Accounting";
 const SUBTITLE =
@@ -31,6 +35,7 @@ export function AccountingPage() {
   const [tab, setTab] = useState<Tab>("wallet");
   const wallet = useMutation({ mutationFn: walletSync });
   const profit = useMutation({ mutationFn: profitFifo });
+  const ledger = useMutation({ mutationFn: transactionLedger });
 
   return (
     <Page>
@@ -39,11 +44,13 @@ export function AccountingPage() {
         subtitle={SUBTITLE}
         actions={
           <PrimaryButton
-            onClick={() =>
-              tab === "wallet" ? wallet.mutate() : profit.mutate()
-            }
-            disabled={wallet.isPending || profit.isPending}
-            pending={wallet.isPending || profit.isPending}
+            onClick={() => {
+              if (tab === "wallet") wallet.mutate();
+              else if (tab === "profit") profit.mutate();
+              else ledger.mutate();
+            }}
+            disabled={wallet.isPending || profit.isPending || ledger.isPending}
+            pending={wallet.isPending || profit.isPending || ledger.isPending}
             pendingLabel="Syncing…"
           >
             Sync
@@ -52,7 +59,13 @@ export function AccountingPage() {
       />
 
       <div className="mt-4 inline-flex rounded border border-zinc-800 bg-zinc-900 p-0.5">
-        {(["wallet", "profit"] as Tab[]).map((t) => (
+        {(
+          [
+            ["wallet", "Wallet"],
+            ["profit", "Profit (FIFO)"],
+            ["transactions", "Transactions"],
+          ] as [Tab, string][]
+        ).map(([t, label]) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -62,7 +75,7 @@ export function AccountingPage() {
                 : "text-zinc-400 hover:text-zinc-200"
             }`}
           >
-            {t === "wallet" ? "Wallet" : "Profit (FIFO)"}
+            {label}
           </button>
         ))}
       </div>
@@ -81,20 +94,33 @@ export function AccountingPage() {
           ) : (
             <Hint>Hit Sync to pull and accumulate your wallet.</Hint>
           )
-        ) : profit.isError ? (
+        ) : tab === "profit" ? (
+          profit.isError ? (
+            <QueryErrorNotice
+              error={profit.error}
+              loginMessage="Log in a character first to view your wallet."
+              scopeHint="check the wallet scope is enabled on your EVE app."
+              className="p-6 text-sm"
+            />
+          ) : profit.data ? (
+            <Profit d={profit.data} />
+          ) : (
+            <Hint>
+              Hit Sync (on the Wallet tab first) to compute realized profit from
+              your transactions.
+            </Hint>
+          )
+        ) : ledger.isError ? (
           <QueryErrorNotice
-            error={profit.error}
-            loginMessage="Log in a character first to view your wallet."
+            error={ledger.error}
+            loginMessage="Log in a character first to view your transactions."
             scopeHint="check the wallet scope is enabled on your EVE app."
             className="p-6 text-sm"
           />
-        ) : profit.data ? (
-          <Profit d={profit.data} />
+        ) : ledger.data ? (
+          <Transactions d={ledger.data} />
         ) : (
-          <Hint>
-            Hit Sync (on the Wallet tab first) to compute realized profit from
-            your transactions.
-          </Hint>
+          <Hint>Hit Sync to pull your buy/sell transaction history.</Hint>
         )}
       </div>
     </Page>
@@ -382,5 +408,207 @@ function Head<K extends string>({
 function Hint({ children }: { children: React.ReactNode }) {
   return (
     <div className="p-8 text-center text-sm text-zinc-500">{children}</div>
+  );
+}
+
+// ---------------------------------------------------------------- Transactions
+
+type LedgerSortKey = "date" | "name" | "quantity" | "unitPrice" | "total";
+const LEDGER_COLUMNS: SortColumn<LedgerSortKey>[] = [
+  {
+    key: "date",
+    label: "Date",
+    numeric: false,
+    description: "When the transaction occurred (UTC).",
+  },
+  {
+    key: "name",
+    label: "Item",
+    numeric: false,
+    description: "The item bought or sold.",
+  },
+  {
+    key: "quantity",
+    label: "Qty",
+    numeric: true,
+    description: "Number of units in this fill.",
+  },
+  {
+    key: "unitPrice",
+    label: "Unit price",
+    numeric: true,
+    description: "ISK per unit.",
+  },
+  {
+    key: "total",
+    label: "Total ISK",
+    numeric: true,
+    description: "Total ISK moved (quantity × unit price).",
+  },
+];
+const LEDGER_KEYS = LEDGER_COLUMNS.map((c) => c.key);
+
+/** ISO date N months before now, for date-range filtering. */
+function cutoffIso(months: number): string {
+  const d = new Date();
+  d.setMonth(d.getMonth() - months);
+  return d.toISOString();
+}
+
+const MONTH_OPTIONS: { label: string; months: number | null }[] = [
+  { label: "1 m", months: 1 },
+  { label: "3 m", months: 3 },
+  { label: "6 m", months: 6 },
+  { label: "12 m", months: 12 },
+  { label: "All", months: null },
+];
+
+function Transactions({ d }: { d: LedgerView }) {
+  const [search, setSearch] = useState("");
+  const [side, setSide] = useState<"all" | "buy" | "sell">("all");
+  const [months, setMonths] = useState<number | null>(3);
+  const query = useDebouncedValue(search.trim().toLowerCase());
+
+  const sort = usePersistentSort<LedgerSortKey>(
+    "sort.transactions",
+    LEDGER_KEYS,
+    "date",
+    "desc",
+    ["date", "name"],
+  );
+
+  const { rows, totalBuy, totalSell } = useMemo(() => {
+    const cutoff = months != null ? cutoffIso(months) : null;
+    let filtered = d.rows.filter((r: LedgerRow) => {
+      if (cutoff && r.date < cutoff) return false;
+      if (side === "buy" && !r.isBuy) return false;
+      if (side === "sell" && r.isBuy) return false;
+      if (query && !r.name.toLowerCase().includes(query)) return false;
+      return true;
+    });
+    filtered = sortRows(filtered, sort.sortKey, sort.sortDir);
+    let totalBuy = 0;
+    let totalSell = 0;
+    for (const r of filtered) {
+      if (r.isBuy) totalBuy += r.total;
+      else totalSell += r.total;
+    }
+    return { rows: filtered, totalBuy, totalSell };
+  }, [d.rows, months, side, query, sort.sortKey, sort.sortDir]);
+
+  return (
+    <div>
+      {/* Filters */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search item…"
+          className="h-8 w-52 rounded border border-zinc-700 bg-zinc-900 px-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-indigo-500 focus:outline-none"
+        />
+        {/* Buy / Sell toggle */}
+        <div className="flex overflow-hidden rounded border border-zinc-700 text-xs">
+          {(["all", "buy", "sell"] as const).map((s) => (
+            <button
+              key={s}
+              onClick={() => setSide(s)}
+              className={`px-2.5 py-1 capitalize ${
+                side === s
+                  ? "bg-zinc-700 text-zinc-100"
+                  : "text-zinc-400 hover:bg-zinc-800"
+              }`}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+        {/* Date range */}
+        <div className="flex overflow-hidden rounded border border-zinc-700 text-xs">
+          {MONTH_OPTIONS.map((o) => (
+            <button
+              key={o.label}
+              onClick={() => setMonths(o.months)}
+              className={`px-2.5 py-1 ${
+                months === o.months
+                  ? "bg-zinc-700 text-zinc-100"
+                  : "text-zinc-400 hover:bg-zinc-800"
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+        {/* Summary */}
+        <span className="ml-auto text-xs text-zinc-500">
+          {formatInt(rows.length)} rows
+          {side !== "sell" && totalBuy > 0 && (
+            <>
+              {" · "}
+              <span className="text-rose-400">{formatIsk(totalBuy)} bought</span>
+            </>
+          )}
+          {side !== "buy" && totalSell > 0 && (
+            <>
+              {" · "}
+              <span className="text-emerald-400">
+                {formatIsk(totalSell)} sold
+              </span>
+            </>
+          )}
+        </span>
+      </div>
+
+      {/* Table */}
+      <div className="overflow-auto rounded border border-zinc-800">
+        <table className="w-full text-sm">
+          <Head columns={LEDGER_COLUMNS} sort={sort} />
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i} className="border-t border-zinc-800 text-zinc-300">
+                <td className="whitespace-nowrap px-3 py-1.5 text-zinc-400">
+                  {formatEveDateTime(r.date)}
+                </td>
+                <td className="px-3 py-1.5">
+                  <span
+                    className={`mr-1.5 rounded px-1 py-0.5 text-[10px] font-medium uppercase ${
+                      r.isBuy
+                        ? "bg-rose-900/40 text-rose-300"
+                        : "bg-emerald-900/40 text-emerald-300"
+                    }`}
+                  >
+                    {r.isBuy ? "buy" : "sell"}
+                  </span>
+                  {r.name}
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                  {formatInt(r.quantity)}
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                  {formatIsk(r.unitPrice)}
+                </td>
+                <td
+                  className={`px-3 py-1.5 text-right tabular-nums ${
+                    r.isBuy ? "text-rose-300" : "text-emerald-300"
+                  }`}
+                >
+                  {formatIsk(r.total)}
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td
+                  colSpan={5}
+                  className="px-3 py-8 text-center text-zinc-500"
+                >
+                  No transactions match the current filters.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
