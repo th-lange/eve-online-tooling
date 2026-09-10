@@ -66,12 +66,27 @@ export interface LostFit {
 
 /** One weapon's engagement envelope from the dogma engine. */
 export interface WeaponLine {
+  typeId: number;
   name: string;
   /** Optimal range (m); for missiles this is flight range (falloff 0). */
   optimal: number;
   falloff: number;
   /** Turret tracking (rad/s); 0 for missiles and non-weapon modules. */
   tracking: number;
+}
+
+/** T2 ammo variant for a weapon: range + DPS on the given ship (all-V). */
+export interface AmmoLine {
+  typeId: number;
+  name: string;
+  optimal: number;
+  falloff: number;
+  dps: number;
+  /** Damage type fractions (0–1, sum to 1). */
+  em: number;
+  therm: number;
+  kin: number;
+  exp: number;
 }
 
 /** All-V dogma read of a fit: tank, damage, tackle range, speed. Upper-bound estimate. */
@@ -101,4 +116,13 @@ export function pvpPilotFits(characterId: number): Promise<LostFit[]> {
  *  lose — sampled from recent public losses of that ship type. `null` if none. */
 export function pvpTypicalFit(hullTypeId: number): Promise<LostFit | null> {
   return invoke<LostFit | null>("pvp_typical_fit", { hullTypeId });
+}
+
+/** T2 ammo comparison for a weapon: range + DPS per variant, simulated on the
+ *  given ship at all-V. Results are pure SDE/dogma (no network); cache forever. */
+export function pvpWeaponAmmo(
+  weaponTypeId: number,
+  shipTypeId: number,
+): Promise<AmmoLine[]> {
+  return invoke<AmmoLine[]>("pvp_weapon_ammo", { weaponTypeId, shipTypeId });
 }

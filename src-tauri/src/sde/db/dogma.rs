@@ -46,6 +46,41 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Tech II charges usable in `weapon_type_id`: same size/capacity/group
+    /// rules as [`compatible_charges`], restricted to `metaGroupID = 2`.
+    /// Ordered by name. Drives the PVP ammo-comparison tooltip.
+    pub fn t2_charges_for_weapon(
+        &self,
+        weapon_type_id: i64,
+    ) -> Result<Vec<(i64, String)>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT t.typeID, t.typeName
+             FROM invTypes t
+             JOIN invMetaTypes mt ON mt.typeID = t.typeID
+             WHERE t.published = 1
+               AND mt.metaGroupID = 2
+               AND t.groupID IN (
+                 SELECT CAST(valueFloat AS INTEGER) FROM dgmTypeAttributes
+                 WHERE typeID = ?1 AND attributeID IN (604, 605, 606, 609, 610)
+                   AND valueFloat IS NOT NULL
+               )
+               AND t.volume <= COALESCE(
+                 NULLIF((SELECT capacity FROM invTypes WHERE typeID = ?1), 0), 1e30)
+               AND (
+                 (SELECT valueFloat FROM dgmTypeAttributes
+                  WHERE typeID = ?1 AND attributeID = 128) IS NULL
+                 OR (SELECT valueFloat FROM dgmTypeAttributes
+                     WHERE typeID = t.typeID AND attributeID = 128)
+                    = (SELECT valueFloat FROM dgmTypeAttributes
+                       WHERE typeID = ?1 AND attributeID = 128)
+               )
+             ORDER BY t.typeName",
+        )?;
+        let rows =
+            stmt.query_map(params![weapon_type_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// Wormhole-class and Pochven-space "environment beacon" effects a fit
     /// can be sitting in: published `groupID = 920` ("Effect Beacon") types
     /// named "Class N \<effect\> Effects" (wormholes, classes 1–6) or "Weak/Strong

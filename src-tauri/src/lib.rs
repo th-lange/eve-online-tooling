@@ -344,6 +344,7 @@ pub fn run() {
             modules::pvp::commands::pvp_profiles,
             modules::pvp::commands::pvp_pilot_fits,
             modules::pvp::commands::pvp_typical_fit,
+            modules::pvp::commands::pvp_weapon_ammo,
             modules::lpstore::commands::lp_balances,
             modules::lpstore::commands::lp_offers,
             modules::character::commands::character_skills,

@@ -224,6 +224,7 @@ pub struct LostFit {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WeaponLine {
+    pub type_id: i64,
     pub name: String,
     /// Optimal range (m); for missiles this is flight range (falloff 0).
     pub optimal: f64,
@@ -432,6 +433,7 @@ fn analysis_from_stats(
         .weapon_ranges
         .iter()
         .map(|w| WeaponLine {
+            type_id: w.type_id,
             name: name_of(w.type_id),
             optimal: w.optimal,
             falloff: w.falloff,
@@ -641,6 +643,117 @@ pub async fn pvp_typical_fit(
 
     let sde = crate::sde::open_from_app(&app)?;
     Ok(Some(build_lost_fit(&sde, &dir, &km, sampled)))
+}
+
+// --------------------------------------------------------- Ammo comparison
+
+/// One T2 ammo variant's engagement profile and damage breakdown, for the
+/// PVP ammo-comparison tooltip.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AmmoLine {
+    pub type_id: i64,
+    pub name: String,
+    /// Optimal range (m) with this ammo loaded, all-V.
+    pub optimal: f64,
+    pub falloff: f64,
+    /// Total weapon DPS with this ammo on the given ship, all-V.
+    pub dps: f64,
+    /// Damage type fractions 0–1 (`em + therm + kin + exp = 1`), derived from
+    /// the charge's base damage attributes. Useful for colour-coding.
+    pub em: f64,
+    pub therm: f64,
+    pub kin: f64,
+    pub exp: f64,
+}
+
+/// T2 ammo comparison for one weapon: simulate each T2 charge on the actual
+/// ship (all-V) to get range and DPS with ship/module bonuses applied, then
+/// derive damage-type fractions from the charge's base attributes.
+/// Results are pure SDE + dogma — no network — so the frontend caches them
+/// indefinitely (`staleTime: Infinity`).
+#[tauri::command]
+pub async fn pvp_weapon_ammo(
+    app: AppHandle,
+    weapon_type_id: i64,
+    ship_type_id: i64,
+) -> Result<Vec<AmmoLine>, String> {
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
+
+    let charges = sde
+        .t2_charges_for_weapon(weapon_type_id)
+        .map_err(|e| e.to_string())?;
+    if charges.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Batch-load charge damage attributes (EM 114 / Exp 116 / Kin 117 / Therm 118).
+    let charge_ids: Vec<i64> = charges.iter().map(|(id, _)| *id).collect();
+    let charge_attrs = sde
+        .types_attributes_raw(&charge_ids)
+        .map_err(|e| e.to_string())?;
+    let dmg_attr = |type_id: i64, attr: i64| -> f64 {
+        charge_attrs
+            .get(&type_id)
+            .and_then(|a| a.iter().find(|(id, _)| *id == attr))
+            .map(|(_, v)| *v)
+            .unwrap_or(0.0)
+    };
+
+    let mut lines = Vec::with_capacity(charges.len());
+    for (charge_id, charge_name) in charges {
+        // Minimal fit: ship + one weapon in the first high slot with this charge.
+        let fit = Fit {
+            id: String::new(),
+            name: String::new(),
+            ship_type_id,
+            items: vec![FitItem {
+                type_id: weapon_type_id,
+                slot: SlotKind::High,
+                index: 0,
+                state: ModuleState::Active,
+                charge_type_id: Some(charge_id),
+                quantity: 1,
+                active_drones: None,
+            }],
+            projected: Vec::new(),
+        };
+        let Ok(stats) = simulate_fit(
+            &sde, &dir, &fit,
+            &|_| 5.0, // all-V skills
+            None, None, None, None, None, None,
+        ) else {
+            continue;
+        };
+        let Some(wr) = stats.weapon_ranges.first() else {
+            continue;
+        };
+        let dps = stats.dps.as_ref().map(|d| d.total).unwrap_or(0.0);
+
+        // Damage-type fractions from base charge attributes.
+        let em  = dmg_attr(charge_id, 114);
+        let exp = dmg_attr(charge_id, 116);
+        let kin = dmg_attr(charge_id, 117);
+        let therm = dmg_attr(charge_id, 118);
+        let raw_sum = em + exp + kin + therm;
+        let frac = |v: f64| if raw_sum > 0.0 { v / raw_sum } else { 0.0 };
+
+        lines.push(AmmoLine {
+            type_id: charge_id,
+            name: charge_name,
+            optimal: wr.optimal,
+            falloff: wr.falloff,
+            dps,
+            em: frac(em),
+            therm: frac(therm),
+            kin: frac(kin),
+            exp: frac(exp),
+        });
+    }
+
+    // Short range → long range.
+    lines.sort_by(|a, b| a.optimal.partial_cmp(&b.optimal).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(lines)
 }
 
 #[cfg(test)]

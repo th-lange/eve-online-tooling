@@ -5,9 +5,12 @@ import {
   pvpProfiles,
   pvpPilotFits,
   pvpTypicalFit,
+  pvpWeaponAmmo,
   type PvpStats,
   type LostFit,
   type HullUsage,
+  type WeaponLine,
+  type AmmoLine,
 } from "../../lib/api";
 import { formatInt } from "../../lib/format";
 import { Page, PageHeader } from "../../components/page";
@@ -187,17 +190,137 @@ function FitView({ fit, community }: { fit: LostFit; community?: boolean }) {
           {fit.analysis.weapons.length > 0 && (
             <div className="mt-1 flex flex-col gap-0.5">
               {fit.analysis.weapons.map((w, i) => (
-                <div key={`${w.name}-${i}`} className="flex gap-2">
-                  <span className="w-12 shrink-0 text-zinc-600">Range</span>
-                  <span className="text-zinc-300">
-                    {w.name}: {km(w.optimal)}
-                    {w.falloff > 0 ? ` +${km(w.falloff)} falloff` : ""}
-                  </span>
-                </div>
+                <WeaponRow
+                  key={`${w.typeId}-${i}`}
+                  weapon={w}
+                  shipTypeId={fit.hullTypeId}
+                />
               ))}
             </div>
           )}
           <div className="mt-1 text-[10px] text-zinc-600">all-V estimate</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- WeaponRow
+
+/** Damage-type colour for the bar segments. */
+const DMG_CLASS: Record<string, string> = {
+  em: "bg-sky-400",
+  therm: "bg-orange-400",
+  kin: "bg-zinc-400",
+  exp: "bg-amber-400",
+};
+
+function DmgBar({ em, therm, kin, exp }: Pick<AmmoLine, "em" | "therm" | "kin" | "exp">) {
+  const segs = [
+    { key: "em", v: em, label: "EM" },
+    { key: "therm", v: therm, label: "Th" },
+    { key: "kin", v: kin, label: "Kin" },
+    { key: "exp", v: exp, label: "Exp" },
+  ].filter((s) => s.v > 0.01);
+  if (segs.length === 0) return null;
+  return (
+    <div className="flex h-1.5 w-20 overflow-hidden rounded-full">
+      {segs.map((s) => (
+        <div
+          key={s.key}
+          title={`${s.label} ${Math.round(s.v * 100)}%`}
+          className={DMG_CLASS[s.key]}
+          style={{ width: `${s.v * 100}%` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * One weapon line: shows its current range, and on hover fires a lazy query
+ * for T2 ammo variants, expanding an inline comparison table.
+ */
+function WeaponRow({
+  weapon,
+  shipTypeId,
+}: {
+  weapon: WeaponLine;
+  shipTypeId: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const ammo = useQuery({
+    queryKey: ["pvp", "ammo", weapon.typeId, shipTypeId],
+    queryFn: () => pvpWeaponAmmo(weapon.typeId, shipTypeId),
+    enabled: open,
+    staleTime: Infinity,
+  });
+
+  const hasDps = ammo.data?.some((a) => a.dps > 0) ?? false;
+
+  return (
+    <div>
+      <div
+        className="flex gap-2 cursor-pointer select-none"
+        onMouseEnter={() => setOpen(true)}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="w-12 shrink-0 text-zinc-600">Range</span>
+        <span className="text-zinc-300 underline decoration-dotted decoration-zinc-600 underline-offset-2">
+          {weapon.name}: {km(weapon.optimal)}
+          {weapon.falloff > 0 ? ` +${km(weapon.falloff)} falloff` : ""}
+        </span>
+      </div>
+      {open && (
+        <div className="ml-14 mt-1 mb-1">
+          {ammo.isLoading && (
+            <span className="text-[10px] text-zinc-500">Loading ammo…</span>
+          )}
+          {ammo.data && ammo.data.length === 0 && (
+            <span className="text-[10px] text-zinc-600">No T2 ammo found.</span>
+          )}
+          {ammo.data && ammo.data.length > 0 && (
+            <table className="text-[10px] border-collapse">
+              <thead>
+                <tr className="text-zinc-500">
+                  <th className="text-left font-normal pr-3 pb-0.5">Ammo</th>
+                  <th className="text-right font-normal pr-3">Opt</th>
+                  <th className="text-right font-normal pr-3">Falloff</th>
+                  {hasDps && <th className="text-right font-normal pr-3">DPS</th>}
+                  <th className="font-normal">Dmg type</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ammo.data.map((a) => (
+                  <tr
+                    key={a.typeId}
+                    className={`border-t border-zinc-800/60 ${
+                      a.typeId === weapon.typeId
+                        ? "text-zinc-200"
+                        : "text-zinc-400"
+                    }`}
+                  >
+                    <td className="pr-3 py-0.5">
+                      {a.name}
+                      {a.typeId === weapon.typeId && (
+                        <span className="ml-1 text-zinc-600">✓</span>
+                      )}
+                    </td>
+                    <td className="pr-3 text-right tabular-nums">{km(a.optimal)}</td>
+                    <td className="pr-3 text-right tabular-nums">
+                      {a.falloff > 0 ? km(a.falloff) : "—"}
+                    </td>
+                    {hasDps && (
+                      <td className="pr-3 text-right tabular-nums">
+                        {a.dps > 0 ? a.dps.toFixed(0) : "—"}
+                      </td>
+                    )}
+                    <td><DmgBar em={a.em} therm={a.therm} kin={a.kin} exp={a.exp} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
     </div>
