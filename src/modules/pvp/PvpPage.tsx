@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Copy, ExternalLink, SlidersHorizontal } from "lucide-react";
 import {
@@ -15,7 +15,7 @@ import {
 import { formatInt } from "../../lib/format";
 import { Page, PageHeader } from "../../components/page";
 import { Stat } from "../../components/Stat";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { openFitInFitting } from "../../lib/deepLink";
 import { useCopyToClipboard } from "../../lib/useCopyToClipboard";
 import {
@@ -514,10 +514,19 @@ function PilotCard({ p, fitLimit }: { p: PvpStats; fitLimit: number }) {
 }
 
 export function PvpPage() {
-  const [text, setText] = useState("");
+  const location = useLocation();
+  const navPilot =
+    (location.state as { pilotName?: string } | null)?.pilotName ?? "";
+  const [text, setText] = useState(navPilot);
   const [fitLimit, setFitLimit] = useState(5);
   const scan = useMutation({ mutationFn: () => pvpProfiles(text) });
   const result = scan.data;
+
+  // When arriving via attacker-click from Local Intel, auto-scan the pre-filled name.
+  useEffect(() => {
+    if (navPilot && !scan.isPending) scan.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally run once on mount only
 
   return (
     <Page>

@@ -644,6 +644,35 @@ pub async fn localintel_system_kills(
         }
     }
 
+    // Filter to combat-ship victims only: category 6 (Ship), not group 29 (Capsule),
+    // not deployables/structures. Also strip capsule-riding attackers.
+    {
+        const SHIP_CATEGORY: i64 = 6;
+        const CAPSULE_GROUP: i64 = 29;
+        let mut ship_ids: Vec<i64> = kms
+            .iter()
+            .flat_map(|(km, _)| {
+                std::iter::once(km.victim.ship_type_id)
+                    .chain(km.attackers.iter().map(|a| a.ship_type_id))
+            })
+            .filter(|&id| id > 0)
+            .collect();
+        ship_ids.sort_unstable();
+        ship_ids.dedup();
+        let categories = sde.types_categories(&ship_ids).unwrap_or_default();
+        let groups = sde.types_groups(&ship_ids).unwrap_or_default();
+        let is_combat = |id: i64| -> bool {
+            id > 0
+                && categories.get(&id).copied() == Some(SHIP_CATEGORY)
+                && groups.get(&id).copied() != Some(CAPSULE_GROUP)
+        };
+        kms.retain(|(km, _)| is_combat(km.victim.ship_type_id));
+        for (km, _) in &mut kms {
+            km.attackers
+                .retain(|a| a.character_id > 0 && is_combat(a.ship_type_id));
+        }
+    }
+
     // Collect all entity IDs for bulk name resolution.
     let mut entity_ids: Vec<i64> = Vec::new();
     let mut type_ids: Vec<i64> = Vec::new();
