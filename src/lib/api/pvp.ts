@@ -72,7 +72,7 @@ export interface WeaponLine {
   falloff: number;
 }
 
-/** All-V dogma read of a fit: tank, damage, tackle range. Upper-bound estimate. */
+/** All-V dogma read of a fit: tank, damage, tackle range, speed. Upper-bound estimate. */
 export interface FitAnalysis {
   ehp: number;
   dpsTotal: number;
@@ -81,6 +81,10 @@ export interface FitAnalysis {
   dpsDrone: number;
   /** Max warp scramble/disruption range (m), if the fit has tackle. */
   scramRange?: number;
+  /** Max speed (m/s) with all modules active; includes the AB/MWD boost when fitted. */
+  maxVelocity: number;
+  /** True when the fit has at least one afterburner or MWD. */
+  hasProp: boolean;
   weapons: WeaponLine[];
 }
 

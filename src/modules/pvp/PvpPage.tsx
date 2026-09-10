@@ -143,6 +143,21 @@ function FitView({ fit, community }: { fit: LostFit; community?: boolean }) {
                 </span>
               </span>
             )}
+            {fit.analysis.maxVelocity > 0 && (
+              <span>
+                Speed{" "}
+                <span
+                  className={
+                    fit.analysis.hasProp ? "text-sky-300" : "text-zinc-200"
+                  }
+                >
+                  {formatInt(Math.round(fit.analysis.maxVelocity))} m/s
+                </span>
+                {fit.analysis.hasProp && (
+                  <span className="text-zinc-500"> prop</span>
+                )}
+              </span>
+            )}
           </div>
           {fit.analysis.weapons.length > 0 && (
             <div className="mt-1 flex flex-col gap-0.5">

@@ -243,6 +243,12 @@ pub struct FitAnalysis {
     /// Max warp scramble/disruption range (m) across the fit's tackle, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scram_range: Option<f64>,
+    /// Max speed (m/s) with all modules active — includes the AB/MWD boost
+    /// when one is fitted (the killmail reconstruction sets all modules Active).
+    pub max_velocity: f64,
+    /// True when at least one afterburner or MWD is fitted; `max_velocity`
+    /// already reflects the boost.
+    pub has_prop: bool,
     pub weapons: Vec<WeaponLine>,
 }
 
@@ -427,6 +433,20 @@ fn analysis_from_stats(
         })
         .collect();
     let dps = stats.dps.as_ref();
+    // Prop detection: any type with both speedFactor (20) and speedBoostFactor
+    // (567) is an AB or MWD. The killmail fit sets all modules Active, so
+    // `stats.navigation.max_velocity` already includes the boost.
+    let has_prop = fit.items.iter().any(|it| {
+        attrs.get(&it.type_id).is_some_and(|a| {
+            a.iter().any(|(id, v)| *id == 20 && *v != 0.0)
+                && a.iter().any(|(id, v)| *id == 567 && *v != 0.0)
+        })
+    });
+    let max_velocity = stats
+        .navigation
+        .as_ref()
+        .map(|n| n.max_velocity)
+        .unwrap_or(0.0);
     FitAnalysis {
         ehp: stats.tank.as_ref().map(|t| t.ehp).unwrap_or(0.0),
         dps_total: dps.map(|d| d.total).unwrap_or(0.0),
@@ -434,6 +454,8 @@ fn analysis_from_stats(
         dps_missile: dps.map(|d| d.missile).unwrap_or(0.0),
         dps_drone: dps.map(|d| d.drone).unwrap_or(0.0),
         scram_range,
+        max_velocity,
+        has_prop,
         weapons,
     }
 }
