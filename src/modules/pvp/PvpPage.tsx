@@ -256,71 +256,75 @@ function WeaponRow({
     staleTime: Infinity,
   });
 
+  const hasAmmo = (ammo.data?.length ?? 0) > 0;
   const hasDps = ammo.data?.some((a) => a.dps > 0) ?? false;
 
   return (
     <div>
       <div
-        className="flex gap-2 cursor-pointer select-none"
+        className={`flex gap-2 ${hasAmmo || ammo.isLoading ? "cursor-pointer select-none" : ""}`}
         onMouseEnter={() => setOpen(true)}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => { if (hasAmmo) setOpen((o) => !o); }}
       >
         <span className="w-12 shrink-0 text-zinc-600">Range</span>
-        <span className="text-zinc-300 underline decoration-dotted decoration-zinc-600 underline-offset-2">
+        <span
+          className={`text-zinc-300 ${
+            hasAmmo
+              ? "underline decoration-dotted decoration-zinc-600 underline-offset-2"
+              : ""
+          }`}
+        >
           {weapon.name}: {km(weapon.optimal)}
           {weapon.falloff > 0 ? ` +${km(weapon.falloff)} falloff` : ""}
         </span>
       </div>
-      {open && (
+      {open && ammo.isLoading && (
         <div className="ml-14 mt-1 mb-1">
-          {ammo.isLoading && (
-            <span className="text-[10px] text-zinc-500">Loading ammo…</span>
-          )}
-          {ammo.data && ammo.data.length === 0 && (
-            <span className="text-[10px] text-zinc-600">No T2 ammo found.</span>
-          )}
-          {ammo.data && ammo.data.length > 0 && (
-            <table className="text-[10px] border-collapse">
-              <thead>
-                <tr className="text-zinc-500">
-                  <th className="text-left font-normal pr-3 pb-0.5">Ammo</th>
-                  <th className="text-right font-normal pr-3">Opt</th>
-                  <th className="text-right font-normal pr-3">Falloff</th>
-                  {hasDps && <th className="text-right font-normal pr-3">DPS</th>}
-                  <th className="font-normal">Dmg type</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ammo.data.map((a) => (
-                  <tr
-                    key={a.typeId}
-                    className={`border-t border-zinc-800/60 ${
-                      a.typeId === weapon.typeId
-                        ? "text-zinc-200"
-                        : "text-zinc-400"
-                    }`}
-                  >
-                    <td className="pr-3 py-0.5">
-                      {a.name}
-                      {a.typeId === weapon.typeId && (
-                        <span className="ml-1 text-zinc-600">✓</span>
-                      )}
-                    </td>
-                    <td className="pr-3 text-right tabular-nums">{km(a.optimal)}</td>
-                    <td className="pr-3 text-right tabular-nums">
-                      {a.falloff > 0 ? km(a.falloff) : "—"}
-                    </td>
-                    {hasDps && (
-                      <td className="pr-3 text-right tabular-nums">
-                        {a.dps > 0 ? a.dps.toFixed(0) : "—"}
-                      </td>
+          <span className="text-[10px] text-zinc-500">Loading…</span>
+        </div>
+      )}
+      {open && hasAmmo && (
+        <div className="ml-14 mt-1 mb-1">
+          <table className="text-[10px] border-collapse">
+            <thead>
+              <tr className="text-zinc-500">
+                <th className="text-left font-normal pr-3 pb-0.5">Ammo</th>
+                <th className="text-right font-normal pr-3">Opt</th>
+                <th className="text-right font-normal pr-3">Falloff</th>
+                {hasDps && <th className="text-right font-normal pr-3">DPS</th>}
+                <th className="font-normal">Dmg type</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ammo.data!.map((a) => (
+                <tr
+                  key={a.typeId}
+                  className={`border-t border-zinc-800/60 ${
+                    a.typeId === weapon.typeId
+                      ? "text-zinc-200"
+                      : "text-zinc-400"
+                  }`}
+                >
+                  <td className="pr-3 py-0.5">
+                    {a.name}
+                    {a.typeId === weapon.typeId && (
+                      <span className="ml-1 text-zinc-600">✓</span>
                     )}
-                    <td><DmgBar em={a.em} therm={a.therm} kin={a.kin} exp={a.exp} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+                  </td>
+                  <td className="pr-3 text-right tabular-nums">{km(a.optimal)}</td>
+                  <td className="pr-3 text-right tabular-nums">
+                    {a.falloff > 0 ? km(a.falloff) : "—"}
+                  </td>
+                  {hasDps && (
+                    <td className="pr-3 text-right tabular-nums">
+                      {a.dps > 0 ? a.dps.toFixed(0) : "—"}
+                    </td>
+                  )}
+                  <td><DmgBar em={a.em} therm={a.therm} kin={a.kin} exp={a.exp} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
