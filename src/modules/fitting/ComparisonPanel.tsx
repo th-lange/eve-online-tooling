@@ -167,7 +167,7 @@ export function ComparisonPanel({
                 stat={(r) =>
                   r && typeof r === "object" ? (r.dps?.total ?? null) : null
                 }
-                format={(v) => formatInt(v)}
+                format={(v) => formatInt(Math.round(v))}
               />
               <StatRow
                 label="EHP"

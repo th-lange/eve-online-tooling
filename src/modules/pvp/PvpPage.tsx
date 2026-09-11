@@ -135,12 +135,12 @@ function FitView({ fit, community }: { fit: LostFit; community?: boolean }) {
             <span>
               DPS{" "}
               <span className="text-zinc-200">
-                {formatInt(fit.analysis.dpsTotal)}
+                {formatInt(Math.round(fit.analysis.dpsTotal))}
               </span>{" "}
               <span className="text-zinc-600">
-                (t{formatInt(fit.analysis.dpsTurret)}/m
-                {formatInt(fit.analysis.dpsMissile)}/d
-                {formatInt(fit.analysis.dpsDrone)})
+                (t{formatInt(Math.round(fit.analysis.dpsTurret))}/m
+                {formatInt(Math.round(fit.analysis.dpsMissile))}/d
+                {formatInt(Math.round(fit.analysis.dpsDrone))})
               </span>
             </span>
             {fit.analysis.scramRange != null && (
