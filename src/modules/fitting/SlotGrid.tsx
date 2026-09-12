@@ -419,7 +419,9 @@ export function SlotGrid({
                 <span className="block">
                   Optimal{" "}
                   <span className="text-zinc-100">{km(ammo.optimal)}</span>
-                  {ammo.falloff > 0 ? ` +${km(ammo.falloff)}` : ""}
+                  {ammo.falloff > 0 ? (
+                    <> → <span className="text-zinc-100">{km(ammo.optimal + ammo.falloff)}</span></>
+                  ) : null}
                 </span>
                 <span className="block">
                   Tracking{" "}
@@ -456,10 +458,10 @@ export function SlotGrid({
           {range && (
             <span
               className="shrink-0 whitespace-nowrap tabular-nums text-[11px] text-zinc-500"
-              title="optimal range + falloff"
+              title="optimal → max range (optimal + falloff)"
             >
               {km(range.optimal)}
-              {range.falloff > 0 ? ` +${km(range.falloff)}` : ""}
+              {range.falloff > 0 ? ` → ${km(range.optimal + range.falloff)}` : ""}
             </span>
           )}
           {/* Ammo / charge picker for weapons, scripts and ancillary reps —

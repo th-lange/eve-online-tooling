@@ -275,7 +275,7 @@ function WeaponRow({
           }`}
         >
           {weapon.name}: {km(weapon.optimal)}
-          {weapon.falloff > 0 ? ` +${km(weapon.falloff)} falloff` : ""}
+          {weapon.falloff > 0 ? ` → ${km(weapon.optimal + weapon.falloff)}` : ""}
         </span>
       </div>
       {open && ammo.isLoading && (
@@ -290,7 +290,7 @@ function WeaponRow({
               <tr className="text-zinc-500">
                 <th className="text-left font-normal pr-3 pb-0.5">Ammo</th>
                 <th className="text-right font-normal pr-3">Opt</th>
-                <th className="text-right font-normal pr-3">Falloff</th>
+                <th className="text-right font-normal pr-3">Max</th>
                 {hasDps && <th className="text-right font-normal pr-3">DPS</th>}
                 <th className="font-normal">Dmg type</th>
               </tr>
@@ -313,7 +313,7 @@ function WeaponRow({
                   </td>
                   <td className="pr-3 text-right tabular-nums">{km(a.optimal)}</td>
                   <td className="pr-3 text-right tabular-nums">
-                    {a.falloff > 0 ? km(a.falloff) : "—"}
+                    {a.falloff > 0 ? km(a.optimal + a.falloff) : "—"}
                   </td>
                   {hasDps && (
                     <td className="pr-3 text-right tabular-nums">
