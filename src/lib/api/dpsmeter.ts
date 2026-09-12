@@ -14,6 +14,10 @@ export interface PilotRate {
   name: string;
   dpsOut: number;
   dpsIn: number;
+  /** Ship type string parsed from `(SHIP)` in the combat log, if present. */
+  ship?: string;
+  /** Unique weapon names fired at us within the averaging window. */
+  weapons?: string[];
 }
 
 /** One live sample: per-second rates over the averaging window. */

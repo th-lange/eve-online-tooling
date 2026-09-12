@@ -566,7 +566,10 @@ export function PvpPage() {
 
   // Active attackers: pilots dealing incoming damage in the last 15 seconds.
   const activeAttackers = useMemo(() => {
-    const seen = new Map<string, { dpsIn: number; lastAt: number }>();
+    const seen = new Map<
+      string,
+      { dpsIn: number; lastAt: number; ship?: string; weapons: string[] }
+    >();
     for (const tick of fightTicks) {
       for (const p of tick.byPilot) {
         if (p.dpsIn > 0) {
@@ -574,6 +577,16 @@ export function PvpPage() {
           seen.set(p.name, {
             dpsIn: p.dpsIn,
             lastAt: Math.max(tick.at, ex?.lastAt ?? 0),
+            // Live log data: ship is authoritative; accumulate unique weapons.
+            ship: p.ship ?? ex?.ship,
+            weapons: ex
+              ? [
+                  ...ex.weapons,
+                  ...(p.weapons ?? []).filter(
+                    (w) => !ex.weapons.includes(w),
+                  ),
+                ]
+              : (p.weapons ?? []),
           });
         }
       }
@@ -581,7 +594,12 @@ export function PvpPage() {
     const cutoff = latestAt - 15;
     return [...seen.entries()]
       .filter(([, { lastAt }]) => lastAt > cutoff)
-      .map(([name, { dpsIn }]) => ({ name, dpsIn }));
+      .map(([name, { dpsIn, ship, weapons }]) => ({
+        name,
+        dpsIn,
+        ship,
+        weapons,
+      }));
   }, [fightTicks, latestAt]);
 
   // Auto-reset dismissed state once fight ends so the next one auto-shows.
@@ -749,14 +767,19 @@ function MiniDpsChart({ ticks }: { ticks: DpsTick[] }) {
   );
 }
 
-/** One attacker in the fight panel: auto-fetches their zKill profile + recent
- *  fit to show their weapons and engagement ranges. */
+/** One attacker in the fight panel.
+ *  - Live data (instant): ship type + weapon names from the combat log.
+ *  - Supplemental (async): zKill profile → most-recent fit → weapon ranges. */
 function AttackerCard({
   name,
   dpsIn,
+  liveShip,
+  liveWeapons,
 }: {
   name: string;
   dpsIn: number;
+  liveShip?: string;
+  liveWeapons?: string[];
 }) {
   const profile = useQuery({
     queryKey: ["pvp", "profile-name", name],
@@ -771,8 +794,8 @@ function AttackerCard({
     staleTime: Infinity,
   });
 
-  // Turret weapons with falloff from their most recent fit.
-  const weapons = useMemo(
+  // zKill turret ranges from their most recent lost fit (supplements live data).
+  const zkillWeapons = useMemo(
     () =>
       (fits.data?.[0]?.analysis?.weapons ?? []).filter(
         (w) => (w.tracking ?? 0) > 0 && w.falloff > 0,
@@ -780,38 +803,53 @@ function AttackerCard({
     [fits.data],
   );
 
+  // Show displayed ship: live log data is authoritative (they're flying it now);
+  // fall back to zKill hull name if the log hasn't given us the ship yet.
+  const shipLabel =
+    liveShip ??
+    fits.data?.[0]?.hullName ??
+    (profile.isLoading ? "…" : null);
+
   return (
     <div className="rounded border border-zinc-800 bg-zinc-900/40 p-2">
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-zinc-100">{name}</span>
-        <span className="text-xs text-rose-400">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium text-zinc-100">{name}</span>
+        <span className="tabular-nums text-xs text-rose-400">
           {Math.round(dpsIn)} dps in
         </span>
-        {fits.data?.[0] && (
-          <span className="text-xs text-zinc-500">
-            ({fits.data[0].hullName})
-          </span>
-        )}
-        {profile.isLoading && (
-          <span className="text-[10px] text-zinc-600">looking up…</span>
+        {shipLabel && (
+          <span className="text-xs text-zinc-400">{shipLabel}</span>
         )}
       </div>
-      {weapons.length > 0 && (
+
+      {/* Live weapons from the combat log — shown immediately */}
+      {liveWeapons && liveWeapons.length > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {weapons.map((w, i) => (
+          {liveWeapons.map((w, i) => (
             <span
               key={i}
               className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-300"
-              title={w.name}
+            >
+              {w}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* zKill ranges: show once available, adds opt → max to the weapon name */}
+      {zkillWeapons.length > 0 && (
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          {zkillWeapons.map((w, i) => (
+            <span
+              key={i}
+              className="rounded bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-500"
+              title="from zKill most-recent fit"
             >
               {w.name}: {km(w.optimal)}
               {w.falloff > 0 ? ` → ${km(w.optimal + w.falloff)}` : ""}
             </span>
           ))}
         </div>
-      )}
-      {fits.isLoading && (
-        <div className="mt-1 text-[10px] text-zinc-600">Loading fits…</div>
       )}
     </div>
   );
@@ -829,7 +867,7 @@ function FightPanel({
   onDismiss,
 }: {
   ticks: DpsTick[];
-  attackers: { name: string; dpsIn: number }[];
+  attackers: { name: string; dpsIn: number; ship?: string; weapons: string[] }[];
   myWeapons: { name: string; dps: number }[];
   localFits: Fit[];
   selectedFitId: string | null;
@@ -946,7 +984,13 @@ function FightPanel({
           </h3>
           <div className="flex flex-col gap-2">
             {attackers.map((a) => (
-              <AttackerCard key={a.name} name={a.name} dpsIn={a.dpsIn} />
+              <AttackerCard
+                key={a.name}
+                name={a.name}
+                dpsIn={a.dpsIn}
+                liveShip={a.ship}
+                liveWeapons={a.weapons}
+              />
             ))}
           </div>
         </div>

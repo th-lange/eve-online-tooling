@@ -30,6 +30,12 @@ pub struct PilotRate {
     pub name: String,
     pub dps_out: f64,
     pub dps_in: f64,
+    /// Ship the attacker is flying, parsed from `(SHIP)` in the combat log.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ship: Option<String>,
+    /// Unique weapon names they've fired at us within the averaging window.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub weapons: Vec<String>,
 }
 
 /// Counts of high-quality hits within the window ("Penetrates" / "Smashes" /
@@ -112,9 +118,11 @@ impl Window {
             at: now,
             ..Default::default()
         };
-        // Breakdown accumulators: weapon → out-damage; pilot → (out, in).
+        // Breakdown accumulators: weapon → out-damage;
+        // pilot → (out, in, ship, weapons[]).
         let mut weapons: HashMap<&str, f64> = HashMap::new();
-        let mut pilots: HashMap<&str, (f64, f64)> = HashMap::new();
+        let mut pilots: HashMap<&str, (f64, f64, Option<&str>, Vec<&str>)> =
+            HashMap::new();
         for ev in &self.events {
             let v = ev.amount as f64;
             match ev.kind {
@@ -134,7 +142,6 @@ impl Window {
                 EventKind::CapWarfareIn => t.cap_warfare_in += v,
                 EventKind::Mining => t.mining_m3 += ev.volume,
             }
-            // Damage events carry the counterparty + weapon for the breakdowns.
             if ev.kind == EventKind::DamageOut {
                 if let Some(w) = ev.weapon.as_deref() {
                     *weapons.entry(w).or_default() += v;
@@ -144,7 +151,19 @@ impl Window {
                 let slot = pilots.entry(p).or_default();
                 match ev.kind {
                     EventKind::DamageOut => slot.0 += v,
-                    EventKind::DamageIn => slot.1 += v,
+                    EventKind::DamageIn => {
+                        slot.1 += v;
+                        // Capture attacker's ship (keep most-recent).
+                        if ev.ship.is_some() {
+                            slot.2 = ev.ship.as_deref();
+                        }
+                        // Accumulate unique weapon names.
+                        if let Some(w) = ev.weapon.as_deref() {
+                            if !slot.3.contains(&w) {
+                                slot.3.push(w);
+                            }
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -169,11 +188,15 @@ impl Window {
             |r| r.dps,
         );
         t.by_pilot = top_n(
-            pilots.into_iter().map(|(name, (out, inc))| PilotRate {
-                name: name.to_string(),
-                dps_out: out / w,
-                dps_in: inc / w,
-            }),
+            pilots
+                .into_iter()
+                .map(|(name, (out, inc, ship, weps))| PilotRate {
+                    name: name.to_string(),
+                    dps_out: out / w,
+                    dps_in: inc / w,
+                    ship: ship.map(String::from),
+                    weapons: weps.into_iter().map(String::from).collect(),
+                }),
             |r| r.dps_out + r.dps_in,
         );
         t
