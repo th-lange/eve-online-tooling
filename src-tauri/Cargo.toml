@@ -1,6 +1,6 @@
 [package]
 name = "eve-online-tooling"
-version = "0.58.2"
+version = "0.59.0"
 description = "EVE Online tooling — production, trading and more"
 authors = ["Thomas Lange"]
 license = "MIT"
