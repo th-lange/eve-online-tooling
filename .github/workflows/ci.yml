@@ -27,7 +27,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 26
           cache: npm
 
       - name: Install dependencies
@@ -60,6 +60,9 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
+          # Only write to the cache on main — PRs read from it but don't write,
+          # so parallel PR builds can't evict each other's entries.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Regenerate the tauri-specta bindings, then fail if the committed file
       # drifted from what the export produces for the current Rust source —
@@ -101,6 +104,9 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
+          # Only write to the cache on main — PRs read from it but don't write,
+          # so parallel PR builds can't evict each other's entries.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Format check
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
