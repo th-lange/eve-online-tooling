@@ -23,7 +23,9 @@ describe("module registry", () => {
     for (const m of modules) {
       expect(m.id).toBeTruthy();
       expect(m.title).toBeTruthy();
-      expect(typeof m.Component).toBe("function");
+      // Component is a React.lazy wrapper (an object), not a plain function —
+      // assert presence/renderability rather than a specific typeof.
+      expect(m.Component).toBeTruthy();
     }
   });
 });

@@ -1,37 +1,4 @@
-import type { ComponentType } from "react";
-import { ProductionPage } from "./production/ProductionPage";
-import { TradingPage } from "./trading/TradingPage";
-import { DaytradingPage } from "./daytrading/DaytradingPage";
-import { ReprocessingPage } from "./reprocessing/ReprocessingPage";
-import { AppraisalPage } from "./appraisal/AppraisalPage";
-import { UniversePage } from "./universe/UniversePage";
-import { MarketSearchPage } from "./marketsearch/MarketSearchPage";
-import { AssetsPage } from "./assets/AssetsPage";
-import { CharacterPage } from "./character/CharacterPage";
-import { AccountingPage } from "./accounting/AccountingPage";
-import { TransactionsPage } from "./transactions/TransactionsPage";
-import { ContractsPage } from "./contracts/ContractsPage";
-import { LpStorePage } from "./lpstore/LpStorePage";
-import { RoutePage } from "./route/RoutePage";
-import { LocalIntelPage } from "./localintel/LocalIntelPage";
-import { OrdersPage } from "./orders/OrdersPage";
-import { IndustryJobsPage } from "./industry/IndustryJobsPage";
-import { PIPage } from "./pi/PIPage";
-import { WormholesPage } from "./wormholes/WormholesPage";
-import { ExplorationPage } from "./exploration/ExplorationPage";
-import { PochvenPage } from "./pochven/PochvenPage";
-import { IncursionsPage } from "./incursions/IncursionsPage";
-import { FactionWarfarePage } from "./faction-warfare/FactionWarfarePage";
-import { NotificationsPage } from "./notifications/NotificationsPage";
-import { FittingPage } from "./fitting/FittingPage";
-import { ShoppingPage } from "./shopping/ShoppingPage";
-import { DpsPage } from "./dpsmeter/DpsPage";
-import { PvpPage } from "./pvp/PvpPage";
-import { FeedbackPage } from "./feedback/FeedbackPage";
-import { SupportPage } from "./support/SupportPage";
-import { PluginsPage } from "./plugins/PluginsPage";
-import { ScriptsPage } from "./scripts/ScriptsPage";
-import { InfoPanel } from "./info/InfoPanel";
+import { lazy, type ComponentType, type LazyExoticComponent } from "react";
 import {
   MODULE_GROUPS,
   MODULE_METADATA,
@@ -48,7 +15,7 @@ export type { ModuleGroup };
 // and router are driven entirely by the resulting `modules` list.
 export interface ModuleDef extends ModuleMeta {
   /** Page component rendered for this module. */
-  Component: ComponentType;
+  Component: ComponentType | LazyExoticComponent<ComponentType>;
 }
 
 // Page components keyed by module id, layered onto the plain metadata from
@@ -56,40 +23,76 @@ export interface ModuleDef extends ModuleMeta {
 // anything that only needs id/title/description, e.g. feedback's category
 // dropdown) never has to import a page component — which is what created the
 // former feedback/registry import cycle.
-const COMPONENTS: Record<string, ComponentType> = {
-  production: ProductionPage,
-  trading: TradingPage,
-  daytrading: DaytradingPage,
-  reprocessing: ReprocessingPage,
-  appraisal: AppraisalPage,
-  universe: UniversePage,
-  "market-search": MarketSearchPage,
-  assets: AssetsPage,
-  character: CharacterPage,
-  notifications: NotificationsPage,
-  accounting: AccountingPage,
-  transactions: TransactionsPage,
-  contracts: ContractsPage,
-  lpstore: LpStorePage,
-  route: RoutePage,
-  "local-intel": LocalIntelPage,
-  orders: OrdersPage,
-  "industry-jobs": IndustryJobsPage,
-  pi: PIPage,
-  incursions: IncursionsPage,
-  "faction-warfare": FactionWarfarePage,
-  pochven: PochvenPage,
-  wormholes: WormholesPage,
-  exploration: ExplorationPage,
-  fitting: FittingPage,
-  shopping: ShoppingPage,
-  dps: DpsPage,
-  pvp: PvpPage,
-  info: InfoPanel,
-  scripts: ScriptsPage,
-  plugins: PluginsPage,
-  feedback: FeedbackPage,
-  support: SupportPage,
+// Each page is loaded as its own lazy chunk (`React.lazy`) so the initial
+// bundle no longer ships all 33 module pages up front — a page's code is
+// fetched only when its tab is first opened. `ModuleHost` already mounts pages
+// on first visit and keeps them mounted, so this splits the download without
+// changing runtime behaviour. The literal `import()` per entry is what lets
+// Vite emit each page as a separate chunk.
+const page = (
+  loader: () => Promise<Record<string, ComponentType>>,
+  name: string,
+): LazyExoticComponent<ComponentType> =>
+  lazy(() => loader().then((m) => ({ default: m[name] })));
+
+const COMPONENTS: Record<string, LazyExoticComponent<ComponentType>> = {
+  production: page(() => import("./production/ProductionPage"), "ProductionPage"),
+  trading: page(() => import("./trading/TradingPage"), "TradingPage"),
+  daytrading: page(() => import("./daytrading/DaytradingPage"), "DaytradingPage"),
+  reprocessing: page(
+    () => import("./reprocessing/ReprocessingPage"),
+    "ReprocessingPage",
+  ),
+  appraisal: page(() => import("./appraisal/AppraisalPage"), "AppraisalPage"),
+  universe: page(() => import("./universe/UniversePage"), "UniversePage"),
+  "market-search": page(
+    () => import("./marketsearch/MarketSearchPage"),
+    "MarketSearchPage",
+  ),
+  assets: page(() => import("./assets/AssetsPage"), "AssetsPage"),
+  character: page(() => import("./character/CharacterPage"), "CharacterPage"),
+  notifications: page(
+    () => import("./notifications/NotificationsPage"),
+    "NotificationsPage",
+  ),
+  accounting: page(() => import("./accounting/AccountingPage"), "AccountingPage"),
+  transactions: page(
+    () => import("./transactions/TransactionsPage"),
+    "TransactionsPage",
+  ),
+  contracts: page(() => import("./contracts/ContractsPage"), "ContractsPage"),
+  lpstore: page(() => import("./lpstore/LpStorePage"), "LpStorePage"),
+  route: page(() => import("./route/RoutePage"), "RoutePage"),
+  "local-intel": page(
+    () => import("./localintel/LocalIntelPage"),
+    "LocalIntelPage",
+  ),
+  orders: page(() => import("./orders/OrdersPage"), "OrdersPage"),
+  "industry-jobs": page(
+    () => import("./industry/IndustryJobsPage"),
+    "IndustryJobsPage",
+  ),
+  pi: page(() => import("./pi/PIPage"), "PIPage"),
+  incursions: page(() => import("./incursions/IncursionsPage"), "IncursionsPage"),
+  "faction-warfare": page(
+    () => import("./faction-warfare/FactionWarfarePage"),
+    "FactionWarfarePage",
+  ),
+  pochven: page(() => import("./pochven/PochvenPage"), "PochvenPage"),
+  wormholes: page(() => import("./wormholes/WormholesPage"), "WormholesPage"),
+  exploration: page(
+    () => import("./exploration/ExplorationPage"),
+    "ExplorationPage",
+  ),
+  fitting: page(() => import("./fitting/FittingPage"), "FittingPage"),
+  shopping: page(() => import("./shopping/ShoppingPage"), "ShoppingPage"),
+  dps: page(() => import("./dpsmeter/DpsPage"), "DpsPage"),
+  pvp: page(() => import("./pvp/PvpPage"), "PvpPage"),
+  info: page(() => import("./info/InfoPanel"), "InfoPanel"),
+  scripts: page(() => import("./scripts/ScriptsPage"), "ScriptsPage"),
+  plugins: page(() => import("./plugins/PluginsPage"), "PluginsPage"),
+  feedback: page(() => import("./feedback/FeedbackPage"), "FeedbackPage"),
+  support: page(() => import("./support/SupportPage"), "SupportPage"),
 };
 
 export const modules: ModuleDef[] = MODULE_METADATA.map((meta) => {

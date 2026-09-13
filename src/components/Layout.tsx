@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ModuleActiveContext } from "./moduleActiveContext";
 import { ModuleChromeContext } from "./moduleChromeContext";
@@ -351,7 +351,13 @@ function ModuleHost({
                 value={{ title: m.title, hide: () => onHide(m.id) }}
               >
                 <ModuleActiveContext.Provider value={active}>
-                  <m.Component />
+                  <Suspense
+                    fallback={
+                      <div className="p-6 text-sm text-slate-400">Loading…</div>
+                    }
+                  >
+                    <m.Component />
+                  </Suspense>
                 </ModuleActiveContext.Provider>
               </ModuleChromeContext.Provider>
             </div>

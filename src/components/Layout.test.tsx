@@ -184,12 +184,18 @@ describe("Layout sidebar", () => {
     });
   });
 
-  it("hides a module from its page into the Hidden section and persists it", () => {
+  it("hides a module from its page into the Hidden section and persists it", async () => {
     renderLayout();
-    // The hide control now lives on the module page (the default active module
-    // is the first one, Production).
+    // The hide control lives on the module page (default active module is the
+    // first one, Production), which is now lazy-loaded — await its mount.
     fireEvent.click(
-      screen.getByRole("button", { name: `Hide ${PRODUCTION} from sidebar` }),
+      await screen.findByRole(
+        "button",
+        { name: `Hide ${PRODUCTION} from sidebar` },
+        // The active page is lazy-loaded; jsdom's first-time transform of
+        // ProductionPage's module graph can exceed the 1s default.
+        { timeout: 15000 },
+      ),
     );
     expect(screen.getByText("Hidden (1)")).toBeInTheDocument();
     expect(
