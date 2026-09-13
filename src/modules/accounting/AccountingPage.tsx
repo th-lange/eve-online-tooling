@@ -545,7 +545,9 @@ function Transactions({ d }: { d: LedgerView }) {
           {side !== "sell" && totalBuy > 0 && (
             <>
               {" · "}
-              <span className="text-rose-400">{formatIsk(totalBuy)} bought</span>
+              <span className="text-rose-400">
+                {formatIsk(totalBuy)} bought
+              </span>
             </>
           )}
           {side !== "buy" && totalSell > 0 && (
@@ -598,10 +600,7 @@ function Transactions({ d }: { d: LedgerView }) {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td
-                  colSpan={5}
-                  className="px-3 py-8 text-center text-zinc-500"
-                >
+                <td colSpan={5} className="px-3 py-8 text-center text-zinc-500">
                   No transactions match the current filters.
                 </td>
               </tr>

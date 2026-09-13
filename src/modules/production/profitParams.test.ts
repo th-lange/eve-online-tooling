@@ -86,7 +86,12 @@ describe("bestResearchedMap", () => {
   });
 
   it("lets an imported entry raise the ceiling for a blueprint that isn't owned", () => {
-    const map = bestResearchedMap([], [importedBp(2, 8, 0)], "materialEfficiency", "me");
+    const map = bestResearchedMap(
+      [],
+      [importedBp(2, 8, 0)],
+      "materialEfficiency",
+      "me",
+    );
     expect(map[2]).toBe(8);
   });
 });
@@ -195,7 +200,11 @@ describe("composeProfitParams", () => {
 
   it("suppresses the owned ME/TE overlay entirely when the toggle is off", () => {
     const params = composeProfitParams(
-      baseInput({ useOwnedMe: false, ownedMe: { 10: 10 }, ownedTe: { 10: 20 } }),
+      baseInput({
+        useOwnedMe: false,
+        ownedMe: { 10: 10 },
+        ownedTe: { 10: 20 },
+      }),
     );
     expect(params.ownedMe).toEqual({});
     expect(params.ownedTe).toEqual({});
@@ -231,7 +240,12 @@ describe("composeProfitParams", () => {
 
   it("folds structure + rig bonuses into the engine's meBonus/costBonus/structureTePct", () => {
     const params = composeProfitParams(
-      baseInput({ structure: "raitaru", rigMePct: 2, rigTePct: 5, rigCostPct: 10 }),
+      baseInput({
+        structure: "raitaru",
+        rigMePct: 2,
+        rigTePct: 5,
+        rigCostPct: 10,
+      }),
     );
     expect(params.meBonus).toBeCloseTo(0.99 * (1 - 2 / 100), 10);
     expect(params.structureTePct).toBe(15 + 5);

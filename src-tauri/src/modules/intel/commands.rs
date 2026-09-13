@@ -393,7 +393,8 @@ pub async fn intel_fw_jumps(
     auth_state: State<'_, AuthState>,
     system_ids: Vec<i64>,
 ) -> Result<FwJumpResult, String> {
-    let (dir, character_id) = storage::dir_and_primary_character(&app).map_err(|e| e.to_string())?;
+    let (dir, character_id) =
+        storage::dir_and_primary_character(&app).map_err(|e| e.to_string())?;
 
     let loc: EsiCharacterLoc = authed_get(
         &auth_state,

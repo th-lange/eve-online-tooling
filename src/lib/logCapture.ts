@@ -4,11 +4,7 @@ import { logStore, type LogLevel } from "./logStore";
 function args2msg(args: unknown[]): string {
   return args
     .map((a) =>
-      a instanceof Error
-        ? a.message
-        : typeof a === "string"
-          ? a
-          : String(a),
+      a instanceof Error ? a.message : typeof a === "string" ? a : String(a),
     )
     .join(" ");
 }

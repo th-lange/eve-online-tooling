@@ -33,7 +33,8 @@ export const logStore = {
     const id = nextId++;
     // Ring buffer: keep the most recent CAPACITY entries.
     const next = [...entries, { ...entry, id }];
-    entries = next.length > CAPACITY ? next.slice(next.length - CAPACITY) : next;
+    entries =
+      next.length > CAPACITY ? next.slice(next.length - CAPACITY) : next;
     notify();
   },
 

@@ -608,7 +608,10 @@ mod tests {
         registry.set_active("acme", true).unwrap();
         let manager = PluginManager::new();
         let err = run_plugin(&registry, &manager, &root, "acme", "echo", &Value::Null).unwrap_err();
-        assert!(err.contains("escapes its plugin dir"), "unexpected error: {err}");
+        assert!(
+            err.contains("escapes its plugin dir"),
+            "unexpected error: {err}"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -641,12 +644,27 @@ mod tests {
         registry.set_active("nested", true).unwrap();
         let manager = PluginManager::new();
         assert_eq!(
-            run_plugin(&registry, &manager, &root, "top", "echo", &serde_json::json!(1)).unwrap(),
+            run_plugin(
+                &registry,
+                &manager,
+                &root,
+                "top",
+                "echo",
+                &serde_json::json!(1)
+            )
+            .unwrap(),
             serde_json::json!(1)
         );
         assert_eq!(
-            run_plugin(&registry, &manager, &root, "nested", "echo", &serde_json::json!(2))
-                .unwrap(),
+            run_plugin(
+                &registry,
+                &manager,
+                &root,
+                "nested",
+                "echo",
+                &serde_json::json!(2)
+            )
+            .unwrap(),
             serde_json::json!(2)
         );
         let _ = std::fs::remove_dir_all(&root);

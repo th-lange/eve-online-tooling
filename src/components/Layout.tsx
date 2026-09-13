@@ -153,7 +153,6 @@ export function Layout() {
       prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id],
     );
 
-
   // Drop the dragged row onto `targetId` — only reorders within the same visible
   // section (the row carries the section it was dragged from), so dragging never
   // (un)pins an item or hops it between sections. Reordering the shared custom

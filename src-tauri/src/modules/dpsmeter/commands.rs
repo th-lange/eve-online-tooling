@@ -404,7 +404,9 @@ fn bucket_events(events: &[super::parser::DpsEvent]) -> LogSummary {
 /// *near*-chronological, so we track the exact min/max rather than trusting
 /// the first/last line (#816).
 async fn scan_log_span(file: &str) -> Result<(i64, i64), String> {
-    let handle = tokio::fs::File::open(file).await.map_err(|e| e.to_string())?;
+    let handle = tokio::fs::File::open(file)
+        .await
+        .map_err(|e| e.to_string())?;
     let mut lines = BufReader::new(handle).lines();
     let mut span: Option<(i64, i64)> = None;
     while let Some(line) = lines.next_line().await.map_err(|e| e.to_string())? {
@@ -441,7 +443,9 @@ async fn stream_log_summary(app: &AppHandle, file: &str) -> Result<LogSummary, S
     let mut ore_vol: HashMap<String, f64> = HashMap::new();
 
     let mut raw = vec![(0.0f64, 0.0f64, 0.0f64); SUMMARY_BUCKETS];
-    let handle = tokio::fs::File::open(file).await.map_err(|e| e.to_string())?;
+    let handle = tokio::fs::File::open(file)
+        .await
+        .map_err(|e| e.to_string())?;
     let mut lines = BufReader::new(handle).lines();
     while let Some(line) = lines.next_line().await.map_err(|e| e.to_string())? {
         let Some(mut ev) = parse_line(&line) else {

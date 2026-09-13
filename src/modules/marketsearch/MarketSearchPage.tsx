@@ -200,7 +200,9 @@ function Workbench() {
                 .then(() => setOpenMarketError(null))
                 .catch((e) => {
                   console.error("Failed to open market window", e);
-                  setOpenMarketError(`Couldn't open market window: ${errorMessage(e)}`);
+                  setOpenMarketError(
+                    `Couldn't open market window: ${errorMessage(e)}`,
+                  );
                 })
             }
             title="Open this item's market in the EVE client (needs a logged-in character + the open-window scope)"

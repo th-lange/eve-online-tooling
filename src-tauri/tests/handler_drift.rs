@@ -67,7 +67,10 @@ fn declared_commands() -> BTreeSet<String> {
             }
             // Skip any further attribute lines before the fn signature.
             let mut j = i + 1;
-            while lines.get(j).is_some_and(|l| l.trim_start().starts_with("#[")) {
+            while lines
+                .get(j)
+                .is_some_and(|l| l.trim_start().starts_with("#["))
+            {
                 j += 1;
             }
             let Some(sig) = lines.get(j) else { continue };

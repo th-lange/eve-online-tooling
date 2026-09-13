@@ -204,7 +204,10 @@ function Colony({
           Route here ↗
         </button>
       </div>
-      <InlineError message={routeError} className="mt-1 text-xs text-rose-400" />
+      <InlineError
+        message={routeError}
+        className="mt-1 text-xs text-rose-400"
+      />
 
       <NextCycle colony={colony} />
 

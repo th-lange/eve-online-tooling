@@ -35,9 +35,7 @@ export interface ArchetypeWeapon {
 export function classifyArchetype(
   weapons: ArchetypeWeapon[],
 ): Archetype | null {
-  const dps = weapons.filter(
-    (w) => (w.tracking ?? 0) > 0 && w.falloff > 0,
-  );
+  const dps = weapons.filter((w) => (w.tracking ?? 0) > 0 && w.falloff > 0);
   if (dps.length === 0) return null;
   const maxRange = Math.max(...dps.map((w) => w.optimal + w.falloff / 2));
   if (maxRange < 5_000) return "brawler";

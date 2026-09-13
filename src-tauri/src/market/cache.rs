@@ -95,7 +95,9 @@ impl<K: Eq + Hash + Clone, V: Clone> TtlCache<K, V> {
     /// decorrelates different keys' expiries.
     #[cfg(test)]
     pub fn expires_at(&self, key: &K) -> Option<Instant> {
-        recover_lock(self.map.lock()).get(key).map(|(expires_at, _)| *expires_at)
+        recover_lock(self.map.lock())
+            .get(key)
+            .map(|(expires_at, _)| *expires_at)
     }
 }
 

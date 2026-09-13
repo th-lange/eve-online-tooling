@@ -67,7 +67,6 @@ describe("ProfitTable", () => {
     ).toBeInTheDocument();
   });
 
-
   it("shows the missing-prices warning icon when a row has unpriced materials", () => {
     renderWithQuery(
       <ProfitTable
@@ -95,12 +94,9 @@ describe("ProfitTable", () => {
       />,
     );
 
-    expect(
-      screen.queryByLabelText(/Missing prices for/),
-    ).toBeNull();
+    expect(screen.queryByLabelText(/Missing prices for/)).toBeNull();
   });
 });
-
 
 describe("sortBreakdowns", () => {
   function row(overrides: Partial<ProfitBreakdown>): ProfitBreakdown {
@@ -127,12 +123,12 @@ describe("sortBreakdowns", () => {
       row({ blueprintTypeId: 2, profit: 300 }),
       row({ blueprintTypeId: 3, profit: 200 }),
     ];
-    expect(sortBreakdowns(rows, "profit", "desc").map((r) => r.blueprintTypeId)).toEqual([
-      2, 3, 1,
-    ]);
-    expect(sortBreakdowns(rows, "profit", "asc").map((r) => r.blueprintTypeId)).toEqual([
-      1, 3, 2,
-    ]);
+    expect(
+      sortBreakdowns(rows, "profit", "desc").map((r) => r.blueprintTypeId),
+    ).toEqual([2, 3, 1]);
+    expect(
+      sortBreakdowns(rows, "profit", "asc").map((r) => r.blueprintTypeId),
+    ).toEqual([1, 3, 2]);
   });
 
   it("sorts by roi and always pushes null roi to the end regardless of direction", () => {
@@ -141,12 +137,12 @@ describe("sortBreakdowns", () => {
       row({ blueprintTypeId: 2, roi: null }),
       row({ blueprintTypeId: 3, roi: 0.1 }),
     ];
-    expect(sortBreakdowns(rows, "roi", "desc").map((r) => r.blueprintTypeId)).toEqual([
-      1, 3, 2,
-    ]);
-    expect(sortBreakdowns(rows, "roi", "asc").map((r) => r.blueprintTypeId)).toEqual([
-      3, 1, 2,
-    ]);
+    expect(
+      sortBreakdowns(rows, "roi", "desc").map((r) => r.blueprintTypeId),
+    ).toEqual([1, 3, 2]);
+    expect(
+      sortBreakdowns(rows, "roi", "asc").map((r) => r.blueprintTypeId),
+    ).toEqual([3, 1, 2]);
   });
 
   it("sorts by margin", () => {
@@ -165,7 +161,9 @@ describe("sortBreakdowns", () => {
       row({ blueprintTypeId: 2, profitPerUnit: 1_000 }),
     ];
     expect(
-      sortBreakdowns(rows, "profitPerUnit", "desc").map((r) => r.blueprintTypeId),
+      sortBreakdowns(rows, "profitPerUnit", "desc").map(
+        (r) => r.blueprintTypeId,
+      ),
     ).toEqual([2, 1]);
   });
 
@@ -211,7 +209,9 @@ describe("sortBreakdowns", () => {
       row({ blueprintTypeId: 3, productVolume: 50 }),
     ];
     expect(
-      sortBreakdowns(rows, "productVolume", "desc").map((r) => r.blueprintTypeId),
+      sortBreakdowns(rows, "productVolume", "desc").map(
+        (r) => r.blueprintTypeId,
+      ),
     ).toEqual([3, 1, 2]);
   });
 });

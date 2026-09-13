@@ -212,7 +212,12 @@ const DMG_CLASS: Record<string, string> = {
   exp: "bg-amber-400",
 };
 
-function DmgBar({ em, therm, kin, exp }: Pick<AmmoLine, "em" | "therm" | "kin" | "exp">) {
+function DmgBar({
+  em,
+  therm,
+  kin,
+  exp,
+}: Pick<AmmoLine, "em" | "therm" | "kin" | "exp">) {
   const segs = [
     { key: "em", v: em, label: "EM" },
     { key: "therm", v: therm, label: "Th" },
@@ -261,7 +266,9 @@ function WeaponRow({
       <div
         className={`flex gap-2 ${hasAmmo || ammo.isLoading ? "cursor-pointer select-none" : ""}`}
         onMouseEnter={() => setOpen(true)}
-        onClick={() => { if (hasAmmo) setOpen((o) => !o); }}
+        onClick={() => {
+          if (hasAmmo) setOpen((o) => !o);
+        }}
       >
         <span className="w-12 shrink-0 text-zinc-600">Range</span>
         <span
@@ -272,7 +279,9 @@ function WeaponRow({
           }`}
         >
           {weapon.name}: {km(weapon.optimal)}
-          {weapon.falloff > 0 ? ` → ${km(weapon.optimal + weapon.falloff)}` : ""}
+          {weapon.falloff > 0
+            ? ` → ${km(weapon.optimal + weapon.falloff)}`
+            : ""}
         </span>
       </div>
       {open && ammo.isLoading && (
@@ -308,7 +317,9 @@ function WeaponRow({
                       <span className="ml-1 text-zinc-600">✓</span>
                     )}
                   </td>
-                  <td className="pr-3 text-right tabular-nums">{km(a.optimal)}</td>
+                  <td className="pr-3 text-right tabular-nums">
+                    {km(a.optimal)}
+                  </td>
                   <td className="pr-3 text-right tabular-nums">
                     {a.falloff > 0 ? km(a.optimal + a.falloff) : "—"}
                   </td>
@@ -317,7 +328,9 @@ function WeaponRow({
                       {a.dps > 0 ? a.dps.toFixed(0) : "—"}
                     </td>
                   )}
-                  <td><DmgBar em={a.em} therm={a.therm} kin={a.kin} exp={a.exp} /></td>
+                  <td>
+                    <DmgBar em={a.em} therm={a.therm} kin={a.kin} exp={a.exp} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -538,8 +551,7 @@ export function PvpPage() {
     }
     let cancelled = false;
     onDpsTick((tick) => {
-      if (!cancelled)
-        setFightTicks((prev) => [...prev, tick].slice(-120));
+      if (!cancelled) setFightTicks((prev) => [...prev, tick].slice(-120));
     }).then((fn) => {
       if (cancelled) fn();
       else unlistenRef.current = fn;
@@ -572,9 +584,7 @@ export function PvpPage() {
             weapons: ex
               ? [
                   ...ex.weapons,
-                  ...(p.weapons ?? []).filter(
-                    (w) => !ex.weapons.includes(w),
-                  ),
+                  ...(p.weapons ?? []).filter((w) => !ex.weapons.includes(w)),
                 ]
               : (p.weapons ?? []),
           });
@@ -727,17 +737,20 @@ export function PvpPage() {
 
 /** Mini rolling DPS chart (dpsOut green, dpsIn red) from accumulated ticks. */
 function MiniDpsChart({ ticks }: { ticks: DpsTick[] }) {
-  if (ticks.length < 2) return <div className="h-12 w-full rounded bg-zinc-950" />;
-  const W = 100, H = 48, pad = 2;
-  const w = W - pad * 2, h = H - pad * 2;
-  const maxVal = Math.max(
-    1,
-    ...ticks.flatMap((t) => [t.dpsOut, t.dpsIn]),
-  );
+  if (ticks.length < 2)
+    return <div className="h-12 w-full rounded bg-zinc-950" />;
+  const W = 100,
+    H = 48,
+    pad = 2;
+  const w = W - pad * 2,
+    h = H - pad * 2;
+  const maxVal = Math.max(1, ...ticks.flatMap((t) => [t.dpsOut, t.dpsIn]));
   const x = (i: number) => pad + (i / (ticks.length - 1)) * w;
   const y = (v: number) => pad + h - (v / maxVal) * h;
   const path = (field: "dpsOut" | "dpsIn") =>
-    ticks.map((t, i) => `${x(i).toFixed(1)},${y(t[field]).toFixed(1)}`).join(" ");
+    ticks
+      .map((t, i) => `${x(i).toFixed(1)},${y(t[field]).toFixed(1)}`)
+      .join(" ");
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded">
       <rect width={W} height={H} fill="#09090b" rx="3" />
@@ -796,9 +809,7 @@ function AttackerCard({
   // Show displayed ship: live log data is authoritative (they're flying it now);
   // fall back to zKill hull name if the log hasn't given us the ship yet.
   const shipLabel =
-    liveShip ??
-    fits.data?.[0]?.hullName ??
-    (profile.isLoading ? "…" : null);
+    liveShip ?? fits.data?.[0]?.hullName ?? (profile.isLoading ? "…" : null);
 
   return (
     <div className="rounded border border-zinc-800 bg-zinc-900/40 p-2">
@@ -857,7 +868,12 @@ function FightPanel({
   onDismiss,
 }: {
   ticks: DpsTick[];
-  attackers: { name: string; dpsIn: number; ship?: string; weapons: string[] }[];
+  attackers: {
+    name: string;
+    dpsIn: number;
+    ship?: string;
+    weapons: string[];
+  }[];
   myWeapons: { name: string; dps: number }[];
   localFits: Fit[];
   selectedFitId: string | null;
@@ -927,7 +943,9 @@ function FightPanel({
             <div className="flex flex-col gap-0.5">
               {myWeapons.map((w, i) => (
                 <div key={i} className="flex items-center gap-2 text-xs">
-                  <span className="flex-1 truncate text-zinc-300">{w.name}</span>
+                  <span className="flex-1 truncate text-zinc-300">
+                    {w.name}
+                  </span>
                   <span className="shrink-0 tabular-nums text-emerald-400">
                     {Math.round(w.dps)} dps
                   </span>
@@ -958,7 +976,13 @@ function FightPanel({
                 <div key={i} className="text-xs text-zinc-400">
                   <span className="text-zinc-300">{km(r.optimal)}</span>
                   {r.falloff > 0 && (
-                    <> → <span className="text-zinc-300">{km(r.optimal + r.falloff)}</span></>
+                    <>
+                      {" "}
+                      →{" "}
+                      <span className="text-zinc-300">
+                        {km(r.optimal + r.falloff)}
+                      </span>
+                    </>
                   )}
                   <span className="ml-1 text-zinc-600">opt → max</span>
                 </div>

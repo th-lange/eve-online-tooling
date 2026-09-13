@@ -83,7 +83,9 @@ function playAlarm(): boolean {
     beep(0, 880);
     beep(0.22, 1175);
     setTimeout(() => {
-      ctx.close().catch((e) => console.error("Failed to close audio context", e));
+      ctx
+        .close()
+        .catch((e) => console.error("Failed to close audio context", e));
     }, 600);
     return true;
   } catch (e) {
@@ -433,7 +435,11 @@ export function LocalIntelPage() {
                       <button
                         key={w.id}
                         onClick={() =>
-                          setWatch.mutate({ id: w.id, name: w.name, add: false })
+                          setWatch.mutate({
+                            id: w.id,
+                            name: w.name,
+                            add: false,
+                          })
                         }
                         title="Remove from watchlist"
                         className="mr-1 rounded bg-amber-900/40 px-1.5 py-0.5 text-amber-300 hover:bg-amber-900/70"
@@ -925,7 +931,9 @@ function KillCard({
             {kill.totalValue > 0 && (
               <>
                 {" · "}
-                <span className="text-amber-400">{formatIsk(kill.totalValue)}</span>
+                <span className="text-amber-400">
+                  {formatIsk(kill.totalValue)}
+                </span>
               </>
             )}
           </div>
@@ -1063,10 +1071,16 @@ function KillsTab({
         <div className="text-sm text-rose-400">{errorMessage(kills.error)}</div>
       )}
       {kills.data && kills.data.length === 0 && (
-        <div className="text-sm text-zinc-500">No recent combat kills in this system.</div>
+        <div className="text-sm text-zinc-500">
+          No recent combat kills in this system.
+        </div>
       )}
       {kills.data?.map((k) => (
-        <KillCard key={k.killmailId} kill={k} onAttackerClick={onAttackerClick} />
+        <KillCard
+          key={k.killmailId}
+          kill={k}
+          onAttackerClick={onAttackerClick}
+        />
       ))}
       {kills.data && kills.data.length > 0 && (
         <div className="text-xs text-zinc-600">

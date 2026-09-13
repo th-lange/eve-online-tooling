@@ -509,10 +509,10 @@ function Row({ r }: { r: AssetRow }) {
             >
               <Copy size={11} />
             </button>
-          <InlineError
-            message={copyError}
-            className="text-xs text-rose-400"
-          />
+            <InlineError
+              message={copyError}
+              className="text-xs text-rose-400"
+            />
           </div>
           {(r.category || r.group) && (
             <div className="text-xs text-zinc-500">

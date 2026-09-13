@@ -76,8 +76,7 @@ impl Sde {
                )
              ORDER BY t.typeName",
         )?;
-        let rows =
-            stmt.query_map(params![weapon_type_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let rows = stmt.query_map(params![weapon_type_id], |r| Ok((r.get(0)?, r.get(1)?)))?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 

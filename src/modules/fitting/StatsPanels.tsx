@@ -422,9 +422,7 @@ export function ResourcesPanel({
 }) {
   return (
     <div className="space-y-2">
-      <h3 className="text-xs uppercase tracking-wide text-zinc-500">
-        Fitting
-      </h3>
+      <h3 className="text-xs uppercase tracking-wide text-zinc-500">Fitting</h3>
       <ResourceBar
         label="CPU"
         used={resources.cpuUsed}
@@ -502,7 +500,9 @@ export function DpsBreakdownPanel({
         </div>
       ) : (
         <>
-          <div className="text-sm text-zinc-300">{dps.total.toFixed(0)} dps</div>
+          <div className="text-sm text-zinc-300">
+            {dps.total.toFixed(0)} dps
+          </div>
           {dps.total > 0 && (
             <div className="text-xs text-zinc-500">
               {dps.turret > 0 && `turret ${dps.turret.toFixed(0)} `}
@@ -648,9 +648,7 @@ export function PricePanel({
   return (
     <div className="mt-4 space-y-1">
       <div className="flex items-center justify-between">
-        <h3 className="text-xs uppercase tracking-wide text-zinc-500">
-          Price
-        </h3>
+        <h3 className="text-xs uppercase tracking-wide text-zinc-500">Price</h3>
         <button
           onClick={() => price.mutate()}
           className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"

@@ -111,7 +111,8 @@ export function useWorkbench(): WorkbenchState {
   // Best researched ME/TE per blueprint type (highest across owned copies, then
   // imported entries layered on so you can model BPs you don't own yet).
   const ownedMe = useMemo(
-    () => bestResearchedMap(owned.data ?? [], imported, "materialEfficiency", "me"),
+    () =>
+      bestResearchedMap(owned.data ?? [], imported, "materialEfficiency", "me"),
     [owned.data, imported],
   );
   const ownedTe = useMemo(

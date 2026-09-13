@@ -66,7 +66,10 @@ impl ScriptEngine for RhaiEngine {
             Ok(value) => Ok(serde_json::to_value(&value).unwrap_or(Value::Null)),
             Err(e) => Err(match *e {
                 EvalAltResult::ErrorTerminated(reason, _) if reason.to_string() == "memory" => {
-                    format!("script exceeded memory limit ({} MiB)", limits.max_memory_mb)
+                    format!(
+                        "script exceeded memory limit ({} MiB)",
+                        limits.max_memory_mb
+                    )
                 }
                 EvalAltResult::ErrorTerminated(..) => "execution timed out".to_string(),
                 other => other.to_string(),

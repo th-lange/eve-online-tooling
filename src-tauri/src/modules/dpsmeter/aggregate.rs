@@ -132,8 +132,7 @@ impl Window {
         // Breakdown accumulators: weapon → out-damage;
         // pilot → (out, in, ship, weapons[]).
         let mut weapons: HashMap<&str, f64> = HashMap::new();
-        let mut pilots: HashMap<&str, (f64, f64, Option<&str>, Vec<&str>)> =
-            HashMap::new();
+        let mut pilots: HashMap<&str, (f64, f64, Option<&str>, Vec<&str>)> = HashMap::new();
         for ev in &self.events {
             let v = ev.amount as f64;
             match ev.kind {

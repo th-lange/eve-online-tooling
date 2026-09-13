@@ -36,9 +36,15 @@ const page = (
   lazy(() => loader().then((m) => ({ default: m[name] })));
 
 const COMPONENTS: Record<string, LazyExoticComponent<ComponentType>> = {
-  production: page(() => import("./production/ProductionPage"), "ProductionPage"),
+  production: page(
+    () => import("./production/ProductionPage"),
+    "ProductionPage",
+  ),
   trading: page(() => import("./trading/TradingPage"), "TradingPage"),
-  daytrading: page(() => import("./daytrading/DaytradingPage"), "DaytradingPage"),
+  daytrading: page(
+    () => import("./daytrading/DaytradingPage"),
+    "DaytradingPage",
+  ),
   reprocessing: page(
     () => import("./reprocessing/ReprocessingPage"),
     "ReprocessingPage",
@@ -55,7 +61,10 @@ const COMPONENTS: Record<string, LazyExoticComponent<ComponentType>> = {
     () => import("./notifications/NotificationsPage"),
     "NotificationsPage",
   ),
-  accounting: page(() => import("./accounting/AccountingPage"), "AccountingPage"),
+  accounting: page(
+    () => import("./accounting/AccountingPage"),
+    "AccountingPage",
+  ),
   transactions: page(
     () => import("./transactions/TransactionsPage"),
     "TransactionsPage",
@@ -73,7 +82,10 @@ const COMPONENTS: Record<string, LazyExoticComponent<ComponentType>> = {
     "IndustryJobsPage",
   ),
   pi: page(() => import("./pi/PIPage"), "PIPage"),
-  incursions: page(() => import("./incursions/IncursionsPage"), "IncursionsPage"),
+  incursions: page(
+    () => import("./incursions/IncursionsPage"),
+    "IncursionsPage",
+  ),
   "faction-warfare": page(
     () => import("./faction-warfare/FactionWarfarePage"),
     "FactionWarfarePage",

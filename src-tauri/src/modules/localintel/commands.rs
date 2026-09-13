@@ -722,7 +722,9 @@ pub async fn localintel_system_kills(
     ) -> Vec<SystemKillModule> {
         let mut agg: HashMap<(i64, &'static str), i64> = HashMap::new();
         for it in items {
-            let Some(slot) = flag_slot(it.flag) else { continue };
+            let Some(slot) = flag_slot(it.flag) else {
+                continue;
+            };
             *agg.entry((it.item_type_id, slot)).or_default() +=
                 (it.quantity_destroyed + it.quantity_dropped).max(1);
         }

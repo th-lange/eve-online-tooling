@@ -197,10 +197,12 @@ impl AuthState {
     /// nothing is cached. Test-only.
     #[cfg(test)]
     pub fn cached_token(&self, character_id: i64) -> Option<(String, bool)> {
-        recover_lock(self.tokens.lock()).get(&character_id).map(|t| {
-            let valid = t.expires_at > Instant::now();
-            (t.access_token.clone(), valid)
-        })
+        recover_lock(self.tokens.lock())
+            .get(&character_id)
+            .map(|t| {
+                let valid = t.expires_at > Instant::now();
+                (t.access_token.clone(), valid)
+            })
     }
 
     fn cache_token(&self, character_id: i64, access_token: String, expires_in: u64) {

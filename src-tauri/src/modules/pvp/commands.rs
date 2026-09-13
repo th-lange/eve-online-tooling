@@ -719,9 +719,16 @@ pub async fn pvp_weapon_ammo(
             projected: Vec::new(),
         };
         let Ok(stats) = simulate_fit(
-            &sde, &dir, &fit,
+            &sde,
+            &dir,
+            &fit,
             &|_| 5.0, // all-V skills
-            None, None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         ) else {
             continue;
         };
@@ -731,7 +738,7 @@ pub async fn pvp_weapon_ammo(
         let dps = stats.dps.as_ref().map(|d| d.total).unwrap_or(0.0);
 
         // Damage-type fractions from base charge attributes.
-        let em  = dmg_attr(charge_id, 114);
+        let em = dmg_attr(charge_id, 114);
         let exp = dmg_attr(charge_id, 116);
         let kin = dmg_attr(charge_id, 117);
         let therm = dmg_attr(charge_id, 118);
@@ -752,7 +759,11 @@ pub async fn pvp_weapon_ammo(
     }
 
     // Short range → long range.
-    lines.sort_by(|a, b| a.optimal.partial_cmp(&b.optimal).unwrap_or(std::cmp::Ordering::Equal));
+    lines.sort_by(|a, b| {
+        a.optimal
+            .partial_cmp(&b.optimal)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     Ok(lines)
 }
 

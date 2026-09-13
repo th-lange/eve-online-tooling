@@ -404,14 +404,19 @@ function ModuleRow({
                 On your turrets
               </span>
               <span className="block">
-                DPS{" "}
-                <span className="text-zinc-100">{formatInt(ammo.dps)}</span>
+                DPS <span className="text-zinc-100">{formatInt(ammo.dps)}</span>
               </span>
               <span className="block">
                 Optimal{" "}
                 <span className="text-zinc-100">{km(ammo.optimal)}</span>
                 {ammo.falloff > 0 ? (
-                  <> → <span className="text-zinc-100">{km(ammo.optimal + ammo.falloff)}</span></>
+                  <>
+                    {" "}
+                    →{" "}
+                    <span className="text-zinc-100">
+                      {km(ammo.optimal + ammo.falloff)}
+                    </span>
+                  </>
                 ) : null}
               </span>
               <span className="block">
@@ -535,12 +540,7 @@ function SlotBank({
     .sort((a, b) => a.it.index - b.it.index);
   // Always show the drone bay and cargo hold, even when empty, so they read as
   // available; other capless banks (implants/subsystems/…) still hide empty.
-  if (
-    items.length === 0 &&
-    cap == null &&
-    slot !== "drone" &&
-    slot !== "cargo"
-  )
+  if (items.length === 0 && cap == null && slot !== "drone" && slot !== "cargo")
     return null;
   const free = cap != null ? cap - items.length : 0;
   const full = cap != null && free === 0 && cap > 0;

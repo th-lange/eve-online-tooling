@@ -99,14 +99,55 @@ const FW_SORT_KEYS: readonly FwSortKey[] = [
 ];
 
 const FW_COLUMNS: SortColumn<FwSortKey>[] = [
-  { key: "name",          label: "System",       numeric: false, description: "Solar system name" },
-  { key: "region",        label: "Region",       numeric: false, description: "Region the system belongs to" },
-  { key: "occupier",      label: "Controlled by",numeric: false, description: "Faction currently occupying this system" },
-  { key: "contestedRank", label: "State",        numeric: false, description: "Contest state: uncontested → contested → vulnerable → captured" },
-  { key: "vpPct",         label: "Capture",      numeric: true,  description: "Victory-point capture progress (% toward flip)" },
-  { key: "kills",         label: "Kills 1h",     numeric: true,  description: "Ship kills in the last hour" },
-  { key: "jumps",         label: "Jumps 1h",     numeric: true,  description: "Stargate jumps through this system in the last hour" },
-  { key: "hops",          label: "Dist.",        numeric: true,  description: "Shortest stargate route from your current location" },
+  {
+    key: "name",
+    label: "System",
+    numeric: false,
+    description: "Solar system name",
+  },
+  {
+    key: "region",
+    label: "Region",
+    numeric: false,
+    description: "Region the system belongs to",
+  },
+  {
+    key: "occupier",
+    label: "Controlled by",
+    numeric: false,
+    description: "Faction currently occupying this system",
+  },
+  {
+    key: "contestedRank",
+    label: "State",
+    numeric: false,
+    description:
+      "Contest state: uncontested → contested → vulnerable → captured",
+  },
+  {
+    key: "vpPct",
+    label: "Capture",
+    numeric: true,
+    description: "Victory-point capture progress (% toward flip)",
+  },
+  {
+    key: "kills",
+    label: "Kills 1h",
+    numeric: true,
+    description: "Ship kills in the last hour",
+  },
+  {
+    key: "jumps",
+    label: "Jumps 1h",
+    numeric: true,
+    description: "Stargate jumps through this system in the last hour",
+  },
+  {
+    key: "hops",
+    label: "Dist.",
+    numeric: true,
+    description: "Shortest stargate route from your current location",
+  },
 ];
 
 /**
@@ -338,9 +379,7 @@ function Warzone({ data, zone }: { data: FwMap; zone: string }) {
         sub: `${n.security.toFixed(1)}${
           n.contested !== "uncontested" ? ` · ${n.contested}` : ""
         }${n.kills > 0 ? ` · ${n.kills} kills` : ""}${
-          hops != null
-            ? ` · ${isCurrent ? "here" : `${hops}j`}`
-            : ""
+          hops != null ? ` · ${isCurrent ? "here" : `${hops}j`}` : ""
         }`,
         accent: FACTION_HEX[n.occupierId] ?? "#a1a1aa",
         ring: CONTEST_RING[n.contested],

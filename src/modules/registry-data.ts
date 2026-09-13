@@ -257,7 +257,8 @@ export const MODULE_METADATA: ModuleMeta[] = [
   {
     id: "logs",
     title: "Logs",
-    description: "Live error and warning log from the frontend and Rust backend.",
+    description:
+      "Live error and warning log from the frontend and Rust backend.",
     group: "support",
     icon: ScrollText,
   },
