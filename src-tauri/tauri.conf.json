@@ -15,7 +15,7 @@
         "title": "EVE Online Tooling",
         "width": 1100,
         "height": 720,
-        "fileDropEnabled": false
+        "dragDropEnabled": false
       }
     ],
     "security": {
