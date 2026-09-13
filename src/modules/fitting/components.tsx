@@ -16,12 +16,13 @@ export { ProjectedPanel } from "./ProjectedPanel";
 export { TargetProfileBox } from "./TargetProfileBox";
 export { ChargeControl, SlotBadge, SlotGrid } from "./SlotGrid";
 export {
-  CapChart,
-  CapGauge,
-  DpsRangeCurve,
+  DpsBreakdownPanel,
   EwPanel,
-  ResourceBar,
-  TankResists,
+  NavigationPanel,
+  PricePanel,
+  ResourcesPanel,
+  TankResistsPanel,
+  Vitals,
 } from "./StatsPanels";
 export { FIT_EPS, type FitContext } from "./fitHelpers";
 

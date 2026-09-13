@@ -5,142 +5,23 @@ import {
   type FitStats,
   type FleetBoost,
 } from "../../lib/api";
-import { formatDuration, formatInt, formatIsk } from "../../lib/format";
-import { km } from "./fitHelpers";
 import {
-  classifyArchetype,
-  ARCHETYPE_LABEL,
-  ARCHETYPE_CLASS,
-} from "../../lib/shipArchetype";
-import {
-  CapGauge,
-  DpsRangeCurve,
+  DpsBreakdownPanel,
   EwPanel,
   FleetBoostsPanel,
-  ResourceBar,
-  TankResists,
+  NavigationPanel,
+  PricePanel,
+  ResourcesPanel,
+  TankResistsPanel,
+  Vitals,
 } from "./components";
-
-/**
- * The four numbers a fitter actually swaps modules to chase (#708): DPS, EHP,
- * capacitor stability and top speed, as a headline block instead of small
- * label/value stacks with the same weight as sensor strength. Capacitor is
- * colour-coded good/marginal/bad (stable & comfortable / stable & tight /
- * unstable) — the same three-state read as the resist table's colour scale.
- */
-// Presets: [label, [em, therm, kin, exp]]
-const DAMAGE_PRESETS = [
-  ["Omni (even)", [0.25, 0.25, 0.25, 0.25]],
-  ["Guristas (kin/therm)", [0, 0.5, 0.5, 0]],
-  ["Serpentis (therm/kin)", [0, 0.667, 0.333, 0]],
-  ["Angel (exp/kin)", [0, 0, 0.5, 0.5]],
-  ["Sansha/Blood (em/therm)", [0.5, 0.5, 0, 0]],
-] as const;
-
-function Vitals({
-  stats,
-  jammedActive,
-}: {
-  stats: FitStats;
-  jammedActive: boolean;
-}) {
-  const dps = jammedActive ? 0 : (stats.dps?.total ?? null);
-  const ehp = stats.tank?.ehp ?? null;
-  const cap = stats.capacitor ?? null;
-  const speed = stats.navigation?.maxVelocity ?? null;
-  const archetype = classifyArchetype(stats.weaponRanges ?? []);
-
-  const capTone: "good" | "warn" | "bad" | "neutral" = !cap
-    ? "neutral"
-    : !cap.stable
-      ? "bad"
-      : (cap.stablePct ?? 100) >= 50
-        ? "good"
-        : "warn";
-  const capToneClass = {
-    good: "text-emerald-400",
-    warn: "text-amber-400",
-    bad: "text-red-400",
-    neutral: "text-zinc-100",
-  }[capTone];
-
-  return (
-    <div className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
-      <VitalStat
-        label="DPS"
-        value={dps == null ? "—" : dps.toFixed(0)}
-        suffix={jammedActive ? "jammed (no lock)" : undefined}
-        suffixClassName={jammedActive ? "text-amber-400" : undefined}
-      />
-      <VitalStat
-        label="EHP"
-        value={ehp == null ? "—" : formatInt(Math.round(ehp))}
-      />
-      <VitalStat
-        label="Capacitor"
-        value={
-          cap == null
-            ? "—"
-            : cap.stable
-              ? `${Math.max(0, Math.min(100, cap.stablePct ?? 100)).toFixed(0)}%`
-              : formatDuration(cap.depletionSeconds ?? 0)
-        }
-        valueClassName={capToneClass}
-        suffix={cap == null ? undefined : cap.stable ? "stable" : "to empty"}
-      />
-      <VitalStat
-        label="Speed"
-        value={speed == null ? "—" : `${Math.round(speed)} m/s`}
-      />
-      {archetype && (
-        <div className="col-span-2 mt-0.5">
-          <span
-            className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${ARCHETYPE_CLASS[archetype]}`}
-          >
-            {ARCHETYPE_LABEL[archetype]}
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function VitalStat({
-  label,
-  value,
-  valueClassName = "text-zinc-100",
-  suffix,
-  suffixClassName = "text-zinc-500",
-}: {
-  label: string;
-  value: string;
-  valueClassName?: string;
-  suffix?: string;
-  suffixClassName?: string;
-}) {
-  return (
-    <div className="min-w-0">
-      <div className="text-[10px] uppercase tracking-wide text-zinc-500">
-        {label}
-      </div>
-      <div
-        className={`text-xl font-semibold leading-tight tabular-nums ${valueClassName}`}
-      >
-        {value}
-      </div>
-      {suffix && (
-        <div className={`truncate text-[10px] ${suffixClassName}`}>
-          {suffix}
-        </div>
-      )}
-    </div>
-  );
-}
 
 /** Right-hand stats sidebar: a sticky vitals headline (DPS/EHP/cap/speed) over
  *  the detail stats (resources, DPS breakdown, EW, tank resists, navigation)
  *  and price — purely presentational, driven by the simulate/price queries
- *  `useFitEditor`/the page-level `price` mutation own. */
+ *  `useFitEditor`/the page-level `price` mutation own. Each detail section is
+ *  its own panel component (`StatsPanels.tsx`); this is just the layout and
+ *  loading/empty-state wrapper around them. */
 export function StatsAside({
   stats,
   skillLabel,
@@ -208,100 +89,23 @@ export function StatsAside({
         }
       >
         {stats.data && (
-          <div className="space-y-2">
-            <h3 className="text-xs uppercase tracking-wide text-zinc-500">
-              Fitting
-            </h3>
-            <ResourceBar
-              label="CPU"
-              used={stats.data.resources.cpuUsed}
-              max={stats.data.resources.cpuOutput}
-              unit="tf"
-            />
-            <ResourceBar
-              label="Powergrid"
-              used={stats.data.resources.powergridUsed}
-              max={stats.data.resources.powergridOutput}
-              unit="MW"
-            />
-            <ResourceBar
-              label="Calibration"
-              used={stats.data.resources.calibrationUsed}
-              max={stats.data.resources.calibrationOutput}
-              unit=""
-            />
-            {stats.data.capacitor && <CapGauge cap={stats.data.capacitor} />}
-            {stats.data.capacitor && (
-              <div className="space-y-0.5">
-                <div className="text-[10px] uppercase tracking-wide text-zinc-500">
-                  Incoming neut
-                </div>
-                <input
-                  type="number"
-                  min="0"
-                  step="1"
-                  placeholder="0 GJ/s"
-                  value={neutGjs ?? ""}
-                  onChange={(e) => {
-                    const v = Number(e.currentTarget.value);
-                    onNeutGjs(v || undefined);
-                  }}
-                  className="w-20 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-100"
-                />
-              </div>
-            )}
-            {stats.data.validation.length > 0 && (
-              <ul className="mt-2 space-y-1">
-                {stats.data.validation.map((p, i) => (
-                  <li key={i} className="text-xs text-red-400">
-                    ⚠ {p.message}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+          <ResourcesPanel
+            resources={stats.data.resources}
+            capacitor={stats.data.capacitor}
+            validation={stats.data.validation}
+            neutGjs={neutGjs}
+            onNeutGjs={onNeutGjs}
+          />
         )}
 
         {stats.data?.dps && (
-          <div className="space-y-1">
-            <h3 className="text-xs uppercase tracking-wide text-zinc-500">
-              DPS ({skillLabel})
-            </h3>
-            {jammedActive ? (
-              <div className="text-sm text-amber-400">
-                Jammed — 0 applied (no lock)
-              </div>
-            ) : (
-              <>
-                <div className="text-sm text-zinc-300">
-                  {stats.data.dps.total.toFixed(0)} dps
-                </div>
-                {stats.data.dps.total > 0 && (
-                  <div className="text-xs text-zinc-500">
-                    {stats.data.dps.turret > 0 &&
-                      `turret ${stats.data.dps.turret.toFixed(0)} `}
-                    {stats.data.dps.missile > 0 &&
-                      `· missile ${stats.data.dps.missile.toFixed(0)} `}
-                    {stats.data.dps.drone > 0 &&
-                      `· drone ${stats.data.dps.drone.toFixed(0)}`}
-                  </div>
-                )}
-                {stats.data.appliedDps && (
-                  <div className="text-xs text-zinc-500">
-                    applied:{" "}
-                    <span className="text-amber-400">
-                      {stats.data.appliedDps.total.toFixed(0)} dps
-                    </span>{" "}
-                    (vs paper {stats.data.dps.total.toFixed(0)} dps)
-                  </div>
-                )}
-                {stats.data.dpsRangeCurve &&
-                  stats.data.dpsRangeCurve.length > 1 && (
-                    <DpsRangeCurve curve={stats.data.dpsRangeCurve} />
-                  )}
-              </>
-            )}
-          </div>
+          <DpsBreakdownPanel
+            skillLabel={skillLabel}
+            dps={stats.data.dps}
+            appliedDps={stats.data.appliedDps}
+            dpsRangeCurve={stats.data.dpsRangeCurve}
+            jammedActive={jammedActive}
+          />
         )}
 
         {stats.data?.projectedEw && stats.data.projectedEw.length > 0 && (
@@ -313,115 +117,23 @@ export function StatsAside({
         )}
 
         {stats.data?.tank && (
-          <div className="space-y-1">
-            <h3 className="text-xs uppercase tracking-wide text-zinc-500">
-              Tank ({skillLabel})
-            </h3>
-            <div className="space-y-0.5">
-              <div className="text-[10px] uppercase tracking-wide text-zinc-500">
-                Incoming damage
-              </div>
-              <select
-                value={damageProfile ? JSON.stringify(damageProfile) : ""}
-                onChange={(e) =>
-                  onDamageProfile(
-                    e.currentTarget.value
-                      ? (JSON.parse(e.currentTarget.value) as [
-                          number,
-                          number,
-                          number,
-                          number,
-                        ])
-                      : undefined,
-                  )
-                }
-                className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-100"
-              >
-                {DAMAGE_PRESETS.map(([label, profile]) => (
-                  <option
-                    key={label}
-                    value={
-                      label === "Omni (even)" ? "" : JSON.stringify(profile)
-                    }
-                  >
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="text-sm text-zinc-300">
-              {formatInt(Math.round(stats.data.tank.ehp))} EHP
-            </div>
-            {(stats.data.tank.shieldRepS > 0 ||
-              stats.data.tank.armorRepS > 0 ||
-              stats.data.tank.passiveShieldS > 0) && (
-              <div className="flex flex-wrap gap-x-3 text-xs text-zinc-500">
-                {stats.data.tank.shieldRepS > 0 && (
-                  <span>
-                    shield boost{" "}
-                    <span className="tabular-nums text-sky-400">
-                      {stats.data.tank.shieldRepS.toFixed(1)}/s
-                    </span>
-                  </span>
-                )}
-                {stats.data.tank.armorRepS > 0 && (
-                  <span>
-                    armor rep{" "}
-                    <span className="tabular-nums text-amber-400">
-                      {stats.data.tank.armorRepS.toFixed(1)}/s
-                    </span>
-                  </span>
-                )}
-                {stats.data.tank.passiveShieldS > 0 && (
-                  <span>
-                    passive shield{" "}
-                    <span className="tabular-nums text-sky-300">
-                      {stats.data.tank.passiveShieldS.toFixed(1)}/s
-                    </span>
-                  </span>
-                )}
-              </div>
-            )}
-            <TankResists tank={stats.data.tank} />
-          </div>
+          <TankResistsPanel
+            skillLabel={skillLabel}
+            tank={stats.data.tank}
+            damageProfile={damageProfile}
+            onDamageProfile={onDamageProfile}
+          />
         )}
 
         {stats.data?.navigation && (
-          <div className="space-y-1">
-            <h3 className="text-xs uppercase tracking-wide text-zinc-500">
-              Navigation
-            </h3>
-            <div className="text-xs text-zinc-400">
-              {Math.round(stats.data.navigation.maxVelocity)} m/s · align{" "}
-              {stats.data.navigation.alignTime.toFixed(1)}s · sig{" "}
-              {Math.round(stats.data.navigation.signatureRadius)}m
-              {stats.data.targeting?.lockRange
-                ? ` · lock ${km(stats.data.targeting.lockRange)}`
-                : ""}
-            </div>
-          </div>
+          <NavigationPanel
+            navigation={stats.data.navigation}
+            lockRange={stats.data.targeting?.lockRange}
+          />
         )}
       </div>
 
-      <div className="mt-4 space-y-1">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs uppercase tracking-wide text-zinc-500">
-            Price
-          </h3>
-          <button
-            onClick={() => price.mutate()}
-            className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
-          >
-            {price.isPending ? "…" : "Price fit"}
-          </button>
-        </div>
-        {price.data && (
-          <div className="text-sm text-zinc-300">
-            <div>Buy: {formatIsk(price.data.buyTotal)}</div>
-            <div>Sell: {formatIsk(price.data.sellTotal)}</div>
-          </div>
-        )}
-      </div>
+      <PricePanel price={price} />
 
       <FleetBoostsPanel
         boosts={fleetBoosts}

@@ -50,8 +50,11 @@ async function notify(title: string, body: string) {
   }
 }
 
-/** Short two-tone alarm beep via Web Audio (no asset). Best-effort. */
-function playAlarm() {
+/** Short two-tone alarm beep via Web Audio (no asset). Returns whether it
+ *  actually played — this beep is the hostile-alert safety channel (#819),
+ *  so a failure (autoplay policy, no audio device, unsupported API, …) must
+ *  surface to the caller instead of vanishing into a silent catch. */
+function playAlarm(): boolean {
   try {
     const Ctx =
       window.AudioContext ||
@@ -79,9 +82,13 @@ function playAlarm() {
     };
     beep(0, 880);
     beep(0.22, 1175);
-    setTimeout(() => ctx.close().catch(() => {}), 600);
-  } catch {
-    /* audio unavailable */
+    setTimeout(() => {
+      ctx.close().catch((e) => console.error("Failed to close audio context", e));
+    }, 600);
+    return true;
+  } catch (e) {
+    console.error("Hostile-alert audio failed to play", e);
+    return false;
   }
 }
 
@@ -101,6 +108,26 @@ export function LocalIntelPage() {
   const [soundOn, setSoundOn] = useState(
     () => localStorage.getItem(STORAGE_KEYS.localintelSound) !== "off",
   );
+  // Persistent warning once the alarm beep has failed to play (autoplay
+  // policy, no audio device, …) — this is a safety alert, so a silent
+  // failure must degrade loudly instead of pretending coverage exists
+  // (#819). Cleared the next time the alarm actually plays.
+  const [audioUnavailable, setAudioUnavailable] = useState(false);
+  // Brief full-page flash as a visual fallback for the same failure.
+  const [flashAlert, setFlashAlert] = useState(false);
+  const flashTimerRef = useRef<number | undefined>(undefined);
+  const triggerAlarm = useCallback(() => {
+    const played = playAlarm();
+    setAudioUnavailable(!played);
+    if (!played) {
+      setFlashAlert(true);
+      window.clearTimeout(flashTimerRef.current);
+      flashTimerRef.current = window.setTimeout(
+        () => setFlashAlert(false),
+        900,
+      );
+    }
+  }, []);
   // Pilot ids from the previous scan, so we can alert only when a *new* threat
   // enters Local (re-pasting the same list doesn't re-alarm), and flag arrivals.
   const prevIdsRef = useRef<Set<number>>(new Set());
@@ -172,7 +199,7 @@ export function LocalIntelPage() {
           );
         }
       }
-      if (alarm && soundOn) playAlarm();
+      if (alarm && soundOn) triggerAlarm();
 
       prevIdsRef.current = new Set(ids);
     },
@@ -262,6 +289,12 @@ export function LocalIntelPage() {
 
   return (
     <div className="flex h-full">
+      {/* Visual fallback for a failed alarm beep (#819): the audio channel is
+          the primary hostile-alert signal, so a screen flash makes sure a
+          silent failure still gets noticed. */}
+      {flashAlert && (
+        <div className="pointer-events-none fixed inset-0 z-50 animate-pulse bg-rose-600/25" />
+      )}
       <div className="min-w-0 flex-1 overflow-auto">
         <Page>
           <PageHeader
@@ -380,11 +413,19 @@ export function LocalIntelPage() {
                         STORAGE_KEYS.localintelSound,
                         e.currentTarget.checked ? "on" : "off",
                       );
-                      if (e.currentTarget.checked) playAlarm();
+                      if (e.currentTarget.checked) triggerAlarm();
                     }}
                   />
                   Sound alarm
                 </label>
+                {audioUnavailable && (
+                  <span
+                    className="rounded border border-rose-800 bg-rose-950/40 px-1.5 py-0.5 text-rose-300"
+                    title="The alarm beep couldn't play — check your system audio/autoplay settings. Local Intel can't sound a hostile alert until this is resolved."
+                  >
+                    ⚠ audio alerts unavailable
+                  </span>
+                )}
                 {(watchlist.data ?? []).length > 0 && (
                   <span>
                     Watching:{" "}

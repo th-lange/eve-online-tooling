@@ -7,6 +7,19 @@
 //! thread-local. That's sound here because a run is executed synchronously on
 //! one dedicated blocking thread: the host is installed before `eval` and
 //! cleared after.
+//!
+//! **`boa` 0.21 has no heap memory limit or interrupt hook** —
+//! [`run_inner`] only sets the loop iteration and recursion caps from
+//! [`Limits`], and `eval` holds an exclusive borrow of the `Context` for its
+//! entire (synchronous, single-threaded) duration, so there's no checkpoint
+//! to poll an external abort signal from mid-script. [`run_inner`] still
+//! checks the memory watchdog's [`Interrupt`] once, before `eval` starts —
+//! that only helps if the watchdog already tripped from a *previous* stage
+//! of setup; a loop that never calls back into host code (e.g.
+//! `let a=[]; for(;;) a.push({})`) can't be stopped once it's running. The
+//! watchdog in `engine::execute_watched` compensates by bounding how long
+//! the *caller* waits rather than the script itself — see [`Limits`]'s doc
+//! comment and issue #815.
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -16,7 +29,7 @@ use boa_engine::{
 };
 use serde_json::Value;
 
-use super::engine::{Limits, ScriptEngine};
+use super::engine::{Interrupt, Limits, ScriptEngine};
 use super::host::Host;
 
 thread_local! {
@@ -27,22 +40,38 @@ thread_local! {
 pub struct JsEngine;
 
 impl ScriptEngine for JsEngine {
-    fn execute(&self, host: &Arc<dyn Host>, code: &str, limits: &Limits) -> Result<Value, String> {
+    fn execute(
+        &self,
+        host: &Arc<dyn Host>,
+        code: &str,
+        limits: &Limits,
+        interrupt: &Interrupt,
+    ) -> Result<Value, String> {
         HOST.with(|h| *h.borrow_mut() = Some(host.clone()));
-        let result = run_inner(code, limits);
+        let result = run_inner(code, limits, interrupt);
         HOST.with(|h| *h.borrow_mut() = None);
         result
     }
 }
 
-fn run_inner(code: &str, limits: &Limits) -> Result<Value, String> {
+fn run_inner(code: &str, limits: &Limits, interrupt: &Interrupt) -> Result<Value, String> {
+    if interrupt.is_tripped() {
+        return Err(format!(
+            "script exceeded memory limit ({} MiB)",
+            limits.max_memory_mb
+        ));
+    }
     let mut context = Context::default();
     {
+        // Boa's `RuntimeLimits` only exposes iteration/recursion caps — no
+        // heap/allocation limit exists to set here (#815).
         let lim = context.runtime_limits_mut();
         lim.set_loop_iteration_limit(limits.loop_iter_limit);
         lim.set_recursion_limit(limits.recursion_limit);
     }
     register(&mut context).map_err(|e| e.to_string())?;
+    // No further `interrupt` check is possible past this point — see this
+    // module's doc comment.
     let value = context
         .eval(Source::from_bytes(code))
         .map_err(|e| e.to_string())?;

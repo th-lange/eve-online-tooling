@@ -13,13 +13,17 @@ import {
 import { marketKeys } from "../../lib/queryKeys";
 import { useTypeIdLists } from "../../lib/useSavedLists";
 import { classifyPaste, dedupNames, isExcludedMetaGroup } from "./helpers";
+import {
+  bestResearchedMap,
+  composeProfitParams,
+  countDirtySettings,
+} from "./profitParams";
 import { toggle, uniqueSorted } from "../../lib/sets";
 import { parseItems } from "../../lib/parseItems";
 import {
   FORGE,
   IMPORTED_BP_KEY,
   loadImported,
-  STRUCTURES,
   type ImportedBlueprint,
   type ResultsView,
   type StructureKey,
@@ -106,24 +110,14 @@ export function useWorkbench(): WorkbenchState {
 
   // Best researched ME/TE per blueprint type (highest across owned copies, then
   // imported entries layered on so you can model BPs you don't own yet).
-  const ownedMe = useMemo(() => {
-    const map: Record<number, number> = {};
-    for (const b of owned.data ?? []) {
-      map[b.typeId] = Math.max(map[b.typeId] ?? 0, b.materialEfficiency);
-    }
-    for (const b of imported)
-      map[b.typeId] = Math.max(map[b.typeId] ?? 0, b.me);
-    return map;
-  }, [owned.data, imported]);
-  const ownedTe = useMemo(() => {
-    const map: Record<number, number> = {};
-    for (const b of owned.data ?? []) {
-      map[b.typeId] = Math.max(map[b.typeId] ?? 0, b.timeEfficiency);
-    }
-    for (const b of imported)
-      map[b.typeId] = Math.max(map[b.typeId] ?? 0, b.te);
-    return map;
-  }, [owned.data, imported]);
+  const ownedMe = useMemo(
+    () => bestResearchedMap(owned.data ?? [], imported, "materialEfficiency", "me"),
+    [owned.data, imported],
+  );
+  const ownedTe = useMemo(
+    () => bestResearchedMap(owned.data ?? [], imported, "timeEfficiency", "te"),
+    [owned.data, imported],
+  );
   const update = useMutation({ mutationFn: () => sdeUpdate(false) });
   const [rows, setRows] = useState<ProfitBreakdown[]>([]);
   const profit = useMutation({
@@ -165,41 +159,42 @@ export function useWorkbench(): WorkbenchState {
   };
   // Snapshot of `settings` as of the last calculate, to detect staleness.
   const [calcSettings, setCalcSettings] = useState(settings);
-  const dirtyCount = (
-    Object.keys(settings) as (keyof typeof settings)[]
-  ).filter((k) => settings[k] !== calcSettings[k]).length;
+  const dirtyCount = countDirtySettings(settings, calcSettings);
   const isStale = dirtyCount > 0 && rows.length > 0;
 
   function calculate() {
     setCalcSettings(settings);
-    profit.mutate({
-      regionId,
-      stationId,
-      runs,
-      me,
-      ownedMe: useOwnedMe ? ownedMe : {},
-      te,
-      ownedTe: useOwnedMe ? ownedTe : {},
-      timeSkill,
-      // Compose structure preset with rig bonuses (material/cost multiplicative).
-      structureTePct: STRUCTURES[structure].tePct + rigTePct,
-      meBonus: STRUCTURES[structure].meBonus * (1 - rigMePct / 100),
-      costBonus:
-        1 - (1 - STRUCTURES[structure].costBonus) * (1 - rigCostPct / 100),
-      stock: useStock ? (stock.data ?? {}) : {},
-      buildComponents,
-      systemCostIndex: costIndexPct / 100,
-      facilityTax: facilityTaxPct / 100,
-      includeSalesCost: includeSaleCost,
-      salesTax: sellTaxPct / 100,
-      brokerFee: sellBrokerPct / 100,
-      materialBasis,
-      productBasis,
-      blueprintCostPerRun,
-      inventionSkillLevel: inventionSkill,
-      decryptorTypeId,
-      productBestHub,
-    });
+    profit.mutate(
+      composeProfitParams({
+        regionId,
+        stationId,
+        runs,
+        me,
+        useOwnedMe,
+        ownedMe,
+        te,
+        ownedTe,
+        timeSkill,
+        structure,
+        rigMePct,
+        rigTePct,
+        rigCostPct,
+        useStock,
+        stock: stock.data,
+        buildComponents,
+        costIndexPct,
+        facilityTaxPct,
+        includeSaleCost,
+        sellTaxPct,
+        sellBrokerPct,
+        materialBasis,
+        productBasis,
+        blueprintCostPerRun,
+        inventionSkill,
+        decryptorTypeId,
+        productBestHub,
+      }),
+    );
   }
 
   // Optional debounced auto-recalc: when on, a settings change re-prices itself

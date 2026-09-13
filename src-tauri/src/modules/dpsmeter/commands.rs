@@ -21,7 +21,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
-use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader, SeekFrom};
 
 use super::aggregate::Window;
 use super::parser::{parse_line, EventKind};
@@ -29,6 +29,13 @@ use crate::sde::{Sde, SdePaths};
 
 /// How often the loop reads new bytes and emits a tick.
 const POLL: Duration = Duration::from_millis(500);
+
+/// Above this size, [`dps_playback`] refuses to load the log rather than risk
+/// spiking memory by (file bytes + parsed-event overhead): replay genuinely
+/// needs the whole file loaded and sorted in memory (unlike
+/// [`dps_log_summary`], which streams the file line-by-line instead). ~50 MB
+/// is generously above what a long real session's gamelog reaches (#816).
+const MAX_PLAYBACK_LOG_BYTES: u64 = 50 * 1024 * 1024;
 
 /// Shared run-state. The active loop runs while its generation == `generation`;
 /// `dps_start` and `dps_stop` both bump it.
@@ -198,8 +205,11 @@ pub fn dps_stop(state: State<'_, DpsState>) {
 }
 
 /// Read + parse a whole gamelog file and resolve its mining volumes, sorted by
-/// timestamp. Shared by [`dps_playback`] (replay) and [`dps_log_summary`]
-/// (timeline density) so both see identical events for the same file.
+/// timestamp. Used by [`dps_playback`] only — replay genuinely needs a
+/// globally ordered event vec, unlike [`dps_log_summary`], which streams the
+/// file line-by-line instead of holding every parsed event in memory (#816).
+/// Callers **must** bound the file size first (see [`MAX_PLAYBACK_LOG_BYTES`])
+/// since this loads the whole file into memory before sorting it.
 async fn load_and_resolve_events(
     app: &AppHandle,
     file: &str,
@@ -262,13 +272,27 @@ fn seek_start(
 /// `settings.seek_ts` (set by dragging the timeline slider) starts the virtual
 /// clock mid-file instead of at the first event; the window is pre-warmed with
 /// the trailing `window_secs` of history so the DPS readout isn't cold at the
-/// seek point.
+/// seek point. Rejects logs over [`MAX_PLAYBACK_LOG_BYTES`] instead of
+/// silently loading + sorting an unbounded amount of memory (#816) — use
+/// [`dps_log_summary`]'s streaming timeline for a rough look at huge logs.
 #[tauri::command]
 pub async fn dps_playback(
     app: AppHandle,
     state: State<'_, DpsState>,
     settings: PlaybackSettings,
 ) -> Result<(), String> {
+    let size = tokio::fs::metadata(&settings.file)
+        .await
+        .map_err(|e| e.to_string())?
+        .len();
+    if size > MAX_PLAYBACK_LOG_BYTES {
+        return Err(format!(
+            "gamelog too large to replay ({} MB, limit {} MB) — playback needs \
+             the whole file sorted in memory; use the summary timeline instead",
+            size / (1024 * 1024),
+            MAX_PLAYBACK_LOG_BYTES / (1024 * 1024),
+        ));
+    }
     let events = load_and_resolve_events(&app, &settings.file).await?;
 
     let generation = state.generation.clone();
@@ -315,27 +339,17 @@ pub async fn dps_playback(
     Ok(())
 }
 
-/// Bucket parsed events into [`SUMMARY_BUCKETS`] equal-width time slices across
-/// their span, normalizing each category (out/in damage, mining) against its
-/// own busiest bucket. Pure — no file IO — for unit testing; [`dps_log_summary`]
-/// is the thin command wrapper.
-fn bucket_events(events: &[super::parser::DpsEvent]) -> LogSummary {
-    let start = events.first().map(|e| e.ts).unwrap_or(0);
-    let end = events.last().map(|e| e.ts).unwrap_or(0);
-    let span = (end - start).max(1) as f64;
-    let bucket_secs = (span / SUMMARY_BUCKETS as f64).max(1.0);
-
-    let mut raw = vec![(0.0f64, 0.0f64, 0.0f64); SUMMARY_BUCKETS];
-    for ev in events {
-        let idx = (((ev.ts - start) as f64 / bucket_secs) as usize).min(SUMMARY_BUCKETS - 1);
-        let slot = &mut raw[idx];
-        match ev.kind {
-            EventKind::DamageOut => slot.0 += ev.amount as f64,
-            EventKind::DamageIn => slot.1 += ev.amount as f64,
-            EventKind::Mining => slot.2 += ev.volume,
-            _ => {}
-        }
-    }
+/// Normalize raw per-bucket `(damage_out, damage_in, mining)` sums into a
+/// [`LogSummary`], each category against its own busiest bucket. Shared by
+/// [`bucket_events`] (in-memory, used by its unit tests) and
+/// [`stream_log_summary`] (the streaming path [`dps_log_summary`] actually
+/// calls).
+fn buckets_from_raw(
+    start: i64,
+    end: i64,
+    bucket_secs: f64,
+    raw: Vec<(f64, f64, f64)>,
+) -> LogSummary {
     let peak_out = raw.iter().map(|b| b.0).fold(0.0f64, f64::max).max(1.0);
     let peak_in = raw.iter().map(|b| b.1).fold(0.0f64, f64::max).max(1.0);
     let peak_mining = raw.iter().map(|b| b.2).fold(0.0f64, f64::max).max(1.0);
@@ -358,13 +372,112 @@ fn bucket_events(events: &[super::parser::DpsEvent]) -> LogSummary {
     }
 }
 
+/// Bucket parsed events into [`SUMMARY_BUCKETS`] equal-width time slices
+/// across their span. Pure — no file IO. Test-only: it exercises the shared
+/// [`buckets_from_raw`] core against realistic in-memory `DpsEvent`s;
+/// [`dps_log_summary`] itself calls the streaming [`stream_log_summary`]
+/// instead, so production never holds the full event vec.
+#[cfg(test)]
+fn bucket_events(events: &[super::parser::DpsEvent]) -> LogSummary {
+    let start = events.first().map(|e| e.ts).unwrap_or(0);
+    let end = events.last().map(|e| e.ts).unwrap_or(0);
+    let span = (end - start).max(1) as f64;
+    let bucket_secs = (span / SUMMARY_BUCKETS as f64).max(1.0);
+
+    let mut raw = vec![(0.0f64, 0.0f64, 0.0f64); SUMMARY_BUCKETS];
+    for ev in events {
+        let idx = (((ev.ts - start) as f64 / bucket_secs) as usize).min(SUMMARY_BUCKETS - 1);
+        let slot = &mut raw[idx];
+        match ev.kind {
+            EventKind::DamageOut => slot.0 += ev.amount as f64,
+            EventKind::DamageIn => slot.1 += ev.amount as f64,
+            EventKind::Mining => slot.2 += ev.volume,
+            _ => {}
+        }
+    }
+    buckets_from_raw(start, end, bucket_secs, raw)
+}
+
+/// First streaming pass over `file`: find the min/max event timestamp
+/// without holding any parsed events — bucketing needs the file's full time
+/// span up front to size `bucket_secs`, and gamelog lines are only
+/// *near*-chronological, so we track the exact min/max rather than trusting
+/// the first/last line (#816).
+async fn scan_log_span(file: &str) -> Result<(i64, i64), String> {
+    let handle = tokio::fs::File::open(file).await.map_err(|e| e.to_string())?;
+    let mut lines = BufReader::new(handle).lines();
+    let mut span: Option<(i64, i64)> = None;
+    while let Some(line) = lines.next_line().await.map_err(|e| e.to_string())? {
+        let Some(ev) = parse_line(&line) else {
+            continue;
+        };
+        span = Some(match span {
+            Some((start, end)) => (start.min(ev.ts), end.max(ev.ts)),
+            None => (ev.ts, ev.ts),
+        });
+    }
+    span.ok_or_else(|| "no combat lines in that log".into())
+}
+
+/// Stream `file` line-by-line, bucketing activity into [`SUMMARY_BUCKETS`] on
+/// the fly instead of loading every parsed event into a `Vec` — summaries
+/// never need a globally sorted event vec, only per-bucket sums (#816). Two
+/// passes over the file ([`scan_log_span`] for the time span, then this one
+/// to bucket), both O(buckets) memory rather than O(file); [`dps_playback`]
+/// is the one path that still needs the whole file in memory, for ordered
+/// replay.
+async fn stream_log_summary(app: &AppHandle, file: &str) -> Result<LogSummary, String> {
+    let (start, end) = scan_log_span(file).await?;
+    let span = (end - start).max(1) as f64;
+    let bucket_secs = (span / SUMMARY_BUCKETS as f64).max(1.0);
+
+    // Ore volumes are resolved per-line against a small name→m³ cache backed
+    // by one SDE connection held open for the whole pass, mirroring
+    // `resolve_ore_volumes`'s batch lookup without needing the batch itself.
+    let sde_db = crate::storage::app_data_dir(app)
+        .ok()
+        .map(|d| SdePaths::new(d).db);
+    let sde = sde_db.as_deref().and_then(|p| Sde::open(p).ok());
+    let mut ore_vol: HashMap<String, f64> = HashMap::new();
+
+    let mut raw = vec![(0.0f64, 0.0f64, 0.0f64); SUMMARY_BUCKETS];
+    let handle = tokio::fs::File::open(file).await.map_err(|e| e.to_string())?;
+    let mut lines = BufReader::new(handle).lines();
+    while let Some(line) = lines.next_line().await.map_err(|e| e.to_string())? {
+        let Some(mut ev) = parse_line(&line) else {
+            continue;
+        };
+        if ev.kind == EventKind::Mining {
+            let per_unit = match ev.ore.as_deref() {
+                Some(ore) => *ore_vol.entry(ore.to_string()).or_insert_with(|| {
+                    sde.as_ref()
+                        .and_then(|s| s.type_by_name(ore).ok().flatten())
+                        .and_then(|(_, v)| v)
+                        .unwrap_or(0.0)
+                }),
+                None => 0.0,
+            };
+            ev.volume = ev.amount as f64 * per_unit;
+        }
+        let idx = (((ev.ts - start) as f64 / bucket_secs) as usize).min(SUMMARY_BUCKETS - 1);
+        let slot = &mut raw[idx];
+        match ev.kind {
+            EventKind::DamageOut => slot.0 += ev.amount as f64,
+            EventKind::DamageIn => slot.1 += ev.amount as f64,
+            EventKind::Mining => slot.2 += ev.volume,
+            _ => {}
+        }
+    }
+    Ok(buckets_from_raw(start, end, bucket_secs, raw))
+}
+
 /// Time span + activity-density buckets for `file`, for the playback timeline
 /// slider — lets the UI show roughly where combat/mining happened before
-/// (or without) actually playing the log.
+/// (or without) actually playing the log. Streams the file rather than
+/// loading it whole (#816); memory is O(buckets), not O(file).
 #[tauri::command]
 pub async fn dps_log_summary(app: AppHandle, file: String) -> Result<LogSummary, String> {
-    let events = load_and_resolve_events(&app, &file).await?;
-    Ok(bucket_events(&events))
+    stream_log_summary(&app, &file).await
 }
 
 /// List gamelog `*.txt` files in `gamelogs_dir`, newest first.
@@ -672,5 +785,38 @@ not a combat line, ignored";
         // Damage-in and mining each land in exactly one bucket, at their peak.
         assert!(summary.buckets.iter().any(|b| b.damage_in == 1.0));
         assert!(summary.buckets.iter().any(|b| b.mining == 1.0));
+    }
+
+    #[tokio::test]
+    async fn scan_log_span_finds_exact_min_max_despite_local_disorder() {
+        // #816: `stream_log_summary` needs the *exact* time span before it
+        // can size buckets, and gamelog lines are only near-chronological —
+        // this line order deliberately isn't sorted (12:05 arrives before
+        // 12:02) to prove `scan_log_span` tracks true min/max, not just the
+        // first/last line's timestamp.
+        let tmp = TmpDir::new("scan-log-span");
+        let path = tmp.0.join("gamelog.txt");
+        let text = "\
+[ 2026.08.01 12:00:00 ] (combat) <color=0xff..><b>300</b> <color=0x77ffffff><font size=10>to</font> <b><color=0xff..>Target[X](Cruiser)</b> - Blaster - Hits
+[ 2026.08.01 12:05:00 ] (combat) <color=0xff..><b>100</b> <color=0x77ffffff><font size=10>to</font> <b><color=0xff..>Target[X](Cruiser)</b> - Blaster - Hits
+[ 2026.08.01 12:02:00 ] (combat) <color=0xff..><b>50</b> <color=0x77ffffff><font size=10>from</font> <b><color=0xff..>Enemy[Y](Frigate)</b> - Hits
+not a combat line, ignored";
+        std::fs::write(&path, text).expect("write gamelog");
+
+        let (start, end) = scan_log_span(path.to_str().expect("utf8 path"))
+            .await
+            .expect("file has combat lines");
+        assert_eq!(end - start, 300); // 12:00:00 .. 12:05:00 (5 minutes)
+    }
+
+    #[tokio::test]
+    async fn scan_log_span_errors_on_a_log_with_no_combat_lines() {
+        let tmp = TmpDir::new("scan-log-span-empty");
+        let path = tmp.0.join("gamelog.txt");
+        std::fs::write(&path, "just some chat, no combat lines here\n").expect("write gamelog");
+
+        assert!(scan_log_span(path.to_str().expect("utf8 path"))
+            .await
+            .is_err());
     }
 }

@@ -76,6 +76,10 @@ impl Sde {
             Ok((
                 r.get::<_, i64>(0)?,
                 (
+                    // invTypes.volume/capacity are NULL for types with no
+                    // physical volume or no internal bay (e.g. blueprints,
+                    // skills) — 0 m³ is the correct value there, not a
+                    // placeholder for missing data (#811).
                     r.get::<_, Option<f64>>(1)?.unwrap_or(0.0),
                     r.get::<_, Option<f64>>(2)?.unwrap_or(0.0),
                 ),

@@ -31,6 +31,7 @@ import {
   type SortColumn,
 } from "../../components/SortHeaderCell";
 import { AddToListButton } from "../../components/AddToListButton";
+import { InlineError } from "../../components/InlineError";
 import { PriceHistoryPopover } from "../../components/PriceHistoryPopover";
 
 const MAX_ROWS = 500;
@@ -270,42 +271,14 @@ export function ProfitTable({
                         <Ban size={15} />
                       </button>
                     </td>
-                    <td className="px-3 py-1.5">
-                      <div className="flex items-center gap-1 text-zinc-200">
-                        <span>{r.productName}</span>
-                        <CopyNameButton name={r.productName} />
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openMarketWindow(r.productTypeId).catch((err) =>
-                              alert(errorMessage(err)),
-                            );
-                          }}
-                          title="Open this item's market window in the EVE client (place a sell order there)"
-                          aria-label={`Open ${r.productName} in EVE`}
-                          className="rounded p-0.5 text-zinc-500 hover:text-indigo-400"
-                        >
-                          <ExternalLink size={13} />
-                        </button>
-                        {incomplete && (
-                          <AlertTriangle
-                            size={13}
-                            className="inline align-text-bottom text-amber-400"
-                            aria-label={`Missing prices for ${r.missingPrices.length} item(s) — numbers are incomplete`}
-                          />
-                        )}
-                        <PriceHistoryPopover
-                          regionId={regionId}
-                          typeId={r.productTypeId}
-                          name={r.productName}
-                          regionName={regionName}
-                          hub={hub}
-                        />
-                      </div>
-                      {subtitle && (
-                        <div className="text-xs text-zinc-500">{subtitle}</div>
-                      )}
-                    </td>
+                    <ProductCell
+                      row={r}
+                      regionId={regionId}
+                      regionName={regionName}
+                      hub={hub}
+                      incomplete={incomplete}
+                      subtitle={subtitle}
+                    />
                     <td className="px-3 py-1.5 text-right tabular-nums text-zinc-200">
                       {formatIsk(r.productPrice)}
                     </td>
@@ -379,6 +352,67 @@ function CopyNameButton({ name }: { name: string }) {
     >
       {copied ? <Check size={13} /> : <Copy size={13} />}
     </button>
+  );
+}
+
+/** Product-name cell: name + copy + "open in EVE market" + missing-price
+ *  warning + price-history popover. Owns its own inline-error state for the
+ *  market-window open failure (#820) since it's repeated per row. */
+function ProductCell({
+  row,
+  regionId,
+  regionName,
+  hub,
+  incomplete,
+  subtitle,
+}: {
+  row: ProfitBreakdown;
+  regionId: number;
+  regionName?: string;
+  hub?: string;
+  incomplete: boolean;
+  subtitle: string;
+}) {
+  const [marketError, setMarketError] = useState<string | null>(null);
+  return (
+    <td className="px-3 py-1.5">
+      <div className="flex items-center gap-1 text-zinc-200">
+        <span>{row.productName}</span>
+        <CopyNameButton name={row.productName} />
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            openMarketWindow(row.productTypeId)
+              .then(() => setMarketError(null))
+              .catch((err) => {
+                console.error("Failed to open market window", err);
+                setMarketError(errorMessage(err));
+              });
+          }}
+          title="Open this item's market window in the EVE client (place a sell order there)"
+          aria-label={`Open ${row.productName} in EVE`}
+          className="rounded p-0.5 text-zinc-500 hover:text-indigo-400"
+        >
+          <ExternalLink size={13} />
+        </button>
+        {incomplete && (
+          <AlertTriangle
+            size={13}
+            className="inline align-text-bottom text-amber-400"
+            aria-label={`Missing prices for ${row.missingPrices.length} item(s) — numbers are incomplete`}
+          />
+        )}
+        <PriceHistoryPopover
+          regionId={regionId}
+          typeId={row.productTypeId}
+          name={row.productName}
+          regionName={regionName}
+          hub={hub}
+        />
+      </div>
+      {subtitle && <div className="text-xs text-zinc-500">{subtitle}</div>}
+      <InlineError message={marketError} className="text-xs text-rose-400" />
+    </td>
   );
 }
 

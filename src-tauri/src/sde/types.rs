@@ -84,8 +84,11 @@ pub struct InventionData {
     pub inventing_blueprint_type_id: i64,
     /// Runs on the resulting T2/T3 BPC per successful attempt.
     pub runs_per_success: i64,
-    /// Base success probability (0..1), no decryptor.
-    pub probability: f64,
+    /// Base success probability (0..1), no decryptor. `None` when the SDE's
+    /// `industryActivityProbabilities` row is missing for this blueprint —
+    /// an integrity gap, not a legitimate 0% chance. Callers must skip or
+    /// flag the blueprint rather than treat this as zero (#811).
+    pub probability: Option<f64>,
     /// Datacores (and any other inputs) consumed per attempt.
     pub datacores: Vec<BlueprintMaterial>,
     /// For T3 (relic) invention: the Ancient Relic consumed per attempt, which

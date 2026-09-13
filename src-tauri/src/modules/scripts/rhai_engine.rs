@@ -1,7 +1,8 @@
 //! Rhai backend: builds a fresh [`rhai::Engine`] per run with operation and size
-//! caps plus a wall-clock deadline (checked in `on_progress`), binds the curated
-//! host API as native functions, evaluates the snippet, and converts its
-//! [`rhai::Dynamic`] result to JSON.
+//! caps plus a wall-clock deadline and the memory watchdog's abort signal
+//! (both checked in `on_progress`, which runs on every VM instruction), binds
+//! the curated host API as native functions, evaluates the snippet, and
+//! converts its [`rhai::Dynamic`] result to JSON.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -10,13 +11,19 @@ use rhai::serde::to_dynamic;
 use rhai::{Dynamic, Engine, EvalAltResult, ImmutableString, Position};
 use serde_json::Value;
 
-use super::engine::{Limits, ScriptEngine};
+use super::engine::{Interrupt, Limits, ScriptEngine};
 use super::host::Host;
 
 pub struct RhaiEngine;
 
 impl ScriptEngine for RhaiEngine {
-    fn execute(&self, host: &Arc<dyn Host>, code: &str, limits: &Limits) -> Result<Value, String> {
+    fn execute(
+        &self,
+        host: &Arc<dyn Host>,
+        code: &str,
+        limits: &Limits,
+        interrupt: &Interrupt,
+    ) -> Result<Value, String> {
         let mut engine = Engine::new();
         engine.set_max_operations(limits.max_ops);
         engine.set_max_call_levels(limits.recursion_limit);
@@ -36,11 +43,16 @@ impl ScriptEngine for RhaiEngine {
         engine.set_max_array_size(512 * 1024);
         engine.set_max_map_size(512 * 1024);
 
-        // Cooperative wall-clock timeout: `on_progress` runs every operation;
-        // returning `Some` terminates the evaluation.
+        // Cooperative wall-clock timeout + memory watchdog: `on_progress`
+        // runs on every operation, so it's also where the engine-agnostic
+        // memory watchdog in `engine::execute_watched` gets to actually cut a
+        // Rhai script short (#815) — returning `Some` terminates the eval.
         let deadline = Instant::now() + limits.timeout;
+        let interrupt = interrupt.clone();
         engine.on_progress(move |_ops| {
-            if Instant::now() >= deadline {
+            if interrupt.is_tripped() {
+                Some(Dynamic::from("memory"))
+            } else if Instant::now() >= deadline {
                 Some(Dynamic::from("timeout"))
             } else {
                 None
@@ -53,6 +65,9 @@ impl ScriptEngine for RhaiEngine {
         match engine.eval::<Dynamic>(code) {
             Ok(value) => Ok(serde_json::to_value(&value).unwrap_or(Value::Null)),
             Err(e) => Err(match *e {
+                EvalAltResult::ErrorTerminated(reason, _) if reason.to_string() == "memory" => {
+                    format!("script exceeded memory limit ({} MiB)", limits.max_memory_mb)
+                }
                 EvalAltResult::ErrorTerminated(..) => "execution timed out".to_string(),
                 other => other.to_string(),
             }),

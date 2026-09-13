@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -101,6 +101,24 @@ impl From<AuthError> for AppError {
     }
 }
 
+/// Lock a `Mutex` guarding small pieces of in-memory auth state (the
+/// per-character access-token cache, per-character refresh locks),
+/// recovering from poison instead of panicking.
+///
+/// A poisoned lock here means some other thread panicked while holding it —
+/// but the guarded data is just a cache: the worst a recovered guard can see
+/// is a stale or missing entry, which every caller already treats as "not
+/// cached" and falls back to a fresh SSO refresh/login for. Propagating the
+/// panic instead would turn one earlier bug into a permanent crash loop on
+/// every subsequent request that touches auth, since `access_token_for` is on
+/// the hot path for every ESI call. Degrading to a re-login is the safe
+/// outcome, not a crash.
+fn recover_lock<'a, T>(
+    result: Result<MutexGuard<'a, T>, PoisonError<MutexGuard<'a, T>>>,
+) -> MutexGuard<'a, T> {
+    result.unwrap_or_else(PoisonError::into_inner)
+}
+
 /// In-memory auth state: an HTTP client and a per-character access-token cache,
 /// plus the shared conditional response cache for authed ESI reads. Refresh
 /// tokens live in the keychain, not here.
@@ -179,7 +197,7 @@ impl AuthState {
     /// nothing is cached. Test-only.
     #[cfg(test)]
     pub fn cached_token(&self, character_id: i64) -> Option<(String, bool)> {
-        self.tokens.lock().unwrap().get(&character_id).map(|t| {
+        recover_lock(self.tokens.lock()).get(&character_id).map(|t| {
             let valid = t.expires_at > Instant::now();
             (t.access_token.clone(), valid)
         })
@@ -188,7 +206,7 @@ impl AuthState {
     fn cache_token(&self, character_id: i64, access_token: String, expires_in: u64) {
         // Refresh a minute early to avoid using a just-expired token.
         let ttl = Duration::from_secs(expires_in.saturating_sub(60));
-        self.tokens.lock().unwrap().insert(
+        recover_lock(self.tokens.lock()).insert(
             character_id,
             CachedToken {
                 access_token,
@@ -199,9 +217,7 @@ impl AuthState {
 
     /// The cached access token for a character if it is still valid.
     fn valid_cached_token(&self, character_id: i64) -> Option<String> {
-        self.tokens
-            .lock()
-            .unwrap()
+        recover_lock(self.tokens.lock())
             .get(&character_id)
             .filter(|t| t.expires_at > Instant::now())
             .map(|t| t.access_token.clone())
@@ -209,9 +225,7 @@ impl AuthState {
 
     /// The lock guarding this character's refreshes, created on first use.
     fn refresh_lock(&self, character_id: i64) -> Arc<tokio::sync::Mutex<()>> {
-        self.refresh_locks
-            .lock()
-            .unwrap()
+        recover_lock(self.refresh_locks.lock())
             .entry(character_id)
             .or_default()
             .clone()
@@ -263,7 +277,7 @@ impl AuthState {
     }
 
     pub fn forget(&self, character_id: i64) {
-        self.tokens.lock().unwrap().remove(&character_id);
+        recover_lock(self.tokens.lock()).remove(&character_id);
     }
 
     pub fn http(&self) -> &reqwest::Client {

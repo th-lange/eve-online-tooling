@@ -128,18 +128,21 @@ impl Sde {
     /// Dogma attributes for a type: (display name, value), published attrs only.
     pub fn type_attributes(&self, type_id: i64) -> Result<Vec<(String, f64)>, SdeError> {
         let mut stmt = self.conn.prepare(
+            // A dgmTypeAttributes row that exists but stores neither valueFloat
+            // nor valueInt means "no explicit override" — EVE dogma semantics
+            // treat that as the attribute's own defaultValue (#811), which we
+            // already surface elsewhere via attribute_defaults(). Only if that
+            // default itself is unset (a genuine integrity gap) does this fall
+            // through to a literal 0.0.
             "SELECT COALESCE(NULLIF(a.displayName, ''), a.attributeName),
-                    COALESCE(ta.valueFloat, ta.valueInt)
+                    COALESCE(ta.valueFloat, ta.valueInt, a.defaultValue, 0.0)
              FROM dgmTypeAttributes ta
              JOIN dgmAttributeTypes a ON a.attributeID = ta.attributeID
              WHERE ta.typeID = ?1 AND a.published = 1
              ORDER BY a.attributeName",
         )?;
         let rows = stmt.query_map(params![type_id], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, Option<f64>>(1)?.unwrap_or(0.0),
-            ))
+            Ok((r.get::<_, String>(0)?, r.get::<_, f64>(1)?))
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
@@ -149,14 +152,16 @@ impl Sde {
     /// unpublished attributes, because the fitting engine reads by id (#158).
     pub fn type_attributes_raw(&self, type_id: i64) -> Result<Vec<(i64, f64)>, SdeError> {
         let mut stmt = self.conn.prepare(
-            "SELECT attributeID, COALESCE(valueFloat, valueInt)
-             FROM dgmTypeAttributes WHERE typeID = ?1",
+            // Same "absent value -> attribute defaultValue" fallback as
+            // type_attributes above (#811); the final 0.0 only fires when
+            // even the attribute's own default is unset.
+            "SELECT ta.attributeID, COALESCE(ta.valueFloat, ta.valueInt, a.defaultValue, 0.0)
+             FROM dgmTypeAttributes ta
+             LEFT JOIN dgmAttributeTypes a ON a.attributeID = ta.attributeID
+             WHERE ta.typeID = ?1",
         )?;
         let rows = stmt.query_map(params![type_id], |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, Option<f64>>(1)?.unwrap_or(0.0),
-            ))
+            Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?))
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
@@ -173,16 +178,21 @@ impl Sde {
         }
         // Build a `(?, ?, …)` placeholder list — rusqlite has no native array bind.
         let placeholders = vec!["?"; type_ids.len()].join(", ");
+        // Same "absent value -> attribute defaultValue" fallback as
+        // type_attributes_raw above (#811).
         let sql = format!(
-            "SELECT typeID, attributeID, COALESCE(valueFloat, valueInt)
-             FROM dgmTypeAttributes WHERE typeID IN ({placeholders})",
+            "SELECT ta.typeID, ta.attributeID,
+                    COALESCE(ta.valueFloat, ta.valueInt, a.defaultValue, 0.0)
+             FROM dgmTypeAttributes ta
+             LEFT JOIN dgmAttributeTypes a ON a.attributeID = ta.attributeID
+             WHERE ta.typeID IN ({placeholders})",
         );
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt.query_map(rusqlite::params_from_iter(type_ids.iter()), |r| {
             Ok((
                 r.get::<_, i64>(0)?,
                 r.get::<_, i64>(1)?,
-                r.get::<_, Option<f64>>(2)?.unwrap_or(0.0),
+                r.get::<_, f64>(2)?,
             ))
         })?;
         let mut map: HashMap<i64, Vec<(i64, f64)>> = HashMap::new();
@@ -397,7 +407,10 @@ impl Sde {
         let Some((name, group_name, group_id)) = found else {
             return Ok(None);
         };
-        // attributeID -> value for this hull; missing attributes default to 0.
+        // attributeID -> value for this hull. A hull with no row for a given
+        // slot-count attribute (e.g. no rig bay) genuinely has zero of that
+        // slot type in EVE — 0.0 is the correct value, not a placeholder for
+        // missing data (#811).
         let attrs: HashMap<i64, f64> = self.type_attributes_raw(type_id)?.into_iter().collect();
         let a = |id: i64| attrs.get(&id).copied().unwrap_or(0.0);
         Ok(Some(ShipLayout {

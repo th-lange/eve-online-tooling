@@ -576,6 +576,7 @@ mod tests {
              INSERT INTO invTypes VALUES (34, 18, 'Tritanium', 0.01, 1, 1);
              INSERT INTO invTypes VALUES (587, 25, 'Rifter', 27289.0, 1, NULL);
              CREATE TABLE dgmTypeAttributes(typeID INT, attributeID INT, valueFloat REAL, valueInt INT);
+             CREATE TABLE dgmAttributeTypes(attributeID INT, attributeName TEXT, displayName TEXT, defaultValue REAL, stackable INT, highIsGood INT, published INT);
              CREATE TABLE mapSolarSystems(solarSystemID INT, solarSystemName TEXT);
              INSERT INTO mapSolarSystems VALUES (30000001, 'Alpha'), (30000002, 'Beta'), (30000003, 'Gamma');
              CREATE TABLE mapSolarSystemJumps(fromSolarSystemID INT, toSolarSystemID INT);

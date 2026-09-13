@@ -91,6 +91,13 @@ pub struct DpsTick {
 pub struct Window {
     secs: i64,
     events: VecDeque<DpsEvent>,
+    /// The eviction cutoff computed by the most recent `tick`. `tick` clamps
+    /// each new cutoff to never regress below this, so a backward `now` (an
+    /// OS clock adjustment during a live session, or an out-of-order
+    /// timestamp from a malformed/replayed log) can't stop eviction and leak
+    /// the buffer for the rest of the session (#817). Starts at `i64::MIN` so
+    /// the very first tick is unclamped.
+    last_cutoff: i64,
 }
 
 impl Window {
@@ -98,6 +105,7 @@ impl Window {
         Self {
             secs: (secs.max(1)) as i64,
             events: VecDeque::new(),
+            last_cutoff: i64::MIN,
         }
     }
 
@@ -108,8 +116,11 @@ impl Window {
     }
 
     /// Drop events older than `now - window`, then compute per-second rates.
+    /// The cutoff is clamped to never regress (#817): if `now` moves
+    /// backward, we hold the last cutoff instead of un-evicting the window.
     pub fn tick(&mut self, now: i64) -> DpsTick {
-        let cutoff = now - self.secs;
+        let cutoff = (now - self.secs).max(self.last_cutoff);
+        self.last_cutoff = cutoff;
         while self.events.front().is_some_and(|e| e.ts < cutoff) {
             self.events.pop_front();
         }
@@ -319,5 +330,36 @@ mod tests {
         assert_eq!(t.logi_out, 20.0);
         assert_eq!(t.cap_warfare_out, 10.0);
         assert_eq!(t.dps_out, 0.0);
+    }
+
+    #[test]
+    fn eviction_cutoff_is_monotonic_across_a_backward_clock_step() {
+        // #817: a backward `now` (OS clock adjustment during a live session,
+        // or an out-of-order playback timestamp) must not stop eviction and
+        // leak the buffer for the rest of the session.
+        let mut w = Window::new(10);
+        for ts in 0..50 {
+            w.push(ev(ts, EventKind::DamageOut, 1));
+        }
+        assert_eq!(w.events.len(), 50);
+
+        // Tick forward: evicts everything older than `now - secs`.
+        w.tick(40);
+        assert_eq!(w.events.len(), 20); // ts 30..=49 survive (cutoff = 30)
+
+        // Clock regresses. A naive `now - secs` cutoff would go backward to
+        // -5 and stop evicting for the rest of the session; the clamped
+        // cutoff holds at 30, so pushing more events doesn't let the window
+        // grow unboundedly just because `now` briefly moved backward.
+        for ts in 50..60 {
+            w.push(ev(ts, EventKind::DamageOut, 1));
+        }
+        w.tick(5);
+        assert_eq!(w.events.len(), 30); // 20 old + 10 new, still bounded
+
+        // Tick forward again: eviction resumes and catches up past the
+        // clamped cutoff.
+        w.tick(65);
+        assert_eq!(w.events.len(), 5); // ts 55..=59 survive (cutoff = 55)
     }
 }

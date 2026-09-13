@@ -226,7 +226,24 @@ pub fn run_plugin(
     } else {
         &[]
     };
-    let wasm_path = app_data_dir.join("plugins").join(plugin_id).join(wasm_rel);
+    let plugin_dir = app_data_dir.join("plugins").join(plugin_id);
+    let wasm_path = plugin_dir.join(wasm_rel);
+    // The string checks above reject `..` and absolute paths, but not a
+    // symlink *inside* the plugin dir that points outside it (e.g.
+    // `plugins/<id>/link -> /somewhere/else` with `wasm: "link/payload.wasm"`).
+    // `canonicalize` resolves all symlinks in both paths, so comparing the
+    // resolved wasm path against the resolved plugin dir catches that case;
+    // a missing/unreadable file surfaces as the same "wasm file missing"
+    // error a plain typo would produce, rather than leaking why.
+    let canonical_plugin_dir = std::fs::canonicalize(&plugin_dir)
+        .map_err(|_| format!("plugin {plugin_id:?} wasm file missing"))?;
+    let wasm_path = std::fs::canonicalize(&wasm_path)
+        .map_err(|_| format!("plugin {plugin_id:?} wasm file missing"))?;
+    if !wasm_path.starts_with(&canonical_plugin_dir) {
+        return Err(format!(
+            "plugin {plugin_id:?} wasm path {wasm_rel:?} escapes its plugin dir"
+        ));
+    }
     let input = serde_json::to_vec(args).map_err(|e| e.to_string())?;
     let out = manager.invoke(
         app_data_dir,
@@ -558,6 +575,79 @@ mod tests {
         assert!(
             err.contains("must be relative to its dir"),
             "unexpected error: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// #814: a manifest can point `wasm` at a path that is textually inside
+    /// the plugin dir (passes the `..`/absolute-path check above) but is
+    /// actually a symlink to a file outside it. `canonicalize` must resolve
+    /// that symlink and the guard must still catch the escape.
+    #[test]
+    #[cfg(unix)]
+    fn run_plugin_rejects_a_symlink_that_escapes_the_plugin_dir() {
+        use std::os::unix::fs::symlink;
+
+        let root = tmp("wasm-symlink-escape");
+        let plugin_dir = root.join("plugins").join("acme");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("plugin.json"),
+            r#"{"id":"acme","name":"acme","version":"1.0.0","minAppVersion":"0.33.0","wasm":"link/payload.wasm","permissions":[]}"#,
+        )
+        .unwrap();
+        // A real target outside the plugin dir entirely (a sibling of
+        // `plugins/`, not just of `plugins/acme/`), reached only through a
+        // symlink planted inside the plugin dir.
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("payload.wasm"), ECHO_WASM).unwrap();
+        symlink(&outside, plugin_dir.join("link")).unwrap();
+
+        let registry = PluginRegistry::load(&root);
+        registry.set_active("acme", true).unwrap();
+        let manager = PluginManager::new();
+        let err = run_plugin(&registry, &manager, &root, "acme", "echo", &Value::Null).unwrap_err();
+        assert!(err.contains("escapes its plugin dir"), "unexpected error: {err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The containment guard must not reject legitimate placements: a wasm
+    /// file directly in the plugin dir, and one nested in a real (non-symlink)
+    /// subdirectory of it.
+    #[test]
+    fn run_plugin_loads_wasm_at_top_level_and_in_a_real_subdir() {
+        let root = tmp("wasm-normal-placements");
+        let top = root.join("plugins").join("top");
+        std::fs::create_dir_all(&top).unwrap();
+        std::fs::write(
+            top.join("plugin.json"),
+            r#"{"id":"top","name":"top","version":"1.0.0","minAppVersion":"0.33.0","wasm":"a.wasm","permissions":[]}"#,
+        )
+        .unwrap();
+        std::fs::write(top.join("a.wasm"), ECHO_WASM).unwrap();
+
+        let nested = root.join("plugins").join("nested");
+        std::fs::create_dir_all(nested.join("bin")).unwrap();
+        std::fs::write(
+            nested.join("plugin.json"),
+            r#"{"id":"nested","name":"nested","version":"1.0.0","minAppVersion":"0.33.0","wasm":"bin/a.wasm","permissions":[]}"#,
+        )
+        .unwrap();
+        std::fs::write(nested.join("bin").join("a.wasm"), ECHO_WASM).unwrap();
+
+        let registry = PluginRegistry::load(&root);
+        registry.set_active("top", true).unwrap();
+        registry.set_active("nested", true).unwrap();
+        let manager = PluginManager::new();
+        assert_eq!(
+            run_plugin(&registry, &manager, &root, "top", "echo", &serde_json::json!(1)).unwrap(),
+            serde_json::json!(1)
+        );
+        assert_eq!(
+            run_plugin(&registry, &manager, &root, "nested", "echo", &serde_json::json!(2))
+                .unwrap(),
+            serde_json::json!(2)
         );
         let _ = std::fs::remove_dir_all(&root);
     }

@@ -24,22 +24,17 @@ import {
   type FeedbackKind,
 } from "../../lib/api";
 import { Page, PageHeader } from "../../components/page";
-import { modules } from "../registry";
-
-// Note on the `modules` import: registry.ts imports this component, so the two
-// files form an import cycle. That is safe *as long as* `modules` is only read
-// during render (by which point registry.ts has finished evaluating and the
-// live binding is populated) and never at module top level. `categories()`
-// below is called from inside the component for exactly that reason.
+import { MODULE_METADATA } from "../registry-data";
 
 const GENERAL = "general";
 
 /** Feedback categories: every registered module, plus "not about one module".
  *  Derived from the registry so a new module needs no edit here. */
 function categories(): { id: string; title: string }[] {
-  const fromRegistry = modules
-    .map((m) => ({ id: m.id, title: m.title }))
-    .sort((a, b) => a.title.localeCompare(b.title));
+  const fromRegistry = MODULE_METADATA.map((m) => ({
+    id: m.id,
+    title: m.title,
+  })).sort((a, b) => a.title.localeCompare(b.title));
   return [
     { id: GENERAL, title: "General (not about one module)" },
     ...fromRegistry,

@@ -145,7 +145,11 @@ pub fn run() {
             // doesn't need a separate `cargo test` invocation to see the update.
             // CI's "Regenerate bindings" step (`npm run generate:bindings`)
             // keeps the committed file fresh; release builds just consume it,
-            // since they never run the app.
+            // since they never run the app. `export_orders_bindings` itself is
+            // diff-aware (#810): it leaves the committed file untouched unless
+            // the signature actually changed, so a clean tree stays clean
+            // across ordinary dev launches instead of picking up a
+            // whitespace-only rewrite every time.
             #[cfg(debug_assertions)]
             bindings::export_orders_bindings();
 

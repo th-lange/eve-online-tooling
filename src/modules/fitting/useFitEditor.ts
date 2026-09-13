@@ -50,6 +50,10 @@ export function useFitEditor() {
     });
   }, []);
   const [eft, setEft] = useState("");
+  // Set when the deep-link EFT import path (the effect below) fails — the
+  // mutation-backed import (`importEft`) tracks its own error via
+  // TanStack Query, this covers the other entry point (#820).
+  const [importError, setImportError] = useState<string | null>(null);
   const [skillSource, setSkillSource] = useState<SkillSource>("allFive");
   const skillLabel = skillSource === "character" ? "character" : "all V";
   // ECM is a chance-to-jam, not a continuous effect — so it's an opt-in "what if
@@ -199,7 +203,7 @@ export function useFitEditor() {
       setFit(f);
       setEft("");
     },
-    onError: (e) => alert(`Import failed: ${errorMessage(e)}`),
+    onError: (e) => console.error("EFT import failed", e),
   });
 
   // A fit handed in from another module (e.g. the PVP tab's "Simulate") — load
@@ -209,15 +213,18 @@ export function useFitEditor() {
   useEffect(() => {
     const load = async (text: string) => {
       try {
+        setImportError(null);
         setFit(await fittingImportEft(text));
       } catch (e) {
-        alert(`Import failed: ${errorMessage(e)}`);
+        console.error("Deep-linked EFT import failed", e);
+        setImportError(`Import failed: ${errorMessage(e)}`);
       }
     };
     const stashed = takePendingFitImport();
     if (stashed) void load(stashed);
     return subscribeFitImport(load);
   }, []);
+
   const save = useMutation({
     mutationFn: () => fittingSaveLocal(fit!),
     onSuccess: (id) => {
@@ -356,7 +363,7 @@ export function useFitEditor() {
   const addItem = useMutation({
     mutationFn: (typeId: number) => fittingAddItem(fit!, typeId),
     onSuccess: (f) => setFit(f),
-    onError: (e) => alert(`Couldn't add module: ${errorMessage(e)}`),
+    onError: (e) => console.error("Couldn't add module", e),
   });
 
   return {
@@ -364,6 +371,7 @@ export function useFitEditor() {
     setFit,
     eft,
     setEft,
+    importError,
     skillSource,
     setSkillSource,
     skillLabel,

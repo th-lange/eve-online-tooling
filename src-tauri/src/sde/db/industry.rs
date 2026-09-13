@@ -180,7 +180,10 @@ impl Sde {
             return Ok(None);
         };
 
-        let probability: f64 = self
+        // `None` (not 0.0) when the row is missing: downstream T2 profit math
+        // divides by `probability * runs_per_success`, so a missing row must
+        // surface as "skip/flag this blueprint", never a fabricated 0% (#811).
+        let probability: Option<f64> = self
             .conn
             .query_row(
                 "SELECT probability
@@ -194,8 +197,7 @@ impl Sde {
                 ],
                 |row| row.get(0),
             )
-            .optional()?
-            .unwrap_or(0.0);
+            .optional()?;
 
         let mut stmt = self.conn.prepare(
             "SELECT iam.materialTypeID, t.typeName, iam.quantity
@@ -258,7 +260,7 @@ impl Sde {
         // (runs_per_success, probability, inventing type's name + category).
         let mut stmt = self.conn.prepare(
             "SELECT iap.productTypeID, iap.typeID, iap.quantity,
-                    COALESCE(iapr.probability, 0.0),
+                    iapr.probability,
                     t.typeName, c.categoryName
              FROM industryActivityProducts iap
              JOIN invTypes t ON t.typeID = iap.typeID
@@ -275,7 +277,9 @@ impl Sde {
                 row.get::<_, i64>(0)?,
                 row.get::<_, i64>(1)?,
                 row.get::<_, i64>(2)?,
-                row.get::<_, f64>(3)?,
+                // NULL (no industryActivityProbabilities row) surfaces as
+                // `None`, not a fabricated 0.0 (#811) — see invention_for.
+                row.get::<_, Option<f64>>(3)?,
                 row.get::<_, String>(4)?,
                 row.get::<_, String>(5)?,
             ))
@@ -337,7 +341,13 @@ impl Sde {
             Ok(Decryptor {
                 type_id: row.get(0)?,
                 name: row.get(1)?,
+                // 1.0 is the multiplicative identity: a decryptor missing
+                // attribute 1112 doesn't alter the base probability at all.
                 probability_multiplier: row.get::<_, Option<f64>>(2)?.unwrap_or(1.0),
+                // 0.0 is the additive identity: a decryptor missing 1113/1124
+                // shifts ME/runs by nothing, not "invalid data" (unlike the
+                // invention-probability multiplicand this feeds, which must
+                // never silently become 0 — see invention_for above, #811).
                 me_modifier: row.get::<_, Option<f64>>(3)?.unwrap_or(0.0) as i64,
                 run_modifier: row.get::<_, Option<f64>>(4)?.unwrap_or(0.0) as i64,
             })
@@ -546,7 +556,7 @@ mod tests {
         let inv = sde.invention_for(999).unwrap().unwrap();
         assert_eq!(inv.inventing_blueprint_type_id, 998);
         assert_eq!(inv.runs_per_success, 10);
-        assert_eq!(inv.probability, 0.3);
+        assert_eq!(inv.probability, Some(0.3));
         assert_eq!(inv.datacores.len(), 1);
         assert_eq!(inv.datacores[0].material_type_id, 500);
         assert_eq!(inv.datacores[0].quantity, 2);
@@ -587,6 +597,37 @@ mod tests {
         assert_eq!(relic.material_type_id, 30752);
         assert_eq!(relic.name, "Intact Hull Section");
         assert_eq!(relic.quantity, 1);
+    }
+
+    #[test]
+    fn invention_probability_is_none_when_sde_row_missing() {
+        // Regression for #811: an industryActivityProducts row with no
+        // matching industryActivityProbabilities row must surface as
+        // `None`, never a fabricated 0.0 that downstream profit math would
+        // divide by.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE invCategories(categoryID INT, categoryName TEXT);
+             CREATE TABLE invGroups(groupID INT, categoryID INT, groupName TEXT);
+             CREATE TABLE invTypes(typeID INT, groupID INT, typeName TEXT, volume REAL);
+             CREATE TABLE industryActivityProducts(typeID INT, activityID INT, productTypeID INT, quantity INT);
+             CREATE TABLE industryActivityProbabilities(typeID INT, activityID INT, productTypeID INT, probability REAL);
+             CREATE TABLE industryActivityMaterials(typeID INT, activityID INT, materialTypeID INT, quantity INT);
+
+             INSERT INTO invCategories VALUES (6, 'Ship');
+             INSERT INTO invGroups VALUES (25, 6, 'Frigate');
+             INSERT INTO invTypes VALUES (998, 25, 'T1 Blueprint', 1.0), (999, 25, 'T2 Blueprint', 1.0);
+             -- Invention link exists, but no probability row for it.
+             INSERT INTO industryActivityProducts VALUES (998, 8, 999, 10);",
+        )
+        .unwrap();
+        let sde = Sde::from_connection(conn);
+
+        let inv = sde.invention_for(999).unwrap().unwrap();
+        assert_eq!(inv.probability, None);
+
+        let all = sde.all_invention_products().unwrap();
+        assert_eq!(all[&999].probability, None);
     }
 
     #[test]

@@ -74,7 +74,17 @@ impl Sde {
         match rows.next()? {
             Some(r) => Ok(Some(SystemInfo {
                 name: r.get(0)?,
+                // mapSolarSystems.security is populated for every real solar
+                // system in the SDE; a NULL here would be a schema anomaly,
+                // not a legitimate "unknown" system. Defaulting to 0.0 fails
+                // safe for the one caller that branches on sec ranges
+                // (market's high-sec-only routing threshold, 0.45): an
+                // anomalous row is conservatively excluded from high-sec,
+                // never wrongly admitted (#811).
                 security: r.get::<_, Option<f64>>(1)?.unwrap_or(0.0),
+                // regionID/regionName come from the LEFT JOIN and are
+                // genuinely absent for a system whose region isn't resolved;
+                // 0/"" is just an "unknown region" placeholder label.
                 region_id: r.get::<_, Option<i64>>(2)?.unwrap_or(0),
                 region_name: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
             })),
@@ -190,7 +200,12 @@ impl Sde {
                 row.get::<_, i64>(0)?,
                 (
                     row.get::<_, String>(1)?,
+                    // Same defensive default as system_info above: real rows
+                    // always have a security value, and the caller that
+                    // branches on sec ranges treats 0.0 as not-high-sec, the
+                    // safe direction (#811).
                     row.get::<_, Option<f64>>(2)?.unwrap_or(0.0),
+                    // From the LEFT JOIN; "" is just an unresolved-region label.
                     row.get::<_, Option<String>>(3)?.unwrap_or_default(),
                 ),
             ))
@@ -214,6 +229,11 @@ impl Sde {
             Ok((
                 r.get::<_, i64>(0)?,
                 (
+                    // Every real solar system has map-plane coordinates; a
+                    // NULL here is a schema anomaly, not a legitimate origin
+                    // point. Used only to seed a visual layout, so a stray
+                    // anomalous system landing at (0,0) has no ranking/cost
+                    // impact — unlike the invention-probability case (#811).
                     r.get::<_, Option<f64>>(1)?.unwrap_or(0.0),
                     r.get::<_, Option<f64>>(2)?.unwrap_or(0.0),
                 ),
@@ -235,6 +255,9 @@ impl Sde {
                 r.get::<_, i64>(0)?,
                 (
                     r.get::<_, i64>(1)?,
+                    // Same reasoning as solar_system_positions: real systems
+                    // always carry 3D coordinates; this only feeds distance
+                    // filters, not profit/ranking math (#811).
                     r.get::<_, Option<f64>>(2)?.unwrap_or(0.0),
                     r.get::<_, Option<f64>>(3)?.unwrap_or(0.0),
                     r.get::<_, Option<f64>>(4)?.unwrap_or(0.0),

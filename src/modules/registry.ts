@@ -1,13 +1,4 @@
 import type { ComponentType } from "react";
-import {
-  Crosshair,
-  Heart,
-  MessageSquare,
-  Puzzle,
-  Terminal,
-  Bell,
-  type LucideIcon,
-} from "lucide-react";
 import { ProductionPage } from "./production/ProductionPage";
 import { TradingPage } from "./trading/TradingPage";
 import { DaytradingPage } from "./daytrading/DaytradingPage";
@@ -41,298 +32,70 @@ import { SupportPage } from "./support/SupportPage";
 import { PluginsPage } from "./plugins/PluginsPage";
 import { ScriptsPage } from "./scripts/ScriptsPage";
 import { InfoPanel } from "./info/InfoPanel";
+import {
+  MODULE_GROUPS,
+  MODULE_METADATA,
+  type ModuleGroup,
+  type ModuleMeta,
+} from "./registry-data";
 
-/** Sidebar section a module belongs to (the nav's information architecture). */
-export type ModuleGroup =
-  | "industry"
-  | "trading"
-  | "market"
-  | "character"
-  | "intel"
-  | "support"
-  | "plugins";
-
-/** Section labels + display order, driving the grouped sidebar nav (#224). */
-export const MODULE_GROUPS: { key: ModuleGroup; label: string }[] = [
-  { key: "industry", label: "Industry" },
-  { key: "trading", label: "Trading" },
-  { key: "market", label: "Market" },
-  { key: "character", label: "Characters" },
-  { key: "intel", label: "Combat / Intel" },
-  { key: "support", label: "Support" },
-  { key: "plugins", label: "Plugins" },
-];
+export { MODULE_GROUPS };
+export type { ModuleGroup };
 
 // A feature module = a nav entry + the page rendered at `/{id}`. Adding a new
-// module (daytrading, station-trading, …) is a one-line entry here plus its
-// page component; the Layout nav and router are driven entirely by this list.
-export interface ModuleDef {
-  /** URL segment and stable key, e.g. "production". */
-  id: string;
-  /** Nav label. */
-  title: string;
-  /** Short description shown in the UI. */
-  description: string;
-  /** Sidebar section this module is filed under. */
-  group: ModuleGroup;
-  /** Optional nav icon (lucide) shown before the title. */
-  icon?: LucideIcon;
-  /** When true the module is inactive until a character is logged in: the nav
-   *  and command palette leave it out, and its page says so. */
-  requiresCharacter?: boolean;
+// module (daytrading, station-trading, …) is a metadata entry in
+// registry-data.ts plus a one-line Component mapping below; the Layout nav
+// and router are driven entirely by the resulting `modules` list.
+export interface ModuleDef extends ModuleMeta {
   /** Page component rendered for this module. */
   Component: ComponentType;
 }
 
-// Note: this list isn't strictly 1:1 with src-tauri/src/modules/. Some entries are
-// views over a shared service (universe -> sde, market-search -> market), some share
-// one Rust module (incursions + faction-warfare -> modules/intel; transactions ->
-// modules/accounting), and some are backend-free static pages (exploration, support).
-export const modules: ModuleDef[] = [
-  {
-    id: "production",
-    title: "Production",
-    description: "Rank what you can build by build-vs-buy profit.",
-    group: "industry",
-    Component: ProductionPage,
-  },
-  {
-    id: "trading",
-    title: "Station Trading",
-    description: "Rank items by buy→sell margin at a market hub.",
-    group: "trading",
-    Component: TradingPage,
-  },
-  {
-    id: "daytrading",
-    title: "Daytrading",
-    description: "Cross-region price gaps on the same item, ranked by ISK/m³.",
-    group: "trading",
-    Component: DaytradingPage,
-  },
-  {
-    id: "reprocessing",
-    title: "Reprocessing",
-    description: "Rank ores by reprocess-vs-sell at your refining efficiency.",
-    group: "industry",
-    Component: ReprocessingPage,
-  },
-  {
-    id: "appraisal",
-    title: "Appraisal",
-    description: "Paste items → buy/sell ISK value and cargo volume.",
-    group: "market",
-    Component: AppraisalPage,
-  },
-  {
-    id: "universe",
-    title: "Universe",
-    description: "Browse every item type with stats and dogma attributes.",
-    group: "market",
-    Component: UniversePage,
-  },
-  {
-    id: "market-search",
-    title: "Market Search",
-    description:
-      "Find an item's sell orders across the market, plus price & volume history.",
-    group: "market",
-    Component: MarketSearchPage,
-  },
-  {
-    id: "assets",
-    title: "Assets",
-    description: "Value your holdings and find where each stack sells best.",
-    group: "character",
-    Component: AssetsPage,
-  },
-  {
-    id: "character",
-    title: "Character",
-    description: "Skills, standings and R&D research.",
-    group: "character",
-    Component: CharacterPage,
-  },
-  {
-    id: "notifications",
-    title: "Notifications",
-    description:
-      "In-game notification feed — war decs, structure attacks, wallet events.",
-    group: "character",
-    Component: NotificationsPage,
-  },
-  {
-    id: "accounting",
-    title: "Accounting",
-    description: "Wallet history and FIFO realized profit.",
-    group: "character",
-    Component: AccountingPage,
-  },
-  {
-    id: "transactions",
-    title: "Transactions",
-    description: "Per-fill buy/sell ledger — how each item traded for you.",
-    group: "character",
-    Component: TransactionsPage,
-  },
-  {
-    id: "contracts",
-    title: "Public Contracts",
-    description: "Find item-exchange contracts worth more than their price.",
-    group: "trading",
-    Component: ContractsPage,
-  },
-  {
-    id: "lpstore",
-    title: "LP Store",
-    description: "Rank loyalty-store offers by ISK per LP.",
-    group: "trading",
-    Component: LpStorePage,
-  },
-  {
-    id: "route",
-    title: "Route",
-    description: "Per-system jumps & kills (last hour) across known space.",
-    group: "intel",
-    Component: RoutePage,
-  },
-  {
-    id: "local-intel",
-    title: "Local Intel",
-    description:
-      "Paste Local → classify pilots by standing, corp and alliance.",
-    group: "intel",
-    Component: LocalIntelPage,
-  },
-  {
-    id: "orders",
-    title: "Market Orders",
-    description: "Your open buy/sell orders with undercut detection.",
-    group: "trading",
-    Component: OrdersPage,
-  },
-  {
-    id: "industry-jobs",
-    title: "Industry Jobs",
-    description: "Running and delivered industry jobs — what's cooking.",
-    group: "industry",
-    Component: IndustryJobsPage,
-  },
-  {
-    id: "pi",
-    title: "Planetary Interaction",
-    description: "Colonies, extractor timers, storage, and input balance.",
-    group: "industry",
-    Component: PIPage,
-  },
-  {
-    id: "incursions",
-    title: "Incursions",
-    description: "Active Sansha incursions — staging, influence and state.",
-    group: "intel",
-    Component: IncursionsPage,
-  },
-  {
-    id: "faction-warfare",
-    title: "Faction Warfare",
-    description: "Militia control, systems and kills by warzone.",
-    group: "intel",
-    Component: FactionWarfarePage,
-  },
-  {
-    id: "pochven",
-    title: "Pochven",
-    description: "Find C729 wormhole entries into Pochven from your region.",
-    group: "intel",
-    Component: PochvenPage,
-  },
-  {
-    id: "wormholes",
-    title: "Wormholes",
-    description: "Map your wormhole chain with mass/EOL tracking.",
-    group: "intel",
-    Component: WormholesPage,
-  },
-  {
-    id: "exploration",
-    title: "Exploration",
-    description:
-      "Reference: combat anomalies and relic/data/DED sites — where, danger, escalations.",
-    group: "intel",
-    Component: ExplorationPage,
-  },
-  {
-    id: "fitting",
-    title: "Fitting",
-    description: "Build ship fits and validate slots, resources and price.",
-    group: "character",
-    Component: FittingPage,
-  },
-  {
-    id: "shopping",
-    title: "Shopping Lists",
-    description: "Named lists of items to buy, fed from across the app.",
-    group: "character",
-    Component: ShoppingPage,
-  },
-  {
-    id: "dps",
-    title: "DPS Meter",
-    description:
-      "Live combat meter from your gamelog — DPS, logi and cap, graphed.",
-    group: "intel",
-    Component: DpsPage,
-  },
-  {
-    id: "pvp",
-    title: "PVP",
-    description:
-      "Paste pilot names → their kills, losses and the fits they fly.",
-    group: "intel",
-    icon: Crosshair,
-    Component: PvpPage,
-  },
-  {
-    id: "info",
-    title: "Info Panel",
-    description: "Alarms and messages posted by your scripts and plugins.",
-    group: "support",
-    icon: Bell,
-    Component: InfoPanel,
-  },
-  {
-    id: "scripts",
-    title: "Scripts",
-    description:
-      "Write small Rhai/JS snippets and run them once or on a timed loop.",
-    group: "support",
-    icon: Terminal,
-    Component: ScriptsPage,
-  },
-  {
-    id: "plugins",
-    title: "Plugins",
-    description: "Activate or deactivate installed third-party plugins.",
-    group: "support",
-    icon: Puzzle,
-    Component: PluginsPage,
-  },
-  {
-    id: "feedback",
-    title: "Feedback",
-    description:
-      "Rate a module, report a bug, or ask for a feature — straight to the maintainer.",
-    group: "support",
-    icon: MessageSquare,
-    requiresCharacter: true,
-    Component: FeedbackPage,
-  },
-  {
-    id: "support",
-    title: "Support my work",
-    description: "Creator code and buddy invite link — support the project.",
-    group: "support",
-    icon: Heart,
-    Component: SupportPage,
-  },
-];
+// Page components keyed by module id, layered onto the plain metadata from
+// registry-data.ts. Kept separate from that file so registry-data.ts (and
+// anything that only needs id/title/description, e.g. feedback's category
+// dropdown) never has to import a page component — which is what created the
+// former feedback/registry import cycle.
+const COMPONENTS: Record<string, ComponentType> = {
+  production: ProductionPage,
+  trading: TradingPage,
+  daytrading: DaytradingPage,
+  reprocessing: ReprocessingPage,
+  appraisal: AppraisalPage,
+  universe: UniversePage,
+  "market-search": MarketSearchPage,
+  assets: AssetsPage,
+  character: CharacterPage,
+  notifications: NotificationsPage,
+  accounting: AccountingPage,
+  transactions: TransactionsPage,
+  contracts: ContractsPage,
+  lpstore: LpStorePage,
+  route: RoutePage,
+  "local-intel": LocalIntelPage,
+  orders: OrdersPage,
+  "industry-jobs": IndustryJobsPage,
+  pi: PIPage,
+  incursions: IncursionsPage,
+  "faction-warfare": FactionWarfarePage,
+  pochven: PochvenPage,
+  wormholes: WormholesPage,
+  exploration: ExplorationPage,
+  fitting: FittingPage,
+  shopping: ShoppingPage,
+  dps: DpsPage,
+  pvp: PvpPage,
+  info: InfoPanel,
+  scripts: ScriptsPage,
+  plugins: PluginsPage,
+  feedback: FeedbackPage,
+  support: SupportPage,
+};
+
+export const modules: ModuleDef[] = MODULE_METADATA.map((meta) => {
+  const Component = COMPONENTS[meta.id];
+  if (!Component) {
+    throw new Error(`registry: no page component registered for "${meta.id}"`);
+  }
+  return { ...meta, Component };
+});

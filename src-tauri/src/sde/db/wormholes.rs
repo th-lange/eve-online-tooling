@@ -132,6 +132,12 @@ impl Sde {
         match rows.next()? {
             Some(r) => Ok(Some((
                 r.get(0)?,
+                // invTypes.mass is populated for every real ship hull; NULL
+                // would mean type_id resolved to a non-ship or corrupt row.
+                // 0.0 kg would wrongly read as "always fits any wormhole",
+                // but this can't currently happen for a ship hull in
+                // practice, so it's left as a documented default rather than
+                // threading Option through the two callers (#811).
                 r.get::<_, Option<f64>>(1)?.unwrap_or(0.0),
             ))),
             None => Ok(None),

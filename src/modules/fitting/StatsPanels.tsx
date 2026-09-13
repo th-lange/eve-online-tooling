@@ -1,6 +1,22 @@
-import { type CapStats, type EwTag, type TankStats } from "../../lib/api";
-import { formatDuration, formatInt } from "../../lib/format";
+import type { UseMutationResult } from "@tanstack/react-query";
+import {
+  type CapStats,
+  type DpsBreakdown,
+  type EwTag,
+  type FitPrice,
+  type FitProblem,
+  type FitStats,
+  type NavStats,
+  type ResourceUsage,
+  type TankStats,
+} from "../../lib/api";
+import { formatDuration, formatInt, formatIsk } from "../../lib/format";
 import { DAMAGE_TYPES, km, resistClass } from "./fitHelpers";
+import {
+  classifyArchetype,
+  ARCHETYPE_LABEL,
+  ARCHETYPE_CLASS,
+} from "../../lib/shipArchetype";
 
 /** Per-layer HP + EM/Th/Kin/Exp resistances for shield, armor and hull. */
 export function TankResists({ tank }: { tank: TankStats }) {
@@ -268,6 +284,386 @@ export function ResourceBar({
           style={{ width: `${frac * 100}%` }}
         />
       </div>
+    </div>
+  );
+}
+
+/** Damage-profile presets for the tank panel's "incoming damage" picker:
+ *  `[label, [em, therm, kin, exp]]`. */
+const DAMAGE_PRESETS = [
+  ["Omni (even)", [0.25, 0.25, 0.25, 0.25]],
+  ["Guristas (kin/therm)", [0, 0.5, 0.5, 0]],
+  ["Serpentis (therm/kin)", [0, 0.667, 0.333, 0]],
+  ["Angel (exp/kin)", [0, 0, 0.5, 0.5]],
+  ["Sansha/Blood (em/therm)", [0.5, 0.5, 0, 0]],
+] as const;
+
+/**
+ * The four numbers a fitter actually swaps modules to chase (#708): DPS, EHP,
+ * capacitor stability and top speed, as a headline block instead of small
+ * label/value stacks with the same weight as sensor strength. Capacitor is
+ * colour-coded good/marginal/bad (stable & comfortable / stable & tight /
+ * unstable) — the same three-state read as the resist table's colour scale.
+ */
+export function Vitals({
+  stats,
+  jammedActive,
+}: {
+  stats: FitStats;
+  jammedActive: boolean;
+}) {
+  const dps = jammedActive ? 0 : (stats.dps?.total ?? null);
+  const ehp = stats.tank?.ehp ?? null;
+  const cap = stats.capacitor ?? null;
+  const speed = stats.navigation?.maxVelocity ?? null;
+  const archetype = classifyArchetype(stats.weaponRanges ?? []);
+
+  const capTone: "good" | "warn" | "bad" | "neutral" = !cap
+    ? "neutral"
+    : !cap.stable
+      ? "bad"
+      : (cap.stablePct ?? 100) >= 50
+        ? "good"
+        : "warn";
+  const capToneClass = {
+    good: "text-emerald-400",
+    warn: "text-amber-400",
+    bad: "text-red-400",
+    neutral: "text-zinc-100",
+  }[capTone];
+
+  return (
+    <div className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
+      <VitalStat
+        label="DPS"
+        value={dps == null ? "—" : dps.toFixed(0)}
+        suffix={jammedActive ? "jammed (no lock)" : undefined}
+        suffixClassName={jammedActive ? "text-amber-400" : undefined}
+      />
+      <VitalStat
+        label="EHP"
+        value={ehp == null ? "—" : formatInt(Math.round(ehp))}
+      />
+      <VitalStat
+        label="Capacitor"
+        value={
+          cap == null
+            ? "—"
+            : cap.stable
+              ? `${Math.max(0, Math.min(100, cap.stablePct ?? 100)).toFixed(0)}%`
+              : formatDuration(cap.depletionSeconds ?? 0)
+        }
+        valueClassName={capToneClass}
+        suffix={cap == null ? undefined : cap.stable ? "stable" : "to empty"}
+      />
+      <VitalStat
+        label="Speed"
+        value={speed == null ? "—" : `${Math.round(speed)} m/s`}
+      />
+      {archetype && (
+        <div className="col-span-2 mt-0.5">
+          <span
+            className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${ARCHETYPE_CLASS[archetype]}`}
+          >
+            {ARCHETYPE_LABEL[archetype]}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function VitalStat({
+  label,
+  value,
+  valueClassName = "text-zinc-100",
+  suffix,
+  suffixClassName = "text-zinc-500",
+}: {
+  label: string;
+  value: string;
+  valueClassName?: string;
+  suffix?: string;
+  suffixClassName?: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+        {label}
+      </div>
+      <div
+        className={`text-xl font-semibold leading-tight tabular-nums ${valueClassName}`}
+      >
+        {value}
+      </div>
+      {suffix && (
+        <div className={`truncate text-[10px] ${suffixClassName}`}>
+          {suffix}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Fitting-resource section: CPU/PG/calibration bars, capacitor gauge, the
+ *  incoming-neut input feeding the cap simulation, and validation findings. */
+export function ResourcesPanel({
+  resources,
+  capacitor,
+  validation,
+  neutGjs,
+  onNeutGjs,
+}: {
+  resources: ResourceUsage;
+  capacitor?: CapStats | null;
+  validation: FitProblem[];
+  neutGjs: number | undefined;
+  onNeutGjs: (n: number | undefined) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+        Fitting
+      </h3>
+      <ResourceBar
+        label="CPU"
+        used={resources.cpuUsed}
+        max={resources.cpuOutput}
+        unit="tf"
+      />
+      <ResourceBar
+        label="Powergrid"
+        used={resources.powergridUsed}
+        max={resources.powergridOutput}
+        unit="MW"
+      />
+      <ResourceBar
+        label="Calibration"
+        used={resources.calibrationUsed}
+        max={resources.calibrationOutput}
+        unit=""
+      />
+      {capacitor && <CapGauge cap={capacitor} />}
+      {capacitor && (
+        <div className="space-y-0.5">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+            Incoming neut
+          </div>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            placeholder="0 GJ/s"
+            value={neutGjs ?? ""}
+            onChange={(e) => {
+              const v = Number(e.currentTarget.value);
+              onNeutGjs(v || undefined);
+            }}
+            className="w-20 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-100"
+          />
+        </div>
+      )}
+      {validation.length > 0 && (
+        <ul className="mt-2 space-y-1">
+          {validation.map((p, i) => (
+            <li key={i} className="text-xs text-red-400">
+              ⚠ {p.message}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** DPS section: paper vs applied totals, per-weapon-kind split, and the
+ *  DPS-vs-range curve when a target profile is set. */
+export function DpsBreakdownPanel({
+  skillLabel,
+  dps,
+  appliedDps,
+  dpsRangeCurve,
+  jammedActive,
+}: {
+  skillLabel: string;
+  dps: DpsBreakdown;
+  appliedDps?: DpsBreakdown;
+  dpsRangeCurve?: [number, number][];
+  jammedActive: boolean;
+}) {
+  return (
+    <div className="space-y-1">
+      <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+        DPS ({skillLabel})
+      </h3>
+      {jammedActive ? (
+        <div className="text-sm text-amber-400">
+          Jammed — 0 applied (no lock)
+        </div>
+      ) : (
+        <>
+          <div className="text-sm text-zinc-300">{dps.total.toFixed(0)} dps</div>
+          {dps.total > 0 && (
+            <div className="text-xs text-zinc-500">
+              {dps.turret > 0 && `turret ${dps.turret.toFixed(0)} `}
+              {dps.missile > 0 && `· missile ${dps.missile.toFixed(0)} `}
+              {dps.drone > 0 && `· drone ${dps.drone.toFixed(0)}`}
+            </div>
+          )}
+          {appliedDps && (
+            <div className="text-xs text-zinc-500">
+              applied:{" "}
+              <span className="text-amber-400">
+                {appliedDps.total.toFixed(0)} dps
+              </span>{" "}
+              (vs paper {dps.total.toFixed(0)} dps)
+            </div>
+          )}
+          {dpsRangeCurve && dpsRangeCurve.length > 1 && (
+            <DpsRangeCurve curve={dpsRangeCurve} />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Tank section: incoming-damage-profile picker, EHP headline, active reps,
+ *  and the per-layer resist table. */
+export function TankResistsPanel({
+  skillLabel,
+  tank,
+  damageProfile,
+  onDamageProfile,
+}: {
+  skillLabel: string;
+  tank: TankStats;
+  damageProfile: [number, number, number, number] | undefined;
+  onDamageProfile: (p: [number, number, number, number] | undefined) => void;
+}) {
+  return (
+    <div className="space-y-1">
+      <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+        Tank ({skillLabel})
+      </h3>
+      <div className="space-y-0.5">
+        <div className="text-[10px] uppercase tracking-wide text-zinc-500">
+          Incoming damage
+        </div>
+        <select
+          value={damageProfile ? JSON.stringify(damageProfile) : ""}
+          onChange={(e) =>
+            onDamageProfile(
+              e.currentTarget.value
+                ? (JSON.parse(e.currentTarget.value) as [
+                    number,
+                    number,
+                    number,
+                    number,
+                  ])
+                : undefined,
+            )
+          }
+          className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-100"
+        >
+          {DAMAGE_PRESETS.map(([label, profile]) => (
+            <option
+              key={label}
+              value={label === "Omni (even)" ? "" : JSON.stringify(profile)}
+            >
+              {label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="text-sm text-zinc-300">
+        {formatInt(Math.round(tank.ehp))} EHP
+      </div>
+      {(tank.shieldRepS > 0 ||
+        tank.armorRepS > 0 ||
+        tank.passiveShieldS > 0) && (
+        <div className="flex flex-wrap gap-x-3 text-xs text-zinc-500">
+          {tank.shieldRepS > 0 && (
+            <span>
+              shield boost{" "}
+              <span className="tabular-nums text-sky-400">
+                {tank.shieldRepS.toFixed(1)}/s
+              </span>
+            </span>
+          )}
+          {tank.armorRepS > 0 && (
+            <span>
+              armor rep{" "}
+              <span className="tabular-nums text-amber-400">
+                {tank.armorRepS.toFixed(1)}/s
+              </span>
+            </span>
+          )}
+          {tank.passiveShieldS > 0 && (
+            <span>
+              passive shield{" "}
+              <span className="tabular-nums text-sky-300">
+                {tank.passiveShieldS.toFixed(1)}/s
+              </span>
+            </span>
+          )}
+        </div>
+      )}
+      <TankResists tank={tank} />
+    </div>
+  );
+}
+
+/** Navigation section: speed, align time, signature and (when known) lock
+ *  range from the targeting stats. */
+export function NavigationPanel({
+  navigation,
+  lockRange,
+}: {
+  navigation: NavStats;
+  lockRange?: number;
+}) {
+  return (
+    <div className="space-y-1">
+      <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+        Navigation
+      </h3>
+      <div className="text-xs text-zinc-400">
+        {Math.round(navigation.maxVelocity)} m/s · align{" "}
+        {navigation.alignTime.toFixed(1)}s · sig{" "}
+        {Math.round(navigation.signatureRadius)}m
+        {lockRange ? ` · lock ${km(lockRange)}` : ""}
+      </div>
+    </div>
+  );
+}
+
+/** Price section: an on-demand "Price fit" button plus the last buy/sell
+ *  valuation, driven by the page-level price mutation. */
+export function PricePanel({
+  price,
+}: {
+  price: UseMutationResult<FitPrice, Error, void, unknown>;
+}) {
+  return (
+    <div className="mt-4 space-y-1">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+          Price
+        </h3>
+        <button
+          onClick={() => price.mutate()}
+          className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
+        >
+          {price.isPending ? "…" : "Price fit"}
+        </button>
+      </div>
+      {price.data && (
+        <div className="text-sm text-zinc-300">
+          <div>Buy: {formatIsk(price.data.buyTotal)}</div>
+          <div>Sell: {formatIsk(price.data.sellTotal)}</div>
+        </div>
+      )}
     </div>
   );
 }

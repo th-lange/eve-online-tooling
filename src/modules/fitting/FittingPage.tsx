@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BarChart2, ClipboardPaste, SlidersHorizontal } from "lucide-react";
+import { BarChart2, ClipboardPaste, SlidersHorizontal, X } from "lucide-react";
 import {
   errorMessage,
   fittingDeleteLocal,
@@ -17,6 +17,7 @@ import {
 } from "../../lib/api";
 import { marketKeys } from "../../lib/queryKeys";
 import { Page, PageHeader, PrimaryButton } from "../../components/page";
+import { InlineError } from "../../components/InlineError";
 import { Combo } from "../../components/Combo";
 import { SdeGate } from "../../components/SdeGate";
 import {
@@ -71,7 +72,16 @@ function Workbench() {
   const [capStable, setCapStable] = useState(false);
   // ISK budget cap as a string (millions); empty = no budget.
   const [maxCostM, setMaxCostM] = useState("");
-  const [optimizeNotice, setOptimizeNotice] = useState<string | null>(null);
+  const [unmetConstraints, setUnmetConstraints] = useState<string[] | null>(
+    null,
+  );
+  // `setFit` always runs the fit through `stackCargo`, which returns a new
+  // object even for a no-op normalization — so we can't tell "optimize just
+  // applied this fit" apart from "the user edited it" by reference alone.
+  // Instead: mark the next fit-change as optimizer-caused, consume that mark
+  // in the effect below, and only treat *further* changes as manual edits.
+  const pendingOptimizeApplyRef = useRef(false);
+  const lastOptimizedFitRef = useRef<typeof editor.fit>(null);
   const [meta, setMeta] = useState<Record<number, boolean>>({
     1: true,
     2: true,
@@ -93,7 +103,7 @@ function Workbench() {
   const pushEsi = useMutation({
     mutationFn: () => fittingEsiPush(editor.fit!),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["fitting", "esi"] }),
-    onError: (e) => alert(`Couldn't save to EVE: ${errorMessage(e)}`),
+    onError: (e) => console.error("Couldn't save to EVE", e),
   });
   const optimize = useMutation({
     mutationFn: () => {
@@ -109,18 +119,38 @@ function Workbench() {
       );
     },
     onSuccess: (res) => {
+      pendingOptimizeApplyRef.current = true;
       editor.setFit(res.fit);
       const unmet: string[] = [];
       if (capStable && !res.capStable) unmet.push("cap-stable");
       if (maxCostM.trim() && !res.withinBudget) unmet.push("ISK budget");
-      setOptimizeNotice(
-        unmet.length
-          ? `Couldn't meet ${unmet.join(" + ")} — showing the closest fit.`
-          : null,
-      );
+      setUnmetConstraints(unmet.length ? unmet : null);
     },
-    onError: (e) => alert(`Optimize failed: ${errorMessage(e)}`),
+    onError: (e) => console.error("Optimize failed", e),
   });
+  // Clear the unmet-constraint banner the moment the fit changes to
+  // something other than what the optimizer just produced — i.e. the user
+  // edited it manually (any of the setFit-backed actions in useFitEditor).
+  useEffect(() => {
+    if (pendingOptimizeApplyRef.current) {
+      // This change is the optimizer's own setFit call landing (post
+      // stackCargo) — keep the banner and remember this fit as the one it
+      // describes.
+      pendingOptimizeApplyRef.current = false;
+      lastOptimizedFitRef.current = editor.fit;
+      return;
+    }
+    if (editor.fit !== lastOptimizedFitRef.current) {
+      setUnmetConstraints(null);
+    }
+  }, [editor.fit]);
+  // Combines the mutation's own error with the deep-link import path's
+  // (useFitEditor's effect-driven import doesn't go through this mutation).
+  const eftImportError =
+    editor.importError ??
+    (editor.importEft.isError
+      ? `Import failed: ${errorMessage(editor.importEft.error)}`
+      : null);
 
   const { fit, nameOf, layout, stats, rangeOf, activatable, fitContext } =
     editor;
@@ -140,7 +170,7 @@ function Workbench() {
   const loadAmmo = useMutation({
     mutationFn: (typeId: number) => fittingLoadAmmo(fit!, typeId),
     onSuccess: (f) => editor.setFit(f),
-    onError: (e) => alert(`Couldn't load ammo: ${errorMessage(e)}`),
+    onError: (e) => console.error("Couldn't load ammo", e),
   });
 
   return (
@@ -196,6 +226,10 @@ function Workbench() {
               setEft={editor.setEft}
               onImport={() => editor.importEft.mutate()}
               pending={editor.importEft.isPending}
+            />
+            <InlineError
+              message={eftImportError}
+              className="mt-1 text-xs text-rose-400"
             />
           </div>
 
@@ -287,6 +321,13 @@ function Workbench() {
                   library.saved.data?.some((s) => s.id === fit.id) ?? false
                 }
               />
+              <InlineError
+                message={
+                  pushEsi.isError
+                    ? `Couldn't save to EVE: ${errorMessage(pushEsi.error)}`
+                    : null
+                }
+              />
 
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-xs uppercase tracking-wide text-zinc-500">
@@ -305,9 +346,30 @@ function Workbench() {
                   setMaxCostM={setMaxCostM}
                   onOptimize={() => optimize.mutate()}
                   pending={optimize.isPending}
-                  notice={optimizeNotice}
                 />
               </div>
+              <InlineError
+                message={
+                  optimize.isError
+                    ? `Optimize failed: ${errorMessage(optimize.error)}`
+                    : null
+                }
+              />
+              {unmetConstraints && (
+                <div className="mb-2 flex items-center justify-between gap-2 rounded border border-amber-700/50 bg-amber-950/20 px-2 py-1">
+                  <InlineError
+                    message={`Optimizer couldn't meet ${unmetConstraints.join(" + ")} — showing the closest fit.`}
+                    className="text-xs text-amber-400"
+                  />
+                  <button
+                    onClick={() => setUnmetConstraints(null)}
+                    title="Dismiss"
+                    className="shrink-0 text-zinc-500 hover:text-zinc-300"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
 
               {/* Prefer the resolved layout (T3 subsystems grant slots). */}
               {resolvedLayout && (
@@ -330,6 +392,13 @@ function Workbench() {
                   onFitAmmo={(typeId) => loadAmmo.mutate(typeId)}
                 />
               )}
+              <InlineError
+                message={
+                  loadAmmo.isError
+                    ? `Couldn't load ammo: ${errorMessage(loadAmmo.error)}`
+                    : null
+                }
+              />
 
               <ModuleBrowser
                 onAdd={(typeId) => editor.addItem.mutate(typeId)}
@@ -339,6 +408,13 @@ function Workbench() {
                 fitContext={fitContext}
                 shipTypeId={fit.shipTypeId}
                 skillSource={editor.skillSource}
+              />
+              <InlineError
+                message={
+                  editor.addItem.isError
+                    ? `Couldn't add module: ${errorMessage(editor.addItem.error)}`
+                    : null
+                }
               />
 
               <ProjectedPanel
@@ -454,8 +530,8 @@ function ImportEftControl({
 /**
  * Optimizer controls (#710): collapsed behind an "Optimize…" button instead
  * of a permanently-visible dense strip. Running it applies immediately to the
- * loaded fit (visible in the slot grid behind the popover) — the popover stays
- * open afterward so the result notice is readable in context.
+ * loaded fit (visible in the slot grid behind the popover); any unmet
+ * constraint is surfaced separately as a persistent banner (#825), not here.
  */
 function OptimizeControl({
   objective,
@@ -470,7 +546,6 @@ function OptimizeControl({
   setMaxCostM,
   onOptimize,
   pending,
-  notice,
 }: {
   objective: OptimizeObjective;
   setObjective: (v: OptimizeObjective) => void;
@@ -486,7 +561,6 @@ function OptimizeControl({
   setMaxCostM: (v: string) => void;
   onOptimize: () => void;
   pending: boolean;
-  notice: string | null;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -590,7 +664,6 @@ function OptimizeControl({
             >
               Optimize
             </PrimaryButton>
-            {notice && <div className="text-amber-400">{notice}</div>}
           </div>
         </>
       )}

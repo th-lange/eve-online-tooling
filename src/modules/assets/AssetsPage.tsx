@@ -18,6 +18,7 @@ import {
   type SortColumn,
 } from "../../components/SortHeaderCell";
 import { Page, PageHeader } from "../../components/page";
+import { InlineError } from "../../components/InlineError";
 import { Stat } from "../../components/Stat";
 import { SdeGate } from "../../components/SdeGate";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
@@ -482,6 +483,7 @@ const AssetTable = memo(function AssetTable({ rows }: { rows: AssetRow[] }) {
 
 function Row({ r }: { r: AssetRow }) {
   const [expanded, setExpanded] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
   return (
     <>
       <tr
@@ -496,11 +498,21 @@ function Row({ r }: { r: AssetRow }) {
               title="Copy name"
               onClick={(e) => {
                 e.stopPropagation();
-                navigator.clipboard?.writeText(r.name).catch(() => {});
+                navigator.clipboard
+                  ?.writeText(r.name)
+                  .then(() => setCopyError(null))
+                  .catch((err) => {
+                    console.error("Failed to copy item name to clipboard", err);
+                    setCopyError("Couldn't copy");
+                  });
               }}
             >
               <Copy size={11} />
             </button>
+          <InlineError
+            message={copyError}
+            className="text-xs text-rose-400"
+          />
           </div>
           {(r.category || r.group) && (
             <div className="text-xs text-zinc-500">

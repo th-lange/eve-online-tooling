@@ -232,6 +232,55 @@ describe("FittingPage", () => {
     );
   });
 
+  it("shows a persistent banner when optimize can't meet cap-stable, clears it once it does (#825)", async () => {
+    let optimizeCalls = 0;
+    mockInvoke({
+      sde_status: () => SDE_OK,
+      fitting_list_local: () => [FIT],
+      fitting_esi_list: () => [],
+      sde_type_infos: () => HULL_INFO,
+      fitting_ship_layout: () => RIFTER_LAYOUT,
+      sde_type_names: () => [
+        { id: 587, name: "Rifter" },
+        { id: 2456, name: "125mm Gatling AutoCannon II" },
+        { id: 1978, name: "5MN Microwarpdrive II" },
+        { id: 28668, name: "Nanite Repair Paste" },
+        { id: 2185, name: "Hobgoblin II" },
+      ],
+      fitting_simulate: () => STATS,
+      fitting_ammo_table: () => [],
+      fitting_compatible_charges: () => [],
+      fitting_environment_effects: () => [],
+      fitting_delete_local: () => undefined,
+      fitting_import_eft: () => ({ ...FIT, id: "", name: "Imported fit" }),
+      fitting_optimize: () => {
+        optimizeCalls += 1;
+        return {
+          fit: FIT,
+          capStable: optimizeCalls > 1,
+          withinBudget: true,
+        };
+      },
+      market_regions: () => [],
+    });
+    renderWithQuery(<FittingPage />);
+    await loadTheFit();
+    await screen.findByText("Solo brawl");
+
+    fireEvent.click(screen.getByRole("button", { name: /Optimize…/ }));
+    fireEvent.click(screen.getByLabelText("Cap-stable"));
+    fireEvent.click(screen.getByRole("button", { name: "Optimize" }));
+
+    const banner = await screen.findByText(/couldn't meet cap-stable/i);
+    expect(banner).toBeInTheDocument();
+
+    // Re-running optimize now meets cap-stable — the banner clears.
+    fireEvent.click(screen.getByRole("button", { name: "Optimize" }));
+    await waitFor(() =>
+      expect(screen.queryByText(/couldn't meet cap-stable/i)).toBeNull(),
+    );
+  });
+
   it("guards Delete behind a confirm step (#711)", async () => {
     renderFitting();
     await loadTheFit();

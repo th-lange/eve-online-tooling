@@ -261,6 +261,14 @@ pub async fn production_profit(
         step.inputs = inputs;
         // T2 items: attach the invention so its expected cost is amortized in.
         if let Some(inv) = all_invention.get(&bp.blueprint_type_id) {
+            // A missing industryActivityProbabilities row is an SDE data gap,
+            // not a legitimate 0% invention chance (downstream cost math
+            // divides by probability * runs_per_success). Skip this
+            // blueprint out of the ranking entirely rather than rank it
+            // with a fabricated probability (#811).
+            let Some(base_probability) = inv.probability else {
+                continue;
+            };
             // T1 product's manufacturing materials estimate the copy job fee.
             let copy_materials = all_materials
                 .get(&inv.inventing_blueprint_type_id)
@@ -294,10 +302,10 @@ pub async fn production_profit(
                     (
                         BASE_T2_ME + d.me_modifier,
                         inv.runs_per_success + d.run_modifier,
-                        inv.probability * d.probability_multiplier,
+                        base_probability * d.probability_multiplier,
                     )
                 }
-                None => (BASE_T2_ME, inv.runs_per_success, inv.probability),
+                None => (BASE_T2_ME, inv.runs_per_success, base_probability),
             };
             step.invention = Some(Invention {
                 datacores,

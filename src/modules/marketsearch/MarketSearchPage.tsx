@@ -44,6 +44,7 @@ import {
 } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { Page, PageHeader, Centered } from "../../components/page";
+import { InlineError } from "../../components/InlineError";
 import { SdeGate } from "../../components/SdeGate";
 import {
   SortHeaderCell,
@@ -72,6 +73,7 @@ function Workbench() {
 
   // Shared item selection.
   const [picked, setPicked] = useState<Picked>(null);
+  const [openMarketError, setOpenMarketError] = useState<string | null>(null);
 
   // Location filters — region is null for "everywhere".
   const [regionId, setRegionId] = useState<number | null>(FORGE);
@@ -118,11 +120,12 @@ function Workbench() {
     ...marketKeys.history(historyRegionId, picked?.id),
     enabled: tab === "history" && picked != null,
   });
-  const compareQueries = useQueries({
+  const compareHistories = useQueries({
     queries: compareRegionIds.map((rid) => ({
       ...marketKeys.history(rid, picked?.id),
       enabled: tab === "history" && picked != null,
     })),
+    combine: (results) => results.map((q) => q.data ?? []),
   });
   const price = useQuery({
     queryKey: ["price", historyRegionId, picked?.id],
@@ -193,9 +196,12 @@ function Workbench() {
         {picked && (
           <button
             onClick={() =>
-              openMarketWindow(picked.id).catch((e) =>
-                alert(`Couldn't open market window: ${errorMessage(e)}`),
-              )
+              openMarketWindow(picked.id)
+                .then(() => setOpenMarketError(null))
+                .catch((e) => {
+                  console.error("Failed to open market window", e);
+                  setOpenMarketError(`Couldn't open market window: ${errorMessage(e)}`);
+                })
             }
             title="Open this item's market in the EVE client (needs a logged-in character + the open-window scope)"
             className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
@@ -210,6 +216,10 @@ function Workbench() {
             className="rounded border border-zinc-700 px-3 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
           />
         )}
+        <InlineError
+          message={openMarketError}
+          className="text-xs text-rose-400"
+        />
       </div>
 
       {/* Tabs. */}
@@ -253,7 +263,7 @@ function Workbench() {
           history={history.data ?? []}
           compareRegionIds={compareRegionIds}
           setCompareRegionIds={setCompareRegionIds}
-          compareHistories={compareQueries.map((q) => q.data ?? [])}
+          compareHistories={compareHistories}
           loading={history.isLoading}
         />
       )}
@@ -574,6 +584,20 @@ function HistoryTab({
   compareHistories: HistoryPoint[][];
   loading: boolean;
 }) {
+  const compareRegionSeries = useMemo<RegionSeries[]>(
+    () => [
+      {
+        name: regions.find((r) => r.id === regionId)?.name ?? "Primary",
+        history,
+      },
+      ...compareRegionIds.map((id, i) => ({
+        name: regions.find((r) => r.id === id)?.name ?? String(id),
+        history: compareHistories[i] ?? [],
+      })),
+    ],
+    [compareRegionIds, compareHistories, regions, regionId, history],
+  );
+
   return (
     <div className="mt-4">
       <div className="flex flex-wrap items-end gap-3">
@@ -671,23 +695,7 @@ function HistoryTab({
                 <div className="mb-1 text-xs text-zinc-400">
                   Region comparison — daily average
                 </div>
-                <MultiRegionHistory
-                  regions={
-                    [
-                      {
-                        name:
-                          regions.find((r) => r.id === regionId)?.name ??
-                          "Primary",
-                        history,
-                      },
-                      ...compareRegionIds.map((id, i) => ({
-                        name:
-                          regions.find((r) => r.id === id)?.name ?? String(id),
-                        history: compareHistories[i] ?? [],
-                      })),
-                    ] satisfies RegionSeries[]
-                  }
-                />
+                <MultiRegionHistory regions={compareRegionSeries} />
               </div>
             )}
           </div>

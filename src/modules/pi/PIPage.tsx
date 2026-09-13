@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  errorMessage,
   piLockedGet,
   piLockedSet,
   piOverview,
@@ -9,6 +10,7 @@ import {
   type ExtractorView,
   type StorageView,
 } from "../../lib/api";
+import { InlineError } from "../../components/InlineError";
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { formatInt } from "../../lib/format";
 import {
@@ -160,6 +162,7 @@ function Colony({
   onToggleLock: (typeId: number) => void;
   showCharacter: boolean;
 }) {
+  const [routeError, setRouteError] = useState<string | null>(null);
   return (
     <div
       className={`rounded border bg-zinc-900/40 p-3 ${
@@ -187,13 +190,21 @@ function Colony({
           </span>
         )}
         <button
-          onClick={() => piShowInGame(colony.systemId).catch(() => {})}
+          onClick={() =>
+            piShowInGame(colony.systemId)
+              .then(() => setRouteError(null))
+              .catch((e) => {
+                console.error("Failed to set route to colony system", e);
+                setRouteError(`Couldn't set route: ${errorMessage(e)}`);
+              })
+          }
           title="Set autopilot to this colony's system — ESI can't open a planet/system Show Info window directly"
           className="ml-auto rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
         >
           Route here ↗
         </button>
       </div>
+      <InlineError message={routeError} className="mt-1 text-xs text-rose-400" />
 
       <NextCycle colony={colony} />
 

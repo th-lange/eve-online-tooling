@@ -265,6 +265,350 @@ function DroneStars({
   );
 }
 
+/** One fitted item row inside a slot bank: remove/state/charge controls, its
+ *  name (+ charge/quantity), the ammo-stats popover (turrets only, hover for
+ *  DPS/optimal/tracking), and — for drones — the active-count stars. Pure
+ *  presentational; every mutation goes through the callbacks the bank/grid own. */
+function ModuleRow({
+  item,
+  index,
+  slot,
+  nameOf,
+  onRemove,
+  onSetState,
+  onSetQuantity,
+  onSetActiveDrones,
+  onSetCharge,
+  onSetChargeForType,
+  onFitAmmo,
+  range,
+  ammo,
+  sameTypeCount,
+  canActivate,
+  droneActive,
+  droneMaxActive,
+}: {
+  item: Fit["items"][number];
+  index: number;
+  slot: SlotKind;
+  nameOf: (id: number) => string;
+  onRemove: (globalIndex: number) => void;
+  onSetState: (globalIndex: number, state: ModuleState) => void;
+  onSetQuantity: (globalIndex: number, quantity: number) => void;
+  onSetActiveDrones: (globalIndex: number, activeDrones: number) => void;
+  onSetCharge: (globalIndex: number, chargeTypeId: number | null) => void;
+  onSetChargeForType: (
+    weaponTypeId: number,
+    chargeTypeId: number | null,
+  ) => void;
+  onFitAmmo?: (ammoTypeId: number) => void;
+  /** Resolved engagement range for this item's type + charge, when known. */
+  range: WeaponRange | undefined;
+  /** Turret DPS/range/tracking for this ammo (cargo rows only). */
+  ammo: AmmoRow | undefined;
+  /** How many fitted weapons share this item's type (for "apply to all"). */
+  sameTypeCount: number;
+  /** Whether this module type can be cycled active/overheated (vs. just
+   *  online/offline for passive or power-only modules). */
+  canActivate: boolean;
+  droneActive: number | null | undefined;
+  droneMaxActive: number | null | undefined;
+}) {
+  const it = item;
+  const i = index;
+  // Only high/mid/low modules toggle (rigs/subsystems are permanent).
+  // Activatable modules cycle active → inactive → offline; passive
+  // ones only toggle online ↔ offline and never read "active".
+  const canToggle = slot === "high" || slot === "mid" || slot === "low";
+  // Only cargo/drone stacks carry more than one — modules/rigs are always
+  // exactly one per slot index, so the live stepper only applies here.
+  const editableQuantity = slot === "cargo" || slot === "drone";
+  const offline = it.state === "offline";
+  // One icon shows the module's state and cycles it on click: activatable
+  // modules run active → overheated → online → offline → active; passive /
+  // power-only ones just toggle online ↔ offline (they start online).
+  const next: ModuleState = canActivate
+    ? it.state === "active"
+      ? "overheated"
+      : it.state === "overheated"
+        ? "online"
+        : it.state === "online"
+          ? "offline"
+          : "active"
+    : offline
+      ? "online"
+      : "offline";
+  // Shift-click runs the cycle backwards.
+  const prev: ModuleState = canActivate
+    ? it.state === "active"
+      ? "offline"
+      : it.state === "offline"
+        ? "online"
+        : it.state === "online"
+          ? "overheated"
+          : "active"
+    : offline
+      ? "online"
+      : "offline";
+  // Current-state glyph: green dot active, white dot online, grey dot offline,
+  // red flame overheated.
+  const stateIcon =
+    it.state === "overheated"
+      ? { Icon: Flame, cls: "text-red-400", label: "overheated" }
+      : it.state === "active"
+        ? {
+            Icon: Circle,
+            cls: "fill-current text-emerald-400",
+            label: "active",
+          }
+        : it.state === "offline"
+          ? {
+              Icon: Circle,
+              cls: "fill-current text-zinc-500",
+              label: "offline",
+            }
+          : {
+              Icon: Circle,
+              cls: "fill-current text-zinc-100",
+              label: "online",
+            };
+  // Dim the name when the module isn't contributing.
+  const dimmed = offline || (canActivate && it.state === "online");
+  return (
+    <li className="group flex flex-col gap-1 rounded px-1 py-0.5 hover:bg-zinc-800/70">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+        <button
+          onClick={() => onRemove(i)}
+          className="flex shrink-0 items-center rounded p-0.5 text-zinc-500 group-hover:text-red-400"
+          title="Remove from slot"
+          aria-label={`Remove ${nameOf(it.typeId)}`}
+        >
+          <X size={14} />
+        </button>
+        {canToggle && (
+          <button
+            onClick={(e) => onSetState(i, e.shiftKey ? prev : next)}
+            title={`${stateIcon.label} — click to cycle, shift-click to reverse`}
+            aria-label={`Module state: ${stateIcon.label}`}
+            className="flex shrink-0 items-center rounded p-0.5 hover:bg-zinc-700"
+          >
+            <stateIcon.Icon size={12} className={stateIcon.cls} />
+          </button>
+        )}
+        {ammo ? (
+          <span className="group/ammo relative flex min-w-0 flex-1 items-center gap-1">
+            <span className="truncate">{nameOf(it.typeId)}</span>
+            <Info size={11} className="shrink-0 text-sky-500/70" />
+            <span className="absolute left-0 top-full z-30 mt-1 hidden w-max rounded border border-zinc-700 bg-zinc-900 p-2 text-left text-[11px] font-normal normal-case leading-relaxed text-zinc-400 shadow-lg group-hover/ammo:block">
+              <span className="mb-1 block font-medium text-zinc-200">
+                On your turrets
+              </span>
+              <span className="block">
+                DPS{" "}
+                <span className="text-zinc-100">{formatInt(ammo.dps)}</span>
+              </span>
+              <span className="block">
+                Optimal{" "}
+                <span className="text-zinc-100">{km(ammo.optimal)}</span>
+                {ammo.falloff > 0 ? (
+                  <> → <span className="text-zinc-100">{km(ammo.optimal + ammo.falloff)}</span></>
+                ) : null}
+              </span>
+              <span className="block">
+                Tracking{" "}
+                <span className="text-zinc-100">
+                  {ammo.tracking > 0 ? ammo.tracking.toFixed(3) : "—"}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => onFitAmmo?.(it.typeId)}
+                className="mt-1.5 block w-full rounded bg-sky-700 px-2 py-1 text-center font-medium text-white hover:bg-sky-600"
+              >
+                Click to fit to all weapons
+              </button>
+            </span>
+          </span>
+        ) : (
+          <span
+            className={`min-w-0 flex-1 truncate ${
+              offline ? "text-zinc-500" : dimmed ? "text-zinc-400" : ""
+            }`}
+          >
+            {nameOf(it.typeId)}
+            {it.chargeTypeId ? ` + ${nameOf(it.chargeTypeId)}` : ""}
+            {!editableQuantity && it.quantity > 1 ? ` x${it.quantity}` : ""}
+          </span>
+        )}
+        {editableQuantity && (
+          <QuantityControl
+            value={it.quantity}
+            onChange={(q) => onSetQuantity(i, q)}
+          />
+        )}
+        {range && (
+          <span
+            className="shrink-0 whitespace-nowrap tabular-nums text-[11px] text-zinc-500"
+            title="optimal → max range (optimal + falloff)"
+          >
+            {km(range.optimal)}
+            {range.falloff > 0 ? ` → ${km(range.optimal + range.falloff)}` : ""}
+          </span>
+        )}
+        {/* Ammo / charge picker for weapons, scripts and ancillary reps —
+            self-hides when the module takes no charge. */}
+        {(slot === "high" || slot === "mid" || slot === "low") && (
+          <ChargeControl
+            typeId={it.typeId}
+            chargeTypeId={it.chargeTypeId ?? null}
+            sameTypeCount={sameTypeCount}
+            onSetCharge={(c) => onSetCharge(i, c)}
+            onSetChargeAll={(c) => onSetChargeForType(it.typeId, c)}
+          />
+        )}
+      </div>
+      {slot === "drone" && (
+        <div className="flex items-center gap-2 pl-6">
+          <DroneStars
+            maxActive={Math.min(5, droneMaxActive ?? it.quantity)}
+            active={droneActive ?? it.activeDrones ?? it.quantity}
+            onChange={(n) => onSetActiveDrones(i, n)}
+          />
+        </div>
+      )}
+    </li>
+  );
+}
+
+/** One bank (High/Mid/Low/Rig/…): a bordered box with an occupancy header,
+ *  its fitted items, and an add-affordance for any free slot. `null` when the
+ *  hull has no such bank and nothing is fitted there (e.g. no rigs, no
+ *  implants). `primary` gives High/Mid/Low the brighter combat-rack styling;
+ *  secondary banks (Rig/Subsystem/Implants/Drones/Cargo) read quieter. */
+function SlotBank({
+  slot,
+  label,
+  primary,
+  cap,
+  fit,
+  nameOf,
+  onRemove,
+  onAddToSlot,
+  onSetCharge,
+  onSetChargeForType,
+  onSetState,
+  onSetQuantity,
+  onSetActiveDrones,
+  droneActive,
+  droneMaxActive,
+  rangeOf,
+  activatable,
+  ammoStats,
+  onFitAmmo,
+}: {
+  slot: SlotKind;
+  label: string;
+  primary: boolean;
+  cap: number | undefined;
+  fit: Fit;
+  nameOf: (id: number) => string;
+  onRemove: (globalIndex: number) => void;
+  onAddToSlot: (slot: SlotKind) => void;
+  onSetCharge: (globalIndex: number, chargeTypeId: number | null) => void;
+  onSetChargeForType: (
+    weaponTypeId: number,
+    chargeTypeId: number | null,
+  ) => void;
+  onSetState: (globalIndex: number, state: ModuleState) => void;
+  onSetQuantity: (globalIndex: number, quantity: number) => void;
+  onSetActiveDrones: (globalIndex: number, activeDrones: number) => void;
+  droneActive?: Array<number | null>;
+  droneMaxActive?: Array<number | null>;
+  rangeOf: Map<string, WeaponRange>;
+  activatable: Set<number>;
+  ammoStats?: Record<number, AmmoRow>;
+  onFitAmmo?: (ammoTypeId: number) => void;
+}): ReactNode {
+  const items = fit.items
+    .map((it, i) => ({ it, i }))
+    .filter((x) => x.it.slot === slot)
+    .sort((a, b) => a.it.index - b.it.index);
+  // Always show the drone bay and cargo hold, even when empty, so they read as
+  // available; other capless banks (implants/subsystems/…) still hide empty.
+  if (
+    items.length === 0 &&
+    cap == null &&
+    slot !== "drone" &&
+    slot !== "cargo"
+  )
+    return null;
+  const free = cap != null ? cap - items.length : 0;
+  const full = cap != null && free === 0 && cap > 0;
+  return (
+    <div
+      className={`rounded-lg border p-2 ${
+        primary
+          ? "border-zinc-700 bg-zinc-900/40"
+          : "border-zinc-800 bg-zinc-900/20"
+      }`}
+    >
+      <div
+        className={`flex items-center justify-between text-xs uppercase tracking-wide ${
+          primary ? "text-zinc-300" : "text-zinc-500"
+        }`}
+      >
+        <span>{label}</span>
+        {cap != null && (
+          <span
+            className={`tabular-nums ${full ? "text-emerald-400" : "text-zinc-500"}`}
+          >
+            {items.length}/{cap}
+          </span>
+        )}
+      </div>
+      {items.length > 0 && (
+        <ul className="mt-1 text-sm text-zinc-300">
+          {items.map(({ it, i }) => (
+            <ModuleRow
+              key={i}
+              item={it}
+              index={i}
+              slot={slot}
+              nameOf={nameOf}
+              onRemove={onRemove}
+              onSetState={onSetState}
+              onSetQuantity={onSetQuantity}
+              onSetActiveDrones={onSetActiveDrones}
+              onSetCharge={onSetCharge}
+              onSetChargeForType={onSetChargeForType}
+              onFitAmmo={onFitAmmo}
+              range={rangeOf.get(`${it.typeId}:${it.chargeTypeId ?? 0}`)}
+              ammo={slot === "cargo" ? ammoStats?.[it.typeId] : undefined}
+              sameTypeCount={
+                fit.items.filter((x) => x.typeId === it.typeId).length
+              }
+              canActivate={activatable.has(it.typeId)}
+              droneActive={droneActive?.[i]}
+              droneMaxActive={droneMaxActive?.[i]}
+            />
+          ))}
+        </ul>
+      )}
+      {/* Click a free slot to add a module to it (filters the browser). */}
+      {cap != null && free > 0 && (
+        <button
+          onClick={() => onAddToSlot(slot)}
+          className="mt-0.5 flex items-center gap-1 rounded px-1 py-0.5 text-sm text-zinc-600 hover:bg-zinc-800/70 hover:text-zinc-300"
+        >
+          <Plus size={13} className="shrink-0" />
+          Add to {label.toLowerCase()}
+          {free > 1 ? ` (${free} free)` : ""}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function SlotGrid({
   fit,
   layout,
@@ -317,256 +661,49 @@ export function SlotGrid({
     mode: layout.modeSlots,
   };
 
-  function renderItem(it: Fit["items"][number], i: number, slot: SlotKind) {
-    const range = rangeOf.get(`${it.typeId}:${it.chargeTypeId ?? 0}`);
-    // Turret DPS/range/tracking for this ammo (cargo only) → hover popover.
-    const ammo = slot === "cargo" ? ammoStats?.[it.typeId] : undefined;
-    // Only high/mid/low modules toggle (rigs/subsystems are permanent).
-    // Activatable modules cycle active → inactive → offline; passive
-    // ones only toggle online ↔ offline and never read "active".
-    const canToggle = slot === "high" || slot === "mid" || slot === "low";
-    // Only cargo/drone stacks carry more than one — modules/rigs are always
-    // exactly one per slot index, so the live stepper only applies here.
-    const editableQuantity = slot === "cargo" || slot === "drone";
-    const canActivate = activatable.has(it.typeId);
-    const offline = it.state === "offline";
-    // One icon shows the module's state and cycles it on click: activatable
-    // modules run active → overheated → online → offline → active; passive /
-    // power-only ones just toggle online ↔ offline (they start online).
-    const next: ModuleState = canActivate
-      ? it.state === "active"
-        ? "overheated"
-        : it.state === "overheated"
-          ? "online"
-          : it.state === "online"
-            ? "offline"
-            : "active"
-      : offline
-        ? "online"
-        : "offline";
-    // Shift-click runs the cycle backwards.
-    const prev: ModuleState = canActivate
-      ? it.state === "active"
-        ? "offline"
-        : it.state === "offline"
-          ? "online"
-          : it.state === "online"
-            ? "overheated"
-            : "active"
-      : offline
-        ? "online"
-        : "offline";
-    // Current-state glyph: green dot active, white dot online, grey dot offline,
-    // red flame overheated.
-    const stateIcon =
-      it.state === "overheated"
-        ? { Icon: Flame, cls: "text-red-400", label: "overheated" }
-        : it.state === "active"
-          ? {
-              Icon: Circle,
-              cls: "fill-current text-emerald-400",
-              label: "active",
-            }
-          : it.state === "offline"
-            ? {
-                Icon: Circle,
-                cls: "fill-current text-zinc-500",
-                label: "offline",
-              }
-            : {
-                Icon: Circle,
-                cls: "fill-current text-zinc-100",
-                label: "online",
-              };
-    // Dim the name when the module isn't contributing.
-    const dimmed = offline || (canActivate && it.state === "online");
-    return (
-      <li
-        key={i}
-        className="group flex flex-col gap-1 rounded px-1 py-0.5 hover:bg-zinc-800/70"
-      >
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-          <button
-            onClick={() => onRemove(i)}
-            className="flex shrink-0 items-center rounded p-0.5 text-zinc-500 group-hover:text-red-400"
-            title="Remove from slot"
-            aria-label={`Remove ${nameOf(it.typeId)}`}
-          >
-            <X size={14} />
-          </button>
-          {canToggle && (
-            <button
-              onClick={(e) => onSetState(i, e.shiftKey ? prev : next)}
-              title={`${stateIcon.label} — click to cycle, shift-click to reverse`}
-              aria-label={`Module state: ${stateIcon.label}`}
-              className="flex shrink-0 items-center rounded p-0.5 hover:bg-zinc-700"
-            >
-              <stateIcon.Icon size={12} className={stateIcon.cls} />
-            </button>
-          )}
-          {ammo ? (
-            <span className="group/ammo relative flex min-w-0 flex-1 items-center gap-1">
-              <span className="truncate">{nameOf(it.typeId)}</span>
-              <Info size={11} className="shrink-0 text-sky-500/70" />
-              <span className="absolute left-0 top-full z-30 mt-1 hidden w-max rounded border border-zinc-700 bg-zinc-900 p-2 text-left text-[11px] font-normal normal-case leading-relaxed text-zinc-400 shadow-lg group-hover/ammo:block">
-                <span className="mb-1 block font-medium text-zinc-200">
-                  On your turrets
-                </span>
-                <span className="block">
-                  DPS{" "}
-                  <span className="text-zinc-100">{formatInt(ammo.dps)}</span>
-                </span>
-                <span className="block">
-                  Optimal{" "}
-                  <span className="text-zinc-100">{km(ammo.optimal)}</span>
-                  {ammo.falloff > 0 ? (
-                    <> → <span className="text-zinc-100">{km(ammo.optimal + ammo.falloff)}</span></>
-                  ) : null}
-                </span>
-                <span className="block">
-                  Tracking{" "}
-                  <span className="text-zinc-100">
-                    {ammo.tracking > 0 ? ammo.tracking.toFixed(3) : "—"}
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onFitAmmo?.(it.typeId)}
-                  className="mt-1.5 block w-full rounded bg-sky-700 px-2 py-1 text-center font-medium text-white hover:bg-sky-600"
-                >
-                  Click to fit to all weapons
-                </button>
-              </span>
-            </span>
-          ) : (
-            <span
-              className={`min-w-0 flex-1 truncate ${
-                offline ? "text-zinc-500" : dimmed ? "text-zinc-400" : ""
-              }`}
-            >
-              {nameOf(it.typeId)}
-              {it.chargeTypeId ? ` + ${nameOf(it.chargeTypeId)}` : ""}
-              {!editableQuantity && it.quantity > 1 ? ` x${it.quantity}` : ""}
-            </span>
-          )}
-          {editableQuantity && (
-            <QuantityControl
-              value={it.quantity}
-              onChange={(q) => onSetQuantity(i, q)}
-            />
-          )}
-          {range && (
-            <span
-              className="shrink-0 whitespace-nowrap tabular-nums text-[11px] text-zinc-500"
-              title="optimal → max range (optimal + falloff)"
-            >
-              {km(range.optimal)}
-              {range.falloff > 0 ? ` → ${km(range.optimal + range.falloff)}` : ""}
-            </span>
-          )}
-          {/* Ammo / charge picker for weapons, scripts and ancillary reps —
-              self-hides when the module takes no charge. */}
-          {(slot === "high" || slot === "mid" || slot === "low") && (
-            <ChargeControl
-              typeId={it.typeId}
-              chargeTypeId={it.chargeTypeId ?? null}
-              sameTypeCount={
-                fit.items.filter((x) => x.typeId === it.typeId).length
-              }
-              onSetCharge={(c) => onSetCharge(i, c)}
-              onSetChargeAll={(c) => onSetChargeForType(it.typeId, c)}
-            />
-          )}
-        </div>
-        {slot === "drone" && (
-          <div className="flex items-center gap-2 pl-6">
-            <DroneStars
-              maxActive={Math.min(5, droneMaxActive?.[i] ?? it.quantity)}
-              active={droneActive?.[i] ?? it.activeDrones ?? it.quantity}
-              onChange={(n) => onSetActiveDrones(i, n)}
-            />
-          </div>
-        )}
-      </li>
-    );
-  }
-
-  /** One bank (High/Mid/Low/Rig/…): a bordered box with an occupancy header,
-   *  its fitted items, and an add-affordance for any free slot. `null` when the
-   *  hull has no such bank and nothing is fitted there (e.g. no rigs, no
-   *  implants). `primary` gives High/Mid/Low the brighter combat-rack styling;
-   *  secondary banks (Rig/Subsystem/Implants/Drones/Cargo) read quieter. */
-  function renderBank(
-    slot: SlotKind,
-    label: string,
-    primary: boolean,
-  ): ReactNode {
-    const items = fit.items
-      .map((it, i) => ({ it, i }))
-      .filter((x) => x.it.slot === slot)
-      .sort((a, b) => a.it.index - b.it.index);
-    const cap = counts[slot];
-    // Always show the drone bay and cargo hold, even when empty, so they read as
-    // available; other capless banks (implants/subsystems/…) still hide empty.
-    if (
-      items.length === 0 &&
-      cap == null &&
-      slot !== "drone" &&
-      slot !== "cargo"
-    )
-      return null;
-    const free = cap != null ? cap - items.length : 0;
-    const full = cap != null && free === 0 && cap > 0;
-    return (
-      <div
-        key={slot}
-        className={`rounded-lg border p-2 ${
-          primary
-            ? "border-zinc-700 bg-zinc-900/40"
-            : "border-zinc-800 bg-zinc-900/20"
-        }`}
-      >
-        <div
-          className={`flex items-center justify-between text-xs uppercase tracking-wide ${
-            primary ? "text-zinc-300" : "text-zinc-500"
-          }`}
-        >
-          <span>{label}</span>
-          {cap != null && (
-            <span
-              className={`tabular-nums ${full ? "text-emerald-400" : "text-zinc-500"}`}
-            >
-              {items.length}/{cap}
-            </span>
-          )}
-        </div>
-        {items.length > 0 && (
-          <ul className="mt-1 text-sm text-zinc-300">
-            {items.map(({ it, i }) => renderItem(it, i, slot))}
-          </ul>
-        )}
-        {/* Click a free slot to add a module to it (filters the browser). */}
-        {cap != null && free > 0 && (
-          <button
-            onClick={() => onAddToSlot(slot)}
-            className="mt-0.5 flex items-center gap-1 rounded px-1 py-0.5 text-sm text-zinc-600 hover:bg-zinc-800/70 hover:text-zinc-300"
-          >
-            <Plus size={13} className="shrink-0" />
-            Add to {label.toLowerCase()}
-            {free > 1 ? ` (${free} free)` : ""}
-          </button>
-        )}
-      </div>
-    );
-  }
+  const bankProps = {
+    fit,
+    nameOf,
+    onRemove,
+    onAddToSlot,
+    onSetCharge,
+    onSetChargeForType,
+    onSetState,
+    onSetQuantity,
+    onSetActiveDrones,
+    droneActive,
+    droneMaxActive,
+    rangeOf,
+    activatable,
+    ammoStats,
+    onFitAmmo,
+  };
 
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        {PRIMARY_BANKS.map(([slot, label]) => renderBank(slot, label, true))}
+        {PRIMARY_BANKS.map(([slot, label]) => (
+          <SlotBank
+            key={slot}
+            slot={slot}
+            label={label}
+            primary
+            cap={counts[slot]}
+            {...bankProps}
+          />
+        ))}
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {SECONDARY_BANKS.map(([slot, label]) => renderBank(slot, label, false))}
+        {SECONDARY_BANKS.map(([slot, label]) => (
+          <SlotBank
+            key={slot}
+            slot={slot}
+            label={label}
+            primary={false}
+            cap={counts[slot]}
+            {...bankProps}
+          />
+        ))}
       </div>
     </div>
   );

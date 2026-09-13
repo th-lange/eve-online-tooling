@@ -1,13 +1,17 @@
 //! Engine-agnostic execution: a [`ScriptEngine`] trait, the resource [`Limits`]
-//! every run is capped by, and the [`run`] dispatcher that times a run and
-//! collects its logs.
+//! every run is capped by, and the [`run`] dispatcher that times a run,
+//! watches its memory, and collects its logs.
 //!
 //! Scripts are trusted but not unbounded: every run is bounded so a runaway
 //! `while(true)` returns an error instead of freezing the app. Rhai is capped by
 //! an operation count plus a wall-clock deadline it checks on progress; the JS
 //! engine (`boa`) is capped by a loop-iteration limit and a recursion limit.
+//! Heap memory is bounded too, but only by a best-effort watchdog outside
+//! either engine — see [`Limits::max_memory_mb`] and issue #815.
 
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -18,7 +22,31 @@ use super::rhai_engine::RhaiEngine;
 use super::types::{Language, ScriptRun};
 
 /// Ceilings applied to every run.
-#[derive(Debug, Clone)]
+///
+/// Loop iterations, recursion depth, and wall-clock are enforced *inside* the
+/// engine (Rhai checks its op count/deadline on every instruction; `boa`
+/// checks its loop/recursion counters on every loop iteration and call) — a
+/// script simply cannot cross them. `max_memory_mb` is different: neither
+/// engine has a native heap cap (Rhai has none; `boa` 0.21 doesn't expose
+/// one), so it's enforced *outside* the engine, by [`run`]'s watchdog thread,
+/// which samples process RSS growth since the run started. That makes it a
+/// best-effort proxy, not a hard guarantee:
+/// - it measures the whole **process's** RSS, not the script's own heap — a
+///   faithful enough proxy here because runs execute one at a time on their
+///   own dedicated thread, but something else in the process allocating
+///   heavily at the same moment could trip it early;
+/// - Rhai polls the watchdog's abort flag from the same `on_progress` hook
+///   that already enforces the wall-clock timeout, so it aborts promptly,
+///   mid-script, the same way a timeout does;
+/// - `boa` has no equivalent per-instruction checkpoint to poll, so a JS loop
+///   that never calls back into host code (e.g.
+///   `let a=[]; for(;;) a.push({})`) can't be preempted mid-flight. The
+///   watchdog still keeps the *caller* from waiting forever — it returns a
+///   "script exceeded memory limit" error and detaches the runaway thread —
+///   but that detached thread's own memory isn't reclaimed until it trips
+///   its loop-iteration limit or the process itself runs out of memory. See
+///   issue #815.
+#[derive(Clone, Copy)]
 pub struct Limits {
     /// Wall-clock budget (Rhai aborts on progress past this).
     pub timeout: Duration,
@@ -28,6 +56,11 @@ pub struct Limits {
     pub loop_iter_limit: u64,
     /// Max call/recursion depth (both engines).
     pub recursion_limit: usize,
+    /// Soft heap cap in MiB, matching the plugin sandbox's Extism cap.
+    /// Enforced by a best-effort RSS watchdog, not the engine itself — see
+    /// this struct's doc comment for exactly what that does and doesn't
+    /// guarantee.
+    pub max_memory_mb: u64,
 }
 
 impl Default for Limits {
@@ -37,25 +70,62 @@ impl Default for Limits {
             max_ops: 5_000_000,
             loop_iter_limit: 5_000_000,
             recursion_limit: 128,
+            max_memory_mb: 64,
         }
+    }
+}
+
+/// Out-of-band abort signal the memory watchdog trips. Cloned into the engine
+/// so it can poll [`is_tripped`](Interrupt::is_tripped) from whatever
+/// periodic checkpoint it already has (Rhai's `on_progress`); an engine
+/// without one (`boa`) can only observe it before `eval` starts.
+#[derive(Clone, Default)]
+pub struct Interrupt(Arc<AtomicBool>);
+
+impl Interrupt {
+    fn trip(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    /// Whether the watchdog has asked the running script to stop.
+    pub fn is_tripped(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
     }
 }
 
 /// One embedded scripting backend.
 pub trait ScriptEngine {
     /// Execute `code` under `limits`, returning its JSON result value or a
-    /// human-readable error message. Host `log()` output accumulates on `host`.
-    fn execute(&self, host: &Arc<dyn Host>, code: &str, limits: &Limits) -> Result<Value, String>;
+    /// human-readable error message. Host `log()` output accumulates on
+    /// `host`. `interrupt` is tripped by [`run`]'s memory watchdog; an engine
+    /// with a periodic checkpoint should poll it there and abort with a
+    /// clear message, matching how it already handles a timeout.
+    fn execute(
+        &self,
+        host: &Arc<dyn Host>,
+        code: &str,
+        limits: &Limits,
+        interrupt: &Interrupt,
+    ) -> Result<Value, String>;
 }
 
-/// Run a snippet end to end: time it, dispatch to the right engine, and fold the
-/// outcome plus captured logs into a [`ScriptRun`]. Never panics on script error.
+/// How often the watchdog re-samples RSS while a script is running. Coarse
+/// enough to be cheap (one `/proc` read per tick), fine enough that the
+/// allocation-bomb case from #815 trips within tens of milliseconds.
+const WATCHDOG_POLL: Duration = Duration::from_millis(20);
+
+/// After tripping the interrupt, how long to keep waiting for the engine to
+/// notice and unwind before giving up on it. Meaningful for Rhai (which will
+/// notice); `boa` never will, so this just bounds how long the caller waits.
+const WATCHDOG_GRACE: Duration = Duration::from_millis(200);
+
+/// Run a snippet end to end: time it, dispatch to the right engine on a
+/// dedicated thread, watch that thread's memory footprint, and fold the
+/// outcome plus captured logs into a [`ScriptRun`]. Never panics on script
+/// error.
 pub fn run(host: Arc<dyn Host>, language: Language, code: &str, limits: &Limits) -> ScriptRun {
     let start = Instant::now();
-    let outcome = match language {
-        Language::Rhai => RhaiEngine.execute(&host, code, limits),
-        Language::Js => JsEngine.execute(&host, code, limits),
-    };
+    let outcome = execute_watched(host.clone(), language, code, limits);
     let duration_ms = start.elapsed().as_millis() as u64;
     let logs = host.take_logs();
     match outcome {
@@ -74,6 +144,98 @@ pub fn run(host: Arc<dyn Host>, language: Language, code: &str, limits: &Limits)
             duration_ms,
         },
     }
+}
+
+/// Run `code` on a dedicated thread and race it against a memory watchdog on
+/// the calling thread. Whichever finishes first wins; on a memory trip the
+/// losing worker thread is detached (not joined), so this call never blocks
+/// more than [`WATCHDOG_GRACE`] past the point of exceeding
+/// `limits.max_memory_mb`.
+fn execute_watched(
+    host: Arc<dyn Host>,
+    language: Language,
+    code: &str,
+    limits: &Limits,
+) -> Result<Value, String> {
+    let interrupt = Interrupt::default();
+    let (tx, rx) = mpsc::channel();
+    let code = code.to_string();
+    let worker_limits = *limits;
+    let worker_interrupt = interrupt.clone();
+    let worker = thread::Builder::new()
+        .name("script-eval".into())
+        .spawn(move || {
+            let result = match language {
+                Language::Rhai => {
+                    RhaiEngine.execute(&host, &code, &worker_limits, &worker_interrupt)
+                }
+                Language::Js => JsEngine.execute(&host, &code, &worker_limits, &worker_interrupt),
+            };
+            // The receiver may already be gone (watchdog gave up on us) — fine.
+            let _ = tx.send(result);
+        })
+        .expect("spawn script-eval thread");
+
+    let baseline_rss = resident_memory_mb();
+    let max_growth = limits.max_memory_mb;
+    loop {
+        match rx.recv_timeout(WATCHDOG_POLL) {
+            Ok(result) => {
+                let _ = worker.join();
+                return result;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("script worker terminated unexpectedly".to_string());
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                let (Some(baseline), Some(current)) = (baseline_rss, resident_memory_mb()) else {
+                    // No RSS sampling on this platform: fall back to the
+                    // pre-#815 behavior (time/iteration limits only).
+                    continue;
+                };
+                if current.saturating_sub(baseline) <= max_growth {
+                    continue;
+                }
+                interrupt.trip();
+                // Give the engine a short grace window to notice and unwind
+                // (Rhai will; `boa` can't — see [`Limits`]'s doc comment).
+                if let Ok(result) = rx.recv_timeout(WATCHDOG_GRACE) {
+                    let _ = worker.join();
+                    return result;
+                }
+                // Didn't unwind in time (the `boa` case): stop waiting so the
+                // caller isn't blocked indefinitely. Dropping the JoinHandle
+                // without joining detaches the thread — it keeps running
+                // independently and frees its memory once it trips its own
+                // loop-iteration limit or errors out on its own.
+                drop(worker);
+                return Err(format!("script exceeded memory limit ({max_growth} MiB)"));
+            }
+        }
+    }
+}
+
+/// Best-effort resident set size of this process, in MiB. `None` when the
+/// platform has no supported sampling path — the memory watchdog then never
+/// trips and scripts fall back to the pre-#815 time/iteration-only limits.
+/// Deliberately avoids a `sysinfo`-style dependency: Linux is the only
+/// platform sampled, via `/proc/self/statm` (page size hardcoded to 4 KiB,
+/// the value on every architecture this app ships for).
+#[cfg(target_os = "linux")]
+fn resident_memory_mb() -> Option<u64> {
+    const PAGE_SIZE_BYTES: u64 = 4096;
+    let statm = std::fs::read_to_string("/proc/self/statm").ok()?;
+    // Fields are "size resident shared text lib data dt", all in pages; we
+    // want the second one (resident).
+    let resident_pages: u64 = statm.split_whitespace().nth(1)?.parse().ok()?;
+    Some(resident_pages * PAGE_SIZE_BYTES / (1024 * 1024))
+}
+
+/// No supported sampling path on this platform — see [`resident_memory_mb`]
+/// above for the Linux implementation this stands in for.
+#[cfg(not(target_os = "linux"))]
+fn resident_memory_mb() -> Option<u64> {
+    None
 }
 
 #[cfg(test)]
@@ -344,6 +506,47 @@ mod tests {
         assert!(!out.ok);
         assert!(out.error.unwrap().contains("timed out"));
     }
+
+    #[test]
+    fn rhai_allocation_bomb_is_stopped_by_the_memory_watchdog() {
+        // #815: an unbounded loop that allocates every iteration and never
+        // calls back into host code — nothing but the memory watchdog can
+        // catch this. `max_memory_mb` is measured as *growth* since the run
+        // started, so a tiny cap here reliably trips regardless of whatever
+        // the test process's baseline RSS already is. Timeout/op-count are
+        // set generously so the memory trip — not those — is what fires.
+        let limits = Limits {
+            max_memory_mb: 1,
+            timeout: Duration::from_secs(10),
+            max_ops: u64::MAX,
+            ..Limits::default()
+        };
+        let out = run(
+            host(),
+            Language::Rhai,
+            "let a = []; loop { a.push(#{}); }",
+            &limits,
+        );
+        assert!(!out.ok);
+        assert!(
+            out.error.as_deref().unwrap().contains("memory limit"),
+            "expected a memory-limit error, got: {:?}",
+            out.error
+        );
+    }
+
+    // `boa` (JS) has no periodic checkpoint to poll the watchdog's interrupt
+    // from (see `Limits`'s and `js_engine`'s doc comments), so the equivalent
+    // JS allocation bomb — `let a=[]; for(;;) a.push({})` — can't be
+    // preempted mid-loop the way the Rhai case above is, and isn't safe to
+    // assert on here: the offending thread would keep running detached in
+    // the background for the rest of the test process's life, potentially
+    // exhausting real memory in CI. Manual verification recipe: run that
+    // snippet via `scripts_run` with a low `max_memory_mb` (e.g. via the
+    // Scripts UI or a temporary `Limits::default()` override) and confirm
+    // the command returns promptly with a "script exceeded memory limit"
+    // error instead of hanging or crashing the app — the watchdog still
+    // bounds the caller's wait even though it can't stop the runaway thread.
 
     #[test]
     fn js_infinite_loop_is_stopped_by_the_iteration_cap() {
