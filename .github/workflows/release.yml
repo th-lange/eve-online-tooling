@@ -85,6 +85,12 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
+          # Restore the release-mode dependency cache built on main by the
+          # warm-release-cache workflow. Tag refs can read main's caches but a
+          # cache saved HERE would be unreachable from any future tag — so
+          # never save (also cuts 30–70s of pointless upload per platform).
+          shared-key: "release-build"
+          save-if: "false"
 
       - name: Install frontend dependencies
         run: npm ci

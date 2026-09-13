@@ -1,0 +1,91 @@
+name: Warm release cache
+
+# Release builds run on tag refs, and GitHub Actions caches are only readable
+# from the ref that created them or from the default branch. A cache saved by
+# the v0.61.0 tag build is unreachable from v0.62.0 — so before this workflow
+# existed, EVERY release was a full cold Rust compile (9–20 min per platform;
+# wasmtime, boa_engine and rhai dominate).
+#
+# This workflow compiles the release-mode dependency graph on MAIN for all
+# three release platforms and saves it under a stable shared-key. Tag builds
+# restore that key read-only (see release.yml: save-if: false) and skip
+# straight to compiling the app crate itself.
+#
+# Triggers: dependency changes (Cargo.lock/toml), weekly (GitHub evicts caches
+# untouched for 7 days), and manual.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "src-tauri/Cargo.lock"
+      - "src-tauri/Cargo.toml"
+      - ".github/workflows/warm-release-cache.yml"
+  schedule:
+    - cron: "0 3 * * 1" # Mondays 03:00 UTC — keeps the cache from 7-day eviction
+  workflow_dispatch:
+
+concurrency:
+  group: warm-release-cache
+  cancel-in-progress: true
+
+jobs:
+  warm:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            rust-targets: ""
+          - platform: windows-latest
+            rust-targets: ""
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+            pkg-config patchelf
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.1
+          targets: ${{ matrix.rust-targets }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          # Must match the key in release.yml so tag builds can restore it.
+          shared-key: "release-build"
+
+      # tauri::generate_context! embeds frontendDist (../dist) at compile time;
+      # a stub satisfies it. Only dependency artifacts are cached (rust-cache
+      # intentionally drops workspace-member artifacts), so the stub's content
+      # never leaks into a real release.
+      - name: Stub frontend dist
+        shell: bash
+        run: mkdir -p dist && touch dist/index.html
+
+      # Compile the full release-mode graph exactly as `tauri build` does
+      # (it passes --features tauri/custom-protocol). macOS builds both
+      # universal-target halves.
+      - name: Build release dependencies
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "macos-latest" ]; then
+            cargo build --release --manifest-path src-tauri/Cargo.toml \
+              --features tauri/custom-protocol --target aarch64-apple-darwin
+            cargo build --release --manifest-path src-tauri/Cargo.toml \
+              --features tauri/custom-protocol --target x86_64-apple-darwin
+          else
+            cargo build --release --manifest-path src-tauri/Cargo.toml \
+              --features tauri/custom-protocol
+          fi
