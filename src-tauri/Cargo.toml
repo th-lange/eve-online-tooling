@@ -1,6 +1,6 @@
 [package]
 name = "eve-online-tooling"
-version = "0.60.2"
+version = "0.61.0"
 description = "EVE Online tooling — production, trading and more"
 authors = ["Thomas Lange"]
 license = "MIT"
@@ -54,10 +54,16 @@ tiny_http = "0.12"
 semver = "1.0.28"
 extism = "1.30.0"
 parking_lot = "0.12.5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 rhai = { version = "1.25", features = ["sync", "serde"] }
 boa_engine = "0.21"
 # Plugin drag-and-drop install (folder or .zip) — extraction only.
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# Error reporting: captures panics and WARN/ERROR records in release builds.
+# DSN baked in via SENTRY_DSN env var at build time (absent = disabled).
+# rustls matches the rest of the project; avoids pulling in native-tls.
+sentry = { version = "0.34", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
 
 
 [dev-dependencies]

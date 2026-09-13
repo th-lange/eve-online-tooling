@@ -107,6 +107,11 @@ jobs:
           # if either is missing. See docs/feedback.md.
           EVE_TOOLING_FIREBASE_PROJECT_ID: ${{ secrets.EVE_TOOLING_FIREBASE_PROJECT_ID }}
           EVE_TOOLING_FIREBASE_API_KEY: ${{ secrets.EVE_TOOLING_FIREBASE_API_KEY }}
+          # Sentry error reporting. Absent = Sentry disabled (graceful — unlike
+          # Firebase, a missing DSN is not a build error). Both Rust and the
+          # Vite frontend read the same secret under different env var names.
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          VITE_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "EVE Online Tooling ${{ github.ref_name }}"

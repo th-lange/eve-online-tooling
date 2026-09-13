@@ -101,6 +101,21 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     sanitize_snap_gstreamer_env();
 
+    // Sentry error reporting. The DSN is baked in at compile time via the
+    // SENTRY_DSN environment variable; absent (dev builds, forks) = disabled.
+    // _guard must live until the process exits: tauri::Builder::run() is
+    // blocking, so declaring it here keeps it alive for the full app lifetime.
+    let _sentry_guard = option_env!("SENTRY_DSN").map(|dsn| {
+        sentry::init((
+            dsn,
+            sentry::ClientOptions {
+                release: sentry::release_name!(),
+                send_default_pii: true,
+                ..Default::default()
+            },
+        ))
+    });
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
@@ -165,6 +180,18 @@ pub fn run() {
             // activate out of the box (no-op once `plugins/` exists).
             plugins::seed_example_plugin(&dir);
             esi::prune_cache_startup(&dir);
+            // Install the in-process log subscriber (WARN/ERROR → LogStore + logs://entry event).
+            let log_store = modules::logs::LogStore::new();
+            {
+                use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+                let layer = modules::logs::layer::LogLayer {
+                    store: std::sync::Arc::clone(&log_store),
+                    app: app.handle().clone(),
+                };
+                // try_init so a test harness that already set a subscriber doesn't panic.
+                let _ = tracing_subscriber::registry().with(layer).try_init();
+            }
+            app.manage(std::sync::Arc::clone(&log_store));
             app.manage(market::MarketService::with_cache(dir.clone()));
             app.manage(esi::EsiClient::with_cache(dir.clone()));
             app.manage(std::sync::Arc::new(plugins::PluginRegistry::load(&dir)));
@@ -381,6 +408,8 @@ pub fn run() {
             modules::feedback::commands::feedback_history,
             modules::feedback::commands::feedback_retry_pending,
             modules::feedback::commands::feedback_forget,
+            modules::logs::commands::logs_list,
+            modules::logs::commands::logs_clear,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

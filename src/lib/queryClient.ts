@@ -1,4 +1,5 @@
-import { QueryClient } from "@tanstack/react-query";
+import { QueryCache, QueryClient } from "@tanstack/react-query";
+import { logStore } from "./logStore";
 
 // Shared TanStack Query client. ESI/SDE data has its own server-side cache
 // timers (and the Rust client now revalidates with ETags), so re-fetching on
@@ -7,6 +8,19 @@ import { QueryClient } from "@tanstack/react-query";
 // pages; queries that want fresher data call refetch() on a button, and a
 // stale read is still cheap (a 304) thanks to the backend conditional cache.
 export const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError(error, query) {
+      // Don't record failures from the logs query itself (avoids feedback loop).
+      if (query.queryKey[0] === "logs_list") return;
+      logStore.push({
+        ts: Date.now(),
+        level: "error",
+        source: "frontend",
+        target: `query:${String(query.queryKey[0] ?? "unknown")}`,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    },
+  }),
   defaultOptions: {
     queries: {
       retry: false,

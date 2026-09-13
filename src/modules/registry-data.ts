@@ -3,6 +3,7 @@ import {
   Heart,
   MessageSquare,
   Puzzle,
+  ScrollText,
   Terminal,
   Bell,
   type LucideIcon,
@@ -252,6 +253,13 @@ export const MODULE_METADATA: ModuleMeta[] = [
     description: "Activate or deactivate installed third-party plugins.",
     group: "support",
     icon: Puzzle,
+  },
+  {
+    id: "logs",
+    title: "Logs",
+    description: "Live error and warning log from the frontend and Rust backend.",
+    group: "support",
+    icon: ScrollText,
   },
   {
     id: "feedback",
