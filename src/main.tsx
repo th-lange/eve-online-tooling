@@ -15,6 +15,7 @@ import { STORAGE_KEYS } from "./lib/storageKeys";
 import { resolveStartModule } from "./lib/startModule";
 import { ScriptsRunnerProvider } from "./modules/scripts/runner";
 import { InfoAlertsProvider } from "./modules/info/InfoAlertsProvider";
+import { FightOverlayProvider } from "./modules/pvp/FightOverlayProvider";
 import "./index.css";
 
 // Sentry: DSN is baked in at build time via VITE_SENTRY_DSN; absent = disabled.
@@ -63,7 +64,9 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <QueryClientProvider client={queryClient}>
       <ScriptsRunnerProvider>
         <InfoAlertsProvider>
-          <RouterProvider router={router} />
+          <FightOverlayProvider>
+            <RouterProvider router={router} />
+          </FightOverlayProvider>
         </InfoAlertsProvider>
       </ScriptsRunnerProvider>
     </QueryClientProvider>

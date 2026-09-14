@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "eve-online-tooling": {
+      "url": "http://127.0.0.1:33451/mcp",
+      "headers": {
+        "Authorization": "Bearer 7xNT92KL6jo52wYkaY1oE99qEnIrgo9R"
+      }
+    }
+  }
+}

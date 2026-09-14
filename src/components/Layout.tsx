@@ -10,6 +10,7 @@ import {
   GripVertical,
   Search,
   Star,
+  Swords,
   X,
 } from "lucide-react";
 import { modules, MODULE_GROUPS, type ModuleDef } from "../modules/registry";
@@ -21,6 +22,7 @@ import { SupportModal } from "./SupportMyWork";
 import { STORAGE_KEYS } from "../lib/storageKeys";
 import { usePersistentState } from "../lib/usePersistentState";
 import { useInfoAlerts } from "../modules/info/infoContext";
+import { useFightOverlay } from "../modules/pvp/fightOverlayContext";
 import { scriptsList } from "../lib/api";
 import appIcon from "../assets/app-icon.png";
 
@@ -84,6 +86,25 @@ function moveBefore(ids: string[], dragId: string, targetId: string): string[] {
   if (at === -1) return ids;
   without.splice(at, 0, dragId);
   return without;
+}
+
+/** Sidebar footer button that toggles the global fight overlay on/off. */
+function FightOverlayToggle() {
+  const { enabled, setEnabled } = useFightOverlay();
+  return (
+    <button
+      onClick={() => setEnabled(!enabled)}
+      title={enabled ? "Fight overlay on — click to disable" : "Fight overlay off — click to enable"}
+      aria-label="Toggle fight overlay"
+      className={`flex shrink-0 items-center rounded p-1.5 transition-colors ${
+        enabled
+          ? "text-rose-400 hover:text-rose-300"
+          : "text-zinc-600 hover:text-zinc-400"
+      }`}
+    >
+      <Swords size={14} />
+    </button>
+  );
 }
 
 // App shell: a sidebar whose entries are driven by the module registry, plus
@@ -285,8 +306,9 @@ export function Layout() {
           )}
         </nav>
         <Characters />
-        <div className="border-t border-zinc-800 px-4 py-3">
+        <div className="border-t border-zinc-800 px-3 py-3 flex items-center justify-between gap-2">
           <BridgeStatus />
+          <FightOverlayToggle />
         </div>
       </aside>
       <main className="flex-1 overflow-hidden">
