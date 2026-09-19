@@ -1,6 +1,6 @@
-import { memo, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Page, PageHeader } from "../../components/page";
-import { Columns2, Play, Rows2, Square } from "lucide-react";
+import { Columns2, Pause, Play, Repeat, Rows2, Square, ZoomOut } from "lucide-react";
 import { ModuleActiveContext } from "../../components/moduleActiveContext";
 import {
   dpsListLogs,
@@ -9,6 +9,7 @@ import {
   dpsStart,
   dpsStop,
   errorMessage,
+  onDpsDone,
   onDpsTick,
   type DpsLogFile,
   type DpsLogSummary,
@@ -397,6 +398,19 @@ export function DpsPage() {
     STORAGE_KEYS.dpsMiningInterval,
     30,
   );
+  // Playback: paused state + saved position for resume; looping restarts
+  // playback automatically when it ends naturally.
+  const [paused, setPaused] = useState(false);
+  const pausedAtRef = useRef<number | null>(null);
+  const [looping, setLooping] = usePersistentState<boolean>(
+    STORAGE_KEYS.dpsLooping,
+    false,
+  );
+  // Zoom: time-based range slicing the chart buffer; null = full view.
+  const [zoomRange, setZoomRange] = useState<{
+    startAt: number;
+    endAt: number;
+  } | null>(null);
 
   // The page stays mounted while backgrounded (ModuleHost), so without this it
   // would keep re-rendering ~2×/s off the tick feed while invisible. Track the
@@ -457,6 +471,34 @@ export function DpsPage() {
     return () => unlisten?.();
   }, []);
 
+  // Stable ref for loop: always holds the current playback params so the
+  // done-handler can restart without capturing stale closure values.
+  const loopParamsRef = useRef({ file, speed, windowSecs, looping });
+  loopParamsRef.current = { file, speed, windowSecs, looping };
+
+  // When playback ends naturally, mark as stopped and auto-loop if enabled.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    onDpsDone(() => {
+      setRunning(false);
+      const p = loopParamsRef.current;
+      if (!p.looping) return;
+      // Small pause so the final tick renders before the restart clears ticks.
+      setTimeout(() => {
+        setTicks([]);
+        peaksRef.current = { out: 0, in: 0 };
+        miningRef.current = { buckets: new Map(), lastAt: null };
+        setSelectedPilot(null);
+        setPaused(false);
+        setZoomRange(null);
+        void dpsPlayback({ file: p.file, speed: p.speed, windowSecs: p.windowSecs })
+          .then(() => setRunning(true))
+          .catch((e) => setError(errorMessage(e)));
+      }, 350);
+    }).then((u) => (unlisten = u));
+    return () => unlisten?.();
+  }, []);
+
   // On becoming visible again, flush whatever arrived while hidden in one update.
   useEffect(() => {
     if (!active || bufferedRef.current.length === 0) return;
@@ -477,6 +519,8 @@ export function DpsPage() {
     peaksRef.current = { out: 0, in: 0 };
     miningRef.current = { buckets: new Map(), lastAt: null };
     setSelectedPilot(null);
+    setPaused(false);
+    setZoomRange(null);
     try {
       await dpsStart({ gamelogsDir: dir, windowSecs });
       setRunning(true);
@@ -488,6 +532,7 @@ export function DpsPage() {
   async function stop() {
     await dpsStop();
     setRunning(false);
+    setPaused(false);
   }
 
   // Load the gamelog list when switching to playback (or when the folder is set).
@@ -511,12 +556,27 @@ export function DpsPage() {
     peaksRef.current = { out: 0, in: 0 };
     miningRef.current = { buckets: new Map(), lastAt: null };
     setSelectedPilot(null);
+    setPaused(false);
+    setZoomRange(null);
     try {
       await dpsPlayback({ file, speed, windowSecs, seekTs });
       setRunning(true);
     } catch (e) {
       setError(errorMessage(e));
     }
+  }
+
+  /** Freeze playback at the current position; resume restores from here. */
+  async function pause() {
+    pausedAtRef.current = latest?.at ?? null;
+    await dpsStop();
+    setRunning(false);
+    setPaused(true);
+  }
+
+  /** Resume from the saved pause position. */
+  function resume() {
+    void playback(pausedAtRef.current ?? undefined);
   }
 
   // Load the selected file's activity summary for the timeline scrubber
@@ -597,6 +657,33 @@ export function DpsPage() {
       return { ...t, dpsOut: p?.dpsOut ?? 0, dpsIn: p?.dpsIn ?? 0 };
     });
   }, [ticks, selectedPilot]);
+
+  // Zoom: slice filteredTicks to the selected time range; both charts get the
+  // same slice so their X axes stay in sync. Falls back to the full buffer if
+  // the range covers fewer than 2 ticks (rounding or stale state).
+  const zoomedTicks = useMemo(() => {
+    if (!zoomRange) return filteredTicks;
+    const slice = filteredTicks.filter(
+      (t) => t.at >= zoomRange.startAt && t.at <= zoomRange.endAt,
+    );
+    return slice.length > 1 ? slice : filteredTicks;
+  }, [filteredTicks, zoomRange]);
+
+  // Stable ref so handleZoom can read the live slice without capturing a
+  // stale closure, avoiding breaking DpsChart's memo on every tick.
+  const zoomedTicksRef = useRef(zoomedTicks);
+  zoomedTicksRef.current = zoomedTicks;
+
+  /** Drag-to-zoom callback passed to both charts. Stable — no deps. */
+  const handleZoom = useCallback((startIdx: number, endIdx: number) => {
+    const tks = zoomedTicksRef.current;
+    if (endIdx <= startIdx + 1 || startIdx < 0 || endIdx >= tks.length) return;
+    const start = tks[startIdx]?.at;
+    const end = tks[endIdx]?.at;
+    if (start != null && end != null && end > start) {
+      setZoomRange({ startAt: start, endAt: end });
+    }
+  }, []);
 
   const filteredLatest = filteredTicks[filteredTicks.length - 1];
 
@@ -725,20 +812,53 @@ export function DpsPage() {
           </>
         )}
 
-        {running ? (
+        {/* Playback-mode transport: Pause (while running), Resume (while
+            paused), Stop, and Loop toggle. Live mode shows Start/Stop only. */}
+        {mode === "playback" && running && !paused && (
           <button
-            onClick={stop}
+            onClick={() => void pause()}
+            className="flex items-center gap-1.5 rounded bg-amber-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-amber-500"
+          >
+            <Pause size={14} /> Pause
+          </button>
+        )}
+        {mode === "playback" && paused && (
+          <button
+            onClick={resume}
+            disabled={!file}
+            className="flex items-center gap-1.5 rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
+          >
+            <Play size={14} /> Resume
+          </button>
+        )}
+        {running || paused ? (
+          <button
+            onClick={() => void stop()}
             className="flex items-center gap-1.5 rounded bg-rose-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-rose-500"
           >
             <Square size={14} /> Stop
           </button>
         ) : (
           <button
-            onClick={() => (mode === "live" ? start() : playback())}
+            onClick={() => (mode === "live" ? void start() : void playback())}
             disabled={mode === "live" ? !dir.trim() : !file}
             className="flex items-center gap-1.5 rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
           >
             <Play size={14} /> {mode === "live" ? "Start" : "Play"}
+          </button>
+        )}
+        {mode === "playback" && (
+          <button
+            onClick={() => setLooping(!looping)}
+            title={looping ? "Loop: on" : "Loop: off"}
+            aria-pressed={looping}
+            className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition-colors ${
+              looping
+                ? "bg-indigo-700 text-white hover:bg-indigo-600"
+                : "bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+            }`}
+          >
+            <Repeat size={14} /> Loop
           </button>
         )}
       </div>
@@ -833,7 +953,7 @@ export function DpsPage() {
         </div>
       )}
 
-      {/* Graphs — outgoing and incoming; layout + breakdown toggles */}
+      {/* Graphs — outgoing and incoming; layout + breakdown toggles + zoom */}
       <div className="mt-6 flex items-center justify-end gap-2">
         <div className="flex overflow-hidden rounded border border-zinc-800 text-xs">
           {(
@@ -879,14 +999,34 @@ export function DpsPage() {
             </button>
           ))}
         </div>
+        {/* Zoom indicator: only shown when a time range is selected */}
+        {zoomRange && (
+          <button
+            onClick={() => setZoomRange(null)}
+            title="Reset zoom"
+            className="flex items-center gap-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+          >
+            <ZoomOut size={12} /> Reset zoom
+          </button>
+        )}
       </div>
       <div
         className={`mt-2 grid gap-4 ${
           chartLayout === "side" ? "md:grid-cols-2" : "grid-cols-1"
         }`}
       >
-        <DpsChart ticks={filteredTicks} series={outSeries} title="Outgoing" />
-        <DpsChart ticks={filteredTicks} series={inSeries} title="Incoming" />
+        <DpsChart
+          ticks={zoomedTicks}
+          series={outSeries}
+          title="Outgoing"
+          onZoom={handleZoom}
+        />
+        <DpsChart
+          ticks={zoomedTicks}
+          series={inSeries}
+          title="Incoming"
+          onZoom={handleZoom}
+        />
       </div>
 
       {/* Mining overview — only once this session has actually mined. History
@@ -1202,10 +1342,14 @@ const DpsChart = memo(function DpsChart({
   ticks,
   series: activeSeries,
   title,
+  onZoom,
 }: {
   ticks: DpsTick[];
   series: readonly ChartSeries[];
   title?: string;
+  /** If provided, the chart is drag-selectable; releasing fires this with the
+   *  start and end tick indices of the selected range. */
+  onZoom?: (startIdx: number, endIdx: number) => void;
 }) {
   const w = 960;
   const h = 280;
@@ -1261,6 +1405,21 @@ const DpsChart = memo(function DpsChart({
   );
   const yAxisStyle = { height: h, paddingTop: padY, paddingBottom: padB };
 
+  // Drag-to-zoom: track the selection box in SVG viewBox x-coordinates (0..w).
+  // We store both the raw x positions (for the highlight rect) and derive tick
+  // indices on mouseup — avoiding index math during the hot mousemove path.
+  const [drag, setDrag] = useState<{ x0: number; x1: number } | null>(null);
+
+  /** Map a clientX position to a viewBox x value via the SVG element's rect. */
+  const toSvgX = (clientX: number, svg: SVGSVGElement) => {
+    const r = svg.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * w;
+  };
+
+  /** Map a viewBox x to the nearest tick index. */
+  const toTickIdx = (svgX: number) =>
+    Math.round((svgX / w) * Math.max(0, n - 1));
+
   return (
     <div className="rounded border border-zinc-800 bg-zinc-900 p-2">
       <div className="mb-1 flex items-center justify-between text-xs text-zinc-400">
@@ -1268,7 +1427,10 @@ const DpsChart = memo(function DpsChart({
           {title ?? "Rolling rate"} (per second)
           {windowSecs > 0 ? ` · ${windowSecs}s window` : ""}
         </span>
-        <span className="tabular-nums text-zinc-300">
+        <span className="flex items-center gap-2 tabular-nums text-zinc-300">
+          {onZoom && n > 2 && (
+            <span className="text-[10px] italic text-zinc-600">drag to zoom</span>
+          )}
           peak {formatInt(Math.round(max))}
         </span>
       </div>
@@ -1285,8 +1447,40 @@ const DpsChart = memo(function DpsChart({
         <svg
           viewBox={`0 0 ${w} ${h}`}
           preserveAspectRatio="none"
-          className="min-w-0 flex-1"
+          className={`min-w-0 flex-1 ${onZoom ? "cursor-crosshair" : ""}`}
           style={{ height: h }}
+          onMouseDown={
+            onZoom
+              ? (e) => {
+                  const x = toSvgX(e.clientX, e.currentTarget);
+                  setDrag({ x0: x, x1: x });
+                  e.preventDefault();
+                }
+              : undefined
+          }
+          onMouseMove={
+            onZoom
+              ? (e) => {
+                  if (!drag) return;
+                  setDrag((d) =>
+                    d ? { ...d, x1: toSvgX(e.clientX, e.currentTarget) } : d,
+                  );
+                }
+              : undefined
+          }
+          onMouseUp={
+            onZoom
+              ? (e) => {
+                  if (!drag) return;
+                  const x1 = toSvgX(e.clientX, e.currentTarget);
+                  const lo = Math.min(drag.x0, x1);
+                  const hi = Math.max(drag.x0, x1);
+                  setDrag(null);
+                  onZoom(toTickIdx(lo), toTickIdx(hi));
+                }
+              : undefined
+          }
+          onMouseLeave={onZoom ? () => setDrag(null) : undefined}
         >
           {grid.map((gy, i) => (
             <line
@@ -1331,6 +1525,19 @@ const DpsChart = memo(function DpsChart({
                 strokeOpacity={l.primary ? 1 : 0.7}
               />
             ))}
+          {/* Drag-selection highlight */}
+          {drag && (
+            <rect
+              x={Math.min(drag.x0, drag.x1)}
+              y={padY}
+              width={Math.max(0, Math.abs(drag.x1 - drag.x0))}
+              height={h - padY - padB}
+              fill="rgba(99,102,241,0.12)"
+              stroke="rgba(99,102,241,0.45)"
+              strokeWidth="1"
+              pointerEvents="none"
+            />
+          )}
         </svg>
         {/* Right Y-axis */}
         <div

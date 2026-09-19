@@ -105,6 +105,7 @@ const COMPONENTS: Record<string, LazyExoticComponent<ComponentType>> = {
   plugins: page(() => import("./plugins/PluginsPage"), "PluginsPage"),
   logs: page(() => import("./logs/LogsPage"), "LogsPage"),
   feedback: page(() => import("./feedback/FeedbackPage"), "FeedbackPage"),
+  settings: page(() => import("./settings/SettingsPage"), "SettingsPage"),
   support: page(() => import("./support/SupportPage"), "SupportPage"),
 };
 

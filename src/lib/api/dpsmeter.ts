@@ -130,3 +130,8 @@ export function onDpsTick(
 ): Promise<UnlistenFn> {
   return listen<DpsTick>("dps://tick", (event) => handler(event.payload));
 }
+
+/** Subscribe to natural playback-end notifications (loop support). */
+export function onDpsDone(handler: () => void): Promise<UnlistenFn> {
+  return listen<void>("dps://done", () => handler());
+}

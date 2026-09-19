@@ -4,6 +4,7 @@ import {
   MessageSquare,
   Puzzle,
   ScrollText,
+  Settings,
   Terminal,
   Bell,
   type LucideIcon,
@@ -270,6 +271,13 @@ export const MODULE_METADATA: ModuleMeta[] = [
     group: "support",
     icon: MessageSquare,
     requiresCharacter: true,
+  },
+  {
+    id: "settings",
+    title: "Settings",
+    description: "App-wide preferences, e.g. the global combat overview.",
+    group: "support",
+    icon: Settings,
   },
   {
     id: "support",

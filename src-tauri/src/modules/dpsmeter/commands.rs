@@ -331,6 +331,8 @@ pub async fn dps_playback(
             let _ = app.emit("dps://tick", &win.tick(now));
             // Run one extra window past the last event so it decays to zero.
             if now > end + window_secs as i64 {
+                // Natural end: tell the UI the playback finished (for loop support).
+                let _ = app.emit("dps://done", ());
                 break;
             }
         }
