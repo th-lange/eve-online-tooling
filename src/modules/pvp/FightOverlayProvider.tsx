@@ -455,7 +455,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     false,
   );
   const [fightTicks, setFightTicks] = useState<DpsTick[]>([]);
-  const [fightDismissed, setFightDismissed] = useState(false);
+  const [fightOpen, setFightOpen] = useState(false);
   const [selectedFitId, setSelectedFitId] = useState<string | null>(null);
   // Settings "Test" preview: sample data, rebuilt each time the button is hit.
   const [testFight, setTestFight] = useState<TestFight | null>(null);
@@ -542,12 +542,18 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
       }));
   }, [fightTicks, latestAt]);
 
-  // Auto-reset dismissed state once fight ends so the next one auto-shows.
+  // Sticky open latch: a detected fight opens the overlay and it STAYS open
+  // until you dismiss it (or disable the feature). It no longer auto-hides
+  // when incoming damage stops, so a short fight doesn't flash and vanish.
   useEffect(() => {
-    if (activeAttackers.length === 0) setFightDismissed(false);
-  }, [activeAttackers.length]);
+    if (!enabled) {
+      setFightOpen(false);
+      return;
+    }
+    if (activeAttackers.length > 0) setFightOpen(true);
+  }, [enabled, activeAttackers.length]);
 
-  const fightActive = enabled && activeAttackers.length > 0 && !fightDismissed;
+  const fightActive = enabled && fightOpen;
 
   // Fit data for "my ranges" in the fight panel.
   const localFits = useQuery({
@@ -658,7 +664,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
               autoFit && selectedFitId == null ? autoFit.name : undefined
             }
             droneReminder={droneReminder}
-            onDismiss={() => setFightDismissed(true)}
+            onDismiss={() => setFightOpen(false)}
           />
         )
       )}
