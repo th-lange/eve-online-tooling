@@ -2,6 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **Agents:** follow the git workflow in [AGENTS.md](AGENTS.md) — always work on a
+> branch, land changes through a pull request, and never push directly to `main`.
+
 ## What this is
 
 A standalone cross-platform desktop app (Linux/Mac/Windows) for EVE Online, built as **feature
