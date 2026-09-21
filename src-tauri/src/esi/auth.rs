@@ -54,6 +54,9 @@ const SCOPES: &[&str] = &[
     "esi-planets.manage_planets.v1",
     "esi-markets.read_character_orders.v1",
     "esi-location.read_location.v1",
+    // Current ship hull (combat overlay auto-loads your fit's optimals + drone
+    // reminders). Must also be enabled on the EVE developer application.
+    "esi-location.read_ship_type.v1",
     "esi-fleets.read_fleet.v1",
     // Character + corp saved fittings (#178). These must also be enabled on the
     // EVE developer application registration before the SSO grant includes them.

@@ -202,6 +202,56 @@ impl Sde {
             .map_err(Into::into)
     }
 
+    /// The group name for a type looked up by (case-insensitive) name — e.g.
+    /// the ammo/charge/drone the gamelog names ("Inferno Rage Rocket" →
+    /// "Rocket", "Hobgoblin II" → "Light Scout Drone", an antimatter charge →
+    /// "Hybrid Charge"). Used by the DPS meter to label the damage *source*
+    /// type, since EVE's combat log names the ammo, not the weapon module.
+    pub fn weapon_group(&self, name: &str) -> Result<Option<String>, SdeError> {
+        self.conn
+            .query_row(
+                "SELECT g.groupName FROM invTypes t
+                 LEFT JOIN invGroups g ON g.groupID = t.groupID
+                 WHERE LOWER(t.typeName) = LOWER(?1) LIMIT 1",
+                params![name],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map(Option::flatten)
+            .map_err(Into::into)
+    }
+
+    /// Dominant damage type(s) of an ammo/charge/drone, looked up by name from
+    /// its SDE base damage attributes (em=114, explosive=116, kinetic=117,
+    /// thermal=118). Returns a short label like "Kin" or "EM/Th" (the profile
+    /// the ammo *deals*, not resist-adjusted damage the log doesn't report), or
+    /// `None` when the type has no damage attributes (e.g. laser crystals, whose
+    /// damage comes from the turret).
+    pub fn damage_type(&self, name: &str) -> Result<Option<String>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT ta.attributeID, COALESCE(ta.valueFloat, ta.valueInt, 0.0)
+             FROM invTypes t
+             JOIN dgmTypeAttributes ta ON ta.typeID = t.typeID
+             WHERE LOWER(t.typeName) = LOWER(?1)
+               AND ta.attributeID IN (114, 116, 117, 118)",
+        )?;
+        let rows = stmt.query_map(params![name], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?))
+        })?;
+        let (mut em, mut exp, mut kin, mut therm) = (0.0, 0.0, 0.0, 0.0);
+        for row in rows {
+            let (id, v) = row?;
+            match id {
+                114 => em = v,
+                116 => exp = v,
+                117 => kin = v,
+                118 => therm = v,
+                _ => {}
+            }
+        }
+        Ok(damage_label(em, therm, kin, exp))
+    }
+
     /// All item categories (id, name) — the root of the universe browser tree.
     pub fn universe_categories(&self) -> Result<Vec<(i64, String)>, SdeError> {
         let mut stmt = self
@@ -353,6 +403,27 @@ impl Sde {
     }
 }
 
+/// Short damage-profile label from the four EVE damage magnitudes. Lists the
+/// contributing types largest-first (each ≥ 25% of the total, so a split like
+/// antimatter's kinetic+thermal shows both), joined with "/". `None` when there
+/// is no damage (all zero).
+fn damage_label(em: f64, therm: f64, kin: f64, exp: f64) -> Option<String> {
+    let total = em + therm + kin + exp;
+    if total <= 0.0 {
+        return None;
+    }
+    let mut parts: Vec<(&str, f64)> =
+        vec![("EM", em), ("Th", therm), ("Kin", kin), ("Exp", exp)];
+    parts.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let label = parts
+        .into_iter()
+        .filter(|(_, v)| *v >= total * 0.25)
+        .map(|(name, _)| name)
+        .collect::<Vec<_>>()
+        .join("/");
+    (!label.is_empty()).then_some(label)
+}
+
 /// Packaged (hauling) volume for a type, given its group and assembled volume.
 /// Ships repackage to a fixed per-group size; `invTypes.volume` is the assembled
 /// figure, so combat-ship groups are overridden with their packaged constant.
@@ -471,6 +542,21 @@ mod tests {
     }
 
     #[test]
+    fn damage_label_lists_dominant_types() {
+        // Pure kinetic → single label.
+        assert_eq!(damage_label(0.0, 0.0, 9.0, 0.0).as_deref(), Some("Kin"));
+        // Antimatter-style kinetic+thermal split → both, largest first.
+        assert_eq!(
+            damage_label(0.0, 4.0, 5.0, 0.0).as_deref(),
+            Some("Kin/Th"),
+        );
+        // A negligible fourth component (<25%) is dropped.
+        assert_eq!(damage_label(10.0, 1.0, 0.0, 0.0).as_deref(), Some("EM"));
+        // No damage → no label.
+        assert_eq!(damage_label(0.0, 0.0, 0.0, 0.0), None);
+    }
+
+    #[test]
     fn maps_category_names() {
         let sde = fixture();
         let cats = sde.category_names().unwrap();
@@ -484,6 +570,14 @@ mod tests {
         let groups = sde.group_names().unwrap();
         assert_eq!(groups.get(&100).map(String::as_str), Some("Widgets"));
         assert_eq!(groups.get(&200).map(String::as_str), Some("Minerals"));
+    }
+
+    #[test]
+    fn weapon_group_resolves_group_by_name() {
+        let sde = fixture();
+        // Case-insensitive name → its group name; unknown → None.
+        assert_eq!(sde.weapon_group("widget").unwrap().as_deref(), Some("Widgets"));
+        assert_eq!(sde.weapon_group("Nonexistent").unwrap(), None);
     }
 
     #[test]

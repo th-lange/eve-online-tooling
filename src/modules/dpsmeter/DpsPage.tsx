@@ -1,11 +1,31 @@
-import { memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { Page, PageHeader } from "../../components/page";
-import { Columns2, Pause, Play, Repeat, Rows2, Square, ZoomOut } from "lucide-react";
+import {
+  ChevronsLeftRight,
+  Columns2,
+  Layers,
+  Pause,
+  Play,
+  Repeat,
+  Rows2,
+  Square,
+  ZoomOut,
+} from "lucide-react";
 import { ModuleActiveContext } from "../../components/moduleActiveContext";
 import {
   dpsListLogs,
   dpsLogSummary,
+  dpsPause,
   dpsPlayback,
+  dpsResume,
   dpsStart,
   dpsStop,
   errorMessage,
@@ -25,8 +45,17 @@ import { usePersistentState } from "../../lib/usePersistentState";
 
 type Mode = "live" | "playback";
 
-/** How the two charts are arranged: side by side or stacked vertically. */
-type ChartLayout = "side" | "stacked";
+/** Readout formatting: keep one decimal under 100 (so small logi/cap/mining
+ *  rates aren't lost to rounding — a 4.6 rep/s no longer reads as "5"), plain
+ *  thousands-separated integer above. */
+function formatRate(v: number): string {
+  if (v <= 0) return "0";
+  return v < 100 ? v.toFixed(1) : formatInt(Math.round(v));
+}
+
+/** How the two damage series are laid out: two panels side by side, two
+ *  panels stacked vertically, or both overlaid in one combined panel. */
+type ChartLayout = "side" | "stacked" | "combined";
 
 // How many ticks to keep on screen (~2 min at the 500 ms backend cadence).
 const BUFFER = 240;
@@ -253,36 +282,62 @@ function TimelineLegend({ color, label }: { color: string; label: string }) {
   );
 }
 
-/** Playback scrubber (#dps-timeline): a slider over the log's full time span,
- *  with a density strip underneath roughly showing where damage/mining
- *  happened — three thin rows (dealt / taken / mined), each bucket's height
- *  scaled to its own category's busiest moment in the file. Dragging the
- *  slider or clicking the strip both seek; releasing restarts playback from
- *  that point with the moving-average window pre-warmed (backend side). */
+/** Playback overview (#dps-timeline): a density strip over the log's time
+ *  span — three thin rows (dealt / taken / mined), each bucket scaled to its
+ *  own category's busiest moment. Two independent gestures:
+ *   - the slider underneath seeks (sets the play position); releasing
+ *     restarts playback from there with the window pre-warmed;
+ *   - dragging across the strip selects a fight region: the strip + slider
+ *     re-scope to it and playback loops within it (see the Loop button).
+ *     Reset clears the region. The strip itself no longer seeks. */
 function PlaybackTimeline({
   summary,
   position,
+  region,
   onSeek,
+  onSelectRegion,
+  onClearRegion,
 }: {
   summary: DpsLogSummary;
   position: number | null;
+  region: { start: number; end: number } | null;
   onSeek: (ts: number) => void;
+  onSelectRegion: (start: number, end: number) => void;
+  onClearRegion: () => void;
 }) {
   const [preview, setPreview] = useState<number | null>(null);
-  const { start, end, buckets } = summary;
-  const span = Math.max(1, end - start);
-  const value = preview ?? position ?? start;
 
   const w = 960;
   const h = 36;
   const rowH = h / 3;
+
+  const fullStart = summary.start;
+  const fullEnd = summary.end;
+  const fullSpan = Math.max(1, fullEnd - fullStart);
+  const n = summary.buckets.length;
+
+  // Displayed window = the selected region, else the whole log.
+  const start = region?.start ?? fullStart;
+  const end = region?.end ?? fullEnd;
+  const span = Math.max(1, end - start);
+
+  // Slice the density strip to the displayed window (buckets are evenly
+  // spaced over the full span). Display-only; the region bounds stay exact.
+  const buckets = useMemo(() => {
+    if (!region) return summary.buckets;
+    const i0 = Math.max(0, Math.floor(((start - fullStart) / fullSpan) * n));
+    const i1 = Math.min(n, Math.ceil(((end - fullStart) / fullSpan) * n));
+    const shown = summary.buckets.slice(i0, Math.max(i0 + 1, i1));
+    return shown.length > 0 ? shown : summary.buckets;
+  }, [region, summary.buckets, start, end, fullStart, fullSpan, n]);
+
+  const value = preview ?? position ?? start;
   const barW = w / Math.max(1, buckets.length);
 
-  const seekFromClientX = (clientX: number, el: Element) => {
-    const rect = el.getBoundingClientRect();
-    const frac = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-    return Math.round(start + frac * span);
-  };
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const { drag, handlers } = useDragZoom(svgRef, w, (f0, f1) =>
+    onSelectRegion(Math.round(start + f0 * span), Math.round(start + f1 * span)),
+  );
 
   return (
     <div className="mt-4 rounded border border-zinc-800 bg-zinc-900/40 p-3">
@@ -292,15 +347,41 @@ function PlaybackTimeline({
           <TimelineLegend color={TIMELINE_COLORS.damageOut} label="dmg out" />
           <TimelineLegend color={TIMELINE_COLORS.damageIn} label="dmg in" />
           <TimelineLegend color={TIMELINE_COLORS.mining} label="mining" />
+          {region ? (
+            <>
+              <button
+                onClick={() =>
+                  onSelectRegion(
+                    Math.max(fullStart, region.start - 10),
+                    Math.min(fullEnd, region.end + 10),
+                  )
+                }
+                disabled={region.start <= fullStart && region.end >= fullEnd}
+                title="Widen the selection by 10s on each side"
+                className="flex items-center gap-1 rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-zinc-800 disabled:hover:text-zinc-400"
+              >
+                <ChevronsLeftRight size={11} /> +10s
+              </button>
+              <button
+                onClick={onClearRegion}
+                className="flex items-center gap-1 rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+              >
+                <ZoomOut size={11} /> reset
+              </button>
+            </>
+          ) : (
+            <span className="italic text-zinc-600">drag to select a fight</span>
+          )}
         </span>
         <span>{formatClock(end)}</span>
       </div>
       <svg
+        ref={svgRef}
         viewBox={`0 0 ${w} ${h}`}
         preserveAspectRatio="none"
-        className="w-full cursor-pointer"
+        className="w-full cursor-crosshair touch-none"
         style={{ height: h }}
-        onClick={(e) => onSeek(seekFromClientX(e.clientX, e.currentTarget))}
+        {...handlers}
       >
         <g fill={TIMELINE_COLORS.damageOut}>
           {buckets.map((b, i) => (
@@ -335,6 +416,18 @@ function PlaybackTimeline({
             />
           ))}
         </g>
+        {drag && (
+          <rect
+            x={Math.min(drag.x0, drag.x1)}
+            y={0}
+            width={Math.max(0, Math.abs(drag.x1 - drag.x0))}
+            height={h}
+            fill="rgba(99,102,241,0.18)"
+            stroke="rgba(99,102,241,0.5)"
+            strokeWidth="1"
+            pointerEvents="none"
+          />
+        )}
         <line
           x1={((value - start) / span) * w}
           x2={((value - start) / span) * w}
@@ -346,10 +439,11 @@ function PlaybackTimeline({
       </svg>
       <input
         type="range"
+        aria-label="Playback position"
         min={start}
         max={end}
         step={1}
-        value={value}
+        value={Math.min(Math.max(value, start), end)}
         onChange={(e) => setPreview(Number(e.currentTarget.value))}
         onMouseUp={(e) => {
           onSeek(Number(e.currentTarget.value));
@@ -359,7 +453,7 @@ function PlaybackTimeline({
           onSeek(Number(e.currentTarget.value));
           setPreview(null);
         }}
-        className="mt-1 w-full accent-indigo-500"
+        className="mt-1 w-full cursor-pointer accent-zinc-300"
       />
       <div className="mt-0.5 text-center text-[11px] tabular-nums text-zinc-400">
         {formatClock(value)}
@@ -406,11 +500,13 @@ export function DpsPage() {
     STORAGE_KEYS.dpsLooping,
     false,
   );
-  // Zoom: time-based range slicing the chart buffer; null = full view.
-  const [zoomRange, setZoomRange] = useState<{
-    startAt: number;
-    endAt: number;
-  } | null>(null);
+  // Selected fight region (playback bounds + overview zoom); null = whole log.
+  const [region, setRegion] = useState<{ start: number; end: number } | null>(
+    null,
+  );
+  // Scrubber cursor: where a slider seek parked the playhead while stopped
+  // (seeking no longer autoplays). Cleared once playback takes over.
+  const [seekPos, setSeekPos] = useState<number | null>(null);
 
   // The page stays mounted while backgrounded (ModuleHost), so without this it
   // would keep re-rendering ~2×/s off the tick feed while invisible. Track the
@@ -473,8 +569,8 @@ export function DpsPage() {
 
   // Stable ref for loop: always holds the current playback params so the
   // done-handler can restart without capturing stale closure values.
-  const loopParamsRef = useRef({ file, speed, windowSecs, looping });
-  loopParamsRef.current = { file, speed, windowSecs, looping };
+  const loopParamsRef = useRef({ file, speed, windowSecs, looping, region });
+  loopParamsRef.current = { file, speed, windowSecs, looping, region };
 
   // When playback ends naturally, mark as stopped and auto-loop if enabled.
   useEffect(() => {
@@ -490,8 +586,15 @@ export function DpsPage() {
         miningRef.current = { buckets: new Map(), lastAt: null };
         setSelectedPilot(null);
         setPaused(false);
-        setZoomRange(null);
-        void dpsPlayback({ file: p.file, speed: p.speed, windowSecs: p.windowSecs })
+        void dpsPlayback({
+          file: p.file,
+          speed: p.speed,
+          windowSecs: p.windowSecs,
+          // Loop within the selected fight region if one is set, else replay
+          // the whole log. Both bounds are i64 in Rust — round them.
+          seekTs: p.region ? Math.round(p.region.start) : undefined,
+          stopTs: p.region ? Math.round(p.region.end) : undefined,
+        })
           .then(() => setRunning(true))
           .catch((e) => setError(errorMessage(e)));
       }, 350);
@@ -512,17 +615,19 @@ export function DpsPage() {
     });
   }, [active]);
 
-  async function start() {
+  async function start(win = windowSecs) {
     setError(null);
     persistDir();
-    localStorage.setItem(STORAGE_KEYS.dpsWindowSecs, String(windowSecs));
+    localStorage.setItem(STORAGE_KEYS.dpsWindowSecs, String(win));
     peaksRef.current = { out: 0, in: 0 };
     miningRef.current = { buckets: new Map(), lastAt: null };
     setSelectedPilot(null);
     setPaused(false);
-    setZoomRange(null);
+    setRegion(null);
+    setSeekPos(null);
+    pausedAtRef.current = null;
     try {
-      await dpsStart({ gamelogsDir: dir, windowSecs });
+      await dpsStart({ gamelogsDir: dir, windowSecs: win });
       setRunning(true);
     } catch (e) {
       setError(errorMessage(e));
@@ -530,6 +635,12 @@ export function DpsPage() {
   }
 
   async function stop() {
+    // Remember where playback stopped so Play / Space resumes there instead of
+    // restarting from the beginning (live capture has no position to resume).
+    if (mode === "playback" && latest) {
+      pausedAtRef.current = latest.at;
+      setSeekPos(latest.at);
+    }
     await dpsStop();
     setRunning(false);
     setPaused(false);
@@ -547,42 +658,144 @@ export function DpsPage() {
     }
   }
 
-  /** Play from the start, or (when scrubbing the timeline) jump straight to
-   *  `seekTs` — the backend pre-warms the moving-average window so the DPS
-   *  readout isn't cold at the seek point. */
-  async function playback(seekTs?: number) {
+  /** Replay the log. `seekTs` starts the virtual clock mid-file (the backend
+   *  pre-warms the window so the readout isn't cold); `stopTs` ends playback
+   *  at a fight region's boundary; `win` overrides the averaging window so a
+   *  live window change can restart cleanly. */
+  async function playback(seekTs?: number, stopTs?: number, win = windowSecs) {
     setError(null);
     setTicks([]);
     peaksRef.current = { out: 0, in: 0 };
     miningRef.current = { buckets: new Map(), lastAt: null };
     setSelectedPilot(null);
     setPaused(false);
-    setZoomRange(null);
+    setSeekPos(null);
     try {
-      await dpsPlayback({ file, speed, windowSecs, seekTs });
+      await dpsPlayback({
+        file,
+        speed,
+        windowSecs: win,
+        // Both bounds are i64 in Rust — the region/scrubber emit fractional
+        // timestamps, so round before crossing the bridge.
+        seekTs: seekTs == null ? undefined : Math.round(seekTs),
+        stopTs: stopTs == null ? undefined : Math.round(stopTs),
+      });
       setRunning(true);
     } catch (e) {
       setError(errorMessage(e));
     }
   }
 
-  /** Freeze playback at the current position; resume restores from here. */
-  async function pause() {
-    pausedAtRef.current = latest?.at ?? null;
-    await dpsStop();
-    setRunning(false);
-    setPaused(true);
+  /** Play the current context: the selected fight region, else the whole log
+   *  (resuming from a parked scrubber cursor if there is one). */
+  function playCurrent() {
+    const from = seekPos ?? pausedAtRef.current ?? region?.start;
+    void playback(from ?? undefined, region?.end);
   }
 
-  /** Resume from the saved pause position. */
-  function resume() {
-    void playback(pausedAtRef.current ?? undefined);
+  /** Drag-select a fight on the overview: zoom to it and play (loop, if on)
+   *  within it. */
+  function selectRegion(regionStart: number, regionEnd: number) {
+    setRegion({ start: regionStart, end: regionEnd });
+    void playback(regionStart, regionEnd);
   }
+
+  /** Clear the region — overview back to the whole log. */
+  function clearRegion() {
+    setRegion(null);
+  }
+
+  /** Scrub to a time WITHOUT starting playback — stop the loop (if any) and
+   *  park the playhead so Play (or Space) starts from there. Not a frozen
+   *  pause: the loop is torn down, so this shows Play, not Resume. */
+  function seekTo(ts: number) {
+    setSeekPos(ts);
+    pausedAtRef.current = ts;
+    if (running) {
+      void dpsStop();
+      setRunning(false);
+    }
+    setPaused(false);
+  }
+
+  /** Change the moving-average window. Applies live by restarting the current
+   *  capture/playback (the window is baked into the backend loop). */
+  function setWindow(win: number) {
+    setWindowSecs(win);
+    localStorage.setItem(STORAGE_KEYS.dpsWindowSecs, String(win));
+    if (!running) return;
+    if (mode === "live") void start(win);
+    else void playback(latest?.at ?? region?.start, region?.end, win);
+  }
+
+  /** True pause: freeze the backend loop in place (the graph + window are kept
+   *  intact). Resume continues from the exact same point — no re-seek, so the
+   *  DPS doesn't jump. */
+  async function pause() {
+    pausedAtRef.current = latest?.at ?? null;
+    setPaused(true);
+    try {
+      await dpsPause();
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+
+  /** Continue a paused replay exactly where it froze. */
+  async function resume() {
+    setPaused(false);
+    try {
+      await dpsResume();
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+
+  /** Space-bar transport: resume if paused, else pause (playback) / stop
+   *  (live) if running, else start (live) / play the current context. `paused`
+   *  is checked first because a true-paused loop is still "running". */
+  function toggleTransport() {
+    if (paused) {
+      void resume();
+    } else if (running) {
+      if (mode === "live") void stop();
+      else void pause();
+    } else if (mode === "live") {
+      if (dir.trim()) void start();
+    } else if (file) {
+      playCurrent();
+    }
+  }
+  // Keep a live ref so the once-registered key listener never goes stale.
+  const toggleTransportRef = useRef(toggleTransport);
+  toggleTransportRef.current = toggleTransport;
+
+  // Space toggles start/stop while the meter is the visible module and focus
+  // isn't in a text field (so typing a folder path still inserts spaces).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== "Space" && e.key !== " ") return;
+      if (!activeRef.current) return;
+      const el = document.activeElement as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable)
+        return;
+      e.preventDefault();
+      toggleTransportRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Load the selected file's activity summary for the timeline scrubber
   // whenever it changes; cleared outside playback mode or on failure (the
   // timeline just doesn't render — it's a bonus, not required to play).
   useEffect(() => {
+    // A new file (or leaving playback) invalidates any selected fight region
+    // and the parked resume position.
+    setRegion(null);
+    setSeekPos(null);
+    pausedAtRef.current = null;
     if (mode !== "playback" || !file) {
       setSummary(null);
       return;
@@ -647,6 +860,17 @@ export function DpsPage() {
     return { outSeries: mk("dpsOut"), inSeries: mk("dpsIn") };
   }, [bySource, knownPilots, selectedPilot]);
 
+  // Combined layout: both series in one panel. Suffix the ids so out/in lines
+  // never collide on their React key (they share the pilot name in by-source
+  // mode), keeping colours as-is (green/red totals, or per-pilot).
+  const combinedSeries = useMemo(
+    () => [
+      ...outSeries.map((s) => ({ ...s, id: `${s.id} out` })),
+      ...inSeries.map((s) => ({ ...s, id: `${s.id} in` })),
+    ],
+    [outSeries, inSeries],
+  );
+
   // When a pilot is selected, replace the aggregate dpsOut/dpsIn on each tick
   // with that pilot's per-engagement values so the charts reflect the filter.
   // All other series (logi, cap, mining) are not per-pilot and stay unchanged.
@@ -658,39 +882,17 @@ export function DpsPage() {
     });
   }, [ticks, selectedPilot]);
 
-  // Zoom: slice filteredTicks to the selected time range; both charts get the
-  // same slice so their X axes stay in sync. Falls back to the full buffer if
-  // the range covers fewer than 2 ticks (rounding or stale state).
-  const zoomedTicks = useMemo(() => {
-    if (!zoomRange) return filteredTicks;
-    const slice = filteredTicks.filter(
-      (t) => t.at >= zoomRange.startAt && t.at <= zoomRange.endAt,
-    );
-    return slice.length > 1 ? slice : filteredTicks;
-  }, [filteredTicks, zoomRange]);
-
-  // Stable ref so handleZoom can read the live slice without capturing a
-  // stale closure, avoiding breaking DpsChart's memo on every tick.
-  const zoomedTicksRef = useRef(zoomedTicks);
-  zoomedTicksRef.current = zoomedTicks;
-
-  /** Drag-to-zoom callback passed to both charts. Stable — no deps. */
-  const handleZoom = useCallback((startIdx: number, endIdx: number) => {
-    const tks = zoomedTicksRef.current;
-    if (endIdx <= startIdx + 1 || startIdx < 0 || endIdx >= tks.length) return;
-    const start = tks[startIdx]?.at;
-    const end = tks[endIdx]?.at;
-    if (start != null && end != null && end > start) {
-      setZoomRange({ startAt: start, endAt: end });
-    }
-  }, []);
-
   const filteredLatest = filteredTicks[filteredTicks.length - 1];
 
   // byPilot rows scoped to the selection (all rows when unfiltered).
   const pilotRows = selectedPilot
     ? (latest?.byPilot.filter((p) => p.name === selectedPilot) ?? [])
     : (latest?.byPilot ?? []);
+
+  // Tackle status from the newest tick: who is holding you down (scram/point
+  // in) and who you are holding (out). Drives the warning banner.
+  const tackledBy = latest?.byPilot.filter((p) => p.scramIn || p.pointIn) ?? [];
+  const tackling = latest?.byPilot.filter((p) => p.scramOut || p.pointOut) ?? [];
 
   // Mining overview: session total + a normalized rate series over the last
   // MINING_BARS intervals ending at the newest tick. Mining lasers deliver ore
@@ -774,39 +976,47 @@ export function DpsPage() {
             className="w-full rounded bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
           />
         </label>
-        <label>
+        <div>
           <span className="mb-1 block text-xs uppercase tracking-wide text-zinc-500">
             Window (s)
           </span>
-          <input
-            type="number"
-            min={1}
-            max={600}
-            value={windowSecs}
-            onChange={(e) =>
-              setWindowSecs(Math.max(1, Number(e.currentTarget.value)))
-            }
-            className="w-24 rounded bg-zinc-800 px-2 py-1.5 text-sm tabular-nums text-zinc-100 outline-none"
-          />
-        </label>
+          <div className="flex overflow-hidden rounded border border-zinc-800 text-sm">
+            {([10, 20, 30, 60] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setWindow(s)}
+                aria-pressed={windowSecs === s}
+                className={`px-2.5 py-1.5 tabular-nums ${
+                  windowSecs === s
+                    ? "bg-zinc-700 text-zinc-100"
+                    : "bg-zinc-900 text-zinc-500 hover:text-zinc-300"
+                }`}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
 
         {mode === "playback" && (
           <>
             <LogFilePicker logs={logs} file={file} onPick={setFile} />
-            <label>
-              <span className="mb-1 block text-xs uppercase tracking-wide text-zinc-500">
-                Speed ×
+            <label className="min-w-[9rem]">
+              <span className="mb-1 flex items-center justify-between text-xs uppercase tracking-wide text-zinc-500">
+                <span>Speed ×</span>
+                <span className="tabular-nums text-zinc-300">
+                  {speed.toFixed(1)}×
+                </span>
               </span>
               <input
-                type="number"
+                type="range"
+                aria-label="Playback speed"
                 min={0.1}
-                max={100}
-                step={0.5}
+                max={10}
+                step={0.1}
                 value={speed}
-                onChange={(e) =>
-                  setSpeed(Math.max(0.1, Number(e.currentTarget.value)))
-                }
-                className="w-20 rounded bg-zinc-800 px-2 py-1.5 text-sm tabular-nums text-zinc-100 outline-none"
+                onChange={(e) => setSpeed(Number(e.currentTarget.value))}
+                className="mt-2 w-32 accent-emerald-500"
               />
             </label>
           </>
@@ -840,7 +1050,7 @@ export function DpsPage() {
           </button>
         ) : (
           <button
-            onClick={() => (mode === "live" ? void start() : void playback())}
+            onClick={() => (mode === "live" ? void start() : playCurrent())}
             disabled={mode === "live" ? !dir.trim() : !file}
             className="flex items-center gap-1.5 rounded bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
           >
@@ -866,8 +1076,11 @@ export function DpsPage() {
       {mode === "playback" && summary && (
         <PlaybackTimeline
           summary={summary}
-          position={latest?.at ?? null}
-          onSeek={(ts) => void playback(ts)}
+          position={seekPos ?? latest?.at ?? null}
+          region={region}
+          onSeek={seekTo}
+          onSelectRegion={selectRegion}
+          onClearRegion={clearRegion}
         />
       )}
 
@@ -895,9 +1108,7 @@ export function DpsPage() {
               }`}
               style={{ color: s.color }}
             >
-              {filteredLatest
-                ? formatInt(Math.round(filteredLatest[s.key]))
-                : "—"}
+              {filteredLatest ? formatRate(filteredLatest[s.key]) : "—"}
             </div>
             {s.key === "dpsOut" && (
               <PrimaryExtras
@@ -914,6 +1125,37 @@ export function DpsPage() {
           </div>
         ))}
       </div>
+
+      {/* Tackle warning — you can't warp out while scrambled/pointed, so
+          surface it prominently. Incoming (on you) is a red alarm; outgoing
+          (you holding a target) is a calmer confirmation. */}
+      {tackledBy.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+          <span className="font-semibold uppercase tracking-wide text-rose-300">
+            Tackled
+          </span>
+          {tackledBy.map((p) => (
+            <span key={p.name} className="flex items-center gap-1">
+              {p.name}
+              <TackleTags scram={p.scramIn} point={p.pointIn} />
+            </span>
+          ))}
+          <span className="text-xs text-rose-300/70">— you can't warp out</span>
+        </div>
+      )}
+      {tackling.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-400">
+          <span className="font-medium uppercase tracking-wide text-zinc-500">
+            Holding
+          </span>
+          {tackling.map((p) => (
+            <span key={p.name} className="flex items-center gap-1">
+              {p.name}
+              <TackleTags scram={p.scramOut} point={p.pointOut} />
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Pilot filter — buttons appear once any combat is seen; click to
           scope the charts + primary readouts to that engagement */}
@@ -981,6 +1223,7 @@ export function DpsPage() {
             [
               { value: "side", label: "Side by side", Icon: Columns2 },
               { value: "stacked", label: "Stacked", Icon: Rows2 },
+              { value: "combined", label: "Combined (one panel)", Icon: Layers },
             ] as const
           ).map(({ value, label, Icon }) => (
             <button
@@ -999,34 +1242,28 @@ export function DpsPage() {
             </button>
           ))}
         </div>
-        {/* Zoom indicator: only shown when a time range is selected */}
-        {zoomRange && (
-          <button
-            onClick={() => setZoomRange(null)}
-            title="Reset zoom"
-            className="flex items-center gap-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
-          >
-            <ZoomOut size={12} /> Reset zoom
-          </button>
-        )}
       </div>
       <div
         className={`mt-2 grid gap-4 ${
           chartLayout === "side" ? "md:grid-cols-2" : "grid-cols-1"
         }`}
       >
-        <DpsChart
-          ticks={zoomedTicks}
-          series={outSeries}
-          title="Outgoing"
-          onZoom={handleZoom}
-        />
-        <DpsChart
-          ticks={zoomedTicks}
-          series={inSeries}
-          title="Incoming"
-          onZoom={handleZoom}
-        />
+        {chartLayout === "combined" ? (
+          <DpsChart
+            ticks={filteredTicks}
+            series={combinedSeries}
+            title="Damage — out + in"
+          />
+        ) : (
+          <>
+            <DpsChart
+              ticks={filteredTicks}
+              series={outSeries}
+              title="Outgoing"
+            />
+            <DpsChart ticks={filteredTicks} series={inSeries} title="Incoming" />
+          </>
+        )}
       </div>
 
       {/* Mining overview — only once this session has actually mined. History
@@ -1081,7 +1318,15 @@ const WeaponTable = memo(function WeaponTable({
           <tbody>
             {rows.map((r) => (
               <tr key={r.name} className="border-t border-zinc-800/60">
-                <td className="py-1 pr-2 text-zinc-200">{r.name}</td>
+                <td className="py-1 pr-2 text-zinc-200">
+                  {r.name}
+                  {r.kind ? (
+                    <span className="text-zinc-500"> · {r.kind}</span>
+                  ) : null}
+                  {r.damage ? (
+                    <span className="text-zinc-600"> [{r.damage}]</span>
+                  ) : null}
+                </td>
                 <td className="py-1 text-right tabular-nums text-emerald-400">
                   {formatInt(Math.round(r.dps))}
                 </td>
@@ -1093,6 +1338,106 @@ const WeaponTable = memo(function WeaponTable({
     </div>
   );
 });
+
+/** Hit-quality tiers worst→best, with the colour each segment gets in the
+ *  per-combatant distribution bar. Keys match {@link HitQuality}. */
+const QUALITY_TIERS = [
+  { key: "misses", label: "Miss", color: "#6b7280" },
+  { key: "glances", label: "Glance", color: "#94a3b8" },
+  { key: "grazes", label: "Graze", color: "#38bdf8" },
+  { key: "hits", label: "Hit", color: "#22d3ee" },
+  { key: "penetrates", label: "Pen", color: "#34d399" },
+  { key: "smashes", label: "Smash", color: "#a3e635" },
+  { key: "wrecks", label: "Wreck", color: "#f472b6" },
+] as const satisfies readonly { key: keyof HitQuality; label: string; color: string }[];
+
+/** Compact stacked bar of a combatant's hit-quality distribution, worst
+ *  (left) → best (right), with a labelled legend of the present tiers below
+ *  (colour dot + name + count) so the tiers read clearly and aren't mistaken
+ *  for damage-type badges. Renders nothing when there were no tracked hits. */
+function QualityBar({ q }: { q?: HitQuality }) {
+  if (!q) return null;
+  const total = QUALITY_TIERS.reduce((s, t) => s + q[t.key], 0);
+  if (total === 0) return null;
+  const present = QUALITY_TIERS.filter((t) => q[t.key] > 0);
+  return (
+    <div className="mt-1">
+      <span className="flex h-2 w-full overflow-hidden rounded-sm bg-zinc-800">
+        {present.map((t) => (
+          <span
+            key={t.key}
+            style={{ width: `${(q[t.key] / total) * 100}%`, background: t.color }}
+          />
+        ))}
+      </span>
+      <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] tabular-nums text-zinc-400">
+        {present.map((t) => (
+          <span key={t.key} className="flex items-center gap-1">
+            <span
+              className="inline-block h-2 w-2 shrink-0 rounded-[2px]"
+              style={{ background: t.color }}
+            />
+            {t.label} {q[t.key]}
+          </span>
+        ))}
+      </span>
+    </div>
+  );
+}
+
+/** Per-source damage breakdown for a combatant row: one line per weapon/ammo/
+ *  drone with its dps, source kind, and (where the SDE knows it) damage type. */
+function WeaponLines({ weapons }: { weapons?: WeaponRate[] }) {
+  if (!weapons || weapons.length === 0) return null;
+  return (
+    <div className="mt-0.5 space-y-px">
+      {weapons.map((wpn) => (
+        <div
+          key={wpn.name}
+          className="flex items-baseline justify-between gap-2 text-[10px] text-zinc-500"
+        >
+          <span className="truncate">
+            {wpn.name}
+            {wpn.kind ? ` · ${wpn.kind}` : ""}
+            {wpn.damage ? (
+              <span className="text-zinc-600"> [{wpn.damage}]</span>
+            ) : null}
+          </span>
+          <span className="shrink-0 tabular-nums">
+            {formatInt(Math.round(wpn.dps))}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Tackle chips for a combatant row: scram (warp scrambler — stops warp and
+ *  MWD) and point (warp disruptor) active within the window. Distinct warm
+ *  colours so they stand apart from the cool quality ramp. */
+function TackleTags({ scram, point }: { scram?: boolean; point?: boolean }) {
+  if (!scram && !point) return null;
+  return (
+    <span className="ml-1 inline-flex gap-1 align-middle">
+      {scram ? (
+        <span
+          className="rounded bg-rose-500/20 px-1 text-[9px] font-semibold uppercase tracking-wide text-rose-300"
+          title="Warp scrambler active"
+        >
+          scram
+        </span>
+      ) : null}
+      {point ? (
+        <span
+          className="rounded bg-amber-500/20 px-1 text-[9px] font-semibold uppercase tracking-wide text-amber-300"
+          title="Warp disruptor (point) active"
+        >
+          point
+        </span>
+      ) : null}
+    </span>
+  );
+}
 
 /** Enemies you are shooting — ranked by outgoing DPS. Row dots carry the
  *  per-source colour used by the by-source charts and filter chips. */
@@ -1120,7 +1465,7 @@ const TargetsTable = memo(function TargetsTable({
           <tbody>
             {sorted.map((r) => (
               <tr key={r.name} className="border-t border-zinc-800/60">
-                <td className="py-1 pr-2 text-zinc-200">
+                <td className="py-1 pr-2 align-top text-zinc-200">
                   <span className="flex items-center gap-1.5">
                     <span
                       aria-hidden
@@ -1128,9 +1473,12 @@ const TargetsTable = memo(function TargetsTable({
                       style={{ background: colors.get(r.name) }}
                     />
                     {r.name}
+                    <TackleTags scram={r.scramOut} point={r.pointOut} />
                   </span>
+                  <WeaponLines weapons={r.weaponsOut} />
+                  <QualityBar q={r.qualityOut} />
                 </td>
-                <td className="py-1 text-right tabular-nums text-emerald-400">
+                <td className="py-1 pl-2 text-right align-top tabular-nums text-emerald-400">
                   {formatInt(Math.round(r.dpsOut))}
                 </td>
               </tr>
@@ -1168,7 +1516,7 @@ const AttackersTable = memo(function AttackersTable({
           <tbody>
             {sorted.map((r) => (
               <tr key={r.name} className="border-t border-zinc-800/60">
-                <td className="py-1 pr-2 text-zinc-200">
+                <td className="py-1 pr-2 align-top text-zinc-200">
                   <span className="flex items-center gap-1.5">
                     <span
                       aria-hidden
@@ -1176,9 +1524,12 @@ const AttackersTable = memo(function AttackersTable({
                       style={{ background: colors.get(r.name) }}
                     />
                     {r.name}
+                    <TackleTags scram={r.scramIn} point={r.pointIn} />
                   </span>
+                  <WeaponLines weapons={r.weaponsIn} />
+                  <QualityBar q={r.qualityIn} />
                 </td>
-                <td className="py-1 text-right tabular-nums text-rose-400">
+                <td className="py-1 pl-2 text-right align-top tabular-nums text-rose-400">
                   {formatInt(Math.round(r.dpsIn))}
                 </td>
               </tr>
@@ -1189,6 +1540,75 @@ const AttackersTable = memo(function AttackersTable({
     </div>
   );
 });
+
+/** Drag-to-select a horizontal range on the playback overview strip. On
+ *  release it reports the selected range as start/end **fractions** (0..1)
+ *  across the SVG width via `onSelect` — the caller maps those to log
+ *  timestamps against whatever window it's currently showing (so selecting
+ *  works precisely, and nests when already zoomed).
+ *
+ *  Uses Pointer Events with `setPointerCapture`, not mouse events: capture
+ *  routes every subsequent `pointermove`/`pointerup` back to the SVG even
+ *  when the pointer leaves its bounds, and it behaves identically across
+ *  WebKit (Tauri's Linux/macOS webview), Blink and Gecko — unlike the
+ *  `document`-level mouse-listener pattern, which WebKitGTK does not track
+ *  reliably through a drag that started with `preventDefault`.
+ *
+ *  Returns the live drag box in viewBox x-coordinates (for the highlight
+ *  rect) plus the pointer handlers to spread onto the `<svg>`. */
+function useDragZoom(
+  svgRef: { current: SVGSVGElement | null },
+  w: number,
+  onSelect?: (startFrac: number, endFrac: number) => void,
+) {
+  const [drag, setDrag] = useState<{ x0: number; x1: number } | null>(null);
+  const x0Ref = useRef(0);
+  const draggingRef = useRef(false);
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+
+  const toSvgX = (clientX: number) => {
+    const svg = svgRef.current;
+    if (!svg) return 0;
+    const r = svg.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * w;
+  };
+
+  const handlers = onSelect
+    ? {
+        onPointerDown: (e: ReactPointerEvent<SVGSVGElement>) => {
+          if (e.button !== 0) return; // left button only
+          e.currentTarget.setPointerCapture(e.pointerId);
+          const x = toSvgX(e.clientX);
+          x0Ref.current = x;
+          draggingRef.current = true;
+          setDrag({ x0: x, x1: x });
+          e.preventDefault();
+        },
+        onPointerMove: (e: ReactPointerEvent<SVGSVGElement>) => {
+          if (!draggingRef.current) return;
+          setDrag({ x0: x0Ref.current, x1: toSvgX(e.clientX) });
+        },
+        onPointerUp: (e: ReactPointerEvent<SVGSVGElement>) => {
+          if (!draggingRef.current) return;
+          draggingRef.current = false;
+          const x1 = toSvgX(e.clientX);
+          setDrag(null);
+          const lo = Math.min(x0Ref.current, x1);
+          const hi = Math.max(x0Ref.current, x1);
+          // Ignore a click / hair-thin drag (< 1% of width).
+          if (hi - lo < w * 0.01) return;
+          onSelectRef.current?.(lo / w, hi / w);
+        },
+        onPointerCancel: () => {
+          draggingRef.current = false;
+          setDrag(null);
+        },
+      }
+    : undefined;
+
+  return { drag, handlers };
+}
 
 /** Mining overview: session total, current live rate, and a normalized rate
  *  line (m³/s, newest right). Each point is a trailing MINING_SMOOTH_SECS
@@ -1306,30 +1726,76 @@ function PrimaryExtras({
   quality?: HitQuality;
 }) {
   const q = quality ?? { penetrates: 0, smashes: 0, wrecks: 0 };
-  const chip = (n: number, cls: string) => (n > 0 ? cls : "text-zinc-600");
+  // The notable high-end tiers, drawn with the same colours as the QualityBar
+  // so quality reads consistently and never like a damage-type badge.
+  const notable = QUALITY_TIERS.filter(
+    (t) => t.key === "penetrates" || t.key === "smashes" || t.key === "wrecks",
+  );
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-x-2.5 text-[11px] tabular-nums">
+    <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] tabular-nums">
       <span className="text-zinc-500" title="Session peak">
         max {formatInt(Math.round(peak))}
       </span>
-      <span
-        className={chip(q.penetrates, "text-amber-400")}
-        title="Penetrating hits in the window"
-      >
-        pen {q.penetrates}
-      </span>
-      <span
-        className={chip(q.smashes, "text-orange-400")}
-        title="Smashing hits in the window"
-      >
-        smash {q.smashes}
-      </span>
-      <span
-        className={chip(q.wrecks, "text-fuchsia-400 font-semibold")}
-        title="Wrecking hits in the window"
-      >
-        wreck {q.wrecks}
-      </span>
+      {notable.map((t) => {
+        const n = q[t.key];
+        return (
+          <span
+            key={t.key}
+            className={`flex items-center gap-1 ${n > 0 ? "text-zinc-300" : "text-zinc-600"}`}
+            title={`${t.label}ing hits in the window`}
+          >
+            <span
+              className="inline-block h-2 w-2 shrink-0 rounded-[2px]"
+              style={{ background: n > 0 ? t.color : "#3f3f46" }}
+            />
+            {t.label} {n}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+/** One hover-tooltip block: a character (with optional ship) and its total for
+ *  the moment, then one indented line per damage source (drones, each weapon)
+ *  below it. Reused for both the Dealt and Taken sections. */
+function HoverPilotRow({
+  name,
+  ship,
+  total,
+  weapons,
+}: {
+  name: string;
+  ship?: string;
+  total: number;
+  weapons?: WeaponRate[];
+}) {
+  return (
+    <div className="mt-0.5">
+      <div className="flex justify-between gap-3">
+        <span className="max-w-[12rem] truncate text-zinc-300">
+          {name}
+          {ship ? <span className="text-zinc-500"> ({ship})</span> : null}
+        </span>
+        <span className="tabular-nums text-zinc-300">
+          {formatInt(Math.round(total))}
+        </span>
+      </div>
+      {weapons?.map((wpn) => (
+        <div
+          key={wpn.name}
+          className="flex justify-between gap-3 pl-3 text-zinc-500"
+        >
+          <span className="max-w-[11rem] truncate">
+            {wpn.name}
+            {wpn.kind ? <span className="text-zinc-600"> · {wpn.kind}</span> : null}
+            {wpn.damage ? (
+              <span className="text-zinc-600"> [{wpn.damage}]</span>
+            ) : null}
+          </span>
+          <span className="tabular-nums">{formatInt(Math.round(wpn.dps))}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1342,14 +1808,10 @@ const DpsChart = memo(function DpsChart({
   ticks,
   series: activeSeries,
   title,
-  onZoom,
 }: {
   ticks: DpsTick[];
   series: readonly ChartSeries[];
   title?: string;
-  /** If provided, the chart is drag-selectable; releasing fires this with the
-   *  start and end tick indices of the selected range. */
-  onZoom?: (startIdx: number, endIdx: number) => void;
 }) {
   const w = 960;
   const h = 280;
@@ -1405,20 +1867,24 @@ const DpsChart = memo(function DpsChart({
   );
   const yAxisStyle = { height: h, paddingTop: padY, paddingBottom: padB };
 
-  // Drag-to-zoom: track the selection box in SVG viewBox x-coordinates (0..w).
-  // We store both the raw x positions (for the highlight rect) and derive tick
-  // indices on mouseup — avoiding index math during the hot mousemove path.
-  const [drag, setDrag] = useState<{ x0: number; x1: number } | null>(null);
-
-  /** Map a clientX position to a viewBox x value via the SVG element's rect. */
-  const toSvgX = (clientX: number, svg: SVGSVGElement) => {
-    const r = svg.getBoundingClientRect();
-    return Math.max(0, Math.min(1, (clientX - r.left) / r.width)) * w;
-  };
-
-  /** Map a viewBox x to the nearest tick index. */
-  const toTickIdx = (svgX: number) =>
-    Math.round((svgX / w) * Math.max(0, n - 1));
+  // Hover: tick index under the cursor. The tooltip always shows BOTH
+  // directions for that moment (dealt + taken), whatever this chart draws, so
+  // e.g. the stacked layout still gives the full picture from one hover.
+  const [hover, setHover] = useState<number | null>(null);
+  const hoverTick = hover != null ? ticks[hover] : undefined;
+  const hoverFrac = hover != null && n > 1 ? hover / (n - 1) : 0;
+  const dealt = hoverTick
+    ? [...hoverTick.byPilot]
+        .filter((p) => p.dpsOut > 0)
+        .sort((a, b) => b.dpsOut - a.dpsOut)
+        .slice(0, 5)
+    : [];
+  const taken = hoverTick
+    ? [...hoverTick.byPilot]
+        .filter((p) => p.dpsIn > 0)
+        .sort((a, b) => b.dpsIn - a.dpsIn)
+        .slice(0, 5)
+    : [];
 
   return (
     <div className="rounded border border-zinc-800 bg-zinc-900 p-2">
@@ -1427,10 +1893,7 @@ const DpsChart = memo(function DpsChart({
           {title ?? "Rolling rate"} (per second)
           {windowSecs > 0 ? ` · ${windowSecs}s window` : ""}
         </span>
-        <span className="flex items-center gap-2 tabular-nums text-zinc-300">
-          {onZoom && n > 2 && (
-            <span className="text-[10px] italic text-zinc-600">drag to zoom</span>
-          )}
+        <span className="tabular-nums text-zinc-300">
           peak {formatInt(Math.round(max))}
         </span>
       </div>
@@ -1444,101 +1907,132 @@ const DpsChart = memo(function DpsChart({
             <span key={i}>{lbl}</span>
           ))}
         </div>
-        <svg
-          viewBox={`0 0 ${w} ${h}`}
-          preserveAspectRatio="none"
-          className={`min-w-0 flex-1 ${onZoom ? "cursor-crosshair" : ""}`}
-          style={{ height: h }}
-          onMouseDown={
-            onZoom
-              ? (e) => {
-                  const x = toSvgX(e.clientX, e.currentTarget);
-                  setDrag({ x0: x, x1: x });
-                  e.preventDefault();
-                }
-              : undefined
-          }
-          onMouseMove={
-            onZoom
-              ? (e) => {
-                  if (!drag) return;
-                  setDrag((d) =>
-                    d ? { ...d, x1: toSvgX(e.clientX, e.currentTarget) } : d,
-                  );
-                }
-              : undefined
-          }
-          onMouseUp={
-            onZoom
-              ? (e) => {
-                  if (!drag) return;
-                  const x1 = toSvgX(e.clientX, e.currentTarget);
-                  const lo = Math.min(drag.x0, x1);
-                  const hi = Math.max(drag.x0, x1);
-                  setDrag(null);
-                  onZoom(toTickIdx(lo), toTickIdx(hi));
-                }
-              : undefined
-          }
-          onMouseLeave={onZoom ? () => setDrag(null) : undefined}
-        >
-          {grid.map((gy, i) => (
-            <line
-              key={i}
-              x1={padX}
-              x2={w - padX}
-              y1={gy}
-              y2={gy}
-              stroke="#27272a"
-              strokeWidth="0.75"
-            />
-          ))}
-          {timeMarks.map((m, i) => (
-            <g key={`t${i}`}>
+        <div className="relative min-w-0 flex-1">
+          <svg
+            viewBox={`0 0 ${w} ${h}`}
+            preserveAspectRatio="none"
+            className={`block w-full ${n > 1 ? "cursor-crosshair" : ""}`}
+            style={{ height: h }}
+            onPointerMove={
+              n > 1
+                ? (e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const frac = Math.max(
+                      0,
+                      Math.min(1, (e.clientX - rect.left) / rect.width),
+                    );
+                    setHover(Math.round(frac * (n - 1)));
+                  }
+                : undefined
+            }
+            onPointerLeave={() => setHover(null)}
+          >
+            {grid.map((gy, i) => (
               <line
-                x1={m.x}
-                x2={m.x}
-                y1={padY}
-                y2={h - padB}
+                key={i}
+                x1={padX}
+                x2={w - padX}
+                y1={gy}
+                y2={gy}
                 stroke="#27272a"
                 strokeWidth="0.75"
               />
-              <text
-                x={m.x}
-                y={h - 8}
-                textAnchor={i === 0 ? "end" : "middle"}
-                fill="#71717a"
-                fontSize="11"
-              >
-                {m.label}
-              </text>
-            </g>
-          ))}
-          {n > 1 &&
-            lines.map((l) => (
-              <polyline
-                key={l.key}
-                points={l.points}
-                fill="none"
-                stroke={l.color}
-                strokeWidth={l.primary ? 1.75 : 1}
-                strokeOpacity={l.primary ? 1 : 0.7}
-              />
             ))}
-          {/* Drag-selection highlight */}
-          {drag && (
-            <rect
-              x={Math.min(drag.x0, drag.x1)}
-              y={padY}
-              width={Math.max(0, Math.abs(drag.x1 - drag.x0))}
-              height={h - padY - padB}
-              fill="rgba(99,102,241,0.12)"
-              stroke="rgba(99,102,241,0.45)"
-              strokeWidth="1"
-              pointerEvents="none"
-            />
+            {timeMarks.map((m, i) => (
+              <g key={`t${i}`}>
+                <line
+                  x1={m.x}
+                  x2={m.x}
+                  y1={padY}
+                  y2={h - padB}
+                  stroke="#27272a"
+                  strokeWidth="0.75"
+                />
+                <text
+                  x={m.x}
+                  y={h - 8}
+                  textAnchor={i === 0 ? "end" : "middle"}
+                  fill="#71717a"
+                  fontSize="11"
+                >
+                  {m.label}
+                </text>
+              </g>
+            ))}
+            {n > 1 &&
+              lines.map((l) => (
+                <polyline
+                  key={l.key}
+                  points={l.points}
+                  fill="none"
+                  stroke={l.color}
+                  strokeWidth={l.primary ? 1.75 : 1}
+                  strokeOpacity={l.primary ? 1 : 0.7}
+                />
+              ))}
+            {hover != null && n > 1 && (
+              <line
+                x1={padX + hoverFrac * (w - 2 * padX)}
+                x2={padX + hoverFrac * (w - 2 * padX)}
+                y1={padY}
+                y2={h - padB}
+                stroke="#a1a1aa"
+                strokeWidth="0.75"
+                strokeDasharray="4 3"
+              />
+            )}
+          </svg>
+          {hoverTick && (dealt.length > 0 || taken.length > 0) && (
+            <div
+              className="pointer-events-none absolute top-1 z-10 w-64 -translate-x-1/2 rounded border border-zinc-700 bg-zinc-900/95 px-2 py-1 text-[11px] shadow-lg"
+              style={{
+                left: `${Math.max(14, Math.min(86, ((padX + hoverFrac * (w - 2 * padX)) / w) * 100))}%`,
+              }}
+            >
+              <div className="mb-0.5 tabular-nums text-zinc-500">
+                {formatClock(hoverTick.at)}
+              </div>
+              {dealt.length > 0 && (
+                <>
+                  <div className="mt-0.5 flex justify-between font-medium text-emerald-400">
+                    <span>Dealt</span>
+                    <span className="tabular-nums">
+                      {formatInt(Math.round(hoverTick.dpsOut))}
+                    </span>
+                  </div>
+                  {dealt.map((p) => (
+                    <HoverPilotRow
+                      key={`o-${p.name}`}
+                      name={p.name}
+                      ship={p.ship}
+                      total={p.dpsOut}
+                      weapons={p.weaponsOut}
+                    />
+                  ))}
+                </>
+              )}
+              {taken.length > 0 && (
+                <>
+                  <div className="mt-1 flex justify-between font-medium text-rose-400">
+                    <span>Taken</span>
+                    <span className="tabular-nums">
+                      {formatInt(Math.round(hoverTick.dpsIn))}
+                    </span>
+                  </div>
+                  {taken.map((p) => (
+                    <HoverPilotRow
+                      key={`i-${p.name}`}
+                      name={p.name}
+                      ship={p.ship}
+                      total={p.dpsIn}
+                      weapons={p.weaponsIn}
+                    />
+                  ))}
+                </>
+              )}
+            </div>
           )}
-        </svg>
+        </div>
         {/* Right Y-axis */}
         <div
           className="flex shrink-0 flex-col justify-between pl-1 text-left text-[10px] tabular-nums text-zinc-500"

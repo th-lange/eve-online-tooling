@@ -15,12 +15,20 @@ use super::parser::{DpsEvent, EventKind};
 /// How many rows each breakdown table reports (top-N by rate).
 const TOP_N: usize = 10;
 
-/// Per-weapon outgoing damage rate (your weapons).
+/// A weapon/ammo/drone damage row. `kind` is the source type (the ammo/drone's
+/// SDE group, e.g. "Rocket", "Hybrid Charge", "Light Scout Drone"); `damage` is
+/// the ammo's dominant damage type(s) (e.g. "Kin", "EM/Th"). Both are filled in
+/// by the command layer from the SDE — the combat log names only the ammo, not
+/// the weapon module or the damage type.
 #[derive(Debug, Clone, PartialEq, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct WeaponRate {
     pub name: String,
     pub dps: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub damage: Option<String>,
 }
 
 /// Per-pilot engagement: damage you dealt to / took from this counterparty.
@@ -33,16 +41,41 @@ pub struct PilotRate {
     /// Ship the attacker is flying, parsed from `(SHIP)` in the combat log.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ship: Option<String>,
-    /// Unique weapon names they've fired at us within the averaging window.
+    /// Per-source damage you dealt to them (outgoing), each with its dps.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    pub weapons: Vec<String>,
+    pub weapons_out: Vec<WeaponRate>,
+    /// Per-source damage they dealt to you (incoming; the source is named only
+    /// for player attackers — EVE never names an NPC's weapon).
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub weapons_in: Vec<WeaponRate>,
+    /// Hit-quality tally of your hits on them.
+    #[serde(default)]
+    pub quality_out: HitQuality,
+    /// Hit-quality tally of their hits on you.
+    #[serde(default)]
+    pub quality_in: HitQuality,
+    /// Tackle you're applying to them within the window.
+    #[serde(default)]
+    pub scram_out: bool,
+    #[serde(default)]
+    pub point_out: bool,
+    /// Tackle they're applying to you within the window.
+    #[serde(default)]
+    pub scram_in: bool,
+    #[serde(default)]
+    pub point_in: bool,
 }
 
-/// Counts of high-quality hits within the window ("Penetrates" / "Smashes" /
-/// "Wrecks" per the gamelog's hit-quality suffix).
+/// Counts of each hit-quality tier within the window, worst→best:
+/// misses, glances off, grazes, hits, penetrates, smashes, wrecks (from the
+/// gamelog's quality suffix; misses come from the separate miss lines).
 #[derive(Debug, Clone, PartialEq, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct HitQuality {
+    pub misses: i64,
+    pub glances: i64,
+    pub grazes: i64,
+    pub hits: i64,
     pub penetrates: i64,
     pub smashes: i64,
     pub wrecks: i64,
@@ -50,11 +83,21 @@ pub struct HitQuality {
 
 impl HitQuality {
     fn count(&mut self, quality: Option<&str>) {
-        match quality {
-            Some(q) if q.eq_ignore_ascii_case("penetrates") => self.penetrates += 1,
-            Some(q) if q.eq_ignore_ascii_case("smashes") => self.smashes += 1,
-            Some(q) if q.eq_ignore_ascii_case("wrecks") => self.wrecks += 1,
-            _ => {}
+        let Some(q) = quality else { return };
+        if q.eq_ignore_ascii_case("misses") {
+            self.misses += 1;
+        } else if q.eq_ignore_ascii_case("glances off") {
+            self.glances += 1;
+        } else if q.eq_ignore_ascii_case("grazes") {
+            self.grazes += 1;
+        } else if q.eq_ignore_ascii_case("hits") {
+            self.hits += 1;
+        } else if q.eq_ignore_ascii_case("penetrates") {
+            self.penetrates += 1;
+        } else if q.eq_ignore_ascii_case("smashes") {
+            self.smashes += 1;
+        } else if q.eq_ignore_ascii_case("wrecks") {
+            self.wrecks += 1;
         }
     }
 }
@@ -129,10 +172,23 @@ impl Window {
             at: now,
             ..Default::default()
         };
-        // Breakdown accumulators: weapon → out-damage;
-        // pilot → (out, in, ship, weapons[]).
+        // Breakdown accumulators: weapon → out-damage; pilot → engagement.
+        #[derive(Default)]
+        struct PilotAcc<'a> {
+            out: f64,
+            inc: f64,
+            ship: Option<&'a str>,
+            weapons_out: HashMap<&'a str, f64>,
+            weapons_in: HashMap<&'a str, f64>,
+            quality_out: HitQuality,
+            quality_in: HitQuality,
+            scram_out: bool,
+            point_out: bool,
+            scram_in: bool,
+            point_in: bool,
+        }
         let mut weapons: HashMap<&str, f64> = HashMap::new();
-        let mut pilots: HashMap<&str, (f64, f64, Option<&str>, Vec<&str>)> = HashMap::new();
+        let mut pilots: HashMap<&str, PilotAcc> = HashMap::new();
         for ev in &self.events {
             let v = ev.amount as f64;
             match ev.kind {
@@ -151,7 +207,13 @@ impl Window {
                 EventKind::CapWarfareOut => t.cap_warfare_out += v,
                 EventKind::CapWarfareIn => t.cap_warfare_in += v,
                 EventKind::Mining => t.mining_m3 += ev.volume,
+                // Tackle is a per-pilot state flag, not a rate — no tick sum.
+                EventKind::ScramOut
+                | EventKind::ScramIn
+                | EventKind::PointOut
+                | EventKind::PointIn => {}
             }
+            // Global "damage by weapon" — your outgoing weapons only.
             if ev.kind == EventKind::DamageOut {
                 if let Some(w) = ev.weapon.as_deref() {
                     *weapons.entry(w).or_default() += v;
@@ -159,21 +221,30 @@ impl Window {
             }
             if let Some(p) = ev.pilot.as_deref() {
                 let slot = pilots.entry(p).or_default();
+                let weapon = ev.weapon.as_deref();
                 match ev.kind {
-                    EventKind::DamageOut => slot.0 += v,
-                    EventKind::DamageIn => {
-                        slot.1 += v;
-                        // Capture attacker's ship (keep most-recent).
-                        if ev.ship.is_some() {
-                            slot.2 = ev.ship.as_deref();
-                        }
-                        // Accumulate unique weapon names.
-                        if let Some(w) = ev.weapon.as_deref() {
-                            if !slot.3.contains(&w) {
-                                slot.3.push(w);
-                            }
+                    EventKind::DamageOut => {
+                        slot.out += v;
+                        slot.quality_out.count(ev.quality.as_deref());
+                        if let Some(w) = weapon {
+                            *slot.weapons_out.entry(w).or_default() += v;
                         }
                     }
+                    EventKind::DamageIn => {
+                        slot.inc += v;
+                        slot.quality_in.count(ev.quality.as_deref());
+                        if let Some(w) = weapon {
+                            *slot.weapons_in.entry(w).or_default() += v;
+                        }
+                        // Capture attacker's ship (keep most-recent).
+                        if ev.ship.is_some() {
+                            slot.ship = ev.ship.as_deref();
+                        }
+                    }
+                    EventKind::ScramOut => slot.scram_out = true,
+                    EventKind::PointOut => slot.point_out = true,
+                    EventKind::ScramIn => slot.scram_in = true,
+                    EventKind::PointIn => slot.point_in = true,
                     _ => {}
                 }
             }
@@ -194,19 +265,26 @@ impl Window {
             weapons.into_iter().map(|(name, dmg)| WeaponRate {
                 name: name.to_string(),
                 dps: dmg / w,
+                kind: None,
+                damage: None,
             }),
             |r| r.dps,
         );
         t.by_pilot = top_n(
-            pilots
-                .into_iter()
-                .map(|(name, (out, inc, ship, weps))| PilotRate {
-                    name: name.to_string(),
-                    dps_out: out / w,
-                    dps_in: inc / w,
-                    ship: ship.map(String::from),
-                    weapons: weps.into_iter().map(String::from).collect(),
-                }),
+            pilots.into_iter().map(|(name, acc)| PilotRate {
+                name: name.to_string(),
+                dps_out: acc.out / w,
+                dps_in: acc.inc / w,
+                ship: acc.ship.map(String::from),
+                weapons_out: weapon_rates(acc.weapons_out, w),
+                weapons_in: weapon_rates(acc.weapons_in, w),
+                quality_out: acc.quality_out,
+                quality_in: acc.quality_in,
+                scram_out: acc.scram_out,
+                point_out: acc.point_out,
+                scram_in: acc.scram_in,
+                point_in: acc.point_in,
+            }),
             |r| r.dps_out + r.dps_in,
         );
         t
@@ -222,6 +300,26 @@ fn top_n<T>(rows: impl Iterator<Item = T>, key: impl Fn(&T) -> f64) -> Vec<T> {
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     v.truncate(TOP_N);
+    v
+}
+
+/// Build a per-source damage list (name + dps) sorted by dps descending.
+/// `kind`/`damage` are filled later by the command layer from the SDE.
+fn weapon_rates(map: HashMap<&str, f64>, window: f64) -> Vec<WeaponRate> {
+    let mut v: Vec<WeaponRate> = map
+        .into_iter()
+        .map(|(name, dmg)| WeaponRate {
+            name: name.to_string(),
+            dps: dmg / window,
+            kind: None,
+            damage: None,
+        })
+        .collect();
+    v.sort_by(|a, b| {
+        b.dps
+            .partial_cmp(&a.dps)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     v
 }
 
@@ -360,5 +458,37 @@ mod tests {
         // clamped cutoff.
         w.tick(65);
         assert_eq!(w.events.len(), 5); // ts 55..=59 survive (cutoff = 55)
+    }
+
+    #[test]
+    fn tallies_per_pilot_quality_and_misses_without_moving_dps() {
+        let q = |ts, kind, amount, pilot: &str, quality: &str| DpsEvent {
+            ts,
+            kind,
+            amount,
+            pilot: Some(pilot.to_string()),
+            ship: None,
+            weapon: None,
+            quality: Some(quality.to_string()),
+            ore: None,
+            volume: 0.0,
+        };
+        let mut w = Window::new(10);
+        w.push(q(1, EventKind::DamageOut, 100, "Rat", "Smashes"));
+        w.push(q(2, EventKind::DamageOut, 50, "Rat", "Grazes"));
+        w.push(q(3, EventKind::DamageOut, 0, "Rat", "Misses")); // zero-amount miss
+        w.push(q(4, EventKind::DamageIn, 30, "Rat", "Penetrates"));
+        let t = w.tick(5);
+
+        // The miss adds no damage but is tallied.
+        assert_eq!(t.dps_out, 15.0); // (100 + 50 + 0) / 10
+        let rat = t.by_pilot.iter().find(|p| p.name == "Rat").unwrap();
+        assert_eq!(rat.quality_out.smashes, 1);
+        assert_eq!(rat.quality_out.grazes, 1);
+        assert_eq!(rat.quality_out.misses, 1);
+        assert_eq!(rat.quality_in.penetrates, 1);
+        // Global tallies mirror the per-pilot ones.
+        assert_eq!(t.hits_out.misses, 1);
+        assert_eq!(t.hits_out.smashes, 1);
     }
 }

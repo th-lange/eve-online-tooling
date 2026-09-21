@@ -80,6 +80,42 @@ pub fn auth_active_character(app: AppHandle) -> Result<Option<i64>, String> {
     Ok(storage::active_character(&dir))
 }
 
+/// The active character's currently-boarded ship: hull type id, its SDE name,
+/// and the player-given ship name. `None` when there's no active character or
+/// the fetch fails — most often the `esi-location.read_ship_type.v1` scope
+/// isn't granted yet (re-login after enabling it on the EVE dev app). The
+/// combat overlay uses this to auto-load your hull's fit (optimals) and drone
+/// reminders.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CharacterShip {
+    pub type_id: i64,
+    pub type_name: String,
+    pub ship_name: String,
+}
+
+#[tauri::command]
+pub async fn esi_character_ship(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+) -> Result<Option<CharacterShip>, String> {
+    let dir = crate::storage::app_data_dir(&app)?;
+    let Some(character_id) = storage::active_character(&dir) else {
+        return Ok(None);
+    };
+    let Ok(ship) = character::fetch_character_ship(&auth_state, character_id).await else {
+        return Ok(None);
+    };
+    let type_name = crate::sde::open_from_dir(&dir)
+        .map(|sde| sde.type_name_or_id(ship.ship_type_id))
+        .unwrap_or_else(|_| ship.ship_type_id.to_string());
+    Ok(Some(CharacterShip {
+        type_id: ship.ship_type_id,
+        type_name,
+        ship_name: ship.ship_name,
+    }))
+}
+
 /// A blueprint owned by a character (or their corporation), with its real
 /// ME/TE/runs.
 #[derive(Debug, Clone, Serialize)]

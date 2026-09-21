@@ -31,6 +31,18 @@ export function activeCharacter(): Promise<number | null> {
   return invoke<number | null>("auth_active_character");
 }
 
+/** The active character's currently-boarded ship (hull type + names). `null`
+ *  when no active character or the `esi-location.read_ship_type.v1` scope isn't
+ *  granted (re-login after enabling it). */
+export interface CharacterShip {
+  typeId: number;
+  typeName: string;
+  shipName: string;
+}
+export function characterShip(): Promise<CharacterShip | null> {
+  return invoke<CharacterShip | null>("esi_character_ship");
+}
+
 /** Sentinel active-character id meaning "all characters" — per-character views
  *  that can aggregate fan out over the whole roster. Negative so it never
  *  collides with a real EVE character id (always positive). */

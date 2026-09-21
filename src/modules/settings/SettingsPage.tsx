@@ -10,8 +10,11 @@ import { useFightOverlay } from "../pvp/fightOverlayContext";
  * "Show fight overlay" checkbox.
  */
 export function SettingsPage() {
-  const { enabled: combatOverviewOn, setEnabled: setCombatOverviewOn } =
-    useFightOverlay();
+  const {
+    enabled: combatOverviewOn,
+    setEnabled: setCombatOverviewOn,
+    runTest,
+  } = useFightOverlay();
 
   return (
     <Page>
@@ -20,8 +23,8 @@ export function SettingsPage() {
         subtitle="App-wide preferences that apply across every module."
       />
       <div className="mt-6 divide-y divide-zinc-800 rounded-lg border border-zinc-800 bg-zinc-900/40">
-        <label className="flex cursor-pointer items-start justify-between gap-4 p-4">
-          <span>
+        <div className="flex items-start justify-between gap-4 p-4">
+          <span className="min-w-0">
             <span className="block text-sm font-medium text-zinc-100">
               Display Combat Overview
             </span>
@@ -31,13 +34,24 @@ export function SettingsPage() {
               module, not just PVP.
             </span>
           </span>
-          <input
-            type="checkbox"
-            checked={combatOverviewOn}
-            onChange={(e) => setCombatOverviewOn(e.currentTarget.checked)}
-            className="mt-1 h-4 w-4 shrink-0 accent-indigo-500"
-          />
-        </label>
+          <div className="mt-1 flex shrink-0 items-center gap-3">
+            <button
+              type="button"
+              onClick={runTest}
+              className="rounded border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+              title="Preview the overlay with random sample data"
+            >
+              Test
+            </button>
+            <input
+              type="checkbox"
+              checked={combatOverviewOn}
+              onChange={(e) => setCombatOverviewOn(e.currentTarget.checked)}
+              className="h-4 w-4 shrink-0 cursor-pointer accent-indigo-500"
+              aria-label="Display Combat Overview"
+            />
+          </div>
+        </div>
       </div>
     </Page>
   );

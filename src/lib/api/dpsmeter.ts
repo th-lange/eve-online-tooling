@@ -3,10 +3,27 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 // --- DPS meter (live combat log) ---
 
-/** Per-weapon outgoing DPS row. */
+/** A weapon/ammo/drone damage row. `kind` is the source type (the ammo/drone's
+ *  SDE group, e.g. "Rocket", "Hybrid Charge", "Light Scout Drone"); `damage` is
+ *  the ammo's dominant damage type(s) (e.g. "Kin", "EM/Th"). The log names only
+ *  the ammo, so both come from the SDE. */
 export interface WeaponRate {
   name: string;
   dps: number;
+  kind?: string;
+  damage?: string;
+}
+
+/** Counts of each hit-quality tier within the window (worst→best). Misses
+ *  come from the separate miss lines; the rest from the quality suffix. */
+export interface HitQuality {
+  misses: number;
+  glances: number;
+  grazes: number;
+  hits: number;
+  penetrates: number;
+  smashes: number;
+  wrecks: number;
 }
 
 /** Per-pilot engagement row (damage dealt to / taken from). */
@@ -16,16 +33,21 @@ export interface PilotRate {
   dpsIn: number;
   /** Ship type string parsed from `(SHIP)` in the combat log, if present. */
   ship?: string;
-  /** Unique weapon names fired at us within the averaging window. */
-  weapons?: string[];
-}
-
-/** One live sample: per-second rates over the averaging window. */
-/** Counts of high-quality hits within the window. */
-export interface HitQuality {
-  penetrates: number;
-  smashes: number;
-  wrecks: number;
+  /** Per-source damage you dealt to them (outgoing), each with its dps. */
+  weaponsOut?: WeaponRate[];
+  /** Per-source damage they dealt to you (incoming; named only for players —
+   *  EVE never names an NPC's weapon). */
+  weaponsIn?: WeaponRate[];
+  /** Hit-quality tally of your hits on them. */
+  qualityOut?: HitQuality;
+  /** Hit-quality tally of their hits on you. */
+  qualityIn?: HitQuality;
+  /** You are scrambling / pointing them within the window. */
+  scramOut?: boolean;
+  pointOut?: boolean;
+  /** They are scrambling / pointing you within the window. */
+  scramIn?: boolean;
+  pointIn?: boolean;
 }
 
 export interface DpsTick {
@@ -79,6 +101,9 @@ export interface DpsPlaybackSettings {
   /** Start the virtual clock here instead of the file's first event (epoch
    *  seconds) — set when scrubbing the timeline slider. */
   seekTs?: number;
+  /** Stop (and, if re-issued, loop) at this epoch second instead of the
+   *  file's end — set when playing a selected fight region. */
+  stopTs?: number;
 }
 
 /** One time bucket's activity, normalized 0..1 against that category's
@@ -111,6 +136,16 @@ export function dpsPlayback(settings: DpsPlaybackSettings): Promise<void> {
 /** Stop the active capture. */
 export function dpsStop(): Promise<void> {
   return invoke<void>("dps_stop");
+}
+
+/** Freeze the active playback in place (true pause). */
+export function dpsPause(): Promise<void> {
+  return invoke<void>("dps_pause");
+}
+
+/** Continue a paused playback from exactly where it froze. */
+export function dpsResume(): Promise<void> {
+  return invoke<void>("dps_resume");
 }
 
 /** List gamelog files in a folder, newest first. */

@@ -1,19 +1,32 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { invokeMock, mockInvoke, renderWithQuery } from "../../test/harness";
 import { DpsPage } from "./DpsPage";
 import type {
   DpsLogFile,
   DpsLogSummary,
   DpsPlaybackSettings,
+  DpsTick,
 } from "../../lib/api";
 
-// DpsPage subscribes to live ticks via `listen`; capture the callback so
-// tests could push one if needed (unused here — these tests exercise the
-// playback-mode file picker and timeline, not the live tick feed).
+// DpsPage subscribes to live ticks via `listen`; capture the `dps://tick`
+// callback so a test can push a tick and drive the current playback position.
+let tickHandler: ((t: DpsTick) => void) | undefined;
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: () => Promise.resolve(() => {}),
+  listen: (name: string, handler: (e: { payload: DpsTick }) => void) => {
+    if (name === "dps://tick") tickHandler = (t: DpsTick) => handler({ payload: t });
+    return Promise.resolve(() => {});
+  },
 }));
+
+function makeTick(at: number): DpsTick {
+  const hq = { misses: 0, glances: 0, grazes: 0, hits: 0, penetrates: 0, smashes: 0, wrecks: 0 };
+  return {
+    at, windowSecs: 10, dpsOut: 50, dpsIn: 0, logiOut: 0, logiIn: 0,
+    capWarfareOut: 0, capWarfareIn: 0, capTransferOut: 0, capTransferIn: 0,
+    miningM3: 0, hitsOut: hq, hitsIn: hq, byWeapon: [], byPilot: [],
+  };
+}
 
 // Same formatting the component uses — computed at runtime so assertions
 // don't hardcode a timezone-dependent clock string.
@@ -80,6 +93,7 @@ function renderInPlayback() {
 beforeEach(() => {
   invokeMock.mockReset();
   localStorage.clear();
+  tickHandler = undefined;
 });
 
 describe("DpsPage — playback file picker", () => {
@@ -110,33 +124,80 @@ describe("DpsPage — playback file picker", () => {
 });
 
 describe("DpsPage — playback timeline", () => {
-  it("loads the activity summary and seeking restarts playback with seekTs", async () => {
+  it("seeking parks the playhead without autoplaying; Play starts from there", async () => {
     renderInPlayback();
 
     // The scrubber renders once the summary loads (start/end clock labels).
     await screen.findByText("dmg out");
-    // (`clock(SUMMARY_START)` also doubles as the idle position readout
-    // below the slider, since it defaults to `start` before any tick.)
     expect(screen.getAllByText(clock(SUMMARY_START)).length).toBeGreaterThan(0);
     expect(screen.getByText(clock(SUMMARY_END))).toBeInTheDocument();
 
-    // Dragging the slider and releasing seeks: dps_playback is called again
-    // with seekTs set to the released value, not the file's start.
-    const slider = screen.getByRole("slider");
+    // Dragging the slider and releasing only parks the playhead — it must NOT
+    // start playback (scrolling to a time no longer autoplays).
+    const slider = screen.getByRole("slider", { name: "Playback position" });
     fireEvent.change(slider, { target: { value: String(SEEK_TS) } });
     fireEvent.mouseUp(slider, { target: { value: String(SEEK_TS) } });
+    expect(
+      invokeMock.mock.calls.find(([cmd]) => cmd === "dps_playback"),
+    ).toBeUndefined();
 
+    // Play starts playback from the parked position.
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
     await waitFor(() => {
-      const call = invokeMock.mock.calls.find(
-        ([cmd]) => cmd === "dps_playback",
-      );
+      const call = [...invokeMock.mock.calls]
+        .reverse()
+        .find(([cmd]) => cmd === "dps_playback");
       expect(call).toBeDefined();
-      // The mock's args are untyped (`unknown[]`) — assert the one shape
-      // `dpsPlayback` ever sends, named so the assertions below read a
-      // fully-typed value rather than an inline cast on a member access.
       const args = call?.[1] as { settings: DpsPlaybackSettings };
       expect(args.settings.seekTs).toBe(SEEK_TS);
       expect(args.settings.file).toBe(LOGS[0].path);
+    });
+  });
+
+  it("rounds a fractional parked seek to an integer i64 when playback starts", async () => {
+    renderInPlayback();
+    await screen.findByText("dmg out");
+
+    // A fractional timestamp (as the slider can emit) must not reach the
+    // backend verbatim — Rust's `seek_ts: i64` rejects floats.
+    const slider = screen.getByRole("slider", { name: "Playback position" });
+    const fractional = SUMMARY_START + 123.565;
+    fireEvent.change(slider, { target: { value: String(fractional) } });
+    fireEvent.mouseUp(slider, { target: { value: String(fractional) } });
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+
+    await waitFor(() => {
+      const call = [...invokeMock.mock.calls]
+        .reverse()
+        .find(([cmd]) => cmd === "dps_playback");
+      const args = call?.[1] as { settings: DpsPlaybackSettings };
+      expect(args.settings.seekTs).toBe(Math.round(fractional));
+      expect(Number.isInteger(args.settings.seekTs)).toBe(true);
+    });
+  });
+
+  it("stop then play resumes from where it stopped, not the log start", async () => {
+    renderInPlayback();
+    await screen.findByText("dmg out");
+
+    // Start playback from the top.
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+    await screen.findByRole("button", { name: "Stop" });
+
+    // A tick advances the playhead to a mid-log position.
+    const pos = SUMMARY_START + 200;
+    act(() => tickHandler?.(makeTick(pos)));
+
+    // Stop, then Play again — playback must resume at `pos`, not restart at 0.
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Play" }));
+
+    await waitFor(() => {
+      const call = [...invokeMock.mock.calls]
+        .reverse()
+        .find(([cmd]) => cmd === "dps_playback");
+      const args = call?.[1] as { settings: DpsPlaybackSettings };
+      expect(args.settings.seekTs).toBe(pos);
     });
   });
 });

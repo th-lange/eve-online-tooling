@@ -499,6 +499,31 @@ pub async fn fetch_character_fittings(
     Ok(resp.json().await?)
 }
 
+/// The character's current ship, from `/characters/{id}/ship/`. Requires the
+/// `esi-location.read_ship_type.v1` scope (a 403 surfaces as an error so the
+/// caller can treat "scope not granted" as "unknown ship").
+#[derive(Debug, Clone, Deserialize)]
+pub struct RawShip {
+    pub ship_type_id: i64,
+    #[serde(default)]
+    pub ship_name: String,
+    #[allow(dead_code)] // part of the ESI shape; the item id isn't surfaced
+    pub ship_item_id: i64,
+}
+
+/// Fetch the character's currently-boarded ship (hull type + given name).
+pub async fn fetch_character_ship(
+    auth: &AuthState,
+    character_id: i64,
+) -> Result<RawShip, AuthError> {
+    authed_get(
+        auth,
+        character_id,
+        &format!("/latest/characters/{character_id}/ship/"),
+    )
+    .await
+}
+
 /// Save a fitting to the character's in-game fittings (POST). Requires the
 /// `esi-fittings.write_fittings.v1` scope; a 403 from a missing scope surfaces to
 /// the caller. Returns the new `fitting_id`. `items` serializes to ESI's body.

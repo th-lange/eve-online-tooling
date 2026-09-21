@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -38,10 +38,13 @@ const POLL: Duration = Duration::from_millis(500);
 const MAX_PLAYBACK_LOG_BYTES: u64 = 50 * 1024 * 1024;
 
 /// Shared run-state. The active loop runs while its generation == `generation`;
-/// `dps_start` and `dps_stop` both bump it.
+/// `dps_start`/`dps_playback`/`dps_stop` bump it. `paused` freezes the active
+/// loop's virtual clock in place (true pause/continue) without tearing it down
+/// — so resuming picks up the exact same moving-average window, no re-seek.
 #[derive(Default)]
 pub struct DpsState {
     generation: Arc<AtomicU64>,
+    paused: Arc<AtomicBool>,
 }
 
 /// Settings passed from the UI to start a capture.
@@ -79,6 +82,10 @@ pub struct PlaybackSettings {
     /// slider restarts playback with this set.
     #[serde(default)]
     pub seek_ts: Option<i64>,
+    /// Stop (and, if the UI re-issues, loop) at this epoch second instead of
+    /// the file's end — set when playing a selected fight region.
+    #[serde(default)]
+    pub stop_ts: Option<i64>,
 }
 
 /// A gamelog file the UI can list (newest first) — used for status + playback.
@@ -134,6 +141,9 @@ pub async fn dps_start(
     // Claim a generation; the previous loop (if any) sees a newer value and exits.
     let generation = state.generation.clone();
     let my_gen = generation.fetch_add(1, Ordering::SeqCst) + 1;
+    // Fresh capture starts unpaused; the loop watches this flag to freeze.
+    let paused = state.paused.clone();
+    paused.store(false, Ordering::SeqCst);
 
     // SDE path (for ore → m³); resolved once. Mining lines need a volume lookup.
     let sde_db = crate::storage::app_data_dir(&app)
@@ -144,6 +154,9 @@ pub async fn dps_start(
         let mut win = Window::new(settings.window_secs);
         // Cache of ore name → m³ per unit, resolved lazily from the SDE.
         let mut ore_vol: HashMap<String, f64> = HashMap::new();
+        // Cache of weapon/ammo/drone name → source type (SDE group).
+        let mut weapon_kinds: HashMap<String, (Option<String>, Option<String>)> =
+            HashMap::new();
         // Start at the *current* end of the active log: only new combat counts,
         // never a replay of the whole session as one burst.
         let mut current = newest_gamelog(&dir);
@@ -158,6 +171,9 @@ pub async fn dps_start(
             ticker.tick().await;
             if generation.load(Ordering::SeqCst) != my_gen {
                 break; // superseded by another start, or stopped.
+            }
+            if paused.load(Ordering::SeqCst) {
+                continue; // frozen: don't read new lines or emit while paused.
             }
 
             // A new session creates a new file — switch to it and read from 0.
@@ -188,10 +204,9 @@ pub async fn dps_start(
                 }
             }
 
-            let _ = app.emit(
-                "dps://tick",
-                &win.tick(crate::util::time::now_secs() as i64),
-            );
+            let mut tick = win.tick(crate::util::time::now_secs() as i64);
+            attach_weapon_kinds(&mut tick, &mut weapon_kinds, sde_db.as_deref());
+            let _ = app.emit("dps://tick", &tick);
         }
     });
 
@@ -202,6 +217,23 @@ pub async fn dps_start(
 #[tauri::command]
 pub fn dps_stop(state: State<'_, DpsState>) {
     state.generation.fetch_add(1, Ordering::SeqCst);
+    // A stopped session is not "paused" — clear the flag so the next start/
+    // playback isn't born frozen if it raced a lingering pause.
+    state.paused.store(false, Ordering::SeqCst);
+}
+
+/// Freeze the active playback/capture loop in place (true pause): the virtual
+/// clock and the moving-average window hold, so [`dps_resume`] continues from
+/// the exact same point with no re-seek or window re-warm.
+#[tauri::command]
+pub fn dps_pause(state: State<'_, DpsState>) {
+    state.paused.store(true, Ordering::SeqCst);
+}
+
+/// Un-freeze a paused loop; playback resumes exactly where it stopped.
+#[tauri::command]
+pub fn dps_resume(state: State<'_, DpsState>) {
+    state.paused.store(false, Ordering::SeqCst);
 }
 
 /// Read + parse a whole gamelog file and resolve its mining volumes, sorted by
@@ -297,14 +329,23 @@ pub async fn dps_playback(
 
     let generation = state.generation.clone();
     let my_gen = generation.fetch_add(1, Ordering::SeqCst) + 1;
+    let paused = state.paused.clone();
+    paused.store(false, Ordering::SeqCst);
     let speed = settings.speed.max(0.1);
     let window_secs = settings.window_secs;
     let seek_ts = settings.seek_ts;
+    let stop_ts = settings.stop_ts;
 
     let (seek, idx, warm) = seek_start(&events, seek_ts, window_secs);
+    // SDE path for resolving weapon/ammo/drone → source type, cached per name.
+    let sde_db = crate::storage::app_data_dir(&app)
+        .ok()
+        .map(|d| SdePaths::new(d).db);
 
     tauri::async_runtime::spawn(async move {
         let mut win = Window::new(window_secs);
+        let mut weapon_kinds: HashMap<String, (Option<String>, Option<String>)> =
+            HashMap::new();
         let end = events.last().map(|e| e.ts).unwrap_or(0);
         let mut idx = idx;
         // `push` order doesn't matter — `tick` only sums what's in the buffer.
@@ -322,16 +363,26 @@ pub async fn dps_playback(
             if generation.load(Ordering::SeqCst) != my_gen {
                 break; // stopped, or another start/playback/seek superseded us.
             }
+            if paused.load(Ordering::SeqCst) {
+                continue; // frozen: hold the virtual clock so resume continues.
+            }
             vt += step;
             let now = vt as i64;
             while idx < events.len() && events[idx].ts <= now {
                 win.push(events[idx].clone());
                 idx += 1;
             }
-            let _ = app.emit("dps://tick", &win.tick(now));
-            // Run one extra window past the last event so it decays to zero.
-            if now > end + window_secs as i64 {
-                // Natural end: tell the UI the playback finished (for loop support).
+            let mut tick = win.tick(now);
+            attach_weapon_kinds(&mut tick, &mut weapon_kinds, sde_db.as_deref());
+            let _ = app.emit("dps://tick", &tick);
+            // End: at the region's stop mark when playing a selection, else one
+            // window past the last event so the rate decays to zero. Either way
+            // emit `dps://done` so the UI can loop.
+            let ended = match stop_ts {
+                Some(s) => now >= s,
+                None => now > end + window_secs as i64,
+            };
+            if ended {
                 let _ = app.emit("dps://done", ());
                 break;
             }
@@ -566,6 +617,59 @@ fn resolve_ore_volumes(
             .and_then(|(_, v)| v)
             .unwrap_or(0.0);
         cache.insert(ore, vol);
+    }
+}
+
+/// Fill each weapon/ammo/drone's source `kind` (SDE group, e.g. "Rocket") and
+/// `damage` type (from the ammo's SDE damage attributes) on a tick — the
+/// combat log names only the ammo, not the weapon module or the damage type.
+/// Caches name → (kind, damage) so each name is looked up once; unknown names
+/// or a missing SDE leave both `None`.
+#[allow(clippy::type_complexity)]
+fn attach_weapon_kinds(
+    tick: &mut super::aggregate::DpsTick,
+    cache: &mut HashMap<String, (Option<String>, Option<String>)>,
+    sde_db: Option<&Path>,
+) {
+    let mut unknown: Vec<String> = Vec::new();
+    let mut consider = |name: &str| {
+        if !cache.contains_key(name) && !unknown.iter().any(|u| u == name) {
+            unknown.push(name.to_string());
+        }
+    };
+    for wr in &tick.by_weapon {
+        consider(&wr.name);
+    }
+    for p in &tick.by_pilot {
+        for wr in p.weapons_out.iter().chain(&p.weapons_in) {
+            consider(&wr.name);
+        }
+    }
+    if !unknown.is_empty() {
+        let sde = sde_db.and_then(|p| Sde::open(p).ok());
+        for name in unknown {
+            let kind = sde
+                .as_ref()
+                .and_then(|s| s.weapon_group(&name).ok().flatten());
+            let damage = sde
+                .as_ref()
+                .and_then(|s| s.damage_type(&name).ok().flatten());
+            cache.insert(name, (kind, damage));
+        }
+    }
+    let apply = |wr: &mut super::aggregate::WeaponRate| {
+        if let Some((kind, damage)) = cache.get(&wr.name) {
+            wr.kind = kind.clone();
+            wr.damage = damage.clone();
+        }
+    };
+    for wr in &mut tick.by_weapon {
+        apply(wr);
+    }
+    for p in &mut tick.by_pilot {
+        for wr in p.weapons_out.iter_mut().chain(p.weapons_in.iter_mut()) {
+            apply(wr);
+        }
     }
 }
 

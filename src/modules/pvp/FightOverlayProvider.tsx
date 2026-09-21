@@ -2,21 +2,28 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   pvpProfiles,
+  characterShip,
   pvpPilotFits,
   onDpsTick,
+  dpsStart,
   fittingListLocal,
   fittingSimulate,
   type DpsTick,
   type Fit,
   type WeaponRange,
+  type CharacterShip,
 } from "../../lib/api";
 import { usePersistentState } from "../../lib/usePersistentState";
+import { useEveLogDir } from "../../lib/useEveLogDir";
+import { playCue, type CueSound } from "../../lib/sound";
 import { FightOverlayContext } from "./fightOverlayContext";
 
 /** Metres → compact km/m string. Used in AttackerCard and FightPanel. */
 function km(m: number): string {
   return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
 }
+
+// (audio cues use the shared cross-platform sound service — see lib/sound.ts)
 
 // ---------------------------------------------------------------- MiniDpsChart
 
@@ -153,6 +160,9 @@ function FightPanel({
   selectedFitId,
   onSelectFit,
   fitWeaponRanges,
+  myShip,
+  autoFitName,
+  droneReminder,
   onDismiss,
 }: {
   ticks: DpsTick[];
@@ -167,6 +177,11 @@ function FightPanel({
   selectedFitId: string | null;
   onSelectFit: (id: string | null) => void;
   fitWeaponRanges: WeaponRange[];
+  myShip: CharacterShip | null;
+  /** When set, ranges are auto-derived from your current ship's matching fit
+   *  (this is that fit's name); absent when a fit was picked manually. */
+  autoFitName?: string;
+  droneReminder: boolean;
   onDismiss: () => void;
 }) {
   const latestTick = ticks[ticks.length - 1];
@@ -183,12 +198,12 @@ function FightPanel({
   }, [fitWeaponRanges]);
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-zinc-700 bg-zinc-950/95 shadow-2xl backdrop-blur">
+    <div className="fixed left-1/2 top-1/2 z-50 flex h-[50vh] w-[90vw] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950/95 shadow-2xl backdrop-blur">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-2">
+      <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-3">
         <div className="flex items-center gap-4">
-          <span className="flex items-center gap-2 text-sm font-semibold text-rose-400">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-rose-500" />
+          <span className="flex items-center gap-2 text-base font-semibold text-rose-400">
+            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-rose-500" />
             Active Fight
           </span>
           {latestTick && (
@@ -204,9 +219,15 @@ function FightPanel({
               dps
             </span>
           )}
-          <span className="text-xs text-zinc-600">
-            Requires DPS meter running in the background
-          </span>
+          {myShip && (
+            <span className="flex items-center gap-1 rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">
+              <span className="text-zinc-500">Ship</span>
+              {myShip.typeName}
+              {myShip.shipName && myShip.shipName !== myShip.typeName ? (
+                <span className="text-zinc-500">· {myShip.shipName}</span>
+              ) : null}
+            </span>
+          )}
         </div>
         <button
           onClick={onDismiss}
@@ -217,62 +238,79 @@ function FightPanel({
       </div>
 
       {/* Content: 3-column grid */}
-      <div
-        className="grid grid-cols-3 gap-4 overflow-y-auto p-4"
-        style={{ maxHeight: 260 }}
-      >
+      <div className="grid flex-1 grid-cols-3 divide-x divide-zinc-800 overflow-y-auto text-sm">
         {/* ── My Weapons ── */}
-        <div className="flex flex-col gap-2">
-          <h3 className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
+        <div className="flex flex-col gap-3 px-5 py-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
             My weapons
           </h3>
+          {droneReminder && (
+            <div className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-base font-semibold text-amber-300">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" />
+              Launch drones
+            </div>
+          )}
           {/* What's firing now (from DPS log) */}
           {myWeapons.length > 0 && (
-            <div className="flex flex-col gap-0.5">
+            <div className="flex flex-col gap-1.5">
               {myWeapons.map((w, i) => (
-                <div key={i} className="flex items-center gap-2 text-xs">
-                  <span className="flex-1 truncate text-zinc-300">
-                    {w.name}
-                  </span>
-                  <span className="shrink-0 tabular-nums text-emerald-400">
+                <div key={i} className="flex items-center gap-3 text-base">
+                  <span className="flex-1 truncate text-zinc-200">{w.name}</span>
+                  <span className="shrink-0 font-semibold tabular-nums text-emerald-400">
                     {Math.round(w.dps)} dps
                   </span>
                 </div>
               ))}
             </div>
           )}
-          {/* Fit selector for ranges */}
-          <select
-            value={selectedFitId ?? ""}
-            onChange={(e) => onSelectFit(e.currentTarget.value || null)}
-            className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300"
-          >
-            <option value="">
-              {localFits.length > 0
-                ? "Select fit for ranges…"
-                : "No saved fits found"}
-            </option>
-            {localFits.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-              </option>
-            ))}
-          </select>
+          {/* Ranges: auto from your current ship's matching fit (API), else a
+              manual saved-fit picker as a fallback. ESI can't read your live
+              fitted modules, so a matching saved fit is still needed. */}
+          {autoFitName ? (
+            <span className="rounded-md bg-zinc-800/60 px-3 py-2 text-sm text-zinc-400">
+              Ranges from your ship’s fit ·{" "}
+              <span className="text-zinc-100">{autoFitName}</span>
+            </span>
+          ) : (
+            <>
+              <span className="text-xs text-zinc-500">
+                No fit from API — pick a saved fit for ranges
+              </span>
+              <select
+                value={selectedFitId ?? ""}
+                onChange={(e) => onSelectFit(e.currentTarget.value || null)}
+                className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-300"
+              >
+                <option value="">
+                  {localFits.length > 0
+                    ? "Select fit for ranges…"
+                    : "No saved fits found"}
+                </option>
+                {localFits.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
           {uniqueRanges.length > 0 && (
-            <div className="flex flex-col gap-0.5">
+            <div className="flex flex-col gap-1">
               {uniqueRanges.map((r, i) => (
-                <div key={i} className="text-xs text-zinc-400">
-                  <span className="text-zinc-300">{km(r.optimal)}</span>
+                <div key={i} className="text-base tabular-nums text-zinc-300">
+                  <span className="font-medium text-zinc-100">
+                    {km(r.optimal)}
+                  </span>
                   {r.falloff > 0 && (
                     <>
                       {" "}
                       →{" "}
-                      <span className="text-zinc-300">
+                      <span className="font-medium text-zinc-100">
                         {km(r.optimal + r.falloff)}
                       </span>
                     </>
                   )}
-                  <span className="ml-1 text-zinc-600">opt → max</span>
+                  <span className="ml-2 text-xs text-zinc-500">opt → max</span>
                 </div>
               ))}
             </div>
@@ -280,7 +318,7 @@ function FightPanel({
         </div>
 
         {/* ── Attackers ── */}
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 px-5 py-4">
           <h3 className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
             Attackers ({attackers.length})
           </h3>
@@ -298,7 +336,7 @@ function FightPanel({
         </div>
 
         {/* ── DPS Graph ── */}
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 px-5 py-4">
           <h3 className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
             DPS
           </h3>
@@ -315,6 +353,90 @@ function FightPanel({
       </div>
     </div>
   );
+}
+
+// -------------------------------------------------------------- test-fight data
+
+/** A previewable sample fight for the Settings "Test" button — enough to
+ *  exercise every part of the panel (attackers with ships/weapons, my weapons,
+ *  ranges, known ship, drone reminder) without a live fight. */
+interface TestFight {
+  ticks: DpsTick[];
+  attackers: {
+    name: string;
+    dpsIn: number;
+    ship?: string;
+    weapons: string[];
+  }[];
+  myWeapons: { name: string; dps: number }[];
+  fitWeaponRanges: WeaponRange[];
+  myShip: CharacterShip;
+  autoFitName: string;
+  droneReminder: boolean;
+}
+
+function buildTestFight(): TestFight {
+  const rnd = (a: number, b: number) => a + Math.random() * (b - a);
+  const hq = {
+    misses: 1,
+    glances: 2,
+    grazes: 3,
+    hits: 8,
+    penetrates: 3,
+    smashes: 1,
+    wrecks: 0,
+  };
+  let out = rnd(90, 130);
+  let inc = rnd(25, 55);
+  const ticks: DpsTick[] = Array.from({ length: 30 }, (_, i) => {
+    out = Math.max(0, out + rnd(-15, 15));
+    inc = Math.max(0, inc + rnd(-10, 10));
+    return {
+      dpsOut: out,
+      dpsIn: inc,
+      logiOut: 0,
+      logiIn: 0,
+      capTransferOut: 0,
+      capTransferIn: 0,
+      capWarfareOut: 0,
+      capWarfareIn: 0,
+      miningM3: 0,
+      hitsOut: hq,
+      hitsIn: hq,
+      byWeapon: [
+        { name: "Caldari Navy Inferno Rocket", dps: out, kind: "Rocket" },
+      ],
+      byPilot: [],
+      windowSecs: 20,
+      at: 1_700_000_000 + i,
+    };
+  });
+  return {
+    ticks,
+    attackers: [
+      {
+        name: "John Doe",
+        dpsIn: Math.round(inc),
+        ship: "Kestrel",
+        weapons: ["Inferno Rage Rocket", "Scourge Rocket"],
+      },
+      {
+        name: "Jane Doe",
+        dpsIn: Math.round(rnd(10, 30)),
+        ship: "Incursus",
+        weapons: ["Light Ion Blaster II"],
+      },
+    ],
+    myWeapons: [
+      { name: "Caldari Navy Inferno Rocket", dps: Math.round(out) },
+    ],
+    fitWeaponRanges: [
+      { typeId: 1, optimal: 12_000, falloff: 8_000 } as WeaponRange,
+    ],
+    myShip: { typeId: 602, typeName: "Kestrel", shipName: "Test Kestrel" },
+    autoFitName: "Rocket Kestrel",
+    droneReminder: true,
+  };
 }
 
 // ---------------------------------------------------------- FightOverlayProvider
@@ -335,6 +457,8 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
   const [fightTicks, setFightTicks] = useState<DpsTick[]>([]);
   const [fightDismissed, setFightDismissed] = useState(false);
   const [selectedFitId, setSelectedFitId] = useState<string | null>(null);
+  // Settings "Test" preview: sample data, rebuilt each time the button is hit.
+  const [testFight, setTestFight] = useState<TestFight | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -357,6 +481,23 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
       unlistenRef.current = null;
     };
   }, [enabled]);
+
+  // Auto-run a background live capture whenever the overlay is on, so combat
+  // is always detected without opening the DPS meter first. `dps_start` seeks
+  // to the current end of the newest gamelog and is generation-guarded, so
+  // this simply (re)claims the shared tail; the DPS page still starts/stops
+  // its own. We (re)start once per enable and when the folder changes.
+  const [gamelogsDir] = useEveLogDir("gamelogs");
+  const startedDirRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!enabled) {
+      startedDirRef.current = null;
+      return;
+    }
+    if (!gamelogsDir || startedDirRef.current === gamelogsDir) return;
+    startedDirRef.current = gamelogsDir;
+    void dpsStart({ gamelogsDir, windowSecs: 10 }).catch(() => {});
+  }, [enabled, gamelogsDir]);
 
   const latestTick = fightTicks[fightTicks.length - 1];
   const latestAt = latestTick?.at ?? 0;
@@ -381,9 +522,11 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
             weapons: ex
               ? [
                   ...ex.weapons,
-                  ...(p.weapons ?? []).filter((w) => !ex.weapons.includes(w)),
+                  ...(p.weaponsIn ?? [])
+                    .map((w) => w.name)
+                    .filter((n) => !ex.weapons.includes(n)),
                 ]
-              : (p.weapons ?? []),
+              : (p.weaponsIn ?? []).map((w) => w.name),
           });
         }
       }
@@ -413,29 +556,111 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     staleTime: 30_000,
     enabled,
   });
-  const selectedFit =
-    localFits.data?.find((f) => f.id === selectedFitId) ?? null;
+
+  // My current ship via ESI (needs the read_ship_type scope). Only when known
+  // do we auto-load optimals + drone reminders. Polls so swapping ships mid-
+  // session is picked up; `null` when logged out or the scope isn't granted.
+  const myShip = useQuery<CharacterShip | null>({
+    queryKey: ["esi", "character-ship"],
+    queryFn: characterShip,
+    enabled,
+    staleTime: 15_000,
+    refetchInterval: enabled ? 30_000 : false,
+  });
+  const ship = myShip.data ?? null;
+
+  // Auto-pick a saved fit for the current hull (only when the ship is known).
+  // A manual selection always overrides it.
+  const autoFit =
+    ship != null
+      ? (localFits.data?.find((f) => f.shipTypeId === ship.typeId) ?? null)
+      : null;
+  const effectiveFitId = selectedFitId ?? autoFit?.id ?? null;
+  const effectiveFit =
+    localFits.data?.find((f) => f.id === effectiveFitId) ?? null;
   const fitStats = useQuery({
-    queryKey: ["pvp", "fight-fit-stats", selectedFitId],
-    queryFn: () => fittingSimulate(selectedFit!),
-    enabled: selectedFit != null,
+    queryKey: ["pvp", "fight-fit-stats", effectiveFitId],
+    queryFn: () => fittingSimulate(effectiveFit!),
+    enabled: effectiveFit != null,
     staleTime: Infinity,
   });
 
+  // Drone reminder: only when we know your ship (via API) and its fit carries
+  // drones, but no drone damage is landing in the current window.
+  const dronesFiring = (latestTick?.byWeapon ?? []).some((w) =>
+    (w.kind ?? "").includes("Drone"),
+  );
+  const fitHasDrones =
+    effectiveFit?.items.some((i) => i.slot === "drone" && i.quantity > 0) ??
+    false;
+  const droneReminder = ship != null && fitHasDrones && !dronesFiring;
+
+  // Audio cues on state transitions (only while a real fight is live). Scram
+  // and point come from the combat log; webs are never logged so there's no
+  // web cue. Fires on the edge so it announces once per change, not per tick.
+  const scrammed = (latestTick?.byPilot ?? []).some((p) => p.scramIn);
+  const pointed = (latestTick?.byPilot ?? []).some((p) => p.pointIn);
+  const cuesRef = useRef({ scram: false, point: false, drones: false });
+  useEffect(() => {
+    if (!enabled || !fightActive) {
+      cuesRef.current = { scram: false, point: false, drones: false };
+      return;
+    }
+    const prev = cuesRef.current;
+    if (scrammed && !prev.scram) playCue("scram");
+    else if (!scrammed && prev.scram) playCue("scramOff");
+    if (pointed && !prev.point) playCue("point");
+    else if (!pointed && prev.point) playCue("pointOff");
+    if (droneReminder && !prev.drones) playCue("drones");
+    cuesRef.current = { scram: scrammed, point: pointed, drones: droneReminder };
+  }, [enabled, fightActive, scrammed, pointed, droneReminder]);
+
+  // The Test button shows the sample panel AND plays the cue clips so you can
+  // hear them (fired from the click gesture, which autoplay policies want).
+  // Staggered so the clips don't overlap.
+  function runTest() {
+    setTestFight(buildTestFight());
+    const demo: CueSound[] = ["scram", "point", "drones"];
+    demo.forEach((name, i) => setTimeout(() => playCue(name), i * 1500));
+  }
+
   return (
-    <FightOverlayContext.Provider value={{ enabled, setEnabled }}>
+    <FightOverlayContext.Provider value={{ enabled, setEnabled, runTest }}>
       {children}
-      {fightActive && (
+      {/* Test preview takes precedence over a live fight so the button always
+          shows the sample; both are the same fixed panel. */}
+      {testFight ? (
         <FightPanel
-          ticks={fightTicks}
-          attackers={activeAttackers}
-          myWeapons={latestTick?.byWeapon ?? []}
+          ticks={testFight.ticks}
+          attackers={testFight.attackers}
+          myWeapons={testFight.myWeapons}
           localFits={localFits.data ?? []}
-          selectedFitId={selectedFitId}
-          onSelectFit={setSelectedFitId}
-          fitWeaponRanges={fitStats.data?.weaponRanges ?? []}
-          onDismiss={() => setFightDismissed(true)}
+          selectedFitId={null}
+          onSelectFit={() => {}}
+          fitWeaponRanges={testFight.fitWeaponRanges}
+          myShip={testFight.myShip}
+          autoFitName={testFight.autoFitName}
+          droneReminder={testFight.droneReminder}
+          onDismiss={() => setTestFight(null)}
         />
+      ) : (
+        fightActive && (
+          <FightPanel
+            ticks={fightTicks}
+            attackers={activeAttackers}
+            myWeapons={latestTick?.byWeapon ?? []}
+            localFits={localFits.data ?? []}
+            selectedFitId={selectedFitId}
+            onSelectFit={setSelectedFitId}
+            fitWeaponRanges={fitStats.data?.weaponRanges ?? []}
+            myShip={ship}
+            autoFitName={
+              autoFit && selectedFitId == null ? autoFit.name : undefined
+            }
+            droneReminder={droneReminder}
+            onDismiss={() => setFightDismissed(true)}
+          />
+        )
       )}
     </FightOverlayContext.Provider>
   );

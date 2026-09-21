@@ -38,6 +38,14 @@ pub enum EventKind {
     CapWarfareOut,
     /// Your capacitor removed/stolen by an enemy.
     CapWarfareIn,
+    /// You scrambled a target (warp scramble attempt from you).
+    ScramOut,
+    /// A target scrambled you (warp scramble attempt to you).
+    ScramIn,
+    /// You pointed a target (warp disruption attempt from you).
+    PointOut,
+    /// A target pointed you (warp disruption attempt to you).
+    PointIn,
     /// Ore mined (the amount is in *units*; `volume` carries the m³ once the tail
     /// loop resolves the ore's volume from the SDE).
     Mining,
@@ -75,6 +83,20 @@ pub fn parse_line(line: &str) -> Option<DpsEvent> {
         return None;
     }
     let ts = parse_ts(line)?;
+    // Miss lines carry no damage number and no `>to<`/`>from<` marker, so they
+    // must be recognised before `classify`/`first_bold_int` (which would drop
+    // them). "Your <weapon> misses <target> completely - <weapon>" outgoing,
+    // "<attacker> misses you completely" incoming.
+    if line.contains(" misses ") && line.contains("completely") {
+        return parse_miss(line, ts);
+    }
+    // Tackle lines ("Warp scramble/disruption attempt from A to B") carry no
+    // damage number, so they must be handled before `first_bold_int` drops
+    // them. Only tackle you're part of is kept, attributed to the other pilot.
+    if line.contains("Warp scramble attempt") || line.contains("Warp disruption attempt")
+    {
+        return parse_tackle(line, ts);
+    }
     let kind = classify(line)?;
     let amount = first_bold_int(line)?.unsigned_abs() as i64;
     // Pilot/ship/weapon are only meaningful (and only present) on damage lines;
@@ -94,6 +116,109 @@ pub fn parse_line(line: &str) -> Option<DpsEvent> {
         ore: None,
         volume: 0.0,
     })
+}
+
+/// Parse a miss line (a `(combat)` line with no damage number):
+///  - outgoing: `Your <weapon> misses <target> completely - <weapon>`
+///  - incoming: `<attacker> misses you completely`
+/// Emitted as a zero-amount damage event with quality `Misses`, so it counts
+/// toward the hit-quality distribution without moving DPS.
+fn parse_miss(line: &str, ts: i64) -> Option<DpsEvent> {
+    let body = line.find("(combat) ").map(|i| &line[i + "(combat) ".len()..])?;
+    let miss = body.find(" misses ")?;
+    let left = body[..miss].trim();
+    let right = body[miss + " misses ".len()..].trim();
+    // Incoming: the target of the miss is us ("… misses you completely").
+    if right.starts_with("you completely") {
+        return Some(DpsEvent {
+            ts,
+            kind: EventKind::DamageIn,
+            amount: 0,
+            pilot: (!left.is_empty()).then(|| left.to_string()),
+            ship: None,
+            weapon: None,
+            quality: Some("Misses".to_string()),
+            ore: None,
+            volume: 0.0,
+        });
+    }
+    // Outgoing: `Your <weapon> misses <target> completely[ - <weapon>]`.
+    let weapon = left.strip_prefix("Your ").map(|w| w.trim().to_string());
+    let target = right
+        .find(" completely")
+        .map(|i| right[..i].trim().to_string())
+        .filter(|t| !t.is_empty());
+    Some(DpsEvent {
+        ts,
+        kind: EventKind::DamageOut,
+        amount: 0,
+        pilot: target,
+        ship: None,
+        weapon,
+        quality: Some("Misses".to_string()),
+        ore: None,
+        volume: 0.0,
+    })
+}
+
+/// Parse a tackle line into a directional event. EVE logs these as `(combat)`
+/// lines shaped like `Warp {scramble|disruption} attempt from <A> to <B>`,
+/// where either side may be "you". We keep only tackle you're part of and
+/// attribute it to the *other* pilot; an attempt between two other pilots (or a
+/// malformed line) returns `None`. The amount is 0 — tackle is a state flag,
+/// not a rate.
+fn parse_tackle(line: &str, ts: i64) -> Option<DpsEvent> {
+    let scram = line.contains("Warp scramble attempt");
+    // Source and target straddle EVE's `>to ` separator, which follows the
+    // `from</font>` marker. "you" appears as `<b>you</b>` (source) or `you!`
+    // (target).
+    let after_from = line.split("from</font>").nth(1)?;
+    let (src, tgt) = after_from.split_once(">to ")?;
+    let src_you = src.contains(">you<");
+    let tgt_you = tgt.contains("you!");
+    let (kind, other) = match (src_you, tgt_you) {
+        (true, false) => (
+            if scram { EventKind::ScramOut } else { EventKind::PointOut },
+            tgt,
+        ),
+        (false, true) => (
+            if scram { EventKind::ScramIn } else { EventKind::PointIn },
+            src,
+        ),
+        _ => return None,
+    };
+    Some(DpsEvent {
+        ts,
+        kind,
+        amount: 0,
+        pilot: Some(first_bold_text(other)?),
+        ship: None,
+        weapon: None,
+        quality: None,
+        ore: None,
+        volume: 0.0,
+    })
+}
+
+/// First non-empty plain text inside a `<b>…</b>` block of `s` (skipping the
+/// literal "you"). Tackle lines wrap the pilot name in bold, sometimes after an
+/// empty `<b>` and nested colour/font tags, so we scan bold blocks and return
+/// the first that carries a real name, trimmed of any `[CORP]`/`(SHIP)` suffix.
+fn first_bold_text(s: &str) -> Option<String> {
+    let mut rest = s;
+    while let Some(i) = rest.find("<b>") {
+        let after = &rest[i + 3..];
+        let end = after.find("</b>")?;
+        let text = strip_tags(&after[..end]);
+        let text = text.trim();
+        if !text.is_empty() && text != "you" {
+            let name = text.split('[').next().unwrap_or(text);
+            let name = name.split('(').next().unwrap_or(name).trim();
+            return Some(name.to_string());
+        }
+        rest = &after[end + 4..];
+    }
+    None
 }
 
 /// Parse a `(mining)` line: `… <b>34</b> units of <…>Veldspar<…>`. The amount is
@@ -186,8 +311,8 @@ fn extract_actor(
                 }
             }
         }
-        // Weapon: the first ` - `-separated field after the name block (the tail
-        // looks like ` - WEAPON - quality`; drop the leading separator first).
+        // The tail after the name block looks like ` - WEAPON - quality`; drop
+        // the leading separator, then split on " - ".
         let tail_txt = strip_tags(tail);
         let fields: Vec<&str> = tail_txt
             .trim_start_matches(['-', ' '])
@@ -195,10 +320,15 @@ fn extract_actor(
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .collect();
-        weapon = fields.first().map(|s| s.to_string());
-        // The hit quality is the last field ("… - WEAPON - Smashes"; a bare
-        // "… - Hits" has quality only, which first() also picked up as weapon —
-        // long-standing behaviour the breakdown table tolerates).
+        // Two fields = "WEAPON - quality" (turrets/missiles/drones, and player
+        // attackers whose ammo the log names); one field = quality only (NPC
+        // attackers, whose weapon EVE never names). Only the two-field shape
+        // has a real weapon.
+        weapon = if fields.len() >= 2 {
+            fields.first().map(|s| s.to_string())
+        } else {
+            None
+        };
         quality = fields.last().map(|s| s.to_string());
     }
     (pilot, ship, weapon, quality)
@@ -389,7 +519,10 @@ mod tests {
         assert_eq!(e.kind, EventKind::DamageIn);
         assert_eq!(e.pilot.as_deref(), Some("Angel Cartel Outlaw"));
         assert_eq!(e.ship, None);
-        assert_eq!(e.weapon.as_deref(), Some("Hits"));
+        // Single trailing field is the quality, not a weapon — NPC attackers'
+        // weapons are never named by the log.
+        assert_eq!(e.weapon, None);
+        assert_eq!(e.quality.as_deref(), Some("Hits"));
     }
 
     #[test]
@@ -415,5 +548,72 @@ mod tests {
     fn ignores_non_combat_lines() {
         assert!(parse_line("[ 2026.06.25 12:00:00 ] (none) Some other line").is_none());
         assert!(parse_line("garbage").is_none());
+    }
+
+    #[test]
+    fn parses_player_incoming_ammo_and_quality() {
+        // A player attacker's ammo IS named on incoming lines ("- ammo - quality").
+        let line = "[ 2026.06.25 12:00:00 ] (combat) <color=0xffcc0000><b>22</b> <color=0x77ffffff><font size=10>from</font> <b><color=0xffffffff>Dieter Isu</b><color=0x77ffffff><font size=10> - Inferno Rage Rocket - Hits</font></color>";
+        let e = parse_line(line).unwrap();
+        assert_eq!(e.kind, EventKind::DamageIn);
+        assert_eq!(e.pilot.as_deref(), Some("Dieter Isu"));
+        assert_eq!(e.weapon.as_deref(), Some("Inferno Rage Rocket"));
+        assert_eq!(e.quality.as_deref(), Some("Hits"));
+    }
+
+    #[test]
+    fn parses_outgoing_miss() {
+        let line = "[ 2026.06.25 12:00:00 ] (combat) Your Hobgoblin II misses Imperial Coercer completely - Hobgoblin II";
+        let e = parse_line(line).unwrap();
+        assert_eq!(e.kind, EventKind::DamageOut);
+        assert_eq!(e.amount, 0);
+        assert_eq!(e.pilot.as_deref(), Some("Imperial Coercer"));
+        assert_eq!(e.weapon.as_deref(), Some("Hobgoblin II"));
+        assert_eq!(e.quality.as_deref(), Some("Misses"));
+    }
+
+    #[test]
+    fn parses_incoming_miss() {
+        let line = "[ 2026.06.25 12:00:00 ] (combat) Imperial Coercer misses you completely";
+        let e = parse_line(line).unwrap();
+        assert_eq!(e.kind, EventKind::DamageIn);
+        assert_eq!(e.amount, 0);
+        assert_eq!(e.pilot.as_deref(), Some("Imperial Coercer"));
+        assert_eq!(e.weapon, None);
+        assert_eq!(e.quality.as_deref(), Some("Misses"));
+    }
+
+    // Real tackle lines (trimmed of the exact colour hex but keeping every
+    // structural marker the parser keys off).
+    const POINT_IN: &str = "[ 2026.06.25 12:00:00 ] (combat) <color=0xffffffff><b>Warp disruption attempt</b> <color=0x77ffffff><font size=10>from</font> <color=0xffffffff><b>Renouncer Coercer</b> <color=0x77ffffff><font size=10>to <b><color=0xffffffff></font>you!";
+    const SCRAM_IN: &str = "[ 2026.06.25 12:00:00 ] (combat) <color=0xffffffff><b>Warp scramble attempt</b> <color=0x77ffffff><font size=10>from</font> <color=0xffffffff><b><font size=12><color=0xFFFFFFFF><b>Dieter Isu</b> </color></font> <font size=12><color=0xFFFFFFFF><b>Kestrel</b></color></font></b> <color=0x77ffffff><font size=10>to <b><color=0xffffffff></font>you!";
+    const SCRAM_OUT: &str = "[ 2026.06.25 12:00:00 ] (combat) <color=0xffffffff><b>Warp scramble attempt</b> <color=0x77ffffff><font size=10>from</font> <color=0xffffffff><b>you</b> <color=0x77ffffff><font size=10>to <b><color=0xffffffff></font><font size=12><color=0xFFFFFFFF><b>Dieter Isu</b> </color></font> <font size=12><color=0xFFFFFFFF><b>Kestrel</b></color></font>";
+    const POINT_OTHERS: &str = "[ 2026.06.25 12:00:00 ] (combat) <color=0xffffffff><b>Warp disruption attempt</b> <color=0x77ffffff><font size=10>from</font> <color=0xffffffff><b>Keeper Rifter</b> <color=0x77ffffff><font size=10>to <b><color=0xffffffff></font>Renouncer Punisher";
+
+    #[test]
+    fn parses_incoming_point_and_scram() {
+        let p = parse_line(POINT_IN).unwrap();
+        assert_eq!(p.kind, EventKind::PointIn);
+        assert_eq!(p.pilot.as_deref(), Some("Renouncer Coercer"));
+        assert_eq!(p.amount, 0);
+        assert_eq!(p.ts, ts());
+
+        let s = parse_line(SCRAM_IN).unwrap();
+        assert_eq!(s.kind, EventKind::ScramIn);
+        // The pilot name is pulled from the first real bold block, not the ship.
+        assert_eq!(s.pilot.as_deref(), Some("Dieter Isu"));
+    }
+
+    #[test]
+    fn parses_outgoing_scram_to_the_target() {
+        let s = parse_line(SCRAM_OUT).unwrap();
+        assert_eq!(s.kind, EventKind::ScramOut);
+        assert_eq!(s.pilot.as_deref(), Some("Dieter Isu"));
+    }
+
+    #[test]
+    fn ignores_tackle_between_two_other_pilots() {
+        // Neither side is "you" — irrelevant to a personal meter.
+        assert!(parse_line(POINT_OTHERS).is_none());
     }
 }
