@@ -27,6 +27,7 @@ import {
 } from "../../components/SortHeaderCell";
 import { InlineError } from "../../components/InlineError";
 import { usePersistentSort } from "../../lib/usePersistentSort";
+import { usePersistentState } from "../../lib/usePersistentState";
 
 /** Militia faction id → accent hex, used for the map + legend. */
 const FACTION_HEX: Record<number, string> = {
@@ -76,6 +77,15 @@ const CONTEST_RANK: Record<string, number> = {
   vulnerable: 2,
   captured: 3,
 };
+
+/** Warzone-list filter: contested (any active contest — contested/vulnerable/
+ *  captured), uncontested (quiet), or all. */
+type FwSystemFilter = "all" | "contested" | "uncontested";
+const FW_FILTERS: readonly { key: FwSystemFilter; label: string }[] = [
+  { key: "all", label: "All" },
+  { key: "contested", label: "Contested" },
+  { key: "uncontested", label: "Uncontested" },
+];
 
 type FwSortKey =
   | "name"
@@ -320,6 +330,21 @@ function Warzone({ data, zone }: { data: FwMap; zone: string }) {
   );
   const ids = useMemo(() => new Set(systems.map((s) => s.systemId)), [systems]);
 
+  // Warzone-list filter (persisted). Only scopes the per-system table; the
+  // control map keeps showing the whole warzone.
+  const [filter, setFilter] = usePersistentState<FwSystemFilter>(
+    "fw.systemFilter",
+    "all",
+  );
+  const tableSystems = useMemo(() => {
+    if (filter === "all") return systems;
+    return systems.filter((s) =>
+      filter === "contested"
+        ? s.contested !== "uncontested"
+        : s.contested === "uncontested",
+    );
+  }, [systems, filter]);
+
   // Auth: needed for jump distances + waypoint button in the table.
   const characters = useQuery({
     queryKey: ["auth", "characters"],
@@ -408,7 +433,32 @@ function Warzone({ data, zone }: { data: FwMap; zone: string }) {
 
   return (
     <div className="mt-4">
-      <SystemTable systems={systems} dist={dist} hasCharacter={hasCharacter} />
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <span className="text-xs text-zinc-500">Show</span>
+        <div className="flex overflow-hidden rounded border border-zinc-700 text-sm">
+          {FW_FILTERS.map((f) => (
+            <button
+              key={f.key}
+              onClick={() => setFilter(f.key)}
+              className={`px-3 py-1 ${
+                filter === f.key
+                  ? "bg-zinc-700 text-zinc-100"
+                  : "text-zinc-400 hover:bg-zinc-800"
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <span className="text-xs text-zinc-600">
+          {tableSystems.length} of {systems.length} systems
+        </span>
+      </div>
+      <SystemTable
+        systems={tableSystems}
+        dist={dist}
+        hasCharacter={hasCharacter}
+      />
 
       <div className="mt-4 mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-zinc-400">
         <span>{systems.length} systems</span>
