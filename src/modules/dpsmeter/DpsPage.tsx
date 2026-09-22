@@ -336,7 +336,10 @@ function PlaybackTimeline({
 
   const svgRef = useRef<SVGSVGElement | null>(null);
   const { drag, handlers } = useDragZoom(svgRef, w, (f0, f1) =>
-    onSelectRegion(Math.round(start + f0 * span), Math.round(start + f1 * span)),
+    onSelectRegion(
+      Math.round(start + f0 * span),
+      Math.round(start + f1 * span),
+    ),
   );
 
   return (
@@ -778,7 +781,12 @@ export function DpsPage() {
       if (!activeRef.current) return;
       const el = document.activeElement as HTMLElement | null;
       const tag = el?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable)
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        el?.isContentEditable
+      )
         return;
       e.preventDefault();
       toggleTransportRef.current();
@@ -892,7 +900,8 @@ export function DpsPage() {
   // Tackle status from the newest tick: who is holding you down (scram/point
   // in) and who you are holding (out). Drives the warning banner.
   const tackledBy = latest?.byPilot.filter((p) => p.scramIn || p.pointIn) ?? [];
-  const tackling = latest?.byPilot.filter((p) => p.scramOut || p.pointOut) ?? [];
+  const tackling =
+    latest?.byPilot.filter((p) => p.scramOut || p.pointOut) ?? [];
 
   // Mining overview: session total + a normalized rate series over the last
   // MINING_BARS intervals ending at the newest tick. Mining lasers deliver ore
@@ -1223,7 +1232,11 @@ export function DpsPage() {
             [
               { value: "side", label: "Side by side", Icon: Columns2 },
               { value: "stacked", label: "Stacked", Icon: Rows2 },
-              { value: "combined", label: "Combined (one panel)", Icon: Layers },
+              {
+                value: "combined",
+                label: "Combined (one panel)",
+                Icon: Layers,
+              },
             ] as const
           ).map(({ value, label, Icon }) => (
             <button
@@ -1261,7 +1274,11 @@ export function DpsPage() {
               series={outSeries}
               title="Outgoing"
             />
-            <DpsChart ticks={filteredTicks} series={inSeries} title="Incoming" />
+            <DpsChart
+              ticks={filteredTicks}
+              series={inSeries}
+              title="Incoming"
+            />
           </>
         )}
       </div>
@@ -1349,7 +1366,11 @@ const QUALITY_TIERS = [
   { key: "penetrates", label: "Pen", color: "#34d399" },
   { key: "smashes", label: "Smash", color: "#a3e635" },
   { key: "wrecks", label: "Wreck", color: "#f472b6" },
-] as const satisfies readonly { key: keyof HitQuality; label: string; color: string }[];
+] as const satisfies readonly {
+  key: keyof HitQuality;
+  label: string;
+  color: string;
+}[];
 
 /** Compact stacked bar of a combatant's hit-quality distribution, worst
  *  (left) → best (right), with a labelled legend of the present tiers below
@@ -1366,7 +1387,10 @@ function QualityBar({ q }: { q?: HitQuality }) {
         {present.map((t) => (
           <span
             key={t.key}
-            style={{ width: `${(q[t.key] / total) * 100}%`, background: t.color }}
+            style={{
+              width: `${(q[t.key] / total) * 100}%`,
+              background: t.color,
+            }}
           />
         ))}
       </span>
@@ -1788,7 +1812,9 @@ function HoverPilotRow({
         >
           <span className="max-w-[11rem] truncate">
             {wpn.name}
-            {wpn.kind ? <span className="text-zinc-600"> · {wpn.kind}</span> : null}
+            {wpn.kind ? (
+              <span className="text-zinc-600"> · {wpn.kind}</span>
+            ) : null}
             {wpn.damage ? (
               <span className="text-zinc-600"> [{wpn.damage}]</span>
             ) : null}

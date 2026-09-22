@@ -527,7 +527,8 @@ export function PvpPage() {
   const result = scan.data;
 
   // Fight overlay toggle — state lives in FightOverlayProvider at the app root.
-  const { enabled: fightScanOn, setEnabled: setFightScanOn } = useFightOverlay();
+  const { enabled: fightScanOn, setEnabled: setFightScanOn } =
+    useFightOverlay();
 
   // When arriving via attacker-click from Local Intel, auto-scan the pre-filled name.
   useEffect(() => {
@@ -536,87 +537,87 @@ export function PvpPage() {
   }, []); // intentionally run once on mount only
   return (
     <Page>
-        <PageHeader
-          title="PVP"
-          subtitle="Paste pilot names → each one's kills, losses and threat from zKillboard."
-          actions={
-            <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-400">
-              <input
-                type="checkbox"
-                checked={fightScanOn}
-                onChange={(e) => setFightScanOn(e.currentTarget.checked)}
-              />
-              Show fight overlay
-            </label>
-          }
+      <PageHeader
+        title="PVP"
+        subtitle="Paste pilot names → each one's kills, losses and threat from zKillboard."
+        actions={
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-400">
+            <input
+              type="checkbox"
+              checked={fightScanOn}
+              onChange={(e) => setFightScanOn(e.currentTarget.checked)}
+            />
+            Show fight overlay
+          </label>
+        }
+      />
+      <div className="mt-4 flex flex-col gap-2">
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              if (!scan.isPending && text.trim() !== "") scan.mutate();
+            }
+          }}
+          placeholder="Paste pilot names, one per line…"
+          rows={5}
+          className="w-full rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-sm text-zinc-100 placeholder:text-zinc-600"
         />
-        <div className="mt-4 flex flex-col gap-2">
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                if (!scan.isPending && text.trim() !== "") scan.mutate();
-              }
-            }}
-            placeholder="Paste pilot names, one per line…"
-            rows={5}
-            className="w-full rounded-lg border border-zinc-800 bg-zinc-950 p-3 font-mono text-sm text-zinc-100 placeholder:text-zinc-600"
-          />
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => scan.mutate()}
-              disabled={scan.isPending || text.trim() === ""}
-              className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm text-white hover:bg-indigo-500 disabled:opacity-50"
-            >
-              {scan.isPending ? "Profiling…" : "Profile pilots"}
-            </button>
-            <span className="text-xs text-zinc-500">
-              Enter to submit · Shift+Enter for a new line
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => scan.mutate()}
+            disabled={scan.isPending || text.trim() === ""}
+            className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm text-white hover:bg-indigo-500 disabled:opacity-50"
+          >
+            {scan.isPending ? "Profiling…" : "Profile pilots"}
+          </button>
+          <span className="text-xs text-zinc-500">
+            Enter to submit · Shift+Enter for a new line
+          </span>
+          {scan.isError && (
+            <span className="text-sm text-red-400">
+              Lookup failed — try again.
             </span>
-            {scan.isError && (
-              <span className="text-sm text-red-400">
-                Lookup failed — try again.
-              </span>
-            )}
-          </div>
+          )}
         </div>
+      </div>
 
-        {result && (
-          <div className="mt-4 flex flex-col gap-3">
-            {result.pilots.length > 0 && (
-              <div className="flex items-center gap-2 text-xs text-zinc-400">
-                <span>Lost fits per pilot:</span>
-                {[5, 10].map((n) => (
-                  <button
-                    key={n}
-                    onClick={() => setFitLimit(n)}
-                    className={`rounded px-2 py-0.5 ${
-                      fitLimit === n
-                        ? "bg-indigo-600 text-white"
-                        : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
-                    }`}
-                  >
-                    {n}
-                  </button>
-                ))}
-              </div>
-            )}
-            {result.pilots.length === 0 ? (
-              <p className="text-sm text-zinc-500">No pilots resolved.</p>
-            ) : (
-              result.pilots.map((p) => (
-                <PilotCard key={p.characterId} p={p} fitLimit={fitLimit} />
-              ))
-            )}
-            {result.unresolved.length > 0 && (
-              <p className="text-xs text-zinc-500">
-                Couldn&apos;t resolve: {result.unresolved.join(", ")}
-              </p>
-            )}
-          </div>
-        )}
-      </Page>
+      {result && (
+        <div className="mt-4 flex flex-col gap-3">
+          {result.pilots.length > 0 && (
+            <div className="flex items-center gap-2 text-xs text-zinc-400">
+              <span>Lost fits per pilot:</span>
+              {[5, 10].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setFitLimit(n)}
+                  className={`rounded px-2 py-0.5 ${
+                    fitLimit === n
+                      ? "bg-indigo-600 text-white"
+                      : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          )}
+          {result.pilots.length === 0 ? (
+            <p className="text-sm text-zinc-500">No pilots resolved.</p>
+          ) : (
+            result.pilots.map((p) => (
+              <PilotCard key={p.characterId} p={p} fitLimit={fitLimit} />
+            ))
+          )}
+          {result.unresolved.length > 0 && (
+            <p className="text-xs text-zinc-500">
+              Couldn&apos;t resolve: {result.unresolved.join(", ")}
+            </p>
+          )}
+        </div>
+      )}
+    </Page>
   );
 }
