@@ -255,7 +255,9 @@ function FightPanel({
             <div className="flex flex-col gap-1.5">
               {myWeapons.map((w, i) => (
                 <div key={i} className="flex items-center gap-3 text-base">
-                  <span className="flex-1 truncate text-zinc-200">{w.name}</span>
+                  <span className="flex-1 truncate text-zinc-200">
+                    {w.name}
+                  </span>
                   <span className="shrink-0 font-semibold tabular-nums text-emerald-400">
                     {Math.round(w.dps)} dps
                   </span>
@@ -427,9 +429,7 @@ function buildTestFight(): TestFight {
         weapons: ["Light Ion Blaster II"],
       },
     ],
-    myWeapons: [
-      { name: "Caldari Navy Inferno Rocket", dps: Math.round(out) },
-    ],
+    myWeapons: [{ name: "Caldari Navy Inferno Rocket", dps: Math.round(out) }],
     fitWeaponRanges: [
       { typeId: 1, optimal: 12_000, falloff: 8_000 } as WeaponRange,
     ],
@@ -618,7 +618,11 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     if (pointed && !prev.point) playCue("point");
     else if (!pointed && prev.point) playCue("pointOff");
     if (droneReminder && !prev.drones) playCue("drones");
-    cuesRef.current = { scram: scrammed, point: pointed, drones: droneReminder };
+    cuesRef.current = {
+      scram: scrammed,
+      point: pointed,
+      drones: droneReminder,
+    };
   }, [enabled, fightActive, scrammed, pointed, droneReminder]);
 
   // The Test button shows the sample panel AND plays the cue clips so you can

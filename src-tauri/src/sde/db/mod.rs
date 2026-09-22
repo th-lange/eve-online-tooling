@@ -412,8 +412,7 @@ fn damage_label(em: f64, therm: f64, kin: f64, exp: f64) -> Option<String> {
     if total <= 0.0 {
         return None;
     }
-    let mut parts: Vec<(&str, f64)> =
-        vec![("EM", em), ("Th", therm), ("Kin", kin), ("Exp", exp)];
+    let mut parts: Vec<(&str, f64)> = vec![("EM", em), ("Th", therm), ("Kin", kin), ("Exp", exp)];
     parts.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     let label = parts
         .into_iter()
@@ -546,10 +545,7 @@ mod tests {
         // Pure kinetic → single label.
         assert_eq!(damage_label(0.0, 0.0, 9.0, 0.0).as_deref(), Some("Kin"));
         // Antimatter-style kinetic+thermal split → both, largest first.
-        assert_eq!(
-            damage_label(0.0, 4.0, 5.0, 0.0).as_deref(),
-            Some("Kin/Th"),
-        );
+        assert_eq!(damage_label(0.0, 4.0, 5.0, 0.0).as_deref(), Some("Kin/Th"),);
         // A negligible fourth component (<25%) is dropped.
         assert_eq!(damage_label(10.0, 1.0, 0.0, 0.0).as_deref(), Some("EM"));
         // No damage → no label.
@@ -576,7 +572,10 @@ mod tests {
     fn weapon_group_resolves_group_by_name() {
         let sde = fixture();
         // Case-insensitive name → its group name; unknown → None.
-        assert_eq!(sde.weapon_group("widget").unwrap().as_deref(), Some("Widgets"));
+        assert_eq!(
+            sde.weapon_group("widget").unwrap().as_deref(),
+            Some("Widgets")
+        );
         assert_eq!(sde.weapon_group("Nonexistent").unwrap(), None);
     }
 

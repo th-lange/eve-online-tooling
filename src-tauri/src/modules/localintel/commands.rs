@@ -633,7 +633,7 @@ pub async fn localintel_system_kills(
             Some(cached)
         } else {
             let fetched: Option<FullKillmail> =
-                crate::esi::fetch_killmail(&http, r.killmail_id, &r.zkb.hash).await;
+                crate::esi::fetch_killmail(http, r.killmail_id, &r.zkb.hash).await;
             if let Some(ref k) = fetched {
                 let _ = storage::cache_put(&dir, &key, k, SYSTEM_KILL_TTL_SECS);
             }

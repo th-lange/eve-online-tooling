@@ -14,17 +14,38 @@ import type {
 let tickHandler: ((t: DpsTick) => void) | undefined;
 vi.mock("@tauri-apps/api/event", () => ({
   listen: (name: string, handler: (e: { payload: DpsTick }) => void) => {
-    if (name === "dps://tick") tickHandler = (t: DpsTick) => handler({ payload: t });
+    if (name === "dps://tick")
+      tickHandler = (t: DpsTick) => handler({ payload: t });
     return Promise.resolve(() => {});
   },
 }));
 
 function makeTick(at: number): DpsTick {
-  const hq = { misses: 0, glances: 0, grazes: 0, hits: 0, penetrates: 0, smashes: 0, wrecks: 0 };
+  const hq = {
+    misses: 0,
+    glances: 0,
+    grazes: 0,
+    hits: 0,
+    penetrates: 0,
+    smashes: 0,
+    wrecks: 0,
+  };
   return {
-    at, windowSecs: 10, dpsOut: 50, dpsIn: 0, logiOut: 0, logiIn: 0,
-    capWarfareOut: 0, capWarfareIn: 0, capTransferOut: 0, capTransferIn: 0,
-    miningM3: 0, hitsOut: hq, hitsIn: hq, byWeapon: [], byPilot: [],
+    at,
+    windowSecs: 10,
+    dpsOut: 50,
+    dpsIn: 0,
+    logiOut: 0,
+    logiIn: 0,
+    capWarfareOut: 0,
+    capWarfareIn: 0,
+    capTransferOut: 0,
+    capTransferIn: 0,
+    miningM3: 0,
+    hitsOut: hq,
+    hitsIn: hq,
+    byWeapon: [],
+    byPilot: [],
   };
 }
 
