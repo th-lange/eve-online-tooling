@@ -244,7 +244,9 @@ function Workbench() {
               <PasteImportControl
                 label="Paste list"
                 title="Paste a loose item list (contract, multibuy, cargo/asset paste) to build a fit"
-                placeholder={"paste an item list — one item per line\n(contract, multibuy, cargo scan…)"}
+                placeholder={
+                  "paste an item list — one item per line\n(contract, multibuy, cargo scan…)"
+                }
                 value={editor.listText}
                 setValue={editor.setListText}
                 onImport={() => editor.importList.mutate()}
