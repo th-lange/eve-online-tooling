@@ -134,6 +134,170 @@ pub fn fitting_import_eft(app: AppHandle, text: String) -> Result<Fit, String> {
     import_eft_to_fit(&sde, &text)
 }
 
+/// Parse a bare quantity token — digits with optional thousands separators.
+/// `None` if it isn't purely a number.
+fn parse_qty(s: &str) -> Option<i64> {
+    let cleaned: String = s
+        .chars()
+        .filter(|c| !matches!(c, ',' | '.' | ' ' | '\''))
+        .collect();
+    if cleaned.is_empty() || !cleaned.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    cleaned.parse().ok()
+}
+
+/// Parse one line of a loose item list into `(name, quantity)`. Tolerant of the
+/// common paste shapes: plain `Name`; multibuy `Name xN` / `Name N`; and
+/// tab-separated rows (contracts, cargo scans, asset/inventory lists — the name
+/// is the first column and the quantity the first later integer column). `None`
+/// for a blank line.
+fn parse_item_line(line: &str) -> Option<(String, i64)> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+    // Tab-separated row: name = first column; quantity = first later integer
+    // column (contracts/inventory put it in column 2), else 1.
+    if line.contains('\t') {
+        let mut cols = line.split('\t').map(str::trim);
+        let name = cols.next().unwrap_or("").to_string();
+        let qty = cols.find_map(parse_qty).unwrap_or(1);
+        return (!name.is_empty()).then_some((name, qty));
+    }
+    // Trailing "Name xN" / "Name x N".
+    if let Some((name, tail)) = line.rsplit_once('x') {
+        if let Some(q) = parse_qty(tail) {
+            let name = name.trim();
+            if !name.is_empty() {
+                return Some((name.to_string(), q));
+            }
+        }
+    }
+    // Trailing "Name N" (multibuy).
+    if let Some((name, tail)) = line.rsplit_once(char::is_whitespace) {
+        if let Some(q) = parse_qty(tail) {
+            let name = name.trim();
+            if !name.is_empty() {
+                return Some((name.to_string(), q));
+            }
+        }
+    }
+    Some((line.to_string(), 1))
+}
+
+/// Resolve one list line to `(type_id, quantity)` via the SDE, or `None` if it
+/// names nothing. Falls back to the raw line when the stripped-quantity name
+/// doesn't resolve (for the rare item name that ends in a number).
+fn resolve_list_item(sde: &Sde, line: &str) -> Result<Option<(i64, i64)>, String> {
+    let Some((name, qty)) = parse_item_line(line) else {
+        return Ok(None);
+    };
+    if let Some((id, _)) = sde.type_by_name(&name).map_err(|e| e.to_string())? {
+        return Ok(Some((id, qty)));
+    }
+    let raw = line.trim();
+    if raw != name {
+        if let Some((id, _)) = sde.type_by_name(raw).map_err(|e| e.to_string())? {
+            return Ok(Some((id, 1)));
+        }
+    }
+    Ok(None)
+}
+
+/// Build a [`Fit`] from a loose, one-item-per-line list (contracts, multibuy,
+/// cargo/asset pastes) — a more flexible sibling of the EFT importer. The first
+/// ship (category 6) is the hull; every other resolved item is classified into
+/// its slot (slot modules expand per unit into separate slots; drones/cargo/
+/// implants stay stacked). Unknown lines are skipped; charges land in cargo
+/// (a loose list can't say which weapon they belong to). Errors only if no
+/// items resolve or no ship is present.
+pub(crate) fn import_list_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
+    let mut resolved: Vec<(i64, i64)> = Vec::new();
+    for line in text.lines() {
+        if let Some(item) = resolve_list_item(sde, line)? {
+            resolved.push(item);
+        }
+    }
+    if resolved.is_empty() {
+        return Err("no recognizable items in the list".into());
+    }
+    let ids: Vec<i64> = resolved.iter().map(|(id, _)| *id).collect();
+    let categories = sde.types_categories(&ids).map_err(|e| e.to_string())?;
+    let slots = classify_slots_batch(sde, &ids)?;
+    let ship_type_id = resolved
+        .iter()
+        .map(|(id, _)| *id)
+        .find(|id| categories.get(id).copied() == Some(6))
+        .ok_or("no ship hull found in the list — include the ship line")?;
+
+    let mut items = Vec::new();
+    let mut next_index: HashMap<SlotKind, i32> = HashMap::new();
+    let mut take_index = |slot: SlotKind| {
+        let n = next_index.entry(slot).or_default();
+        let idx = *n;
+        *n += 1;
+        idx
+    };
+    let mut hull_used = false;
+    for (id, qty) in resolved {
+        if id == ship_type_id && !hull_used {
+            hull_used = true; // this entry is the hull itself
+            continue;
+        }
+        let slot = slots.get(&id).copied().unwrap_or(SlotKind::Cargo);
+        let qty = qty.max(1);
+        let expands = matches!(
+            slot,
+            SlotKind::High
+                | SlotKind::Mid
+                | SlotKind::Low
+                | SlotKind::Rig
+                | SlotKind::Subsystem
+                | SlotKind::Mode
+        );
+        if expands {
+            // A real fit never carries more than a slot bank of one module (8
+            // highs at most); cap so a bulk multibuy line can't explode.
+            for _ in 0..qty.min(8) {
+                items.push(FitItem {
+                    type_id: id,
+                    slot,
+                    index: take_index(slot),
+                    state: ModuleState::Active,
+                    charge_type_id: None,
+                    quantity: 1,
+                    active_drones: None,
+                });
+            }
+        } else {
+            items.push(FitItem {
+                type_id: id,
+                slot,
+                index: take_index(slot),
+                state: ModuleState::Active,
+                charge_type_id: None,
+                quantity: qty.min(i32::MAX as i64) as i32,
+                active_drones: None,
+            });
+        }
+    }
+    Ok(Fit {
+        id: new_fit_id(),
+        name: format!("{} (imported)", sde.type_name_or_id(ship_type_id)),
+        ship_type_id,
+        items,
+        projected: Vec::new(),
+    })
+}
+
+/// Tauri wrapper: open the SDE, then build a fit from a pasted item list.
+#[tauri::command]
+pub fn fitting_import_list(app: AppHandle, text: String) -> Result<Fit, String> {
+    let sde = crate::sde::open_from_app(&app)?;
+    import_list_to_fit(&sde, &text)
+}
+
 /// Next free 0-based index for `slot`, i.e. one past the highest currently used
 /// (or 0 when the slot is empty). Pure, so the placement logic is unit-tested
 /// without an SDE.
@@ -1541,5 +1705,83 @@ mod tests {
             ..item(11, SlotKind::Low, None, 1)
         });
         assert_eq!(next_slot_index(&items, SlotKind::Low), 2);
+    }
+
+    #[test]
+    fn parse_qty_accepts_only_numbers() {
+        assert_eq!(parse_qty("5"), Some(5));
+        assert_eq!(parse_qty("1,000"), Some(1000));
+        assert_eq!(parse_qty(" 42 "), Some(42));
+        assert_eq!(parse_qty("II"), None);
+        assert_eq!(parse_qty("Warrior"), None);
+        assert_eq!(parse_qty(""), None);
+    }
+
+    #[test]
+    fn parse_item_line_handles_common_paste_shapes() {
+        // Plain name.
+        assert_eq!(
+            parse_item_line("Warrior II"),
+            Some(("Warrior II".into(), 1)),
+        );
+        // Multibuy: trailing "xN" and " N".
+        assert_eq!(
+            parse_item_line("Warrior II x5"),
+            Some(("Warrior II".into(), 5)),
+        );
+        assert_eq!(
+            parse_item_line("Scourge Rage Rocket 5000"),
+            Some(("Scourge Rage Rocket".into(), 5000)),
+        );
+        // Tab-separated (contract/inventory): name col + first integer col.
+        assert_eq!(
+            parse_item_line("Rifter\t1\tFrigate\tShip"),
+            Some(("Rifter".into(), 1)),
+        );
+        // A trailing non-number stays part of the name.
+        assert_eq!(
+            parse_item_line("125mm Gatling AutoCannon II"),
+            Some(("125mm Gatling AutoCannon II".into(), 1)),
+        );
+        // Blank line.
+        assert_eq!(parse_item_line("   "), None);
+    }
+
+    /// End-to-end paste-list import against the real SDE (gated on
+    /// `EVE_SDE_PATH`, like the golden suite): resolves names, picks the hull,
+    /// classifies slots, stacks drones/ammo. Skips when the SDE isn't present.
+    #[test]
+    fn import_list_builds_a_fit_from_a_pasted_list() {
+        let Ok(path) = std::env::var("EVE_SDE_PATH") else {
+            eprintln!("import_list…: EVE_SDE_PATH unset — skipping");
+            return;
+        };
+        if !std::path::Path::new(&path).exists() {
+            eprintln!("import_list…: {path} missing — skipping");
+            return;
+        }
+        let sde = crate::sde::Sde::open(std::path::Path::new(&path)).expect("open sde");
+        let list = "\
+Rifter
+200mm AutoCannon II
+Warp Scrambler II
+Small Armor Repairer II
+Hobgoblin II x5
+Barrage S 1000
+Nanite Repair Paste\t50\tCommodity";
+        let fit = import_list_to_fit(&sde, list).expect("import");
+        let rifter = sde.type_by_name("Rifter").unwrap().unwrap().0;
+        assert_eq!(fit.ship_type_id, rifter, "hull is the Rifter");
+        assert!(fit.name.ends_with("(imported)"));
+        assert!(fit.items.iter().all(|i| i.type_id != rifter));
+        assert!(fit.items.iter().any(|i| i.slot == SlotKind::High));
+        let drones = sde.type_by_name("Hobgoblin II").unwrap().unwrap().0;
+        let drone = fit.items.iter().find(|i| i.type_id == drones).unwrap();
+        assert_eq!(drone.slot, SlotKind::Drone);
+        assert_eq!(drone.quantity, 5);
+        let barrage = sde.type_by_name("Barrage S").unwrap().unwrap().0;
+        let ammo = fit.items.iter().find(|i| i.type_id == barrage).unwrap();
+        assert_eq!(ammo.slot, SlotKind::Cargo);
+        assert_eq!(ammo.quantity, 1000);
     }
 }
