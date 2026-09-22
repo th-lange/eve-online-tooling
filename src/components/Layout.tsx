@@ -94,7 +94,11 @@ function FightOverlayToggle() {
   return (
     <button
       onClick={() => setEnabled(!enabled)}
-      title={enabled ? "Fight overlay on — click to disable" : "Fight overlay off — click to enable"}
+      title={
+        enabled
+          ? "Fight overlay on — click to disable"
+          : "Fight overlay off — click to enable"
+      }
       aria-label="Toggle fight overlay"
       className={`flex shrink-0 items-center rounded p-1.5 transition-colors ${
         enabled
