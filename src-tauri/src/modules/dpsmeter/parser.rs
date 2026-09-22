@@ -93,8 +93,7 @@ pub fn parse_line(line: &str) -> Option<DpsEvent> {
     // Tackle lines ("Warp scramble/disruption attempt from A to B") carry no
     // damage number, so they must be handled before `first_bold_int` drops
     // them. Only tackle you're part of is kept, attributed to the other pilot.
-    if line.contains("Warp scramble attempt") || line.contains("Warp disruption attempt")
-    {
+    if line.contains("Warp scramble attempt") || line.contains("Warp disruption attempt") {
         return parse_tackle(line, ts);
     }
     let kind = classify(line)?;
@@ -121,10 +120,13 @@ pub fn parse_line(line: &str) -> Option<DpsEvent> {
 /// Parse a miss line (a `(combat)` line with no damage number):
 ///  - outgoing: `Your <weapon> misses <target> completely - <weapon>`
 ///  - incoming: `<attacker> misses you completely`
+///
 /// Emitted as a zero-amount damage event with quality `Misses`, so it counts
 /// toward the hit-quality distribution without moving DPS.
 fn parse_miss(line: &str, ts: i64) -> Option<DpsEvent> {
-    let body = line.find("(combat) ").map(|i| &line[i + "(combat) ".len()..])?;
+    let body = line
+        .find("(combat) ")
+        .map(|i| &line[i + "(combat) ".len()..])?;
     let miss = body.find(" misses ")?;
     let left = body[..miss].trim();
     let right = body[miss + " misses ".len()..].trim();
@@ -178,11 +180,19 @@ fn parse_tackle(line: &str, ts: i64) -> Option<DpsEvent> {
     let tgt_you = tgt.contains("you!");
     let (kind, other) = match (src_you, tgt_you) {
         (true, false) => (
-            if scram { EventKind::ScramOut } else { EventKind::PointOut },
+            if scram {
+                EventKind::ScramOut
+            } else {
+                EventKind::PointOut
+            },
             tgt,
         ),
         (false, true) => (
-            if scram { EventKind::ScramIn } else { EventKind::PointIn },
+            if scram {
+                EventKind::ScramIn
+            } else {
+                EventKind::PointIn
+            },
             src,
         ),
         _ => return None,
