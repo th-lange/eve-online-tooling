@@ -23,6 +23,30 @@ function km(m: number): string {
   return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
 }
 
+/** Whether a tick shows live combat: damage dealt/taken, or active tackle. The
+ *  overlay stops accumulating ticks once combat ends (all of these fall to
+ *  zero), so the chart freezes on the fight instead of scrolling a flat zero
+ *  line as the idle capture keeps ticking. Exported for tests. */
+export function isCombatTick(t: DpsTick): boolean {
+  return (
+    t.dpsOut > 0 ||
+    t.dpsIn > 0 ||
+    t.byPilot.some((p) => p.scramIn || p.pointIn || p.scramOut || p.pointOut)
+  );
+}
+
+/** Overlay tick-buffer reducer: begin on first combat, keep appending while the
+ *  fight is live (capped at 120, incl. the final wind-down-to-zero tick), then
+ *  freeze once combat ends — and start a fresh buffer when a new fight begins,
+ *  so fights aren't mixed. Exported for tests. */
+export function nextFightTicks(prev: DpsTick[], tick: DpsTick): DpsTick[] {
+  const active = isCombatTick(tick);
+  if (prev.length === 0) return active ? [tick] : prev;
+  // Frozen (last tick idle): resume fresh only when new combat starts.
+  if (!isCombatTick(prev[prev.length - 1])) return active ? [tick] : prev;
+  return [...prev, tick].slice(-120);
+}
+
 // (audio cues use the shared cross-platform sound service — see lib/sound.ts)
 
 // ---------------------------------------------------------------- MiniDpsChart
@@ -470,7 +494,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     }
     let cancelled = false;
     onDpsTick((tick) => {
-      if (!cancelled) setFightTicks((prev) => [...prev, tick].slice(-120));
+      if (!cancelled) setFightTicks((prev) => nextFightTicks(prev, tick));
     }).then((fn) => {
       if (cancelled) fn();
       else unlistenRef.current = fn;
