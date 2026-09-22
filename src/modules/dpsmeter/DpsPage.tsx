@@ -23,6 +23,7 @@ import { ModuleActiveContext } from "../../components/moduleActiveContext";
 import {
   dpsListLogs,
   dpsLogSummary,
+  dpsLogStat,
   dpsPause,
   dpsPlayback,
   dpsResume,
@@ -801,15 +802,38 @@ export function DpsPage() {
       return;
     }
     let cancelled = false;
-    dpsLogSummary(file)
-      .then((s) => {
-        if (!cancelled) setSummary(s);
+    const load = () =>
+      dpsLogSummary(file)
+        .then((s) => {
+          if (!cancelled) setSummary(s);
+        })
+        .catch(() => {
+          if (!cancelled) setSummary(null);
+        });
+    void load();
+    // The selected log may still be the live session's gamelog, which keeps
+    // growing. Poll its byte size every 30 s and rebuild the overview (its
+    // span is first→last entry) whenever it changed, so the density strip and
+    // playhead positions stay correct instead of showing a stale snapshot.
+    let lastSize = -1;
+    void dpsLogStat(file)
+      .then((n) => {
+        lastSize = n;
       })
-      .catch(() => {
-        if (!cancelled) setSummary(null);
-      });
+      .catch(() => {});
+    const poll = setInterval(() => {
+      void dpsLogStat(file)
+        .then((n) => {
+          if (!cancelled && n !== lastSize) {
+            lastSize = n;
+            void load();
+          }
+        })
+        .catch(() => {});
+    }, 30_000);
     return () => {
       cancelled = true;
+      clearInterval(poll);
     };
   }, [mode, file]);
 

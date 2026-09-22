@@ -159,6 +159,12 @@ export function dpsLogSummary(file: string): Promise<DpsLogSummary> {
   return invoke<DpsLogSummary>("dps_log_summary", { file });
 }
 
+/** Byte size of a gamelog file — a cheap growth probe. The playback overview
+ *  polls this to rebuild its summary while the log is still being written. */
+export function dpsLogStat(file: string): Promise<number> {
+  return invoke<number>("dps_log_stat", { file });
+}
+
 /** Subscribe to live DPS ticks. */
 export function onDpsTick(
   handler: (tick: DpsTick) => void,

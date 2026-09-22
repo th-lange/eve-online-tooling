@@ -200,4 +200,39 @@ describe("DpsPage — playback timeline", () => {
       expect(args.settings.seekTs).toBe(pos);
     });
   });
+
+  it("rebuilds the overview only when the growing log changes size", async () => {
+    vi.useFakeTimers();
+    try {
+      let size = 100;
+      mockInvoke({
+        dps_list_logs: () => LOGS,
+        dps_log_summary: () => SUMMARY,
+        dps_log_stat: () => size,
+        dps_playback: () => undefined,
+        eve_default_log_dir: () => "",
+      });
+      localStorage.setItem("eveGamelogsDir", "/EVE/logs/Gamelogs");
+      renderWithQuery(<DpsPage />);
+      fireEvent.click(screen.getByRole("button", { name: "playback" }));
+      // Flush the async file-select + initial summary/stat load under fake timers.
+      for (let i = 0; i < 12; i++) await vi.advanceTimersByTimeAsync(0);
+
+      const summaryCalls = () =>
+        invokeMock.mock.calls.filter(([c]) => c === "dps_log_summary").length;
+      const base = summaryCalls();
+      expect(base).toBeGreaterThan(0);
+
+      // Unchanged size → a 30 s poll must NOT rebuild the overview.
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(summaryCalls()).toBe(base);
+
+      // The log grew → the next poll rebuilds it exactly once.
+      size = 200;
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(summaryCalls()).toBe(base + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
