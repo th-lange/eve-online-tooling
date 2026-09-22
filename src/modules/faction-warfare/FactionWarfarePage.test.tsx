@@ -6,10 +6,21 @@ import type { FwSystemNode } from "../../lib/api";
 
 function node(name: string, contested: string, id: number): FwSystemNode {
   return {
-    systemId: id, name, region: "Devoid", warzone: "Amarr–Minmatar",
-    security: 0.3, owner: "Amarr", occupier: "Amarr", ownerId: 500003,
-    occupierId: 500003, contested, vpPct: contested === "uncontested" ? 0 : 0.5,
-    kills: 0, jumps: 0, x: id * 1e15, z: id * 1e15,
+    systemId: id,
+    name,
+    region: "Devoid",
+    warzone: "Amarr–Minmatar",
+    security: 0.3,
+    owner: "Amarr",
+    occupier: "Amarr",
+    ownerId: 500003,
+    occupierId: 500003,
+    contested,
+    vpPct: contested === "uncontested" ? 0 : 0.5,
+    kills: 0,
+    jumps: 0,
+    x: id * 1e15,
+    z: id * 1e15,
   };
 }
 const NODES = [

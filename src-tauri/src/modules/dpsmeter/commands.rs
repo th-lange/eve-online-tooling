@@ -155,8 +155,7 @@ pub async fn dps_start(
         // Cache of ore name → m³ per unit, resolved lazily from the SDE.
         let mut ore_vol: HashMap<String, f64> = HashMap::new();
         // Cache of weapon/ammo/drone name → source type (SDE group).
-        let mut weapon_kinds: HashMap<String, (Option<String>, Option<String>)> =
-            HashMap::new();
+        let mut weapon_kinds: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
         // Start at the *current* end of the active log: only new combat counts,
         // never a replay of the whole session as one burst.
         let mut current = newest_gamelog(&dir);
@@ -344,8 +343,7 @@ pub async fn dps_playback(
 
     tauri::async_runtime::spawn(async move {
         let mut win = Window::new(window_secs);
-        let mut weapon_kinds: HashMap<String, (Option<String>, Option<String>)> =
-            HashMap::new();
+        let mut weapon_kinds: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
         let end = events.last().map(|e| e.ts).unwrap_or(0);
         let mut idx = idx;
         // `push` order doesn't matter — `tick` only sums what's in the buffer.
