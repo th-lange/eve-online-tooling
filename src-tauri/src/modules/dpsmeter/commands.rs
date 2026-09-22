@@ -535,6 +535,16 @@ pub async fn dps_log_summary(app: AppHandle, file: String) -> Result<LogSummary,
     stream_log_summary(&app, &file).await
 }
 
+/// Byte size of a gamelog file — a cheap growth probe. The playback overview
+/// polls this so it can rebuild its summary (span first→last entry + activity)
+/// while the log is still being written, instead of showing a stale snapshot.
+#[tauri::command]
+pub fn dps_log_stat(file: String) -> Result<u64, String> {
+    std::fs::metadata(&file)
+        .map(|m| m.len())
+        .map_err(|e| format!("{file}: {e}"))
+}
+
 /// List gamelog `*.txt` files in `gamelogs_dir`, newest first.
 #[tauri::command]
 pub fn dps_list_logs(gamelogs_dir: String) -> Result<Vec<LogFile>, String> {

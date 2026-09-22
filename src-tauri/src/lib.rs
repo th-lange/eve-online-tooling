@@ -398,6 +398,7 @@ pub fn run() {
             modules::dpsmeter::commands::dps_list_logs,
             modules::dpsmeter::commands::dps_playback,
             modules::dpsmeter::commands::dps_log_summary,
+            modules::dpsmeter::commands::dps_log_stat,
             modules::scripts::commands::scripts_list,
             modules::scripts::commands::scripts_save,
             modules::scripts::commands::scripts_delete,
