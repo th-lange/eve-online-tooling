@@ -12,9 +12,24 @@ Project stack, commands, architecture, and naming conventions live in
   intent: `feat/<slug>`, `fix/<slug>`, `chore/<slug>`, or `docs/<slug>`.
 - **Land changes via a pull request** — push the branch and merge the PR; do
   not fast-forward or merge into `main` locally and push.
-- Keep each branch/PR focused on one logical change where practical.
+- **Run the full check suite locally before every commit** — never rely on CI
+  to catch a formatting/lint/test failure. Match what CI runs:
+  `npm run lint`, `npm run format:check`, `npm run test`, `npm run build`, and
+  in `src-tauri`: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+  `cargo test`. Auto-fix formatting first with `npx prettier --write .` and
+  `cargo fmt`.
+- **Merge with auto-merge, gated on CI:** enable it with
+  `gh pr merge <n> --auto --merge --delete-branch` so the PR lands
+  automatically once the required status checks pass. **Do not bypass checks**
+  with `--admin` (or by force-merging) — let CI gate every merge, releases
+  included.
+- **Group related work into a single pull request.** Prefer one PR that covers
+  a cohesive change (and its tests/docs) over many tiny PRs; don't open a
+  separate PR for each small edit. Only split when the changes are genuinely
+  independent.
 - **Releases follow the same path:** bump the version on a branch, open a PR,
-  merge it, then tag `vX.Y.Z` on the resulting `main` commit and push the tag.
+  auto-merge it once green, then tag `vX.Y.Z` on the resulting `main` commit
+  and push the tag.
 
 ## Everything else
 
