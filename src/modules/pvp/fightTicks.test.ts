@@ -3,13 +3,31 @@ import { isCombatTick, nextFightTicks } from "./FightOverlayProvider";
 import type { DpsTick } from "../../lib/api";
 
 const hq = {
-  misses: 0, glances: 0, grazes: 0, hits: 0, penetrates: 0, smashes: 0, wrecks: 0,
+  misses: 0,
+  glances: 0,
+  grazes: 0,
+  hits: 0,
+  penetrates: 0,
+  smashes: 0,
+  wrecks: 0,
 };
 function tick(over: Partial<DpsTick>, at = 0): DpsTick {
   return {
-    dpsOut: 0, dpsIn: 0, logiOut: 0, logiIn: 0, capTransferOut: 0,
-    capTransferIn: 0, capWarfareOut: 0, capWarfareIn: 0, miningM3: 0,
-    hitsOut: hq, hitsIn: hq, byWeapon: [], byPilot: [], windowSecs: 10, at,
+    dpsOut: 0,
+    dpsIn: 0,
+    logiOut: 0,
+    logiIn: 0,
+    capTransferOut: 0,
+    capTransferIn: 0,
+    capWarfareOut: 0,
+    capWarfareIn: 0,
+    miningM3: 0,
+    hitsOut: hq,
+    hitsIn: hq,
+    byWeapon: [],
+    byPilot: [],
+    windowSecs: 10,
+    at,
     ...over,
   };
 }
@@ -63,7 +81,8 @@ describe("nextFightTicks", () => {
 
   it("caps the live buffer at 120 ticks", () => {
     let buf: DpsTick[] = [];
-    for (let i = 0; i < 200; i++) buf = nextFightTicks(buf, tick({ dpsIn: 1 }, i));
+    for (let i = 0; i < 200; i++)
+      buf = nextFightTicks(buf, tick({ dpsIn: 1 }, i));
     expect(buf).toHaveLength(120);
     expect(buf[buf.length - 1].at).toBe(199);
   });
