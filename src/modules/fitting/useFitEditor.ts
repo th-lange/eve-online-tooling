@@ -11,6 +11,7 @@ import {
   fittingAddItem,
   fittingExportEft,
   fittingImportEft,
+  fittingImportList,
   fittingSaveLocal,
   fittingShipLayout,
   fittingSimulate,
@@ -204,6 +205,16 @@ export function useFitEditor() {
       setEft("");
     },
     onError: (e) => console.error("EFT import failed", e),
+  });
+
+  const [listText, setListText] = useState("");
+  const importList = useMutation({
+    mutationFn: () => fittingImportList(listText),
+    onSuccess: (f) => {
+      setFit(f);
+      setListText("");
+    },
+    onError: (e) => console.error("List import failed", e),
   });
 
   // A fit handed in from another module (e.g. the PVP tab's "Simulate") — load
@@ -408,6 +419,9 @@ export function useFitEditor() {
     removeProjected,
     addItem,
     importEft,
+    listText,
+    setListText,
+    importList,
     exportEft,
     save,
   };

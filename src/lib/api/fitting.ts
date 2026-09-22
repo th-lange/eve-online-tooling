@@ -271,6 +271,13 @@ export function fittingImportEft(text: string): Promise<Fit> {
   return invoke<Fit>("fitting_import_eft", { text });
 }
 
+/** Build a fit from a loose, one-item-per-line list (contracts, multibuy,
+ *  cargo/asset pastes) — more flexible than EFT. First ship = hull; other
+ *  items are placed into their slots; unknown lines are skipped. */
+export function fittingImportList(text: string): Promise<Fit> {
+  return invoke<Fit>("fitting_import_list", { text });
+}
+
 /**
  * Add a module/drone to a fit. The backend classifies the type's slot from its
  * dogma effects and places it at the next free index in that slot.

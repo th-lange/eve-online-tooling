@@ -151,6 +151,9 @@ function Workbench() {
     (editor.importEft.isError
       ? `Import failed: ${errorMessage(editor.importEft.error)}`
       : null);
+  const listImportError = editor.importList.isError
+    ? `Import failed: ${errorMessage(editor.importList.error)}`
+    : null;
 
   const { fit, nameOf, layout, stats, rangeOf, activatable, fitContext } =
     editor;
@@ -220,17 +223,38 @@ function Workbench() {
               ))}
             </select>
           </label>
-          <div className="pb-0.5">
-            <ImportEftControl
-              eft={editor.eft}
-              setEft={editor.setEft}
-              onImport={() => editor.importEft.mutate()}
-              pending={editor.importEft.isPending}
-            />
-            <InlineError
-              message={eftImportError}
-              className="mt-1 text-xs text-rose-400"
-            />
+          <div className="flex items-start gap-2 pb-0.5">
+            <div>
+              <PasteImportControl
+                label="Import EFT"
+                title="Paste an EFT fit to import"
+                placeholder="paste an EFT fit here…"
+                value={editor.eft}
+                setValue={editor.setEft}
+                onImport={() => editor.importEft.mutate()}
+                pending={editor.importEft.isPending}
+                mono
+              />
+              <InlineError
+                message={eftImportError}
+                className="mt-1 text-xs text-rose-400"
+              />
+            </div>
+            <div>
+              <PasteImportControl
+                label="Paste list"
+                title="Paste a loose item list (contract, multibuy, cargo/asset paste) to build a fit"
+                placeholder={"paste an item list — one item per line\n(contract, multibuy, cargo scan…)"}
+                value={editor.listText}
+                setValue={editor.setListText}
+                onImport={() => editor.importList.mutate()}
+                pending={editor.importList.isPending}
+              />
+              <InlineError
+                message={listImportError}
+                className="mt-1 text-xs text-rose-400"
+              />
+            </div>
           </div>
 
           {/* Fits picker — independent of the hull, grouped by ship group → hull → name */}
@@ -460,28 +484,36 @@ function Workbench() {
 }
 
 /**
- * EFT import (#710): collapsed behind a button so a loaded fit owns the top
- * of the page instead of a permanently-visible paste box. Closes immediately
- * on Import — success clears the fit editor's `eft` state, failure alerts
- * (both already handled by the mutation).
+ * Collapsible paste-to-import control (#710): a button that opens a small
+ * textarea popover. Used for both EFT fits and loose item lists — the parse
+ * happens in the caller's `onImport`. Closes on Import; errors surface via the
+ * caller's InlineError.
  */
-function ImportEftControl({
-  eft,
-  setEft,
+function PasteImportControl({
+  label,
+  title,
+  placeholder,
+  value,
+  setValue,
   onImport,
   pending,
+  mono = false,
 }: {
-  eft: string;
-  setEft: (v: string) => void;
+  label: string;
+  title: string;
+  placeholder: string;
+  value: string;
+  setValue: (v: string) => void;
   onImport: () => void;
   pending: boolean;
+  mono?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
-        title="Paste an EFT fit to import"
+        title={title}
         className={`flex items-center gap-1.5 rounded border px-2 py-1 text-xs ${
           open
             ? "border-zinc-600 bg-zinc-800 text-zinc-200"
@@ -489,18 +521,20 @@ function ImportEftControl({
         }`}
       >
         <ClipboardPaste size={13} />
-        Import EFT
+        {label}
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute left-0 z-20 mt-1 w-96 rounded border border-zinc-700 bg-zinc-900 p-2 shadow-lg">
             <textarea
-              value={eft}
-              onChange={(e) => setEft(e.currentTarget.value)}
-              placeholder="paste an EFT fit here…"
+              value={value}
+              onChange={(e) => setValue(e.currentTarget.value)}
+              placeholder={placeholder}
               autoFocus
-              className="h-32 w-full rounded bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-100 outline-none placeholder:text-zinc-500"
+              className={`h-32 w-full rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-100 outline-none placeholder:text-zinc-500 ${
+                mono ? "font-mono" : ""
+              }`}
             />
             <div className="mt-2 flex justify-end gap-2">
               <button
@@ -514,7 +548,7 @@ function ImportEftControl({
                   onImport();
                   setOpen(false);
                 }}
-                disabled={eft.trim().length === 0 || pending}
+                disabled={value.trim().length === 0 || pending}
                 className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50"
               >
                 {pending ? "Importing…" : "Import"}
