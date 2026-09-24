@@ -16,6 +16,7 @@ use super::candidates::{HUBS, POCHVEN_CANDIDATES};
 use super::engine;
 // Re-exported so the response structs' field type keeps its public path.
 pub use super::engine::Stat;
+use crate::model::AppError;
 use crate::sde::graph;
 use crate::storage;
 
@@ -47,13 +48,14 @@ pub struct PochvenRoutes {
 /// insecure; avg / median / min / max over that system's C729 exit candidates).
 /// Computed over the SDE stargate graph and cached ~24h.
 #[tauri::command]
-pub async fn pochven_routes(app: AppHandle) -> Result<PochvenRoutes, String> {
+pub async fn pochven_routes(app: AppHandle) -> Result<PochvenRoutes, AppError> {
     // 15 Dijkstra passes over the full k-space graph plus full-table SDE loads
     // — pure CPU with zero awaits, so run the whole body on the blocking pool
     // instead of a tokio worker thread (#611, same pattern as `scripts_run`).
     tokio::task::spawn_blocking(move || pochven_routes_blocking(&app))
         .await
         .map_err(|e| e.to_string())?
+        .map_err(AppError::from)
 }
 
 /// The CPU-bound body of [`pochven_routes`], run on the blocking pool.
@@ -446,13 +448,14 @@ pub struct PochvenTopology {
 /// plus the actual internal stargate links between them (both endpoints in
 /// Pochven), straight from the SDE — so it matches the in-game / dotlan map.
 #[tauri::command]
-pub async fn pochven_map(app: AppHandle) -> Result<PochvenTopology, String> {
+pub async fn pochven_map(app: AppHandle) -> Result<PochvenTopology, AppError> {
     // Full geo-table scan + 27×N distance calcs — pure CPU with zero awaits,
     // so run the whole body on the blocking pool instead of a tokio worker
     // thread (#611, same pattern as `scripts_run`).
     tokio::task::spawn_blocking(move || pochven_map_blocking(&app))
         .await
         .map_err(|e| e.to_string())?
+        .map_err(AppError::from)
 }
 
 /// The CPU-bound body of [`pochven_map`], run on the blocking pool.

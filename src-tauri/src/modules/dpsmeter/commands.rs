@@ -25,6 +25,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader, SeekFrom
 
 use super::aggregate::Window;
 use super::parser::{parse_line, EventKind};
+use crate::model::AppError;
 use crate::sde::{Sde, SdePaths};
 
 /// How often the loop reads new bytes and emits a tick.
@@ -531,8 +532,10 @@ async fn stream_log_summary(app: &AppHandle, file: &str) -> Result<LogSummary, S
 /// (or without) actually playing the log. Streams the file rather than
 /// loading it whole (#816); memory is O(buckets), not O(file).
 #[tauri::command]
-pub async fn dps_log_summary(app: AppHandle, file: String) -> Result<LogSummary, String> {
-    stream_log_summary(&app, &file).await
+pub async fn dps_log_summary(app: AppHandle, file: String) -> Result<LogSummary, AppError> {
+    stream_log_summary(&app, &file)
+        .await
+        .map_err(AppError::from)
 }
 
 /// Byte size of a gamelog file — a cheap growth probe. The playback overview
