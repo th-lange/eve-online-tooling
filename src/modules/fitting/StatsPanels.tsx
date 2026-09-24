@@ -1,4 +1,5 @@
 import type { UseMutationResult } from "@tanstack/react-query";
+import { BatteryCharging, BatteryWarning } from "lucide-react";
 import {
   type CapStats,
   type DpsBreakdown,
@@ -127,13 +128,15 @@ export function CapGauge({ cap }: { cap: CapStats }) {
       <div className="flex justify-between text-xs">
         <span className="text-zinc-400">Capacitor</span>
         {cap.stable ? (
-          <span className="text-emerald-400">
-            stable ·{" "}
+          <span className="flex items-center gap-1 text-emerald-400">
+            <BatteryCharging size={12} aria-hidden />
+            Stable ·{" "}
             {Math.max(0, Math.min(100, cap.stablePct ?? 100)).toFixed(0)}%
           </span>
         ) : (
-          <span className="text-red-400">
-            empties in {formatDuration(cap.depletionSeconds ?? 0)}
+          <span className="flex items-center gap-1 text-red-400">
+            <BatteryWarning size={12} aria-hidden />
+            Empties in {formatDuration(cap.depletionSeconds ?? 0)}
           </span>
         )}
       </div>
