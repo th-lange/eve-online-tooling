@@ -16,6 +16,7 @@ import {
 import { usePersistentState } from "../../lib/usePersistentState";
 import { useEveLogDir } from "../../lib/useEveLogDir";
 import { playCue, type CueSound } from "../../lib/sound";
+import { Modal } from "../../components/Modal";
 import { FightOverlayContext } from "./fightOverlayContext";
 
 /** Metres → compact km/m string. Used in AttackerCard and FightPanel. */
@@ -222,7 +223,14 @@ function FightPanel({
   }, [fitWeaponRanges]);
 
   return (
-    <div className="fixed left-1/2 top-1/2 z-50 flex h-[50vh] w-[90vw] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950/95 shadow-2xl backdrop-blur">
+    <Modal
+      open
+      onClose={onDismiss}
+      role="alertdialog"
+      aria-label="Active fight"
+      backdrop={false}
+      className="fixed left-1/2 top-1/2 z-50 flex h-[50vh] w-[90vw] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-zinc-700 bg-zinc-950/95 shadow-2xl backdrop-blur"
+    >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-3">
         <div className="flex items-center gap-4">
@@ -377,7 +385,7 @@ function FightPanel({
           </div>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 

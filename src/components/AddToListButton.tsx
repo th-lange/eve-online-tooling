@@ -88,7 +88,7 @@ export function AddToListButton({
         <>
           {/* Click-away backdrop. */}
           <button
-            aria-label="close"
+            aria-label="Close"
             onClick={() => setOpen(false)}
             className="fixed inset-0 z-20 cursor-default"
           />
