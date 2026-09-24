@@ -140,9 +140,23 @@ export interface TankStats {
   shieldResists: [number, number, number, number];
   armorResists: [number, number, number, number];
   hullResists: [number, number, number, number];
-  /** Active local reps/s (shield boosters / armor repairers). */
+  /** Active local reps/s at full rate (burst): while an ancillary module's
+   *  charge/capacitor keeps it going, or always for a non-ancillary rep. */
   shieldRepS: number;
   armorRepS: number;
+  /** Cycle-averaged reps/s including any reload pause. Equal to
+   *  `shieldRepS`/`armorRepS` for a rep with infinite ammo. */
+  shieldRepSSustained: number;
+  armorRepSSustained: number;
+  /** Remote-rep multiplier per layer: `1 / effective resonance` — how much
+   *  a remote repair's raw GJ is amplified by this layer's resists. */
+  shieldRrm: number;
+  armorRrm: number;
+  hullRrm: number;
+  /** True when a running Reactive Armor Hardener's resist-shift was
+   *  simulated to a fixed point — `armorResists` reflects the shifted
+   *  values. */
+  rahActive: boolean;
   /** Peak passive shield regen (HP/s). */
   passiveShieldS: number;
 }

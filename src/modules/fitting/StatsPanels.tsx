@@ -22,12 +22,28 @@ import {
   ARCHETYPE_CLASS,
 } from "../../lib/shipArchetype";
 
-/** Per-layer HP + EM/Th/Kin/Exp resistances for shield, armor and hull. */
+/** Per-layer HP + EM/Th/Kin/Exp resistances for shield, armor and hull, plus
+ *  each layer's remote-rep multiplier (RRM: how much a remote repair's raw
+ *  GJ is amplified by that layer's resists against the selected profile).
+ *  The armor row gets a "RAH" badge when a Reactive Armor Hardener's
+ *  resist-shift was simulated — its resists are the shifted values, not the
+ *  module's static baseline. */
 export function TankResists({ tank }: { tank: TankStats }) {
   const layers = [
-    { name: "Shield", hp: tank.shieldHp, r: tank.shieldResists },
-    { name: "Armor", hp: tank.armorHp, r: tank.armorResists },
-    { name: "Hull", hp: tank.hullHp, r: tank.hullResists },
+    {
+      name: "Shield",
+      hp: tank.shieldHp,
+      r: tank.shieldResists,
+      rrm: tank.shieldRrm,
+    },
+    {
+      name: "Armor",
+      hp: tank.armorHp,
+      r: tank.armorResists,
+      rrm: tank.armorRrm,
+      rah: tank.rahActive,
+    },
+    { name: "Hull", hp: tank.hullHp, r: tank.hullResists, rrm: tank.hullRrm },
   ];
   return (
     <table className="w-full text-[11px] tabular-nums">
@@ -40,12 +56,23 @@ export function TankResists({ tank }: { tank: TankStats }) {
               {d}
             </th>
           ))}
+          <th className="pl-2 text-right font-normal">RRM</th>
         </tr>
       </thead>
       <tbody>
         {layers.map((l) => (
           <tr key={l.name}>
-            <td className="text-zinc-300">{l.name}</td>
+            <td className="text-zinc-300">
+              {l.name}
+              {l.rah && (
+                <span
+                  className="ml-1 text-[9px] uppercase text-amber-500"
+                  title="Reactive Armor Hardener resists shifted toward the selected damage profile"
+                >
+                  RAH
+                </span>
+              )}
+            </td>
             <td className="pr-1 text-right text-zinc-400">
               {formatInt(Math.round(l.hp))}
             </td>
@@ -54,6 +81,9 @@ export function TankResists({ tank }: { tank: TankStats }) {
                 {Math.round(v * 100)}
               </td>
             ))}
+            <td className="pl-2 text-right text-zinc-400">
+              {l.rrm.toFixed(2)}×
+            </td>
           </tr>
         ))}
       </tbody>
@@ -740,6 +770,16 @@ export function TankResistsPanel({
               <span className="tabular-nums text-sky-400">
                 {tank.shieldRepS.toFixed(1)}/s
               </span>
+              {tank.shieldRepSSustained < tank.shieldRepS - 0.05 && (
+                <span className="text-zinc-600">
+                  {" "}
+                  (
+                  <span className="tabular-nums text-sky-600">
+                    {tank.shieldRepSSustained.toFixed(1)}/s
+                  </span>{" "}
+                  sustained)
+                </span>
+              )}
             </span>
           )}
           {tank.armorRepS > 0 && (
@@ -748,6 +788,16 @@ export function TankResistsPanel({
               <span className="tabular-nums text-amber-400">
                 {tank.armorRepS.toFixed(1)}/s
               </span>
+              {tank.armorRepSSustained < tank.armorRepS - 0.05 && (
+                <span className="text-zinc-600">
+                  {" "}
+                  (
+                  <span className="tabular-nums text-amber-600">
+                    {tank.armorRepSSustained.toFixed(1)}/s
+                  </span>{" "}
+                  sustained)
+                </span>
+              )}
             </span>
           )}
           {tank.passiveShieldS > 0 && (

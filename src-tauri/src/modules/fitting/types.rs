@@ -146,9 +146,27 @@ pub struct TankStats {
     pub shield_resists: [f64; 4],
     pub armor_resists: [f64; 4],
     pub hull_resists: [f64; 4],
-    /// Active local reps per second (shield boosters / armor repairers).
+    /// Active local reps/s (shield boosters / armor repairers) at full rate
+    /// — the burst figure: while an ancillary module's charge or capacitor
+    /// keeps it going, or always for a non-ancillary rep.
     pub shield_rep_s: f64,
     pub armor_rep_s: f64,
+    /// Cycle-averaged reps/s including any reload pause (#878): equal to
+    /// `shield_rep_s`/`armor_rep_s` for a rep with infinite ammo (no clip),
+    /// lower for an ancillary module that must reload once its charges run
+    /// out — the fit-defining number for an ASB/AAR-tanked ship.
+    pub shield_rep_s_sustained: f64,
+    pub armor_rep_s_sustained: f64,
+    /// Remote-rep multiplier per layer (#878): `1 / effective_resonance`,
+    /// the same denominator EHP uses — how much a remote repair's raw GJ is
+    /// amplified by this layer's resists against the selected profile.
+    pub shield_rrm: f64,
+    pub armor_rrm: f64,
+    pub hull_rrm: f64,
+    /// Whether a running Reactive Armor Hardener's resist-shift was
+    /// simulated to a fixed point against the selected profile (#878) —
+    /// `armor_resists` already reflects the shifted values when true.
+    pub rah_active: bool,
     /// Peak passive shield regeneration (GJ/s ≈ HP/s): 2.5 × shield HP ÷ recharge.
     pub passive_shield_s: f64,
 }

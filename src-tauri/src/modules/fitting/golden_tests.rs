@@ -636,3 +636,253 @@ fn rapid_light_missile_launcher_sustained_dps_matches_hand_computed_ratio() {
         "sustained/burst ratio should be {expected}, got {ratio}"
     );
 }
+
+/// Ancillary Armor Repairer burst/sustained rep (#878) — no pyfa-oracle
+/// fixture exists for an AAR fit (`tools/pyfa-oracle/golden.json` predates
+/// #878), so per the issue's documented fallback (the same one #871/#872
+/// used) this is a hand-computed check against real Small Ancillary Armor
+/// Repairer / Nanite Repair Paste attribute values (PYFA v2.67.0's bundled
+/// SDE, cross-checked against everef.net): `armorDamageAmount` (84) 52 HP,
+/// `duration` (73) 6s, `capacity` (38) 0.08 m³, `reloadTime` (1795) 60s,
+/// `chargedArmorDamageMultiplier` (1886) 3x; Nanite Repair Paste `volume`
+/// (161) 0.01 m³ → an 8-shot clip (`floor(0.08 / 0.01)`). Untrained (level 0)
+/// skills keep the module's own base numbers exact (no Repair Systems rep
+/// bonus). Burst must be exactly `52 * 3 / 6 = 26`/s; sustained derates it by
+/// the #871 cycle helper: `(8*6) / (8*6 + 60) = 48/108 = 4/9`.
+#[test]
+fn punisher_ancillary_armor_repairer_matches_hand_computed_burst_and_sustained() {
+    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        eprintln!(
+            "punisher_ancillary_armor_repairer_matches_hand_computed_burst_and_sustained: EVE_SDE_PATH unset — skipping"
+        );
+        return;
+    };
+    let path = std::path::PathBuf::from(&path);
+    if !path.exists() {
+        eprintln!(
+            "punisher_ancillary_armor_repairer_matches_hand_computed_burst_and_sustained: {path:?} missing — skipping"
+        );
+        return;
+    }
+    let sde = Sde::open(&path).expect("open sde");
+    let dir = path.parent().unwrap();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let zero_skills = |_: i64| 0.0;
+    let fit = Fit {
+        id: "t".into(),
+        name: "Punisher".into(),
+        ship_type_id: tid("Punisher"),
+        items: vec![FitItem {
+            type_id: tid("Small Ancillary Armor Repairer"),
+            slot: SlotKind::Low,
+            index: 0,
+            state: ModuleState::Active,
+            charge_type_id: Some(tid("Nanite Repair Paste")),
+            quantity: 1,
+            active_drones: None,
+        }],
+        projected: Vec::new(),
+    };
+    let layout = sde.ship_layout(fit.ship_type_id).unwrap().expect("layout");
+    let d = run_dogma(
+        &sde,
+        dir,
+        &fit,
+        &layout,
+        &zero_skills,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,
+        1.0,
+        false, // factor_reload (#871) — burst/sustained are always both computed
+    )
+    .expect("dogma");
+    assert!(
+        (d.tank.armor_rep_s - 26.0).abs() < 1e-6,
+        "burst armor rep should be 26/s, got {}",
+        d.tank.armor_rep_s
+    );
+    let expected_sustained = 26.0 * 4.0 / 9.0;
+    assert!(
+        (d.tank.armor_rep_s_sustained - expected_sustained).abs() < 1e-6,
+        "sustained armor rep should be {expected_sustained}, got {}",
+        d.tank.armor_rep_s_sustained
+    );
+}
+
+/// Ancillary Shield Booster burst/sustained rep (#878) — same documented
+/// hand-computed fallback, against real Large Ancillary Shield Booster / Cap
+/// Booster 400 attribute values (PYFA v2.67.0's bundled SDE, cross-checked
+/// against everef.net): `shieldBonus` (68) 390 HP, `duration` (73) 4s,
+/// `capacity` (38) 42 m³, `reloadTime` (1795) 60s; Cap Booster 400 `volume`
+/// (161) 16 m³ → a 2-shot clip (`floor(42 / 16)`). Burst must be exactly
+/// `390 / 4 = 97.5`/s; sustained derates it by the #871 cycle helper:
+/// `(2*4) / (2*4 + 60) = 8/68 = 2/17`.
+#[test]
+fn cyclone_ancillary_shield_booster_matches_hand_computed_burst_and_sustained() {
+    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        eprintln!(
+            "cyclone_ancillary_shield_booster_matches_hand_computed_burst_and_sustained: EVE_SDE_PATH unset — skipping"
+        );
+        return;
+    };
+    let path = std::path::PathBuf::from(&path);
+    if !path.exists() {
+        eprintln!(
+            "cyclone_ancillary_shield_booster_matches_hand_computed_burst_and_sustained: {path:?} missing — skipping"
+        );
+        return;
+    }
+    let sde = Sde::open(&path).expect("open sde");
+    let dir = path.parent().unwrap();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let zero_skills = |_: i64| 0.0;
+    let fit = Fit {
+        id: "t".into(),
+        name: "Cyclone".into(),
+        ship_type_id: tid("Cyclone"),
+        items: vec![FitItem {
+            type_id: tid("Large Ancillary Shield Booster"),
+            slot: SlotKind::Mid,
+            index: 0,
+            state: ModuleState::Active,
+            charge_type_id: Some(tid("Cap Booster 400")),
+            quantity: 1,
+            active_drones: None,
+        }],
+        projected: Vec::new(),
+    };
+    let layout = sde.ship_layout(fit.ship_type_id).unwrap().expect("layout");
+    let d = run_dogma(
+        &sde,
+        dir,
+        &fit,
+        &layout,
+        &zero_skills,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,
+        1.0,
+        false, // factor_reload (#871) — burst/sustained are always both computed
+    )
+    .expect("dogma");
+    assert!(
+        (d.tank.shield_rep_s - 97.5).abs() < 1e-6,
+        "burst shield rep should be 97.5/s, got {}",
+        d.tank.shield_rep_s
+    );
+    let expected_sustained = 97.5 * 2.0 / 17.0;
+    assert!(
+        (d.tank.shield_rep_s_sustained - expected_sustained).abs() < 1e-6,
+        "sustained shield rep should be {expected_sustained}, got {}",
+        d.tank.shield_rep_s_sustained
+    );
+}
+
+/// Reactive Armor Hardener resist convergence against a 100% EM profile
+/// (#878) — same documented hand-computed fallback. A base Reactive Armor
+/// Hardener's own baseline armor resonance is `[0.85; 4]` (15% resist each,
+/// `resistanceShiftAmount` 6%, PYFA v2.67.0's bundled SDE); iterated to a
+/// fixed point against a pure-EM profile (hand-verified in
+/// `engine::tank::tests::rah_shift_single_damage_type_concentrates_all_resist_on_it`)
+/// it concentrates the module's whole 60% resist pool onto EM (60% EM
+/// resist, 0% on the other three) — independent of the hull's own base
+/// resistances or skills, which cancel out of the *ratio* between the
+/// unarmed hull's own armor resonance and the RAH-fitted hull's shifted
+/// resonance: `shifted_resonance / unarmed_resonance` must be exactly
+/// `[0.4, 1.0, 1.0, 1.0]`.
+#[test]
+fn rifter_reactive_armor_hardener_converges_to_hand_computed_em_resists() {
+    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        eprintln!(
+            "rifter_reactive_armor_hardener_converges_to_hand_computed_em_resists: EVE_SDE_PATH unset — skipping"
+        );
+        return;
+    };
+    let path = std::path::PathBuf::from(&path);
+    if !path.exists() {
+        eprintln!(
+            "rifter_reactive_armor_hardener_converges_to_hand_computed_em_resists: {path:?} missing — skipping"
+        );
+        return;
+    }
+    let sde = Sde::open(&path).expect("open sde");
+    let dir = path.parent().unwrap();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let zero_skills = |_: i64| 0.0;
+    let em_only = DamageProfile([1.0, 0.0, 0.0, 0.0]);
+    let layout = sde.ship_layout(tid("Rifter")).unwrap().expect("layout");
+    let run = |items: Vec<FitItem>| {
+        run_dogma(
+            &sde,
+            dir,
+            &Fit {
+                id: "t".into(),
+                name: "Rifter".into(),
+                ship_type_id: tid("Rifter"),
+                items,
+                projected: Vec::new(),
+            },
+            &layout,
+            &zero_skills,
+            &em_only,
+            0.0,
+            None,
+            &[],
+            None,
+            None,
+            1.0,
+            false, // factor_reload (#871)
+        )
+        .expect("dogma")
+    };
+    let unarmed = run(Vec::new());
+    let hardened = run(vec![FitItem {
+        type_id: tid("Reactive Armor Hardener"),
+        slot: SlotKind::Low,
+        index: 0,
+        state: ModuleState::Active,
+        charge_type_id: None,
+        quantity: 1,
+        active_drones: None,
+    }]);
+    assert!(
+        hardened.tank.rah_active,
+        "a running RAH should flag rah_active"
+    );
+    let expected_ratio = [0.4, 1.0, 1.0, 1.0];
+    for (i, expected) in expected_ratio.into_iter().enumerate() {
+        let unarmed_resonance = 1.0 - unarmed.tank.armor_resists[i];
+        let hardened_resonance = 1.0 - hardened.tank.armor_resists[i];
+        assert!(
+            unarmed_resonance > 0.0,
+            "unarmed resonance[{i}] should be nonzero: {unarmed_resonance}"
+        );
+        let ratio = hardened_resonance / unarmed_resonance;
+        assert!(
+            (ratio - expected).abs() < 1e-6,
+            "type {i}: shifted/unarmed resonance ratio should be {expected}, got {ratio}"
+        );
+    }
+}

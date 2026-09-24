@@ -19,7 +19,7 @@ use super::engine::projection::{
 };
 use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
 use super::engine::spool::apply_spool;
-use super::engine::tank::{tank, DamageProfile, Layer};
+use super::engine::tank::{rah_shift, tank, DamageProfile, Layer};
 use super::engine::validate::{validate, ValItem};
 use super::types::{
     AbyssalWeatherSelection, CapStats, DpsBreakdown, EwTag, Fit, FitItem, FitProblem, FitStats,
@@ -1085,6 +1085,25 @@ pub(super) fn capacitor_of(
 /// from shield boosters (shieldBonus 68) and armor repairers (armorDamageAmount
 /// 84). `profile` weighs the resonances (#702); callers default to even
 /// 25/25/25/25 when none is specified.
+///
+/// Reactive Armor Hardener (#878): a running RAH (`resistanceShiftAmount`
+/// 1849 > 0) has its own unshifted per-type armor resonance iterated to a
+/// fixed point against `profile` (`engine::tank::rah_shift`), then swapped
+/// back into the ship's finalized armor resonance in place of the RAH's own
+/// baseline (unshifted) contribution: `armor_resonance[k] /= rah_base[k]`
+/// (undoing the plain multiply the standard resolve pass already applied)
+/// `* shifted[k]`. Exact as long as the RAH is the only source of resist
+/// bonus multiplying that baseline in — true in practice, since only one RAH
+/// can ever be fitted (`maxGroupActive` 763) and its own contribution isn't
+/// stacking-penalized against itself.
+///
+/// Ancillary reps (#878): burst rep/s (the existing full-rate figure) and
+/// sustained rep/s — burst derated by the module's own reload cycle
+/// (`engine::cycle::cycle_of`/`sustained_factor`, #871) — both always
+/// computed regardless of the fit's `factor_reload` toggle, mirroring
+/// `dps`/`dps_sustained` so the UI can switch freely without re-simulating.
+/// Equal to burst for any rep with infinite "ammo" (no clip/reload attrs, or
+/// none loaded) — unchanged behavior for ordinary shield boosters/armor reps.
 pub(super) fn tank_of(
     resolved: &ResolvedFit,
     module_items: &[&FitItem],
@@ -1096,7 +1115,7 @@ pub(super) fn tank_of(
         hp: s.get(263),
         resonance: [s.get(271), s.get(274), s.get(273), s.get(272)],
     };
-    let armor = Layer {
+    let mut armor = Layer {
         hp: s.get(265),
         resonance: [s.get(267), s.get(270), s.get(269), s.get(268)],
     };
@@ -1105,7 +1124,33 @@ pub(super) fn tank_of(
         resonance: [s.get(113), s.get(110), s.get(109), s.get(111)],
     };
 
-    let (mut shield_rep_s, mut armor_rep_s) = (0.0, 0.0);
+    let mut rah_active = false;
+    for (i, store) in resolved.modules.iter().enumerate() {
+        let shift_amt = store.get(1849) / 100.0; // resistanceShiftAmount
+        if shift_amt <= 0.0 {
+            continue; // not a RAH
+        }
+        if module_items.get(i).is_some_and(|it| !is_running(it.state)) {
+            continue; // resist-shift only runs while the RAH is cycling
+        }
+        let base = [
+            store.get(267),
+            store.get(270),
+            store.get(269),
+            store.get(268),
+        ];
+        let shifted = rah_shift(base, shift_amt, profile);
+        for k in 0..4 {
+            if base[k] > 0.0 {
+                armor.resonance[k] = armor.resonance[k] / base[k] * shifted[k];
+            }
+        }
+        rah_active = true;
+        break; // only one RAH is ever fitted
+    }
+
+    let (mut shield_rep_s, mut shield_rep_s_sustained) = (0.0, 0.0);
+    let (mut armor_rep_s, mut armor_rep_s_sustained) = (0.0, 0.0);
     for (i, store) in resolved.modules.iter().enumerate() {
         if module_items.get(i).is_some_and(|it| !is_running(it.state)) {
             continue; // active/overheated reps cycle
@@ -1114,9 +1159,14 @@ pub(super) fn tank_of(
         if dur <= 0.0 {
             continue;
         }
+        let rof_seconds = dur / 1000.0;
+        let charge = resolved.charges.get(i).and_then(|c| c.as_ref());
+        let factor = cycle_of(store, charge).sustained_factor(rof_seconds);
         let sb = store.get(68);
         if sb > 0.0 {
-            shield_rep_s += sb / (dur / 1000.0);
+            let burst = sb / rof_seconds;
+            shield_rep_s += burst;
+            shield_rep_s_sustained += burst * factor;
         }
         let ar = store.get(84);
         if ar > 0.0 {
@@ -1134,7 +1184,9 @@ pub(super) fn tank_of(
             } else {
                 1.0
             };
-            armor_rep_s += ar * mult / (dur / 1000.0);
+            let burst = ar * mult / rof_seconds;
+            armor_rep_s += burst;
+            armor_rep_s_sustained += burst * factor;
         }
     }
 
@@ -1147,8 +1199,18 @@ pub(super) fn tank_of(
         0.0
     };
 
-    let mut t = tank(shield, armor, hull, profile, shield_rep_s, armor_rep_s);
+    let mut t = tank(
+        shield,
+        armor,
+        hull,
+        profile,
+        shield_rep_s,
+        armor_rep_s,
+        shield_rep_s_sustained,
+        armor_rep_s_sustained,
+    );
     t.passive_shield_s = passive_shield_s;
+    t.rah_active = rah_active;
     t
 }
 
@@ -2142,5 +2204,161 @@ mod tests {
         assert_eq!(idle, 0.0, "online (inactive) rep should not");
         assert!(is_running(ModuleState::Overheated));
         assert!(!is_running(ModuleState::Online));
+    }
+
+    /// Ancillary armor repairer sustained rep/s (#878): burst 120*3/6=60/s
+    /// (paste-loaded), derated by its own reload cycle — capacity 0.08 /
+    /// charge volume 0.01 -> an 8-shot clip, 60s reload, 6s cycle ->
+    /// sustained_factor (8*6)/(8*6+60) = 4/9.
+    #[test]
+    fn ancillary_armor_repairer_sustained_rep_derates_by_reload_cycle() {
+        let module = store(&[
+            (84, 120.0),
+            (73, 6000.0),
+            (1886, 3.0),
+            (38, 0.08),
+            (1795, 60_000.0),
+        ]);
+        let charge = store(&[(161, 0.01)]);
+        let resolved = resolved_fit(vec![module], vec![Some(charge)], Vec::new());
+        let loaded = [item(100, Some(28668), ModuleState::Active, 1)];
+        let t = tank_of(
+            &resolved,
+            &loaded.iter().collect::<Vec<_>>(),
+            &DamageProfile::default(),
+        );
+        assert!(
+            (t.armor_rep_s - 60.0).abs() < 1e-9,
+            "burst {}",
+            t.armor_rep_s
+        );
+        let expected = 60.0 * 4.0 / 9.0;
+        assert!(
+            (t.armor_rep_s_sustained - expected).abs() < 1e-9,
+            "sustained {}",
+            t.armor_rep_s_sustained
+        );
+    }
+
+    /// Ancillary shield booster sustained rep/s (#878): burst 390/4=97.5/s,
+    /// derated by its own reload cycle — capacity 42 / charge volume 16 -> a
+    /// 2-shot clip, 60s reload, 4s cycle -> sustained_factor
+    /// (2*4)/(2*4+60) = 2/17. Unlike the AAR, no charged-multiplier attribute
+    /// applies — the module's own `shieldBonus` is the full rate either way.
+    #[test]
+    fn ancillary_shield_booster_sustained_rep_derates_by_reload_cycle() {
+        let module = store(&[(68, 390.0), (73, 4000.0), (38, 42.0), (1795, 60_000.0)]);
+        let charge = store(&[(161, 16.0)]);
+        let resolved = resolved_fit(vec![module], vec![Some(charge)], Vec::new());
+        let loaded = [item(100, Some(11287), ModuleState::Active, 1)];
+        let t = tank_of(
+            &resolved,
+            &loaded.iter().collect::<Vec<_>>(),
+            &DamageProfile::default(),
+        );
+        assert!(
+            (t.shield_rep_s - 97.5).abs() < 1e-9,
+            "burst {}",
+            t.shield_rep_s
+        );
+        let expected = 97.5 * 2.0 / 17.0;
+        assert!(
+            (t.shield_rep_s_sustained - expected).abs() < 1e-9,
+            "sustained {}",
+            t.shield_rep_s_sustained
+        );
+    }
+
+    /// No charge loaded ⇒ `cycle_of` reports an infinite clip (never
+    /// reloads), so sustained must equal burst exactly — same "no reload
+    /// accounting without a charge" behavior #871 established for weapons.
+    #[test]
+    fn unloaded_ancillary_shield_booster_sustained_equals_burst() {
+        let module = store(&[(68, 390.0), (73, 4000.0), (38, 42.0), (1795, 60_000.0)]);
+        let resolved = resolved_fit(vec![module], vec![None], Vec::new());
+        let unloaded = [item(100, None, ModuleState::Active, 1)];
+        let t = tank_of(
+            &resolved,
+            &unloaded.iter().collect::<Vec<_>>(),
+            &DamageProfile::default(),
+        );
+        assert!(t.shield_rep_s > 0.0);
+        assert_eq!(t.shield_rep_s, t.shield_rep_s_sustained);
+    }
+
+    /// Reactive Armor Hardener (#878) end-to-end through `tank_of`: a naked
+    /// hull (armor resonance 1.0, i.e. no other resist source) with only a
+    /// running RAH (baseline 0.85/15% each, 6% shift/cycle) against a pure-EM
+    /// profile — same fixed point `rah_shift`'s own unit test hand-verifies —
+    /// converges to 60% EM resist and 0% on the other three, and flips
+    /// `rah_active`.
+    #[test]
+    fn rah_shifts_armor_resistances_to_a_fixed_point() {
+        let mut ship = AttrStore::new();
+        for id in [267, 270, 269, 268] {
+            ship.set_base(id, 0.85);
+        }
+        let rah = store(&[
+            (1849, 6.0),
+            (267, 0.85),
+            (270, 0.85),
+            (269, 0.85),
+            (268, 0.85),
+        ]);
+        let resolved = ResolvedFit {
+            ship,
+            modules: vec![rah],
+            drones: Vec::new(),
+            charges: vec![None],
+            unresolved: 0,
+        };
+        let em_only = DamageProfile([1.0, 0.0, 0.0, 0.0]);
+        let items = [item(100, None, ModuleState::Active, 1)];
+        let t = tank_of(&resolved, &items.iter().collect::<Vec<_>>(), &em_only);
+        assert!(t.rah_active);
+        assert!(
+            (t.armor_resists[0] - 0.6).abs() < 1e-9,
+            "em resist: {:?}",
+            t.armor_resists
+        );
+        for i in 1..4 {
+            assert!(
+                t.armor_resists[i].abs() < 1e-9,
+                "type {i} resist should be drained to 0: {:?}",
+                t.armor_resists
+            );
+        }
+    }
+
+    /// A RAH that isn't actively cycling (`Online`, not `Active`) doesn't
+    /// shift — `rah_active` stays false and the resistances stay at the
+    /// module's own unshifted baseline (15% each).
+    #[test]
+    fn inactive_rah_does_not_shift() {
+        let mut ship = AttrStore::new();
+        for id in [267, 270, 269, 268] {
+            ship.set_base(id, 0.85);
+        }
+        let rah = store(&[
+            (1849, 6.0),
+            (267, 0.85),
+            (270, 0.85),
+            (269, 0.85),
+            (268, 0.85),
+        ]);
+        let resolved = ResolvedFit {
+            ship,
+            modules: vec![rah],
+            drones: Vec::new(),
+            charges: vec![None],
+            unresolved: 0,
+        };
+        let em_only = DamageProfile([1.0, 0.0, 0.0, 0.0]);
+        let items = [item(100, None, ModuleState::Online, 1)];
+        let t = tank_of(&resolved, &items.iter().collect::<Vec<_>>(), &em_only);
+        assert!(!t.rah_active);
+        for v in t.armor_resists {
+            assert!((v - 0.15).abs() < 1e-9, "{:?}", t.armor_resists);
+        }
     }
 }
