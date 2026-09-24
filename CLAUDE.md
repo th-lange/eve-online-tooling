@@ -161,3 +161,7 @@ code comments, and docs — never use one where another is meant:
   column needs a `description` (rendered as both a tooltip and an inline info marker). Remaining
   pre-#839 tables (Accounting, Assets, Appraisal, Market Search, Exploration, Contracts, …) still
   use the lower-level `SortHeaderCell` directly — migrate them to `DataTable` opportunistically.
+- Never signal state (profit/loss, stability, danger level) with color alone — pair it with an
+  explicit sign (`+`/`−`), icon, or text label so the meaning survives grayscale rendering and
+  reaches screen readers (#848). `lib/format.ts` has `formatSignedIsk`/`formatSignedPercent` for
+  the sign case.

@@ -96,6 +96,20 @@ describe("ProfitTable", () => {
 
     expect(screen.queryByLabelText(/Missing prices for/)).toBeNull();
   });
+
+  it("carries an explicit sign on ROI and profit-per-unit for negative rows", () => {
+    renderWithQuery(
+      <ProfitTable
+        rows={[{ ...T2_ROW, roi: -0.42, profitPerUnit: -900 }]}
+        regionId={10000002}
+        onFavorite={vi.fn()}
+        onBlacklist={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("\u221242.0%")).toBeInTheDocument();
+    expect(screen.getByText("\u2212900")).toBeInTheDocument();
+  });
 });
 
 describe("sortBreakdowns", () => {

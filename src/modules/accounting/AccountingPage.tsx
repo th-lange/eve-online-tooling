@@ -14,6 +14,7 @@ import {
   formatEveDateTime,
   formatInt,
   formatIsk,
+  formatSignedIsk,
   sortRows,
 } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
@@ -266,7 +267,7 @@ function Wallet({ d }: { d: WalletView }) {
                     e.amount >= 0 ? "text-emerald-400" : "text-rose-400"
                   }`}
                 >
-                  {formatIsk(e.amount)}
+                  {formatSignedIsk(e.amount)}
                 </td>
                 <td className="px-3 py-1 text-right tabular-nums text-zinc-400">
                   {formatIsk(e.balance)}
@@ -338,8 +339,8 @@ function Profit({ d }: { d: ProfitView }) {
       <div className="mb-3">
         <Stat
           label="Total realized profit"
-          value={formatIsk(d.totalProfit)}
-          accent="text-emerald-400"
+          value={formatSignedIsk(d.totalProfit)}
+          accent={d.totalProfit >= 0 ? "text-emerald-400" : "text-rose-400"}
         />
       </div>
       <div className="overflow-auto rounded border border-zinc-800">
@@ -373,7 +374,7 @@ function Profit({ d }: { d: ProfitView }) {
                     r.profit >= 0 ? "text-emerald-400" : "text-rose-400"
                   }`}
                 >
-                  {formatIsk(r.profit)}
+                  {formatSignedIsk(r.profit)}
                 </td>
                 <td className="px-3 py-1.5 text-zinc-500">
                   {formatEveDateTime(r.lastSold)}

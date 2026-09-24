@@ -31,6 +31,24 @@ export function formatPercent(frac: number | null | undefined): string {
   return `${(frac * 100).toFixed(1)}%`;
 }
 
+/**
+ * Same as {@link formatIsk}/{@link formatPercent} but always prefixes an
+ * explicit `+`/`−` sign, independent of color (#848 — a colorblind viewer or
+ * screen reader must be able to tell profit from loss without relying on
+ * emerald/rose text alone).
+ */
+export function formatSignedIsk(n: number | null | undefined): string {
+  if (n === null || n === undefined || Number.isNaN(n)) return "—";
+  return n >= 0 ? `+${formatIsk(n)}` : `\u2212${formatIsk(Math.abs(n))}`;
+}
+
+export function formatSignedPercent(frac: number | null | undefined): string {
+  if (frac === null || frac === undefined || Number.isNaN(frac)) return "—";
+  return frac >= 0
+    ? `+${formatPercent(frac)}`
+    : `\u2212${formatPercent(Math.abs(frac))}`;
+}
+
 /** A duration in seconds as a compact `1d 2h 3m` (largest two units). */
 export function formatDuration(seconds: number | null | undefined): string {
   if (!seconds || seconds <= 0) return "—";
