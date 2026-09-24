@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { DataAge } from "../../components/DataAge";
+import { QueryResult } from "../../components/QueryResult";
 import { Sparkline } from "../../components/Sparkline";
 import {
   CheckboxGroup,
@@ -9,12 +10,7 @@ import {
   SearchFilterRow,
 } from "../../components/forms";
 import { toggle, uniqueSorted } from "../../lib/sets";
-import {
-  errorMessage,
-  stationTrading,
-  type TradeParams,
-  type TradeRow,
-} from "../../lib/api";
+import { stationTrading, type TradeParams, type TradeRow } from "../../lib/api";
 import { marketKeys } from "../../lib/queryKeys";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
 import {
@@ -33,12 +29,7 @@ import {
   SortHeaderCell,
   type SortColumn,
 } from "../../components/SortHeaderCell";
-import {
-  Page,
-  PageHeader,
-  Centered,
-  PrimaryButton,
-} from "../../components/page";
+import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
 import { useTypeIdLists } from "../../lib/useSavedLists";
 import {
@@ -201,51 +192,60 @@ function Workbench() {
       />
 
       <div className="mt-3">
-        {tab === "opportunities" &&
-          (run.isError ? (
-            <div className="text-sm text-rose-400">
-              Failed: {errorMessage(run.error)}
-            </div>
-          ) : run.isPending ? (
-            <Centered>Scanning ~19k items at the chosen market…</Centered>
-          ) : (
-            <div>
-              {rows.length > 0 && (
-                <div className="mb-2 grid gap-3 md:grid-cols-2">
-                  <Field label="Hide categories (check to exclude)">
-                    <CheckboxGroup
-                      options={categoryOptions}
-                      selected={hideCategories}
-                      onToggle={(v) =>
-                        setHideCategories(toggle(hideCategories, v))
-                      }
-                    />
-                  </Field>
-                  <Field label="Hide tech levels (check to exclude)">
-                    <CheckboxGroup
-                      options={metaOptions}
-                      selected={hideMetas}
-                      onToggle={(v) => setHideMetas(toggle(hideMetas, v))}
-                    />
-                  </Field>
-                </div>
-              )}
-              {rows.length > 0 && (
-                <SearchFilterRow
-                  value={search}
-                  onChange={setSearch}
-                  placeholder="Search name / category / group…"
-                  shown={filteredRows.length}
-                  total={rows.length}
+        {tab === "opportunities" && (
+          <QueryResult
+            result={{
+              isError: run.isError,
+              error: run.error,
+              isPending: run.isPending,
+              data: run.isPending ? undefined : rows,
+            }}
+            isEmpty={(d) => d.length === 0}
+            pendingLabel="Scanning ~19k items at the chosen market…"
+            loginMessage="Log in a character first to run this scan."
+            emptyTitle="No opportunities yet."
+            emptyHint="Hit Calculate to scan the market at the chosen station."
+          >
+            {() => (
+              <div>
+                {rows.length > 0 && (
+                  <div className="mb-2 grid gap-3 md:grid-cols-2">
+                    <Field label="Hide categories (check to exclude)">
+                      <CheckboxGroup
+                        options={categoryOptions}
+                        selected={hideCategories}
+                        onToggle={(v) =>
+                          setHideCategories(toggle(hideCategories, v))
+                        }
+                      />
+                    </Field>
+                    <Field label="Hide tech levels (check to exclude)">
+                      <CheckboxGroup
+                        options={metaOptions}
+                        selected={hideMetas}
+                        onToggle={(v) => setHideMetas(toggle(hideMetas, v))}
+                      />
+                    </Field>
+                  </div>
+                )}
+                {rows.length > 0 && (
+                  <SearchFilterRow
+                    value={search}
+                    onChange={setSearch}
+                    placeholder="Search name / category / group…"
+                    shown={filteredRows.length}
+                    total={rows.length}
+                  />
+                )}
+                <TradeTable
+                  rows={filteredRows}
+                  onFavorite={toggleFavorite}
+                  onBlacklist={blacklistRow}
                 />
-              )}
-              <TradeTable
-                rows={filteredRows}
-                onFavorite={toggleFavorite}
-                onBlacklist={blacklistRow}
-              />
-            </div>
-          ))}
+              </div>
+            )}
+          </QueryResult>
+        )}
 
         {tab === "favorites" && (
           <SavedListView
