@@ -13,10 +13,8 @@ import { QueryResult } from "../../components/QueryResult";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
 import { formatInt, formatIsk } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
-import {
-  SortHeaderCell,
-  type SortColumn,
-} from "../../components/SortHeaderCell";
+import { DataTable, type SortColumn } from "../../components/DataTable";
+import { EmptyState } from "../../components/EmptyState";
 import { DataAge } from "../../components/DataAge";
 import { Page, PageHeader, PrimaryButton } from "../../components/page";
 
@@ -251,113 +249,107 @@ function OrdersTable({
   }, [rows, sortKey, sortDir]);
 
   return (
-    <div className="mt-3 overflow-auto rounded border border-zinc-800">
-      <table className="w-full border-collapse text-sm">
-        <thead className="bg-zinc-900 text-zinc-400">
-          <tr>
-            {showCharacter && (
-              <th className="px-3 py-1.5 text-left font-medium">Character</th>
-            )}
-            {COLUMNS.map((c) => (
-              <SortHeaderCell
-                key={c.key}
-                column={c}
-                active={sortKey === c.key}
-                dir={sortDir}
-                onClick={toggleSort}
-              />
-            ))}
-            <th className="px-3 py-1.5 text-right font-medium">Undercut</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((r) => (
-            <tr
-              key={r.orderId}
-              className={`border-t border-zinc-800 hover:bg-zinc-800/40 ${
-                r.undercut ? "bg-rose-950/30" : ""
-              }`}
-            >
-              {showCharacter && (
-                <td className="px-3 py-1.5 text-zinc-400">{r.characterName}</td>
-              )}
-              <td className="px-3 py-1.5">
-                <span className="text-zinc-200">{r.name}</span>
-                <span
-                  className={`ml-2 text-xs ${r.isBuy ? "text-sky-400" : "text-emerald-400"}`}
-                >
-                  {r.isBuy ? "buy" : "sell"}
-                </span>
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
-                {formatIsk(r.price)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {r.bestPrice == null ? "—" : formatIsk(r.bestPrice)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {formatInt(r.volumeRemain)} / {formatInt(r.volumeTotal)}
-              </td>
-              <td className="px-3 py-1.5 text-zinc-400">{r.location}</td>
-              <td className="px-3 py-1.5 text-xs text-zinc-500">
-                {r.issued.slice(0, 10)}
-              </td>
-              <td className="px-3 py-1.5">
-                <div className="flex items-center justify-end gap-2">
-                  {(() => {
-                    const cost =
-                      !r.isBuy && buildCost ? costOf(r, buildCost) : undefined;
-                    if (cost != null && undercutPrice(r) < cost) {
-                      return (
-                        <span
-                          title={`Build cost ≈ ${formatIsk(cost)}/unit — undercutting sells at a loss`}
-                          className="rounded border border-amber-700 px-1.5 py-0.5 text-xs text-amber-300"
-                        >
-                          below cost
-                        </span>
-                      );
-                    }
-                    return r.undercut && r.bestPrice != null ? (
-                      <button
-                        onClick={() => copyUndercut(r)}
-                        title="Copy a price one tick better than the current best"
-                        className="rounded border border-rose-700 px-1.5 py-0.5 text-xs text-rose-300 hover:bg-rose-900/40"
-                      >
-                        copy {formatIsk(undercutPrice(r))}
-                      </button>
-                    ) : (
-                      <span className="text-xs text-emerald-500">top</span>
-                    );
-                  })()}
-                  <button
-                    onClick={() =>
-                      openMarketWindow(r.typeId).catch((e) =>
-                        alert(errorMessage(e)),
-                      )
-                    }
-                    title="Open this item's market window in the EVE client"
-                    aria-label={`Open ${r.name} in EVE`}
-                    className="inline-flex text-zinc-600 hover:text-indigo-400"
-                  >
-                    <ExternalLink size={13} />
-                  </button>
-                </div>
-              </td>
-            </tr>
-          ))}
-          {rows.length === 0 && (
-            <tr>
-              <td
-                colSpan={COLUMNS.length + 1 + (showCharacter ? 1 : 0)}
-                className="px-3 py-6 text-center text-zinc-500"
-              >
-                No open orders.
-              </td>
-            </tr>
+    <DataTable
+      className="mt-3 overflow-auto rounded border border-zinc-800"
+      columns={COLUMNS}
+      sortKey={sortKey}
+      sortDir={sortDir}
+      onSort={toggleSort}
+      rows={sorted}
+      leadingHeader={
+        showCharacter && (
+          <th className="px-3 py-1.5 text-left font-medium">Character</th>
+        )
+      }
+      trailingHeader={
+        <th
+          className="px-3 py-1.5 text-right font-medium"
+          title="Copy a price one tick better than the current best, or the reason it isn't offered."
+        >
+          Undercut
+        </th>
+      }
+      emptyState={
+        <EmptyState
+          title="No open orders."
+          hint="You have no active buy or sell orders for the selected character(s)."
+        />
+      }
+      renderRow={(r) => (
+        <tr
+          key={r.orderId}
+          className={`border-t border-zinc-800 hover:bg-zinc-800/40 ${
+            r.undercut ? "bg-rose-950/30" : ""
+          }`}
+        >
+          {showCharacter && (
+            <td className="px-3 py-1.5 text-zinc-400">{r.characterName}</td>
           )}
-        </tbody>
-      </table>
-    </div>
+          <td className="px-3 py-1.5">
+            <span className="text-zinc-200">{r.name}</span>
+            <span
+              className={`ml-2 text-xs ${r.isBuy ? "text-sky-400" : "text-emerald-400"}`}
+            >
+              {r.isBuy ? "buy" : "sell"}
+            </span>
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+            {formatIsk(r.price)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            {r.bestPrice == null ? "—" : formatIsk(r.bestPrice)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            {formatInt(r.volumeRemain)} / {formatInt(r.volumeTotal)}
+          </td>
+          <td className="px-3 py-1.5 text-zinc-400">{r.location}</td>
+          <td className="px-3 py-1.5 text-xs text-zinc-500">
+            {r.issued.slice(0, 10)}
+          </td>
+          <td className="px-3 py-1.5">
+            <div className="flex items-center justify-end gap-2">
+              {(() => {
+                const cost =
+                  !r.isBuy && buildCost ? costOf(r, buildCost) : undefined;
+                if (cost != null && undercutPrice(r) < cost) {
+                  return (
+                    <span
+                      title={`Build cost ≈ ${formatIsk(cost)}/unit — undercutting sells at a loss`}
+                      className="rounded border border-amber-700 px-1.5 py-0.5 text-xs text-amber-300"
+                    >
+                      below cost
+                    </span>
+                  );
+                }
+                return r.undercut && r.bestPrice != null ? (
+                  <button
+                    onClick={() => copyUndercut(r)}
+                    title="Copy a price one tick better than the current best"
+                    className="rounded border border-rose-700 px-1.5 py-0.5 text-xs text-rose-300 hover:bg-rose-900/40"
+                  >
+                    copy {formatIsk(undercutPrice(r))}
+                  </button>
+                ) : (
+                  <span className="text-xs text-emerald-500">top</span>
+                );
+              })()}
+              <button
+                onClick={() =>
+                  openMarketWindow(r.typeId).catch((e) =>
+                    alert(errorMessage(e)),
+                  )
+                }
+                title="Open this item's market window in the EVE client"
+                aria-label={`Open ${r.name} in EVE`}
+                className="inline-flex text-zinc-600 hover:text-indigo-400"
+              >
+                <ExternalLink size={13} />
+              </button>
+            </div>
+          </td>
+        </tr>
+      )}
+    />
   );
 }
 

@@ -26,10 +26,8 @@ import {
 } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { FeesFromCharacter } from "../../components/FeesFromCharacter";
-import {
-  SortHeaderCell,
-  type SortColumn,
-} from "../../components/SortHeaderCell";
+import { DataTable, type SortColumn } from "../../components/DataTable";
+import { EmptyState } from "../../components/EmptyState";
 import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
 import { useTypeIdLists } from "../../lib/useSavedLists";
@@ -401,129 +399,123 @@ function TradeTable({
   );
 
   return (
-    <div className="overflow-auto rounded border border-zinc-800">
-      <table className="w-full border-collapse text-sm">
-        <thead className="bg-zinc-900 text-zinc-400">
-          <tr>
-            <th className="w-16" />
-            {TRADE_COLUMNS.map((c) => (
-              <SortHeaderCell
-                key={c.key}
-                column={c}
-                active={sortKey === c.key}
-                dir={sortDir}
-                onClick={toggleSort}
-              />
-            ))}
-            <th className="px-3 py-1.5 text-right font-medium">Trend</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((r) => (
-            <tr
-              key={r.typeId}
-              className="border-t border-zinc-800 hover:bg-zinc-800/40"
-            >
-              <RowActionsCell
-                row={r}
-                onFavorite={onFavorite}
-                onBlacklist={onBlacklist}
-                showAddToList
-              />
-              <td className="px-3 py-1.5">
-                <div className="text-zinc-200">
-                  {r.name}
-                  {r.priceFlag && (
-                    <span
-                      className="ml-1 text-amber-400"
-                      title={`Current sell price is ${r.priceFlag} — possible mean-reversion`}
-                    >
-                      ⚠
-                    </span>
-                  )}
-                </div>
-                {(r.category || r.group) && (
-                  <div className="text-xs text-zinc-500">
-                    {[r.category, r.group].filter(Boolean).join(" · ")}
-                  </div>
-                )}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                <UndercutPrice
-                  value={r.buy}
-                  tick={0.01}
-                  label="buy (overcut +0.01)"
-                />
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                <UndercutPrice
-                  value={r.sell}
-                  tick={-0.01}
-                  label="sell (undercut −0.01)"
-                />
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
-                {formatIsk(r.profitPerUnit)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
-                {formatPercent(r.margin)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {formatInt(r.volume)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {formatInt(r.buyVolume)}
-              </td>
-              <td
-                className={`px-3 py-1.5 text-right tabular-nums ${
-                  r.buySellRatio >= 1 ? "text-emerald-400" : "text-zinc-400"
-                }`}
-              >
-                {r.buySellRatio > 0
-                  ? r.buySellRatio.toLocaleString(undefined, {
-                      maximumFractionDigits: 2,
-                    })
-                  : "—"}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
-                {formatInt(r.dailyTraded)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
-                {r.dailyTraded > 0 ? formatIsk(r.dailyTraded * r.sell) : "—"}
-              </td>
-              <td
-                className={`px-3 py-1.5 text-right tabular-nums ${
-                  r.changePct == null
-                    ? "text-zinc-500"
-                    : r.changePct >= 0
-                      ? "text-emerald-400"
-                      : "text-rose-400"
-                }`}
-              >
-                {formatPercent(r.changePct)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {r.daysOfSupply > 0
-                  ? r.daysOfSupply.toLocaleString(undefined, {
-                      maximumFractionDigits: 1,
-                    })
-                  : "—"}
-              </td>
-              <td className="px-3 py-1.5">
-                <Sparkline values={r.trend} />
-              </td>
-            </tr>
-          ))}
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={14} className="px-3 py-6 text-center text-zinc-500">
-                Hit Calculate to scan the market.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      columns={TRADE_COLUMNS}
+      sortKey={sortKey}
+      sortDir={sortDir}
+      onSort={toggleSort}
+      rows={sorted}
+      leadingHeader={<th className="w-16" />}
+      trailingHeader={
+        <th
+          className="px-3 py-1.5 text-right font-medium"
+          title="30-day price history sparkline."
+        >
+          Trend
+        </th>
+      }
+      emptyState={
+        <EmptyState
+          title="No opportunities to show."
+          hint="Hit Calculate to scan the market, or loosen the search/category filters."
+        />
+      }
+      renderRow={(r) => (
+        <tr
+          key={r.typeId}
+          className="border-t border-zinc-800 hover:bg-zinc-800/40"
+        >
+          <RowActionsCell
+            row={r}
+            onFavorite={onFavorite}
+            onBlacklist={onBlacklist}
+            showAddToList
+          />
+          <td className="px-3 py-1.5">
+            <div className="text-zinc-200">
+              {r.name}
+              {r.priceFlag && (
+                <span
+                  className="ml-1 text-amber-400"
+                  title={`Current sell price is ${r.priceFlag} — possible mean-reversion`}
+                >
+                  ⚠
+                </span>
+              )}
+            </div>
+            {(r.category || r.group) && (
+              <div className="text-xs text-zinc-500">
+                {[r.category, r.group].filter(Boolean).join(" · ")}
+              </div>
+            )}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            <UndercutPrice
+              value={r.buy}
+              tick={0.01}
+              label="buy (overcut +0.01)"
+            />
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            <UndercutPrice
+              value={r.sell}
+              tick={-0.01}
+              label="sell (undercut −0.01)"
+            />
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
+            {formatIsk(r.profitPerUnit)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+            {formatPercent(r.margin)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            {formatInt(r.volume)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            {formatInt(r.buyVolume)}
+          </td>
+          <td
+            className={`px-3 py-1.5 text-right tabular-nums ${
+              r.buySellRatio >= 1 ? "text-emerald-400" : "text-zinc-400"
+            }`}
+          >
+            {r.buySellRatio > 0
+              ? r.buySellRatio.toLocaleString(undefined, {
+                  maximumFractionDigits: 2,
+                })
+              : "—"}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+            {formatInt(r.dailyTraded)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+            {r.dailyTraded > 0 ? formatIsk(r.dailyTraded * r.sell) : "—"}
+          </td>
+          <td
+            className={`px-3 py-1.5 text-right tabular-nums ${
+              r.changePct == null
+                ? "text-zinc-500"
+                : r.changePct >= 0
+                  ? "text-emerald-400"
+                  : "text-rose-400"
+            }`}
+          >
+            {formatPercent(r.changePct)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            {r.daysOfSupply > 0
+              ? r.daysOfSupply.toLocaleString(undefined, {
+                  maximumFractionDigits: 1,
+                })
+              : "—"}
+          </td>
+          <td className="px-3 py-1.5">
+            <Sparkline values={r.trend} />
+          </td>
+        </tr>
+      )}
+    />
   );
 }
 
