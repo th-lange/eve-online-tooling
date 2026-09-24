@@ -1,4 +1,5 @@
 import { commands, type OrderRow } from "./generated/orders";
+import { unwrapCommand } from "./common";
 
 export type { OrderRow };
 
@@ -7,9 +8,5 @@ export type { OrderRow };
  * Requires the `esi-markets.read_character_orders.v1` scope (re-login if added).
  */
 export async function marketOrders(): Promise<OrderRow[]> {
-  const result = await commands.ordersList();
-  if (result.status === "error") {
-    throw result.error;
-  }
-  return result.data;
+  return unwrapCommand(await commands.ordersList());
 }

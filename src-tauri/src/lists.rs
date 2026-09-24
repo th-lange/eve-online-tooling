@@ -16,7 +16,7 @@ use crate::sde::Sde;
 use crate::storage;
 
 /// An item on a saved list, resolved to its display name.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ListItem {
     pub type_id: i64,

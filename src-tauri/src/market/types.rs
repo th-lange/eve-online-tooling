@@ -41,7 +41,7 @@ pub struct AdjustedPrice {
 
 /// All price vectors for one type. Every vector is optional so "no data" is
 /// represented explicitly rather than as a misleading zero.
-#[derive(Debug, Clone, Serialize, PartialEq, Default)]
+#[derive(Debug, Clone, Serialize, PartialEq, Default, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct PriceModel {
     pub type_id: i64,

@@ -12,6 +12,7 @@ use crate::storage;
 /// Log in (or re-authorize) a character via EVE SSO and add it to the roster.
 /// Opens the browser and waits for the loopback redirect.
 #[tauri::command]
+#[specta::specta]
 pub async fn auth_login(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
@@ -60,7 +61,8 @@ pub async fn auth_login(
 
 /// The current character roster.
 #[tauri::command]
-pub fn auth_characters(app: AppHandle) -> Result<Vec<Character>, String> {
+#[specta::specta]
+pub fn auth_characters(app: AppHandle) -> Result<Vec<Character>, crate::model::AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
     Ok(storage::load_roster(&dir))
 }
@@ -68,14 +70,19 @@ pub fn auth_characters(app: AppHandle) -> Result<Vec<Character>, String> {
 /// Bookmark the "active" character used by per-character features (industry
 /// jobs, route, etc.).
 #[tauri::command]
-pub fn auth_set_active_character(app: AppHandle, character_id: i64) -> Result<(), String> {
+#[specta::specta]
+pub fn auth_set_active_character(
+    app: AppHandle,
+    character_id: i64,
+) -> Result<(), crate::model::AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
-    storage::save_active_character(&dir, character_id)
+    storage::save_active_character(&dir, character_id).map_err(Into::into)
 }
 
 /// The active character id (bookmarked if set + in roster, else the first).
 #[tauri::command]
-pub fn auth_active_character(app: AppHandle) -> Result<Option<i64>, String> {
+#[specta::specta]
+pub fn auth_active_character(app: AppHandle) -> Result<Option<i64>, crate::model::AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
     Ok(storage::active_character(&dir))
 }
@@ -86,7 +93,7 @@ pub fn auth_active_character(app: AppHandle) -> Result<Option<i64>, String> {
 /// isn't granted yet (re-login after enabling it on the EVE dev app). The
 /// combat overlay uses this to auto-load your hull's fit (optimals) and drone
 /// reminders.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CharacterShip {
     pub type_id: i64,
@@ -95,10 +102,11 @@ pub struct CharacterShip {
 }
 
 #[tauri::command]
+#[specta::specta]
 pub async fn esi_character_ship(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
-) -> Result<Option<CharacterShip>, String> {
+) -> Result<Option<CharacterShip>, crate::model::AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
     let Some(character_id) = storage::active_character(&dir) else {
         return Ok(None);
@@ -118,7 +126,7 @@ pub async fn esi_character_ship(
 
 /// A blueprint owned by a character (or their corporation), with its real
 /// ME/TE/runs.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct OwnedBlueprint {
     pub character_id: i64,
@@ -138,10 +146,11 @@ pub struct OwnedBlueprint {
 /// (where the character has the Director role + corp scope). A character whose
 /// token can't be refreshed is skipped rather than failing the whole call.
 #[tauri::command]
+#[specta::specta]
 pub async fn esi_owned_blueprints(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
-) -> Result<Vec<OwnedBlueprint>, String> {
+) -> Result<Vec<OwnedBlueprint>, crate::model::AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
     let roster = storage::load_roster(&dir);
 
@@ -202,10 +211,11 @@ pub async fn esi_owned_blueprints(
 /// skipped from the totals, but such a *partial* result is never cached — the
 /// next call retries instead of serving wrong stock counts for the full TTL.
 #[tauri::command]
+#[specta::specta]
 pub async fn esi_roster_stock(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
-) -> Result<std::collections::HashMap<i64, i64>, String> {
+) -> Result<std::collections::HashMap<i64, i64>, crate::model::AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
     if let Some(cached) =
         storage::cache_get::<std::collections::HashMap<i64, i64>>(&dir, "roster_stock")
@@ -259,6 +269,7 @@ fn cache_stock_if_complete(
 /// one whose orders are shown). Requires the `esi-ui.open_window.v1` scope
 /// (re-login if added).
 #[tauri::command]
+#[specta::specta]
 pub async fn esi_open_market_window(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
@@ -273,6 +284,7 @@ pub async fn esi_open_market_window(
 /// id, using the active character. Requires the `esi-ui.open_window.v1` scope
 /// (re-login if added). Used e.g. by the "Support my corp" link.
 #[tauri::command]
+#[specta::specta]
 pub async fn esi_open_info_window(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
@@ -289,6 +301,7 @@ pub async fn esi_open_info_window(
 /// (esi-issues#358), so setting a waypoint is the closest working hook.
 /// Clears other waypoints so the route is direct.
 #[tauri::command]
+#[specta::specta]
 pub async fn esi_set_waypoint(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
@@ -316,11 +329,12 @@ pub async fn warm_active_character(app: &AppHandle) {
 /// Remove a character: drop it from the roster, delete its keychain entry, and
 /// forget any cached token. Returns the updated roster.
 #[tauri::command]
+#[specta::specta]
 pub fn auth_logout(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
     character_id: i64,
-) -> Result<Vec<Character>, String> {
+) -> Result<Vec<Character>, crate::model::AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
     let mut roster = storage::load_roster(&dir);
     roster.retain(|c| c.character_id != character_id);
@@ -328,6 +342,23 @@ pub fn auth_logout(
     storage::delete_refresh_token(character_id)?;
     auth_state.forget(character_id);
     Ok(roster)
+}
+
+/// Collects this module's specta-annotated commands for [`crate::bindings`].
+pub fn specta_commands() -> tauri_specta::Commands<tauri::Wry> {
+    tauri_specta::collect_commands![
+        auth_login,
+        auth_characters,
+        auth_set_active_character,
+        auth_active_character,
+        esi_character_ship,
+        esi_owned_blueprints,
+        esi_roster_stock,
+        esi_open_market_window,
+        esi_open_info_window,
+        esi_set_waypoint,
+        auth_logout,
+    ]
 }
 
 #[cfg(test)]

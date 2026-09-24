@@ -1,46 +1,43 @@
-import { invoke } from "@tauri-apps/api/core";
+import {
+  commands,
+  type Character,
+  type CharacterShip,
+  type OwnedBlueprint,
+} from "./generated/auth";
+import { unwrapCommand } from "./common";
 
-export interface Character {
-  characterId: number;
-  name: string;
-  scopes: string[];
-}
+export type { Character, CharacterShip, OwnedBlueprint };
 
 /** Log in (or re-authorize) a character via EVE SSO. Opens the browser. */
-export function authLogin(): Promise<Character> {
-  return invoke<Character>("auth_login");
+export async function authLogin(): Promise<Character> {
+  return unwrapCommand(await commands.authLogin());
 }
 
 /** The current character roster. */
-export function authCharacters(): Promise<Character[]> {
-  return invoke<Character[]>("auth_characters");
+export async function authCharacters(): Promise<Character[]> {
+  return unwrapCommand(await commands.authCharacters());
 }
 
 /** Remove a character; returns the updated roster. */
-export function authLogout(characterId: number): Promise<Character[]> {
-  return invoke<Character[]>("auth_logout", { characterId });
+export async function authLogout(characterId: number): Promise<Character[]> {
+  return unwrapCommand(await commands.authLogout(characterId));
 }
 
 /** Bookmark the "active" character used by per-character features. */
-export function setActiveCharacter(characterId: number): Promise<void> {
-  return invoke<void>("auth_set_active_character", { characterId });
+export async function setActiveCharacter(characterId: number): Promise<void> {
+  unwrapCommand(await commands.authSetActiveCharacter(characterId));
 }
 
 /** The active character id (bookmarked if set + in roster, else the first). */
-export function activeCharacter(): Promise<number | null> {
-  return invoke<number | null>("auth_active_character");
+export async function activeCharacter(): Promise<number | null> {
+  return unwrapCommand(await commands.authActiveCharacter());
 }
 
 /** The active character's currently-boarded ship (hull type + names). `null`
  *  when no active character or the `esi-location.read_ship_type.v1` scope isn't
  *  granted (re-login after enabling it). */
-export interface CharacterShip {
-  typeId: number;
-  typeName: string;
-  shipName: string;
-}
-export function characterShip(): Promise<CharacterShip | null> {
-  return invoke<CharacterShip | null>("esi_character_ship");
+export async function characterShip(): Promise<CharacterShip | null> {
+  return unwrapCommand(await commands.esiCharacterShip());
 }
 
 /** Sentinel active-character id meaning "all characters" — per-character views
@@ -48,49 +45,37 @@ export function characterShip(): Promise<CharacterShip | null> {
  *  collides with a real EVE character id (always positive). */
 export const ALL_CHARACTERS = -1;
 
-export interface OwnedBlueprint {
-  characterId: number;
-  characterName: string;
-  /** True for a corporation blueprint, false for a personal one. */
-  corporation: boolean;
-  /** The blueprint's type id (matches a production row's blueprintTypeId). */
-  typeId: number;
-  /** Blueprint name from the SDE, e.g. "Hobgoblin II Blueprint". */
-  name: string;
-  materialEfficiency: number;
-  timeEfficiency: number;
-  runs: number;
-  quantity: number;
-}
-
 /** Blueprints owned across the whole roster (their real ME/TE). */
-export function ownedBlueprints(): Promise<OwnedBlueprint[]> {
-  return invoke<OwnedBlueprint[]>("esi_owned_blueprints");
+export async function ownedBlueprints(): Promise<OwnedBlueprint[]> {
+  return unwrapCommand(await commands.esiOwnedBlueprints());
 }
 
 /** Open the in-game market window for a type (needs a logged-in character + the
  * esi-ui.open_window scope). */
-export function openMarketWindow(typeId: number): Promise<void> {
-  return invoke<void>("esi_open_market_window", { typeId });
+export async function openMarketWindow(typeId: number): Promise<void> {
+  unwrapCommand(await commands.esiOpenMarketWindow(typeId));
 }
 
 /** Open the in-game "Show Info" window for a character/corporation/alliance id
  * (needs a logged-in character + the esi-ui.open_window scope). */
-export function openInfoWindow(targetId: number): Promise<void> {
-  return invoke<void>("esi_open_info_window", { targetId });
+export async function openInfoWindow(targetId: number): Promise<void> {
+  unwrapCommand(await commands.esiOpenInfoWindow(targetId));
 }
 
 /** Set the active character's autopilot destination to a solar system id
  * (needs a logged-in character + the esi-ui.write_waypoint.v1 scope).
  * Clears other waypoints — direct route. */
-export function setWaypoint(systemId: number): Promise<void> {
-  return invoke<void>("esi_set_waypoint", { systemId });
+export async function setWaypoint(systemId: number): Promise<void> {
+  unwrapCommand(await commands.esiSetWaypoint(systemId));
 }
 
 /**
  * Total owned quantity per type across the whole roster (durably cached ~10min).
  * Keys are type ids (as strings, per JSON object keys).
  */
-export function rosterStock(): Promise<Record<string, number>> {
-  return invoke<Record<string, number>>("esi_roster_stock");
+export async function rosterStock(): Promise<Record<string, number>> {
+  return unwrapCommand(await commands.esiRosterStock()) as unknown as Record<
+    string,
+    number
+  >;
 }

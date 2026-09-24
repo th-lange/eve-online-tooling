@@ -63,7 +63,7 @@ pub struct BlueprintProduct {
 }
 
 /// An invention decryptor and its outcome modifiers (read from the SDE).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Decryptor {
     pub type_id: i64,

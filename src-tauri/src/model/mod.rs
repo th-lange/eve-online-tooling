@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// A logged-in EVE character in the roster. The refresh token lives in the OS
 /// keychain (keyed by `character_id`), never here.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Character {
     pub character_id: i64,
@@ -14,7 +14,7 @@ pub struct Character {
 
 /// An (id, name) pair used across the SDE and market command surfaces
 /// (camelCase for the UI).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct IdName {
     pub id: i64,
