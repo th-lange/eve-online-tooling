@@ -6,6 +6,8 @@ import {
   formatEveDateTime,
   formatIsk,
   formatPercent,
+  formatSignedIsk,
+  formatSignedPercent,
 } from "./format";
 import type { ProfitBreakdown } from "./api";
 
@@ -51,6 +53,16 @@ describe("format", () => {
     expect(formatIsk(null)).toBe("—");
     expect(formatPercent(0.7168)).toBe("71.7%");
     expect(formatPercent(null)).toBe("—");
+  });
+
+  it("formatSignedIsk/formatSignedPercent always carry an explicit sign", () => {
+    expect(formatSignedIsk(1234.5)).toBe("+1,234.5");
+    expect(formatSignedIsk(-1234.5)).toBe("\u22121,234.5");
+    expect(formatSignedIsk(0)).toBe("+0");
+    expect(formatSignedIsk(null)).toBe("—");
+    expect(formatSignedPercent(0.7168)).toBe("+71.7%");
+    expect(formatSignedPercent(-0.7168)).toBe("\u221271.7%");
+    expect(formatSignedPercent(null)).toBe("—");
   });
 
   it("sorts by profit descending and keeps null volumes last", () => {
