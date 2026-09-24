@@ -15,9 +15,10 @@ use super::dna::{self, DnaItem, ParsedDna};
 use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule};
 use super::engine::resolve::{resolve, FitInput};
 use super::esi_fittings::EsiFitSource;
+use super::npc_profiles;
 use super::types::{
-    AbyssalWeatherSelection, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState, SlotKind,
-    TargetProfile,
+    AbyssalWeatherSelection, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState,
+    NpcProfile, SlotKind, TargetProfile, TargetProfileLibrary,
 };
 use crate::esi::{self, corporation_id, AuthState, SkillLevels};
 use crate::market::{resolve_location, MarketService};
@@ -1343,6 +1344,84 @@ pub fn fitting_delete_local(app: AppHandle, id: String) -> Result<(), String> {
     let mut fits = load_fits(&dir);
     fits.retain(|f| f.id != id);
     storage::save_data(&dir, FITS_KEY, &fits)
+}
+
+/// Storage key for the user's custom target/damage profile presets (#873).
+const CUSTOM_TARGET_PROFILES_KEY: &str = "fitting_custom_target_profiles";
+/// Disk-cache key for the SDE-derived built-in library (#873), generation-keyed
+/// (see `sde::generation_id`) so an SDE update invalidates it immediately
+/// instead of waiting out the TTL.
+const NPC_PROFILE_CACHE_KEY: &str = "fitting_npc_profiles";
+/// Rebuilding the built-in library is a handful of SDE queries — cheap, but
+/// not free, so it's cached for a week (well past any plausible SDE update
+/// cadence; `cache_get_versioned` invalidates on SDE swap regardless).
+const NPC_PROFILE_CACHE_TTL_SECS: u64 = 7 * 24 * 3600;
+
+/// The user's persisted custom target/damage profile presets (#873).
+fn load_custom_profiles(dir: &Path) -> Vec<NpcProfile> {
+    storage::load_data(dir, CUSTOM_TARGET_PROFILES_KEY).unwrap_or_default()
+}
+
+/// The built-in NPC target/damage profile library plus the user's persisted
+/// custom presets (#873): `TargetProfileBox` and the tank panel's damage
+/// picker both source their grouped, searchable dropdowns from this. The
+/// built-in half is derived from real SDE NPC ship dogma attributes (see
+/// `npc_profiles`) and cached per SDE generation.
+#[tauri::command]
+pub fn fitting_target_profiles(app: AppHandle) -> Result<TargetProfileLibrary, String> {
+    let dir = storage::app_data_dir(&app)?;
+    let sde = crate::sde::open_from_app(&app)?;
+    let generation = crate::sde::generation_id(&dir)?;
+    let built_in = if let Some(cached) =
+        storage::cache_get_versioned::<Vec<NpcProfile>>(&dir, NPC_PROFILE_CACHE_KEY, generation)
+    {
+        cached
+    } else {
+        let built = npc_profiles::built_in_profiles(&sde);
+        let _ = storage::cache_put_versioned(
+            &dir,
+            NPC_PROFILE_CACHE_KEY,
+            &built,
+            NPC_PROFILE_CACHE_TTL_SECS,
+            generation,
+        );
+        built
+    };
+    Ok(TargetProfileLibrary {
+        built_in,
+        custom: load_custom_profiles(&dir),
+    })
+}
+
+/// Save (insert or update by id) a custom target/damage profile preset
+/// (#873); always grouped as "Custom" regardless of what the caller sends.
+/// Returns the preset's id.
+#[tauri::command]
+pub fn fitting_save_target_profile(
+    app: AppHandle,
+    mut profile: NpcProfile,
+) -> Result<String, String> {
+    let dir = storage::app_data_dir(&app)?;
+    if profile.id.is_empty() {
+        profile.id = new_fit_id();
+    }
+    profile.group = "Custom".to_string();
+    let mut profiles = load_custom_profiles(&dir);
+    match profiles.iter_mut().find(|p| p.id == profile.id) {
+        Some(existing) => *existing = profile.clone(),
+        None => profiles.push(profile.clone()),
+    }
+    storage::save_data(&dir, CUSTOM_TARGET_PROFILES_KEY, &profiles)?;
+    Ok(profile.id)
+}
+
+/// Delete a custom target/damage profile preset by id (no-op if absent) (#873).
+#[tauri::command]
+pub fn fitting_delete_target_profile(app: AppHandle, id: String) -> Result<(), String> {
+    let dir = storage::app_data_dir(&app)?;
+    let mut profiles = load_custom_profiles(&dir);
+    profiles.retain(|p| p.id != id);
+    storage::save_data(&dir, CUSTOM_TARGET_PROFILES_KEY, &profiles)
 }
 
 #[cfg(test)]

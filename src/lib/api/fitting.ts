@@ -190,6 +190,27 @@ export interface TargetProfile {
   missilesNeedOvertake: boolean;
 }
 
+/** One target/damage-pattern preset (#873): a built-in NPC combat profile
+ *  (derived from real SDE NPC ship dogma attributes, grouped by faction/
+ *  content-type) or a user-saved custom one ("Custom" group). Bundles both
+ *  halves of "what am I fighting" — the applied-DPS target profile and the
+ *  incoming damage split — so picking one preset feeds both
+ *  `TargetProfileBox` and the tank panel's damage-profile picker. */
+export interface NpcProfile {
+  id: string;
+  label: string;
+  group: string;
+  target: TargetProfile;
+  damageProfile: [number, number, number, number];
+}
+
+/** Response of `fittingTargetProfiles`: the SDE-derived built-in library
+ *  plus the user's persisted custom presets. */
+export interface TargetProfileLibrary {
+  builtIn: NpcProfile[];
+  custom: NpcProfile[];
+}
+
 /** Navigation: speed, agility, align and signature. */
 export interface NavStats {
   maxVelocity: number;
@@ -508,4 +529,23 @@ export function fittingEsiPush(fit: Fit): Promise<number> {
 /** Delete a locally saved fit by id. */
 export function fittingDeleteLocal(id: string): Promise<void> {
   return invoke<void>("fitting_delete_local", { id });
+}
+
+/** The built-in NPC target/damage profile library plus the user's persisted
+ *  custom presets (#873) — backs the searchable, faction/content-grouped
+ *  preset dropdowns in `TargetProfileBox` and the tank panel's damage-profile
+ *  picker. */
+export function fittingTargetProfiles(): Promise<TargetProfileLibrary> {
+  return invoke<TargetProfileLibrary>("fitting_target_profiles");
+}
+
+/** Save (insert or update by id) a custom target/damage profile preset
+ *  (#873); always grouped as "Custom". Returns the preset's id. */
+export function fittingSaveTargetProfile(profile: NpcProfile): Promise<string> {
+  return invoke<string>("fitting_save_target_profile", { profile });
+}
+
+/** Delete a custom target/damage profile preset by id. */
+export function fittingDeleteTargetProfile(id: string): Promise<void> {
+  return invoke<void>("fitting_delete_target_profile", { id });
 }

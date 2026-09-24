@@ -215,6 +215,39 @@ pub struct TargetProfile {
     pub missiles_need_overtake: bool,
 }
 
+/// One target/damage-pattern preset (#873): a built-in NPC combat profile or
+/// a user-saved custom one, bundling both halves of "what am I fighting" —
+/// the applied-DPS [`TargetProfile`] (sig/speed/tracking) and the incoming
+/// damage split used for EHP — so picking e.g. "Guristas Cruiser" once feeds
+/// both `TargetProfileBox` and the tank panel's damage-profile picker from
+/// the same underlying NPC's real numbers. Built-ins are derived from real
+/// SDE NPC ship dogma attributes (see `npc_profiles`), never copied from
+/// Pyfa's tables; `group` is the faction/content-type the UI groups presets
+/// under ("Guristas", "Sleepers", "Abyssal", "Custom", …).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NpcProfile {
+    /// Stable id: `"builtin:<slug>"` for generated presets, a timestamp-based
+    /// local id (matching [`Fit::id`]) for user-saved ones.
+    pub id: String,
+    pub label: String,
+    /// Faction/content-type grouping shown in the UI (e.g. "Guristas").
+    pub group: String,
+    pub target: TargetProfile,
+    /// Incoming damage split `[em, thermal, kinetic, explosive]` fractions
+    /// summing to 1.0 (#702's damage-profile shape).
+    pub damage_profile: [f64; 4],
+}
+
+/// Response of `fitting_target_profiles` (#873): the generated built-in
+/// library plus the user's persisted custom presets.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetProfileLibrary {
+    pub built_in: Vec<NpcProfile>,
+    pub custom: Vec<NpcProfile>,
+}
+
 /// Which Abyssal Deadspace weather a fit is sitting in (#env-selector). See
 /// [`AbyssalWeatherSelection`] and `engine::abyssal` — these bonus/penalty
 /// magnitudes are hardcoded from community reference data, not the SDE
