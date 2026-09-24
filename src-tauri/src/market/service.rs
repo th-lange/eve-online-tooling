@@ -5,11 +5,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use parking_lot::Mutex;
+
 use crate::esi::{EsiClient, EsiError};
 
 use super::aggregate::assemble_price_model;
 use super::cache::TtlCache;
-use super::flight::KeyLocks;
+use super::flight::{deduplicated_cached_fetch, KeyLocks};
 use super::fuzzwork::{Aggregate, FuzzworkClient};
 use super::markets::Location;
 use super::types::{AdjustedPrice, HistoryDay, Order, PriceModel};
@@ -79,34 +81,33 @@ impl MarketService {
 
     /// Spot orders for a type in a region (cached per region).
     async fn orders_for(&self, region_id: i64, type_id: i64) -> Result<Vec<Order>, EsiError> {
-        if let Some(cached) = self.orders.get(&(region_id, type_id)) {
-            return Ok(cached);
-        }
-        // Single-flight: if another caller is fetching this key, wait for it,
-        // then take the cache hit it left behind.
-        let gate = self.orders_flight.lock_for(&(region_id, type_id));
-        let _flight = gate.lock().await;
-        if let Some(cached) = self.orders.get(&(region_id, type_id)) {
-            return Ok(cached);
-        }
-        let path = format!("/latest/markets/{region_id}/orders/");
-        let orders: Vec<Order> = match self
-            .esi
-            .get_paged(
-                &path,
-                &[
-                    ("type_id", type_id.to_string()),
-                    ("order_type", "all".to_string()),
-                ],
-            )
-            .await
-        {
-            Ok(orders) => orders,
-            Err(e) if is_not_found(&e) => Vec::new(),
-            Err(e) => return Err(e),
-        };
-        self.orders.put((region_id, type_id), orders.clone());
-        Ok(orders)
+        let key = (region_id, type_id);
+        deduplicated_cached_fetch(
+            &self.orders_flight,
+            &key,
+            || self.orders.get(&key),
+            || async {
+                let path = format!("/latest/markets/{region_id}/orders/");
+                let orders: Vec<Order> = match self
+                    .esi
+                    .get_paged(
+                        &path,
+                        &[
+                            ("type_id", type_id.to_string()),
+                            ("order_type", "all".to_string()),
+                        ],
+                    )
+                    .await
+                {
+                    Ok(orders) => orders,
+                    Err(e) if is_not_found(&e) => Vec::new(),
+                    Err(e) => return Err(e),
+                };
+                self.orders.put(key, orders.clone());
+                Ok(orders)
+            },
+        )
+        .await
     }
 
     /// All live orders (buy + sell) for a type in a region, cached per region.
@@ -121,43 +122,46 @@ impl MarketService {
 
     /// Daily history for a type in a region (cached per region).
     async fn history_for(&self, region_id: i64, type_id: i64) -> Result<Vec<HistoryDay>, EsiError> {
-        if let Some(cached) = self.history.get(&(region_id, type_id)) {
-            return Ok(cached);
-        }
-        let gate = self.history_flight.lock_for(&(region_id, type_id));
-        let _flight = gate.lock().await;
-        if let Some(cached) = self.history.get(&(region_id, type_id)) {
-            return Ok(cached);
-        }
-        let path = format!("/latest/markets/{region_id}/history/");
-        let history: Vec<HistoryDay> = match self
-            .esi
-            .get_json(&path, &[("type_id", type_id.to_string())])
-            .await
-        {
-            Ok(history) => history,
-            Err(e) if is_not_found(&e) => Vec::new(),
-            Err(e) => return Err(e),
-        };
-        self.history.put((region_id, type_id), history.clone());
-        Ok(history)
+        let key = (region_id, type_id);
+        deduplicated_cached_fetch(
+            &self.history_flight,
+            &key,
+            || self.history.get(&key),
+            || async {
+                let path = format!("/latest/markets/{region_id}/history/");
+                let history: Vec<HistoryDay> = match self
+                    .esi
+                    .get_json(&path, &[("type_id", type_id.to_string())])
+                    .await
+                {
+                    Ok(history) => history,
+                    Err(e) if is_not_found(&e) => Vec::new(),
+                    Err(e) => return Err(e),
+                };
+                self.history.put(key, history.clone());
+                Ok(history)
+            },
+        )
+        .await
     }
 
     /// Global adjusted/average prices, keyed by type id (cached as a whole).
     async fn adjusted_prices(&self) -> Result<Arc<HashMap<i64, AdjustedPrice>>, EsiError> {
-        if let Some(cached) = self.prices.get(&()) {
-            return Ok(cached);
-        }
-        let gate = self.prices_flight.lock_for(&());
-        let _flight = gate.lock().await;
-        if let Some(cached) = self.prices.get(&()) {
-            return Ok(cached);
-        }
-        let list: Vec<AdjustedPrice> = self.esi.get_json("/latest/markets/prices/", &[]).await?;
-        let map: HashMap<i64, AdjustedPrice> = list.into_iter().map(|p| (p.type_id, p)).collect();
-        let arc = Arc::new(map);
-        self.prices.put((), arc.clone());
-        Ok(arc)
+        deduplicated_cached_fetch(
+            &self.prices_flight,
+            &(),
+            || self.prices.get(&()),
+            || async {
+                let list: Vec<AdjustedPrice> =
+                    self.esi.get_json("/latest/markets/prices/", &[]).await?;
+                let map: HashMap<i64, AdjustedPrice> =
+                    list.into_iter().map(|p| (p.type_id, p)).collect();
+                let arc = Arc::new(map);
+                self.prices.put((), arc.clone());
+                Ok(arc)
+            },
+        )
+        .await
     }
 
     /// Raw daily market history for a type in a region (ascending by date),
@@ -193,38 +197,49 @@ impl MarketService {
         type_ids: &[i64],
     ) -> Result<HashMap<i64, Aggregate>, EsiError> {
         let key = location.key();
-        let mut out = HashMap::with_capacity(type_ids.len());
-        let mut misses = Vec::new();
+        let out = Mutex::new(HashMap::with_capacity(type_ids.len()));
+        let misses = Mutex::new(Vec::new());
         for &type_id in type_ids {
             match self.aggregates.get(&(key, type_id)) {
                 Some(agg) => {
-                    out.insert(type_id, agg);
+                    out.lock().insert(type_id, agg);
                 }
-                None => misses.push(type_id),
+                None => misses.lock().push(type_id),
             }
         }
-        if !misses.is_empty() {
-            // Single-flight per location: a concurrent scan of the same hub
-            // waits here, then re-checks the cache and fetches only what's
-            // still missing (usually nothing).
-            let gate = self.aggregates_flight.lock_for(&key);
-            let _flight = gate.lock().await;
-            misses.retain(|&type_id| match self.aggregates.get(&(key, type_id)) {
-                Some(agg) => {
-                    out.insert(type_id, agg);
-                    false
-                }
-                None => true,
-            });
-            if !misses.is_empty() {
-                let fetched = self.fuzzwork.aggregates(location, &misses).await?;
+        if misses.lock().is_empty() {
+            return Ok(out.into_inner());
+        }
+        // Single-flight per location: a concurrent scan of the same hub waits
+        // here, then re-checks the cache and fetches only what's still
+        // missing (usually nothing).
+        deduplicated_cached_fetch(
+            &self.aggregates_flight,
+            &key,
+            || {
+                misses
+                    .lock()
+                    .retain(|&type_id| match self.aggregates.get(&(key, type_id)) {
+                        Some(agg) => {
+                            out.lock().insert(type_id, agg);
+                            false
+                        }
+                        None => true,
+                    });
+                misses.lock().is_empty().then_some(())
+            },
+            || async {
+                let missing = misses.lock().clone();
+                let fetched = self.fuzzwork.aggregates(location, &missing).await?;
                 for (type_id, agg) in fetched {
                     self.aggregates.put((key, type_id), agg.clone());
-                    out.insert(type_id, agg);
+                    out.lock().insert(type_id, agg);
                 }
-            }
-        }
-        Ok(out)
+                Ok::<(), EsiError>(())
+            },
+        )
+        .await?;
+        Ok(out.into_inner())
     }
 
     /// Average daily-**traded** volume (units moved/day) over the last `days` of

@@ -7,6 +7,7 @@
 //! of firing a duplicate request (which would waste ESI error budget).
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::hash::Hash;
 use std::sync::{Arc, Mutex};
 
@@ -42,6 +43,42 @@ impl<K: Eq + Hash + Clone> Default for KeyLocks<K> {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// The single-flight + TTL "lock-gate → check-cache → fetch" pattern shared
+/// by every cached ESI/Fuzzwork lookup in [`crate::market::service`]:
+///
+/// 1. Check the cache; return immediately on a hit.
+/// 2. Take this key's lock (queueing behind any concurrent identical fetch).
+/// 3. Re-check the cache — the caller that was fetching may have just filled
+///    it, in which case this is now a cache hit too.
+/// 4. Otherwise, run `fetch` (which is expected to populate the cache itself
+///    before returning, mirroring the original inline call sites).
+///
+/// `check_cache` is `FnMut` (not `Fn`) so a caller assembling a partial
+/// result across multiple keys (e.g. a batch of misses) can mutate captured
+/// state on each cache probe.
+pub async fn deduplicated_cached_fetch<K, V, E, C, F, Fut>(
+    locks: &KeyLocks<K>,
+    key: &K,
+    mut check_cache: C,
+    fetch: F,
+) -> Result<V, E>
+where
+    K: Eq + Hash + Clone,
+    C: FnMut() -> Option<V>,
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<V, E>>,
+{
+    if let Some(cached) = check_cache() {
+        return Ok(cached);
+    }
+    let gate = locks.lock_for(key);
+    let _flight = gate.lock().await;
+    if let Some(cached) = check_cache() {
+        return Ok(cached);
+    }
+    fetch().await
 }
 
 #[cfg(test)]
