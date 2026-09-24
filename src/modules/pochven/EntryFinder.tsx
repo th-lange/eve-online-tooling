@@ -25,7 +25,7 @@ export function EntryFinder() {
   });
   const result = useQuery({
     queryKey: ["pochven", "search", system?.id ?? null, maxJumps],
-    queryFn: () => pochvenSearch(system!.id, maxJumps),
+    queryFn: system ? () => pochvenSearch(system.id, maxJumps) : undefined,
     enabled: system != null,
     staleTime: 5 * 60_000,
   });

@@ -296,7 +296,7 @@ function WeaponRow({
               </tr>
             </thead>
             <tbody>
-              {ammo.data!.map((a) => (
+              {(ammo.data ?? []).map((a) => (
                 <tr
                   key={a.typeId}
                   className={`border-t border-zinc-800/60 ${

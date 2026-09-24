@@ -573,6 +573,9 @@ export function SystemGraph({
         selected: curSel.get(n.id) ?? false,
       }));
     });
+    // `mode` is deliberately excluded: it's read via closure (see comment
+    // above) so mode switches go through `applyMode` instead of re-running
+    // this sync effect, which would otherwise wipe in-progress node drags.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inputNodes, positionsFor, storageKey]);
 
