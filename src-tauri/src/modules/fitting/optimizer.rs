@@ -1570,4 +1570,164 @@ mod tests {
         assert_eq!(m.charge_type_id, None);
         assert_eq!(m.quantity, 1);
     }
+
+    /// Ship base attributes shared by the `evaluate`-level tests below: 4 high
+    /// / 3 mid / 2 low slots, generous CPU/PG/calibration so a single test
+    /// module never trips the feasibility gate, plus a capacitor whose ~5
+    /// GJ/s peak matches the `engine::capacitor` fixtures (capacity 250,
+    /// recharge 125_000ms).
+    const EVAL_SHIP: i64 = 1;
+    fn eval_ship_attrs() -> Vec<(i64, f64)> {
+        vec![
+            (14, 4.0),       // high slots
+            (13, 3.0),       // mid slots
+            (12, 2.0),       // low slots
+            (1137, 0.0),     // rig slots
+            (1367, 0.0),     // subsystem slots
+            (102, 4.0),      // turret hardpoints
+            (101, 0.0),      // launcher hardpoints
+            (48, 500.0),     // cpu output
+            (11, 500.0),     // powergrid output
+            (1132, 400.0),   // calibration
+            (283, 0.0),      // drone bay
+            (1271, 0.0),     // drone bandwidth
+            (482, 250.0),    // capacitorCapacity
+            (55, 125_000.0), // rechargeRate (ms)
+        ]
+    }
+
+    /// A one-module fit (in a low slot, well within CPU/PG/slot limits) built
+    /// from `attrs`/`prices` for the `evaluate`-level tests.
+    fn eval_fit(module_type: i64) -> Fit {
+        Fit {
+            id: "x".into(),
+            name: "n".into(),
+            ship_type_id: EVAL_SHIP,
+            items: vec![item(module_type, SlotKind::Low, None, 1)],
+            projected: Vec::new(),
+        }
+    }
+
+    /// Run `evaluate` with empty effects/groups/skills/effect_meta — exactly
+    /// the "no dogma modifiers, base attrs only" shape the tests below need —
+    /// against a fit built from `attrs`/`prices`.
+    fn eval_with(attrs: &AttrMap, prices: &HashMap<i64, f64>, fit: &Fit) -> Option<Eval> {
+        let effects: EffectMap = HashMap::new();
+        let groups: GroupMap = HashMap::new();
+        let effect_meta: HashMap<i64, crate::sde::EffectMeta> = HashMap::new();
+        evaluate(
+            Objective::Tank,
+            fit,
+            &layout(),
+            attrs,
+            &effects,
+            &groups,
+            &[],
+            &effect_meta,
+            &|_: i64| true,
+            &|_: i64| 0.0,
+            prices,
+        )
+    }
+
+    /// `evaluate`'s `cap_stable` field, and `meets`'s cap-stable constraint,
+    /// track the module's steady capacitor drain against the ship's ~5 GJ/s
+    /// peak: a 4 GJ/s module stays under it (satisfied), a 6 GJ/s module
+    /// exceeds it (violated) — mirroring `engine::capacitor`'s own fixtures.
+    #[test]
+    fn evaluate_reports_cap_stable_satisfied_and_violated() {
+        let cap_constraint = Constraints {
+            cap_stable: true,
+            max_cost: None,
+        };
+
+        let stable_attrs: AttrMap = HashMap::from([
+            (EVAL_SHIP, eval_ship_attrs()),
+            (10, vec![(50, 10.0), (30, 5.0), (6, 4.0), (73, 1000.0)]),
+        ]);
+        let stable_fit = eval_fit(10);
+        let stable = eval_with(&stable_attrs, &HashMap::new(), &stable_fit)
+            .expect("feasible fit must evaluate");
+        assert!(
+            stable.cap_stable,
+            "4 GJ/s draw must stay under the ~5 GJ/s peak"
+        );
+        assert!(meets(&stable, &cap_constraint));
+
+        let unstable_attrs: AttrMap = HashMap::from([
+            (EVAL_SHIP, eval_ship_attrs()),
+            (11, vec![(50, 10.0), (30, 5.0), (6, 6.0), (73, 1000.0)]),
+        ]);
+        let unstable_fit = eval_fit(11);
+        let unstable = eval_with(&unstable_attrs, &HashMap::new(), &unstable_fit)
+            .expect("feasible fit must evaluate");
+        assert!(
+            !unstable.cap_stable,
+            "6 GJ/s draw must exceed the ~5 GJ/s peak"
+        );
+        assert!(!meets(&unstable, &cap_constraint));
+    }
+
+    /// `evaluate`'s `cost` field sums hull + module prices (via `fit_cost`),
+    /// and `meets`'s budget constraint enforces it: within the cap it's
+    /// satisfied, over it (beyond `meets`'s 1.0 ISK rounding tolerance) it's
+    /// violated.
+    #[test]
+    fn evaluate_reports_cost_and_meets_enforces_cost_cap() {
+        let attrs: AttrMap = HashMap::from([
+            (EVAL_SHIP, eval_ship_attrs()),
+            (12, vec![(50, 10.0), (30, 5.0)]), // no cap draw — stays cap-stable
+        ]);
+        let prices = HashMap::from([(EVAL_SHIP, 1_000.0), (12, 200.0)]);
+        let fit = eval_fit(12);
+        let eval = eval_with(&attrs, &prices, &fit).expect("feasible fit must evaluate");
+        assert_eq!(eval.cost, 1_200.0);
+
+        let loose = Constraints {
+            cap_stable: false,
+            max_cost: Some(1_500.0),
+        };
+        assert!(meets(&eval, &loose), "1200 ISK must fit a 1500 ISK budget");
+
+        let tight = Constraints {
+            cap_stable: false,
+            max_cost: Some(1_000.0),
+        };
+        assert!(
+            !meets(&eval, &tight),
+            "1200 ISK must exceed a 1000 ISK budget"
+        );
+    }
+
+    /// When a trial satisfies neither active constraint, `meets` rejects it and
+    /// the same `cap_stable`/`within_budget` derivation `optimize_fit` reports
+    /// back to the UI (so it can warn "target not reached") both read false —
+    /// pinning the "no valid fit exists" reporting contract without needing a
+    /// full SDE-backed search.
+    #[test]
+    fn evaluate_and_meets_report_unmet_when_no_constraint_is_satisfied() {
+        let attrs: AttrMap = HashMap::from([
+            (EVAL_SHIP, eval_ship_attrs()),
+            // Both over the ~5 GJ/s cap peak *and* priced over budget.
+            (13, vec![(50, 10.0), (30, 5.0), (6, 6.0), (73, 1000.0)]),
+        ]);
+        let prices = HashMap::from([(EVAL_SHIP, 1_000.0), (13, 200.0)]);
+        let fit = eval_fit(13);
+        let constraints = Constraints {
+            cap_stable: true,
+            max_cost: Some(1_000.0),
+        };
+
+        let report = eval_with(&attrs, &prices, &fit);
+        let eval = report.as_ref().expect("structurally feasible fit");
+        assert!(!meets(eval, &constraints));
+
+        // Mirrors `optimize_fit`'s final report derivation exactly.
+        let cap_stable = report.as_ref().is_some_and(|e| e.cap_stable);
+        let within_budget = report
+            .as_ref()
+            .is_none_or(|e| constraints.max_cost.is_none_or(|m| e.cost <= m + 1.0));
+        assert!(!cap_stable, "unmet cap-stable constraint must be reported");
+        assert!(!within_budget, "unmet budget constraint must be reported");
+    }
 }
