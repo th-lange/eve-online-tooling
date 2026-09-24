@@ -1,4 +1,7 @@
 import { createContext, useContext } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { infoList } from "../../lib/api";
+import { INFO_FEED_REFRESH_INTERVAL_MS } from "../../lib/refreshIntervals";
 
 /** Unseen-alarm state for the Info Panel nav badge. */
 export interface InfoAlerts {
@@ -18,4 +21,16 @@ export const InfoAlertsContext = createContext<InfoAlerts>({
 
 export function useInfoAlerts(): InfoAlerts {
   return useContext(InfoAlertsContext);
+}
+
+/** The info feed (plugin-posted alarms/messages), polled since entries don't
+ * always emit a live event. Shared by `InfoPanel` and `InfoAlertsProvider` —
+ * both mount their own observer on the same `["info"]` query, so this hook
+ * keeps them on one interval instead of two independently-drifting ones. */
+export function useInfoFeed() {
+  return useQuery({
+    queryKey: ["info"],
+    queryFn: infoList,
+    refetchInterval: INFO_FEED_REFRESH_INTERVAL_MS,
+  });
 }

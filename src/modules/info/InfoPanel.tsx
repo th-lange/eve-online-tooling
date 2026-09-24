@@ -1,8 +1,7 @@
 import { useContext, useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Bell, ChevronRight, MessageSquare, Trash2 } from "lucide-react";
 import {
-  infoList,
   infoClear,
   infoClearSource,
   onInfoEntry,
@@ -10,7 +9,7 @@ import {
 } from "../../lib/api";
 import { Page, PageHeader, Centered } from "../../components/page";
 import { ModuleActiveContext } from "../../components/moduleActiveContext";
-import { useInfoAlerts } from "./infoContext";
+import { useInfoAlerts, useInfoFeed } from "./infoContext";
 
 const SUBTITLE =
   "Alarms and messages posted by your scripts and plugins (via send_alarm / write_message). Each source gets its own segment, newest first.";
@@ -30,11 +29,7 @@ function groupBySource(rows: InfoEntry[]): [string, InfoEntry[]][] {
 export function InfoPanel() {
   const qc = useQueryClient();
   // Poll so plugin-posted entries (which don't emit an event) still surface.
-  const entries = useQuery({
-    queryKey: ["info"],
-    queryFn: infoList,
-    refetchInterval: 3000,
-  });
+  const entries = useInfoFeed();
 
   // Script-posted entries arrive live — prepend them for a snappy feel.
   useEffect(() => {

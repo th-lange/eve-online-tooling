@@ -24,6 +24,7 @@ import {
 import { formatInt } from "../../lib/format";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
+import { SHOPPING_CHAT_POLL_INTERVAL_MS } from "../../lib/refreshIntervals";
 import { Page, PageHeader } from "../../components/page";
 
 /**
@@ -244,41 +245,42 @@ function ChatCapture({
     localStorage.setItem(STORAGE_KEYS.shoppingChatTarget, targetId);
   }, [targetId]);
 
-  // Poll the channel's log while listening.
+  // Poll the channel's log while listening — TanStack Query owns the
+  // interval lifecycle (auto-cleanup on unmount/disable) instead of a raw
+  // `setInterval`.
+  const listenEnabled = listening && !!channel.trim() && !!logsDir.trim();
+  const sync = useQuery({
+    queryKey: ["shopping", "chatSync", logsDir, channel.trim()],
+    queryFn: () => {
+      const first = fromNow.current;
+      fromNow.current = false;
+      return shoppingChatSync(
+        logsDir,
+        channel.trim(),
+        first,
+        targetRef.current,
+      );
+    },
+    enabled: listenEnabled,
+    refetchInterval: listenEnabled ? SHOPPING_CHAT_POLL_INTERVAL_MS : false,
+  });
   useEffect(() => {
-    if (!listening || !channel.trim() || !logsDir.trim()) return;
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const first = fromNow.current;
-        fromNow.current = false;
-        const r = await shoppingChatSync(
-          logsDir,
-          channel.trim(),
-          first,
-          targetRef.current,
-        );
-        if (cancelled) return;
-        setStatus(
-          r.found
-            ? `listening to ${r.file}`
-            : "waiting for the channel log (create the channel in EVE)…",
-        );
-        if (r.added.length) {
-          setTotal((t) => t + r.added.length);
-          await onSync();
-        }
-      } catch (e) {
-        if (!cancelled) setStatus(errorMessage(e));
-      }
-    };
-    void poll();
-    const timer = setInterval(() => void poll(), 4000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [listening, channel, logsDir, onSync]);
+    const r = sync.data;
+    if (!r) return;
+    setStatus(
+      r.found
+        ? `listening to ${r.file}`
+        : "waiting for the channel log (create the channel in EVE)…",
+    );
+    if (r.added.length) {
+      setTotal((t) => t + r.added.length);
+      void onSync();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sync.data]);
+  useEffect(() => {
+    if (sync.error) setStatus(errorMessage(sync.error));
+  }, [sync.error]);
 
   function generate() {
     setChannel(`buy-${crypto.randomUUID().slice(0, 8)}`);
