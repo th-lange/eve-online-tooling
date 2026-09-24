@@ -9,7 +9,7 @@ import {
   type ProfitView,
   type WalletView,
 } from "../../lib/api";
-import { QueryErrorNotice } from "../../components/QueryErrorNotice";
+import { QueryResult } from "../../components/QueryResult";
 import {
   formatEveDateTime,
   formatInt,
@@ -82,45 +82,59 @@ export function AccountingPage() {
 
       <div className="mt-3">
         {tab === "wallet" ? (
-          wallet.isError ? (
-            <QueryErrorNotice
-              error={wallet.error}
-              loginMessage="Log in a character first to view your wallet."
-              scopeHint="check the wallet scope is enabled on your EVE app."
-              className="p-6 text-sm"
-            />
-          ) : wallet.data ? (
-            <Wallet d={wallet.data} />
-          ) : (
-            <Hint>Hit Sync to pull and accumulate your wallet.</Hint>
-          )
+          <QueryResult
+            result={{
+              isError: wallet.isError,
+              error: wallet.error,
+              isPending: wallet.isPending,
+              data: wallet.data,
+            }}
+            pendingLabel="Syncing…"
+            loginMessage="Log in a character first to view your wallet."
+            scopeHint="check the wallet scope is enabled on your EVE app."
+            emptyTitle="No wallet data yet."
+            emptyHint="Hit Sync to pull and accumulate your wallet."
+            updatedAt={wallet.isSuccess ? wallet.submittedAt : undefined}
+            fetching={wallet.isPending}
+          >
+            {(d) => <Wallet d={d} />}
+          </QueryResult>
         ) : tab === "profit" ? (
-          profit.isError ? (
-            <QueryErrorNotice
-              error={profit.error}
-              loginMessage="Log in a character first to view your wallet."
-              scopeHint="check the wallet scope is enabled on your EVE app."
-              className="p-6 text-sm"
-            />
-          ) : profit.data ? (
-            <Profit d={profit.data} />
-          ) : (
-            <Hint>
-              Hit Sync (on the Wallet tab first) to compute realized profit from
-              your transactions.
-            </Hint>
-          )
-        ) : ledger.isError ? (
-          <QueryErrorNotice
-            error={ledger.error}
+          <QueryResult
+            result={{
+              isError: profit.isError,
+              error: profit.error,
+              isPending: profit.isPending,
+              data: profit.data,
+            }}
+            pendingLabel="Syncing…"
+            loginMessage="Log in a character first to view your wallet."
+            scopeHint="check the wallet scope is enabled on your EVE app."
+            emptyTitle="No profit data yet."
+            emptyHint="Hit Sync (on the Wallet tab first) to compute realized profit from your transactions."
+            updatedAt={profit.isSuccess ? profit.submittedAt : undefined}
+            fetching={profit.isPending}
+          >
+            {(d) => <Profit d={d} />}
+          </QueryResult>
+        ) : (
+          <QueryResult
+            result={{
+              isError: ledger.isError,
+              error: ledger.error,
+              isPending: ledger.isPending,
+              data: ledger.data,
+            }}
+            pendingLabel="Syncing…"
             loginMessage="Log in a character first to view your transactions."
             scopeHint="check the wallet scope is enabled on your EVE app."
-            className="p-6 text-sm"
-          />
-        ) : ledger.data ? (
-          <Transactions d={ledger.data} />
-        ) : (
-          <Hint>Hit Sync to pull your buy/sell transaction history.</Hint>
+            emptyTitle="No transaction data yet."
+            emptyHint="Hit Sync to pull your buy/sell transaction history."
+            updatedAt={ledger.isSuccess ? ledger.submittedAt : undefined}
+            fetching={ledger.isPending}
+          >
+            {(d) => <Transactions d={d} />}
+          </QueryResult>
         )}
       </div>
     </Page>
@@ -402,12 +416,6 @@ function Head<K extends string>({
         ))}
       </tr>
     </thead>
-  );
-}
-
-function Hint({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="p-8 text-center text-sm text-zinc-500">{children}</div>
   );
 }
 
