@@ -28,6 +28,7 @@ import {
 import { InlineError } from "../../components/InlineError";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { usePersistentState } from "../../lib/usePersistentState";
+import { FACTION_WARFARE_JUMP_DISTANCE_REFRESH_MS } from "../../lib/refreshIntervals";
 
 /** Militia faction id → accent hex, used for the map + legend. */
 const FACTION_HEX: Record<number, string> = {
@@ -363,8 +364,8 @@ function Warzone({ data, zone }: { data: FwMap; zone: string }) {
     queryKey: ["intel", "fw-jumps", systemIds],
     queryFn: () => intelFwJumps(systemIds),
     enabled: !!activeChar.data,
-    staleTime: 90_000,
-    refetchInterval: 90_000,
+    staleTime: FACTION_WARFARE_JUMP_DISTANCE_REFRESH_MS,
+    refetchInterval: FACTION_WARFARE_JUMP_DISTANCE_REFRESH_MS,
   });
   const dist = jumpResult.data?.jumps ?? {};
   const characterSystemId = jumpResult.data?.characterSystemId ?? null;

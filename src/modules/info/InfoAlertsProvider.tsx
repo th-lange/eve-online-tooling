@@ -1,7 +1,7 @@
 import { useCallback, useState, type ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { infoList, type InfoEntry } from "../../lib/api";
-import { InfoAlertsContext } from "./infoContext";
+import { useQueryClient } from "@tanstack/react-query";
+import type { InfoEntry } from "../../lib/api";
+import { InfoAlertsContext, useInfoFeed } from "./infoContext";
 
 const SEEN_KEY = "eve.info.seenAlarmId";
 
@@ -14,11 +14,7 @@ const SEEN_KEY = "eve.info.seenAlarmId";
  */
 export function InfoAlertsProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
-  const feed = useQuery({
-    queryKey: ["info"],
-    queryFn: infoList,
-    refetchInterval: 4000,
-  });
+  const feed = useInfoFeed();
   const [seenId, setSeenId] = useState<string | null>(() =>
     localStorage.getItem(SEEN_KEY),
   );

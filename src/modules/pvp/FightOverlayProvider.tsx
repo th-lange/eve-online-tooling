@@ -16,6 +16,7 @@ import {
 import { usePersistentState } from "../../lib/usePersistentState";
 import { useEveLogDir } from "../../lib/useEveLogDir";
 import { playCue, type CueSound } from "../../lib/sound";
+import { FIGHT_OVERLAY_SHIP_POLL_INTERVAL_MS } from "../../lib/refreshIntervals";
 import { Modal } from "../../components/Modal";
 import { FightOverlayContext } from "./fightOverlayContext";
 
@@ -603,7 +604,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     queryFn: characterShip,
     enabled,
     staleTime: 15_000,
-    refetchInterval: enabled ? 30_000 : false,
+    refetchInterval: enabled ? FIGHT_OVERLAY_SHIP_POLL_INTERVAL_MS : false,
   });
   const ship = myShip.data ?? null;
 

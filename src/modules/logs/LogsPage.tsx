@@ -8,6 +8,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { logStore, type LogEntry } from "../../lib/logStore";
 import { logsList, logsClear } from "../../lib/api";
+import { LOGS_POLL_INTERVAL_MS } from "../../lib/refreshIntervals";
 
 type Level = "all" | "error" | "warn";
 type Source = "all" | "frontend" | "backend";
@@ -43,7 +44,7 @@ export function LogsPage() {
   const { data: backendRaw = [] } = useQuery({
     queryKey: ["logs_list"],
     queryFn: logsList,
-    refetchInterval: 2_000,
+    refetchInterval: LOGS_POLL_INTERVAL_MS,
   });
 
   // Merge and sort by timestamp.

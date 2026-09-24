@@ -17,6 +17,7 @@ import {
 } from "../../lib/api";
 import { queryErrorText } from "../../components/QueryErrorNotice";
 import { formatInt } from "../../lib/format";
+import { ROUTE_AUTO_REFRESH_INTERVAL_MS } from "../../lib/refreshIntervals";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { usePersistentState } from "../../lib/usePersistentState";
 import {
@@ -79,6 +80,7 @@ function Workbench() {
   const activity = useQuery({
     queryKey: ["route", "systemActivity"],
     queryFn: () => systemActivity(false),
+    refetchInterval: auto ? ROUTE_AUTO_REFRESH_INTERVAL_MS : false,
   });
   const trail = useQuery({
     queryKey: ["route", "breadcrumb"],
@@ -86,11 +88,17 @@ function Workbench() {
   });
   // Neighbourhood graph as a cached query keyed on (centre, depth): it survives
   // unmount and restores instantly on return, refetching only when stale or on
-  // an explicit Update.
+  // an explicit Update. While "Auto 30s" is on and centred on a typed system
+  // (not "my location", which polls via `liveLocation` below) it also
+  // self-refreshes.
   const hood = useQuery({
     queryKey: ["route", "neighbourhood", centre?.id ?? null, depth],
     queryFn: () => systemNeighbourhood(centre!.id, depth),
     enabled: mode === "neighbouring" && !!centre,
+    refetchInterval:
+      auto && !fromMe && mode === "neighbouring" && !!centre
+        ? ROUTE_AUTO_REFRESH_INTERVAL_MS
+        : false,
   });
 
   // Focus the neighbourhood on a typed system (the query reacts to centre/mode).
@@ -99,19 +107,26 @@ function Workbench() {
     setCentre(m);
     setMode("neighbouring");
   }
+
+  // Applies a fresh location fetch: records the breadcrumb and re-centres the
+  // neighbourhood on the current system. Shared by the manual "focus on me"
+  // action and the auto-refresh poll below.
+  function applyLocation(t: BreadcrumbEntry[], d: number) {
+    setLocError(null);
+    qc.setQueryData(["route", "breadcrumb"], t);
+    const last = t[t.length - 1];
+    if (last) {
+      setFromMe(true);
+      setCentre({ id: last.systemId, name: last.name });
+      setMode("neighbouring");
+      setDepth(d);
+    }
+  }
+
   // Focus on the live current location (also records the travel breadcrumb).
   async function focusMyLocation(d = depth) {
     try {
-      const t = await routeLocation();
-      setLocError(null);
-      qc.setQueryData(["route", "breadcrumb"], t);
-      const last = t[t.length - 1];
-      if (last) {
-        setFromMe(true);
-        setCentre({ id: last.systemId, name: last.name });
-        setMode("neighbouring");
-        setDepth(d);
-      }
+      applyLocation(await routeLocation(), d);
     } catch (e) {
       setLocError(
         queryErrorText(e, "Log in a character first to track your location."),
@@ -131,17 +146,30 @@ function Workbench() {
     else if (centre) void hood.refetch();
   }
 
-  // Auto-update every 30s while enabled (re-centres a live "my location" focus).
+  // Auto-update every 30s while enabled and centred on "my location": polls
+  // live location via TanStack Query instead of a raw `setInterval`, so the
+  // query lifecycle (start/stop/cleanup) is owned by `enabled` +
+  // `refetchInterval`.
+  const liveLocation = useQuery({
+    queryKey: ["route", "liveLocation"],
+    queryFn: routeLocation,
+    enabled: auto && fromMe,
+    refetchInterval: auto && fromMe ? ROUTE_AUTO_REFRESH_INTERVAL_MS : false,
+  });
   useEffect(() => {
-    if (!auto) return;
-    const id = setInterval(() => {
-      void activity.refetch();
-      if (fromMe) void focusMyLocation();
-      else if (centre) void hood.refetch();
-    }, 30_000);
-    return () => clearInterval(id);
+    if (liveLocation.data) applyLocation(liveLocation.data, depth);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auto, fromMe, centre, depth]);
+  }, [liveLocation.data]);
+  useEffect(() => {
+    if (liveLocation.error) {
+      setLocError(
+        queryErrorText(
+          liveLocation.error,
+          "Log in a character first to track your location.",
+        ),
+      );
+    }
+  }, [liveLocation.error]);
 
   // Memoised so the `filtered` memo's dependency stays referentially stable.
   const source: SystemActivity[] = useMemo(
