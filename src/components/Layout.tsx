@@ -299,8 +299,21 @@ export function Layout() {
             <div className="mt-2 border-t border-zinc-800 pt-2">
               <NavSection
                 label={`Hidden (${hiddenModules.length})`}
+                title="Hidden modules stay reachable at their route — click the eye icon on a row to restore it to the sidebar"
                 collapsed={collapsed.includes("hidden")}
                 onToggle={() => toggleSection("hidden")}
+                action={
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setHidden([]);
+                    }}
+                    title="Restore all hidden modules to the sidebar"
+                    className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium normal-case text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                  >
+                    Restore all
+                  </button>
+                }
               >
                 {hiddenModules.map((m) => (
                   <HiddenRow key={m.id} module={m} onRestore={toggleHidden} />
@@ -392,28 +405,41 @@ function ModuleHost({
   );
 }
 
-/** A labelled sidebar section: a small caption above its grouped nav rows. */
+/**
+ * A labelled sidebar section: a small caption above its grouped nav rows.
+ * `title` adds a tooltip on the caption (e.g. explaining a non-obvious
+ * section's behavior); `action` renders an optional control at the row's
+ * trailing edge, alongside the toggle (e.g. "Restore all" on Hidden).
+ */
 function NavSection({
   label,
+  title,
   collapsed,
   onToggle,
+  action,
   children,
 }: {
   label: string;
+  title?: string;
   collapsed: boolean;
   onToggle: () => void;
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="mb-2">
-      <button
-        onClick={onToggle}
-        aria-expanded={!collapsed}
-        className="flex w-full items-center gap-1 px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-300"
-      >
-        {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
-        {label}
-      </button>
+      <div className="flex items-center gap-1 px-2 pt-2 pb-1">
+        <button
+          onClick={onToggle}
+          aria-expanded={!collapsed}
+          title={title}
+          className="flex flex-1 items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-300"
+        >
+          {collapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+          {label}
+        </button>
+        {action}
+      </div>
       {!collapsed && <div className="space-y-0.5">{children}</div>}
     </div>
   );
