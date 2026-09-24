@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { LineChart, X } from "lucide-react";
 import { errorMessage, marketOrderBook } from "../lib/api";
 import { marketKeys } from "../lib/queryKeys";
+import { Modal } from "./Modal";
 import { PriceHistoryView } from "./PriceHistory";
 import { DepthChart } from "./DepthChart";
 
@@ -56,14 +56,6 @@ export function PriceHistoryPopover({
       </div>
     ) : null;
 
-  // Close on Escape.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open]);
-
   return (
     <>
       <button
@@ -81,69 +73,58 @@ export function PriceHistoryPopover({
       >
         <LineChart size={16} />
       </button>
-      {open &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            onClick={() => setOpen(false)}
-          >
-            <div className="absolute inset-0 bg-black/60" />
-            <div
-              role="dialog"
-              onClick={(e) => e.stopPropagation()}
-              className="relative z-10 flex max-h-[85vh] w-[760px] max-w-[calc(100vw-2rem)] flex-col rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl"
-            >
-              {/* Fixed header so the close button never sits under the content
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        aria-label={`${name} price history`}
+        backdropClassName="fixed inset-0 z-40 bg-black/60"
+        className="fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[760px] max-w-[calc(100vw-2rem)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl"
+      >
+        {/* Fixed header so the close button never sits under the content
                   scrollbar. */}
-              <div className="flex items-start justify-between gap-3 border-b border-zinc-800 p-3">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-zinc-200">
-                    {name} — price history
-                  </div>
-                  {/* ESI publishes history per region only, so this is always
-                      regional; `hub` (if any) is just the pricing market. */}
-                  <div className="mt-0.5 truncate text-xs text-zinc-500">
-                    {regionName
-                      ? `${regionName} — regional history`
-                      : "Regional history (ESI)"}
-                    {hub ? ` · priced at ${hub}` : ""}
-                  </div>
-                </div>
-                <button
-                  onClick={() => setOpen(false)}
-                  aria-label="Close"
-                  className="shrink-0 text-zinc-500 hover:text-zinc-200"
-                >
-                  <X size={15} />
-                </button>
-              </div>
-              <div className="overflow-auto p-3">
-                {history.isLoading ? (
-                  <div className="p-8 text-center text-sm text-zinc-500">
-                    Loading history…
-                  </div>
-                ) : history.isError ? (
-                  <div className="p-8 text-center text-sm text-rose-400">
-                    {errorMessage(history.error)}
-                  </div>
-                ) : (history.data?.length ?? 0) === 0 ? (
-                  <>
-                    <div className="p-8 text-center text-sm text-zinc-500">
-                      No market history for this item in the selected region.
-                    </div>
-                    {depth && <div className="mt-2">{depth}</div>}
-                  </>
-                ) : (
-                  <PriceHistoryView
-                    history={history.data!}
-                    afterPriceChart={depth}
-                  />
-                )}
-              </div>
+        <div className="flex items-start justify-between gap-3 border-b border-zinc-800 p-3">
+          <div className="min-w-0">
+            <div className="truncate text-sm font-medium text-zinc-200">
+              {name} — price history
             </div>
-          </div>,
-          document.body,
-        )}
+            {/* ESI publishes history per region only, so this is always
+                      regional; `hub` (if any) is just the pricing market. */}
+            <div className="mt-0.5 truncate text-xs text-zinc-500">
+              {regionName
+                ? `${regionName} — regional history`
+                : "Regional history (ESI)"}
+              {hub ? ` · priced at ${hub}` : ""}
+            </div>
+          </div>
+          <button
+            onClick={() => setOpen(false)}
+            aria-label="Close"
+            className="shrink-0 text-zinc-500 hover:text-zinc-200"
+          >
+            <X size={15} />
+          </button>
+        </div>
+        <div className="overflow-auto p-3">
+          {history.isLoading ? (
+            <div className="p-8 text-center text-sm text-zinc-500">
+              Loading history…
+            </div>
+          ) : history.isError ? (
+            <div className="p-8 text-center text-sm text-rose-400">
+              {errorMessage(history.error)}
+            </div>
+          ) : (history.data?.length ?? 0) === 0 ? (
+            <>
+              <div className="p-8 text-center text-sm text-zinc-500">
+                No market history for this item in the selected region.
+              </div>
+              {depth && <div className="mt-2">{depth}</div>}
+            </>
+          ) : (
+            <PriceHistoryView history={history.data!} afterPriceChart={depth} />
+          )}
+        </div>
+      </Modal>
     </>
   );
 }
