@@ -123,6 +123,20 @@ Vitest (jsdom), config in `vite.config.ts`, setup in `src/test/setup.ts`. To tes
 - **Price vectors**: the market service exposes more than spot — sell-min/buy-max, daily average,
   N-day moving average, and daily volume/order_count (liquidity), with a configurable basis per role.
 
+## Location terminology (Region / System / Station / Hub)
+
+EVE's location hierarchy is **Region > System > Station**; keep these words distinct in UI labels,
+code comments, and docs — never use one where another is meant:
+
+- **Region** — the ESI price-history basis (e.g. "The Forge"). `/markets/{region}/history/` and
+  `/markets/prices/` are regional; there is no per-station price history.
+- **System** — a solar system within a region (e.g. "Jita" the system, within The Forge).
+- **Station** — a citadel or NPC station within a system where orders are actually placed and
+  assets sit (e.g. "Jita IV - Moon 4 - Caldari Navy Assembly Plant").
+- **Hub** — colloquial shorthand for a major trading station (e.g. "Jita", "Amarr"). Fine in prose
+  and subtitles; never as a field label standing in for "region" or "station" — say which one it
+  is.
+
 ## Dependencies
 
 - `allowScripts` in `package.json` pins `esbuild@0.27.7` as an intentional re-approval gate: it is
