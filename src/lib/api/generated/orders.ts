@@ -20,7 +20,7 @@ export const commands = {
       return { status: "ok", data: await TAURI_INVOKE("orders_list") };
     } catch (e) {
       if (e instanceof Error) throw e;
-      else return { status: "error", error: e as any };
+      else return { status: "error", error: e as AppError };
     }
   },
 };

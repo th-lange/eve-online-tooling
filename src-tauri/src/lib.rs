@@ -155,18 +155,24 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            // Pilot (#589): re-export the orders module's TS bindings on every
-            // debug launch, so a dev session that changes `OrderRow`/`orders_list`
-            // doesn't need a separate `cargo test` invocation to see the update.
-            // CI's "Regenerate bindings" step (`npm run generate:bindings`)
-            // keeps the committed file fresh; release builds just consume it,
-            // since they never run the app. `export_orders_bindings` itself is
-            // diff-aware (#810): it leaves the committed file untouched unless
-            // the signature actually changed, so a clean tree stays clean
-            // across ordinary dev launches instead of picking up a
+            // Pilot (#589), extended by #836: re-export the covered modules'
+            // TS bindings on every debug launch, so a dev session that
+            // changes a covered command's signature or DTOs doesn't need a
+            // separate `cargo test` invocation to see the update. CI's
+            // "Regenerate bindings" step (`npm run generate:bindings`) keeps
+            // the committed files fresh; release builds just consume them,
+            // since they never run the app. Each `export_*_bindings` call is
+            // diff-aware (#810): it leaves its committed file untouched
+            // unless the signature actually changed, so a clean tree stays
+            // clean across ordinary dev launches instead of picking up a
             // whitespace-only rewrite every time.
             #[cfg(debug_assertions)]
-            bindings::export_orders_bindings();
+            {
+                bindings::export_orders_bindings();
+                bindings::export_market_bindings();
+                bindings::export_auth_bindings();
+                bindings::export_production_bindings();
+            }
 
             // Resolve the app data dir once and give the shared services a
             // disk-backed conditional cache rooted there, so ESI reads survive

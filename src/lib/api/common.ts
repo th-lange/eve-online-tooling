@@ -75,3 +75,16 @@ export function isAuthRequired(e: unknown): boolean {
 export function errorMessage(e: unknown): string {
   return isAppError(e) ? e.message : String(e);
 }
+
+/**
+ * Unwraps a tauri-specta `Result<T, E>` (#589/#836) into `T`, throwing `E` on
+ * failure so callers can keep using plain `try`/`catch` or a `Promise`
+ * rejection — the shape every generated `commands.*` call returns instead of
+ * rejecting directly. Shared by every module migrated to generated bindings.
+ */
+export function unwrapCommand<T, E>(
+  result: { status: "ok"; data: T } | { status: "error"; error: E },
+): T {
+  if (result.status === "error") throw result.error;
+  return result.data;
+}
