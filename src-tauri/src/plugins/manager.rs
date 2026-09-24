@@ -413,6 +413,120 @@ mod tests {
         .unwrap();
     }
 
+    /// Write a manifest + wasm artifact directly under `<root>/plugins/<id>/`
+    /// (bypassing the installer, as the wasm-escape tests above do) and
+    /// activate it, so `run_plugin` — the exact function `plugins_invoke`
+    /// calls — can be exercised end-to-end without a `PluginManager`
+    /// pre-warmed via the lower-level `invoke` path.
+    fn install_active_plugin(
+        root: &Path,
+        id: &str,
+        wasm: &[u8],
+        permissions: &str,
+    ) -> PluginRegistry {
+        let dir = root.join("plugins").join(id);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("plugin.json"),
+            format!(
+                r#"{{"id":"{id}","name":"{id}","version":"1.0.0","minAppVersion":"0.33.0","wasm":"plugin.wasm","permissions":[{permissions}]}}"#
+            ),
+        )
+        .unwrap();
+        std::fs::write(dir.join("plugin.wasm"), wasm).unwrap();
+        let registry = PluginRegistry::load(root);
+        registry.set_active(id, true).unwrap();
+        registry
+    }
+
+    /// #847: `run_plugin` — the exact dispatch `plugins_invoke` and the MCP
+    /// bridge both call — must refuse a call the plugin's *own manifest*
+    /// never granted, cleanly (an error, not a panic or a hang). The kv guest
+    /// imports the broker's `storage:own` host functions; installed with an
+    /// empty grant list, those imports go unresolved and instantiation itself
+    /// fails before any guest code runs.
+    #[test]
+    fn run_plugin_denies_a_call_the_manifest_never_granted() {
+        let root = tmp("run-plugin-permission-denied");
+        let kv_bytes = std::fs::read(kv_path()).unwrap();
+        let registry = install_active_plugin(&root, "kv-ungranted", &kv_bytes, "");
+        let manager = PluginManager::new();
+        let err = run_plugin(
+            &registry,
+            &manager,
+            &root,
+            "kv-ungranted",
+            "kv_set",
+            &serde_json::json!("hello"),
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("failed to instantiate plugin"),
+            "denial must fail at instantiation (unresolved storage:own import), not later: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// #847: a granted plugin's `host_call` round trip through `run_plugin`
+    /// end-to-end — manifest permission grant -> broker host functions ->
+    /// capability gateway -> SDE read -> JSON result back through the wasm
+    /// boundary — the same path `plugins_invoke` and the MCP bridge use.
+    #[test]
+    fn run_plugin_completes_a_granted_host_call_round_trip() {
+        let root = tmp("run-plugin-host-call-round-trip");
+        write_sde(&root);
+        let example_bytes = std::fs::read(example_wasm()).unwrap();
+        let registry = install_active_plugin(
+            &root,
+            "pricing-model",
+            &example_bytes,
+            r#""sde:read","storage:own""#,
+        );
+        let manager = PluginManager::new();
+        let out = run_plugin(
+            &registry,
+            &manager,
+            &root,
+            "pricing-model",
+            "search",
+            &serde_json::json!({"query": "trit"}),
+        )
+        .unwrap();
+        let results = out["results"].as_array().expect("results array");
+        assert!(
+            results
+                .iter()
+                .any(|r| r["typeId"] == 34 && r["name"] == "Tritanium"),
+            "host_call round trip must resolve Tritanium: {out}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// #847: a resource-limit case distinct from the wall-clock timeout
+    /// above (`timeout_terminates_a_runaway_plugin`) — a memory cap too
+    /// small for the call's own input/output must terminate the call
+    /// cleanly (an error, not a panic or a hang), the same contract the
+    /// timeout gives a runaway loop. 1 page (64 KiB) is enough for Extism to
+    /// instantiate the guest, but not enough to also hold a payload well over
+    /// that, so the *call* — not the build — is what trips the cap.
+    #[test]
+    fn a_memory_cap_too_small_for_the_payload_terminates_the_call() {
+        let starved = Limits {
+            max_pages: 1, // 64 KiB total linear memory
+            timeout: Duration::from_secs(5),
+        };
+        let mut plugin = build_plugin(ECHO_WASM, &starved, Vec::new(), &[])
+            .expect("64 KiB is enough to instantiate the guest itself");
+        let oversized = serde_json::to_vec(&serde_json::json!({
+            "pad": "x".repeat(1024 * 1024), // 1 MiB, well over the 64 KiB cap
+        }))
+        .unwrap();
+        let err = plugin
+            .call::<&[u8], Vec<u8>>("echo", &oversized)
+            .unwrap_err();
+        assert!(!err.to_string().is_empty());
+    }
+
     #[test]
     fn echo_round_trips_a_json_payload() {
         let mut plugin = build_plugin(ECHO_WASM, &Limits::default(), Vec::new(), &[]).unwrap();
