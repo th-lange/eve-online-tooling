@@ -10,6 +10,7 @@ import {
   SearchFilterRow,
 } from "../../components/forms";
 import { toggle, uniqueSorted } from "../../lib/sets";
+import { useElapsedSeconds } from "../../lib/useElapsedSeconds";
 import { stationTrading, type TradeParams, type TradeRow } from "../../lib/api";
 import { marketKeys } from "../../lib/queryKeys";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
@@ -74,6 +75,9 @@ function Workbench() {
     mutationFn: (p: TradeParams) => stationTrading(p),
     onSuccess: setRows,
   });
+  // No backend progress signal for this scan (one opaque bulk price fetch,
+  // not a per-item loop) — an elapsed-time tick is an honest liveness cue.
+  const elapsedSeconds = useElapsedSeconds(run.isPending);
 
   function calculate() {
     run.mutate({
@@ -127,7 +131,7 @@ function Workbench() {
               onClick={calculate}
               disabled={run.isPending}
               pending={run.isPending}
-              pendingLabel="Scanning…"
+              pendingLabel={`Scanning… ${elapsedSeconds}s`}
             >
               Calculate
             </PrimaryButton>
@@ -200,7 +204,7 @@ function Workbench() {
               data: run.isPending ? undefined : rows,
             }}
             isEmpty={(d) => d.length === 0}
-            pendingLabel="Scanning ~19k items at the chosen market…"
+            pendingLabel={`Scanning ~19k items at the chosen market… ${elapsedSeconds}s`}
             loginMessage="Log in a character first to run this scan."
             emptyTitle="No opportunities yet."
             emptyHint="Hit Calculate to scan the market at the chosen station."
