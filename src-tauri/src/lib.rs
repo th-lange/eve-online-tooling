@@ -320,6 +320,8 @@ pub fn run() {
             modules::fitting::commands::fitting_compatible_charges,
             modules::fitting::commands::fitting_environment_effects,
             modules::fitting::commands::fitting_export_eft,
+            modules::fitting::commands::fitting_export_dna,
+            modules::fitting::commands::fitting_export_multibuy,
             modules::fitting::commands::fitting_esi_list,
             modules::fitting::commands::fitting_esi_push,
             modules::fitting::commands::fitting_simulate,

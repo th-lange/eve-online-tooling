@@ -200,7 +200,7 @@ describe("FittingPage", () => {
     // Not visible until opened.
     expect(screen.queryByPlaceholderText(/paste an EFT fit/)).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Import EFT" }));
+    fireEvent.click(screen.getByRole("button", { name: "Import EFT / DNA" }));
     const textarea = screen.getByPlaceholderText(/paste an EFT fit/);
     fireEvent.change(textarea, { target: { value: "[Rifter, test]" } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));

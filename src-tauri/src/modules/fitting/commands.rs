@@ -11,6 +11,7 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use super::context::DogmaContext;
+use super::dna::{self, DnaItem, ParsedDna};
 use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule};
 use super::engine::resolve::{resolve, FitInput};
 use super::esi_fittings::EsiFitSource;
@@ -127,11 +128,112 @@ pub(crate) fn import_eft_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
     })
 }
 
-/// Tauri command wrapper: open the SDE for the app, then run the pure parse.
+/// Tauri wrapper: open the SDE, then auto-detect EFT vs. DNA by shape (#879)
+/// and run the matching pure parse — this is the single paste-import entry
+/// point the frontend uses for both formats.
 #[tauri::command]
 pub fn fitting_import_eft(app: AppHandle, text: String) -> Result<Fit, String> {
     let sde = crate::sde::open_from_app(&app)?;
-    import_eft_to_fit(&sde, &text)
+    if dna::looks_like_dna(&text) {
+        import_dna_to_fit(&sde, &text)
+    } else {
+        import_eft_to_fit(&sde, &text)
+    }
+}
+
+/// Parse a Ship DNA string into a [`Fit`] (#879). DNA is a flat `id[_];qty`
+/// token list after the ship id — slot membership isn't encoded in the text
+/// (unlike EFT's section layout), so every token is classified from its own
+/// dogma effects/category exactly like [`import_eft_to_fit`]'s modules and
+/// extras (subsystems included — they carry the same `subSystem` slot effect
+/// EFT relies on). Charges (category 8) are always unfitted, landing in
+/// cargo aggregated by type; an explicit `_` "unfitted" marker does the same
+/// for a module. Unknown type ids are skipped; an unknown ship id is an
+/// error.
+pub(crate) fn import_dna_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
+    let parsed = dna::parse_dna(text).map_err(|e| e.to_string())?;
+    let ParsedDna {
+        ship_type_id,
+        items,
+    } = parsed;
+
+    if sde
+        .type_category(ship_type_id)
+        .map_err(|e| e.to_string())?
+        .is_none()
+    {
+        return Err(format!("unknown ship type id: {ship_type_id}"));
+    }
+
+    let type_ids: Vec<i64> = items.iter().map(|i| i.type_id).collect();
+    let categories = sde.types_categories(&type_ids).map_err(|e| e.to_string())?;
+    let slots = classify_slots_batch(sde, &type_ids)?;
+
+    let mut fit_items = Vec::new();
+    let mut next_index: HashMap<SlotKind, i32> = HashMap::new();
+    let mut take_index = |slot: SlotKind| {
+        let n = next_index.entry(slot).or_default();
+        let idx = *n;
+        *n += 1;
+        idx
+    };
+    for entry in &items {
+        let Some(&category) = categories.get(&entry.type_id) else {
+            continue; // unknown item — skip
+        };
+        // Charges (category 8) are always unfitted; an explicit `_` marker
+        // forces the same for a module.
+        let slot = if entry.unfitted || category == 8 {
+            SlotKind::Cargo
+        } else {
+            slots
+                .get(&entry.type_id)
+                .copied()
+                .unwrap_or(SlotKind::Cargo)
+        };
+        let expands = matches!(
+            slot,
+            SlotKind::High
+                | SlotKind::Mid
+                | SlotKind::Low
+                | SlotKind::Rig
+                | SlotKind::Subsystem
+                | SlotKind::Mode
+        );
+        if expands {
+            // Same defensive cap as the loose-list importer (#761): a real
+            // fit never carries more than a slot bank of one module.
+            for _ in 0..entry.quantity.clamp(1, 8) {
+                fit_items.push(FitItem {
+                    type_id: entry.type_id,
+                    slot,
+                    index: take_index(slot),
+                    state: ModuleState::Active,
+                    charge_type_id: None,
+                    quantity: 1,
+                    active_drones: None,
+                });
+            }
+        } else {
+            fit_items.push(FitItem {
+                type_id: entry.type_id,
+                slot,
+                index: take_index(slot),
+                state: ModuleState::Active,
+                charge_type_id: None,
+                quantity: entry.quantity.max(1),
+                active_drones: None,
+            });
+        }
+    }
+
+    Ok(Fit {
+        id: new_fit_id(),
+        name: format!("{} (DNA imported)", sde.type_name_or_id(ship_type_id)),
+        ship_type_id,
+        items: fit_items,
+        projected: Vec::new(),
+    })
 }
 
 /// Parse a bare quantity token — digits with optional thousands separators.
@@ -653,6 +755,175 @@ pub(crate) fn fit_to_eft(sde: &Sde, fit: &Fit) -> String {
 pub fn fitting_export_eft(app: AppHandle, fit: Fit) -> Result<String, String> {
     let sde = crate::sde::open_from_app(&app)?;
     Ok(fit_to_eft(&sde, &fit))
+}
+
+/// Serialize a resolved [`Fit`] to a Ship DNA string (#879): subsystems
+/// first (in their fitted index order — the client always lists them ahead
+/// of regular modules), then modules grouped high→mid→low→rig, aggregated
+/// by type id with a count (`id;count`) rather than one token per instance
+/// — this is what makes "two of the same gun" round-trip as `id;2` rather
+/// than two separate `id;1` tokens. Drones follow, then charges: every
+/// loaded weapon charge (one unit per weapon carrying it) plus any cargo
+/// item that's itself charge-category (#879), merged into one aggregate per
+/// charge type — DNA has no way to say "this ammo is loaded in that gun",
+/// so, like the real client, charges always land unfitted. Plain (non-charge)
+/// cargo has no representation in DNA and is dropped, matching the format's
+/// real-world semantics (a cargo module id in the client's own DNA importer
+/// gets misinterpreted as fitted and corrupts the save).
+pub(crate) fn fit_to_dna(sde: &Sde, fit: &Fit) -> String {
+    let mut subsystems: Vec<&FitItem> = fit
+        .items
+        .iter()
+        .filter(|i| i.slot == SlotKind::Subsystem)
+        .collect();
+    subsystems.sort_by_key(|i| i.index);
+
+    let mut mod_order: Vec<i64> = Vec::new();
+    let mut mod_counts: HashMap<i64, i32> = HashMap::new();
+    let mut charge_order: Vec<i64> = Vec::new();
+    let mut charge_counts: HashMap<i64, i32> = HashMap::new();
+    let bump = |id: i64, qty: i32, order: &mut Vec<i64>, counts: &mut HashMap<i64, i32>| {
+        if !counts.contains_key(&id) {
+            order.push(id);
+        }
+        *counts.entry(id).or_insert(0) += qty;
+    };
+
+    for slot in [SlotKind::High, SlotKind::Mid, SlotKind::Low, SlotKind::Rig] {
+        let mut in_slot: Vec<&FitItem> = fit.items.iter().filter(|i| i.slot == slot).collect();
+        in_slot.sort_by_key(|i| i.index);
+        for i in in_slot {
+            bump(i.type_id, 1, &mut mod_order, &mut mod_counts);
+            if let Some(c) = i.charge_type_id {
+                bump(c, 1, &mut charge_order, &mut charge_counts);
+            }
+        }
+    }
+
+    let mut drones: Vec<&FitItem> = fit
+        .items
+        .iter()
+        .filter(|i| i.slot == SlotKind::Drone)
+        .collect();
+    drones.sort_by_key(|i| i.index);
+
+    let mut cargo: Vec<&FitItem> = fit
+        .items
+        .iter()
+        .filter(|i| i.slot == SlotKind::Cargo)
+        .collect();
+    cargo.sort_by_key(|i| i.index);
+    let cargo_ids: Vec<i64> = cargo.iter().map(|i| i.type_id).collect();
+    let cargo_categories = sde.types_categories(&cargo_ids).unwrap_or_default();
+    for i in &cargo {
+        if cargo_categories.get(&i.type_id).copied() == Some(8) {
+            bump(i.type_id, i.quantity, &mut charge_order, &mut charge_counts);
+        }
+    }
+
+    let mut items = Vec::new();
+    for s in &subsystems {
+        items.push(DnaItem {
+            type_id: s.type_id,
+            quantity: 1,
+            unfitted: false,
+        });
+    }
+    for id in &mod_order {
+        items.push(DnaItem {
+            type_id: *id,
+            quantity: mod_counts[id],
+            unfitted: false,
+        });
+    }
+    for d in &drones {
+        items.push(DnaItem {
+            type_id: d.type_id,
+            quantity: d.quantity,
+            unfitted: false,
+        });
+    }
+    for id in &charge_order {
+        items.push(DnaItem {
+            type_id: *id,
+            quantity: charge_counts[id],
+            unfitted: false,
+        });
+    }
+
+    dna::format_dna(&ParsedDna {
+        ship_type_id: fit.ship_type_id,
+        items,
+    })
+}
+
+/// Serialize a [`Fit`] to a Ship DNA clipboard string (#879).
+#[tauri::command]
+pub fn fitting_export_dna(app: AppHandle, fit: Fit) -> Result<String, String> {
+    let sde = crate::sde::open_from_app(&app)?;
+    Ok(fit_to_dna(&sde, &fit))
+}
+
+/// Serialize a resolved [`Fit`] to an EVE Multibuy-pasteable item list
+/// (#879): one `Name xQty` line per distinct type id, aggregated across
+/// fitted modules, their loaded charges (one unit per weapon carrying it)
+/// and drone/cargo stacks — everything a player would need to buy to
+/// restock the fit. The hull itself isn't included (Multibuy restocks
+/// consumables/replaceables, not the ship). Lines follow first-appearance
+/// order (modules high→mid→low→rig→subsystem→mode, then drones/cargo),
+/// matching [`fit_to_eft`]'s slot ordering.
+pub(crate) fn fit_to_multibuy(sde: &Sde, fit: &Fit) -> String {
+    let mut order: Vec<i64> = Vec::new();
+    let mut counts: HashMap<i64, i32> = HashMap::new();
+    let bump = |id: i64, qty: i32, order: &mut Vec<i64>, counts: &mut HashMap<i64, i32>| {
+        if !counts.contains_key(&id) {
+            order.push(id);
+        }
+        *counts.entry(id).or_insert(0) += qty;
+    };
+
+    for slot in [
+        SlotKind::High,
+        SlotKind::Mid,
+        SlotKind::Low,
+        SlotKind::Rig,
+        SlotKind::Subsystem,
+        SlotKind::Mode,
+        SlotKind::Implant,
+        SlotKind::Booster,
+    ] {
+        let mut in_slot: Vec<&FitItem> = fit.items.iter().filter(|i| i.slot == slot).collect();
+        in_slot.sort_by_key(|i| i.index);
+        for i in in_slot {
+            bump(i.type_id, i.quantity, &mut order, &mut counts);
+            if let Some(c) = i.charge_type_id {
+                bump(c, 1, &mut order, &mut counts);
+            }
+        }
+    }
+
+    let mut extras: Vec<&FitItem> = fit
+        .items
+        .iter()
+        .filter(|i| matches!(i.slot, SlotKind::Drone | SlotKind::Cargo))
+        .collect();
+    extras.sort_by_key(|i| i.index);
+    for i in extras {
+        bump(i.type_id, i.quantity, &mut order, &mut counts);
+    }
+
+    order
+        .iter()
+        .map(|id| format!("{} x{}", sde.type_name_or_id(*id), counts[id]))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Serialize a [`Fit`] to an EVE Multibuy-pasteable clipboard string (#879).
+#[tauri::command]
+pub fn fitting_export_multibuy(app: AppHandle, fit: Fit) -> Result<String, String> {
+    let sde = crate::sde::open_from_app(&app)?;
+    Ok(fit_to_multibuy(&sde, &fit))
 }
 
 /// Save a fit to the active character's in-game fittings via ESI (#178). Needs
@@ -1804,5 +2075,175 @@ Nanite Repair Paste\t50\tCommodity";
         let ammo = fit.items.iter().find(|i| i.type_id == barrage).unwrap();
         assert_eq!(ammo.slot, SlotKind::Cargo);
         assert_eq!(ammo.quantity, 1000);
+    }
+
+    /// Real killboard-style DNA string (EVE Developer Documentation's
+    /// "Heron Navy Issue" example) importing end-to-end against the real SDE:
+    /// hull resolves, modules classify into their slots, and the trailing
+    /// scanner-probe stack (a charge-category item) lands unfitted in cargo.
+    #[test]
+    fn import_dna_builds_a_fit_from_a_real_killboard_string() {
+        let Ok(path) = std::env::var("EVE_SDE_PATH") else {
+            eprintln!("import_dna…: EVE_SDE_PATH unset — skipping");
+            return;
+        };
+        if !std::path::Path::new(&path).exists() {
+            eprintln!("import_dna…: {path} missing — skipping");
+            return;
+        }
+        let sde = crate::sde::Sde::open(std::path::Path::new(&path)).expect("open sde");
+        let dna_text = "72904:4250;2:4258;1:11577;1:33199;1:33201;1:33197;1:9580;1:9568;1:1405;2:31220;1:31788;1:30488;8::";
+        let fit = import_dna_to_fit(&sde, dna_text).expect("import");
+        assert_eq!(fit.ship_type_id, 72904, "hull is the Heron Navy Issue");
+        assert!(fit.name.ends_with("(DNA imported)"));
+        // Two Small Tractor Beam II (4250) expand into two separate high-slot items.
+        assert_eq!(fit.items.iter().filter(|i| i.type_id == 4250).count(), 2);
+        assert!(fit
+            .items
+            .iter()
+            .filter(|i| i.type_id == 4250)
+            .all(|i| i.slot == SlotKind::High));
+        // The scanner-probe stack (charge category) lands unfitted in cargo, not fitted.
+        let probes = fit.items.iter().find(|i| i.type_id == 30488).unwrap();
+        assert_eq!(probes.slot, SlotKind::Cargo);
+        assert_eq!(probes.quantity, 8);
+    }
+
+    /// A T3 cruiser DNA string built from real Legion + subsystem type ids
+    /// (#879 acceptance): all 4 subsystems classify into the Subsystem slot
+    /// from their own dogma effects, same as every other module.
+    #[test]
+    fn import_dna_handles_t3_cruiser_subsystems() {
+        let Ok(path) = std::env::var("EVE_SDE_PATH") else {
+            eprintln!("import_dna t3c…: EVE_SDE_PATH unset — skipping");
+            return;
+        };
+        if !std::path::Path::new(&path).exists() {
+            eprintln!("import_dna t3c…: {path} missing — skipping");
+            return;
+        }
+        let sde = crate::sde::Sde::open(std::path::Path::new(&path)).expect("open sde");
+        let id = |name: &str| sde.type_by_name(name).unwrap().unwrap().0;
+        let legion = id("Legion");
+        let core = id("Legion Core - Augmented Antimatter Reactor");
+        let defensive = id("Legion Defensive - Augmented Plating");
+        let offensive = id("Legion Offensive - Assault Optimization");
+        let propulsion = id("Legion Propulsion - Intercalated Nanofibers");
+        let gyro = id("Gyrostabilizer II");
+        let drone = id("Hobgoblin II");
+        let dna_text = format!(
+            "{legion}:{core};1:{defensive};1:{offensive};1:{propulsion};1:{gyro};1:{drone};5::"
+        );
+        let fit = import_dna_to_fit(&sde, &dna_text).expect("import");
+        assert_eq!(fit.ship_type_id, legion);
+        for sub in [core, defensive, offensive, propulsion] {
+            let item = fit.items.iter().find(|i| i.type_id == sub).unwrap();
+            assert_eq!(item.slot, SlotKind::Subsystem, "subsystem {sub}");
+        }
+        let drone_item = fit.items.iter().find(|i| i.type_id == drone).unwrap();
+        assert_eq!(drone_item.slot, SlotKind::Drone);
+        assert_eq!(drone_item.quantity, 5);
+    }
+
+    /// DNA -> Fit -> DNA is stable (#879 acceptance) for a DNA string already
+    /// in the canonical high→mid→low slot order our own exporter produces
+    /// (as a real client/killboard export always is) — cross-slot ordering
+    /// isn't itself preserved by the `Fit` model (only within-slot position
+    /// is), so a hand-scrambled cross-slot order wouldn't round-trip byte
+    /// for byte, same as pyfa's own canonical-order exporter.
+    #[test]
+    fn dna_round_trips_through_a_resolved_fit() {
+        let Ok(path) = std::env::var("EVE_SDE_PATH") else {
+            eprintln!("dna round-trip…: EVE_SDE_PATH unset — skipping");
+            return;
+        };
+        if !std::path::Path::new(&path).exists() {
+            eprintln!("dna round-trip…: {path} missing — skipping");
+            return;
+        }
+        let sde = crate::sde::Sde::open(std::path::Path::new(&path)).expect("open sde");
+        let id = |name: &str| sde.type_by_name(name).unwrap().unwrap().0;
+        let rifter = id("Rifter");
+        let gyro = id("Gyrostabilizer II");
+        let ab = id("1MN Afterburner II");
+        let scram = id("Warp Scrambler II");
+        let gun = id("200mm AutoCannon II");
+        let drone = id("Hobgoblin II");
+        let dna_text = format!("{rifter}:{gun};2:{ab};1:{scram};1:{gyro};1:{drone};5::");
+        let fit = import_dna_to_fit(&sde, &dna_text).expect("import");
+        let round_tripped = fit_to_dna(&sde, &fit);
+        assert_eq!(round_tripped, dna_text);
+    }
+
+    /// The paste-import entry point auto-detects DNA vs. EFT by shape (#879).
+    #[test]
+    fn looks_like_dna_distinguishes_from_eft_paste() {
+        assert!(dna::looks_like_dna("587:519;1::"));
+        assert!(!dna::looks_like_dna(
+            "[Rifter, My Rifter]\n\nGyrostabilizer II"
+        ));
+    }
+
+    /// MultiBuy output matches the fitted contents exactly (#879 acceptance):
+    /// one `Name xQty` line per distinct type, modules + loaded charge +
+    /// drones aggregated, hull excluded.
+    #[test]
+    fn multibuy_export_matches_fitted_contents() {
+        let Ok(path) = std::env::var("EVE_SDE_PATH") else {
+            eprintln!("multibuy…: EVE_SDE_PATH unset — skipping");
+            return;
+        };
+        if !std::path::Path::new(&path).exists() {
+            eprintln!("multibuy…: {path} missing — skipping");
+            return;
+        }
+        let sde = crate::sde::Sde::open(std::path::Path::new(&path)).expect("open sde");
+        let id = |name: &str| sde.type_by_name(name).unwrap().unwrap().0;
+        let rifter = id("Rifter");
+        let gun = id("200mm AutoCannon II");
+        let barrage = id("Barrage S");
+        let drone = id("Hobgoblin II");
+        let fit = Fit {
+            id: String::new(),
+            name: "Test".into(),
+            ship_type_id: rifter,
+            items: vec![
+                FitItem {
+                    type_id: gun,
+                    slot: SlotKind::High,
+                    index: 0,
+                    state: ModuleState::Active,
+                    charge_type_id: Some(barrage),
+                    quantity: 1,
+                    active_drones: None,
+                },
+                FitItem {
+                    type_id: gun,
+                    slot: SlotKind::High,
+                    index: 1,
+                    state: ModuleState::Active,
+                    charge_type_id: Some(barrage),
+                    quantity: 1,
+                    active_drones: None,
+                },
+                FitItem {
+                    type_id: drone,
+                    slot: SlotKind::Drone,
+                    index: 0,
+                    state: ModuleState::Active,
+                    charge_type_id: None,
+                    quantity: 5,
+                    active_drones: None,
+                },
+            ],
+            projected: Vec::new(),
+        };
+        let text = fit_to_multibuy(&sde, &fit);
+        assert_eq!(
+            text,
+            "200mm AutoCannon II x2\nBarrage S x2\nHobgoblin II x5"
+        );
+        // The hull itself isn't in the list.
+        assert!(!text.contains("Rifter"));
     }
 }

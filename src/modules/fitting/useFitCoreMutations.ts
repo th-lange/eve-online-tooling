@@ -5,7 +5,9 @@ import {
 } from "@tanstack/react-query";
 import {
   fittingAddItem,
+  fittingExportDna,
   fittingExportEft,
+  fittingExportMultibuy,
   fittingImportEft,
   fittingImportList,
   fittingSaveLocal,
@@ -37,6 +39,8 @@ export interface FitMutationsSlice {
   setListText: (v: string) => void;
   importList: UseMutationResult<Fit, Error, void, unknown>;
   exportEft: UseMutationResult<string, Error, void, unknown>;
+  exportDna: UseMutationResult<string, Error, void, unknown>;
+  exportMultibuy: UseMutationResult<string, Error, void, unknown>;
   save: UseMutationResult<string, Error, void, unknown>;
 }
 
@@ -79,6 +83,16 @@ export function useFitCoreMutations(state: FitStateSlice): FitMutationsSlice {
       copyToClipboard(text);
       setEft(text);
     },
+  });
+  // DNA/MultiBuy exports copy to the clipboard only — unlike EFT, neither
+  // has an on-page textarea to mirror them into.
+  const exportDna = useMutation({
+    mutationFn: () => fittingExportDna(fit!),
+    onSuccess: (text) => copyToClipboard(text),
+  });
+  const exportMultibuy = useMutation({
+    mutationFn: () => fittingExportMultibuy(fit!),
+    onSuccess: (text) => copyToClipboard(text),
   });
 
   function pickShip(id: number, name: string) {
@@ -214,6 +228,8 @@ export function useFitCoreMutations(state: FitStateSlice): FitMutationsSlice {
     setListText,
     importList,
     exportEft,
+    exportDna,
+    exportMultibuy,
     save,
   };
 }

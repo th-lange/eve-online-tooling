@@ -269,7 +269,10 @@ export function fittingShipLayout(
   });
 }
 
-/** Parse an EFT clipboard string into a resolved fit. */
+/** Parse an EFT clipboard string or a Ship DNA string/link into a resolved
+ *  fit — format is auto-detected by shape (`[Ship, name]` vs. a leading
+ *  ship type id, #879). DNA is the compact format behind in-game chat fit
+ *  links and killboard links. */
 export function fittingImportEft(text: string): Promise<Fit> {
   return invoke<Fit>("fitting_import_eft", { text });
 }
@@ -334,6 +337,19 @@ export interface AbyssalWeatherSelection {
 /** Serialize a fit to an EFT clipboard string. */
 export function fittingExportEft(fit: Fit): Promise<string> {
   return invoke<string>("fitting_export_eft", { fit });
+}
+
+/** Serialize a fit to a Ship DNA string (the compact format behind in-game
+ *  chat fit links and killboard links, #879). */
+export function fittingExportDna(fit: Fit): Promise<string> {
+  return invoke<string>("fitting_export_dna", { fit });
+}
+
+/** Serialize a fit's modules, loaded charges and drones as an EVE Multibuy-
+ *  pasteable item list — one `Name xQty` line per distinct type, hull
+ *  excluded (#879). */
+export function fittingExportMultibuy(fit: Fit): Promise<string> {
+  return invoke<string>("fitting_export_multibuy", { fit });
 }
 
 /** Skills basis for simulation: best-case all-V, or the logged-in character. */

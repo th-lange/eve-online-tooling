@@ -11,6 +11,7 @@
 
 pub mod commands;
 mod context;
+pub mod dna;
 pub mod eft;
 pub mod engine;
 pub mod esi_fittings;
