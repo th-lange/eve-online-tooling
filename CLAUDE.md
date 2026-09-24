@@ -155,3 +155,9 @@ code comments, and docs — never use one where another is meant:
   reserved for services, not feature modules — a module never claims a service's prefix even if
   it only calls that service. `wh_`, `lp_`, `dps_`, and `pi_` are exempted as already-established
   module abbreviations predating this policy; leave them as-is.
+- Sortable tables use `components/DataTable.tsx` (`SortColumn<K>` type + sticky, tooltip'd header
+  + generic row rendering + `EmptyState` slot, extracted in #839 from Production/Orders/Trading).
+  New sortable tables MUST build on `DataTable`, not a bespoke `<table>`/`<thead>` shell; every
+  column needs a `description` (rendered as both a tooltip and an inline info marker). Remaining
+  pre-#839 tables (Accounting, Assets, Appraisal, Market Search, Exploration, Contracts, …) still
+  use the lower-level `SortHeaderCell` directly — migrate them to `DataTable` opportunistically.
