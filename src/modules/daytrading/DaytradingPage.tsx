@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { DataAge } from "../../components/DataAge";
+import { QueryResult } from "../../components/QueryResult";
 import {
   CheckboxGroup,
   Field,
@@ -10,7 +11,6 @@ import {
 import { toggle, uniqueSorted } from "../../lib/sets";
 import {
   daytradingScan,
-  errorMessage,
   rosterStock,
   sdeMarketCategories,
   type DayTradeParams,
@@ -34,7 +34,6 @@ import {
   Page,
   PageHeader,
   SplitPane,
-  Centered,
   PrimaryButton,
 } from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
@@ -365,47 +364,58 @@ function Workbench() {
       />
 
       <div className="mt-3">
-        {tab === "opportunities" &&
-          (run.isError ? (
-            <div className="text-sm text-rose-400">
-              Failed: {errorMessage(run.error)}
-            </div>
-          ) : run.isPending ? (
-            <Centered>
-              Pricing {categoryIds.size} categor
-              {categoryIds.size === 1 ? "y" : "ies"} across {selectedCount}{" "}
-              hubs…
-            </Centered>
-          ) : (
-            <div>
-              {rows.length > 0 && metaOptions.length > 0 && (
-                <div className="mb-2">
-                  <Field label="Hide tech levels (check to exclude)">
-                    <CheckboxGroup
-                      options={metaOptions}
-                      selected={hideMetas}
-                      onToggle={(v) => setHideMetas(toggle(hideMetas, v))}
-                    />
-                  </Field>
-                </div>
-              )}
-              {rows.length > 0 && (
-                <SearchFilterRow
-                  value={search}
-                  onChange={setSearch}
-                  placeholder="Search name / category / hub…"
-                  shown={filteredRows.length}
-                  total={rows.length}
+        {tab === "opportunities" && (
+          <QueryResult
+            result={{
+              isError: run.isError,
+              error: run.error,
+              isPending: run.isPending,
+              data: run.isPending ? undefined : rows,
+            }}
+            isEmpty={(d) => d.length === 0}
+            pendingLabel={
+              <>
+                Pricing {categoryIds.size} categor
+                {categoryIds.size === 1 ? "y" : "ies"} across {selectedCount}{" "}
+                hubs…
+              </>
+            }
+            loginMessage="Log in a character first to run this scan."
+            emptyTitle="No opportunities yet."
+            emptyHint="Hit Calculate to scan the selected hubs and categories."
+          >
+            {() => (
+              <div>
+                {rows.length > 0 && metaOptions.length > 0 && (
+                  <div className="mb-2">
+                    <Field label="Hide tech levels (check to exclude)">
+                      <CheckboxGroup
+                        options={metaOptions}
+                        selected={hideMetas}
+                        onToggle={(v) => setHideMetas(toggle(hideMetas, v))}
+                      />
+                    </Field>
+                  </div>
+                )}
+                {rows.length > 0 && (
+                  <SearchFilterRow
+                    value={search}
+                    onChange={setSearch}
+                    placeholder="Search name / category / hub…"
+                    shown={filteredRows.length}
+                    total={rows.length}
+                  />
+                )}
+                <DayTradeTable
+                  rows={tripRows}
+                  cargoM3={cargoM3}
+                  onFavorite={toggleFavorite}
+                  onBlacklist={blacklistRow}
                 />
-              )}
-              <DayTradeTable
-                rows={tripRows}
-                cargoM3={cargoM3}
-                onFavorite={toggleFavorite}
-                onBlacklist={blacklistRow}
-              />
-            </div>
-          ))}
+              </div>
+            )}
+          </QueryResult>
+        )}
 
         {tab === "favorites" && (
           <SavedListView

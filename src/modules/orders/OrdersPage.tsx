@@ -9,7 +9,7 @@ import {
   type OrderRow,
   type ProfitBreakdown,
 } from "../../lib/api";
-import { QueryErrorNotice } from "../../components/QueryErrorNotice";
+import { QueryResult } from "../../components/QueryResult";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
 import { formatInt, formatIsk } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
@@ -113,8 +113,14 @@ export function OrdersPage() {
         }
       />
 
-      <QueryErrorNotice
-        error={orders.error}
+      <QueryResult
+        result={{
+          isError: orders.isError,
+          error: orders.error,
+          isPending: orders.isPending,
+          data: orders.data,
+        }}
+        pendingLabel="Loading…"
         loginMessage="Log in a character first to view your market orders."
         scopeHint={
           <>
@@ -122,38 +128,51 @@ export function OrdersPage() {
             re-login after it's enabled on the EVE app.
           </>
         }
-      />
+        isEmpty={(d) => d.length === 0}
+        emptyTitle="No open orders."
+        emptyHint="You have no active buy or sell orders for the selected character(s)."
+      >
+        {() => (
+          <>
+            {rows.length > 0 && (
+              <div className="mt-3 text-sm text-zinc-400">
+                {formatInt(rows.length)} open order(s) ·{" "}
+                <span
+                  className={
+                    undercut > 0 ? "text-rose-400" : "text-emerald-400"
+                  }
+                >
+                  {formatInt(undercut)} undercut
+                </span>
+                {buildCost && (
+                  <>
+                    {" · "}
+                    <span
+                      className={
+                        belowCost > 0 ? "text-amber-400" : "text-zinc-500"
+                      }
+                    >
+                      {formatInt(belowCost)} below build cost
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
+            {costs.isError && (
+              <div className="mt-2 text-xs text-amber-500">
+                Couldn't compute build costs — the Production static data may
+                not be installed.
+              </div>
+            )}
 
-      {rows.length > 0 && (
-        <div className="mt-3 text-sm text-zinc-400">
-          {formatInt(rows.length)} open order(s) ·{" "}
-          <span className={undercut > 0 ? "text-rose-400" : "text-emerald-400"}>
-            {formatInt(undercut)} undercut
-          </span>
-          {buildCost && (
-            <>
-              {" · "}
-              <span
-                className={belowCost > 0 ? "text-amber-400" : "text-zinc-500"}
-              >
-                {formatInt(belowCost)} below build cost
-              </span>
-            </>
-          )}
-        </div>
-      )}
-      {costs.isError && (
-        <div className="mt-2 text-xs text-amber-500">
-          Couldn't compute build costs — the Production static data may not be
-          installed.
-        </div>
-      )}
-
-      <OrdersTable
-        rows={rows}
-        showCharacter={multiCharacter}
-        buildCost={buildCost}
-      />
+            <OrdersTable
+              rows={rows}
+              showCharacter={multiCharacter}
+              buildCost={buildCost}
+            />
+          </>
+        )}
+      </QueryResult>
     </Page>
   );
 }
