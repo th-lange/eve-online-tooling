@@ -131,7 +131,7 @@ function Workbench() {
   });
   const price = useQuery({
     queryKey: ["price", historyRegionId, picked?.id],
-    queryFn: () => marketPrice(historyRegionId, picked!.id),
+    queryFn: picked ? () => marketPrice(historyRegionId, picked.id) : undefined,
     enabled: tab === "history" && picked != null,
   });
 
@@ -146,16 +146,18 @@ function Workbench() {
       highSecOnly,
       excludeScams,
     ],
-    queryFn: () =>
-      marketSellOrders({
-        typeId: picked!.id,
-        regionId,
-        systemId: system?.id ?? null,
-        stationId: station?.id ?? null,
-        originSystemId: origin?.id ?? null,
-        highSecOnly,
-        excludeScams,
-      }),
+    queryFn: picked
+      ? () =>
+          marketSellOrders({
+            typeId: picked.id,
+            regionId,
+            systemId: system?.id ?? null,
+            stationId: station?.id ?? null,
+            originSystemId: origin?.id ?? null,
+            highSecOnly,
+            excludeScams,
+          })
+      : undefined,
     enabled: tab === "search" && picked != null,
   });
 
@@ -168,14 +170,16 @@ function Workbench() {
       station?.id ?? null,
       excludeScams,
     ],
-    queryFn: () =>
-      marketOrderBook({
-        typeId: picked!.id,
-        regionId,
-        systemId: system?.id ?? null,
-        stationId: station?.id ?? null,
-        excludeScams,
-      }),
+    queryFn: picked
+      ? () =>
+          marketOrderBook({
+            typeId: picked.id,
+            regionId,
+            systemId: system?.id ?? null,
+            stationId: station?.id ?? null,
+            excludeScams,
+          })
+      : undefined,
     enabled: tab === "search" && picked != null,
   });
 
