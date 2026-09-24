@@ -360,6 +360,70 @@ fn write_envelope<T: Serialize>(
     std::fs::write(path, data).map_err(|e| e.to_string())
 }
 
+// --- Hash short-circuit for providers with no revalidation headers (#886) ---
+//
+// zKillboard's stats endpoint (and Fuzzwork's aggregates, though that one's
+// cache is in-memory-only — see `market::cache::TtlCache`) send neither an
+// `ETag` nor a `Last-Modified` we can trust (confirmed via `curl -I`;
+// zKillboard's stats response is even marked `Cache-Control: no-store`), so
+// there's no way to ask the server "did this change?" before paying for a
+// full download. `cache_put_if_changed` still pays for the download (the TTL
+// cadence below is unchanged) but skips rewriting the body to disk when the
+// freshly-fetched value hashes the same as what's already cached — the
+// common case for e.g. a pilot's kill stats, which drift slowly.
+
+/// SHA-256 hex digest of `value`'s JSON encoding. Used only to detect
+/// whether a re-fetched value actually changed, never for security purposes.
+fn content_hash<T: Serialize>(value: &T) -> String {
+    use sha2::{Digest, Sha256};
+    let bytes = serde_json::to_vec(value).unwrap_or_default();
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+/// The [`cache_put_if_changed`]/[`cache_get_if_changed`] hash-marker key for
+/// `key` — kept distinct from `key` itself so the (small) freshness marker
+/// and the (potentially large) durable body never collide as cache keys.
+fn hash_marker_key(key: &str) -> String {
+    format!("{key}.hash")
+}
+
+/// Like [`cache_put`], but for providers with no `ETag`/`Last-Modified` to
+/// revalidate against: skips rewriting the (durable, non-expiring) body when
+/// `value` hashes the same as the last write, only pushing the freshness
+/// deadline forward — exactly like [`cache_put`], so a call here always
+/// renews the same `ttl_secs` cadence regardless of whether the body changed.
+/// Returns whether the value actually changed, so callers can skip
+/// signalling a refresh downstream when it didn't. Pair with
+/// [`cache_get_if_changed`] to read it back.
+pub fn cache_put_if_changed<T: Serialize>(
+    app_data_dir: &Path,
+    key: &str,
+    value: &T,
+    ttl_secs: u64,
+) -> Result<bool, String> {
+    let hash = content_hash(value);
+    let marker_key = hash_marker_key(key);
+    // Compare against the last-written hash regardless of how stale its own
+    // marker has become — staleness only gates *whether a re-fetch is due*
+    // (the caller's own `cache_get_if_changed` check), not whether the hash
+    // is still meaningful for spotting an unchanged body.
+    let previous = cache_get_stale::<String>(app_data_dir, &marker_key, u64::MAX);
+    let changed = previous.as_deref() != Some(hash.as_str());
+    if changed {
+        save_data(app_data_dir, key, value)?;
+    }
+    cache_put(app_data_dir, &marker_key, &hash, ttl_secs)?;
+    Ok(changed)
+}
+
+/// Read a value written by [`cache_put_if_changed`]: the durable body if its
+/// freshness marker hasn't expired, `None` otherwise (stale or never
+/// written) — mirrors [`cache_get`]'s "fresh or nothing" contract.
+pub fn cache_get_if_changed<T: DeserializeOwned>(app_data_dir: &Path, key: &str) -> Option<T> {
+    cache_get::<String>(app_data_dir, &hash_marker_key(key))?;
+    load_data(app_data_dir, key)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,6 +436,50 @@ mod tests {
         // Fresh entry round-trips.
         cache_put(&dir, "k", &vec![1_i64, 2, 3], 3600).unwrap();
         assert_eq!(cache_get::<Vec<i64>>(&dir, "k"), Some(vec![1, 2, 3]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cache_put_if_changed_skips_body_rewrite_when_unchanged() {
+        let dir = std::env::temp_dir().join(format!("eve-hash-cache-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // First write: no previous hash, so it's reported as "changed" and
+        // both the body and the marker land on disk.
+        assert!(cache_put_if_changed(&dir, "k", &vec![1_i64, 2, 3], 3600).unwrap());
+        assert_eq!(
+            cache_get_if_changed::<Vec<i64>>(&dir, "k"),
+            Some(vec![1, 2, 3])
+        );
+
+        // Same value again: hash matches, reported unchanged, but the TTL
+        // marker still renews (cadence is unaffected).
+        assert!(!cache_put_if_changed(&dir, "k", &vec![1_i64, 2, 3], 3600).unwrap());
+        assert_eq!(
+            cache_get_if_changed::<Vec<i64>>(&dir, "k"),
+            Some(vec![1, 2, 3])
+        );
+
+        // A genuinely different value is reported as changed and overwrites
+        // the durable body.
+        assert!(cache_put_if_changed(&dir, "k", &vec![9_i64], 3600).unwrap());
+        assert_eq!(cache_get_if_changed::<Vec<i64>>(&dir, "k"), Some(vec![9]));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cache_get_if_changed_misses_once_marker_expires() {
+        let dir =
+            std::env::temp_dir().join(format!("eve-hash-cache-expiry-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // A marker written with an already-elapsed TTL means the value is
+        // due for a re-fetch, even though the durable body is still on disk.
+        cache_put_if_changed(&dir, "k", &1_i64, 0).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        assert_eq!(cache_get_if_changed::<i64>(&dir, "k"), None);
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

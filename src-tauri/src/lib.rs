@@ -15,6 +15,7 @@
 //! - [`util`]     — cross-cutting helpers (time: epoch-now, civil dates, RFC-3339)
 //! - [`lists`]    — persisted type-id lists (blacklist/favorites)
 //! - [`evescout`] — EVE-Scout public Thera/Turnur wormhole connections
+//! - [`net`]      — cross-cutting network helpers (provider-agnostic conditional HTTP cache)
 //!
 //! Feature modules live under [`modules`]; the frontend registry in
 //! `src/modules/registry.ts` is the canonical catalogue of them.
@@ -31,6 +32,7 @@ mod market;
 mod mcp;
 mod model;
 mod modules;
+mod net;
 mod plugins;
 mod sde;
 mod storage;

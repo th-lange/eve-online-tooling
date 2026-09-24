@@ -127,11 +127,15 @@ pub async fn stats_for_characters(
     dir: &Path,
     character_ids: &[i64],
 ) -> Result<Vec<(i64, ZkillStatsRaw)>, String> {
-    // Serve cache hits first; only fetch the misses.
+    // Serve cache hits first; only fetch the misses. `cache_get_if_changed`
+    // (#886) pairs with the write below: zKillboard's stats endpoint sends
+    // no ETag/Last-Modified (confirmed via `curl -I` — it's even marked
+    // `Cache-Control: no-store`), so freshness here is TTL-only, same as
+    // before.
     let mut out: Vec<(i64, ZkillStatsRaw)> = Vec::new();
     let mut to_fetch: Vec<i64> = Vec::new();
     for &id in character_ids {
-        match storage::cache_get::<ZkillStatsRaw>(dir, &stats_cache_key(id)) {
+        match storage::cache_get_if_changed::<ZkillStatsRaw>(dir, &stats_cache_key(id)) {
             Some(s) => out.push((id, s)),
             None => to_fetch.push(id),
         }
@@ -152,7 +156,7 @@ pub async fn stats_for_characters(
         .await;
 
     for (id, raw) in &fetched {
-        let _ = storage::cache_put(dir, &stats_cache_key(*id), raw, ZKILL_TTL_SECS);
+        let _ = storage::cache_put_if_changed(dir, &stats_cache_key(*id), raw, ZKILL_TTL_SECS);
     }
     out.extend(fetched);
     Ok(out)
