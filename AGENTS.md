@@ -30,6 +30,10 @@ Project stack, commands, architecture, and naming conventions live in
 - **Releases follow the same path:** bump the version on a branch, open a PR,
   auto-merge it once green, then tag `vX.Y.Z` on the resulting `main` commit
   and push the tag.
+- **Versioning:** use semantic versioning (major.minor.patch). Small fixes,
+  cleanups, and non-substantial changes are always patch releases. Features
+  and bug fixes that change observable behavior are minor. Breaking changes
+  are major.
 
 ## Everything else
 
