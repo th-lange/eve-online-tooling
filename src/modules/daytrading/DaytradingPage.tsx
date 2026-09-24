@@ -187,7 +187,7 @@ function Workbench() {
               pendingLabel="Scanning…"
               title={
                 selectedCount < 2
-                  ? "Select at least two hubs"
+                  ? "Select at least two regions"
                   : categoryIds.size === 0
                     ? "Select at least one category"
                     : undefined
@@ -206,7 +206,7 @@ function Workbench() {
       <SplitPane
         left={
           <>
-            <Field label={`Hubs to compare (${selectedCount})`}>
+            <Field label={`Regions to compare (${selectedCount})`}>
               <div className="flex flex-wrap gap-1">
                 {allRegions.map((r) => {
                   const on = regionIds.size === 0 || regionIds.has(r.id);
@@ -230,7 +230,7 @@ function Workbench() {
                 })}
               </div>
               <span className="mt-1 text-[11px] text-zinc-500">
-                None checked = all hubs.
+                None checked = all regions.
               </span>
             </Field>
             <div className="grid grid-cols-2 gap-3">

@@ -47,6 +47,7 @@ import { QueryResult } from "../../components/QueryResult";
 import { Page, PageHeader, Centered } from "../../components/page";
 import { InlineError } from "../../components/InlineError";
 import { SdeGate } from "../../components/SdeGate";
+import { REGION_STATION_TOOLTIP } from "../../lib/copy";
 import {
   SortHeaderCell,
   type SortColumn,
@@ -323,7 +324,10 @@ function SearchTab({
   return (
     <div className="mt-4">
       <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-xs text-zinc-400">
+        <label
+          className="flex flex-col gap-1 text-xs text-zinc-400"
+          title={REGION_STATION_TOOLTIP}
+        >
           Region
           <select
             value={regionId == null ? "" : regionId}
@@ -360,6 +364,7 @@ function SearchTab({
           onPick={setStation}
           search={marketSearchStations}
           placeholder="any station…"
+          title={REGION_STATION_TOOLTIP}
         />
       </div>
 

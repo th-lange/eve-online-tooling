@@ -179,7 +179,7 @@ export function ParamsPanel({ wb }: { wb: WorkbenchState }) {
                 }}
               />
             </Field>
-            <Field label="Market">
+            <Field label="Station">
               <StationSelect
                 stations={stations}
                 value={stationId}
