@@ -15,6 +15,7 @@ export function Combo<T extends { id: number; name: string }>({
   maxResults,
   queryKey,
   staleTime,
+  title,
 }: {
   label?: string;
   value: T | null;
@@ -29,6 +30,8 @@ export function Combo<T extends { id: number; name: string }>({
   queryKey?: (text: string) => readonly unknown[];
   /** Override the default (global) staleTime to match the shared key's policy. */
   staleTime?: number;
+  /** Optional tooltip shown on hover on the labelled wrapper. */
+  title?: string;
 }) {
   const [text, setText] = useState("");
   const debouncedText = useDebouncedValue(text, 200);
@@ -71,7 +74,10 @@ export function Combo<T extends { id: number; name: string }>({
   return (
     <div className="relative">
       {label ? (
-        <label className="flex flex-col gap-1 text-xs text-zinc-400">
+        <label
+          className="flex flex-col gap-1 text-xs text-zinc-400"
+          title={title}
+        >
           {label}
           {field}
         </label>
