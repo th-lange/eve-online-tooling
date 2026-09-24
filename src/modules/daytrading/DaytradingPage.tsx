@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { DataAge } from "../../components/DataAge";
 import { QueryResult } from "../../components/QueryResult";
+import { useElapsedSeconds } from "../../lib/useElapsedSeconds";
 import {
   CheckboxGroup,
   Field,
@@ -104,6 +105,10 @@ function Workbench() {
     mutationFn: (p: DayTradeParams) => daytradingScan(p),
     onSuccess: setRows,
   });
+  // No backend progress signal for this scan (one opaque bulk price fetch
+  // per hub, not a per-item loop) — an elapsed-time tick is an honest
+  // liveness cue.
+  const elapsedSeconds = useElapsedSeconds(run.isPending);
 
   function calculate() {
     run.mutate({
@@ -184,7 +189,7 @@ function Workbench() {
                 run.isPending || selectedCount < 2 || categoryIds.size === 0
               }
               pending={run.isPending}
-              pendingLabel="Scanning…"
+              pendingLabel={`Scanning… ${elapsedSeconds}s`}
               title={
                 selectedCount < 2
                   ? "Select at least two regions"
@@ -377,7 +382,7 @@ function Workbench() {
               <>
                 Pricing {categoryIds.size} categor
                 {categoryIds.size === 1 ? "y" : "ies"} across {selectedCount}{" "}
-                hubs…
+                hubs… {elapsedSeconds}s
               </>
             }
             loginMessage="Log in a character first to run this scan."
