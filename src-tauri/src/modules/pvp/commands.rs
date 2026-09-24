@@ -500,9 +500,21 @@ fn build_lost_fit(sde: &Sde, dir: &std::path::Path, km: &Killmail, lost_count: i
         })
         .collect();
     let fit = build_engine_fit(km.victim.ship_type_id, &km.victim.items, &cat_of);
-    let analysis = simulate_fit(sde, dir, &fit, &|_| 5.0, None, None, None, None, None, None)
-        .ok()
-        .map(|s| analysis_from_stats(&s, &attrs, &fit, &name_of));
+    let analysis = simulate_fit(
+        sde,
+        dir,
+        &fit,
+        &|_| 5.0,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .ok()
+    .map(|s| analysis_from_stats(&s, &attrs, &fit, &name_of));
     let eft = crate::modules::fitting::fit_to_eft(sde, &fit);
     LostFit {
         hull_type_id: km.victim.ship_type_id,
@@ -723,6 +735,7 @@ pub async fn pvp_weapon_ammo(
             &dir,
             &fit,
             &|_| 5.0, // all-V skills
+            None,
             None,
             None,
             None,

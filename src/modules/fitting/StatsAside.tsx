@@ -31,6 +31,8 @@ export function StatsAside({
     setDamageProfile,
     neutGjs,
     setNeutGjs,
+    spoolPct,
+    setSpoolPct,
   } = useFitState();
   const { stats, jammedActive } = useFitStats();
   const onJam = setJammed;
@@ -88,6 +90,9 @@ export function StatsAside({
             appliedDps={stats.data.appliedDps}
             dpsRangeCurve={stats.data.dpsRangeCurve}
             jammedActive={jammedActive}
+            isSpoolable={!!stats.data.isSpoolable}
+            spoolPct={spoolPct}
+            onSpoolPct={setSpoolPct}
           />
         )}
 

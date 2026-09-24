@@ -16,6 +16,7 @@ pub mod modifier;
 pub mod navigation;
 pub mod projection;
 pub mod resolve;
+pub mod spool;
 pub mod stacking;
 pub mod tank;
 pub mod validate;

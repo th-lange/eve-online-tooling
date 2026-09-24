@@ -370,6 +370,7 @@ fn golden_pyfa_fits() {
             &[],
             None,
             None,
+            1.0,
         )
         .expect("dogma");
         let (dps, ehp, vel, align, stable) = (
@@ -420,5 +421,116 @@ fn golden_pyfa_fits() {
         failures.is_empty(),
         "golden mismatches vs PYFA:\n{}",
         failures.join("\n"),
+    );
+}
+
+/// Vedmak spool-up (#872): a Vedmak with a Heavy Entropic Disintegrator II
+/// loaded with Occult M, run at 0% vs 100% spool. No Triglavian hull is in
+/// `tools/pyfa-oracle/golden.json` yet (it predates #872), so per the
+/// issue's documented fallback this is a hand-computed check instead of an
+/// oracle-matched one: the weapon's own finalized
+/// `damageMultiplierBonusMax`/`…PerCycle` (2.125 / 0.07 — real numbers from
+/// PYFA v2.67.0's bundled SDE, cross-checked against `engine::spool`'s unit
+/// tests) fully caps at 100% spool (`ceil(2.125 / 0.07) = 31` cycles ≥ max),
+/// so the 100%-spooled turret DPS must be *exactly* `1 + 2.125 = 3.125×` the
+/// 0%-spool (cold) turret DPS — a ratio that's independent of the hull's own
+/// damage bonuses (skills, role bonus, …), which cancel out of it. Also
+/// checks `is_spoolable` gates strictly on whether a spoolable weapon/rep is
+/// actually fitted.
+#[test]
+fn vedmak_spool_up_matches_hand_computed_ratio() {
+    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        eprintln!("vedmak_spool_up_matches_hand_computed_ratio: EVE_SDE_PATH unset — skipping");
+        return;
+    };
+    let path = std::path::PathBuf::from(&path);
+    if !path.exists() {
+        eprintln!("vedmak_spool_up_matches_hand_computed_ratio: {path:?} missing — skipping");
+        return;
+    }
+    let sde = Sde::open(&path).expect("open sde");
+    let dir = path.parent().unwrap();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let all5 = |_: i64| 5.0;
+    let fit = Fit {
+        id: "t".into(),
+        name: "Vedmak".into(),
+        ship_type_id: tid("Vedmak"),
+        items: vec![FitItem {
+            type_id: tid("Heavy Entropic Disintegrator II"),
+            slot: SlotKind::High,
+            index: 0,
+            state: ModuleState::Active,
+            charge_type_id: Some(tid("Occult M")),
+            quantity: 1,
+            active_drones: None,
+        }],
+        projected: Vec::new(),
+    };
+    let layout = sde.ship_layout(fit.ship_type_id).unwrap().expect("layout");
+    let run = |spool_pct: f64| {
+        run_dogma(
+            &sde,
+            dir,
+            &fit,
+            &layout,
+            &all5,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+            None,
+            None,
+            spool_pct,
+        )
+        .expect("dogma")
+    };
+    let cold = run(0.0);
+    let spooled = run(1.0);
+    assert!(
+        cold.is_spoolable,
+        "Vedmak + Entropic Disintegrator should be flagged spoolable"
+    );
+    assert!(
+        cold.dps.turret > 0.0,
+        "cold DPS should be nonzero: {}",
+        cold.dps.turret
+    );
+    let ratio = spooled.dps.turret / cold.dps.turret;
+    assert!(
+        (ratio - 3.125).abs() < 1e-6,
+        "100%-spooled/cold DPS ratio should be exactly 3.125, got {ratio}"
+    );
+
+    let unarmed = Fit {
+        id: "t".into(),
+        name: "Vedmak".into(),
+        ship_type_id: tid("Vedmak"),
+        items: Vec::new(),
+        projected: Vec::new(),
+    };
+    let d = run_dogma(
+        &sde,
+        dir,
+        &unarmed,
+        &layout,
+        &all5,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,
+        1.0,
+    )
+    .expect("dogma");
+    assert!(
+        !d.is_spoolable,
+        "an unarmed hull should not be flagged spoolable"
     );
 }

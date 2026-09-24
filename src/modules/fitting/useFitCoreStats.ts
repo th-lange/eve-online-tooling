@@ -39,6 +39,7 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
     fleetBoosts,
     environmentEffect,
     abyssalWeather,
+    spoolPct,
     jammed,
   } = state;
 
@@ -87,6 +88,7 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
       fleetBoosts,
       environmentEffect,
       abyssalWeather,
+      spoolPct,
     ],
     queryFn: fit
       ? () =>
@@ -99,6 +101,7 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
             fleetBoosts.length > 0 ? fleetBoosts : undefined,
             environmentEffect,
             abyssalWeather,
+            spoolPct,
           )
       : undefined,
     enabled: fit != null,

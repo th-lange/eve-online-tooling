@@ -334,6 +334,11 @@ pub struct FitStats {
     /// target profile was given.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub dps_range_curve: Vec<(f64, f64)>,
+    /// Whether the fit carries any spoolable weapon/rep (#872) — Triglavian
+    /// Entropic Disintegrators and similar — gating the UI's spool selector.
+    /// `false`/absent until the dogma engine runs.
+    #[serde(default)]
+    pub is_spoolable: bool,
 }
 
 /// One category of electronic warfare projected onto the fit (presence only).

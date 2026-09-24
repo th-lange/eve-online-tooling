@@ -561,6 +561,7 @@ fn cap_fitting_stats(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
         None,
         None,
         None,
+        None,
     )?;
     serde_json::to_value(stats).map_err(|e| e.to_string())
 }
@@ -797,6 +798,7 @@ mod tests {
             dir,
             &fit,
             &|_| 5.0,
+            None,
             None,
             None,
             None,

@@ -17,6 +17,7 @@ use super::engine::projection::{
     apply_projection, apply_subsystem_slots, projected_from_attrs, ProjectedInput,
 };
 use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
+use super::engine::spool::apply_spool;
 use super::engine::tank::{tank, DamageProfile, Layer};
 use super::engine::validate::{validate, ValItem};
 use super::types::{
@@ -61,6 +62,9 @@ pub(super) struct DogmaStats {
     pub(super) applied_dps: Option<DpsBreakdown>,
     /// DPS-over-range curve (#701); empty when no target profile was given.
     pub(super) dps_range_curve: Vec<(f64, f64)>,
+    /// Whether the fit carries any spoolable weapon/rep (#872) — gates the
+    /// UI's spool selector.
+    pub(super) is_spoolable: bool,
 }
 
 /// Build the engine inputs (ship + modules + all-V skills) from the SDE, resolve
@@ -78,7 +82,9 @@ pub(super) struct DogmaStats {
 /// external-modifier pass. `abyssal_weather` is a *separate*, mutually
 /// exclusive choice — Abyssal Deadspace weather, applied as a hardcoded
 /// post-resolve adjustment (see `engine::abyssal`) since it has no dogma
-/// representation in the SDE at all.
+/// representation in the SDE at all. `spool_pct` (#872) is the requested
+/// Triglavian/spoolable-weapon ramp fraction (0.0 cold .. 1.0 fully
+/// spooled), applied the same way (see `engine::spool`).
 #[allow(clippy::too_many_arguments)] // one arg per independent sim input; a struct would just rename them
 pub(super) fn run_dogma(
     sde: &Sde,
@@ -92,6 +98,7 @@ pub(super) fn run_dogma(
     fleet_boosts: &[(i64, i64)],
     environment_effect: Option<i64>,
     abyssal_weather: Option<AbyssalWeatherSelection>,
+    spool_pct: f64,
 ) -> Result<DogmaStats, String> {
     // Only slots that affect ship stats (drones/cargo/implants don't here).
     let module_items: Vec<&FitItem> = fit
@@ -274,6 +281,12 @@ pub(super) fn run_dogma(
         apply_abyssal_weather(&mut resolved.ship, &mut resolved.modules, selection);
     }
 
+    // Triglavian/spoolable weapon + rep ramp-up (#872): each module/drone's
+    // own damageMultiplier/armorDamageAmount scaled by its own spool
+    // attributes — must land before dps_of/applied_dps_of/tank_of read them,
+    // same ordering requirement as the abyssal-weather block above.
+    let is_spoolable = apply_spool(&mut resolved.modules, &mut resolved.drones, spool_pct);
+
     // T3 subsystems grant slots/hardpoints to the ship procedurally (#178).
     for (it, store) in module_items.iter().zip(&resolved.modules) {
         if it.slot == SlotKind::Subsystem {
@@ -441,6 +454,7 @@ pub(super) fn run_dogma(
         drone_max_active: drone_max_active_full,
         applied_dps,
         dps_range_curve,
+        is_spoolable,
     })
 }
 
@@ -1095,7 +1109,9 @@ pub(super) fn required_skills_of(attrs: &AttrMap, type_id: i64) -> Vec<i64> {
 /// `environment_effect` is a wormhole-class or Pochven-metaliminal-storm
 /// beacon type id the fit is sitting in — see [`run_dogma`].
 /// `abyssal_weather` is the separate, mutually exclusive Abyssal Deadspace
-/// weather choice (also see [`run_dogma`]).
+/// weather choice (also see [`run_dogma`]). `spool_pct` (#872) is the
+/// requested Triglavian/spoolable-weapon ramp fraction (`None`/omitted
+/// defaults to `1.0`, fully spooled — how players quote Trig DPS).
 #[allow(clippy::too_many_arguments)] // one arg per independent sim input; a struct would just rename them
 pub(crate) fn simulate_fit(
     sde: &Sde,
@@ -1108,6 +1124,7 @@ pub(crate) fn simulate_fit(
     fleet_boosts: Option<Vec<[i64; 2]>>,
     environment_effect: Option<i64>,
     abyssal_weather: Option<AbyssalWeatherSelection>,
+    spool_pct: Option<f64>,
 ) -> Result<FitStats, String> {
     let Some(ship) = sde
         .ship_layout(fit.ship_type_id)
@@ -1185,6 +1202,7 @@ pub(crate) fn simulate_fit(
         &boosts,
         environment_effect,
         abyssal_weather,
+        spool_pct.unwrap_or(1.0).clamp(0.0, 1.0),
     )
     .ok();
 
@@ -1229,6 +1247,7 @@ pub(crate) fn simulate_fit(
             .as_ref()
             .map(|d| d.dps_range_curve.clone())
             .unwrap_or_default(),
+        is_spoolable: dogma.as_ref().is_some_and(|d| d.is_spoolable),
     })
 }
 

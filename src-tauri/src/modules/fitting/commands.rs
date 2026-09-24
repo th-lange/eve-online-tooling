@@ -774,8 +774,10 @@ pub async fn fitting_esi_list(
 /// in (default none) — see [`fitting_environment_effects`]. `abyssal_weather`
 /// is the separate, mutually exclusive Abyssal Deadspace weather choice
 /// (default none, hardcoded — see `engine::abyssal`, no dogma data exists
-/// for it). `price` stays `None` here (priced separately via
-/// [`fitting_price`]).
+/// for it). `spool_pct` (#872) is the requested Triglavian/spoolable-weapon
+/// ramp fraction (`0.0` cold .. `1.0` fully spooled; default `1.0`, since
+/// players quote Trig DPS fully spooled). `price` stays `None` here (priced
+/// separately via [`fitting_price`]).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // Tauri command surface — each arg is a distinct optional input
 pub async fn fitting_simulate(
@@ -789,6 +791,7 @@ pub async fn fitting_simulate(
     fleet_boosts: Option<Vec<[i64; 2]>>,
     environment_effect: Option<i64>,
     abyssal_weather: Option<AbyssalWeatherSelection>,
+    spool_pct: Option<f64>,
 ) -> Result<FitStats, String> {
     // Skills first (async, before opening the SDE — see resolve_skill_levels).
     let levels = resolve_skill_levels(&app, &auth_state, skill_source.as_deref()).await;
@@ -806,6 +809,7 @@ pub async fn fitting_simulate(
         fleet_boosts,
         environment_effect,
         abyssal_weather,
+        spool_pct,
     )
 }
 
@@ -894,7 +898,7 @@ pub async fn fitting_ammo_table(
             }
         }
         let stats = simulate_fit(
-            &sde, &dir, &probe, &lookup, None, None, None, None, None, None,
+            &sde, &dir, &probe, &lookup, None, None, None, None, None, None, None,
         )?;
         let dps = stats
             .dps
@@ -1142,6 +1146,7 @@ mod tests {
             &[],
             None,
             None,
+            1.0,
         )
         .unwrap();
         let r = d.weapon_ranges.first().expect("a weapon range");
@@ -1180,6 +1185,7 @@ mod tests {
             &[],
             None,
             None,
+            1.0,
         )
         .unwrap();
         let r = d.weapon_ranges.first().expect("a laser range");
@@ -1228,6 +1234,7 @@ mod tests {
             &[],
             None,
             None,
+            1.0,
         )
         .unwrap();
         let online = run_dogma(
@@ -1242,6 +1249,7 @@ mod tests {
             &[],
             None,
             None,
+            1.0,
         )
         .unwrap();
         let offline = run_dogma(
@@ -1256,6 +1264,7 @@ mod tests {
             &[],
             None,
             None,
+            1.0,
         )
         .unwrap();
         assert!(active.dps.total > 0.0);
@@ -1318,6 +1327,7 @@ mod tests {
             &[],
             None,
             None,
+            1.0,
         )
         .unwrap();
         let online = run_dogma(
@@ -1332,6 +1342,7 @@ mod tests {
             &[],
             None,
             None,
+            1.0,
         )
         .unwrap();
         let offline = run_dogma(
@@ -1346,6 +1357,7 @@ mod tests {
             &[],
             None,
             None,
+            1.0,
         )
         .unwrap();
         assert!(active.capacitor.drain > 0.0, "active AB draws cap");
@@ -1399,6 +1411,7 @@ mod tests {
             &[],
             None,
             None,
+            1.0,
         )
         .unwrap();
         let online = run_dogma(
@@ -1413,6 +1426,7 @@ mod tests {
             &[],
             None,
             None,
+            1.0,
         )
         .unwrap();
         assert!(
@@ -1473,6 +1487,7 @@ mod tests {
             &[],
             None,
             None,
+            1.0,
         )
         .unwrap();
         let applied = d.applied_dps.expect("applied dps when a target is given");
@@ -1536,6 +1551,7 @@ mod tests {
             &[],
             None,
             None,
+            1.0,
         )
         .unwrap();
         let boosted = run_dogma(
@@ -1553,6 +1569,7 @@ mod tests {
             )],
             None,
             None,
+            1.0,
         )
         .unwrap();
         assert!(
@@ -1600,6 +1617,7 @@ mod tests {
             &[],
             None,
             None,
+            1.0,
         )
         .unwrap();
         let in_pulsar = run_dogma(
@@ -1614,6 +1632,7 @@ mod tests {
             &[],
             Some(tid("Class 1 Pulsar Effects")),
             None,
+            1.0,
         )
         .unwrap();
         assert!(
@@ -1661,6 +1680,7 @@ mod tests {
             &[],
             None,
             None,
+            1.0,
         )
         .unwrap();
         let in_gamma = run_dogma(
@@ -1678,6 +1698,7 @@ mod tests {
                 weather: crate::modules::fitting::types::AbyssalWeather::Gamma,
                 tier_pct: 70.0,
             }),
+            1.0,
         )
         .unwrap();
         assert!(

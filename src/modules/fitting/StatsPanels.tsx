@@ -485,18 +485,48 @@ export function DpsBreakdownPanel({
   appliedDps,
   dpsRangeCurve,
   jammedActive,
+  isSpoolable = false,
+  spoolPct,
+  onSpoolPct,
 }: {
   skillLabel: string;
   dps: DpsBreakdown;
   appliedDps?: DpsBreakdown;
   dpsRangeCurve?: [number, number][];
   jammedActive: boolean;
+  /** Whether the fit carries a Triglavian/spoolable weapon — shows the spool
+   *  slider only then (#872). */
+  isSpoolable?: boolean;
+  spoolPct?: number;
+  onSpoolPct?: (pct: number | undefined) => void;
 }) {
+  const spoolPercent = Math.round((spoolPct ?? 1) * 100);
   return (
     <div className="space-y-1">
       <h3 className="text-xs uppercase tracking-wide text-zinc-500">
         DPS ({skillLabel})
       </h3>
+      {isSpoolable && onSpoolPct && (
+        <div className="space-y-0.5">
+          <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-zinc-500">
+            <span>Spool-up</span>
+            <span>{spoolPercent}%</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={spoolPercent}
+            onChange={(e) => {
+              const v = Number(e.currentTarget.value);
+              onSpoolPct(v === 100 ? undefined : v / 100);
+            }}
+            className="w-full"
+            aria-label="Spool-up percentage"
+          />
+        </div>
+      )}
       {jammedActive ? (
         <div className="text-sm text-amber-400">
           Jammed — 0 applied (no lock)

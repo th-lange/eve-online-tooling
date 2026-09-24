@@ -239,6 +239,9 @@ export interface FitStats {
   /** DPS-over-range curve as `[distance_m, dps]` pairs; empty when no
    * target profile was given. */
   dpsRangeCurve?: [number, number][];
+  /** Whether the fit carries any spoolable weapon/rep (Triglavian Entropic
+   * Disintegrators and similar) — gates the spool selector. */
+  isSpoolable?: boolean;
 }
 
 /** One priced line of a whole-fit valuation. */
@@ -341,7 +344,9 @@ export type SkillSource = "allFive" | "character";
  *  "receiving" from a fleet member. `environmentEffect` is a wormhole-class
  *  or Pochven-metaliminal-storm environment beacon type id the fit is
  *  sitting in. `abyssalWeather` is the separate, mutually exclusive Abyssal
- *  Deadspace weather choice. */
+ *  Deadspace weather choice. `spoolPct` (#872) is the requested Triglavian/
+ *  spoolable-weapon ramp fraction (0..1); omitted defaults to 1 (fully
+ *  spooled — how players quote Trig DPS). */
 export function fittingSimulate(
   fit: Fit,
   skillSource: SkillSource = "allFive",
@@ -351,6 +356,7 @@ export function fittingSimulate(
   fleetBoosts?: FleetBoost[],
   environmentEffect?: number | null,
   abyssalWeather?: AbyssalWeatherSelection | null,
+  spoolPct?: number,
 ): Promise<FitStats> {
   return invoke<FitStats>("fitting_simulate", {
     fit,
@@ -363,6 +369,7 @@ export function fittingSimulate(
       : null,
     environmentEffect: environmentEffect ?? null,
     abyssalWeather: abyssalWeather ?? null,
+    spoolPct: spoolPct ?? null,
   });
 }
 
