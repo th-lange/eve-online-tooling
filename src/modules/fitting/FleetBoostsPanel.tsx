@@ -38,7 +38,9 @@ export function FleetBoostsPanel({
   });
   const charges = useQuery({
     queryKey: ["fitting", "compatible-charges", pickedModule?.id],
-    queryFn: () => fittingCompatibleCharges(pickedModule!.id),
+    queryFn: pickedModule
+      ? () => fittingCompatibleCharges(pickedModule.id)
+      : undefined,
     enabled: pickedModule != null,
   });
 
@@ -142,7 +144,7 @@ export function FleetBoostsPanel({
                 Charge
               </div>
               <ul className="max-h-40 overflow-y-auto">
-                {charges.data!.map((c) => (
+                {(charges.data ?? []).map((c) => (
                   <li key={c.id}>
                     <button
                       onClick={() => commit(c.id)}

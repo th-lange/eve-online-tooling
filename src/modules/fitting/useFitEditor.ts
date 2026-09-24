@@ -96,7 +96,7 @@ export function useFitEditor() {
 
   const layout = useQuery({
     queryKey: ["fitting", "layout", fit?.shipTypeId],
-    queryFn: () => fittingShipLayout(fit!.shipTypeId),
+    queryFn: fit ? () => fittingShipLayout(fit.shipTypeId) : undefined,
     enabled: fit != null,
   });
 
@@ -140,17 +140,19 @@ export function useFitEditor() {
       environmentEffect,
       abyssalWeather,
     ],
-    queryFn: () =>
-      fittingSimulate(
-        fit!,
-        skillSource,
-        damageProfile,
-        neutGjs,
-        targetProfile,
-        fleetBoosts.length > 0 ? fleetBoosts : undefined,
-        environmentEffect,
-        abyssalWeather,
-      ),
+    queryFn: fit
+      ? () =>
+          fittingSimulate(
+            fit,
+            skillSource,
+            damageProfile,
+            neutGjs,
+            targetProfile,
+            fleetBoosts.length > 0 ? fleetBoosts : undefined,
+            environmentEffect,
+            abyssalWeather,
+          )
+      : undefined,
     enabled: fit != null,
   });
   // The jammed view only applies while ECM is actually projected onto the fit.
