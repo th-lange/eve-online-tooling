@@ -45,15 +45,9 @@ impl<K: Eq + Hash + Clone> Default for KeyLocks<K> {
     }
 }
 
-/// The single-flight + TTL "lock-gate → check-cache → fetch" pattern shared
-/// by every cached ESI/Fuzzwork lookup in [`crate::market::service`]:
-///
-/// 1. Check the cache; return immediately on a hit.
-/// 2. Take this key's lock (queueing behind any concurrent identical fetch).
-/// 3. Re-check the cache — the caller that was fetching may have just filled
-///    it, in which case this is now a cache hit too.
-/// 4. Otherwise, run `fetch` (which is expected to populate the cache itself
-///    before returning, mirroring the original inline call sites).
+/// Same as [`deduplicated_cached_fetch_with_stale_fallback`], but with no
+/// stale-fallback: a fetch failure always propagates unchanged. The common
+/// case for caches that have no bounded-stale story (most of them).
 ///
 /// `check_cache` is `FnMut` (not `Fn`) so a caller assembling a partial
 /// result across multiple keys (e.g. a batch of misses) can mutate captured
@@ -61,7 +55,7 @@ impl<K: Eq + Hash + Clone> Default for KeyLocks<K> {
 pub async fn deduplicated_cached_fetch<K, V, E, C, F, Fut>(
     locks: &KeyLocks<K>,
     key: &K,
-    mut check_cache: C,
+    check_cache: C,
     fetch: F,
 ) -> Result<V, E>
 where
@@ -69,6 +63,38 @@ where
     C: FnMut() -> Option<V>,
     F: FnOnce() -> Fut,
     Fut: Future<Output = Result<V, E>>,
+{
+    deduplicated_cached_fetch_with_stale_fallback(locks, key, check_cache, fetch, || None).await
+}
+
+/// The single-flight + TTL "lock-gate → check-cache → fetch" pattern, with an
+/// optional bounded-stale fallback: when `fetch` fails, `stale_fallback` gets
+/// one last chance to serve a value (e.g. a disk-backed cache entry read
+/// within a bounded staleness window) instead of propagating the error.
+/// Generalizes the pattern production's system cost index established for
+/// its own bespoke cache (#774) so any `deduplicated_cached_fetch` caller can
+/// opt in: a stale success beats a hard error (#888).
+///
+/// 1. Check the cache; return immediately on a hit.
+/// 2. Take this key's lock (queueing behind any concurrent identical fetch).
+/// 3. Re-check the cache — the caller that was fetching may have just filled
+///    it, in which case this is now a cache hit too.
+/// 4. Otherwise, run `fetch`. On success, return it. On failure, try
+///    `stale_fallback`; a hit returns its value, a miss propagates the
+///    original fetch error.
+pub async fn deduplicated_cached_fetch_with_stale_fallback<K, V, E, C, F, Fut, S>(
+    locks: &KeyLocks<K>,
+    key: &K,
+    mut check_cache: C,
+    fetch: F,
+    stale_fallback: S,
+) -> Result<V, E>
+where
+    K: Eq + Hash + Clone,
+    C: FnMut() -> Option<V>,
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<V, E>>,
+    S: FnOnce() -> Option<V>,
 {
     if let Some(cached) = check_cache() {
         return Ok(cached);
@@ -78,7 +104,10 @@ where
     if let Some(cached) = check_cache() {
         return Ok(cached);
     }
-    fetch().await
+    match fetch().await {
+        Ok(value) => Ok(value),
+        Err(err) => stale_fallback().ok_or(err),
+    }
 }
 
 #[cfg(test)]
@@ -117,6 +146,51 @@ mod tests {
                 t.await.unwrap();
             }
             assert_eq!(fetches.load(Ordering::SeqCst), 1);
+        });
+    }
+
+    /// Expired-but-recoverable cache + failing fetch → the stale fallback is
+    /// served instead of the error (moved/adapted from production's
+    /// `cost_index_fallback_tests`, #774/#888).
+    #[test]
+    fn stale_fallback_beats_fetch_error() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let locks = KeyLocks::<i64>::new();
+            let got: Result<HashMap<i64, f64>, String> =
+                deduplicated_cached_fetch_with_stale_fallback(
+                    &locks,
+                    &42,
+                    || None,
+                    || async { Err::<HashMap<i64, f64>, String>("esi down".into()) },
+                    || Some([(30000142, 0.041)].into()),
+                )
+                .await;
+            assert_eq!(got.unwrap(), [(30000142, 0.041)].into());
+        });
+    }
+
+    /// No usable stale fallback + failing fetch → the fetch error surfaces
+    /// unchanged.
+    #[test]
+    fn no_stale_fallback_surfaces_the_error() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let locks = KeyLocks::<i64>::new();
+            let got: Result<HashMap<i64, f64>, String> =
+                deduplicated_cached_fetch_with_stale_fallback(
+                    &locks,
+                    &42,
+                    || None,
+                    || async { Err::<HashMap<i64, f64>, String>("esi down".into()) },
+                    || None,
+                )
+                .await;
+            assert_eq!(got.unwrap_err(), "esi down");
         });
     }
 }

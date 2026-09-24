@@ -203,6 +203,7 @@ pub fn run() {
             app.manage(std::sync::Arc::new(plugins::PluginRegistry::load(&dir)));
             app.manage(std::sync::Arc::new(plugins::PluginManager::new()));
             app.manage(esi::AuthState::with_cache(dir.clone()));
+            app.manage(modules::production::commands::CostIndexLocks::default());
             modules::dpsmeter::init(app);
             mcp::init(app);
 
