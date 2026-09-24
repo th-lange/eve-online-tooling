@@ -1,30 +1,31 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
-import { type FitItem } from "../../lib/api";
 import { sdeKeys } from "../../lib/queryKeys";
+import {
+  useFitMutations,
+  useFitState,
+  useFitStats,
+} from "./useFitEditorContext";
 
 /**
  * Add modules projected **onto** this fit (webs/paints/damps/…) — incoming
  * effects from a notional attacker, modelled at all-V. Search-to-add plus a
- * removable list; the stats recompute with the projected effects applied (#178).
+ * removable list; the stats recompute with the projected effects applied
+ * (#178). Reads `fit.projected` + `nameOf` from `FitEditorContext` and
+ * writes back through its `addProjected`/`removeProjected` mutations.
  */
-export function ProjectedPanel({
-  projected,
-  nameOf,
-  onAdd,
-  onRemove,
-}: {
-  projected: FitItem[];
-  nameOf: (id: number) => string;
-  onAdd: (typeId: number) => void;
-  onRemove: (idx: number) => void;
-}) {
+export function ProjectedPanel() {
+  const { fit } = useFitState();
+  const { nameOf } = useFitStats();
+  const { addProjected, removeProjected } = useFitMutations();
   const [q, setQ] = useState("");
   const results = useQuery({
     ...sdeKeys.search(q),
     enabled: q.trim().length >= 2,
   });
+  if (!fit) return null;
+  const projected = fit.projected ?? [];
   return (
     <div className="mt-4 rounded border border-zinc-800 bg-zinc-900/40 p-3">
       <div className="mb-2 text-xs uppercase tracking-wide text-zinc-500">
@@ -38,7 +39,7 @@ export function ProjectedPanel({
               className="group flex items-center gap-2 rounded px-1 py-0.5 hover:bg-zinc-800/70"
             >
               <button
-                onClick={() => onRemove(i)}
+                onClick={() => removeProjected(i)}
                 className="flex shrink-0 items-center rounded p-0.5 text-zinc-500 group-hover:text-red-400"
                 title="Remove projection"
                 aria-label={`Remove ${nameOf(it.typeId)}`}
@@ -62,7 +63,7 @@ export function ProjectedPanel({
             <li key={r.id}>
               <button
                 onClick={() => {
-                  onAdd(r.id);
+                  addProjected(r.id);
                   setQ("");
                 }}
                 className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-zinc-200 hover:bg-zinc-800"

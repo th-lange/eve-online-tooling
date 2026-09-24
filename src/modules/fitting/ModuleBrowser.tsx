@@ -18,29 +18,33 @@ import {
   type FitContext,
 } from "./fitHelpers";
 import { SlotBadge } from "./SlotGrid";
+import {
+  useFitMutations,
+  useFitState,
+  useFitStats,
+} from "./useFitEditorContext";
 
 /**
  * Click-to-add module browser: search marketable types by name and add the pick
  * to the fit. The backend classifies the slot, so any module lands in the right
- * place (the slot grid above reflects it immediately) (#168).
+ * place (the slot grid above reflects it immediately) (#168). Fit identity
+ * (`shipTypeId`/`skillSource`/`fitContext`) and the add mutation come from
+ * `FitEditorContext`; `slotFilter` stays a prop since it's UI state the slot
+ * grid and this browser share, owned by the page.
  */
 export function ModuleBrowser({
-  onAdd,
-  pending,
   slotFilter,
   onSlotFilter,
-  fitContext,
-  shipTypeId,
-  skillSource,
 }: {
-  onAdd: (typeId: number) => void;
-  pending: boolean;
   slotFilter: SlotKind | null;
   onSlotFilter: (slot: SlotKind | null) => void;
-  fitContext: FitContext | null;
-  shipTypeId: number;
-  skillSource: SkillSource;
 }) {
+  const { fit, skillSource } = useFitState();
+  const { fitContext } = useFitStats();
+  const { addItem } = useFitMutations();
+  const shipTypeId = fit?.shipTypeId;
+  const pending = addItem.isPending;
+  const onAdd = (typeId: number) => addItem.mutate(typeId);
   const [q, setQ] = useState("");
   const [mode, setMode] = useState<"search" | "browse">("search");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -66,8 +70,8 @@ export function ModuleBrowser({
   const ids = useMemo(() => matches.map((r) => r.id), [matches]);
   const info = useQuery({
     queryKey: ["fitting", "module-info", shipTypeId, skillSource, ids],
-    queryFn: () => fittingModuleInfo(shipTypeId, skillSource, ids),
-    enabled: ids.length > 0,
+    queryFn: () => fittingModuleInfo(shipTypeId!, skillSource, ids),
+    enabled: ids.length > 0 && shipTypeId != null,
   });
   const infoOf = useMemo(
     () => new Map((info.data ?? []).map((m) => [m.id, m])),
@@ -97,6 +101,7 @@ export function ModuleBrowser({
     };
   }, [matches, infoOf, slotFilter, fitContext, q]);
   const nothingShown = fitRows.length === 0 && noFitRows.length === 0;
+  if (!fit || shipTypeId == null) return null;
   return (
     <div className="mt-4 rounded border border-zinc-800 bg-zinc-900/40 p-3">
       <div className="mb-2 flex items-center gap-2 text-xs uppercase tracking-wide text-zinc-500">

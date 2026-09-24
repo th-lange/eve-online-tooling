@@ -3,7 +3,6 @@
 // StatsPanels / ProjectedPanel / fitHelpers); this keeps existing import
 // sites working unchanged.
 
-import type { ReactNode } from "react";
 import { isAuthRequired, type Fit } from "../../lib/api";
 import { queryErrorText } from "../../components/QueryErrorNotice";
 
@@ -57,12 +56,4 @@ export function EsiFitStatus({
     );
   }
   return null;
-}
-
-export function Centered({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex h-full items-center justify-center text-sm text-zinc-500">
-      {children}
-    </div>
-  );
 }

@@ -1,10 +1,5 @@
-import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
-import {
-  errorMessage,
-  type FitPrice,
-  type FitStats,
-  type FleetBoost,
-} from "../../lib/api";
+import type { UseMutationResult } from "@tanstack/react-query";
+import { errorMessage, type FitPrice } from "../../lib/api";
 import {
   DpsBreakdownPanel,
   EwPanel,
@@ -15,44 +10,32 @@ import {
   TankResistsPanel,
   Vitals,
 } from "./components";
+import { useFitState, useFitStats } from "./useFitEditorContext";
 
 /** Right-hand stats sidebar: a sticky vitals headline (DPS/EHP/cap/speed) over
  *  the detail stats (resources, DPS breakdown, EW, tank resists, navigation)
- *  and price — purely presentational, driven by the simulate/price queries
- *  `useFitEditor`/the page-level `price` mutation own. Each detail section is
- *  its own panel component (`StatsPanels.tsx`); this is just the layout and
- *  loading/empty-state wrapper around them. */
+ *  and price — purely presentational, driven by the simulate query
+ *  (`FitEditorContext`) and the page-level `price` mutation. Each detail
+ *  section is its own panel component (`StatsPanels.tsx`); this is just the
+ *  layout and loading/empty-state wrapper around them. */
 export function StatsAside({
-  stats,
-  skillLabel,
-  jammed,
-  onJam,
-  jammedActive,
   price,
-  damageProfile,
-  onDamageProfile,
-  neutGjs,
-  onNeutGjs,
-  fleetBoosts,
-  onAddFleetBoost,
-  onRemoveFleetBoost,
-  nameOf,
 }: {
-  stats: UseQueryResult<FitStats, Error>;
-  skillLabel: string;
-  jammed: boolean;
-  onJam: (jammed: boolean) => void;
-  jammedActive: boolean;
   price: UseMutationResult<FitPrice, Error, void, unknown>;
-  damageProfile: [number, number, number, number] | undefined;
-  onDamageProfile: (p: [number, number, number, number] | undefined) => void;
-  neutGjs: number | undefined;
-  onNeutGjs: (n: number | undefined) => void;
-  fleetBoosts: FleetBoost[];
-  onAddFleetBoost: (boost: FleetBoost) => void;
-  onRemoveFleetBoost: (index: number) => void;
-  nameOf: (id: number) => string;
 }) {
+  const {
+    skillLabel,
+    jammed,
+    setJammed,
+    damageProfile,
+    setDamageProfile,
+    neutGjs,
+    setNeutGjs,
+  } = useFitState();
+  const { stats, jammedActive } = useFitStats();
+  const onJam = setJammed;
+  const onDamageProfile = setDamageProfile;
+  const onNeutGjs = setNeutGjs;
   return (
     <aside className="w-72 shrink-0 overflow-auto">
       {/* Sticky so the headline numbers stay visible while detail scrolls. */}
@@ -135,12 +118,7 @@ export function StatsAside({
 
       <PricePanel price={price} />
 
-      <FleetBoostsPanel
-        boosts={fleetBoosts}
-        onAdd={onAddFleetBoost}
-        onRemove={onRemoveFleetBoost}
-        nameOf={nameOf}
-      />
+      <FleetBoostsPanel />
     </aside>
   );
 }

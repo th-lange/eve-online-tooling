@@ -19,6 +19,11 @@ import {
   type WeaponRange,
 } from "../../lib/api";
 import { SLOT_BADGE, km } from "./fitHelpers";
+import {
+  useFitMutations,
+  useFitState,
+  useFitStats,
+} from "./useFitEditorContext";
 import { formatInt } from "../../lib/format";
 
 /** Combat racks — the banks a fitter reads first, given equal prominence. */
@@ -610,49 +615,34 @@ function SlotBank({
 }
 
 export function SlotGrid({
-  fit,
-  layout,
-  nameOf,
-  onRemove,
   onAddToSlot,
-  onSetCharge,
-  onSetChargeForType,
-  onSetState,
-  onSetQuantity,
-  onSetActiveDrones,
-  droneActive,
-  droneMaxActive,
-  rangeOf,
-  activatable,
   ammoStats,
   onFitAmmo,
 }: {
-  fit: Fit;
-  layout: {
-    highSlots: number;
-    midSlots: number;
-    lowSlots: number;
-    rigSlots: number;
-    modeSlots: number;
-  };
-  nameOf: (id: number) => string;
-  onRemove: (globalIndex: number) => void;
   onAddToSlot: (slot: SlotKind) => void;
-  onSetCharge: (globalIndex: number, chargeTypeId: number | null) => void;
-  onSetChargeForType: (
-    weaponTypeId: number,
-    chargeTypeId: number | null,
-  ) => void;
-  onSetState: (globalIndex: number, state: ModuleState) => void;
-  onSetQuantity: (globalIndex: number, quantity: number) => void;
-  onSetActiveDrones: (globalIndex: number, activeDrones: number) => void;
-  droneActive?: Array<number | null>;
-  droneMaxActive?: Array<number | null>;
-  rangeOf: Map<string, WeaponRange>;
-  activatable: Set<number>;
   ammoStats?: Record<number, AmmoRow>;
   onFitAmmo?: (ammoTypeId: number) => void;
 }) {
+  const { fit } = useFitState();
+  const {
+    setCharge: onSetCharge,
+    setChargeForType: onSetChargeForType,
+    setModuleState: onSetState,
+    setQuantity: onSetQuantity,
+    setActiveDrones: onSetActiveDrones,
+    removeItem: onRemove,
+  } = useFitMutations();
+  const {
+    stats,
+    layout: layoutQuery,
+    nameOf,
+    rangeOf,
+    activatable,
+  } = useFitStats();
+  const layout = stats.data?.layout ?? layoutQuery.data;
+  if (!fit || !layout) return null;
+  const droneActive = stats.data?.droneActive;
+  const droneMaxActive = stats.data?.droneMaxActive;
   const counts: Partial<Record<SlotKind, number>> = {
     high: layout.highSlots,
     mid: layout.midSlots,
