@@ -211,6 +211,14 @@ use serde::{de::DeserializeOwned, Serialize};
 struct CacheEnvelope<T> {
     /// Unix epoch (seconds) after which the entry is stale.
     expires: u64,
+    /// SDE database identity (`sde::generation_id`) this entry was computed
+    /// against, for cache values derived from the SDE (#884: routes, maps,
+    /// FW system topology). `None` for the (majority) of entries that don't
+    /// depend on the SDE at all — those keep today's TTL-only behaviour.
+    /// `#[serde(default)]` so pre-#884 cache files on disk (written without
+    /// this field) still deserialize as `None` instead of failing to parse.
+    #[serde(default)]
+    sde_generation: Option<u64>,
     value: T,
 }
 
@@ -223,9 +231,30 @@ fn cache_path(app_data_dir: &Path, key: &str) -> std::path::PathBuf {
 
 /// Read a cached value, or `None` if absent, unreadable, or expired.
 pub fn cache_get<T: DeserializeOwned>(app_data_dir: &Path, key: &str) -> Option<T> {
-    let bytes = std::fs::read(cache_path(app_data_dir, key)).ok()?;
-    let env: CacheEnvelope<T> = serde_json::from_slice(&bytes).ok()?;
+    let env = read_envelope::<T>(app_data_dir, key)?;
     (env.expires >= crate::util::time::now_secs()).then_some(env.value)
+}
+
+/// Like [`cache_get`], but also misses when the entry was written against a
+/// different SDE generation than `sde_generation` — an SDE update invalidates
+/// the entry immediately instead of waiting out its TTL (#884). An entry
+/// written with no generation tag (i.e. via [`cache_put`]) never matches and
+/// always misses here; use [`cache_put_versioned`] to write one.
+pub fn cache_get_versioned<T: DeserializeOwned>(
+    app_data_dir: &Path,
+    key: &str,
+    sde_generation: u64,
+) -> Option<T> {
+    let env = read_envelope::<T>(app_data_dir, key)?;
+    if env.sde_generation != Some(sde_generation) {
+        return None;
+    }
+    (env.expires >= crate::util::time::now_secs()).then_some(env.value)
+}
+
+fn read_envelope<T: DeserializeOwned>(app_data_dir: &Path, key: &str) -> Option<CacheEnvelope<T>> {
+    let bytes = std::fs::read(cache_path(app_data_dir, key)).ok()?;
+    serde_json::from_slice(&bytes).ok()
 }
 
 /// Read a cached value even if expired, as long as it aged out no more than
@@ -237,8 +266,7 @@ pub fn cache_get_stale<T: DeserializeOwned>(
     key: &str,
     max_stale_secs: u64,
 ) -> Option<T> {
-    let bytes = std::fs::read(cache_path(app_data_dir, key)).ok()?;
-    let env: CacheEnvelope<T> = serde_json::from_slice(&bytes).ok()?;
+    let env = read_envelope::<T>(app_data_dir, key)?;
     (env.expires.saturating_add(max_stale_secs) >= crate::util::time::now_secs())
         .then_some(env.value)
 }
@@ -284,12 +312,40 @@ fn sanitize(key: &str) -> String {
         .collect()
 }
 
-/// Write a cached value that stays fresh for `ttl_secs`.
+/// Write a cached value that stays fresh for `ttl_secs`. Carries no SDE
+/// generation tag — a plain TTL-only entry, as read by [`cache_get`]. Use
+/// [`cache_put_versioned`] for values derived from the SDE.
 pub fn cache_put<T: Serialize>(
     app_data_dir: &Path,
     key: &str,
     value: &T,
     ttl_secs: u64,
+) -> Result<(), String> {
+    write_envelope(app_data_dir, key, value, ttl_secs, None)
+}
+
+/// Write a cached value that stays fresh for `ttl_secs`, tagged with the SDE
+/// generation (`sde::generation_id`) it was computed against (#884). A
+/// subsequent [`cache_get_versioned`] call misses as soon as the SDE's
+/// generation moves on, even if `ttl_secs` hasn't elapsed yet; the TTL still
+/// applies as a secondary ceiling so the entry doesn't live forever should
+/// the SDE never update.
+pub fn cache_put_versioned<T: Serialize>(
+    app_data_dir: &Path,
+    key: &str,
+    value: &T,
+    ttl_secs: u64,
+    sde_generation: u64,
+) -> Result<(), String> {
+    write_envelope(app_data_dir, key, value, ttl_secs, Some(sde_generation))
+}
+
+fn write_envelope<T: Serialize>(
+    app_data_dir: &Path,
+    key: &str,
+    value: &T,
+    ttl_secs: u64,
+    sde_generation: Option<u64>,
 ) -> Result<(), String> {
     let path = cache_path(app_data_dir, key);
     if let Some(parent) = path.parent() {
@@ -297,6 +353,7 @@ pub fn cache_put<T: Serialize>(
     }
     let env = CacheEnvelope {
         expires: crate::util::time::now_secs() + ttl_secs,
+        sde_generation,
         value,
     };
     let data = serde_json::to_vec(&env).map_err(|e| e.to_string())?;
@@ -329,12 +386,38 @@ mod tests {
         let now = crate::util::time::now_secs();
         let env = CacheEnvelope {
             expires: now - 100,
+            sde_generation: None,
             value: 7_i64,
         };
         std::fs::write(&path, serde_json::to_vec(&env).unwrap()).unwrap();
         assert_eq!(cache_get::<i64>(&dir, "k"), None);
         assert_eq!(cache_get_stale::<i64>(&dir, "k", 3600), Some(7));
         assert_eq!(cache_get_stale::<i64>(&dir, "k", 50), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cache_get_versioned_misses_on_generation_mismatch() {
+        // #884: a cache entry written for SDE generation N must miss when read
+        // back requesting N + 1, even though its TTL hasn't elapsed — an SDE
+        // update invalidates it immediately instead of waiting out the TTL.
+        let dir = std::env::temp_dir().join(format!("eve-versioned-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        cache_put_versioned(&dir, "k", &vec![1_i64, 2, 3], 3600, 1).unwrap();
+
+        // Same generation → hit.
+        assert_eq!(
+            cache_get_versioned::<Vec<i64>>(&dir, "k", 1),
+            Some(vec![1, 2, 3])
+        );
+        // Next generation → miss, forcing recompute, despite the fresh TTL.
+        assert_eq!(cache_get_versioned::<Vec<i64>>(&dir, "k", 2), None);
+
+        // An entry with no generation tag (plain cache_put) never matches a
+        // versioned read.
+        cache_put(&dir, "plain", &1_i64, 3600).unwrap();
+        assert_eq!(cache_get_versioned::<i64>(&dir, "plain", 1), None);
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

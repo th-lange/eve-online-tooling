@@ -141,6 +141,18 @@ fn generation(db: &Path) -> Result<Generation, String> {
     Ok((mtime, meta.len()))
 }
 
+/// Single-integer identity of the SDE database file, for callers outside this
+/// module that key an **on-disk** cache to the SDE version (#884) — the
+/// process-wide slots above already invalidate on [`Generation`] internally,
+/// but `storage::cache_put_versioned` needs one plain `u64` to persist
+/// alongside a cache entry. Cheaply mixes the same (mtime, size) identity
+/// [`generation`] uses; not cryptographic, just collision-resistant enough
+/// that an SDE swap always changes it.
+pub fn generation_id(dir: &Path) -> Result<u64, String> {
+    let (mtime, size) = generation(&SdePaths::new(dir.to_path_buf()).db)?;
+    Ok(mtime.wrapping_mul(1_000_003).wrapping_add(size))
+}
+
 /// Serve `slot`'s value while its generation matches; (re)build otherwise.
 /// Pure over its inputs (testable without an SDE on disk).
 fn get_or_build<T: Clone>(
