@@ -6,7 +6,6 @@ import {
   assetsLoad,
   authCharacters,
   authLogin,
-  errorMessage,
   type AssetNode,
   type AssetRow,
   type AssetsPayload,
@@ -18,6 +17,7 @@ import {
   type SortColumn,
 } from "../../components/SortHeaderCell";
 import { Page, PageHeader } from "../../components/page";
+import { QueryResult } from "../../components/QueryResult";
 import { InlineError } from "../../components/InlineError";
 import { Stat } from "../../components/Stat";
 import { SdeGate } from "../../components/SdeGate";
@@ -228,94 +228,104 @@ function Workbench() {
         </p>
       )}
 
-      {loadMut.isError && (
-        <div className="mt-3 text-sm text-rose-400">
-          Failed: {errorMessage(loadMut.error)} — log in a character with the
-          assets scope.
-        </div>
-      )}
-
-      {assets && isTree && (
-        <>
-          <div className="mt-4 flex flex-wrap gap-6 text-sm">
-            <Stat
-              label="Sell value"
-              value={formatIsk(assets.sellTotal)}
-              accent="text-emerald-400"
-            />
-            <Stat
-              label="Volume"
-              value={`${formatInt(Math.round(assets.volumeTotal))} m³`}
-            />
-            <Stat label="Locations" value={formatInt(assets.roots.length)} />
-          </div>
-          {treeOwnerList.length > 1 && (
-            <OwnerChips
-              ownerList={treeOwnerList}
-              selected={treeOwners}
-              setSelected={setTreeOwners}
-            />
-          )}
-          <input
-            value={treeSearch}
-            onChange={(e) => setTreeSearch(e.currentTarget.value)}
-            placeholder="Search tree: name / category / group / metatype / owner…"
-            className="mt-3 w-96 max-w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
-          />
-          <div className="mt-2 rounded border border-zinc-800">
-            {treeRoots.map((n) => (
-              <TreeRow
-                key={n.id}
-                node={n}
-                depth={0}
-                searching={treeSearching}
-              />
-            ))}
-            {treeRoots.length === 0 && (
-              <div className="px-3 py-6 text-center text-sm text-zinc-500">
-                {treeSearching || treeOwners.size > 0
-                  ? "No matches."
-                  : "No assets."}
+      <QueryResult
+        result={{
+          isError: loadMut.isError,
+          error: loadMut.error,
+          isPending: loadMut.isPending && !assets,
+          data: assets ?? undefined,
+        }}
+        pendingLabel="Loading…"
+        loginMessage="Log in a character first to view your assets."
+        scopeHint="Needs the assets read scope — re-login after it's enabled on the EVE app."
+        isEmpty={(d) => d.rows.length === 0}
+        emptyTitle="No assets found."
+        emptyHint="Your roster has no valued holdings — or a character/corp filter is hiding everything."
+        updatedAt={loadMut.isSuccess ? loadMut.submittedAt : undefined}
+        fetching={loadMut.isPending}
+      >
+        {(d) =>
+          isTree ? (
+            <>
+              <div className="mt-4 flex flex-wrap gap-6 text-sm">
+                <Stat
+                  label="Sell value"
+                  value={formatIsk(d.sellTotal)}
+                  accent="text-emerald-400"
+                />
+                <Stat
+                  label="Volume"
+                  value={`${formatInt(Math.round(d.volumeTotal))} m³`}
+                />
+                <Stat label="Locations" value={formatInt(d.roots.length)} />
               </div>
-            )}
-          </div>
-        </>
-      )}
-
-      {assets && !isTree && (
-        <>
-          <div className="mt-4 flex flex-wrap gap-6 text-sm">
-            <Stat
-              label="Sell value (net worth)"
-              value={formatIsk(assets.sellTotal)}
-              accent="text-emerald-400"
-            />
-            <Stat label="Buy value" value={formatIsk(assets.buyTotal)} />
-            <Stat
-              label="Volume"
-              value={`${formatInt(Math.round(assets.volumeTotal))} m³`}
-            />
-            <Stat
-              label="Item types"
-              value={formatInt(new Set(assets.rows.map((r) => r.typeId)).size)}
-            />
-          </div>
-          {ownerList.length > 1 && (
-            <OwnerChips
-              ownerList={ownerList}
-              selected={owners}
-              setSelected={setOwners}
-            />
-          )}
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.currentTarget.value)}
-            placeholder="Search: name / category / group / owner…"
-            className="mt-3 w-72 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
-          />
-          <AssetTable rows={rows} />
-        </>
-      )}
+              {treeOwnerList.length > 1 && (
+                <OwnerChips
+                  ownerList={treeOwnerList}
+                  selected={treeOwners}
+                  setSelected={setTreeOwners}
+                />
+              )}
+              <input
+                value={treeSearch}
+                onChange={(e) => setTreeSearch(e.currentTarget.value)}
+                placeholder="Search tree: name / category / group / metatype / owner…"
+                className="mt-3 w-96 max-w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+              />
+              <div className="mt-2 rounded border border-zinc-800">
+                {treeRoots.map((n) => (
+                  <TreeRow
+                    key={n.id}
+                    node={n}
+                    depth={0}
+                    searching={treeSearching}
+                  />
+                ))}
+                {treeRoots.length === 0 && (
+                  <div className="px-3 py-6 text-center text-sm text-zinc-500">
+                    {treeSearching || treeOwners.size > 0
+                      ? "No matches."
+                      : "No assets."}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="mt-4 flex flex-wrap gap-6 text-sm">
+                <Stat
+                  label="Sell value (net worth)"
+                  value={formatIsk(d.sellTotal)}
+                  accent="text-emerald-400"
+                />
+                <Stat label="Buy value" value={formatIsk(d.buyTotal)} />
+                <Stat
+                  label="Volume"
+                  value={`${formatInt(Math.round(d.volumeTotal))} m³`}
+                />
+                <Stat
+                  label="Item types"
+                  value={formatInt(new Set(d.rows.map((r) => r.typeId)).size)}
+                />
+              </div>
+              {ownerList.length > 1 && (
+                <OwnerChips
+                  ownerList={ownerList}
+                  selected={owners}
+                  setSelected={setOwners}
+                />
+              )}
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.currentTarget.value)}
+                placeholder="Search: name / category / group / owner…"
+                className="mt-3 w-72 rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
+              />
+              <AssetTable rows={rows} />
+            </>
+          )
+        }
+      </QueryResult>
     </Page>
   );
 }

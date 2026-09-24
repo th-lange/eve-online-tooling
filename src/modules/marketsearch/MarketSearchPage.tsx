@@ -43,6 +43,7 @@ import {
   sortRows,
 } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
+import { QueryResult } from "../../components/QueryResult";
 import { Page, PageHeader, Centered } from "../../components/page";
 import { InlineError } from "../../components/InlineError";
 import { SdeGate } from "../../components/SdeGate";
@@ -254,6 +255,7 @@ function Workbench() {
           orderBook={orderBook.data}
           loading={orders.isFetching}
           error={orders.error}
+          dataUpdatedAt={orders.dataUpdatedAt}
         />
       ) : (
         <HistoryTab
@@ -267,6 +269,8 @@ function Workbench() {
           setCompareRegionIds={setCompareRegionIds}
           compareHistories={compareHistories}
           loading={history.isLoading}
+          error={history.error ?? price.error}
+          dataUpdatedAt={history.dataUpdatedAt}
         />
       )}
     </Page>
@@ -294,6 +298,7 @@ function SearchTab({
   orderBook,
   loading,
   error,
+  dataUpdatedAt,
 }: {
   picked: Picked;
   regions: IdName[];
@@ -313,6 +318,7 @@ function SearchTab({
   orderBook: OrderBook | undefined;
   loading: boolean;
   error: unknown;
+  dataUpdatedAt: number | undefined;
 }) {
   return (
     <div className="mt-4">
@@ -396,22 +402,31 @@ function SearchTab({
       <div className="mt-4">
         {!picked ? (
           <Centered>Search for an item to see its sell orders.</Centered>
-        ) : loading ? (
-          <Centered>Loading orders…</Centered>
-        ) : error ? (
-          <Centered>Couldn't load orders: {errorMessage(error)}</Centered>
-        ) : orders.length === 0 ? (
-          <Centered>
-            No sell orders for this item in the selected area.
-          </Centered>
         ) : (
-          <div className="flex flex-col gap-4">
-            {orderBook &&
-              (orderBook.sell.length > 0 || orderBook.buy.length > 0) && (
-                <DepthChart sell={orderBook.sell} buy={orderBook.buy} />
-              )}
-            <OrderTable orders={orders} hasOrigin={origin != null} />
-          </div>
+          <QueryResult
+            result={{
+              isError: !!error,
+              error,
+              isPending: loading,
+              data: orders,
+            }}
+            pendingLabel="Loading…"
+            loginMessage="Log in a character first to see live orders."
+            isEmpty={(d) => d.length === 0}
+            emptyTitle="No sell orders here."
+            emptyHint="No sell orders for this item in the selected area — try widening the region or clearing the station filter."
+            updatedAt={dataUpdatedAt}
+          >
+            {(d) => (
+              <div className="flex flex-col gap-4">
+                {orderBook &&
+                  (orderBook.sell.length > 0 || orderBook.buy.length > 0) && (
+                    <DepthChart sell={orderBook.sell} buy={orderBook.buy} />
+                  )}
+                <OrderTable orders={d} hasOrigin={origin != null} />
+              </div>
+            )}
+          </QueryResult>
         )}
       </div>
     </div>
@@ -574,6 +589,8 @@ function HistoryTab({
   setCompareRegionIds,
   compareHistories,
   loading,
+  error,
+  dataUpdatedAt,
 }: {
   picked: Picked;
   regions: IdName[];
@@ -585,6 +602,8 @@ function HistoryTab({
   setCompareRegionIds: (ids: number[]) => void;
   compareHistories: HistoryPoint[][];
   loading: boolean;
+  error: unknown;
+  dataUpdatedAt: number | undefined;
 }) {
   const compareRegionSeries = useMemo<RegionSeries[]>(
     () => [
@@ -685,22 +704,35 @@ function HistoryTab({
       <div className="mt-4">
         {!picked ? (
           <Centered>Search for an item to see its prices and history.</Centered>
-        ) : loading ? (
-          <Centered>Loading history…</Centered>
-        ) : history.length === 0 ? (
-          <Centered>No history for this item in this region.</Centered>
         ) : (
-          <div className="flex flex-col gap-4">
-            <PriceHistoryView history={history} />
-            {compareRegionIds.length > 0 && (
-              <div>
-                <div className="mb-1 text-xs text-zinc-400">
-                  Region comparison — daily average
-                </div>
-                <MultiRegionHistory regions={compareRegionSeries} />
+          <QueryResult
+            result={{
+              isError: !!error,
+              error,
+              isPending: loading,
+              data: history,
+            }}
+            pendingLabel="Loading…"
+            loginMessage="Log in a character first to see price history."
+            isEmpty={(d) => d.length === 0}
+            emptyTitle="No history here."
+            emptyHint="No history for this item in this region."
+            updatedAt={dataUpdatedAt}
+          >
+            {(d) => (
+              <div className="flex flex-col gap-4">
+                <PriceHistoryView history={d} />
+                {compareRegionIds.length > 0 && (
+                  <div>
+                    <div className="mb-1 text-xs text-zinc-400">
+                      Region comparison — daily average
+                    </div>
+                    <MultiRegionHistory regions={compareRegionSeries} />
+                  </div>
+                )}
               </div>
             )}
-          </div>
+          </QueryResult>
         )}
       </div>
     </div>
