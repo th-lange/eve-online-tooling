@@ -26,10 +26,8 @@ import {
 } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { useCopyToClipboard } from "../../lib/useCopyToClipboard";
-import {
-  SortHeaderCell,
-  type SortColumn,
-} from "../../components/SortHeaderCell";
+import { DataTable, type SortColumn } from "../../components/DataTable";
+import { EmptyState } from "../../components/EmptyState";
 import { AddToListButton } from "../../components/AddToListButton";
 import { InlineError } from "../../components/InlineError";
 import { PriceHistoryPopover } from "../../components/PriceHistoryPopover";
@@ -194,143 +192,143 @@ export function ProfitTable({
           ? `Showing top ${MAX_ROWS} of ${rows.length}`
           : `${rows.length} item(s)`}
       </div>
-      <div className="rounded border border-zinc-800">
-        <table className="w-full border-collapse text-sm">
-          <thead className="sticky top-0 z-10 bg-zinc-900 text-zinc-400 shadow-[0_1px_0_0_theme(colors.zinc.800)]">
-            <tr>
-              <th className="w-6" />
-              <th className="w-16" />
-              {COLUMNS.map((c) => (
-                <SortHeaderCell
-                  key={c.key}
-                  column={c}
-                  active={sortKey === c.key}
-                  dir={sortDir}
-                  onClick={toggleSort}
-                  demoted={c.key === "productVolume"}
-                />
-              ))}
-              <th
-                className="border-l border-zinc-800/60 px-3 py-2 text-left text-xs font-medium text-zinc-500"
-                title="The market this row was priced at."
+      <DataTable
+        columns={COLUMNS}
+        sortKey={sortKey}
+        sortDir={sortDir}
+        onSort={toggleSort}
+        rows={shown}
+        demotedKeys={["productVolume"]}
+        leadingHeader={
+          <>
+            <th className="w-6" />
+            <th className="w-16" />
+          </>
+        }
+        trailingHeader={
+          <th
+            className="border-l border-zinc-800/60 px-3 py-2 text-left text-xs font-medium text-zinc-500"
+            title="The market this row was priced at."
+          >
+            Market
+          </th>
+        }
+        emptyState={
+          <EmptyState
+            title="No builds match your filters"
+            hint="Loosen a filter — lower the min ROI/volume, clear the category, or turn off Owned-only — to bring rows back."
+          />
+        }
+        renderRow={(r) => {
+          const open = expanded === r.blueprintTypeId;
+          const incomplete = r.missingPrices.length > 0;
+          const subtitle = [r.category, r.group, r.metaGroup]
+            .filter(Boolean)
+            .join(" · ");
+          return (
+            <Fragment key={r.blueprintTypeId}>
+              <tr
+                onClick={() => setExpanded(open ? null : r.blueprintTypeId)}
+                className="cursor-pointer border-t border-zinc-800 hover:bg-zinc-800/40"
               >
-                Market
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((r) => {
-              const open = expanded === r.blueprintTypeId;
-              const incomplete = r.missingPrices.length > 0;
-              const subtitle = [r.category, r.group, r.metaGroup]
-                .filter(Boolean)
-                .join(" · ");
-              return (
-                <Fragment key={r.blueprintTypeId}>
-                  <tr
-                    onClick={() => setExpanded(open ? null : r.blueprintTypeId)}
-                    className="cursor-pointer border-t border-zinc-800 hover:bg-zinc-800/40"
+                <td className="px-2 text-zinc-400">
+                  <span className="flex items-center justify-center">
+                    {open ? (
+                      <ChevronDown size={16} />
+                    ) : (
+                      <ChevronRight size={16} />
+                    )}
+                  </span>
+                </td>
+                <td className="px-2 whitespace-nowrap">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onFavorite(r);
+                    }}
+                    title="Favorite"
+                    aria-label={r.favorite ? "Unfavorite" : "Favorite"}
+                    className={`rounded p-1 ${
+                      r.favorite
+                        ? "text-amber-400"
+                        : "text-zinc-400 hover:text-amber-400"
+                    }`}
                   >
-                    <td className="px-2 text-zinc-400">
-                      <span className="flex items-center justify-center">
-                        {open ? (
-                          <ChevronDown size={16} />
-                        ) : (
-                          <ChevronRight size={16} />
-                        )}
-                      </span>
-                    </td>
-                    <td className="px-2 whitespace-nowrap">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onFavorite(r);
-                        }}
-                        title="Favorite"
-                        aria-label={r.favorite ? "Unfavorite" : "Favorite"}
-                        className={`rounded p-1 ${
-                          r.favorite
-                            ? "text-amber-400"
-                            : "text-zinc-400 hover:text-amber-400"
-                        }`}
-                      >
-                        <Star
-                          size={15}
-                          fill={r.favorite ? "currentColor" : "none"}
-                        />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onBlacklist(r);
-                        }}
-                        title="Blacklist (hide from ranking)"
-                        aria-label="Blacklist"
-                        className="ml-1 rounded p-1 text-zinc-400 hover:text-rose-400"
-                      >
-                        <Ban size={15} />
-                      </button>
-                    </td>
-                    <ProductCell
-                      row={r}
-                      regionId={regionId}
-                      regionName={regionName}
-                      hub={hub}
-                      incomplete={incomplete}
-                      subtitle={subtitle}
+                    <Star
+                      size={15}
+                      fill={r.favorite ? "currentColor" : "none"}
                     />
-                    <td className="px-3 py-1.5 text-right tabular-nums text-zinc-200">
-                      {formatIsk(r.productPrice)}
-                    </td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                      {formatIsk(unitCost(r))}
-                    </td>
-                    <td
-                      className={`px-3 py-1.5 text-right tabular-nums ${
-                        (r.roi ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"
-                      }`}
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onBlacklist(r);
+                    }}
+                    title="Blacklist (hide from ranking)"
+                    aria-label="Blacklist"
+                    className="ml-1 rounded p-1 text-zinc-400 hover:text-rose-400"
+                  >
+                    <Ban size={15} />
+                  </button>
+                </td>
+                <ProductCell
+                  row={r}
+                  regionId={regionId}
+                  regionName={regionName}
+                  hub={hub}
+                  incomplete={incomplete}
+                  subtitle={subtitle}
+                />
+                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-200">
+                  {formatIsk(r.productPrice)}
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                  {formatIsk(unitCost(r))}
+                </td>
+                <td
+                  className={`px-3 py-1.5 text-right tabular-nums ${
+                    (r.roi ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"
+                  }`}
+                >
+                  {formatPercent(r.roi)}
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+                  {formatPercent(r.margin)}
+                </td>
+                <td className="px-3 py-1.5 text-right">
+                  <div
+                    className={`text-[15px] font-semibold tabular-nums ${
+                      r.profitPerUnit >= 0
+                        ? "text-emerald-400"
+                        : "text-rose-400"
+                    }`}
+                  >
+                    {formatIsk(r.profitPerUnit)}
+                  </div>
+                  <RoiBar roi={r.roi} max={maxAbsRoi} />
+                </td>
+                <td className="border-l border-zinc-800/60 px-3 py-1.5 text-right text-xs tabular-nums text-zinc-500">
+                  {formatInt(r.productVolume)}
+                </td>
+                <td className="border-l border-zinc-800/60 px-3 py-1.5 text-xs text-zinc-500">
+                  {r.sellHub ? (
+                    <span
+                      className="inline-flex items-center gap-1 text-emerald-400"
+                      title="Best hub to sell at"
                     >
-                      {formatPercent(r.roi)}
-                    </td>
-                    <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
-                      {formatPercent(r.margin)}
-                    </td>
-                    <td className="px-3 py-1.5 text-right">
-                      <div
-                        className={`text-[15px] font-semibold tabular-nums ${
-                          r.profitPerUnit >= 0
-                            ? "text-emerald-400"
-                            : "text-rose-400"
-                        }`}
-                      >
-                        {formatIsk(r.profitPerUnit)}
-                      </div>
-                      <RoiBar roi={r.roi} max={maxAbsRoi} />
-                    </td>
-                    <td className="border-l border-zinc-800/60 px-3 py-1.5 text-right text-xs tabular-nums text-zinc-500">
-                      {formatInt(r.productVolume)}
-                    </td>
-                    <td className="border-l border-zinc-800/60 px-3 py-1.5 text-xs text-zinc-500">
-                      {r.sellHub ? (
-                        <span
-                          className="inline-flex items-center gap-1 text-emerald-400"
-                          title="Best hub to sell at"
-                        >
-                          <TrendingUp size={13} />
-                          {r.sellHub}
-                        </span>
-                      ) : (
-                        (r.market ?? "—")
-                      )}
-                    </td>
-                  </tr>
-                  {open && <BreakdownRow row={r} />}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                      <TrendingUp size={13} />
+                      {r.sellHub}
+                    </span>
+                  ) : (
+                    (r.market ?? "—")
+                  )}
+                </td>
+              </tr>
+              {open && <BreakdownRow row={r} />}
+            </Fragment>
+          );
+        }}
+      />
     </div>
   );
 }
@@ -431,20 +429,6 @@ function RoiBar({ roi, max }: { roi: number | null; max: number }) {
         }`}
         style={{ width: `${pct}%`, marginLeft: v >= 0 ? undefined : "auto" }}
       />
-    </div>
-  );
-}
-
-/** A centred empty state: a headline plus a concrete next step. */
-export function EmptyState({ title, hint }: { title: string; hint?: string }) {
-  return (
-    <div className="rounded border border-dashed border-zinc-800 p-10 text-center">
-      <div className="text-sm font-medium text-zinc-300">{title}</div>
-      {hint && (
-        <div className="mx-auto mt-1 max-w-md text-xs text-zinc-500">
-          {hint}
-        </div>
-      )}
     </div>
   );
 }

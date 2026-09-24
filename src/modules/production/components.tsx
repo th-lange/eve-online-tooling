@@ -7,7 +7,7 @@ import {
   type ProfitBreakdown,
 } from "../../lib/api";
 import { formatIsk, formatPercent } from "../../lib/format";
-import { EmptyState } from "./ProfitTable";
+import { EmptyState } from "../../components/EmptyState";
 import type { ResultsView, Tab, ImportedBlueprint } from "./types";
 
 // Presentational + form components and helpers extracted from ProductionPage (#341).
