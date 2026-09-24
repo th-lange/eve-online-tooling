@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
+use crate::model::AppError;
 use crate::sde::graph;
 use crate::storage;
 
@@ -613,7 +614,7 @@ fn merge_by_source(
 /// are preserved; previously-imported holes are refreshed from the feed. Returns
 /// the merged, name-enriched connection set (same shape as `wh_connections`).
 #[tauri::command]
-pub async fn wh_import_evescout(app: AppHandle) -> Result<Vec<ConnectionView>, String> {
+pub async fn wh_import_evescout(app: AppHandle) -> Result<Vec<ConnectionView>, AppError> {
     let (dir, existing) = store::load(&app)?;
     let feed = crate::evescout::fetch_signatures(&dir).await?;
     let now = crate::util::time::now_secs();
@@ -623,7 +624,7 @@ pub async fn wh_import_evescout(app: AppHandle) -> Result<Vec<ConnectionView>, S
         .filter_map(|s| imported_connection(s, now))
         .collect();
     let merged = merge_by_source(existing, imported, ConnSource::Evescout);
-    store::save_and_view(&dir, &merged)
+    store::save_and_view(&dir, &merged).map_err(AppError::from)
 }
 
 // --- Ship-mass jump planner (#303) ---
@@ -923,12 +924,12 @@ pub fn wh_tripwire_disconnect(app: AppHandle) -> Result<TripwireStatus, String> 
 /// imports untouched; previous Tripwire rows refreshed). Mask defaults to the
 /// active character's personal chain (`<id>.1`) when not overridden.
 #[tauri::command]
-pub async fn wh_tripwire_import(app: AppHandle) -> Result<Vec<ConnectionView>, String> {
+pub async fn wh_tripwire_import(app: AppHandle) -> Result<Vec<ConnectionView>, AppError> {
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     let cfg: tripwire::TripwireConfig =
         storage::load_data(&dir, tripwire::CONFIG_KEY).unwrap_or_default();
     if cfg.username.is_empty() {
-        return Err("Connect Tripwire first".to_string());
+        return Err(AppError::from("Connect Tripwire first"));
     }
     let password = storage::load_secret(tripwire::SECRET_KEY)?
         .ok_or_else(|| "Connect Tripwire first".to_string())?;
@@ -960,7 +961,7 @@ pub async fn wh_tripwire_import(app: AppHandle) -> Result<Vec<ConnectionView>, S
         crate::util::time::now_secs(),
     );
     let merged = merge_by_source(existing, imported, ConnSource::Tripwire);
-    store::save_and_view(&dir, &merged)
+    store::save_and_view(&dir, &merged).map_err(AppError::from)
 }
 
 #[cfg(test)]

@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::esi::{authed_get, resolve_names, AuthState, EsiClient};
+use crate::model::AppError;
 use crate::sde::{cached_adjacency, graph};
 use crate::storage;
 
@@ -273,7 +274,10 @@ pub struct FwMap {
 /// capture progress, plus last-hour kills and jumps, and the stargate edges
 /// between the systems (for the warzone map). Public data, cached ~5 min.
 #[tauri::command]
-pub async fn intel_fw_systems(app: AppHandle, esi: State<'_, EsiClient>) -> Result<FwMap, String> {
+pub async fn intel_fw_systems(
+    app: AppHandle,
+    esi: State<'_, EsiClient>,
+) -> Result<FwMap, AppError> {
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     if let Some(cached) = storage::cache_get::<FwMap>(&dir, "intel_fw_systems") {
         return Ok(cached);

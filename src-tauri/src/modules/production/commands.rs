@@ -8,6 +8,7 @@ use tauri::{AppHandle, State};
 use crate::esi::EsiClient;
 use crate::lists::{self, ListItem};
 use crate::market::{default_region_id, location_label, resolve_location, MarketService};
+use crate::model::AppError;
 use crate::sde::Sde;
 use crate::storage;
 
@@ -474,9 +475,9 @@ fn reprice_product(bd: &mut ProfitBreakdown, unit_price: f64, hub: &str, sales_c
 
 /// The invention decryptors (for the UI dropdown).
 #[tauri::command]
-pub async fn production_decryptors(app: AppHandle) -> Result<Vec<crate::sde::Decryptor>, String> {
+pub async fn production_decryptors(app: AppHandle) -> Result<Vec<crate::sde::Decryptor>, AppError> {
     let sde = crate::sde::open_from_app(&app)?;
-    sde.decryptors().map_err(|e| e.to_string())
+    sde.decryptors().map_err(|e| AppError::from(e.to_string()))
 }
 
 /// Storage keys for production's saved lists — distinct from trading's so the
