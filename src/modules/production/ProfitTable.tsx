@@ -20,6 +20,8 @@ import {
   formatInt,
   formatIsk,
   formatPercent,
+  formatSignedIsk,
+  formatSignedPercent,
   sortBreakdowns,
   unitCost,
   type SortKey,
@@ -290,7 +292,7 @@ export function ProfitTable({
                     (r.roi ?? 0) >= 0 ? "text-emerald-400" : "text-rose-400"
                   }`}
                 >
-                  {formatPercent(r.roi)}
+                  {formatSignedPercent(r.roi)}
                 </td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
                   {formatPercent(r.margin)}
@@ -303,7 +305,7 @@ export function ProfitTable({
                         : "text-rose-400"
                     }`}
                   >
-                    {formatIsk(r.profitPerUnit)}
+                    {formatSignedIsk(r.profitPerUnit)}
                   </div>
                   <RoiBar roi={r.roi} max={maxAbsRoi} />
                 </td>

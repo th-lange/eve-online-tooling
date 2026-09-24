@@ -293,19 +293,22 @@ const SEC_STYLE: Record<Sec, string> = {
 
 const DANGER: Record<
   Danger,
-  { color: string; accent: string; Icon: typeof Shield }
+  { label: string; color: string; accent: string; Icon: typeof Shield }
 > = {
   safe: {
+    label: "Safe",
     color: "text-emerald-400",
     accent: "border-l-emerald-500/60",
     Icon: ShieldCheck,
   },
   moderate: {
+    label: "Moderate",
     color: "text-amber-400",
     accent: "border-l-amber-500/60",
     Icon: Shield,
   },
   high: {
+    label: "High danger",
     color: "text-rose-400",
     accent: "border-l-rose-500/60",
     Icon: Skull,
@@ -376,7 +379,9 @@ function SiteCard({
       </div>
       <div className={`mt-2.5 flex items-start gap-1.5 text-xs ${d.color}`}>
         <d.Icon size={14} className="mt-px shrink-0" />
-        <span>{site.enemies}</span>
+        <span>
+          <span className="font-semibold">{d.label}</span> — {site.enemies}
+        </span>
       </div>
       <p className="mt-2 text-xs leading-relaxed text-zinc-400">{site.notes}</p>
       <span className="mt-2 block text-[10px] uppercase tracking-wide text-zinc-600">
@@ -484,10 +489,16 @@ function SiteDetail({ site, onClose }: { site: Site; onClose: () => void }) {
             <h3 className="text-base font-semibold text-zinc-100">
               {site.name}
             </h3>
-            <div className="mt-1 flex items-center gap-2">
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
               <SecBadges sec={site.sec} />
-              <span className={`flex items-center gap-1 text-xs ${d.color}`}>
-                <d.Icon size={12} /> {site.enemies.split(/[—.]/)[0].trim()}
+            </div>
+            <div
+              className={`mt-1.5 flex items-center gap-1.5 text-xs ${d.color}`}
+            >
+              <d.Icon size={12} className="shrink-0" />
+              <span>
+                <span className="font-semibold">{d.label}</span> —{" "}
+                {site.enemies.split(/[—.]/)[0].trim()}
               </span>
             </div>
           </div>
