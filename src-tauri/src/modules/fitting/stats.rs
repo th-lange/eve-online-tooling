@@ -10,7 +10,8 @@ use super::context::DogmaContext;
 use super::engine::abyssal::apply_abyssal_weather;
 use super::engine::application::{missile_application, turret_application};
 use super::engine::attr::{attr, AttrStore};
-use super::engine::capacitor::capacitor;
+use super::engine::capacitor::{capacitor, ModuleDrain};
+use super::engine::cycle::cycle_of;
 use super::engine::damage::{damage, Weapon};
 use super::engine::navigation::{navigation, prop_velocity, targeting};
 use super::engine::projection::{
@@ -45,6 +46,11 @@ pub(super) struct DogmaStats {
     pub(super) capacitor: CapStats,
     pub(super) tank: TankStats,
     pub(super) dps: DpsBreakdown,
+    /// Sustained DPS (#871): burst DPS derated by each weapon's own reload
+    /// cycle (`engine::cycle`) — clip depletion + reload pause. Equal to
+    /// `dps` for any weapon with infinite ammo (no reloadTime/capacity/
+    /// charge-volume attributes, or none loaded).
+    pub(super) dps_sustained: DpsBreakdown,
     pub(super) weapon_ranges: Vec<WeaponRange>,
     pub(super) navigation: NavStats,
     pub(super) targeting: TargetStats,
@@ -84,7 +90,12 @@ pub(super) struct DogmaStats {
 /// post-resolve adjustment (see `engine::abyssal`) since it has no dogma
 /// representation in the SDE at all. `spool_pct` (#872) is the requested
 /// Triglavian/spoolable-weapon ramp fraction (0.0 cold .. 1.0 fully
-/// spooled), applied the same way (see `engine::spool`).
+/// spooled), applied the same way (see `engine::spool`). `factor_reload`
+/// (#871) toggles reload accounting in the capacitor sim: when `true`, a
+/// cap-drawing weapon's steady drain is derated by its own reload
+/// sustained-factor and the discrete depletion sim pauses its draw during
+/// the reload window (see `engine::cycle`). `dps`/`dps_sustained` are always
+/// both computed regardless of this flag — the UI picks which to show.
 #[allow(clippy::too_many_arguments)] // one arg per independent sim input; a struct would just rename them
 pub(super) fn run_dogma(
     sde: &Sde,
@@ -99,6 +110,7 @@ pub(super) fn run_dogma(
     environment_effect: Option<i64>,
     abyssal_weather: Option<AbyssalWeatherSelection>,
     spool_pct: f64,
+    factor_reload: bool,
 ) -> Result<DogmaStats, String> {
     // Only slots that affect ship stats (drones/cargo/implants don't here).
     let module_items: Vec<&FitItem> = fit
@@ -408,9 +420,15 @@ pub(super) fn run_dogma(
         validation,
         layout,
         activatable_types,
-        capacitor: capacitor_of(&resolved, &module_items, neut_gjs),
+        capacitor: capacitor_of(&resolved, &module_items, neut_gjs, factor_reload),
         tank: tank_of(&resolved, &module_items, damage_profile),
         dps: dps_of(&resolved, &module_items, &drone_items, &drone_active_counts),
+        dps_sustained: dps_sustained_of(
+            &resolved,
+            &module_items,
+            &drone_items,
+            &drone_active_counts,
+        ),
         weapon_ranges,
         navigation: {
             // Prop modules (AB/MWD) are identified by speedFactor (20) +
@@ -640,6 +658,66 @@ pub(super) fn dps_of(
         };
         let damage_per_shot = resolved_damage(charge);
         let rof_seconds = store.get(51) / 1000.0;
+        let mult = store.get(64);
+        if mult > 0.0 {
+            turrets.push(Weapon {
+                damage_mult: mult,
+                damage_per_shot,
+                rof_seconds,
+                count: 1,
+            });
+        } else if rof_seconds > 0.0 {
+            missiles.push(Weapon {
+                damage_mult: 1.0,
+                damage_per_shot,
+                rof_seconds,
+                count: 1,
+            });
+        }
+    }
+
+    let drones: Vec<Weapon> = drone_items
+        .iter()
+        .zip(&resolved.drones)
+        .zip(drone_active)
+        .map(|((_, store), &active)| Weapon {
+            damage_mult: store.get(64),
+            damage_per_shot: resolved_damage(store),
+            rof_seconds: store.get(51) / 1000.0,
+            count: active.max(0),
+        })
+        .collect();
+
+    damage(&turrets, &missiles, &drones)
+}
+
+/// Sustained DPS (#871): the same weapon set/iteration as [`dps_of`], but
+/// each turret/missile's per-shot damage is derated by its own reload cycle
+/// (`engine::cycle::cycle_of`) — the fraction of an average cycle actually
+/// spent firing once clip depletion + `reloadTime` are factored in. Scaling
+/// `damage_per_shot` (rather than the whole DPS figure) keeps this exactly
+/// on `dps_of`'s math for any weapon with infinite ammo (factor `1.0`).
+/// Drones never reload — full burst, same as `dps_of`. Always computed
+/// (independent of the `factor_reload` toggle, which only gates the cap
+/// sim) so the UI can switch between burst/sustained without re-simulating.
+pub(super) fn dps_sustained_of(
+    resolved: &ResolvedFit,
+    module_items: &[&FitItem],
+    drone_items: &[&FitItem],
+    drone_active: &[i32],
+) -> DpsBreakdown {
+    let mut turrets = Vec::new();
+    let mut missiles = Vec::new();
+    for (i, store) in resolved.modules.iter().enumerate() {
+        if module_items.get(i).is_some_and(|it| !is_running(it.state)) {
+            continue; // active/overheated weapons fire; inactive/offline = none
+        }
+        let Some(Some(charge)) = resolved.charges.get(i) else {
+            continue;
+        };
+        let rof_seconds = store.get(51) / 1000.0;
+        let factor = cycle_of(store, Some(charge)).sustained_factor(rof_seconds);
+        let damage_per_shot = resolved_damage(charge) * factor;
         let mult = store.get(64);
         if mult > 0.0 {
             turrets.push(Weapon {
@@ -948,14 +1026,19 @@ pub(super) fn weapon_ranges_of(
 /// Capacitor stability from a resolved fit (#172). Steady drain assumes every
 /// cap-using module runs (capacitorNeed 6 / duration 73 ms); per-module on/off
 /// toggling is a UI follow-up. `neut_gjs` adds projected neut pressure (#706)
-/// on top of the module drain.
+/// on top of the module drain. `factor_reload` (#871) derates each weapon's
+/// steady drain by its own reload sustained-factor and feeds its clip/reload
+/// cycle to the discrete depletion sim, which then pauses draw during the
+/// reload window (`engine::capacitor::time_to_empty`); `false` reproduces
+/// pre-#871 behavior exactly (modules always draw every cycle, forever).
 pub(super) fn capacitor_of(
     resolved: &ResolvedFit,
     module_items: &[&FitItem],
     neut_gjs: f64,
+    factor_reload: bool,
 ) -> CapStats {
     let mut drain = 0.0;
-    let mut module_drains: Vec<(f64, f64)> = Vec::new();
+    let mut module_drains: Vec<ModuleDrain> = Vec::new();
     for (i, store) in resolved.modules.iter().enumerate() {
         if module_items.get(i).is_some_and(|it| !is_running(it.state)) {
             continue; // active/overheated modules draw capacitor
@@ -972,8 +1055,21 @@ pub(super) fn capacitor_of(
             }
         };
         if need > 0.0 && dur > 0.0 {
-            drain += need / (dur / 1000.0);
-            module_drains.push((need, dur));
+            let (clip_shots, reload_ms, factor) = if factor_reload {
+                let charge = resolved.charges.get(i).and_then(|c| c.as_ref());
+                let cycle = cycle_of(store, charge);
+                let factor = cycle.sustained_factor(dur / 1000.0);
+                (cycle.clip_shots, cycle.reload_seconds * 1000.0, factor)
+            } else {
+                (0.0, 0.0, 1.0)
+            };
+            drain += need / (dur / 1000.0) * factor;
+            module_drains.push(ModuleDrain {
+                need,
+                cycle_ms: dur,
+                clip_shots,
+                reload_ms,
+            });
         }
     }
     capacitor(
@@ -1112,6 +1208,8 @@ pub(super) fn required_skills_of(attrs: &AttrMap, type_id: i64) -> Vec<i64> {
 /// weather choice (also see [`run_dogma`]). `spool_pct` (#872) is the
 /// requested Triglavian/spoolable-weapon ramp fraction (`None`/omitted
 /// defaults to `1.0`, fully spooled — how players quote Trig DPS).
+/// `factor_reload` (#871) toggles reload accounting in the cap sim
+/// (`None`/omitted defaults to `false` — see [`run_dogma`]).
 #[allow(clippy::too_many_arguments)] // one arg per independent sim input; a struct would just rename them
 pub(crate) fn simulate_fit(
     sde: &Sde,
@@ -1125,6 +1223,7 @@ pub(crate) fn simulate_fit(
     environment_effect: Option<i64>,
     abyssal_weather: Option<AbyssalWeatherSelection>,
     spool_pct: Option<f64>,
+    factor_reload: Option<bool>,
 ) -> Result<FitStats, String> {
     let Some(ship) = sde
         .ship_layout(fit.ship_type_id)
@@ -1203,6 +1302,7 @@ pub(crate) fn simulate_fit(
         environment_effect,
         abyssal_weather,
         spool_pct.unwrap_or(1.0).clamp(0.0, 1.0),
+        factor_reload.unwrap_or(false),
     )
     .ok();
 
@@ -1221,6 +1321,7 @@ pub(crate) fn simulate_fit(
         capacitor: dogma.as_ref().map(|d| d.capacitor.clone()),
         tank: dogma.as_ref().map(|d| d.tank.clone()),
         dps: dogma.as_ref().map(|d| d.dps.clone()),
+        dps_sustained: dogma.as_ref().map(|d| d.dps_sustained.clone()),
         navigation: dogma.as_ref().map(|d| d.navigation.clone()),
         layout: dogma.as_ref().map(|d| d.layout.clone()),
         weapon_ranges: dogma
@@ -1464,6 +1565,45 @@ mod tests {
         assert_eq!(dps.missile, 0.0);
         assert_eq!(dps.drone, 2.0 * 40.0 * 3.0 / 1.0); // scaled by quantity, regardless of state
         assert_eq!(dps.total, dps.turret + dps.drone);
+    }
+
+    /// Sustained DPS (#871) derates burst by each weapon's own reload cycle:
+    /// a launcher with a 5-shot clip (capacity 5 ÷ charge volume 1) and a 10s
+    /// reload fires 5×2s = 10s per clip, so sustained is half of burst.
+    /// Drones never reload — their sustained DPS equals burst.
+    #[test]
+    fn dps_sustained_of_derates_by_reload_cycle() {
+        let launcher = store(&[(51, 2000.0), (38, 5.0), (1795, 10_000.0)]); // no damageMultiplier -> missile
+        let charge = store(&[
+            (114, 25.0),
+            (116, 25.0),
+            (117, 25.0),
+            (118, 25.0),
+            (161, 1.0),
+        ]); // 100 dmg, 1 m3
+        let resolved = resolved_fit(
+            vec![launcher],
+            vec![Some(charge)],
+            vec![store(&[(64, 2.0), (51, 1000.0), (114, 40.0)])], // drone: no reload attrs at all
+        );
+        let items = [item(100, Some(200), ModuleState::Active, 1)];
+        let module_items: Vec<&FitItem> = items.iter().collect();
+        let drone_item = item(300, None, ModuleState::Active, 1);
+        let drone_items = vec![&drone_item];
+
+        let burst = dps_of(&resolved, &module_items, &drone_items, &[1]);
+        let sustained = dps_sustained_of(&resolved, &module_items, &drone_items, &[1]);
+        assert_eq!(burst.missile, 100.0 / 2.0); // 50 dps burst
+        assert!(
+            (sustained.missile - burst.missile * 0.5).abs() < 1e-9,
+            "sustained {} should be half of burst {}",
+            sustained.missile,
+            burst.missile
+        );
+        assert_eq!(
+            sustained.drone, burst.drone,
+            "drones never reload — sustained == burst"
+        );
     }
 
     /// A turret-armed fit against a small/fast (hard-to-track) target profile
@@ -1859,8 +1999,33 @@ mod tests {
         ];
         let module_items: Vec<&FitItem> = items.iter().collect();
 
-        let cap = capacitor_of(&resolved, &module_items, 0.0);
+        let cap = capacitor_of(&resolved, &module_items, 0.0, false);
         assert_eq!(cap.drain, 20.0 / (4000.0 / 1000.0));
+    }
+
+    /// `factor_reload` (#871) derates a reloading weapon's steady drain by
+    /// its own sustained-factor: a launcher with a 5-shot clip and 10s
+    /// reload firing every 2s draws its full 8 GJ raw, but only half the
+    /// time on average (10s firing / 20s average cycle) — so the reported
+    /// `drain` halves, while `factor_reload: false` (or a module with no
+    /// clip/reload attrs) reports the raw undiscounted drain.
+    #[test]
+    fn capacitor_of_factor_reload_derates_steady_drain() {
+        let launcher = store(&[(6, 8.0), (51, 2000.0), (38, 5.0), (1795, 10_000.0)]);
+        let charge = store(&[(161, 1.0)]); // 1 m3/unit -> 5-shot clip
+        let resolved = resolved_fit(vec![launcher], vec![Some(charge)], Vec::new());
+        let items = [item(100, Some(200), ModuleState::Active, 1)];
+        let module_items: Vec<&FitItem> = items.iter().collect();
+
+        let raw = capacitor_of(&resolved, &module_items, 0.0, false);
+        assert_eq!(raw.drain, 8.0 / 2.0); // 4 GJ/s, no derating
+
+        let derated = capacitor_of(&resolved, &module_items, 0.0, true);
+        assert!(
+            (derated.drain - 2.0).abs() < 1e-9, // 4 GJ/s * 0.5 sustained factor
+            "derated drain = {}",
+            derated.drain
+        );
     }
 
     /// A different damage profile weighs the same resonances differently
@@ -1914,8 +2079,8 @@ mod tests {
         let items = [item(100, None, ModuleState::Active, 1)];
         let module_items: Vec<&FitItem> = items.iter().collect();
 
-        let no_neut = capacitor_of(&resolved, &module_items, 0.0);
-        let with_neut = capacitor_of(&resolved, &module_items, 3.0);
+        let no_neut = capacitor_of(&resolved, &module_items, 0.0, false);
+        let with_neut = capacitor_of(&resolved, &module_items, 3.0, false);
         let t_no_neut = no_neut.depletion_seconds.expect("unstable without neut");
         let t_with_neut = with_neut.depletion_seconds.expect("unstable with neut");
         assert!(

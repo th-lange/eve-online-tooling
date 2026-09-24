@@ -287,6 +287,13 @@ pub struct FitStats {
     /// DPS (#174); `None` until the dogma engine runs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dps: Option<DpsBreakdown>,
+    /// Sustained DPS (#871): burst `dps` derated by each weapon's own
+    /// reload cycle (clip depletion + `reloadTime`) — PYFA's `factorReload`
+    /// figure. Equal to `dps` for infinite-ammo weapons. Always populated
+    /// alongside `dps`, independent of the `factor_reload` sim toggle (which
+    /// only gates the capacitor sim); `None` until the dogma engine runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dps_sustained: Option<DpsBreakdown>,
     /// Navigation (#175); `None` until the dogma engine runs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub navigation: Option<NavStats>,

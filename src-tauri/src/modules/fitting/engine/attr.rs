@@ -25,10 +25,12 @@ pub mod attr {
     pub const HI_SLOTS: i64 = 14;
     pub const POWER_USAGE: i64 = 30;
     pub const MAX_VELOCITY: i64 = 37;
+    pub const CAPACITY: i64 = 38;
     pub const CPU_OUTPUT: i64 = 48;
     pub const CPU_USAGE: i64 = 50;
     pub const RATE_OF_FIRE: i64 = 51;
     pub const RECHARGE_RATE: i64 = 55;
+    pub const CHARGES_PER_CYCLE: i64 = 56;
     pub const DAMAGE_MULTIPLIER: i64 = 64;
     pub const AGILITY: i64 = 70;
     pub const LAUNCHER_HARDPOINTS: i64 = 101;
@@ -37,15 +39,17 @@ pub mod attr {
     pub const EXPLOSIVE_DAMAGE: i64 = 116;
     pub const KINETIC_DAMAGE: i64 = 117;
     pub const THERMAL_DAMAGE: i64 = 118;
+    pub const VOLUME: i64 = 161;
     pub const SHIELD_CAPACITY: i64 = 263;
     pub const DRONE_CAPACITY: i64 = 283;
     pub const CAPACITOR_CAPACITY: i64 = 482;
     pub const CALIBRATION: i64 = 1132;
-    pub const CALIBRATION_COST: i64 = 1153;
     pub const RIG_SLOTS: i64 = 1137;
+    pub const CALIBRATION_COST: i64 = 1153;
     pub const DRONE_BANDWIDTH: i64 = 1271;
     pub const DRONE_BANDWIDTH_USED: i64 = 1272;
     pub const SUBSYSTEM_SLOTS: i64 = 1367;
+    pub const RELOAD_TIME: i64 = 1795;
 }
 
 /// A single attribute's base value plus accumulating modifier buckets.

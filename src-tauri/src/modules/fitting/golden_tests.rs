@@ -371,6 +371,7 @@ fn golden_pyfa_fits() {
             None,
             None,
             1.0,
+            false, // factor_reload (#871)
         )
         .expect("dogma");
         let (dps, ehp, vel, align, stable) = (
@@ -487,6 +488,7 @@ fn vedmak_spool_up_matches_hand_computed_ratio() {
             None,
             None,
             spool_pct,
+            false, // factor_reload (#871)
         )
         .expect("dogma")
     };
@@ -527,10 +529,110 @@ fn vedmak_spool_up_matches_hand_computed_ratio() {
         None,
         None,
         1.0,
+        false, // factor_reload (#871)
     )
     .expect("dogma");
     assert!(
         !d.is_spoolable,
         "an unarmed hull should not be flagged spoolable"
+    );
+}
+
+/// Rapid Light Missile Launcher sustained DPS (#871) — the acceptance-
+/// critical reload case, per the issue: no PYFA-oracle fixture exists for a
+/// rapid-launcher fit yet (`tools/pyfa-oracle/golden.json` predates #871),
+/// so per the issue's documented fallback (same one #872's spool-up test
+/// used) this is a hand-computed check instead of an oracle-matched one.
+///
+/// Real Rapid Light Missile Launcher II / Scourge Light Missile attribute
+/// values (PYFA v2.67.0's bundled SDE, cross-checked against everef.net):
+/// launcher `capacity` (38) 0.3 m³, `reloadTime` (1795) 35s, base rate of
+/// fire (51) 6.24s; missile `volume` (161) 0.015 m³ → a 20-shot clip
+/// (`floor(0.3 / 0.015)`). Skills are held at zero (untrained skills are
+/// skipped by the dogma engine entirely) so the finalized rate of fire stays
+/// at the module's own base 6.24s, unaffected by the Rapid Launch skill's
+/// RoF bonus — keeping the hand math exact. The sustained/burst DPS ratio
+/// must then be exactly `(20×6.24) / (20×6.24 + 35) = 124.8 / 159.8`,
+/// independent of any damage multiplier (which scales burst and sustained
+/// identically and cancels out of the ratio). Burst DPS itself must be
+/// bit-identical whether or not reload is factored in — the toggle only
+/// gates the capacitor sim, never the DPS panel.
+#[test]
+fn rapid_light_missile_launcher_sustained_dps_matches_hand_computed_ratio() {
+    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        eprintln!(
+            "rapid_light_missile_launcher_sustained_dps_matches_hand_computed_ratio: EVE_SDE_PATH unset — skipping"
+        );
+        return;
+    };
+    let path = std::path::PathBuf::from(&path);
+    if !path.exists() {
+        eprintln!(
+            "rapid_light_missile_launcher_sustained_dps_matches_hand_computed_ratio: {path:?} missing — skipping"
+        );
+        return;
+    }
+    let sde = Sde::open(&path).expect("open sde");
+    let dir = path.parent().unwrap();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    // Untrained (level 0) skills are skipped entirely by the dogma engine —
+    // avoids the Rapid Launch RoF bonus and any Caldari-cruiser missile
+    // bonus confounding the hand-computed ratio below.
+    let zero_skills = |_: i64| 0.0;
+    let fit = Fit {
+        id: "t".into(),
+        name: "Caracal".into(),
+        ship_type_id: tid("Caracal"),
+        items: vec![FitItem {
+            type_id: tid("Rapid Light Missile Launcher II"),
+            slot: SlotKind::High,
+            index: 0,
+            state: ModuleState::Active,
+            charge_type_id: Some(tid("Scourge Light Missile")),
+            quantity: 1,
+            active_drones: None,
+        }],
+        projected: Vec::new(),
+    };
+    let layout = sde.ship_layout(fit.ship_type_id).unwrap().expect("layout");
+    let run = |factor_reload: bool| {
+        run_dogma(
+            &sde,
+            dir,
+            &fit,
+            &layout,
+            &zero_skills,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+            None,
+            None,
+            1.0,
+            factor_reload,
+        )
+        .expect("dogma")
+    };
+    let factored = run(true);
+    let unfactored = run(false);
+
+    assert!(
+        factored.dps.missile > 0.0,
+        "burst missile dps should be nonzero"
+    );
+    assert_eq!(
+        factored.dps.missile, unfactored.dps.missile,
+        "burst dps must be identical regardless of the factor_reload toggle"
+    );
+    let ratio = factored.dps_sustained.missile / factored.dps.missile;
+    let expected = (20.0 * 6.24) / (20.0 * 6.24 + 35.0);
+    assert!(
+        (ratio - expected).abs() < 1e-6,
+        "sustained/burst ratio should be {expected}, got {ratio}"
     );
 }

@@ -382,7 +382,7 @@ pub(super) fn evaluate(
     };
     Some(Eval {
         objective,
-        cap_stable: capacitor_of(&resolved, &module_items, 0.0).stable,
+        cap_stable: capacitor_of(&resolved, &module_items, 0.0, false).stable,
         cost: fit_cost(fit, prices),
     })
 }

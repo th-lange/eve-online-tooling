@@ -482,15 +482,21 @@ export function ResourcesPanel({
 export function DpsBreakdownPanel({
   skillLabel,
   dps,
+  dpsSustained,
   appliedDps,
   dpsRangeCurve,
   jammedActive,
   isSpoolable = false,
   spoolPct,
   onSpoolPct,
+  factorReload = false,
+  onFactorReload,
 }: {
   skillLabel: string;
   dps: DpsBreakdown;
+  /** Sustained DPS (#871) — burst `dps` derated by clip depletion + reload
+   *  pauses. Shown instead of burst when `factorReload` is on. */
+  dpsSustained?: DpsBreakdown;
   appliedDps?: DpsBreakdown;
   dpsRangeCurve?: [number, number][];
   jammedActive: boolean;
@@ -499,8 +505,13 @@ export function DpsBreakdownPanel({
   isSpoolable?: boolean;
   spoolPct?: number;
   onSpoolPct?: (pct: number | undefined) => void;
+  /** Reload-accounting toggle (#871): off shows infinite-ammo burst DPS
+   *  (today's behavior); on shows `dpsSustained`. */
+  factorReload?: boolean;
+  onFactorReload?: (v: boolean) => void;
 }) {
   const spoolPercent = Math.round((spoolPct ?? 1) * 100);
+  const shown = factorReload && dpsSustained ? dpsSustained : dps;
   return (
     <div className="space-y-1">
       <h3 className="text-xs uppercase tracking-wide text-zinc-500">
@@ -527,6 +538,17 @@ export function DpsBreakdownPanel({
           />
         </div>
       )}
+      {onFactorReload && (
+        <label className="flex items-center justify-between text-[10px] uppercase tracking-wide text-zinc-500">
+          <span>Factor reload</span>
+          <input
+            type="checkbox"
+            checked={factorReload}
+            onChange={(e) => onFactorReload(e.currentTarget.checked)}
+            aria-label="Factor reload"
+          />
+        </label>
+      )}
       {jammedActive ? (
         <div className="text-sm text-amber-400">
           Jammed — 0 applied (no lock)
@@ -534,13 +556,21 @@ export function DpsBreakdownPanel({
       ) : (
         <>
           <div className="text-sm text-zinc-300">
-            {dps.total.toFixed(0)} dps
+            {shown.total.toFixed(0)} dps
+            {factorReload && dpsSustained && (
+              <span className="text-zinc-500"> (sustained)</span>
+            )}
           </div>
-          {dps.total > 0 && (
+          {shown.total > 0 && (
             <div className="text-xs text-zinc-500">
-              {dps.turret > 0 && `turret ${dps.turret.toFixed(0)} `}
-              {dps.missile > 0 && `· missile ${dps.missile.toFixed(0)} `}
-              {dps.drone > 0 && `· drone ${dps.drone.toFixed(0)}`}
+              {shown.turret > 0 && `turret ${shown.turret.toFixed(0)} `}
+              {shown.missile > 0 && `· missile ${shown.missile.toFixed(0)} `}
+              {shown.drone > 0 && `· drone ${shown.drone.toFixed(0)}`}
+            </div>
+          )}
+          {factorReload && dpsSustained && (
+            <div className="text-xs text-zinc-500">
+              burst {dps.total.toFixed(0)} dps
             </div>
           )}
           {appliedDps && (

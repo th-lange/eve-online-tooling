@@ -512,6 +512,7 @@ fn build_lost_fit(sde: &Sde, dir: &std::path::Path, km: &Killmail, lost_count: i
         None,
         None,
         None,
+        None, // factor_reload (#871)
     )
     .ok()
     .map(|s| analysis_from_stats(&s, &attrs, &fit, &name_of));
@@ -742,6 +743,7 @@ pub async fn pvp_weapon_ammo(
             None,
             None,
             None,
+            None, // factor_reload (#871)
         ) else {
             continue;
         };

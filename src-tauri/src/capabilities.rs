@@ -562,6 +562,7 @@ fn cap_fitting_stats(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
         None,
         None,
         None,
+        None, // factor_reload (#871)
     )?;
     serde_json::to_value(stats).map_err(|e| e.to_string())
 }
@@ -805,6 +806,7 @@ mod tests {
             None,
             None,
             None,
+            None, // factor_reload (#871)
         )
         .unwrap();
         let layout = stats.layout.expect("dogma engine should resolve a layout");

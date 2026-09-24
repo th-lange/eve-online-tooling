@@ -40,6 +40,7 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
     environmentEffect,
     abyssalWeather,
     spoolPct,
+    factorReload,
     jammed,
   } = state;
 
@@ -89,6 +90,7 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
       environmentEffect,
       abyssalWeather,
       spoolPct,
+      factorReload,
     ],
     queryFn: fit
       ? () =>
@@ -102,6 +104,7 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
             environmentEffect,
             abyssalWeather,
             spoolPct,
+            factorReload,
           )
       : undefined,
     enabled: fit != null,

@@ -10,19 +10,37 @@
 
 use crate::modules::fitting::types::CapStats;
 
+/// One cap-drawing module's discrete-sim inputs (#871): `need` (GJ) drawn
+/// every `cycle_ms`, plus its own reload cycle (`engine::cycle::ReloadCycle`)
+/// — `clip_shots` activations before a `reload_ms` pause with **no** cap draw
+/// at all. `clip_shots`/`reload_ms` are `0.0` when the module never reloads,
+/// or reload factoring is off: the sim then behaves exactly as it did before
+/// #871 (draws every `cycle_ms`, forever).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ModuleDrain {
+    pub need: f64,
+    pub cycle_ms: f64,
+    pub clip_shots: f64,
+    pub reload_ms: f64,
+}
+
 /// Compute capacitor stability from finalized attributes.
 /// - `capacity` — `capacitorCapacity` (GJ)
 /// - `recharge_ms` — `rechargeRate` (ms)
-/// - `drain` — steady cap use (GJ/s) from active modules (for stability/stable%)
-/// - `module_drains` — per-module `(capNeed GJ, cycle_ms)` for the discrete
-///   depletion sim when unstable
+/// - `drain` — steady cap use (GJ/s) from active modules (for stability/stable%);
+///   the caller derates this by each module's own reload sustained-factor
+///   when reload accounting is on (#871), so a reloading module contributes
+///   less to the *average* steady drain even though its discrete pulses
+///   (below) are still full-size.
+/// - `module_drains` — per-module discrete depletion-sim inputs (used only
+///   when unstable)
 /// - `neut_gjs` — continuous steady drain (GJ/s) from projected neuts (#706),
 ///   added on top of `drain` everywhere the steady component is used
 pub fn capacitor(
     capacity: f64,
     recharge_ms: f64,
     drain: f64,
-    module_drains: &[(f64, f64)],
+    module_drains: &[ModuleDrain],
     neut_gjs: f64,
 ) -> CapStats {
     let total_drain = drain + neut_gjs;
@@ -98,17 +116,42 @@ fn cap_trajectory(capacity: f64, recharge_ms: f64, drain: f64, horizon_s: f64) -
     out
 }
 
+/// Per-module discrete-sim activation state: `t` is the next activation
+/// time (ms); `shots_left` counts down within the current clip (only
+/// meaningful when `clip_shots > 0.0 && reload_ms > 0.0` — otherwise the
+/// module never pauses and fires every `cyc` forever, pre-#871 behavior).
+struct DrainEvent {
+    t: f64,
+    need: f64,
+    cyc: f64,
+    clip_shots: f64,
+    reload_ms: f64,
+    shots_left: f64,
+}
+
 /// Seconds until the capacitor first goes negative, simulating discrete module
 /// activations: each module consumes `capNeed` at its cycle start, with the exact
 /// analytical recharge between events, until an activation drives cap below zero
-/// (the same stop condition PYFA's capSim uses). `drains` = `(capNeed, cycle_ms)`.
-fn time_to_empty(capacity: f64, recharge_ms: f64, drains: &[(f64, f64)], neut_gjs: f64) -> f64 {
+/// (the same stop condition PYFA's capSim uses). A module whose [`ModuleDrain`]
+/// carries a `clip_shots`/`reload_ms` pair (#871) draws nothing during its
+/// reload window: once `clip_shots` consecutive activations fire, its next
+/// event is pushed out by `reload_ms` instead of the usual `cycle_ms`.
+fn time_to_empty(capacity: f64, recharge_ms: f64, drains: &[ModuleDrain], neut_gjs: f64) -> f64 {
     let tau = recharge_ms / 5.0; // PYFA: recharge / 5, in ms
-                                 // Per-module next-activation time (ms), starting at 0.
-    let mut events: Vec<(f64, f64, f64)> = drains
+    let mut events: Vec<DrainEvent> = drains
         .iter()
-        .filter(|(need, cyc)| *need > 0.0 && *cyc > 0.0)
-        .map(|(need, cyc)| (0.0_f64, *need, *cyc))
+        .filter(|d| d.need > 0.0 && d.cycle_ms > 0.0)
+        .map(|d| {
+            let reloads = d.clip_shots > 0.0 && d.reload_ms > 0.0;
+            DrainEvent {
+                t: 0.0,
+                need: d.need,
+                cyc: d.cycle_ms,
+                clip_shots: d.clip_shots,
+                reload_ms: d.reload_ms,
+                shots_left: if reloads { d.clip_shots } else { 0.0 },
+            }
+        })
         .collect();
     if events.is_empty() {
         if neut_gjs <= 0.0 {
@@ -118,7 +161,14 @@ fn time_to_empty(capacity: f64, recharge_ms: f64, drains: &[(f64, f64)], neut_gj
         // cadence purely to sample the continuous neut drain against the
         // recharge curve (#706).
         const TICK_MS: f64 = 1000.0;
-        events.push((0.0, 0.0, TICK_MS));
+        events.push(DrainEvent {
+            t: 0.0,
+            need: 0.0,
+            cyc: TICK_MS,
+            clip_shots: 0.0,
+            reload_ms: 0.0,
+            shots_left: 0.0,
+        });
     }
     let cap_max = capacity;
     let mut cap = capacity;
@@ -126,9 +176,10 @@ fn time_to_empty(capacity: f64, recharge_ms: f64, drains: &[(f64, f64)], neut_gj
     loop {
         // Earliest pending activation.
         let i = (0..events.len())
-            .min_by(|&a, &b| events[a].0.partial_cmp(&events[b].0).unwrap())
+            .min_by(|&a, &b| events[a].t.partial_cmp(&events[b].t).unwrap())
             .unwrap();
-        let (t_now, need, cyc) = events[i];
+        let t_now = events[i].t;
+        let need = events[i].need;
         if t_now > 6.0 * 3600.0 * 1000.0 {
             return t_last / 1000.0; // stable enough; bail
         }
@@ -146,13 +197,35 @@ fn time_to_empty(capacity: f64, recharge_ms: f64, drains: &[(f64, f64)], neut_gj
         if cap > cap_max {
             cap = cap_max;
         }
-        events[i].0 = t_now + cyc;
+        let reloads = events[i].clip_shots > 0.0 && events[i].reload_ms > 0.0;
+        if reloads {
+            events[i].shots_left -= 1.0;
+            if events[i].shots_left <= 0.0 {
+                events[i].t = t_now + events[i].cyc + events[i].reload_ms;
+                events[i].shots_left = events[i].clip_shots;
+            } else {
+                events[i].t = t_now + events[i].cyc;
+            }
+        } else {
+            events[i].t = t_now + events[i].cyc;
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A non-reloading module drain (pre-#871 shape): fires `need` GJ every
+    /// `cycle_ms`, forever.
+    fn drain(need: f64, cycle_ms: f64) -> ModuleDrain {
+        ModuleDrain {
+            need,
+            cycle_ms,
+            clip_shots: 0.0,
+            reload_ms: 0.0,
+        }
+    }
 
     #[test]
     fn no_drain_is_fully_stable() {
@@ -165,7 +238,7 @@ mod tests {
 
     #[test]
     fn drain_above_peak_is_unstable() {
-        let c = capacitor(250.0, 125_000.0, 6.0, &[(6.0, 1000.0)], 0.0); // 6 > 5 peak
+        let c = capacitor(250.0, 125_000.0, 6.0, &[drain(6.0, 1000.0)], 0.0); // 6 > 5 peak
         assert!(!c.stable);
         assert_eq!(c.stable_pct, None);
     }
@@ -173,7 +246,7 @@ mod tests {
     #[test]
     fn unstable_reports_a_finite_depletion_time() {
         // 8 GJ/s drain via a 1 s, 8 GJ module — well above the 5 peak.
-        let c = capacitor(250.0, 125_000.0, 8.0, &[(8.0, 1000.0)], 0.0);
+        let c = capacitor(250.0, 125_000.0, 8.0, &[drain(8.0, 1000.0)], 0.0);
         assert!(!c.stable);
         let t = c
             .depletion_seconds
@@ -210,7 +283,7 @@ mod tests {
 
     #[test]
     fn trajectory_declines_toward_empty_when_unstable() {
-        let c = capacitor(250.0, 125_000.0, 8.0, &[(8.0, 1000.0)], 0.0);
+        let c = capacitor(250.0, 125_000.0, 8.0, &[drain(8.0, 1000.0)], 0.0);
         let end = c.trajectory.last().unwrap().1;
         assert!(end < 20.0, "unstable cap should be near empty, got {end}%");
     }
@@ -221,9 +294,9 @@ mod tests {
     fn neut_drain_can_destabilize_a_stable_fit() {
         // 4 GJ/s module drain alone is under the 5 GJ/s peak (stable); +2 GJ/s
         // neut pushes total steady drain to 6, over peak.
-        let stable = capacitor(250.0, 125_000.0, 4.0, &[(4.0, 1000.0)], 0.0);
+        let stable = capacitor(250.0, 125_000.0, 4.0, &[drain(4.0, 1000.0)], 0.0);
         assert!(stable.stable);
-        let neutralized = capacitor(250.0, 125_000.0, 4.0, &[(4.0, 1000.0)], 2.0);
+        let neutralized = capacitor(250.0, 125_000.0, 4.0, &[drain(4.0, 1000.0)], 2.0);
         assert!(!neutralized.stable);
         assert_eq!(neutralized.drain, 6.0);
     }
@@ -232,13 +305,56 @@ mod tests {
     /// module drain empties faster with neut GJ/s added on top.
     #[test]
     fn neut_drain_shortens_depletion_time() {
-        let no_neut = capacitor(250.0, 125_000.0, 8.0, &[(8.0, 1000.0)], 0.0);
-        let with_neut = capacitor(250.0, 125_000.0, 8.0, &[(8.0, 1000.0)], 3.0);
+        let no_neut = capacitor(250.0, 125_000.0, 8.0, &[drain(8.0, 1000.0)], 0.0);
+        let with_neut = capacitor(250.0, 125_000.0, 8.0, &[drain(8.0, 1000.0)], 3.0);
         let t_no_neut = no_neut.depletion_seconds.expect("unstable");
         let t_with_neut = with_neut.depletion_seconds.expect("unstable");
         assert!(
             t_with_neut < t_no_neut,
             "with-neut depletion {t_with_neut} should be < no-neut {t_no_neut}"
+        );
+    }
+
+    /// Cap stability improves when reload is factored in (#871): a module
+    /// whose raw 8 GJ/s drain is unstable against a 5 GJ/s peak (250 GJ
+    /// capacity, 125s recharge) becomes stable once its own reload cycle
+    /// (5-shot clip, 20s reload → sustained factor 5s/(5s+20s) = 0.2) derates
+    /// the *average* steady drain the caller feeds in to 1.6 GJ/s.
+    #[test]
+    fn reload_pause_improves_cap_stability() {
+        let unstable = capacitor(250.0, 125_000.0, 8.0, &[drain(8.0, 1000.0)], 0.0);
+        assert!(!unstable.stable);
+
+        let reloading = ModuleDrain {
+            need: 8.0,
+            cycle_ms: 1000.0,
+            clip_shots: 5.0,
+            reload_ms: 20_000.0,
+        };
+        let stable = capacitor(250.0, 125_000.0, 1.6, &[reloading], 0.0);
+        assert!(
+            stable.stable,
+            "reload-derated drain should stabilize the cap"
+        );
+    }
+
+    /// The discrete depletion sim itself pauses draw during a module's
+    /// reload window (#871): the same raw per-shot drain empties the
+    /// capacitor slower once reload is factored in, since no GJ is drawn
+    /// while the module is reloading.
+    #[test]
+    fn reload_pause_extends_discrete_depletion_time() {
+        let t_no_reload = time_to_empty(250.0, 125_000.0, &[drain(8.0, 1000.0)], 0.0);
+        let reloading = ModuleDrain {
+            need: 8.0,
+            cycle_ms: 1000.0,
+            clip_shots: 5.0,
+            reload_ms: 20_000.0,
+        };
+        let t_reloading = time_to_empty(250.0, 125_000.0, &[reloading], 0.0);
+        assert!(
+            t_reloading > t_no_reload,
+            "reload pause should extend depletion: {t_reloading} vs {t_no_reload}"
         );
     }
 }

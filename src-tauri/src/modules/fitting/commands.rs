@@ -1047,8 +1047,11 @@ pub async fn fitting_esi_list(
 /// (default none, hardcoded — see `engine::abyssal`, no dogma data exists
 /// for it). `spool_pct` (#872) is the requested Triglavian/spoolable-weapon
 /// ramp fraction (`0.0` cold .. `1.0` fully spooled; default `1.0`, since
-/// players quote Trig DPS fully spooled). `price` stays `None` here (priced
-/// separately via [`fitting_price`]).
+/// players quote Trig DPS fully spooled). `factor_reload` (#871) toggles
+/// reload accounting in the cap sim (default `false`) — clip depletion +
+/// reload pauses a weapon's cap draw; burst/sustained DPS are always both
+/// returned regardless (`FitStats::dps`/`dps_sustained`). `price` stays
+/// `None` here (priced separately via [`fitting_price`]).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // Tauri command surface — each arg is a distinct optional input
 pub async fn fitting_simulate(
@@ -1063,6 +1066,7 @@ pub async fn fitting_simulate(
     environment_effect: Option<i64>,
     abyssal_weather: Option<AbyssalWeatherSelection>,
     spool_pct: Option<f64>,
+    factor_reload: Option<bool>,
 ) -> Result<FitStats, String> {
     // Skills first (async, before opening the SDE — see resolve_skill_levels).
     let levels = resolve_skill_levels(&app, &auth_state, skill_source.as_deref()).await;
@@ -1081,6 +1085,7 @@ pub async fn fitting_simulate(
         environment_effect,
         abyssal_weather,
         spool_pct,
+        factor_reload,
     )
 }
 
@@ -1170,6 +1175,7 @@ pub async fn fitting_ammo_table(
         }
         let stats = simulate_fit(
             &sde, &dir, &probe, &lookup, None, None, None, None, None, None, None,
+            None, // factor_reload (#871)
         )?;
         let dps = stats
             .dps
@@ -1418,6 +1424,7 @@ mod tests {
             None,
             None,
             1.0,
+            false, // factor_reload (#871)
         )
         .unwrap();
         let r = d.weapon_ranges.first().expect("a weapon range");
@@ -1457,6 +1464,7 @@ mod tests {
             None,
             None,
             1.0,
+            false, // factor_reload (#871)
         )
         .unwrap();
         let r = d.weapon_ranges.first().expect("a laser range");
@@ -1506,6 +1514,7 @@ mod tests {
             None,
             None,
             1.0,
+            false, // factor_reload (#871)
         )
         .unwrap();
         let online = run_dogma(
@@ -1521,6 +1530,7 @@ mod tests {
             None,
             None,
             1.0,
+            false, // factor_reload (#871)
         )
         .unwrap();
         let offline = run_dogma(
@@ -1536,6 +1546,7 @@ mod tests {
             None,
             None,
             1.0,
+            false, // factor_reload (#871)
         )
         .unwrap();
         assert!(active.dps.total > 0.0);
@@ -1599,6 +1610,7 @@ mod tests {
             None,
             None,
             1.0,
+            false, // factor_reload (#871)
         )
         .unwrap();
         let online = run_dogma(
@@ -1614,6 +1626,7 @@ mod tests {
             None,
             None,
             1.0,
+            false, // factor_reload (#871)
         )
         .unwrap();
         let offline = run_dogma(
@@ -1629,6 +1642,7 @@ mod tests {
             None,
             None,
             1.0,
+            false, // factor_reload (#871)
         )
         .unwrap();
         assert!(active.capacitor.drain > 0.0, "active AB draws cap");
@@ -1683,6 +1697,7 @@ mod tests {
             None,
             None,
             1.0,
+            false, // factor_reload (#871)
         )
         .unwrap();
         let online = run_dogma(
@@ -1698,6 +1713,7 @@ mod tests {
             None,
             None,
             1.0,
+            false, // factor_reload (#871)
         )
         .unwrap();
         assert!(
@@ -1759,6 +1775,7 @@ mod tests {
             None,
             None,
             1.0,
+            false, // factor_reload (#871)
         )
         .unwrap();
         let applied = d.applied_dps.expect("applied dps when a target is given");
@@ -1823,6 +1840,7 @@ mod tests {
             None,
             None,
             1.0,
+            false, // factor_reload (#871)
         )
         .unwrap();
         let boosted = run_dogma(
@@ -1841,6 +1859,7 @@ mod tests {
             None,
             None,
             1.0,
+            false, // factor_reload (#871)
         )
         .unwrap();
         assert!(
@@ -1889,6 +1908,7 @@ mod tests {
             None,
             None,
             1.0,
+            false, // factor_reload (#871)
         )
         .unwrap();
         let in_pulsar = run_dogma(
@@ -1904,6 +1924,7 @@ mod tests {
             Some(tid("Class 1 Pulsar Effects")),
             None,
             1.0,
+            false, // factor_reload (#871)
         )
         .unwrap();
         assert!(
@@ -1952,6 +1973,7 @@ mod tests {
             None,
             None,
             1.0,
+            false, // factor_reload (#871)
         )
         .unwrap();
         let in_gamma = run_dogma(
@@ -1970,6 +1992,7 @@ mod tests {
                 tier_pct: 70.0,
             }),
             1.0,
+            false, // factor_reload (#871)
         )
         .unwrap();
         assert!(

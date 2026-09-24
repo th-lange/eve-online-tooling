@@ -33,6 +33,8 @@ export function StatsAside({
     setNeutGjs,
     spoolPct,
     setSpoolPct,
+    factorReload,
+    setFactorReload,
   } = useFitState();
   const { stats, jammedActive } = useFitStats();
   const onJam = setJammed;
@@ -87,12 +89,15 @@ export function StatsAside({
           <DpsBreakdownPanel
             skillLabel={skillLabel}
             dps={stats.data.dps}
+            dpsSustained={stats.data.dpsSustained ?? undefined}
             appliedDps={stats.data.appliedDps}
             dpsRangeCurve={stats.data.dpsRangeCurve}
             jammedActive={jammedActive}
             isSpoolable={!!stats.data.isSpoolable}
             spoolPct={spoolPct}
             onSpoolPct={setSpoolPct}
+            factorReload={factorReload}
+            onFactorReload={setFactorReload}
           />
         )}
 

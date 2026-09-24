@@ -214,6 +214,10 @@ export interface FitStats {
   capacitor?: CapStats | null;
   tank?: TankStats | null;
   dps?: DpsBreakdown | null;
+  /** Sustained DPS: burst `dps` derated by each weapon's own reload cycle
+   * (clip depletion + reload time) — PYFA's `factorReload` figure. Equal to
+   * `dps` for infinite-ammo weapons. Always populated alongside `dps`. */
+  dpsSustained?: DpsBreakdown | null;
   navigation?: NavStats | null;
   /** Resolved slot layout (T3 subsystems grant slots). */
   layout?: ShipLayout | null;
@@ -362,7 +366,10 @@ export type SkillSource = "allFive" | "character";
  *  sitting in. `abyssalWeather` is the separate, mutually exclusive Abyssal
  *  Deadspace weather choice. `spoolPct` (#872) is the requested Triglavian/
  *  spoolable-weapon ramp fraction (0..1); omitted defaults to 1 (fully
- *  spooled — how players quote Trig DPS). */
+ *  spooled — how players quote Trig DPS). `factorReload` (#871) toggles
+ *  reload accounting in the cap sim (default off) — clip depletion + reload
+ *  pauses a weapon's cap draw; burst/sustained DPS (`dps`/`dpsSustained`)
+ *  are always both returned regardless. */
 export function fittingSimulate(
   fit: Fit,
   skillSource: SkillSource = "allFive",
@@ -373,6 +380,7 @@ export function fittingSimulate(
   environmentEffect?: number | null,
   abyssalWeather?: AbyssalWeatherSelection | null,
   spoolPct?: number,
+  factorReload?: boolean,
 ): Promise<FitStats> {
   return invoke<FitStats>("fitting_simulate", {
     fit,
@@ -386,6 +394,7 @@ export function fittingSimulate(
     environmentEffect: environmentEffect ?? null,
     abyssalWeather: abyssalWeather ?? null,
     spoolPct: spoolPct ?? null,
+    factorReload: factorReload ?? null,
   });
 }
 

@@ -10,6 +10,7 @@ pub mod abyssal;
 pub mod application;
 pub mod attr;
 pub mod capacitor;
+pub mod cycle;
 pub mod damage;
 pub mod effects;
 pub mod modifier;
