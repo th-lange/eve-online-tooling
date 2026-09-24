@@ -1,6 +1,10 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { transactionLedger, type LedgerRow } from "../../lib/api";
+import {
+  activeCharacter,
+  transactionLedger,
+  type LedgerRow,
+} from "../../lib/api";
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { formatEveDateTime, formatInt, formatIsk } from "../../lib/format";
 import { Page, PageHeader } from "../../components/page";
@@ -12,8 +16,16 @@ type Side = "all" | "buy" | "sell";
 // per-transaction history behind the FIFO profit tracker, so you can see how a
 // given item actually traded for you. Backed by the wallet scope.
 export function TransactionsPage() {
+  // The backend resolves the ledger against its own bookmarked active
+  // character, not an argument — folding that id into the query key means
+  // switching characters naturally refetches (loading state) instead of
+  // rendering the previous character's ledger from cache.
+  const active = useQuery({
+    queryKey: ["auth", "active"],
+    queryFn: activeCharacter,
+  });
   const q = useQuery({
-    queryKey: ["transactions", "ledger"],
+    queryKey: ["transactions", "ledger", active.data ?? null],
     queryFn: transactionLedger,
     staleTime: 5 * 60_000,
   });

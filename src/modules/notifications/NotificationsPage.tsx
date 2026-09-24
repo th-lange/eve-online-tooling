@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import {
+  activeCharacter,
   notifications,
   notificationDismiss,
   notificationsReset,
@@ -25,8 +26,16 @@ const CATEGORY_STYLE: Record<string, string> = {
 // industry/PI and wallet events — categorised, filterable, and dismissable.
 export function NotificationsPage() {
   const qc = useQueryClient();
+  // The backend resolves the feed against its own bookmarked active
+  // character (or the whole roster for "All characters") — folding that
+  // selection into the query key means switching characters refetches
+  // instead of rendering the previous character's notifications from cache.
+  const active = useQuery({
+    queryKey: ["auth", "active"],
+    queryFn: activeCharacter,
+  });
   const q = useQuery({
-    queryKey: ["notifications"],
+    queryKey: ["notifications", active.data ?? null],
     queryFn: notifications,
     staleTime: 5 * 60_000,
   });

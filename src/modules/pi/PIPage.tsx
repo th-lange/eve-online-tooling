@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  activeCharacter,
   errorMessage,
   piLockedGet,
   piLockedSet,
@@ -42,8 +43,16 @@ export function PIPage() {
 
 function Workbench() {
   const qc = useQueryClient();
+  // The backend resolves colonies against its own bookmarked active
+  // character (or the whole roster for "All characters") — folding that
+  // selection into the query key means switching characters refetches
+  // instead of rendering the previous character's colonies from cache.
+  const active = useQuery({
+    queryKey: ["auth", "active"],
+    queryFn: activeCharacter,
+  });
   const colonies = useQuery({
-    queryKey: ["pi", "overview"],
+    queryKey: ["pi", "overview", active.data ?? null],
     queryFn: piOverview,
   });
   const locked = useQuery({ queryKey: ["pi", "locked"], queryFn: piLockedGet });

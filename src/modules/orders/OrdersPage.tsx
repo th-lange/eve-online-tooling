@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import {
+  activeCharacter,
   errorMessage,
   marketOrders,
   openMarketWindow,
@@ -19,8 +20,16 @@ import { DataAge } from "../../components/DataAge";
 import { Page, PageHeader, PrimaryButton } from "../../components/page";
 
 export function OrdersPage() {
+  // The backend resolves orders against its own bookmarked active character
+  // (or the whole roster for "All characters") — folding that selection into
+  // the query key means switching characters refetches instead of rendering
+  // the previous character's orders from cache.
+  const active = useQuery({
+    queryKey: ["auth", "active"],
+    queryFn: activeCharacter,
+  });
   const orders = useQuery({
-    queryKey: ["orders", "market"],
+    queryKey: ["orders", "market", active.data ?? null],
     queryFn: marketOrders,
   });
   const rows = useMemo(() => orders.data ?? [], [orders.data]);
