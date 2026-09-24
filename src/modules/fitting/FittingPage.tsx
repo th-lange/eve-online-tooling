@@ -20,6 +20,7 @@ import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { InlineError } from "../../components/InlineError";
 import { Combo } from "../../components/Combo";
 import { SdeGate } from "../../components/SdeGate";
+import { Modal } from "../../components/Modal";
 import {
   Centered,
   ComparisonPanel,
@@ -612,97 +613,96 @@ function OptimizeControl({
         <SlidersHorizontal size={13} />
         Optimize…
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-20 mt-1 w-80 space-y-2 rounded border border-zinc-700 bg-zinc-900 p-3 text-xs shadow-lg">
-            <label className="flex flex-col gap-1 text-zinc-400">
-              Objective
-              <select
-                value={objective}
-                onChange={(e) =>
-                  setObjective(e.currentTarget.value as OptimizeObjective)
-                }
-                className="rounded bg-zinc-800 px-2 py-1 text-zinc-100 outline-none"
-              >
-                <option value="tank">Tank</option>
-                <option value="damage">Damage</option>
-                <option value="repair">Repair</option>
-                <option value="yield">Yield (mining)</option>
-              </select>
-            </label>
-            <label className="flex flex-col gap-1 text-zinc-400">
-              Slots
-              <select
-                value={optimizeMode}
-                onChange={(e) =>
-                  setOptimizeMode(e.currentTarget.value as OptimizeMode)
-                }
-                title="Rework all relevant slots, or only fill empty ones"
-                className="rounded bg-zinc-800 px-2 py-1 text-zinc-100 outline-none"
-              >
-                <option value="all">All modules</option>
-                <option value="empty">Empty modules only</option>
-              </select>
-            </label>
-            <div>
-              <div className="mb-1 text-zinc-500">Meta groups</div>
-              <div className="flex flex-wrap gap-x-3 gap-y-1">
-                {META_TIERS.map(([id, label]) => (
-                  <label
-                    key={id}
-                    className="flex items-center gap-1 text-zinc-400"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={!!meta[id]}
-                      onChange={(e) => {
-                        const checked = e.currentTarget.checked;
-                        setMeta((m) => ({ ...m, [id]: checked }));
-                      }}
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            </div>
-            <label
-              className="flex items-center gap-1 text-zinc-400"
-              title="Keep the result capacitor-stable"
-            >
-              <input
-                type="checkbox"
-                checked={capStable}
-                onChange={(e) => setCapStable(e.currentTarget.checked)}
-              />
-              Cap-stable
-            </label>
-            <label
-              className="flex items-center gap-1 text-zinc-400"
-              title="Cap total fit cost"
-            >
-              Max
-              <input
-                type="number"
-                min={0}
-                value={maxCostM}
-                onChange={(e) => setMaxCostM(e.currentTarget.value)}
-                placeholder="∞"
-                className="w-16 rounded bg-zinc-800 px-1 py-0.5 text-zinc-100 outline-none"
-              />
-              M ISK
-            </label>
-            <PrimaryButton
-              onClick={onOptimize}
-              disabled={pending}
-              pending={pending}
-              pendingLabel="Optimizing…"
-            >
-              Optimize
-            </PrimaryButton>
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        aria-label="Fitting optimizer settings"
+        backdropClassName="fixed inset-0 z-10"
+        portal={false}
+        className="absolute right-0 z-20 mt-1 w-80 space-y-2 rounded border border-zinc-700 bg-zinc-900 p-3 text-xs shadow-lg"
+      >
+        <label className="flex flex-col gap-1 text-zinc-400">
+          Objective
+          <select
+            value={objective}
+            onChange={(e) =>
+              setObjective(e.currentTarget.value as OptimizeObjective)
+            }
+            className="rounded bg-zinc-800 px-2 py-1 text-zinc-100 outline-none"
+          >
+            <option value="tank">Tank</option>
+            <option value="damage">Damage</option>
+            <option value="repair">Repair</option>
+            <option value="yield">Yield (mining)</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-zinc-400">
+          Slots
+          <select
+            value={optimizeMode}
+            onChange={(e) =>
+              setOptimizeMode(e.currentTarget.value as OptimizeMode)
+            }
+            title="Rework all relevant slots, or only fill empty ones"
+            className="rounded bg-zinc-800 px-2 py-1 text-zinc-100 outline-none"
+          >
+            <option value="all">All modules</option>
+            <option value="empty">Empty modules only</option>
+          </select>
+        </label>
+        <div>
+          <div className="mb-1 text-zinc-500">Meta groups</div>
+          <div className="flex flex-wrap gap-x-3 gap-y-1">
+            {META_TIERS.map(([id, label]) => (
+              <label key={id} className="flex items-center gap-1 text-zinc-400">
+                <input
+                  type="checkbox"
+                  checked={!!meta[id]}
+                  onChange={(e) => {
+                    const checked = e.currentTarget.checked;
+                    setMeta((m) => ({ ...m, [id]: checked }));
+                  }}
+                />
+                {label}
+              </label>
+            ))}
           </div>
-        </>
-      )}
+        </div>
+        <label
+          className="flex items-center gap-1 text-zinc-400"
+          title="Keep the result capacitor-stable"
+        >
+          <input
+            type="checkbox"
+            checked={capStable}
+            onChange={(e) => setCapStable(e.currentTarget.checked)}
+          />
+          Cap-stable
+        </label>
+        <label
+          className="flex items-center gap-1 text-zinc-400"
+          title="Cap total fit cost"
+        >
+          Max
+          <input
+            type="number"
+            min={0}
+            value={maxCostM}
+            onChange={(e) => setMaxCostM(e.currentTarget.value)}
+            placeholder="∞"
+            className="w-16 rounded bg-zinc-800 px-1 py-0.5 text-zinc-100 outline-none"
+          />
+          M ISK
+        </label>
+        <PrimaryButton
+          onClick={onOptimize}
+          disabled={pending}
+          pending={pending}
+          pendingLabel="Optimizing…"
+        >
+          Optimize
+        </PrimaryButton>
+      </Modal>
     </div>
   );
 }
