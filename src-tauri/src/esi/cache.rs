@@ -22,13 +22,14 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 use reqwest::header::{CACHE_CONTROL, DATE, ETAG, EXPIRES, IF_NONE_MATCH};
-use reqwest::{RequestBuilder, Response, StatusCode};
+use reqwest::{RequestBuilder, StatusCode};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::error::EsiError;
 use super::net::send_retrying;
+use super::pagination::{collect_remaining_pages, walk_pages};
 
 /// Fallback freshness window when a response carries no cache headers. Kept
 /// short: with an ETag, revalidation is cheap (a 304), so erring small is safe.
@@ -70,15 +71,6 @@ fn sanitize(key: &str) -> String {
             }
         })
         .collect()
-}
-
-/// Total pages from the `X-Pages` header (1 if absent/garbled).
-fn x_pages(headers: &reqwest::header::HeaderMap) -> u32 {
-    headers
-        .get("x-pages")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(1)
 }
 
 /// Freshness TTL (secs) from cache headers: `Cache-Control: max-age` wins, else
@@ -312,33 +304,6 @@ impl ConditionalCache {
         .await;
         Ok(value)
     }
-}
-
-/// Concatenate the JSON array from an already-received page-1 response with
-/// every subsequent page (per `X-Pages`), fetched via `build_page`. Shared by
-/// [`ConditionalCache::get_paged`] (which handles page 1 itself, for
-/// conditional-GET revalidation) and [`walk_pages`] (uncached).
-async fn collect_remaining_pages<F: Fn(u32) -> RequestBuilder>(
-    page1: Response,
-    build_page: &F,
-) -> Result<Vec<Value>, EsiError> {
-    let pages = x_pages(page1.headers());
-    let mut all: Vec<Value> = page1.json().await?;
-    for page in 2..=pages {
-        let more: Vec<Value> = send_retrying(|| build_page(page))
-            .await?
-            .error_for_status()?
-            .json()
-            .await?;
-        all.extend(more);
-    }
-    Ok(all)
-}
-
-/// Walk every page (no caching), concatenating the JSON arrays.
-async fn walk_pages<F: Fn(u32) -> RequestBuilder>(build_page: &F) -> Result<Vec<Value>, EsiError> {
-    let resp = send_retrying(|| build_page(1)).await?.error_for_status()?;
-    collect_remaining_pages(resp, build_page).await
 }
 
 /// A stable cache key from a URL and its query pairs (page param excluded by

@@ -43,6 +43,14 @@ impl Default for Limits {
     }
 }
 
+/// Apply resource ceilings to a fresh Extism manifest: memory cap and the
+/// per-call epoch-interruption timeout.
+fn apply_limits(manifest: ExtismManifest, limits: &Limits) -> ExtismManifest {
+    manifest
+        .with_memory_max(limits.max_pages)
+        .with_timeout(limits.timeout)
+}
+
 /// Build a sandboxed Extism plugin from raw wasm bytes under `limits`, exposing
 /// only `functions` (the broker-gated host functions this plugin was granted)
 /// and permitting outbound HTTP only to `allowed_hosts` (empty = no network).
@@ -52,9 +60,7 @@ fn build_plugin(
     functions: Vec<Function>,
     allowed_hosts: &[String],
 ) -> Result<Plugin, String> {
-    let mut manifest = ExtismManifest::new([Wasm::data(wasm.to_vec())])
-        .with_memory_max(limits.max_pages)
-        .with_timeout(limits.timeout);
+    let mut manifest = apply_limits(ExtismManifest::new([Wasm::data(wasm.to_vec())]), limits);
     for host in allowed_hosts {
         manifest = manifest.with_allowed_host(host);
     }
@@ -115,6 +121,59 @@ impl PluginManager {
             .clone()
     }
 
+    /// Host functions this plugin is entitled to call, built from its
+    /// `granted` permissions and a fresh broker context scoped to this
+    /// invocation (shared `MarketService`/`AuthState`, see the locking-model
+    /// doc above for why those are warmed once per manager, not per call).
+    fn host_functions_for_permissions(
+        &self,
+        app_data_dir: &Path,
+        id: &str,
+        granted: &HashSet<Permission>,
+    ) -> Vec<Function> {
+        let ctx = Arc::new(BrokerCtx::new(
+            app_data_dir.to_path_buf(),
+            id.to_string(),
+            self.shared_market(app_data_dir),
+            self.shared_auth(app_data_dir),
+        ));
+        host_functions(granted, ctx)
+    }
+
+    /// The cached Extism instance for plugin `id`, building and caching one
+    /// on a cold lookup. The fs read + wasm compile of a cold build happen
+    /// *outside* the map lock so a slow first load of one plugin doesn't
+    /// stall every other plugin's lookup. If two threads race to build the
+    /// same plugin, `or_insert` keeps the first insert and the loser's
+    /// instance is simply dropped — wasteful but rare and correct.
+    fn load_or_build_plugin(
+        &self,
+        app_data_dir: &Path,
+        id: &str,
+        granted: &HashSet<Permission>,
+        allowed_hosts: &[String],
+        wasm_path: &Path,
+    ) -> Result<Arc<Mutex<Plugin>>, String> {
+        if let Some(entry) = self.loaded.lock().get(id).cloned() {
+            return Ok(entry);
+        }
+        let bytes = std::fs::read(wasm_path)
+            .map_err(|e| format!("cannot read plugin wasm {wasm_path:?}: {e}"))?;
+        let functions = self.host_functions_for_permissions(app_data_dir, id, granted);
+        let built = Arc::new(Mutex::new(build_plugin(
+            &bytes,
+            &self.limits,
+            functions,
+            allowed_hosts,
+        )?));
+        Ok(self
+            .loaded
+            .lock()
+            .entry(id.to_string())
+            .or_insert(built)
+            .clone())
+    }
+
     /// Call `func` on plugin `id`, building it on first use with the host
     /// functions its `granted` permissions allow. Input/output are opaque bytes
     /// (the command layer speaks JSON). A failed call evicts the cached
@@ -130,38 +189,8 @@ impl PluginManager {
         func: &str,
         args: &[u8],
     ) -> Result<Vec<u8>, String> {
-        // Grab the cached entry, or build one. The fs read + wasm compile of a
-        // cold build happen *outside* the map lock so a slow first load of one
-        // plugin doesn't stall every other plugin's lookup. If two threads
-        // race to build the same plugin, `or_insert` keeps the first insert
-        // and the loser's instance is simply dropped — wasteful but rare and
-        // correct.
-        let cached = self.loaded.lock().get(id).cloned();
-        let entry = match cached {
-            Some(entry) => entry,
-            None => {
-                let bytes = std::fs::read(wasm_path)
-                    .map_err(|e| format!("cannot read plugin wasm {wasm_path:?}: {e}"))?;
-                let ctx = Arc::new(BrokerCtx::new(
-                    app_data_dir.to_path_buf(),
-                    id.to_string(),
-                    self.shared_market(app_data_dir),
-                    self.shared_auth(app_data_dir),
-                ));
-                let functions = host_functions(granted, ctx);
-                let built = Arc::new(Mutex::new(build_plugin(
-                    &bytes,
-                    &self.limits,
-                    functions,
-                    allowed_hosts,
-                )?));
-                self.loaded
-                    .lock()
-                    .entry(id.to_string())
-                    .or_insert(built)
-                    .clone()
-            }
-        };
+        let entry =
+            self.load_or_build_plugin(app_data_dir, id, granted, allowed_hosts, wasm_path)?;
         // Only this plugin's own mutex is held across the call (bounded by the
         // Extism timeout); other plugins remain fully available meanwhile.
         let mut plugin = entry.lock();
