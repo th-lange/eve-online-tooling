@@ -98,7 +98,7 @@ fn default_runs() -> i64 {
 
 /// Parameters for the production ranking. Everything here affects pricing/cost,
 /// so changing one re-runs the calculation; the UI filters the results.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfitParams {
     /// Region to price against (default The Forge).
@@ -196,11 +196,12 @@ const BASE_T2_ME: i64 = 2;
 /// Rank **every** manufacturable item by build-vs-buy profit at the chosen
 /// market. The whole catalogue is returned; the UI filters it client-side.
 #[tauri::command]
+#[specta::specta]
 pub async fn production_profit(
     app: AppHandle,
     market: State<'_, MarketService>,
     params: ProfitParams,
-) -> Result<Vec<ProfitBreakdown>, String> {
+) -> Result<Vec<ProfitBreakdown>, AppError> {
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
 
     // Saved lists are keyed by blueprint type id (the ranking row's identity):
@@ -475,6 +476,7 @@ fn reprice_product(bd: &mut ProfitBreakdown, unit_price: f64, hub: &str, sales_c
 
 /// The invention decryptors (for the UI dropdown).
 #[tauri::command]
+#[specta::specta]
 pub async fn production_decryptors(app: AppHandle) -> Result<Vec<crate::sde::Decryptor>, AppError> {
     let sde = crate::sde::open_from_app(&app)?;
     sde.decryptors().map_err(|e| AppError::from(e.to_string()))
@@ -497,21 +499,23 @@ fn list_key(list: &str) -> Result<&'static str, String> {
 /// The contents of a production saved list (`blacklist` or `favorites`), with
 /// names. Ids are blueprint type ids.
 #[tauri::command]
-pub fn production_get_list(app: AppHandle, list: String) -> Result<Vec<ListItem>, String> {
+#[specta::specta]
+pub fn production_get_list(app: AppHandle, list: String) -> Result<Vec<ListItem>, AppError> {
     let key = list_key(&list)?;
-    lists::get_from_app(&app, key)
+    lists::get_from_app(&app, key).map_err(Into::into)
 }
 
 /// Add or remove a blueprint type from a production saved list.
 #[tauri::command]
+#[specta::specta]
 pub fn production_set_list(
     app: AppHandle,
     list: String,
     type_id: i64,
     add: bool,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let key = list_key(&list)?;
-    lists::set_from_app(&app, key, type_id, add)
+    lists::set_from_app(&app, key, type_id, add).map_err(Into::into)
 }
 
 // --- Live per-system industry cost index (ESI /industry/systems/) ---
@@ -548,11 +552,12 @@ fn cost_index_fallback(
 /// instead of a hand-entered guess. When the refresh fails but a map ≤24h past
 /// expiry sits on disk, the stale map is served instead of an error (#774).
 #[tauri::command]
+#[specta::specta]
 pub async fn production_system_cost_index(
     app: AppHandle,
     esi: State<'_, EsiClient>,
     system_id: i64,
-) -> Result<Option<f64>, String> {
+) -> Result<Option<f64>, AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
     let map: HashMap<i64, f64> = match storage::cache_get(&dir, "industry_cost_indices") {
         Some(cached) => cached,
@@ -587,6 +592,17 @@ pub async fn production_system_cost_index(
         }
     };
     Ok(map.get(&system_id).copied())
+}
+
+/// Collects this module's specta-annotated commands for [`crate::bindings`].
+pub fn specta_commands() -> tauri_specta::Commands<tauri::Wry> {
+    tauri_specta::collect_commands![
+        production_profit,
+        production_decryptors,
+        production_get_list,
+        production_set_list,
+        production_system_cost_index,
+    ]
 }
 
 #[cfg(test)]

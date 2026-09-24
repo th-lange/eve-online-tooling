@@ -14,10 +14,10 @@ use super::markets::{regions, resolve_location, Region};
 use super::service::MarketService;
 use super::types::{Order, PriceModel};
 
-pub use crate::model::{id_names, IdName};
+pub use crate::model::{id_names, AppError, IdName};
 
 /// One day of market history, for the history explorer (camelCase for the UI).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryPoint {
     pub date: String,
@@ -30,11 +30,12 @@ pub struct HistoryPoint {
 
 /// Daily market history for a type in a region (ascending by date).
 #[tauri::command]
+#[specta::specta]
 pub async fn market_history(
     service: State<'_, MarketService>,
     region_id: i64,
     type_id: i64,
-) -> Result<Vec<HistoryPoint>, String> {
+) -> Result<Vec<HistoryPoint>, AppError> {
     let days = service
         .history(region_id, type_id)
         .await
@@ -54,6 +55,7 @@ pub async fn market_history(
 
 /// The selectable regions, each with its hub station.
 #[tauri::command]
+#[specta::specta]
 pub fn market_regions() -> Vec<Region> {
     regions()
 }
@@ -61,17 +63,19 @@ pub fn market_regions() -> Vec<Region> {
 /// Price model for a single type at a region (and optional station), via live
 /// ESI orders + history.
 #[tauri::command]
+#[specta::specta]
 pub async fn market_price(
     service: State<'_, MarketService>,
     region_id: i64,
     station_id: Option<i64>,
     type_id: i64,
-) -> Result<PriceModel, String> {
+) -> Result<PriceModel, AppError> {
     let location = resolve_location(region_id, station_id);
     service
         .price_model(location, type_id)
         .await
         .map_err(|e| e.to_string())
+        .map_err(Into::into)
 }
 
 // --- Market search (order list + jumps) ---
@@ -79,14 +83,16 @@ pub async fn market_price(
 /// Every known-space region, for the region picker. Backed by the SDE, so it
 /// covers all of k-space — not just the five trade hubs in [`regions`].
 #[tauri::command]
-pub fn market_all_regions(app: AppHandle) -> Result<Vec<IdName>, String> {
+#[specta::specta]
+pub fn market_all_regions(app: AppHandle) -> Result<Vec<IdName>, AppError> {
     let sde = crate::sde::open_from_app(&app)?;
     Ok(id_names(sde.market_regions().map_err(|e| e.to_string())?))
 }
 
 /// Search NPC stations by name (for the optional station filter). Capped.
 #[tauri::command]
-pub fn market_search_stations(app: AppHandle, query: String) -> Result<Vec<IdName>, String> {
+#[specta::specta]
+pub fn market_search_stations(app: AppHandle, query: String) -> Result<Vec<IdName>, AppError> {
     if query.trim().len() < 2 {
         return Ok(Vec::new());
     }
@@ -98,7 +104,7 @@ pub fn market_search_stations(app: AppHandle, query: String) -> Result<Vec<IdNam
 
 /// The logged-in character's current system + region, used to default the
 /// search to "current region" and to anchor the jumps-to-station column.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CurrentLocation {
     pub system_id: i64,
@@ -117,10 +123,11 @@ struct EsiLocation {
 /// `None` when nobody is logged in (or the location scope is missing) so the UI
 /// can fall back to a default region and a pickable jumps origin.
 #[tauri::command]
+#[specta::specta]
 pub async fn market_current_location(
     app: AppHandle,
     auth: State<'_, AuthState>,
-) -> Result<Option<CurrentLocation>, String> {
+) -> Result<Option<CurrentLocation>, AppError> {
     let dir = storage::app_data_dir(&app)?;
     let Some(character_id) = storage::active_character(&dir) else {
         return Ok(None);
@@ -155,14 +162,18 @@ pub async fn market_current_location(
 
 /// Filters for a market-search order query. All location fields are optional;
 /// precedence is station → system → region → everywhere (every k-space region).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SellOrdersParams {
     pub type_id: i64,
+    #[serde(default)]
     pub region_id: Option<i64>,
+    #[serde(default)]
     pub system_id: Option<i64>,
+    #[serde(default)]
     pub station_id: Option<i64>,
     /// Where the jumps column is measured from. None → no jumps computed.
+    #[serde(default)]
     pub origin_system_id: Option<i64>,
     /// Route only through high-sec (≥ 0.45) systems for the jumps count.
     #[serde(default)]
@@ -177,7 +188,7 @@ fn default_true() -> bool {
 }
 
 /// One sell order in the order list, enriched with location + jumps.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct SellOrder {
     pub price: f64,
@@ -201,11 +212,12 @@ const MAX_ORDERS: usize = 500;
 /// carrying its station/system/region and jumps from the origin system. Honours
 /// the high-sec-only routing toggle.
 #[tauri::command]
+#[specta::specta]
 pub async fn market_sell_orders(
     app: AppHandle,
     service: State<'_, MarketService>,
     params: SellOrdersParams,
-) -> Result<Vec<SellOrder>, String> {
+) -> Result<Vec<SellOrder>, AppError> {
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
 
     // Resolve the region set + any narrower (system/station) filter, then fetch.
@@ -353,7 +365,7 @@ async fn fetch_region_orders(
 }
 
 /// One price level in the order book: total remaining units at that price.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct DepthLevel {
     pub price: f64,
@@ -362,7 +374,7 @@ pub struct DepthLevel {
 
 /// Aggregated order book for the depth chart: sell levels ascending by price,
 /// buy levels descending. Cumulative curves are built on the client.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderBook {
     pub sell: Vec<DepthLevel>,
@@ -394,11 +406,12 @@ fn depth_levels(orders: impl Iterator<Item = Order>, ascending: bool) -> Vec<Dep
 /// Aggregated buy + sell order book for a type across the chosen scope, for the
 /// depth chart. Honours the same scope + scam-guard as [`market_sell_orders`].
 #[tauri::command]
+#[specta::specta]
 pub async fn market_order_book(
     app: AppHandle,
     service: State<'_, MarketService>,
     params: SellOrdersParams,
-) -> Result<OrderBook, String> {
+) -> Result<OrderBook, AppError> {
     let sde = crate::sde::open_from_app(&app)?;
     let Scope {
         region_ids,
@@ -449,6 +462,20 @@ fn jump_distances(
     };
     let adj = graph::undirected_adjacency(&filtered);
     graph::bfs(&adj, origin, None).0
+}
+
+/// Collects this module's specta-annotated commands for [`crate::bindings`].
+pub fn specta_commands() -> tauri_specta::Commands<tauri::Wry> {
+    tauri_specta::collect_commands![
+        market_history,
+        market_regions,
+        market_price,
+        market_all_regions,
+        market_search_stations,
+        market_current_location,
+        market_sell_orders,
+        market_order_book,
+    ]
 }
 
 #[cfg(test)]

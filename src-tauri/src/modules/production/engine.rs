@@ -32,7 +32,7 @@ pub enum Activity {
 
 /// Which price vector to value a role (materials or product) with. Defaults use
 /// `SellMin`; the rest are user-selectable in the UI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum PriceBasis {
     SellMin,
@@ -159,7 +159,7 @@ fn job_fee(eiv: f64, config: &ProfitConfig) -> f64 {
 }
 
 /// Per-material cost line for the UI drill-down.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct MaterialLine {
     pub type_id: i64,
@@ -175,7 +175,7 @@ pub struct MaterialLine {
 }
 
 /// Invention cost detail for the drill-down (T2 items).
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct InventionBreakdown {
     /// Datacores consumed per attempt (quantity, unit price, cost).
@@ -237,7 +237,7 @@ fn build_unit_cost(
 }
 
 /// The result of evaluating a build step.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfitBreakdown {
     pub blueprint_type_id: i64,
