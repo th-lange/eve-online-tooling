@@ -67,7 +67,7 @@ export const MODULE_METADATA: ModuleMeta[] = [
   {
     id: "trading",
     title: "Station Trading",
-    description: "Rank items by buy→sell margin at a market hub.",
+    description: "Rank items by buy→sell margin at a station.",
     group: "trading",
   },
   {

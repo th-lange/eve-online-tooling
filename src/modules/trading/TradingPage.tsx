@@ -17,6 +17,7 @@ import {
   RegionSelect,
   StationSelect,
 } from "../../components/RegionStationPicker";
+import { REGION_STATION_TOOLTIP } from "../../lib/copy";
 import {
   formatInt,
   formatIsk,
@@ -140,7 +141,7 @@ function Workbench() {
         }
       />
       <div className="mt-4 grid grid-cols-2 gap-3 rounded border border-zinc-800 bg-zinc-900 p-3 md:grid-cols-5">
-        <Field label="Region">
+        <Field label="Region" title={REGION_STATION_TOOLTIP}>
           <RegionSelect
             regions={regions.data}
             value={regionId}
@@ -150,7 +151,7 @@ function Workbench() {
             }}
           />
         </Field>
-        <Field label="Market">
+        <Field label="Station" title={REGION_STATION_TOOLTIP}>
           <StationSelect
             stations={stations}
             value={stationId}
