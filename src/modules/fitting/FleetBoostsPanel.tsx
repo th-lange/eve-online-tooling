@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Trash2, X } from "lucide-react";
-import { fittingCompatibleCharges, type FleetBoost } from "../../lib/api";
+import { fittingCompatibleCharges } from "../../lib/api";
 import { sdeKeys } from "../../lib/queryKeys";
+import { useFitState, useFitStats } from "./useFitEditorContext";
 
 /**
  * Fleet boosts (#705): command-burst/fleet-link modules (+ optional charge)
@@ -12,17 +13,13 @@ import { sdeKeys } from "../../lib/queryKeys";
  * sourced from a module the user picks here instead of the slot grid.
  * Renders nothing until the list has an entry or "Add" has been clicked.
  */
-export function FleetBoostsPanel({
-  boosts,
-  onAdd,
-  onRemove,
-  nameOf,
-}: {
-  boosts: FleetBoost[];
-  onAdd: (boost: FleetBoost) => void;
-  onRemove: (index: number) => void;
-  nameOf: (id: number) => string;
-}) {
+export function FleetBoostsPanel() {
+  const {
+    fleetBoosts: boosts,
+    addFleetBoost: onAdd,
+    removeFleetBoost: onRemove,
+  } = useFitState();
+  const { nameOf } = useFitStats();
   const [adding, setAdding] = useState(false);
   const [q, setQ] = useState("");
   // A module picked but not yet committed — offers a charge picker (or "no

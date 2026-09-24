@@ -1,11 +1,8 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, X } from "lucide-react";
-import {
-  fittingEnvironmentEffects,
-  type AbyssalWeather,
-  type AbyssalWeatherSelection,
-} from "../../lib/api";
+import { fittingEnvironmentEffects, type AbyssalWeather } from "../../lib/api";
+import { useFitState } from "./useFitEditorContext";
 
 /** Split a beacon's raw SDE name into a display group + short label:
  *  "Class 3 Pulsar Effects" -> Wormhole / "Class 3 Pulsar";
@@ -61,17 +58,13 @@ type Option =
  * at once, so this is a single-choice picker, not a growable list like
  * [`FleetBoostsPanel`].
  */
-export function EnvironmentEffectSelector({
-  value,
-  onChange,
-  abyssalWeather,
-  onAbyssalWeather,
-}: {
-  value: number | null;
-  onChange: (id: number | null) => void;
-  abyssalWeather: AbyssalWeatherSelection | null;
-  onAbyssalWeather: (selection: AbyssalWeatherSelection | null) => void;
-}) {
+export function EnvironmentEffectSelector() {
+  const {
+    environmentEffect: value,
+    setEnvironmentEffect: onChange,
+    abyssalWeather,
+    setAbyssalWeather: onAbyssalWeather,
+  } = useFitState();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const options = useQuery({

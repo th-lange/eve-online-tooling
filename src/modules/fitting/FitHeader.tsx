@@ -1,6 +1,12 @@
 import { useState } from "react";
+import type { UseMutationResult } from "@tanstack/react-query";
 import { MoreVertical, Trash2 } from "lucide-react";
 import { PrimaryButton } from "../../components/page";
+import {
+  useFitMutations,
+  useFitState,
+  useFitStats,
+} from "./useFitEditorContext";
 
 /** Hull render from EVE's public image server (CSP-allowed in tauri.conf.json). */
 function hullRenderUrl(typeId: number, size: 32 | 64 | 128 = 64): string {
@@ -11,42 +17,33 @@ function hullRenderUrl(typeId: number, size: 32 | 64 | 128 = 64): string {
  * Fit identity + primary actions (#709, #711): the hull render, name and
  * class anchor the editor instead of a plain text heading. Save reads as the
  * one primary action; Export EFT and Save to EVE move into an overflow menu;
- * Delete requires an explicit confirm so it can't be fat-fingered next to Save.
+ * Delete requires an explicit confirm so it can't be fat-fingered next to
+ * Save. Fit identity and Save/Export come from `FitEditorContext`; Save-to-
+ * EVE (`pushEsi`, page-scoped ESI push) and Delete (gated on the fit
+ * library, outside the fit editor) are the caller's business.
  */
 export function FitHeader({
-  shipTypeId,
-  hullName,
-  groupName,
-  fitName,
-  onSave,
-  savePending,
-  onExportEft,
   onPushEsi,
-  pushEsiPending,
-  pushEsiSuccess,
   onDelete,
   canDelete,
 }: {
-  shipTypeId: number;
-  hullName: string;
-  groupName: string;
-  fitName: string;
-  onSave: () => void;
-  savePending: boolean;
-  onExportEft: () => void;
-  onPushEsi: () => void;
-  pushEsiPending: boolean;
-  pushEsiSuccess: boolean;
+  onPushEsi: UseMutationResult<number, Error, void, unknown>;
   onDelete: () => void;
   canDelete: boolean;
 }) {
+  const { fit } = useFitState();
+  const { layout, nameOf } = useFitStats();
+  const { save, exportEft } = useFitMutations();
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  if (!fit) return null;
+  const hullName = layout.data?.name ?? nameOf(fit.shipTypeId);
+  const groupName = layout.data?.groupName ?? "";
 
   return (
     <div className="mb-3 flex items-center gap-3">
       <img
-        src={hullRenderUrl(shipTypeId)}
+        src={hullRenderUrl(fit.shipTypeId)}
         alt=""
         width={48}
         height={48}
@@ -54,7 +51,7 @@ export function FitHeader({
         className="h-12 w-12 shrink-0 rounded bg-zinc-900 object-contain"
       />
       <div className="min-w-0 flex-1">
-        <h2 className="truncate font-medium text-zinc-200">{fitName}</h2>
+        <h2 className="truncate font-medium text-zinc-200">{fit.name}</h2>
         <div className="truncate text-xs text-zinc-500">
           {hullName}
           {groupName ? ` · ${groupName}` : ""}
@@ -62,8 +59,8 @@ export function FitHeader({
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <PrimaryButton
-          onClick={onSave}
-          pending={savePending}
+          onClick={() => save.mutate()}
+          pending={save.isPending}
           pendingLabel="Saving…"
         >
           Save
@@ -90,7 +87,7 @@ export function FitHeader({
               <div className="absolute right-0 z-20 mt-1 w-44 rounded border border-zinc-700 bg-zinc-900 p-1 shadow-lg">
                 <button
                   onClick={() => {
-                    onExportEft();
+                    exportEft.mutate();
                     setMenuOpen(false);
                   }}
                   className="block w-full rounded px-2 py-1.5 text-left text-sm text-zinc-300 hover:bg-zinc-800"
@@ -99,16 +96,16 @@ export function FitHeader({
                 </button>
                 <button
                   onClick={() => {
-                    onPushEsi();
+                    onPushEsi.mutate();
                     setMenuOpen(false);
                   }}
-                  disabled={pushEsiPending}
+                  disabled={onPushEsi.isPending}
                   title="Save this fit to your in-game fittings (ESI)"
                   className="block w-full rounded px-2 py-1.5 text-left text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"
                 >
-                  {pushEsiPending
+                  {onPushEsi.isPending
                     ? "Saving…"
-                    : pushEsiSuccess
+                    : onPushEsi.isSuccess
                       ? "Saved to EVE ✓"
                       : "Save to EVE"}
                 </button>

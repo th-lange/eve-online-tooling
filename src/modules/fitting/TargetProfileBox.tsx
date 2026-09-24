@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { TargetProfile } from "../../lib/api";
+import { useFitState } from "./useFitEditorContext";
 
 /** Presets: [label, profile]. `angularVelocity` is the old speed÷distance
  *  worst-case derivation, kept as a starting point for the custom fields.
@@ -66,13 +67,8 @@ const TARGET_PRESETS: [string, TargetProfile | null][] = [
  * and missile-range gating come from the DPS-vs-range curve sweeping
  * distance separately, so this box has no distance field.
  */
-export function TargetProfileBox({
-  value,
-  onChange,
-}: {
-  value: TargetProfile | undefined;
-  onChange: (t: TargetProfile | undefined) => void;
-}) {
+export function TargetProfileBox() {
+  const { targetProfile: value, setTargetProfile: onChange } = useFitState();
   const set = (patch: Partial<TargetProfile>) => {
     const base: TargetProfile = value ?? {
       sigRadius: 0,
