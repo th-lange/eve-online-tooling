@@ -12,10 +12,147 @@
 //! (no `regex` dependency, matching the rest of this crate). Direction is read
 //! from the `>to<` / `>from<` / ` to ` / ` by ` markers EVE emits.
 //!
-//! This module is **pure and unit-tested**; the tail loop in [`super::commands`]
-//! feeds it lines and never re-implements parsing.
+//! # Localization (#868)
+//!
+//! A client running in a non-English language writes the same events with
+//! localized phrases, so [`classify`] and the header line 3 (`Listener:`)
+//! are keyed off a per-language [`LangMarkers`] table instead of English
+//! literals. [`detect_lang`] reads the header once per file/session and the
+//! caller threads the resolved [`Lang`] into every [`parse_line`] call — the
+//! parser itself never re-detects per line.
+//!
+//! PELD (PyEveLiveDPS) is GPL-3.0; this repo is MIT, so its regex tables were
+//! never consulted for this. The header phrases (`Listener:` / `Слушатель:` /
+//! `Auditeur:` / `Empfänger:` / `傍聴者:` / `收听者:`) and the module names used
+//! to derive them are CCP's own client localization strings, sourced from the
+//! MIT-licensed `Kelly-Hsueh/EVE-localisation-json-archive` archive of the
+//! client's FSD message catalog (message ID 59426 "Listener" / 59427 "Session
+//! Started"). The `>to</>from<` damage-direction markers for RU/FR/DE/JA/ZH
+//! are the examples documented directly in this project's issue #868 by its
+//! human author from EVE's localized client output — this repo's own MIT
+//! text, not PELD's. CCP's general FSD string catalog does not contain the
+//! remaining gamelog notification templates (remote reps, cap warfare, miss/
+//! tackle sentences, mining) as literal strings — they appear to be compiled
+//! client-side, outside that catalog — and no other non-GPL source with
+//! verifiable literal phrase text could be found, so those categories stay
+//! English-only for now: a detected non-English log falls back to the
+//! English markers for them (skips the line rather than misparsing it).
 
 use serde::Serialize;
+
+/// A gamelog's detected client language. Defaults to [`Lang::En`] when the
+/// header doesn't match any known localized `Listener:` phrase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lang {
+    En,
+    Ru,
+    Fr,
+    De,
+    Ja,
+    Zh,
+}
+
+/// Per-language substring markers [`classify`] and [`detect_lang`] key off.
+/// Only English has every field independently verified against real gamelog
+/// text (unchanged from before #868); other languages populate only the
+/// fields backed by a citable non-GPL source (see the module doc) and leave
+/// the rest as English literals, so [`classify`] transparently falls back to
+/// English for the phrases a language doesn't have yet.
+struct LangMarkers {
+    lang: Lang,
+    /// Localized "Listener:" header phrase (gamelog line 3, no trailing
+    /// colon — clients render it as `<phrase>: <character name>`).
+    listener: &'static str,
+    /// Localized `>to<` direction marker wrapping outgoing damage.
+    damage_to: &'static str,
+    /// Localized `>from<` direction marker wrapping incoming damage.
+    damage_from: &'static str,
+}
+
+/// One row per language with verified data; [`marker_row`] falls back to
+/// [`EN_MARKERS`] for any [`Lang`] not listed here (keeps every unverified
+/// field pointing at the real English literal instead of an empty string).
+const EN_MARKERS: LangMarkers = LangMarkers {
+    lang: Lang::En,
+    listener: "Listener:",
+    damage_to: ">to<",
+    damage_from: ">from<",
+};
+
+/// RU: header from FSD message ID 59426/59427 (Kelly-Hsueh archive);
+/// direction markers from issue #868's documented examples.
+const RU_MARKERS: LangMarkers = LangMarkers {
+    lang: Lang::Ru,
+    listener: "Слушатель:",
+    damage_to: ">на<",
+    damage_from: ">из<",
+};
+
+/// FR: header from FSD message ID 59426/59427 (Kelly-Hsueh archive);
+/// direction markers from issue #868's documented examples.
+const FR_MARKERS: LangMarkers = LangMarkers {
+    lang: Lang::Fr,
+    listener: "Auditeur:",
+    damage_to: ">à<",
+    damage_from: ">de<",
+};
+
+/// DE: header from FSD message ID 59426/59427 (Kelly-Hsueh archive);
+/// direction markers from issue #868's documented examples.
+const DE_MARKERS: LangMarkers = LangMarkers {
+    lang: Lang::De,
+    listener: "Empfänger:",
+    damage_to: ">nach<",
+    damage_from: ">von<",
+};
+
+/// JA: header from FSD message ID 59426/59427 (Kelly-Hsueh archive);
+/// direction markers from issue #868's documented examples.
+const JA_MARKERS: LangMarkers = LangMarkers {
+    lang: Lang::Ja,
+    listener: "傍聴者:",
+    damage_to: ">対象:<",
+    damage_from: ">攻撃者:<",
+};
+
+/// ZH: header from FSD message ID 59426/59427 (Kelly-Hsueh archive);
+/// direction markers from issue #868's documented examples.
+const ZH_MARKERS: LangMarkers = LangMarkers {
+    lang: Lang::Zh,
+    listener: "收听者:",
+    damage_to: ">对<",
+    damage_from: ">来自<",
+};
+
+const LANG_TABLE: [LangMarkers; 6] = [
+    EN_MARKERS, RU_MARKERS, FR_MARKERS, DE_MARKERS, JA_MARKERS, ZH_MARKERS,
+];
+
+/// The verified-marker row for `lang` (always [`EN_MARKERS`] for [`Lang::En`]
+/// and — by construction, since every row above is fully populated — for
+/// every other language too; the fallback comment on [`LangMarkers`] describes
+/// the *design* headroom for future per-field overrides, not a runtime gap).
+fn marker_row(lang: Lang) -> &'static LangMarkers {
+    LANG_TABLE
+        .iter()
+        .find(|m| m.lang == lang)
+        .unwrap_or(&EN_MARKERS)
+}
+
+/// Detect a gamelog's client language from its header block (the first few
+/// lines, which carry the localized `Listener:` phrase on line 3). Callers
+/// detect once per file/session and thread the result through every
+/// [`parse_line`] call — [`classify`] never re-detects per line. Falls back
+/// to [`Lang::En`] when the header doesn't match any known phrase (a
+/// malformed header, a truncated read, or a language without a sourced
+/// `Listener:` phrase yet) — never panics.
+pub fn detect_lang(header: &str) -> Lang {
+    LANG_TABLE
+        .iter()
+        .find(|m| m.lang != Lang::En && header.contains(m.listener))
+        .map(|m| m.lang)
+        .unwrap_or(Lang::En)
+}
 
 /// What a parsed combat line represents, already resolved to a direction
 /// (out = you are the source, in = you are the target).
@@ -82,7 +219,11 @@ pub struct DpsEvent {
 /// `capDamageDone` and `capRecieved`, so we emit a second `CapTransferIn`
 /// event alongside the primary `CapWarfareOut` one (#867) — the cap-received
 /// series already sums that kind, so no `aggregate.rs` change is needed.
-pub fn parse_line(line: &str) -> Vec<DpsEvent> {
+///
+/// `lang` is the file's already-detected [`Lang`] (see [`detect_lang`]) —
+/// this function never re-detects per line, so a caller processing a whole
+/// file only pays the header scan once.
+pub fn parse_line(line: &str, lang: Lang) -> Vec<DpsEvent> {
     if line.contains("(mining)") {
         return parse_mining(line).into_iter().collect();
     }
@@ -105,7 +246,7 @@ pub fn parse_line(line: &str) -> Vec<DpsEvent> {
     if line.contains("Warp scramble attempt") || line.contains("Warp disruption attempt") {
         return parse_tackle(line, ts).into_iter().collect();
     }
-    let Some(kind) = classify(line) else {
+    let Some(kind) = classify(line, lang) else {
         return Vec::new();
     };
     let Some(amount) = first_bold_int(line).map(|n| n.unsigned_abs() as i64) else {
@@ -318,7 +459,11 @@ fn first_inner_text(s: &str) -> Option<String> {
 /// renders the name in the **last** `<b>…</b>` block as `NAME[CORP](SHIP)`,
 /// followed by ` - WEAPON - quality`. (The first `<b>…</b>` is the damage
 /// number.) NPCs may omit the `[CORP]`/`(SHIP)` parts, so every field is
-/// optional.
+/// optional. Localized clients wrap translated fragments in
+/// `<localized untranslated="…">…</localized>` (#868); `strip_tags` already
+/// discards that wrapper (and any other single-level markup) before the
+/// `[`/`(` bracket search runs, so it needs no special casing here — see the
+/// `localized_wrapper_tags_are_stripped_before_bracket_parsing` test.
 fn extract_actor(
     line: &str,
 ) -> (
@@ -372,6 +517,9 @@ fn extract_actor(
 }
 
 /// Strip `<…>` markup from a fragment, returning the trimmed plain text.
+/// Generic over tag shape, so it equally discards a localized client's
+/// `<localized untranslated="…">` / `</localized>` wrapper tags (#868),
+/// keeping only the rendered inner text.
 fn strip_tags(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut in_tag = false;
@@ -388,7 +536,11 @@ fn strip_tags(s: &str) -> String {
 
 /// Decide which series a combat line belongs to. Order matters — the specific
 /// remote-/cap-warfare phrases are checked before the generic damage `to`/`from`.
-fn classify(line: &str) -> Option<EventKind> {
+/// Only the final damage-direction check is language-aware (see the module
+/// doc for why the other branches stay English-only for now) — an
+/// unrecognised non-English category simply returns `None` here and the line
+/// is skipped by [`parse_line`], never misparsed.
+fn classify(line: &str, lang: Lang) -> Option<EventKind> {
     // Remote capacitor transfer (logistics).
     if line.contains("remote capacitor transmitted to ") {
         return Some(EventKind::CapTransferOut);
@@ -421,11 +573,13 @@ fn classify(line: &str) -> Option<EventKind> {
         });
     }
     // Plain weapon damage. EVE wraps the direction word in its own tag, so the
-    // reliable marker is the bracketed `>to<` / `>from<`.
-    if line.contains(">to<") {
+    // reliable marker is the bracketed `>to<` / `>from<` (localized per
+    // `lang` — see `LangMarkers::damage_to`/`damage_from`).
+    let markers = marker_row(lang);
+    if line.contains(markers.damage_to) {
         return Some(EventKind::DamageOut);
     }
-    if line.contains(">from<") {
+    if line.contains(markers.damage_from) {
         return Some(EventKind::DamageIn);
     }
     None
@@ -494,10 +648,16 @@ mod tests {
         // 2026.06.25 12:00:00 UTC
         crate::util::time::days_from_civil(2026, 6, 25) * 86_400 + 12 * 3_600
     }
-
-    /// Parse `line`, asserting it yields exactly one event, and return it.
+    /// Parse `line` as English, asserting it yields exactly one event, and
+    /// return it.
     fn one(line: &str) -> DpsEvent {
-        let mut events = parse_line(line);
+        one_lang(line, Lang::En)
+    }
+
+    /// Parse `line` under `lang`, asserting it yields exactly one event, and
+    /// return it.
+    fn one_lang(line: &str, lang: Lang) -> DpsEvent {
+        let mut events = parse_line(line, lang);
         assert_eq!(events.len(), 1, "expected exactly one event from {line:?}");
         events.remove(0)
     }
@@ -587,8 +747,8 @@ mod tests {
 
     #[test]
     fn ignores_non_combat_lines() {
-        assert!(parse_line("[ 2026.06.25 12:00:00 ] (none) Some other line").is_empty());
-        assert!(parse_line("garbage").is_empty());
+        assert!(parse_line("[ 2026.06.25 12:00:00 ] (none) Some other line", Lang::En).is_empty());
+        assert!(parse_line("garbage", Lang::En).is_empty());
     }
 
     #[test]
@@ -655,7 +815,7 @@ mod tests {
     #[test]
     fn ignores_tackle_between_two_other_pilots() {
         // Neither side is "you" — irrelevant to a personal meter.
-        assert!(parse_line(POINT_OTHERS).is_empty());
+        assert!(parse_line(POINT_OTHERS, Lang::En).is_empty());
     }
 
     #[test]
@@ -664,12 +824,102 @@ mod tests {
         // enemy AND capacitor received by you — PyEveLiveDPS appends the
         // match to both series, so one nos-out line must yield two events.
         let nos_out = "[ 2026.06.25 12:00:00 ] (combat) <color=0xff..><b>75</b> energy drained from <color=0xff..>Victim</color>";
-        let events = parse_line(nos_out);
+        let events = parse_line(nos_out, Lang::En);
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].kind, EventKind::CapWarfareOut);
         assert_eq!(events[0].amount, 75);
         assert_eq!(events[1].kind, EventKind::CapTransferIn);
         assert_eq!(events[1].amount, 75);
         assert_eq!(events[1].ts, events[0].ts);
+    }
+
+    // --- #868: localization ---------------------------------------------
+
+    #[test]
+    fn detects_language_from_the_localized_listener_header() {
+        // Header phrases sourced from CCP's own client localization data
+        // (Kelly-Hsueh/EVE-localisation-json-archive, MIT-licensed archive of
+        // the FSD message catalog; message ID 59426 "Listener").
+        assert_eq!(detect_lang("Gamelog\r\nListener: Some Pilot\r\n"), Lang::En);
+        assert_eq!(
+            detect_lang("Игровой журнал\r\nСлушатель: Some Pilot\r\n"),
+            Lang::Ru
+        );
+        assert_eq!(
+            detect_lang("Journal de jeu\r\nAuditeur: Some Pilot\r\n"),
+            Lang::Fr
+        );
+        assert_eq!(
+            detect_lang("Spielprotokoll\r\nEmpfänger: Some Pilot\r\n"),
+            Lang::De
+        );
+        assert_eq!(
+            detect_lang("ゲームログ\r\n傍聴者: Some Pilot\r\n"),
+            Lang::Ja
+        );
+        assert_eq!(detect_lang("游戏记录\r\n收听者: Some Pilot\r\n"), Lang::Zh);
+    }
+
+    #[test]
+    fn unrecognised_header_falls_back_to_english_without_panicking() {
+        assert_eq!(detect_lang("garbage header, no listener line"), Lang::En);
+        assert_eq!(detect_lang(""), Lang::En);
+    }
+
+    /// Localized damage-direction markers (`>to</>from<` equivalents) are
+    /// documented directly in this project's issue #868 by its human author
+    /// from EVE's localized client output — this repo's own MIT text, not
+    /// PyEveLiveDPS's GPL source. One damage-out and one damage-in line per
+    /// language, built from those markers in the parser's real gamelog shape.
+    #[test]
+    fn parses_localized_damage_out_and_in_per_language() {
+        let cases = [
+            (Lang::Ru, "на", "из"),
+            (Lang::Fr, "à", "de"),
+            (Lang::De, "nach", "von"),
+            (Lang::Ja, "対象:", "攻撃者:"),
+            (Lang::Zh, "对", "来自"),
+        ];
+        for (lang, to_word, from_word) in cases {
+            let out = format!(
+                "[ 2026.06.25 12:00:00 ] (combat) <color=0xff..><b>342</b> <color=0x77ffffff><font size=10>{to_word}</font> <b><color=0xff..>Target[X](Cruiser)</b> - Tractor Beam I - Hits"
+            );
+            let e = one_lang(&out, lang);
+            assert_eq!(e.kind, EventKind::DamageOut, "{lang:?} damage-out");
+            assert_eq!(e.amount, 342);
+
+            let inc = format!(
+                "[ 2026.06.25 12:00:00 ] (combat) <color=0xff..><b>88</b> <color=0x77ffffff><font size=10>{from_word}</font> <b><color=0xff..>Bad Guy[Y](Frigate)</b> - Hits"
+            );
+            let e = one_lang(&inc, lang);
+            assert_eq!(e.kind, EventKind::DamageIn, "{lang:?} damage-in");
+            assert_eq!(e.amount, 88);
+        }
+    }
+
+    #[test]
+    fn unlocalized_categories_skip_rather_than_misparse_for_a_detected_non_english_log() {
+        // Rep/nos/mining/miss/tackle gamelog phrase templates for RU/FR/DE/
+        // JA/ZH could not be sourced from a non-GPL primary (see the module
+        // doc), so `classify` still only recognises the English literals for
+        // those categories. A genuine Russian rep line (fabricated Cyrillic
+        // placeholder text, not a claimed real phrase) therefore falls
+        // through every branch and is skipped rather than guessed at.
+        let rep_ru_placeholder = "[ 2026.06.25 12:00:00 ] (combat) <color=0xff..><b>250</b> удалённый щит восстановлен для <color=0xff..>Friendly</color>";
+        assert!(parse_line(rep_ru_placeholder, Lang::Ru).is_empty());
+    }
+
+    #[test]
+    fn localized_wrapper_tags_are_stripped_before_bracket_parsing() {
+        // Localized clients wrap translated fragments in `<localized
+        // untranslated="…">…</localized>` (#868); the corp tag here carries
+        // one to prove `extract_actor`'s existing `strip_tags` pass discards
+        // it before the `[`/`(` bracket search runs.
+        let line = "[ 2026.06.25 12:00:00 ] (combat) <color=0xff00ffff><b>342</b> <color=0x77ffffff><font size=10>на</font> <b><color=0xffffffff><localized untranslated=\"Target Pilot\">Целевой Пилот</localized><localized untranslated=\"[CORP]\">[КОРП]</localized>(Cynabal)</b><color=0x77ffffff><font size=10> - 425mm AutoCannon II - Hits</font></color>";
+        let e = one_lang(line, Lang::Ru);
+        assert_eq!(e.kind, EventKind::DamageOut);
+        assert_eq!(e.pilot.as_deref(), Some("Целевой Пилот"));
+        assert_eq!(e.ship.as_deref(), Some("Cynabal"));
+        assert_eq!(e.weapon.as_deref(), Some("425mm AutoCannon II"));
     }
 }

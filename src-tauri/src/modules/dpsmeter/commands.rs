@@ -24,7 +24,7 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader, SeekFrom};
 
 use super::aggregate::Window;
-use super::parser::{parse_line, EventKind};
+use super::parser::{parse_line, EventKind, Lang};
 use crate::model::AppError;
 use crate::sde::{Sde, SdePaths};
 
@@ -165,6 +165,12 @@ pub async fn dps_start(
             .and_then(|p| std::fs::metadata(p).ok())
             .map(|m| m.len())
             .unwrap_or(0);
+        // Detected once when `current` is (re)assigned, not per line — a
+        // localized client's header never changes mid-session (#868).
+        let mut lang = match &current {
+            Some(path) => detect_file_lang(path).await,
+            None => Lang::En,
+        };
 
         let mut ticker = tokio::time::interval(POLL);
         loop {
@@ -176,9 +182,11 @@ pub async fn dps_start(
                 continue; // frozen: don't read new lines or emit while paused.
             }
 
-            // A new session creates a new file — switch to it and read from 0.
+            // A new session creates a new file — switch to it, read from 0,
+            // and re-detect its language.
             if let Some(newest) = newest_gamelog(&dir) {
                 if current.as_deref() != Some(newest.as_path()) {
+                    lang = detect_file_lang(&newest).await;
                     current = Some(newest);
                     offset = 0;
                 }
@@ -187,7 +195,8 @@ pub async fn dps_start(
             if let Some(path) = &current {
                 if let Some((text, next)) = read_appended(path, offset).await {
                     offset = next;
-                    let mut batch: Vec<_> = text.lines().flat_map(parse_line).collect();
+                    let mut batch: Vec<_> =
+                        text.lines().flat_map(|l| parse_line(l, lang)).collect();
                     resolve_ore_volumes(&batch, &mut ore_vol, sde_db.as_deref());
                     for mut ev in batch.drain(..) {
                         if ev.kind == EventKind::Mining {
@@ -247,10 +256,9 @@ async fn load_and_resolve_events(
     file: &str,
 ) -> Result<Vec<super::parser::DpsEvent>, String> {
     let bytes = tokio::fs::read(file).await.map_err(|e| e.to_string())?;
-    let mut events: Vec<_> = String::from_utf8_lossy(&bytes)
-        .lines()
-        .flat_map(parse_line)
-        .collect();
+    let text = String::from_utf8_lossy(&bytes);
+    let lang = super::parser::detect_lang(&text);
+    let mut events: Vec<_> = text.lines().flat_map(|l| parse_line(l, lang)).collect();
     events.sort_by_key(|e| e.ts);
     if events.is_empty() {
         return Err("no combat lines in that log".into());
@@ -455,14 +463,14 @@ fn bucket_events(events: &[super::parser::DpsEvent]) -> LogSummary {
 /// span up front to size `bucket_secs`, and gamelog lines are only
 /// *near*-chronological, so we track the exact min/max rather than trusting
 /// the first/last line (#816).
-async fn scan_log_span(file: &str) -> Result<(i64, i64), String> {
+async fn scan_log_span(file: &str, lang: Lang) -> Result<(i64, i64), String> {
     let handle = tokio::fs::File::open(file)
         .await
         .map_err(|e| e.to_string())?;
     let mut lines = BufReader::new(handle).lines();
     let mut span: Option<(i64, i64)> = None;
     while let Some(line) = lines.next_line().await.map_err(|e| e.to_string())? {
-        for ev in parse_line(&line) {
+        for ev in parse_line(&line, lang) {
             span = Some(match span {
                 Some((start, end)) => (start.min(ev.ts), end.max(ev.ts)),
                 None => (ev.ts, ev.ts),
@@ -480,7 +488,8 @@ async fn scan_log_span(file: &str) -> Result<(i64, i64), String> {
 /// is the one path that still needs the whole file in memory, for ordered
 /// replay.
 async fn stream_log_summary(app: &AppHandle, file: &str) -> Result<LogSummary, String> {
-    let (start, end) = scan_log_span(file).await?;
+    let lang = detect_file_lang(Path::new(file)).await;
+    let (start, end) = scan_log_span(file, lang).await?;
     let span = (end - start).max(1) as f64;
     let bucket_secs = (span / SUMMARY_BUCKETS as f64).max(1.0);
 
@@ -499,7 +508,7 @@ async fn stream_log_summary(app: &AppHandle, file: &str) -> Result<LogSummary, S
         .map_err(|e| e.to_string())?;
     let mut lines = BufReader::new(handle).lines();
     while let Some(line) = lines.next_line().await.map_err(|e| e.to_string())? {
-        for mut ev in parse_line(&line) {
+        for mut ev in parse_line(&line, lang) {
             if ev.kind == EventKind::Mining {
                 let per_unit = match ev.ore.as_deref() {
                     Some(ore) => *ore_vol.entry(ore.to_string()).or_insert_with(|| {
@@ -598,6 +607,20 @@ async fn read_appended(path: &Path, offset: u64) -> Option<(String, u64)> {
     let consumed = last_nl + 1;
     let text = String::from_utf8_lossy(&buf[..consumed]).into_owned();
     Some((text, offset + consumed as u64))
+}
+
+/// Detect `path`'s client language from its header block (#868) — reads
+/// only the first few KB, never the whole (potentially huge, still-growing)
+/// file, since the localized `Listener:` phrase always sits on line 3.
+/// Falls back to [`Lang::En`] if the file can't be opened/read.
+async fn detect_file_lang(path: &Path) -> Lang {
+    let Ok(mut file) = tokio::fs::File::open(path).await else {
+        return Lang::En;
+    };
+    let mut buf = vec![0u8; 4096];
+    let n = file.read(&mut buf).await.unwrap_or(0);
+    buf.truncate(n);
+    super::parser::detect_lang(&String::from_utf8_lossy(&buf))
 }
 
 /// Ensure every ore named in `batch` has its m³/unit cached, looking up any new
@@ -872,7 +895,7 @@ mod tests {
 [ 2026.08.01 12:03:20 ] (mining) <color=0xff..><b>34</b> units of <color=0xff..>Veldspar</color>
 [ 2026.08.01 12:09:59 ] (combat) <color=0xff..><b>100</b> <color=0x77ffffff><font size=10>to</font> <b><color=0xff..>Target[X](Cruiser)</b> - Blaster - Hits
 not a combat line, ignored";
-        let mut events: Vec<_> = text.lines().flat_map(parse_line).collect();
+        let mut events: Vec<_> = text.lines().flat_map(|l| parse_line(l, Lang::En)).collect();
         events.sort_by_key(|e| e.ts);
         assert_eq!(events.len(), 4); // the chat-noise line is dropped.
                                      // `parse_line` leaves mining volume at 0.0 — only the SDE-backed
@@ -922,7 +945,7 @@ not a combat line, ignored";
 not a combat line, ignored";
         std::fs::write(&path, text).expect("write gamelog");
 
-        let (start, end) = scan_log_span(path.to_str().expect("utf8 path"))
+        let (start, end) = scan_log_span(path.to_str().expect("utf8 path"), Lang::En)
             .await
             .expect("file has combat lines");
         assert_eq!(end - start, 300); // 12:00:00 .. 12:05:00 (5 minutes)
@@ -934,7 +957,7 @@ not a combat line, ignored";
         let path = tmp.0.join("gamelog.txt");
         std::fs::write(&path, "just some chat, no combat lines here\n").expect("write gamelog");
 
-        assert!(scan_log_span(path.to_str().expect("utf8 path"))
+        assert!(scan_log_span(path.to_str().expect("utf8 path"), Lang::En)
             .await
             .is_err());
     }
