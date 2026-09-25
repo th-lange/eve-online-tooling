@@ -49,6 +49,10 @@ const COMPONENTS: Record<string, LazyExoticComponent<ComponentType>> = {
     () => import("./reprocessing/ReprocessingPage"),
     "ReprocessingPage",
   ),
+  massproduction: page(
+    () => import("./massproduction/MassProductionPage"),
+    "MassProductionPage",
+  ),
   appraisal: page(() => import("./appraisal/AppraisalPage"), "AppraisalPage"),
   universe: page(() => import("./universe/UniversePage"), "UniversePage"),
   "market-search": page(

@@ -176,6 +176,13 @@ export const MODULE_METADATA: ModuleMeta[] = [
     group: "industry",
   },
   {
+    id: "massproduction",
+    title: "Mass Production",
+    description:
+      "Paste owned blueprints → categorized Multibuy shopping lists.",
+    group: "industry",
+  },
+  {
     id: "incursions",
     title: "Incursions",
     description: "Active Sansha incursions — staging, influence and state.",

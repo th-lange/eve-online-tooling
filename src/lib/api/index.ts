@@ -27,6 +27,7 @@ export * from "./market";
 export * from "./production";
 export * from "./fitting";
 export * from "./shopping";
+export * from "./massprod";
 export * from "./dpsmeter";
 export * from "./plugins";
 export * from "./mcp";
