@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  activeCharacter,
   characterFleet,
   characterMining,
   characterResearch,
@@ -8,6 +9,7 @@ import {
   characterStandings,
 } from "../../lib/api";
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
+import { DataAge } from "../../components/DataAge";
 import { formatInt, formatIsk } from "../../lib/format";
 import { Page, PageHeader } from "../../components/page";
 import { Stat } from "../../components/Stat";
@@ -20,24 +22,34 @@ const SUBTITLE =
 
 export function CharacterPage() {
   const [tab, setTab] = useState<Tab>("skills");
+  // The backend resolves every tab below against its own bookmarked active
+  // character (or the roster's first when "All characters" is selected) —
+  // folding that selection into each tab's query key means switching
+  // characters refetches (loading state) instead of rendering the previous
+  // character's data from cache.
+  const active = useQuery({
+    queryKey: ["auth", "active"],
+    queryFn: activeCharacter,
+  });
+  const activeId = active.data ?? null;
   return (
     <Page>
       <PageHeader title={TITLE} subtitle={SUBTITLE} />
       <Tabs tab={tab} onChange={setTab} />
       <div className="mt-3">
-        {tab === "skills" && <Skills />}
-        {tab === "standings" && <Standings />}
-        {tab === "research" && <Research />}
-        {tab === "mining" && <Mining />}
-        {tab === "fleet" && <Fleet />}
+        {tab === "skills" && <Skills activeId={activeId} />}
+        {tab === "standings" && <Standings activeId={activeId} />}
+        {tab === "research" && <Research activeId={activeId} />}
+        {tab === "mining" && <Mining activeId={activeId} />}
+        {tab === "fleet" && <Fleet activeId={activeId} />}
       </div>
     </Page>
   );
 }
 
-function Skills() {
+function Skills({ activeId }: { activeId: number | null }) {
   const q = useQuery({
-    queryKey: ["char", "skills"],
+    queryKey: ["char", "skills", activeId],
     queryFn: characterSkills,
   });
   if (q.isError)
@@ -50,9 +62,16 @@ function Skills() {
       />
     );
   if (!q.data) return <Loading />;
-  const d = q.data;
+  const d = q.data.data;
   return (
     <div>
+      <div className="mb-2 flex justify-end">
+        <DataAge
+          updatedAt={q.dataUpdatedAt}
+          expiresAt={q.data.expiresAt}
+          fetching={q.isFetching}
+        />
+      </div>
       <div className="mb-3 flex gap-6 text-sm">
         <Stat label="Total SP" value={formatInt(d.totalSp)} />
         <Stat label="Unallocated SP" value={formatInt(d.unallocatedSp)} />
@@ -94,9 +113,9 @@ function Skills() {
   );
 }
 
-function Standings() {
+function Standings({ activeId }: { activeId: number | null }) {
   const q = useQuery({
-    queryKey: ["char", "standings"],
+    queryKey: ["char", "standings", activeId],
     queryFn: characterStandings,
   });
   if (q.isError)
@@ -152,9 +171,9 @@ function Standings() {
   );
 }
 
-function Research() {
+function Research({ activeId }: { activeId: number | null }) {
   const q = useQuery({
-    queryKey: ["char", "research"],
+    queryKey: ["char", "research", activeId],
     queryFn: characterResearch,
   });
   if (q.isError)
@@ -211,9 +230,9 @@ function Research() {
   );
 }
 
-function Mining() {
+function Mining({ activeId }: { activeId: number | null }) {
   const q = useQuery({
-    queryKey: ["char", "mining"],
+    queryKey: ["char", "mining", activeId],
     queryFn: characterMining,
   });
   if (q.isError)
@@ -276,8 +295,11 @@ function Mining() {
   );
 }
 
-function Fleet() {
-  const q = useQuery({ queryKey: ["char", "fleet"], queryFn: characterFleet });
+function Fleet({ activeId }: { activeId: number | null }) {
+  const q = useQuery({
+    queryKey: ["char", "fleet", activeId],
+    queryFn: characterFleet,
+  });
   if (q.isError)
     return (
       <QueryErrorNotice

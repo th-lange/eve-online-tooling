@@ -33,7 +33,7 @@ export function FitHeader({
 }) {
   const { fit } = useFitState();
   const { layout, nameOf } = useFitStats();
-  const { save, exportEft } = useFitMutations();
+  const { save, exportEft, exportDna, exportMultibuy } = useFitMutations();
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   if (!fit) return null;
@@ -93,6 +93,26 @@ export function FitHeader({
                   className="block w-full rounded px-2 py-1.5 text-left text-sm text-zinc-300 hover:bg-zinc-800"
                 >
                   Export EFT
+                </button>
+                <button
+                  onClick={() => {
+                    exportDna.mutate();
+                    setMenuOpen(false);
+                  }}
+                  title="Copy a Ship DNA link (killboard/chat fit-link format)"
+                  className="block w-full rounded px-2 py-1.5 text-left text-sm text-zinc-300 hover:bg-zinc-800"
+                >
+                  Export DNA
+                </button>
+                <button
+                  onClick={() => {
+                    exportMultibuy.mutate();
+                    setMenuOpen(false);
+                  }}
+                  title="Copy the fit's modules, charges and drones for the in-game Multibuy window"
+                  className="block w-full rounded px-2 py-1.5 text-left text-sm text-zinc-300 hover:bg-zinc-800"
+                >
+                  Export MultiBuy
                 </button>
                 <button
                   onClick={() => {

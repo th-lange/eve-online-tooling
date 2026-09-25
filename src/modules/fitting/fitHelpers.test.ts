@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { stackCargo } from "./fitHelpers";
+import { burnoutLabel, stackCargo } from "./fitHelpers";
 import type { Fit } from "../../lib/api";
 
 const FIT: Fit = {
@@ -41,5 +41,23 @@ describe("stackCargo", () => {
   it("is idempotent", () => {
     const once = stackCargo(FIT);
     expect(stackCargo(once)).toEqual(once);
+  });
+});
+
+describe("burnoutLabel", () => {
+  it("formats sub-minute durations as whole seconds", () => {
+    expect(burnoutLabel(48.4)).toBe("48s");
+  });
+
+  it("formats minute-plus durations as minutes + remainder seconds", () => {
+    expect(burnoutLabel(125)).toBe("2m 5s");
+  });
+
+  it("drops a zero seconds remainder", () => {
+    expect(burnoutLabel(120)).toBe("2m");
+  });
+
+  it("clamps a negative input to zero instead of going negative", () => {
+    expect(burnoutLabel(-5)).toBe("0s");
   });
 });

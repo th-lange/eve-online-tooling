@@ -108,7 +108,7 @@ pub async fn fetch_signatures(dir: &Path) -> Result<SignatureFeed, String> {
         });
     }
 
-    match fetch_live().await {
+    match fetch_live(dir).await {
         Ok(sigs) => {
             let _ = storage::cache_put(dir, CACHE_KEY, &sigs, TTL_SECS);
             Ok(SignatureFeed {
@@ -127,17 +127,25 @@ pub async fn fetch_signatures(dir: &Path) -> Result<SignatureFeed, String> {
     }
 }
 
-async fn fetch_live() -> Result<Vec<TheraSignature>, String> {
+/// The live fetch behind a cache miss, routed through the provider-agnostic
+/// [`crate::net::conditional_cache::ConditionalCache`] (#886): EVE-Scout's
+/// `/v2/public/signatures` feed sends a real (weak) `ETag` and
+/// `Cache-Control: max-age=300` (confirmed via `curl -I`), so a re-fetch
+/// inside that window is served straight from the on-disk cache with no
+/// network call, and one past it revalidates as a cheap 304 instead of a
+/// full re-download whenever the feed hasn't actually moved — on top of the
+/// outer 3-minute [`TTL_SECS`] gate above, which is unaffected.
+async fn fetch_live(dir: &Path) -> Result<Vec<TheraSignature>, String> {
     let http = crate::esi::http_client_builder()
         .build()
         .map_err(|e| e.to_string())?;
-    http.get(SIGNATURES_URL)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .error_for_status()
-        .map_err(|e| e.to_string())?
-        .json()
+    let cache = crate::net::conditional_cache::ConditionalCache::on_disk(dir.to_path_buf());
+    cache
+        .get_json(
+            CACHE_KEY,
+            || http.get(SIGNATURES_URL),
+            |rb| async move { rb.send().await },
+        )
         .await
         .map_err(|e| e.to_string())
 }

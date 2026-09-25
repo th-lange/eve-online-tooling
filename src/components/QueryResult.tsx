@@ -27,9 +27,10 @@ export interface QueryResultState<T> {
  *   3. empty — a standardized `EmptyState` (headline + next-step hint), also
  *      used for "never run yet" (mutation with no data and not pending).
  *   4. data — the `children` render prop, plus an optional `DataAge`
- *      freshness cue when `updatedAt` is given. Omit `updatedAt` when the
- *      page already surfaces its own `DataAge` next to a Refresh/Calculate
- *      button.
+ *      freshness cue when `updatedAt` is given (`expiresAt`, when also
+ *      given, prefers the server's real cache deadline over `DataAge`'s
+ *      fixed threshold, #885). Omit `updatedAt` when the page already
+ *      surfaces its own `DataAge` next to a Refresh/Calculate button.
  */
 export function QueryResult<T>({
   result,
@@ -40,6 +41,7 @@ export function QueryResult<T>({
   emptyTitle = "Nothing here yet.",
   emptyHint,
   updatedAt,
+  expiresAt,
   fetching,
   children,
 }: {
@@ -52,6 +54,9 @@ export function QueryResult<T>({
   emptyTitle?: ReactNode;
   emptyHint?: ReactNode;
   updatedAt?: number;
+  /** A `Fresh` envelope's server-derived cache deadline (#885), preferred
+   *  over `DataAge`'s fixed threshold when present. */
+  expiresAt?: number | null;
   fetching?: boolean;
   children: (data: T) => ReactNode;
 }) {
@@ -75,7 +80,11 @@ export function QueryResult<T>({
     <>
       {updatedAt != null && (
         <div className="mb-2 flex justify-end">
-          <DataAge updatedAt={updatedAt} fetching={fetching} />
+          <DataAge
+            updatedAt={updatedAt}
+            expiresAt={expiresAt}
+            fetching={fetching}
+          />
         </div>
       )}
       {children(result.data)}

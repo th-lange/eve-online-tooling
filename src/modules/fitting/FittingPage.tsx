@@ -33,7 +33,7 @@ const FORGE = 10000002;
 
 const TITLE = "Fitting";
 const SUBTITLE =
-  "Build a fit, validate slots and resources, price it, and optimize. Import/export EFT or load your in-game fittings.";
+  "Build a fit, validate slots and resources, price it, and optimize. Import/export EFT or DNA, export MultiBuy, or load your in-game fittings.";
 
 /** Gate the editor on the SDE being installed (like the other SDE-backed pages). */
 export function FittingPage() {
@@ -119,9 +119,9 @@ function Workbench() {
           <div className="flex items-start gap-2 pb-0.5">
             <div>
               <PasteImportControl
-                label="Import EFT"
-                title="Paste an EFT fit to import"
-                placeholder="paste an EFT fit here…"
+                label="Import EFT / DNA"
+                title="Paste an EFT fit or a Ship DNA link/string to import — format is auto-detected"
+                placeholder="paste an EFT fit or a DNA link here…"
                 value={eft}
                 setValue={setEft}
                 onImport={() => importEft.mutate()}

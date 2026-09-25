@@ -20,6 +20,9 @@ pub enum SlotKind {
     Implant,
     Booster,
     Cargo,
+    /// A fighter squadron launched from a carrier/super's fighter tubes
+    /// (#877). `FitItem::quantity` is the squadron's fighter count.
+    Fighter,
     /// Tactical Destroyer mode slot (one per T3D hull).
     Mode,
 }
@@ -36,6 +39,24 @@ pub enum ModuleState {
 
 fn one() -> i32 {
     1
+}
+
+/// A mutaplasmid-rolled item's per-instance attribute overrides (#876).
+/// `base_type_id` is the item's own (unmutated) type id — always equal to
+/// the owning [`FitItem::type_id`], carried here too so the mutation stays
+/// self-describing wherever it travels alone (EFT round-trip, UI slider
+/// state). `attrs` are **absolute** overridden values (not multipliers),
+/// one entry per attribute the mutaplasmid touches; the resolve pass seeds
+/// these as the entity's base attributes before dogma effects apply (see
+/// `stats::run_dogma`), so any bonus a skill/other module grants that
+/// attribute still stacks on top of the rolled value exactly as it would on
+/// the unmutated base value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemMutation {
+    pub base_type_id: i64,
+    pub mutaplasmid_type_id: i64,
+    pub attrs: std::collections::HashMap<i64, f64>,
 }
 
 /// One fitted item: a module/rig/subsystem/drone slot entry, optionally with a
@@ -60,6 +81,21 @@ pub struct FitItem {
     /// `slot == Drone`.
     #[serde(default)]
     pub active_drones: Option<i32>,
+    /// Mutaplasmid roll applied to this item (#876), `None` for an unmutated
+    /// item — the overwhelming majority.
+    #[serde(default)]
+    pub mutation: Option<ItemMutation>,
+    /// Selected offensive ability for a fighter squadron (#877), a stable
+    /// key from `engine::fighter::abilities_of` (e.g. `"attackMissile"`).
+    /// `None` = auto (the squadron's highest-DPS ability) — the overwhelming
+    /// majority, since most fighter types only ever carry one damage
+    /// ability anyway. Only meaningful for `slot == Fighter`; a squadron
+    /// with no offensive ability at all (a pure support/EW type) ignores
+    /// this. An explicit choice the type doesn't actually carry is a
+    /// validation problem (the "one ability type" constraint — you can't
+    /// select a channel your fighters don't have).
+    #[serde(default)]
+    pub fighter_ability: Option<String>,
 }
 
 /// The editable fit document. `id` is a stable key for local storage; `items`
@@ -146,9 +182,27 @@ pub struct TankStats {
     pub shield_resists: [f64; 4],
     pub armor_resists: [f64; 4],
     pub hull_resists: [f64; 4],
-    /// Active local reps per second (shield boosters / armor repairers).
+    /// Active local reps/s (shield boosters / armor repairers) at full rate
+    /// — the burst figure: while an ancillary module's charge or capacitor
+    /// keeps it going, or always for a non-ancillary rep.
     pub shield_rep_s: f64,
     pub armor_rep_s: f64,
+    /// Cycle-averaged reps/s including any reload pause (#878): equal to
+    /// `shield_rep_s`/`armor_rep_s` for a rep with infinite ammo (no clip),
+    /// lower for an ancillary module that must reload once its charges run
+    /// out — the fit-defining number for an ASB/AAR-tanked ship.
+    pub shield_rep_s_sustained: f64,
+    pub armor_rep_s_sustained: f64,
+    /// Remote-rep multiplier per layer (#878): `1 / effective_resonance`,
+    /// the same denominator EHP uses — how much a remote repair's raw GJ is
+    /// amplified by this layer's resists against the selected profile.
+    pub shield_rrm: f64,
+    pub armor_rrm: f64,
+    pub hull_rrm: f64,
+    /// Whether a running Reactive Armor Hardener's resist-shift was
+    /// simulated to a fixed point against the selected profile (#878) —
+    /// `armor_resists` already reflects the shifted values when true.
+    pub rah_active: bool,
     /// Peak passive shield regeneration (GJ/s ≈ HP/s): 2.5 × shield HP ÷ recharge.
     pub passive_shield_s: f64,
 }
@@ -160,6 +214,11 @@ pub struct DpsBreakdown {
     pub turret: f64,
     pub missile: f64,
     pub drone: f64,
+    /// Fighter squadron DPS (#877) — each squadron's selected ability ×
+    /// squadron size. Not yet folded into applied-DPS/DPS-vs-range
+    /// (travel/application modeling for fighters is a documented follow-up),
+    /// so `applied_dps`/`dps_range_curve` always carry `0.0` here.
+    pub fighter: f64,
     pub total: f64,
 }
 
@@ -213,6 +272,39 @@ pub struct TargetProfile {
     /// application, instead of the explosion-velocity-only reduction.
     /// PYFA doesn't model this; off by default to match it.
     pub missiles_need_overtake: bool,
+}
+
+/// One target/damage-pattern preset (#873): a built-in NPC combat profile or
+/// a user-saved custom one, bundling both halves of "what am I fighting" —
+/// the applied-DPS [`TargetProfile`] (sig/speed/tracking) and the incoming
+/// damage split used for EHP — so picking e.g. "Guristas Cruiser" once feeds
+/// both `TargetProfileBox` and the tank panel's damage-profile picker from
+/// the same underlying NPC's real numbers. Built-ins are derived from real
+/// SDE NPC ship dogma attributes (see `npc_profiles`), never copied from
+/// Pyfa's tables; `group` is the faction/content-type the UI groups presets
+/// under ("Guristas", "Sleepers", "Abyssal", "Custom", …).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NpcProfile {
+    /// Stable id: `"builtin:<slug>"` for generated presets, a timestamp-based
+    /// local id (matching [`Fit::id`]) for user-saved ones.
+    pub id: String,
+    pub label: String,
+    /// Faction/content-type grouping shown in the UI (e.g. "Guristas").
+    pub group: String,
+    pub target: TargetProfile,
+    /// Incoming damage split `[em, thermal, kinetic, explosive]` fractions
+    /// summing to 1.0 (#702's damage-profile shape).
+    pub damage_profile: [f64; 4],
+}
+
+/// Response of `fitting_target_profiles` (#873): the generated built-in
+/// library plus the user's persisted custom presets.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TargetProfileLibrary {
+    pub built_in: Vec<NpcProfile>,
+    pub custom: Vec<NpcProfile>,
 }
 
 /// Which Abyssal Deadspace weather a fit is sitting in (#env-selector). See
@@ -287,6 +379,13 @@ pub struct FitStats {
     /// DPS (#174); `None` until the dogma engine runs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dps: Option<DpsBreakdown>,
+    /// Sustained DPS (#871): burst `dps` derated by each weapon's own
+    /// reload cycle (clip depletion + `reloadTime`) — PYFA's `factorReload`
+    /// figure. Equal to `dps` for infinite-ammo weapons. Always populated
+    /// alongside `dps`, independent of the `factor_reload` sim toggle (which
+    /// only gates the capacitor sim); `None` until the dogma engine runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dps_sustained: Option<DpsBreakdown>,
     /// Navigation (#175); `None` until the dogma engine runs.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub navigation: Option<NavStats>,
@@ -334,6 +433,42 @@ pub struct FitStats {
     /// target profile was given.
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub dps_range_curve: Vec<(f64, f64)>,
+    /// Whether the fit carries any spoolable weapon/rep (#872) — Triglavian
+    /// Entropic Disintegrators and similar — gating the UI's spool selector.
+    /// `false`/absent until the dogma engine runs.
+    #[serde(default)]
+    pub is_spoolable: bool,
+    /// Overheat burnout estimate (#874) per fitted item, parallel to
+    /// `Fit::items` — `None` for non-module items and modules that aren't
+    /// currently overheated (or that never build meaningful rack heat).
+    /// Expected-value seconds; see `engine::heat`'s doc comment for the
+    /// model and its "estimate, not exact" caveat. Empty until the dogma
+    /// engine runs.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub burnout_seconds: Vec<Option<f64>>,
+    /// Each fitted fighter squadron's selected offensive ability + its DPS
+    /// contribution (#877), parallel to `Fit::items` — `None` for non-fighter
+    /// items and for a pure support/EW squadron with no offensive ability at
+    /// all. Empty until the dogma engine runs.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub fighter_abilities: Vec<Option<FighterAbilityStats>>,
+}
+
+/// One fitted fighter squadron's selected ability + its DPS contribution
+/// (#877). See [`FitStats::fighter_abilities`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FighterAbilityStats {
+    /// Stable ability key (`FitItem::fighter_ability` uses the same key).
+    pub key: String,
+    /// Human label, e.g. "Rockets", "Fighter Missiles".
+    pub label: String,
+    /// This squadron's total burst DPS at its current size.
+    pub dps: f64,
+    /// Sustained DPS (#871 reload accounting via `engine::cycle`); equal to
+    /// `dps` today since no fighter ability carries clip/reload attributes
+    /// in the SDE yet.
+    pub dps_sustained: f64,
 }
 
 /// One category of electronic warfare projected onto the fit (presence only).
@@ -398,6 +533,8 @@ mod tests {
                 charge_type_id: None,
                 quantity: 1,
                 active_drones: None,
+                mutation: None,
+                fighter_ability: None,
             }],
             projected: Vec::new(),
         };

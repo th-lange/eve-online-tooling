@@ -16,12 +16,14 @@ export { TargetProfileBox } from "./TargetProfileBox";
 export { ChargeControl, SlotBadge, SlotGrid } from "./SlotGrid";
 export {
   DpsBreakdownPanel,
+  DpsRangeOverlayChart,
   EwPanel,
   NavigationPanel,
   PricePanel,
   ResourcesPanel,
   TankResistsPanel,
   Vitals,
+  type DpsRangeSeries,
 } from "./StatsPanels";
 export { FIT_EPS, type FitContext } from "./fitHelpers";
 

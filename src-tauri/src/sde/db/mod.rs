@@ -11,6 +11,7 @@ mod dogma;
 mod industry;
 mod map;
 mod market;
+mod mutaplasmid;
 mod pi;
 mod wormholes;
 

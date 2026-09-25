@@ -61,7 +61,12 @@ pub async fn pochven_routes(app: AppHandle) -> Result<PochvenRoutes, AppError> {
 /// The CPU-bound body of [`pochven_routes`], run on the blocking pool.
 fn pochven_routes_blocking(app: &AppHandle) -> Result<PochvenRoutes, String> {
     let dir = storage::app_data_dir(app)?;
-    if let Some(cached) = storage::cache_get::<PochvenRoutes>(&dir, "pochven_routes") {
+    // Computed from the SDE stargate graph — keyed to the SDE's generation so
+    // an SDE update invalidates this immediately instead of after 24h (#884).
+    let generation = crate::sde::generation_id(&dir)?;
+    if let Some(cached) =
+        storage::cache_get_versioned::<PochvenRoutes>(&dir, "pochven_routes", generation)
+    {
         return Ok(cached);
     }
 
@@ -123,7 +128,7 @@ fn pochven_routes_blocking(app: &AppHandle) -> Result<PochvenRoutes, String> {
         hubs: HUBS.iter().map(|&(n, _)| n.to_string()).collect(),
         systems,
     };
-    let _ = storage::cache_put(&dir, "pochven_routes", &result, 86_400);
+    let _ = storage::cache_put_versioned(&dir, "pochven_routes", &result, 86_400, generation);
     Ok(result)
 }
 

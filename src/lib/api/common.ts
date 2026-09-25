@@ -48,6 +48,25 @@ export interface IdName {
 }
 
 /**
+ * Mirrors the Rust `Fresh<T>` envelope (#885): wraps command data with the
+ * backend's own cache-freshness deadline (derived from ESI's
+ * `Cache-Control`/`Expires` headers) instead of a hand-guessed constant.
+ * Both timestamps are Unix epoch **milliseconds**, directly comparable
+ * with `Date.now()`. Each generated bindings module (`./generated/market`,
+ * `./generated/orders`, …) emits its own structurally-identical copy of
+ * this type; this shared alias lets call sites that aren't tied to one
+ * specific module (e.g. `queryKeys.ts`) reference the shape once.
+ * `expiresAt` is `null` when the backend has no cached deadline yet
+ * (cache disabled, or nothing fetched) — callers fall back to their
+ * existing hand-set `staleTime`.
+ */
+export interface Fresh<T> {
+  data: T;
+  fetchedAt: number;
+  expiresAt: number | null;
+}
+
+/**
  * Structured command error mirroring the Rust `AppError` (#337). Commands that
  * have migrated reject with this shape; others still reject with a plain string,
  * so use the helpers below rather than reading fields directly.

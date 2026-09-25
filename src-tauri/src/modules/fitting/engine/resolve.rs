@@ -83,6 +83,10 @@ pub struct FitInput {
     /// Drones in space (pass 4): targets of drone skills + ship/module drone
     /// bonuses, but they never modify the ship.
     pub drones: Vec<EntityInput>,
+    /// Fighter squadrons (#877), resolved exactly like `drones` — pure aux
+    /// targets of carrier skill/ship `fighterBonus*` bonuses, never
+    /// modifying the ship.
+    pub fighters: Vec<EntityInput>,
     /// Loaded charges, parallel to `modules` (pass 4): a charge gets its host
     /// module's group/skill-keyed bonuses plus missile-damage skills/ship role
     /// bonuses, so its finalized damage drives missile DPS. `None` = empty slot.
@@ -104,6 +108,8 @@ pub struct ResolvedFit {
     pub modules: Vec<AttrStore>,
     /// Finalized drone stores (parallel to `FitInput::drones`).
     pub drones: Vec<AttrStore>,
+    /// Finalized fighter squadron stores (parallel to `FitInput::fighters`).
+    pub fighters: Vec<AttrStore>,
     /// Finalized charge stores (parallel to `FitInput::charges`/`modules`).
     pub charges: Vec<Option<AttrStore>>,
     /// Effect modifiers we couldn't model (coverage metric).
@@ -123,6 +129,7 @@ struct Aux {
 
 enum AuxDest {
     Drone(usize),
+    Fighter(usize),
     Charge(usize),
 }
 
@@ -152,6 +159,14 @@ pub fn resolve(
             group_id: d.group_id,
             req_skills: d.required_skills.clone(),
             dest: AuxDest::Drone(j),
+        });
+    }
+    for (j, f) in input.fighters.iter().enumerate() {
+        aux.push(Aux {
+            store: seed(f),
+            group_id: f.group_id,
+            req_skills: f.required_skills.clone(),
+            dest: AuxDest::Fighter(j),
         });
     }
     for (i, c) in input.charges.iter().enumerate() {
@@ -253,6 +268,7 @@ pub fn resolve(
         .iter()
         .map(|a| match &a.dest {
             AuxDest::Drone(j) => mods(&input.drones[*j], &mut unresolved),
+            AuxDest::Fighter(j) => mods(&input.fighters[*j], &mut unresolved),
             AuxDest::Charge(i) => mods(input.charges[*i].as_ref().unwrap(), &mut unresolved),
         })
         .collect();
@@ -375,10 +391,12 @@ pub fn resolve(
 
     // Scatter resolved aux stores back to their slots.
     let mut drones = vec![AttrStore::new(); input.drones.len()];
+    let mut fighters = vec![AttrStore::new(); input.fighters.len()];
     let mut charges: Vec<Option<AttrStore>> = vec![None; input.charges.len()];
     for a in aux {
         match a.dest {
             AuxDest::Drone(j) => drones[j] = a.store,
+            AuxDest::Fighter(j) => fighters[j] = a.store,
             AuxDest::Charge(i) => charges[i] = Some(a.store),
         }
     }
@@ -387,6 +405,7 @@ pub fn resolve(
         ship,
         modules,
         drones,
+        fighters,
         charges,
         unresolved,
     }

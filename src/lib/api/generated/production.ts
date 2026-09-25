@@ -78,7 +78,8 @@ export const commands = {
    * cached ~1h on disk, then looked up per system. `None` when the system isn't
    * listed (e.g. wormhole space). Lets the production tab use the real index
    * instead of a hand-entered guess. When the refresh fails but a map ≤24h past
-   * expiry sits on disk, the stale map is served instead of an error (#774).
+   * expiry sits on disk, the stale map is served instead of an error via the
+   * shared [`deduplicated_cached_fetch_with_stale_fallback`] helper (#774, #888).
    */
   async productionSystemCostIndex(
     systemId: number,

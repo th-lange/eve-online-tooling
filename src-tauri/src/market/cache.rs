@@ -11,6 +11,11 @@ use std::time::{Duration, Instant};
 pub struct TtlCache<K, V> {
     map: Mutex<HashMap<K, (Instant, V)>>,
     ttl: Duration,
+    // How long past `ttl` an entry stays in the map for `get_stale` to serve
+    // on a fetch failure (#888), before `put`'s sweep reclaims it. Zero for
+    // caches with no bounded-stale story — `get_stale` then never differs
+    // from `get`.
+    max_stale: Duration,
 }
 
 /// Lock the cache's map, recovering from poison instead of panicking.
@@ -29,9 +34,18 @@ fn recover_lock<'a, T>(
 
 impl<K: Eq + Hash + Clone, V: Clone> TtlCache<K, V> {
     pub fn new(ttl: Duration) -> Self {
+        Self::with_max_stale(ttl, Duration::ZERO)
+    }
+
+    /// Like [`new`], but an entry that ages past `ttl` stays servable via
+    /// [`get_stale`] for up to `max_stale` longer — the in-memory analogue of
+    /// [`crate::storage::cache_get_stale`], generalizing production's
+    /// bounded-stale cost-index pattern (#774) to any `TtlCache` (#888).
+    pub fn with_max_stale(ttl: Duration, max_stale: Duration) -> Self {
         Self {
             map: Mutex::new(HashMap::new()),
             ttl,
+            max_stale,
         }
     }
 
@@ -71,16 +85,33 @@ impl<K: Eq + Hash + Clone, V: Clone> TtlCache<K, V> {
         })
     }
 
+    /// Returns a clone of the cached value even if it aged out, as long as it
+    /// expired no more than this cache's configured `max_stale` ago. For
+    /// fallback paths that prefer slightly-stale data over an error (e.g. a
+    /// transient ESI hiccup); use [`get`](Self::get) everywhere freshness
+    /// matters (#888).
+    pub fn get_stale(&self, key: &K) -> Option<V> {
+        let map = recover_lock(self.map.lock());
+        map.get(key).and_then(|(expires_at, value)| {
+            if Instant::now() < *expires_at + self.max_stale {
+                Some(value.clone())
+            } else {
+                None
+            }
+        })
+    }
+
     pub fn put(&self, key: K, value: V) {
         let mut map = recover_lock(self.map.lock());
         let now = Instant::now();
-        // Drop any entries that have aged out before inserting. Without this the
-        // map only ever grows — `get` skips expired entries but never removes
+        // Drop any entries that have aged out (past both `ttl` and
+        // `max_stale`) before inserting. Without this the map only ever
+        // grows — `get`/`get_stale` skip expired entries but never remove
         // them — so over a long session stale (region, type) prices would
-        // accumulate unbounded. The sweep is O(n) but n is small (a handful of
-        // regions × requested types) and puts only happen behind a network
-        // fetch, so the cost is negligible.
-        map.retain(|_, (expires_at, _)| *expires_at > now);
+        // accumulate unbounded. The sweep is O(n) but n is small (a handful
+        // of regions × requested types) and puts only happen behind a
+        // network fetch, so the cost is negligible.
+        map.retain(|_, (expires_at, _)| *expires_at + self.max_stale > now);
         let jitter = self.jitter(&key);
         map.insert(key, (now + self.ttl + jitter, value));
     }

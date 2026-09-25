@@ -386,3 +386,28 @@ pub fn sde_type_attributes(app: AppHandle, type_id: i64) -> Result<Vec<AttrPair>
         .map(|(name, value)| AttrPair { name, value })
         .collect())
 }
+
+/// Every mutaplasmid applicable to a base module type id, with its roll
+/// ranges and display name (#876) — for the module editor's mutaplasmid
+/// picker.
+#[tauri::command]
+pub fn sde_mutaplasmids_for_type(
+    app: AppHandle,
+    type_id: i64,
+) -> Result<Vec<super::MutaplasmidRoll>, String> {
+    open(&app)?
+        .mutaplasmids_for_base_type(type_id)
+        .map_err(|e| e.to_string())
+}
+
+/// One mutaplasmid's roll data by its own type id (#876) — `null` if it
+/// isn't a mutaplasmid.
+#[tauri::command]
+pub fn sde_mutaplasmid_roll(
+    app: AppHandle,
+    mutaplasmid_type_id: i64,
+) -> Result<Option<super::MutaplasmidRoll>, String> {
+    open(&app)?
+        .mutaplasmid_roll(mutaplasmid_type_id)
+        .map_err(|e| e.to_string())
+}

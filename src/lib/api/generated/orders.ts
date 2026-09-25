@@ -13,9 +13,11 @@ export const commands = {
    * "All characters" is active, else just the active one), each flagged as
    * undercut or top-of-book against the current best price **at the order's
    * own station**. A character whose orders can't be fetched is skipped
-   * rather than failing the whole call.
+   * rather than failing the whole call. Wrapped with the server's real ESI
+   * cache deadline (#885) so the frontend can derive its `staleTime`/
+   * `DataAge` cue from `expiresAt` instead of a hand-set constant.
    */
-  async ordersList(): Promise<Result<OrderRow[], AppError>> {
+  async ordersList(): Promise<Result<Fresh<OrderRow[]>, AppError>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("orders_list") };
     } catch (e) {
@@ -50,6 +52,22 @@ export type AppError =
    * Any other failure, carrying a human-readable message.
    */
   | { kind: "message"; message: string };
+/**
+ * Server-derived cache-freshness envelope (#885). Wraps command data with
+ * the same `fetchedAt`/`expiresAt` deadline the backend's conditional
+ * cache (`net::conditional_cache::ConditionalCache`, wrapped per-provider
+ * by e.g. `esi::cache::ConditionalCache`) already computed from the
+ * upstream `Cache-Control`/`Expires` headers, instead of the frontend
+ * re-guessing a per-endpoint `staleTime` constant that drifts as those
+ * headers change server-side.
+ *
+ * Both timestamps are Unix epoch **milliseconds** (matching JS
+ * `Date.now()`), so `DataAge` and `queryKeys.ts` can compare directly with
+ * no unit conversion. `expires_at` is `None` when the underlying cache has
+ * no persisted entry for this call (cache disabled, or nothing cached
+ * yet) — callers fall back to their existing hand-set `staleTime`.
+ */
+export type Fresh<T> = { data: T; fetchedAt: number; expiresAt: number | null };
 /**
  * One of the character's open market orders, with undercut status.
  */

@@ -211,6 +211,14 @@ use serde::{de::DeserializeOwned, Serialize};
 struct CacheEnvelope<T> {
     /// Unix epoch (seconds) after which the entry is stale.
     expires: u64,
+    /// SDE database identity (`sde::generation_id`) this entry was computed
+    /// against, for cache values derived from the SDE (#884: routes, maps,
+    /// FW system topology). `None` for the (majority) of entries that don't
+    /// depend on the SDE at all — those keep today's TTL-only behaviour.
+    /// `#[serde(default)]` so pre-#884 cache files on disk (written without
+    /// this field) still deserialize as `None` instead of failing to parse.
+    #[serde(default)]
+    sde_generation: Option<u64>,
     value: T,
 }
 
@@ -223,9 +231,30 @@ fn cache_path(app_data_dir: &Path, key: &str) -> std::path::PathBuf {
 
 /// Read a cached value, or `None` if absent, unreadable, or expired.
 pub fn cache_get<T: DeserializeOwned>(app_data_dir: &Path, key: &str) -> Option<T> {
-    let bytes = std::fs::read(cache_path(app_data_dir, key)).ok()?;
-    let env: CacheEnvelope<T> = serde_json::from_slice(&bytes).ok()?;
+    let env = read_envelope::<T>(app_data_dir, key)?;
     (env.expires >= crate::util::time::now_secs()).then_some(env.value)
+}
+
+/// Like [`cache_get`], but also misses when the entry was written against a
+/// different SDE generation than `sde_generation` — an SDE update invalidates
+/// the entry immediately instead of waiting out its TTL (#884). An entry
+/// written with no generation tag (i.e. via [`cache_put`]) never matches and
+/// always misses here; use [`cache_put_versioned`] to write one.
+pub fn cache_get_versioned<T: DeserializeOwned>(
+    app_data_dir: &Path,
+    key: &str,
+    sde_generation: u64,
+) -> Option<T> {
+    let env = read_envelope::<T>(app_data_dir, key)?;
+    if env.sde_generation != Some(sde_generation) {
+        return None;
+    }
+    (env.expires >= crate::util::time::now_secs()).then_some(env.value)
+}
+
+fn read_envelope<T: DeserializeOwned>(app_data_dir: &Path, key: &str) -> Option<CacheEnvelope<T>> {
+    let bytes = std::fs::read(cache_path(app_data_dir, key)).ok()?;
+    serde_json::from_slice(&bytes).ok()
 }
 
 /// Read a cached value even if expired, as long as it aged out no more than
@@ -237,8 +266,7 @@ pub fn cache_get_stale<T: DeserializeOwned>(
     key: &str,
     max_stale_secs: u64,
 ) -> Option<T> {
-    let bytes = std::fs::read(cache_path(app_data_dir, key)).ok()?;
-    let env: CacheEnvelope<T> = serde_json::from_slice(&bytes).ok()?;
+    let env = read_envelope::<T>(app_data_dir, key)?;
     (env.expires.saturating_add(max_stale_secs) >= crate::util::time::now_secs())
         .then_some(env.value)
 }
@@ -284,12 +312,40 @@ fn sanitize(key: &str) -> String {
         .collect()
 }
 
-/// Write a cached value that stays fresh for `ttl_secs`.
+/// Write a cached value that stays fresh for `ttl_secs`. Carries no SDE
+/// generation tag — a plain TTL-only entry, as read by [`cache_get`]. Use
+/// [`cache_put_versioned`] for values derived from the SDE.
 pub fn cache_put<T: Serialize>(
     app_data_dir: &Path,
     key: &str,
     value: &T,
     ttl_secs: u64,
+) -> Result<(), String> {
+    write_envelope(app_data_dir, key, value, ttl_secs, None)
+}
+
+/// Write a cached value that stays fresh for `ttl_secs`, tagged with the SDE
+/// generation (`sde::generation_id`) it was computed against (#884). A
+/// subsequent [`cache_get_versioned`] call misses as soon as the SDE's
+/// generation moves on, even if `ttl_secs` hasn't elapsed yet; the TTL still
+/// applies as a secondary ceiling so the entry doesn't live forever should
+/// the SDE never update.
+pub fn cache_put_versioned<T: Serialize>(
+    app_data_dir: &Path,
+    key: &str,
+    value: &T,
+    ttl_secs: u64,
+    sde_generation: u64,
+) -> Result<(), String> {
+    write_envelope(app_data_dir, key, value, ttl_secs, Some(sde_generation))
+}
+
+fn write_envelope<T: Serialize>(
+    app_data_dir: &Path,
+    key: &str,
+    value: &T,
+    ttl_secs: u64,
+    sde_generation: Option<u64>,
 ) -> Result<(), String> {
     let path = cache_path(app_data_dir, key);
     if let Some(parent) = path.parent() {
@@ -297,10 +353,75 @@ pub fn cache_put<T: Serialize>(
     }
     let env = CacheEnvelope {
         expires: crate::util::time::now_secs() + ttl_secs,
+        sde_generation,
         value,
     };
     let data = serde_json::to_vec(&env).map_err(|e| e.to_string())?;
     std::fs::write(path, data).map_err(|e| e.to_string())
+}
+
+// --- Hash short-circuit for providers with no revalidation headers (#886) ---
+//
+// zKillboard's stats endpoint (and Fuzzwork's aggregates, though that one's
+// cache is in-memory-only — see `market::cache::TtlCache`) send neither an
+// `ETag` nor a `Last-Modified` we can trust (confirmed via `curl -I`;
+// zKillboard's stats response is even marked `Cache-Control: no-store`), so
+// there's no way to ask the server "did this change?" before paying for a
+// full download. `cache_put_if_changed` still pays for the download (the TTL
+// cadence below is unchanged) but skips rewriting the body to disk when the
+// freshly-fetched value hashes the same as what's already cached — the
+// common case for e.g. a pilot's kill stats, which drift slowly.
+
+/// SHA-256 hex digest of `value`'s JSON encoding. Used only to detect
+/// whether a re-fetched value actually changed, never for security purposes.
+fn content_hash<T: Serialize>(value: &T) -> String {
+    use sha2::{Digest, Sha256};
+    let bytes = serde_json::to_vec(value).unwrap_or_default();
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+/// The [`cache_put_if_changed`]/[`cache_get_if_changed`] hash-marker key for
+/// `key` — kept distinct from `key` itself so the (small) freshness marker
+/// and the (potentially large) durable body never collide as cache keys.
+fn hash_marker_key(key: &str) -> String {
+    format!("{key}.hash")
+}
+
+/// Like [`cache_put`], but for providers with no `ETag`/`Last-Modified` to
+/// revalidate against: skips rewriting the (durable, non-expiring) body when
+/// `value` hashes the same as the last write, only pushing the freshness
+/// deadline forward — exactly like [`cache_put`], so a call here always
+/// renews the same `ttl_secs` cadence regardless of whether the body changed.
+/// Returns whether the value actually changed, so callers can skip
+/// signalling a refresh downstream when it didn't. Pair with
+/// [`cache_get_if_changed`] to read it back.
+pub fn cache_put_if_changed<T: Serialize>(
+    app_data_dir: &Path,
+    key: &str,
+    value: &T,
+    ttl_secs: u64,
+) -> Result<bool, String> {
+    let hash = content_hash(value);
+    let marker_key = hash_marker_key(key);
+    // Compare against the last-written hash regardless of how stale its own
+    // marker has become — staleness only gates *whether a re-fetch is due*
+    // (the caller's own `cache_get_if_changed` check), not whether the hash
+    // is still meaningful for spotting an unchanged body.
+    let previous = cache_get_stale::<String>(app_data_dir, &marker_key, u64::MAX);
+    let changed = previous.as_deref() != Some(hash.as_str());
+    if changed {
+        save_data(app_data_dir, key, value)?;
+    }
+    cache_put(app_data_dir, &marker_key, &hash, ttl_secs)?;
+    Ok(changed)
+}
+
+/// Read a value written by [`cache_put_if_changed`]: the durable body if its
+/// freshness marker hasn't expired, `None` otherwise (stale or never
+/// written) — mirrors [`cache_get`]'s "fresh or nothing" contract.
+pub fn cache_get_if_changed<T: DeserializeOwned>(app_data_dir: &Path, key: &str) -> Option<T> {
+    cache_get::<String>(app_data_dir, &hash_marker_key(key))?;
+    load_data(app_data_dir, key)
 }
 
 #[cfg(test)]
@@ -319,6 +440,50 @@ mod tests {
     }
 
     #[test]
+    fn cache_put_if_changed_skips_body_rewrite_when_unchanged() {
+        let dir = std::env::temp_dir().join(format!("eve-hash-cache-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // First write: no previous hash, so it's reported as "changed" and
+        // both the body and the marker land on disk.
+        assert!(cache_put_if_changed(&dir, "k", &vec![1_i64, 2, 3], 3600).unwrap());
+        assert_eq!(
+            cache_get_if_changed::<Vec<i64>>(&dir, "k"),
+            Some(vec![1, 2, 3])
+        );
+
+        // Same value again: hash matches, reported unchanged, but the TTL
+        // marker still renews (cadence is unaffected).
+        assert!(!cache_put_if_changed(&dir, "k", &vec![1_i64, 2, 3], 3600).unwrap());
+        assert_eq!(
+            cache_get_if_changed::<Vec<i64>>(&dir, "k"),
+            Some(vec![1, 2, 3])
+        );
+
+        // A genuinely different value is reported as changed and overwrites
+        // the durable body.
+        assert!(cache_put_if_changed(&dir, "k", &vec![9_i64], 3600).unwrap());
+        assert_eq!(cache_get_if_changed::<Vec<i64>>(&dir, "k"), Some(vec![9]));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cache_get_if_changed_misses_once_marker_expires() {
+        let dir =
+            std::env::temp_dir().join(format!("eve-hash-cache-expiry-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // A marker written with an already-elapsed TTL means the value is
+        // due for a re-fetch, even though the durable body is still on disk.
+        cache_put_if_changed(&dir, "k", &1_i64, 0).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        assert_eq!(cache_get_if_changed::<i64>(&dir, "k"), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn cache_get_stale_serves_recently_expired_entries() {
         let dir = std::env::temp_dir().join(format!("eve-stale-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -329,12 +494,38 @@ mod tests {
         let now = crate::util::time::now_secs();
         let env = CacheEnvelope {
             expires: now - 100,
+            sde_generation: None,
             value: 7_i64,
         };
         std::fs::write(&path, serde_json::to_vec(&env).unwrap()).unwrap();
         assert_eq!(cache_get::<i64>(&dir, "k"), None);
         assert_eq!(cache_get_stale::<i64>(&dir, "k", 3600), Some(7));
         assert_eq!(cache_get_stale::<i64>(&dir, "k", 50), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cache_get_versioned_misses_on_generation_mismatch() {
+        // #884: a cache entry written for SDE generation N must miss when read
+        // back requesting N + 1, even though its TTL hasn't elapsed — an SDE
+        // update invalidates it immediately instead of waiting out the TTL.
+        let dir = std::env::temp_dir().join(format!("eve-versioned-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        cache_put_versioned(&dir, "k", &vec![1_i64, 2, 3], 3600, 1).unwrap();
+
+        // Same generation → hit.
+        assert_eq!(
+            cache_get_versioned::<Vec<i64>>(&dir, "k", 1),
+            Some(vec![1, 2, 3])
+        );
+        // Next generation → miss, forcing recompute, despite the fresh TTL.
+        assert_eq!(cache_get_versioned::<Vec<i64>>(&dir, "k", 2), None);
+
+        // An entry with no generation tag (plain cache_put) never matches a
+        // versioned read.
+        cache_put(&dir, "plain", &1_i64, 3600).unwrap();
+        assert_eq!(cache_get_versioned::<i64>(&dir, "plain", 1), None);
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -7,6 +7,7 @@
 
 import { queryOptions } from "@tanstack/react-query";
 import { marketHistory, marketRegions, sdeSearch } from "./api";
+import type { Fresh } from "./api/common";
 
 /** Key for the shopping lists; shared so "add to list" buttons can invalidate
  *  the Shopping page from anywhere. */
@@ -14,14 +15,30 @@ export const SHOPPING_LISTS_KEY = ["shopping", "lists"] as const;
 
 // --- Market ---
 
-/** ESI history is published once a day, and the backend's own conditional
- *  cache already holds the same call ~20 min server-side — a long client
- *  stale time just avoids redundant refetches of data that hasn't moved.
- *  This is the value PriceHistoryPopover used stand-alone before it and the
- *  Market Search history tab were unified onto this one key: fetching the
- *  same region+type from either surface now shares a single cache entry
- *  instead of double-fetching. */
+/** Fallback when the backend has no cached `expiresAt` yet (cache disabled,
+ *  or nothing fetched): ESI history is published once a day, and the
+ *  backend's own conditional cache already holds the same call ~20 min
+ *  server-side, so a long client stale time just avoids redundant refetches
+ *  of data that hasn't moved. This is the value PriceHistoryPopover used
+ *  stand-alone before it and the Market Search history tab were unified
+ *  onto this one key: fetching the same region+type from either surface
+ *  now shares a single cache entry instead of double-fetching. */
 const MARKET_HISTORY_STALE_TIME = 30 * 60 * 1000;
+
+/** Time remaining (ms) until a `Fresh` envelope's server-derived cache
+ *  deadline, floored at 0 — TanStack's dynamic `staleTime` form calls this
+ *  with the query's raw (pre-`select`) cached data on every staleness
+ *  check (#885), so it reflects ESI's real `Cache-Control`/`Expires`
+ *  window instead of a hand-guessed constant. Falls back to `fallbackMs`
+ *  when the envelope carries no `expiresAt` (not fetched yet, or the
+ *  backend's conditional cache is disabled). */
+function staleTimeFromFresh(
+  fresh: Fresh<unknown> | undefined,
+  fallbackMs: number,
+): number {
+  if (fresh?.expiresAt == null) return fallbackMs;
+  return Math.max(0, fresh.expiresAt - Date.now());
+}
 
 /** The region/trade-hub list is baked into the backend (market service
  *  `markets.rs`), so it can only change with an app update — like the SDE it
@@ -42,12 +59,17 @@ export const marketKeys = {
     }),
   /** Daily price/volume history for a type in a region. `typeId` is nullable
    *  so callers can build the key before an item is picked; pair with
-   *  `enabled: typeId != null` on the query. */
+   *  `enabled: typeId != null` on the query. `select` projects the `Fresh`
+   *  envelope down to the plain `HistoryPoint[]` every existing caller
+   *  expects — `staleTime` still sees the full envelope via the query's
+   *  raw cached data, so it can derive from `expiresAt` (#885). */
   history: (regionId: number, typeId: number | null | undefined) =>
     queryOptions({
       queryKey: ["market", "history", regionId, typeId] as const,
       queryFn: () => marketHistory(regionId, typeId as number),
-      staleTime: MARKET_HISTORY_STALE_TIME,
+      staleTime: (query) =>
+        staleTimeFromFresh(query.state.data, MARKET_HISTORY_STALE_TIME),
+      select: (fresh) => fresh.data,
     }),
 };
 

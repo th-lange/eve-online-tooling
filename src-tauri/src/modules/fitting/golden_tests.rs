@@ -38,6 +38,8 @@ fn golden_pyfa_fits() {
         charge_type_id: charge.map(tid),
         quantity: 1,
         active_drones: None,
+        mutation: None,
+        fighter_ability: None,
     };
     let drone = |name: &str, qty: i32| FitItem {
         type_id: tid(name),
@@ -47,6 +49,8 @@ fn golden_pyfa_fits() {
         charge_type_id: None,
         quantity: qty,
         active_drones: None,
+        mutation: None,
+        fighter_ability: None,
     };
     let fit = |name: &str, items: Vec<FitItem>| Fit {
         id: "t".into(),
@@ -370,6 +374,8 @@ fn golden_pyfa_fits() {
             &[],
             None,
             None,
+            1.0,
+            false, // factor_reload (#871)
         )
         .expect("dogma");
         let (dps, ehp, vel, align, stable) = (
@@ -421,4 +427,893 @@ fn golden_pyfa_fits() {
         "golden mismatches vs PYFA:\n{}",
         failures.join("\n"),
     );
+}
+
+/// Vedmak spool-up (#872): a Vedmak with a Heavy Entropic Disintegrator II
+/// loaded with Occult M, run at 0% vs 100% spool. No Triglavian hull is in
+/// `tools/pyfa-oracle/golden.json` yet (it predates #872), so per the
+/// issue's documented fallback this is a hand-computed check instead of an
+/// oracle-matched one: the weapon's own finalized
+/// `damageMultiplierBonusMax`/`…PerCycle` (2.125 / 0.07 — real numbers from
+/// PYFA v2.67.0's bundled SDE, cross-checked against `engine::spool`'s unit
+/// tests) fully caps at 100% spool (`ceil(2.125 / 0.07) = 31` cycles ≥ max),
+/// so the 100%-spooled turret DPS must be *exactly* `1 + 2.125 = 3.125×` the
+/// 0%-spool (cold) turret DPS — a ratio that's independent of the hull's own
+/// damage bonuses (skills, role bonus, …), which cancel out of it. Also
+/// checks `is_spoolable` gates strictly on whether a spoolable weapon/rep is
+/// actually fitted.
+#[test]
+fn vedmak_spool_up_matches_hand_computed_ratio() {
+    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        eprintln!("vedmak_spool_up_matches_hand_computed_ratio: EVE_SDE_PATH unset — skipping");
+        return;
+    };
+    let path = std::path::PathBuf::from(&path);
+    if !path.exists() {
+        eprintln!("vedmak_spool_up_matches_hand_computed_ratio: {path:?} missing — skipping");
+        return;
+    }
+    let sde = Sde::open(&path).expect("open sde");
+    let dir = path.parent().unwrap();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let all5 = |_: i64| 5.0;
+    let fit = Fit {
+        id: "t".into(),
+        name: "Vedmak".into(),
+        ship_type_id: tid("Vedmak"),
+        items: vec![FitItem {
+            type_id: tid("Heavy Entropic Disintegrator II"),
+            slot: SlotKind::High,
+            index: 0,
+            state: ModuleState::Active,
+            charge_type_id: Some(tid("Occult M")),
+            quantity: 1,
+            active_drones: None,
+            mutation: None,
+            fighter_ability: None,
+        }],
+        projected: Vec::new(),
+    };
+    let layout = sde.ship_layout(fit.ship_type_id).unwrap().expect("layout");
+    let run = |spool_pct: f64| {
+        run_dogma(
+            &sde,
+            dir,
+            &fit,
+            &layout,
+            &all5,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+            None,
+            None,
+            spool_pct,
+            false, // factor_reload (#871)
+        )
+        .expect("dogma")
+    };
+    let cold = run(0.0);
+    let spooled = run(1.0);
+    assert!(
+        cold.is_spoolable,
+        "Vedmak + Entropic Disintegrator should be flagged spoolable"
+    );
+    assert!(
+        cold.dps.turret > 0.0,
+        "cold DPS should be nonzero: {}",
+        cold.dps.turret
+    );
+    let ratio = spooled.dps.turret / cold.dps.turret;
+    assert!(
+        (ratio - 3.125).abs() < 1e-6,
+        "100%-spooled/cold DPS ratio should be exactly 3.125, got {ratio}"
+    );
+
+    let unarmed = Fit {
+        id: "t".into(),
+        name: "Vedmak".into(),
+        ship_type_id: tid("Vedmak"),
+        items: Vec::new(),
+        projected: Vec::new(),
+    };
+    let d = run_dogma(
+        &sde,
+        dir,
+        &unarmed,
+        &layout,
+        &all5,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,
+        1.0,
+        false, // factor_reload (#871)
+    )
+    .expect("dogma");
+    assert!(
+        !d.is_spoolable,
+        "an unarmed hull should not be flagged spoolable"
+    );
+}
+
+/// Rapid Light Missile Launcher sustained DPS (#871) — the acceptance-
+/// critical reload case, per the issue: no PYFA-oracle fixture exists for a
+/// rapid-launcher fit yet (`tools/pyfa-oracle/golden.json` predates #871),
+/// so per the issue's documented fallback (same one #872's spool-up test
+/// used) this is a hand-computed check instead of an oracle-matched one.
+///
+/// Real Rapid Light Missile Launcher II / Scourge Light Missile attribute
+/// values (PYFA v2.67.0's bundled SDE, cross-checked against everef.net):
+/// launcher `capacity` (38) 0.3 m³, `reloadTime` (1795) 35s, base rate of
+/// fire (51) 6.24s; missile `volume` (161) 0.015 m³ → a 20-shot clip
+/// (`floor(0.3 / 0.015)`). Skills are held at zero (untrained skills are
+/// skipped by the dogma engine entirely) so the finalized rate of fire stays
+/// at the module's own base 6.24s, unaffected by the Rapid Launch skill's
+/// RoF bonus — keeping the hand math exact. The sustained/burst DPS ratio
+/// must then be exactly `(20×6.24) / (20×6.24 + 35) = 124.8 / 159.8`,
+/// independent of any damage multiplier (which scales burst and sustained
+/// identically and cancels out of the ratio). Burst DPS itself must be
+/// bit-identical whether or not reload is factored in — the toggle only
+/// gates the capacitor sim, never the DPS panel.
+#[test]
+fn rapid_light_missile_launcher_sustained_dps_matches_hand_computed_ratio() {
+    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        eprintln!(
+            "rapid_light_missile_launcher_sustained_dps_matches_hand_computed_ratio: EVE_SDE_PATH unset — skipping"
+        );
+        return;
+    };
+    let path = std::path::PathBuf::from(&path);
+    if !path.exists() {
+        eprintln!(
+            "rapid_light_missile_launcher_sustained_dps_matches_hand_computed_ratio: {path:?} missing — skipping"
+        );
+        return;
+    }
+    let sde = Sde::open(&path).expect("open sde");
+    let dir = path.parent().unwrap();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    // Untrained (level 0) skills are skipped entirely by the dogma engine —
+    // avoids the Rapid Launch RoF bonus and any Caldari-cruiser missile
+    // bonus confounding the hand-computed ratio below.
+    let zero_skills = |_: i64| 0.0;
+    let fit = Fit {
+        id: "t".into(),
+        name: "Caracal".into(),
+        ship_type_id: tid("Caracal"),
+        items: vec![FitItem {
+            type_id: tid("Rapid Light Missile Launcher II"),
+            slot: SlotKind::High,
+            index: 0,
+            state: ModuleState::Active,
+            charge_type_id: Some(tid("Scourge Light Missile")),
+            quantity: 1,
+            active_drones: None,
+            mutation: None,
+            fighter_ability: None,
+        }],
+        projected: Vec::new(),
+    };
+    let layout = sde.ship_layout(fit.ship_type_id).unwrap().expect("layout");
+    let run = |factor_reload: bool| {
+        run_dogma(
+            &sde,
+            dir,
+            &fit,
+            &layout,
+            &zero_skills,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+            None,
+            None,
+            1.0,
+            factor_reload,
+        )
+        .expect("dogma")
+    };
+    let factored = run(true);
+    let unfactored = run(false);
+
+    assert!(
+        factored.dps.missile > 0.0,
+        "burst missile dps should be nonzero"
+    );
+    assert_eq!(
+        factored.dps.missile, unfactored.dps.missile,
+        "burst dps must be identical regardless of the factor_reload toggle"
+    );
+    let ratio = factored.dps_sustained.missile / factored.dps.missile;
+    let expected = (20.0 * 6.24) / (20.0 * 6.24 + 35.0);
+    assert!(
+        (ratio - expected).abs() < 1e-6,
+        "sustained/burst ratio should be {expected}, got {ratio}"
+    );
+}
+
+/// Ancillary Armor Repairer burst/sustained rep (#878) — no pyfa-oracle
+/// fixture exists for an AAR fit (`tools/pyfa-oracle/golden.json` predates
+/// #878), so per the issue's documented fallback (the same one #871/#872
+/// used) this is a hand-computed check against real Small Ancillary Armor
+/// Repairer / Nanite Repair Paste attribute values (PYFA v2.67.0's bundled
+/// SDE, cross-checked against everef.net): `armorDamageAmount` (84) 52 HP,
+/// `duration` (73) 6s, `capacity` (38) 0.08 m³, `reloadTime` (1795) 60s,
+/// `chargedArmorDamageMultiplier` (1886) 3x; Nanite Repair Paste `volume`
+/// (161) 0.01 m³ → an 8-shot clip (`floor(0.08 / 0.01)`). Untrained (level 0)
+/// skills keep the module's own base numbers exact (no Repair Systems rep
+/// bonus). Burst must be exactly `52 * 3 / 6 = 26`/s; sustained derates it by
+/// the #871 cycle helper: `(8*6) / (8*6 + 60) = 48/108 = 4/9`.
+#[test]
+fn punisher_ancillary_armor_repairer_matches_hand_computed_burst_and_sustained() {
+    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        eprintln!(
+            "punisher_ancillary_armor_repairer_matches_hand_computed_burst_and_sustained: EVE_SDE_PATH unset — skipping"
+        );
+        return;
+    };
+    let path = std::path::PathBuf::from(&path);
+    if !path.exists() {
+        eprintln!(
+            "punisher_ancillary_armor_repairer_matches_hand_computed_burst_and_sustained: {path:?} missing — skipping"
+        );
+        return;
+    }
+    let sde = Sde::open(&path).expect("open sde");
+    let dir = path.parent().unwrap();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let zero_skills = |_: i64| 0.0;
+    let fit = Fit {
+        id: "t".into(),
+        name: "Punisher".into(),
+        ship_type_id: tid("Punisher"),
+        items: vec![FitItem {
+            type_id: tid("Small Ancillary Armor Repairer"),
+            slot: SlotKind::Low,
+            index: 0,
+            state: ModuleState::Active,
+            charge_type_id: Some(tid("Nanite Repair Paste")),
+            quantity: 1,
+            active_drones: None,
+            mutation: None,
+            fighter_ability: None,
+        }],
+        projected: Vec::new(),
+    };
+    let layout = sde.ship_layout(fit.ship_type_id).unwrap().expect("layout");
+    let d = run_dogma(
+        &sde,
+        dir,
+        &fit,
+        &layout,
+        &zero_skills,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,
+        1.0,
+        false, // factor_reload (#871) — burst/sustained are always both computed
+    )
+    .expect("dogma");
+    assert!(
+        (d.tank.armor_rep_s - 26.0).abs() < 1e-6,
+        "burst armor rep should be 26/s, got {}",
+        d.tank.armor_rep_s
+    );
+    let expected_sustained = 26.0 * 4.0 / 9.0;
+    assert!(
+        (d.tank.armor_rep_s_sustained - expected_sustained).abs() < 1e-6,
+        "sustained armor rep should be {expected_sustained}, got {}",
+        d.tank.armor_rep_s_sustained
+    );
+}
+
+/// Ancillary Shield Booster burst/sustained rep (#878) — same documented
+/// hand-computed fallback, against real Large Ancillary Shield Booster / Cap
+/// Booster 400 attribute values (PYFA v2.67.0's bundled SDE, cross-checked
+/// against everef.net): `shieldBonus` (68) 390 HP, `duration` (73) 4s,
+/// `capacity` (38) 42 m³, `reloadTime` (1795) 60s; Cap Booster 400 `volume`
+/// (161) 16 m³ → a 2-shot clip (`floor(42 / 16)`). Burst must be exactly
+/// `390 / 4 = 97.5`/s; sustained derates it by the #871 cycle helper:
+/// `(2*4) / (2*4 + 60) = 8/68 = 2/17`.
+#[test]
+fn cyclone_ancillary_shield_booster_matches_hand_computed_burst_and_sustained() {
+    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        eprintln!(
+            "cyclone_ancillary_shield_booster_matches_hand_computed_burst_and_sustained: EVE_SDE_PATH unset — skipping"
+        );
+        return;
+    };
+    let path = std::path::PathBuf::from(&path);
+    if !path.exists() {
+        eprintln!(
+            "cyclone_ancillary_shield_booster_matches_hand_computed_burst_and_sustained: {path:?} missing — skipping"
+        );
+        return;
+    }
+    let sde = Sde::open(&path).expect("open sde");
+    let dir = path.parent().unwrap();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let zero_skills = |_: i64| 0.0;
+    let fit = Fit {
+        id: "t".into(),
+        name: "Cyclone".into(),
+        ship_type_id: tid("Cyclone"),
+        items: vec![FitItem {
+            type_id: tid("Large Ancillary Shield Booster"),
+            slot: SlotKind::Mid,
+            index: 0,
+            state: ModuleState::Active,
+            charge_type_id: Some(tid("Cap Booster 400")),
+            quantity: 1,
+            active_drones: None,
+            mutation: None,
+            fighter_ability: None,
+        }],
+        projected: Vec::new(),
+    };
+    let layout = sde.ship_layout(fit.ship_type_id).unwrap().expect("layout");
+    let d = run_dogma(
+        &sde,
+        dir,
+        &fit,
+        &layout,
+        &zero_skills,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,
+        1.0,
+        false, // factor_reload (#871) — burst/sustained are always both computed
+    )
+    .expect("dogma");
+    assert!(
+        (d.tank.shield_rep_s - 97.5).abs() < 1e-6,
+        "burst shield rep should be 97.5/s, got {}",
+        d.tank.shield_rep_s
+    );
+    let expected_sustained = 97.5 * 2.0 / 17.0;
+    assert!(
+        (d.tank.shield_rep_s_sustained - expected_sustained).abs() < 1e-6,
+        "sustained shield rep should be {expected_sustained}, got {}",
+        d.tank.shield_rep_s_sustained
+    );
+}
+
+/// Reactive Armor Hardener resist convergence against a 100% EM profile
+/// (#878) — same documented hand-computed fallback. A base Reactive Armor
+/// Hardener's own baseline armor resonance is `[0.85; 4]` (15% resist each,
+/// `resistanceShiftAmount` 6%, PYFA v2.67.0's bundled SDE); iterated to a
+/// fixed point against a pure-EM profile (hand-verified in
+/// `engine::tank::tests::rah_shift_single_damage_type_concentrates_all_resist_on_it`)
+/// it concentrates the module's whole 60% resist pool onto EM (60% EM
+/// resist, 0% on the other three) — independent of the hull's own base
+/// resistances or skills, which cancel out of the *ratio* between the
+/// unarmed hull's own armor resonance and the RAH-fitted hull's shifted
+/// resonance: `shifted_resonance / unarmed_resonance` must be exactly
+/// `[0.4, 1.0, 1.0, 1.0]`.
+#[test]
+fn rifter_reactive_armor_hardener_converges_to_hand_computed_em_resists() {
+    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        eprintln!(
+            "rifter_reactive_armor_hardener_converges_to_hand_computed_em_resists: EVE_SDE_PATH unset — skipping"
+        );
+        return;
+    };
+    let path = std::path::PathBuf::from(&path);
+    if !path.exists() {
+        eprintln!(
+            "rifter_reactive_armor_hardener_converges_to_hand_computed_em_resists: {path:?} missing — skipping"
+        );
+        return;
+    }
+    let sde = Sde::open(&path).expect("open sde");
+    let dir = path.parent().unwrap();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let zero_skills = |_: i64| 0.0;
+    let em_only = DamageProfile([1.0, 0.0, 0.0, 0.0]);
+    let layout = sde.ship_layout(tid("Rifter")).unwrap().expect("layout");
+    let run = |items: Vec<FitItem>| {
+        run_dogma(
+            &sde,
+            dir,
+            &Fit {
+                id: "t".into(),
+                name: "Rifter".into(),
+                ship_type_id: tid("Rifter"),
+                items,
+                projected: Vec::new(),
+            },
+            &layout,
+            &zero_skills,
+            &em_only,
+            0.0,
+            None,
+            &[],
+            None,
+            None,
+            1.0,
+            false, // factor_reload (#871)
+        )
+        .expect("dogma")
+    };
+    let unarmed = run(Vec::new());
+    let hardened = run(vec![FitItem {
+        type_id: tid("Reactive Armor Hardener"),
+        slot: SlotKind::Low,
+        index: 0,
+        state: ModuleState::Active,
+        charge_type_id: None,
+        quantity: 1,
+        active_drones: None,
+        mutation: None,
+        fighter_ability: None,
+    }]);
+    assert!(
+        hardened.tank.rah_active,
+        "a running RAH should flag rah_active"
+    );
+    let expected_ratio = [0.4, 1.0, 1.0, 1.0];
+    for (i, expected) in expected_ratio.into_iter().enumerate() {
+        let unarmed_resonance = 1.0 - unarmed.tank.armor_resists[i];
+        let hardened_resonance = 1.0 - hardened.tank.armor_resists[i];
+        assert!(
+            unarmed_resonance > 0.0,
+            "unarmed resonance[{i}] should be nonzero: {unarmed_resonance}"
+        );
+        let ratio = hardened_resonance / unarmed_resonance;
+        assert!(
+            (ratio - expected).abs() < 1e-6,
+            "type {i}: shifted/unarmed resonance ratio should be {expected}, got {ratio}"
+        );
+    }
+}
+
+/// Cap booster injection (#875) — no pyfa-oracle fixture exists for a cap
+/// booster fit (`tools/pyfa-oracle/golden.json` predates #875), so per the
+/// issue's documented fallback this is a hand-computed check against real
+/// Rifter / Medium Capacitor Booster II / Cap Booster 400 attribute values
+/// (PYFA v2.67.0's bundled SDE, cross-checked against everef.net): Rifter
+/// `capacitorCapacity` (482) 250 GJ, `rechargeRate` (55) 250s → peak
+/// recharge `2.5 * 250 / 250 = 2.5` GJ/s. A projected neut at 6 GJ/s (#706)
+/// — well above that peak — makes the bare hull unstable outright. Medium
+/// Capacitor Booster II `duration` (73) 12s, `capacity` (38) 40 m3,
+/// `reloadTime` (1795) 10s; Cap Booster 400 `volume` (161) 16 m3 →
+/// `floor(40 / 16) = 2`-shot clip. Average injection `2*400 / (2*12+10) =
+/// 800/34 ≈ 23.5` GJ/s comfortably outstrips the 6 GJ/s neut, so the same
+/// hull holds indefinitely once the booster is fitted — matching Pyfa's
+/// capSim treatment of injectors (approach/formulas only, per the issue's
+/// license note; #875's own engine tests pin the exact discrete-sim math).
+#[test]
+fn rifter_cap_booster_stabilizes_an_otherwise_neut_unstable_hull() {
+    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        eprintln!(
+            "rifter_cap_booster_stabilizes_an_otherwise_neut_unstable_hull: EVE_SDE_PATH unset — skipping"
+        );
+        return;
+    };
+    let path = std::path::PathBuf::from(&path);
+    if !path.exists() {
+        eprintln!(
+            "rifter_cap_booster_stabilizes_an_otherwise_neut_unstable_hull: {path:?} missing — skipping"
+        );
+        return;
+    }
+    let sde = Sde::open(&path).expect("open sde");
+    let dir = path.parent().unwrap();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let zero_skills = |_: i64| 0.0;
+    let layout = sde.ship_layout(tid("Rifter")).unwrap().expect("layout");
+    let run = |items: Vec<FitItem>, neut_gjs: f64| {
+        run_dogma(
+            &sde,
+            dir,
+            &Fit {
+                id: "t".into(),
+                name: "Rifter".into(),
+                ship_type_id: tid("Rifter"),
+                items,
+                projected: Vec::new(),
+            },
+            &layout,
+            &zero_skills,
+            &DamageProfile::default(),
+            neut_gjs,
+            None,
+            &[],
+            None,
+            None,
+            1.0,
+            false, // factor_reload (#871) — irrelevant here; #875 always models the booster
+        )
+        .expect("dogma")
+    };
+
+    let bare = run(Vec::new(), 6.0);
+    assert!(
+        !bare.capacitor.stable,
+        "6 GJ/s neut should exceed the Rifter's 2.5 GJ/s peak recharge"
+    );
+
+    let boosted = run(
+        vec![FitItem {
+            type_id: tid("Medium Capacitor Booster II"),
+            slot: SlotKind::Mid,
+            index: 0,
+            state: ModuleState::Active,
+            charge_type_id: Some(tid("Cap Booster 400")),
+            quantity: 1,
+            active_drones: None,
+            mutation: None,
+            fighter_ability: None,
+        }],
+        6.0,
+    );
+    assert!(
+        boosted.capacitor.stable,
+        "the same neut pressure should be absorbed once the cap booster is fitted"
+    );
+}
+
+/// Mutated (abyssal) module support (#876): a max-rolled mutaplasmid on a
+/// fitted MWD changes the ship's max velocity by exactly the amount
+/// `engine::navigation::prop_velocity`'s formula (`base_velocity × (1 +
+/// speedFactor·speedBoostFactor/mass/100)`) predicts for the rolled
+/// `speedFactor`. Uses the "Unstable 5MN Microwarpdrive Mutaplasmid"
+/// (typeID 47738) on a Rifter's 5MN Microwarpdrive II — the issue's own
+/// example is a 50MN MWD, but this substitutes the same mechanic on the
+/// size variant already wired into this file's Rifter fixture; the roll
+/// math is identical for every MWD size.
+///
+/// The velocity *bonus* the prop module grants (`speedFactor ·
+/// speedBoostFactor/mass/100`) is exactly proportional to its resolved
+/// `speedFactor` (20) — confirmed against every `dgmEffects.modifierInfo`
+/// row touching that attribute: they're all `LocationRequiredSkillModifier`/
+/// `LocationGroupModifier` percent scalings (e.g. effect 8291, Acceleration
+/// Control's `+X%/level` to any module requiring its skill), never a reset
+/// to a constant. So mutating the *base* `speedFactor` the resolve pass
+/// seeds by a known multiplier (this mutaplasmid's real max-roll, from the
+/// bundled `dynamic_item_attributes.json` — CCP's `dynamicitemattributes`
+/// data, see `sde::db::mutaplasmid`) must scale the *resolved* bonus by
+/// that exact same multiplier, regardless of what all-V skill bonuses also
+/// apply on top — this is what the test derives and checks, rather than
+/// hand-deriving the skill chain (Acceleration Control's own magnitude
+/// isn't this feature's concern). A mutation that silently no-ops would
+/// leave the mutated run's bonus ratio at `1.0`, not the mutaplasmid's
+/// rolled multiplier, failing the assertion below.
+#[test]
+fn mutated_mwd_max_roll_speed_bonus_changes_max_velocity() {
+    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        eprintln!(
+            "mutated_mwd_max_roll_speed_bonus_changes_max_velocity: EVE_SDE_PATH unset — skipping"
+        );
+        return;
+    };
+    let path = std::path::PathBuf::from(&path);
+    if !path.exists() {
+        eprintln!(
+            "mutated_mwd_max_roll_speed_bonus_changes_max_velocity: {path:?} missing — skipping"
+        );
+        return;
+    }
+    let sde = Sde::open(&path).expect("open sde");
+    let dir = path.parent().unwrap();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let all5 = |_: i64| 5.0;
+    let mwd_type_id = tid("5MN Microwarpdrive II");
+    let mutaplasmid_type_id = tid("Unstable 5MN Microwarpdrive Mutaplasmid");
+    let ship_type_id = tid("Rifter");
+    let layout = sde.ship_layout(ship_type_id).unwrap().expect("layout");
+
+    // Real base speedFactor (bundled Fuzzwork SDE, cross-checked live).
+    let base_speed_factor = sde
+        .type_attributes_raw(mwd_type_id)
+        .unwrap()
+        .into_iter()
+        .find(|&(id, _)| id == 20)
+        .map(|(_, v)| v)
+        .expect("5MN Microwarpdrive II should carry speedFactor");
+    assert_eq!(base_speed_factor, 510.0);
+    // This mutaplasmid's real speedFactor roll range (bundled
+    // `dynamic_item_attributes.json`): [0.9, 1.100000023841858]×.
+    let max_roll_speed_factor = base_speed_factor * 1.100000023841858_f64;
+
+    let mwd_item = |mutation: Option<super::types::ItemMutation>| FitItem {
+        type_id: mwd_type_id,
+        slot: SlotKind::Mid,
+        index: 0,
+        state: ModuleState::Active,
+        charge_type_id: None,
+        quantity: 1,
+        active_drones: None,
+        mutation,
+        fighter_ability: None,
+    };
+    let run = |items: Vec<FitItem>| {
+        let fit = Fit {
+            id: "t".into(),
+            name: "Rifter".into(),
+            ship_type_id,
+            items,
+            projected: Vec::new(),
+        };
+        run_dogma(
+            &sde,
+            dir,
+            &fit,
+            &layout,
+            &all5,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+            None,
+            None,
+            1.0,
+            false, // factor_reload (#871) — irrelevant to navigation
+        )
+        .expect("dogma")
+    };
+
+    // The formula's `base_velocity` term (whatever Navigation/other all-V
+    // ship-speed skills resolve it to — unrelated to this feature).
+    let bare_velocity = run(Vec::new()).navigation.max_velocity;
+    let bonus_of = |velocity: f64| velocity / bare_velocity - 1.0;
+
+    let unmutated = run(vec![mwd_item(None)]);
+    let mutated = run(vec![mwd_item(Some(super::types::ItemMutation {
+        base_type_id: mwd_type_id,
+        mutaplasmid_type_id,
+        attrs: [(20i64, max_roll_speed_factor)].into_iter().collect(),
+    }))]);
+
+    assert!(
+        mutated.navigation.max_velocity > unmutated.navigation.max_velocity,
+        "a max-roll speed mutaplasmid must raise max velocity: {} vs {}",
+        mutated.navigation.max_velocity,
+        unmutated.navigation.max_velocity
+    );
+    let bonus_ratio =
+        bonus_of(mutated.navigation.max_velocity) / bonus_of(unmutated.navigation.max_velocity);
+    let expected_ratio = max_roll_speed_factor / base_speed_factor;
+    assert!(
+        (bonus_ratio - expected_ratio).abs() < 1e-9,
+        "the mutated/unmutated velocity-bonus ratio should equal the mutaplasmid's rolled \
+         speedFactor multiplier ({expected_ratio}), got {bonus_ratio}"
+    );
+}
+
+/// Unmutated fits are byte-for-byte unaffected by the mutation machinery
+/// (#876 acceptance: "unmutated fits: zero change") — a plain `FitItem`
+/// with `mutation: None` resolves identically whether or not the dogma
+/// engine's mutation-override branch exists at all, since it's simply never
+/// entered.
+#[test]
+fn unmutated_item_is_unaffected_by_mutation_field() {
+    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        eprintln!("unmutated_item_is_unaffected_by_mutation_field: EVE_SDE_PATH unset — skipping");
+        return;
+    };
+    let path = std::path::PathBuf::from(&path);
+    if !path.exists() {
+        eprintln!("unmutated_item_is_unaffected_by_mutation_field: {path:?} missing — skipping");
+        return;
+    }
+    let sde = Sde::open(&path).expect("open sde");
+    let dir = path.parent().unwrap();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let all5 = |_: i64| 5.0;
+    let layout = sde.ship_layout(tid("Rifter")).unwrap().expect("layout");
+    let item = FitItem {
+        type_id: tid("200mm AutoCannon II"),
+        slot: SlotKind::High,
+        index: 0,
+        state: ModuleState::Active,
+        charge_type_id: Some(tid("Barrage S")),
+        quantity: 1,
+        active_drones: None,
+        mutation: None,
+        fighter_ability: None,
+    };
+    let fit = Fit {
+        id: "t".into(),
+        name: "Rifter".into(),
+        ship_type_id: tid("Rifter"),
+        items: vec![item],
+        projected: Vec::new(),
+    };
+    let d = run_dogma(
+        &sde,
+        dir,
+        &fit,
+        &layout,
+        &all5,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,
+        1.0,
+        false,
+    )
+    .expect("dogma");
+    assert!(d.dps.turret > 0.0, "unmutated gun should still deal damage");
+}
+
+/// Thanatos with 2 light fighter squadrons (#877) — the issue's acceptance
+/// scenario. No pyfa-oracle fixture exists for a fighter fit yet
+/// (`tools/pyfa-oracle/golden.json` predates #877), so per the issue's
+/// documented fallback (the same one #871/#872/#878 used) this is a
+/// hand-computed check against real Firbolg I / Thanatos attribute values
+/// (bundled SDE, cross-checked against everef.net).
+///
+/// Firbolg I (Gallente light fighter) carries two offensive abilities;
+/// `attackMissile` ("Rockets") is the higher-DPS one and wins auto-
+/// selection: 112.5 thermal damage per cycle, 1.0 damage multiplier,
+/// 5.0s rate of fire (`fighterAbilityAttackMissileDuration` 2233 = 5000ms).
+/// A Thanatos's own role bonus (`shipBonusCarrierG1FighterDamage`, effect
+/// 6601 — ship-intrinsic, exempt from the stacking penalty and from any
+/// skill gate since it's the ship's own effect, not a trained skill's)
+/// postPercent-boosts `fighterAbilityAttackMissileDamageMultiplier` by the
+/// ship's own `shipBonusCarrierG1` attribute (design value 5.0 = +5%) for
+/// any fighter requiring the "Gallente Carrier"-gated skill id the Firbolg
+/// carries as its second required skill — the *trained* Carrier skill's own
+/// self-scaling effect on that same ship attribute is skipped here (zero
+/// skills, untrained skills never resolve), so the ship's raw, unscaled
+/// design value is what applies: `112.5 × 1.05 / 5.0` = 23.625 dps per
+/// fighter. A full-size (6-fighter) squadron is 141.75 dps; two squadrons
+/// (both light, both under the hull's 3-light-bay / 4-tube caps) sum to
+/// 283.5 dps burst. No fighter ability carries clip/reload attributes in
+/// the SDE, so sustained equals burst exactly.
+#[test]
+fn thanatos_two_light_fighter_squadrons_matches_hand_computed_dps() {
+    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        eprintln!(
+            "thanatos_two_light_fighter_squadrons_matches_hand_computed_dps: EVE_SDE_PATH unset — skipping"
+        );
+        return;
+    };
+    let path = std::path::PathBuf::from(&path);
+    if !path.exists() {
+        eprintln!(
+            "thanatos_two_light_fighter_squadrons_matches_hand_computed_dps: {path:?} missing — skipping"
+        );
+        return;
+    }
+    let sde = Sde::open(&path).expect("open sde");
+    let dir = path.parent().unwrap();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    // Untrained (level 0) skills are skipped entirely by the dogma engine —
+    // avoids the trained Carrier skill's own self-scaling of the ship's role
+    // bonus, keeping the hand math exact against the ship's raw design value.
+    let zero_skills = |_: i64| 0.0;
+    let fit = Fit {
+        id: "t".into(),
+        name: "Thanatos".into(),
+        ship_type_id: tid("Thanatos"),
+        items: vec![
+            FitItem {
+                type_id: tid("Firbolg I"),
+                slot: SlotKind::Fighter,
+                index: 0,
+                state: ModuleState::Active,
+                charge_type_id: None,
+                quantity: 6,
+                active_drones: None,
+                mutation: None,
+                fighter_ability: None,
+            },
+            FitItem {
+                type_id: tid("Firbolg I"),
+                slot: SlotKind::Fighter,
+                index: 1,
+                state: ModuleState::Active,
+                charge_type_id: None,
+                quantity: 6,
+                active_drones: None,
+                mutation: None,
+                fighter_ability: None,
+            },
+        ],
+        projected: Vec::new(),
+    };
+    let layout = sde.ship_layout(fit.ship_type_id).unwrap().expect("layout");
+    let d = run_dogma(
+        &sde,
+        dir,
+        &fit,
+        &layout,
+        &zero_skills,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,
+        1.0,
+        false,
+    )
+    .expect("dogma");
+
+    assert!(
+        d.validation.is_empty(),
+        "2 light squadrons of 6 should be well within a Thanatos's tubes/bays/bay volume: {:?}",
+        d.validation
+    );
+    let expected = 112.5 * 1.05 / 5.0 * 6.0 * 2.0;
+    assert!(
+        (d.dps.fighter - expected).abs() < 0.5,
+        "fighter dps {} should match hand-computed {expected}",
+        d.dps.fighter
+    );
+    assert!(
+        (d.dps_sustained.fighter - expected).abs() < 0.5,
+        "no fighter ability reloads — sustained {} should equal burst {expected}",
+        d.dps_sustained.fighter
+    );
+    assert_eq!(
+        d.dps.total, d.dps.fighter,
+        "an unarmed hull's only DPS source is its fighters"
+    );
+    assert_eq!(d.fighter_abilities.len(), 2);
+    for squadron in d.fighter_abilities.iter().flatten() {
+        assert_eq!(
+            squadron.key, "attackMissile",
+            "Rockets outDPS the longer-range Fighter Missiles ability"
+        );
+        assert!((squadron.dps - expected / 2.0).abs() < 0.5);
+    }
 }

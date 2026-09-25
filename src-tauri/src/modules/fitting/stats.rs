@@ -10,19 +10,23 @@ use super::context::DogmaContext;
 use super::engine::abyssal::apply_abyssal_weather;
 use super::engine::application::{missile_application, turret_application};
 use super::engine::attr::{attr, AttrStore};
-use super::engine::capacitor::capacitor;
+use super::engine::capacitor::{capacitor, ModuleDrain};
+use super::engine::cycle::cycle_of;
 use super::engine::damage::{damage, Weapon};
+use super::engine::fighter;
+use super::engine::heat::{burnout_seconds, rack_heat, HeatSource};
 use super::engine::navigation::{navigation, prop_velocity, targeting};
 use super::engine::projection::{
     apply_projection, apply_subsystem_slots, projected_from_attrs, ProjectedInput,
 };
 use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
-use super::engine::tank::{tank, DamageProfile, Layer};
+use super::engine::spool::apply_spool;
+use super::engine::tank::{rah_shift, tank, DamageProfile, Layer};
 use super::engine::validate::{validate, ValItem};
 use super::types::{
-    AbyssalWeatherSelection, CapStats, DpsBreakdown, EwTag, Fit, FitItem, FitProblem, FitStats,
-    ModuleState, NavStats, ResourceUsage, SlotKind, TankStats, TargetProfile, TargetStats,
-    WeaponRange,
+    AbyssalWeatherSelection, CapStats, DpsBreakdown, EwTag, FighterAbilityStats, Fit, FitItem,
+    FitProblem, FitStats, ModuleState, NavStats, ResourceUsage, Severity, SlotKind, TankStats,
+    TargetProfile, TargetStats, WeaponRange,
 };
 use crate::sde::{Sde, ShipLayout};
 
@@ -44,6 +48,11 @@ pub(super) struct DogmaStats {
     pub(super) capacitor: CapStats,
     pub(super) tank: TankStats,
     pub(super) dps: DpsBreakdown,
+    /// Sustained DPS (#871): burst DPS derated by each weapon's own reload
+    /// cycle (`engine::cycle`) — clip depletion + reload pause. Equal to
+    /// `dps` for any weapon with infinite ammo (no reloadTime/capacity/
+    /// charge-volume attributes, or none loaded).
+    pub(super) dps_sustained: DpsBreakdown,
     pub(super) weapon_ranges: Vec<WeaponRange>,
     pub(super) navigation: NavStats,
     pub(super) targeting: TargetStats,
@@ -61,6 +70,17 @@ pub(super) struct DogmaStats {
     pub(super) applied_dps: Option<DpsBreakdown>,
     /// DPS-over-range curve (#701); empty when no target profile was given.
     pub(super) dps_range_curve: Vec<(f64, f64)>,
+    /// Whether the fit carries any spoolable weapon/rep (#872) — gates the
+    /// UI's spool selector.
+    pub(super) is_spoolable: bool,
+    /// Overheat burnout estimate per fitted item (#874), parallel to
+    /// `fit.items` — `None` for non-module items and modules that aren't
+    /// currently overheated. See `heat_of`.
+    pub(super) burnout_seconds: Vec<Option<f64>>,
+    /// Each fitted fighter squadron's selected ability + DPS (#877),
+    /// parallel to `fit.items` — `None` for non-fighter items and for a
+    /// pure support/EW squadron with no offensive ability.
+    pub(super) fighter_abilities: Vec<Option<FighterAbilityStats>>,
 }
 
 /// Build the engine inputs (ship + modules + all-V skills) from the SDE, resolve
@@ -78,7 +98,14 @@ pub(super) struct DogmaStats {
 /// external-modifier pass. `abyssal_weather` is a *separate*, mutually
 /// exclusive choice — Abyssal Deadspace weather, applied as a hardcoded
 /// post-resolve adjustment (see `engine::abyssal`) since it has no dogma
-/// representation in the SDE at all.
+/// representation in the SDE at all. `spool_pct` (#872) is the requested
+/// Triglavian/spoolable-weapon ramp fraction (0.0 cold .. 1.0 fully
+/// spooled), applied the same way (see `engine::spool`). `factor_reload`
+/// (#871) toggles reload accounting in the capacitor sim: when `true`, a
+/// cap-drawing weapon's steady drain is derated by its own reload
+/// sustained-factor and the discrete depletion sim pauses its draw during
+/// the reload window (see `engine::cycle`). `dps`/`dps_sustained` are always
+/// both computed regardless of this flag — the UI picks which to show.
 #[allow(clippy::too_many_arguments)] // one arg per independent sim input; a struct would just rename them
 pub(super) fn run_dogma(
     sde: &Sde,
@@ -92,6 +119,8 @@ pub(super) fn run_dogma(
     fleet_boosts: &[(i64, i64)],
     environment_effect: Option<i64>,
     abyssal_weather: Option<AbyssalWeatherSelection>,
+    spool_pct: f64,
+    factor_reload: bool,
 ) -> Result<DogmaStats, String> {
     // Only slots that affect ship stats (drones/cargo/implants don't here).
     let module_items: Vec<&FitItem> = fit
@@ -116,6 +145,13 @@ pub(super) fn run_dogma(
         .iter()
         .filter(|i| i.slot == SlotKind::Drone)
         .collect();
+    // Fighter squadrons (#877) resolve exactly like drones — pure aux
+    // targets of carrier skill/ship `fighterBonus*` bonuses.
+    let fighter_items: Vec<&FitItem> = fit
+        .items
+        .iter()
+        .filter(|i| i.slot == SlotKind::Fighter)
+        .collect();
     // Implants modify ship attributes via shipID effects, like skills (stacking-
     // exempt), so they resolve as skill-like entities.
     let implant_items: Vec<&FitItem> = fit
@@ -129,6 +165,7 @@ pub(super) fn run_dogma(
     let mut extra_ids = Vec::with_capacity(
         1 + module_items.len() * 2
             + drone_items.len()
+            + fighter_items.len()
             + implant_items.len()
             + fit.projected.len()
             + fleet_boosts.len() * 2
@@ -138,6 +175,7 @@ pub(super) fn run_dogma(
     extra_ids.extend(module_items.iter().map(|i| i.type_id));
     extra_ids.extend(module_items.iter().filter_map(|i| i.charge_type_id));
     extra_ids.extend(drone_items.iter().map(|i| i.type_id));
+    extra_ids.extend(fighter_items.iter().map(|i| i.type_id));
     extra_ids.extend(implant_items.iter().map(|i| i.type_id));
     extra_ids.extend(fit.projected.iter().map(|i| i.type_id));
     extra_ids.extend(fleet_boosts.iter().map(|&(m, _)| m));
@@ -168,6 +206,19 @@ pub(super) fn run_dogma(
     for it in &module_items {
         // All required skills (182/183/184) drive *RequiredSkillModifier targeting.
         let mut e = ctx.entity(it.type_id, required_skills_of(&ctx.attrs, it.type_id));
+        // Mutaplasmid roll (#876): seed the entity's base attributes with the
+        // rolled overrides before any effect/skill/module modifier applies —
+        // a mutated module's *baseline* is the rolled value, but every
+        // external bonus (skills, other modules' LocationGroupModifiers, …)
+        // still stacks on top of it exactly as it would on an unmutated item.
+        if let Some(mutation) = &it.mutation {
+            for (&attr_id, &value) in &mutation.attrs {
+                match e.attrs.iter_mut().find(|(id, _)| *id == attr_id) {
+                    Some(existing) => existing.1 = value,
+                    None => e.attrs.push((attr_id, value)),
+                }
+            }
+        }
         // State gates which effects run. Offline: none (no ship modifiers, no
         // fitting use). Online (not active): only passive effects — drop the
         // activatable ones (those with a duration), so e.g. an *active* hardener
@@ -202,6 +253,10 @@ pub(super) fn run_dogma(
     let mut drones = Vec::with_capacity(drone_items.len());
     for it in &drone_items {
         drones.push(ctx.entity(it.type_id, required_skills_of(&ctx.attrs, it.type_id)));
+    }
+    let mut fighters = Vec::with_capacity(fighter_items.len());
+    for it in &fighter_items {
+        fighters.push(ctx.entity(it.type_id, required_skills_of(&ctx.attrs, it.type_id)));
     }
 
     // Skills at the chosen level (all-V or the character's). skillLevel (280) is
@@ -242,6 +297,7 @@ pub(super) fn run_dogma(
             modules,
             skills,
             drones,
+            fighters,
             charges,
             gang_modules,
         },
@@ -274,6 +330,12 @@ pub(super) fn run_dogma(
         apply_abyssal_weather(&mut resolved.ship, &mut resolved.modules, selection);
     }
 
+    // Triglavian/spoolable weapon + rep ramp-up (#872): each module/drone's
+    // own damageMultiplier/armorDamageAmount scaled by its own spool
+    // attributes — must land before dps_of/applied_dps_of/tank_of read them,
+    // same ordering requirement as the abyssal-weather block above.
+    let is_spoolable = apply_spool(&mut resolved.modules, &mut resolved.drones, spool_pct);
+
     // T3 subsystems grant slots/hardpoints to the ship procedurally (#178).
     for (it, store) in module_items.iter().zip(&resolved.modules) {
         if it.slot == SlotKind::Subsystem {
@@ -299,8 +361,10 @@ pub(super) fn run_dogma(
 
     // Finalized fitting resources + validation from the *resolved* ship + modules
     // (skills/rigs/modules reflected, not base attributes) — shared with the
-    // optimizer's feasibility gate. Drone-bay volume comes from the SDE.
-    let (resources, validation, layout) =
+    // optimizer's feasibility gate. Drone/fighter bay volume comes from the SDE
+    // (both a drone's and a fighter's packaged unit volume live on the same
+    // `invTypes.volume` column).
+    let (resources, mut validation, layout) =
         resolved_feasibility(&resolved, base_layout, &ctx.effects, fit, &|tid| {
             sde.type_info(tid)
                 .ok()
@@ -390,14 +454,68 @@ pub(super) fn run_dogma(
         (None, Vec::new())
     };
 
+    // Overheat burnout estimate (#874), scattered back to `fit.items` order —
+    // same "next() over the module-list positions" pattern as drone_active/
+    // drone_max_active above.
+    let burnout_per_module = heat_of(&resolved, &module_items, &layout);
+    let burnout_seconds_full: Vec<Option<f64>> = {
+        let mut times = burnout_per_module.into_iter();
+        fit.items
+            .iter()
+            .map(|it| {
+                if matches!(
+                    it.slot,
+                    SlotKind::High
+                        | SlotKind::Mid
+                        | SlotKind::Low
+                        | SlotKind::Rig
+                        | SlotKind::Subsystem
+                        | SlotKind::Mode
+                ) {
+                    times.next().flatten()
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+
+    // Fighter squadron DPS + validation (#877): each squadron fires one
+    // ability (`fighter_of`), scattered back to `fit.items` order the same
+    // way `drone_active_full`/`burnout_seconds_full` are above.
+    let (fighter_problems, fighter_ability_per_squadron, fighter_dps, fighter_dps_sustained) =
+        fighter_of(&fighter_items, &resolved.fighters);
+    validation.extend(fighter_problems);
+    let fighter_abilities_full: Vec<Option<FighterAbilityStats>> = {
+        let mut abilities = fighter_ability_per_squadron.into_iter();
+        fit.items
+            .iter()
+            .map(|it| {
+                if it.slot == SlotKind::Fighter {
+                    abilities.next().flatten()
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+    let mut dps = dps_of(&resolved, &module_items, &drone_items, &drone_active_counts);
+    dps.fighter = fighter_dps.fighter;
+    dps.total += fighter_dps.fighter;
+    let mut dps_sustained =
+        dps_sustained_of(&resolved, &module_items, &drone_items, &drone_active_counts);
+    dps_sustained.fighter = fighter_dps_sustained.fighter;
+    dps_sustained.total += fighter_dps_sustained.fighter;
+
     Ok(DogmaStats {
         resources,
         validation,
         layout,
         activatable_types,
-        capacitor: capacitor_of(&resolved, &module_items, neut_gjs),
+        capacitor: capacitor_of(&resolved, &module_items, neut_gjs, factor_reload),
         tank: tank_of(&resolved, &module_items, damage_profile),
-        dps: dps_of(&resolved, &module_items, &drone_items, &drone_active_counts),
+        dps,
+        dps_sustained,
         weapon_ranges,
         navigation: {
             // Prop modules (AB/MWD) are identified by speedFactor (20) +
@@ -441,6 +559,9 @@ pub(super) fn run_dogma(
         drone_max_active: drone_max_active_full,
         applied_dps,
         dps_range_curve,
+        is_spoolable,
+        burnout_seconds: burnout_seconds_full,
+        fighter_abilities: fighter_abilities_full,
     })
 }
 
@@ -448,14 +569,15 @@ pub(super) fn run_dogma(
 /// [`ValItem`]s from a resolved fit and [`validate`] them, so CPU/PG/calibration and
 /// slot/hardpoint checks reflect skills, rigs and fitting modules (RCUs, ACRs, …)
 /// rather than base attributes. Shared by the simulator (#172) and the optimizer's
-/// feasibility gate (#156). `drone_volume_of` supplies packaged drone volume for the
-/// bay check (the optimizer passes `|_| 0.0`, as it never reworks drones in-search).
+/// feasibility gate (#156). `packaged_volume_of` supplies a drone's or fighter's
+/// packaged unit volume for the bay checks (the optimizer passes `|_| 0.0`, as it
+/// never reworks drones/fighters in-search).
 pub(super) fn resolved_feasibility(
     resolved: &ResolvedFit,
     base_layout: &ShipLayout,
     effects_by_type: &EffectMap,
     fit: &Fit,
-    drone_volume_of: &dyn Fn(i64) -> f64,
+    packaged_volume_of: &dyn Fn(i64) -> f64,
 ) -> (ResourceUsage, Vec<FitProblem>, ShipLayout) {
     let s = &resolved.ship;
     let resolved_layout = ShipLayout {
@@ -476,8 +598,14 @@ pub(super) fn resolved_feasibility(
         calibration: s.get(1132),
         drone_bay: s.get(283),
         drone_bandwidth: s.get(1271),
+        fighter_tubes: s.get(2216) as i64,
+        fighter_light_slots: s.get(2217) as i64,
+        fighter_support_slots: s.get(2218) as i64,
+        fighter_heavy_slots: s.get(2219) as i64,
+        fighter_bay: s.get(2055),
     };
     let mut module_stores = resolved.modules.iter();
+    let mut fighter_stores = resolved.fighters.iter();
     let mut val_items: Vec<ValItem> = Vec::with_capacity(fit.items.len());
     for item in &fit.items {
         if is_ship_module(item.slot) {
@@ -498,6 +626,8 @@ pub(super) fn resolved_feasibility(
                 is_turret,
                 is_launcher,
                 drone_volume: 0.0,
+                fighter_category: None,
+                fighter_volume: 0.0,
                 quantity: item.quantity.max(1),
             });
         } else if item.slot == SlotKind::Drone {
@@ -508,7 +638,25 @@ pub(super) fn resolved_feasibility(
                 calibration: 0.0,
                 is_turret: false,
                 is_launcher: false,
-                drone_volume: drone_volume_of(item.type_id),
+                drone_volume: packaged_volume_of(item.type_id),
+                fighter_category: None,
+                fighter_volume: 0.0,
+                quantity: item.quantity.max(1),
+            });
+        } else if item.slot == SlotKind::Fighter {
+            let Some(store) = fighter_stores.next() else {
+                continue;
+            };
+            val_items.push(ValItem {
+                slot: SlotKind::Fighter,
+                cpu: 0.0,
+                powergrid: 0.0,
+                calibration: 0.0,
+                is_turret: false,
+                is_launcher: false,
+                drone_volume: 0.0,
+                fighter_category: fighter::category_of(store),
+                fighter_volume: packaged_volume_of(item.type_id),
                 quantity: item.quantity.max(1),
             });
         }
@@ -602,6 +750,85 @@ pub(super) fn max_active_drones(
         .collect()
 }
 
+/// Fighter squadron problems + DPS (#877): fighters resolve like drones
+/// (aux pass-4 targets — carrier skill/ship fighter bonuses already apply),
+/// so `fighters` is parallel to `fighter_items`. Squadron size is the
+/// item's own `quantity`; oversizing it past the type's own
+/// `fighterSquadronMaxSize` is a validation problem, not a silent clamp
+/// (mirroring how an over-full drone bay is reported rather than trimmed).
+/// Each squadron fires one ability — `FitItem::fighter_ability` picks
+/// which, defaulting to the highest-DPS one the type carries; an explicit
+/// choice the type doesn't have is also a validation problem (the "one
+/// ability type" constraint — you can't select a channel your fighters
+/// don't carry). A pure support/EW squadron with no offensive ability
+/// contributes `None`/0 DPS.
+pub(super) fn fighter_of(
+    fighter_items: &[&FitItem],
+    fighters: &[AttrStore],
+) -> (
+    Vec<FitProblem>,
+    Vec<Option<FighterAbilityStats>>,
+    DpsBreakdown,
+    DpsBreakdown,
+) {
+    let mut problems = Vec::new();
+    let mut per_squadron = Vec::with_capacity(fighter_items.len());
+    let mut burst = 0.0;
+    let mut sustained = 0.0;
+    for (item, store) in fighter_items.iter().zip(fighters) {
+        let size = item.quantity.max(0) as f64;
+        let max_size = store.get(attr::FIGHTER_SQUADRON_MAX_SIZE);
+        if max_size > 0.0 && size > max_size {
+            problems.push(FitProblem {
+                severity: Severity::Error,
+                message: format!(
+                    "{} fighters in a squadron but the type caps it at {max_size:.0}",
+                    item.quantity
+                ),
+                item_index: None,
+            });
+        }
+        let abilities = fighter::abilities_of(store);
+        if let Some(requested) = item.fighter_ability.as_deref() {
+            if !abilities.iter().any(|a| a.key == requested) {
+                problems.push(FitProblem {
+                    severity: Severity::Error,
+                    message: format!(
+                        "Selected fighter ability \"{requested}\" isn't one this squadron carries"
+                    ),
+                    item_index: None,
+                });
+            }
+        }
+        let selected = fighter::selected_ability(&abilities, item.fighter_ability.as_deref());
+        per_squadron.push(selected.map(|a| {
+            let dps = a.dps_per_fighter * size;
+            let dps_sustained = a.sustained_dps_per_fighter * size;
+            burst += dps;
+            sustained += dps_sustained;
+            FighterAbilityStats {
+                key: a.key.to_string(),
+                label: a.label.to_string(),
+                dps,
+                dps_sustained,
+            }
+        }));
+    }
+    let breakdown = |fighter: f64| DpsBreakdown {
+        turret: 0.0,
+        missile: 0.0,
+        drone: 0.0,
+        fighter,
+        total: fighter,
+    };
+    (
+        problems,
+        per_squadron,
+        breakdown(burst),
+        breakdown(sustained),
+    )
+}
+
 /// DPS from a resolved fit (#174, #176). Turrets read finalized `damageMultiplier`
 /// (64) + `speed` (51) and the loaded charge's base damage; **missiles** ride on
 /// the *resolved* charge, so missile-damage skills and ship role bonuses (applied
@@ -626,6 +853,66 @@ pub(super) fn dps_of(
         };
         let damage_per_shot = resolved_damage(charge);
         let rof_seconds = store.get(51) / 1000.0;
+        let mult = store.get(64);
+        if mult > 0.0 {
+            turrets.push(Weapon {
+                damage_mult: mult,
+                damage_per_shot,
+                rof_seconds,
+                count: 1,
+            });
+        } else if rof_seconds > 0.0 {
+            missiles.push(Weapon {
+                damage_mult: 1.0,
+                damage_per_shot,
+                rof_seconds,
+                count: 1,
+            });
+        }
+    }
+
+    let drones: Vec<Weapon> = drone_items
+        .iter()
+        .zip(&resolved.drones)
+        .zip(drone_active)
+        .map(|((_, store), &active)| Weapon {
+            damage_mult: store.get(64),
+            damage_per_shot: resolved_damage(store),
+            rof_seconds: store.get(51) / 1000.0,
+            count: active.max(0),
+        })
+        .collect();
+
+    damage(&turrets, &missiles, &drones)
+}
+
+/// Sustained DPS (#871): the same weapon set/iteration as [`dps_of`], but
+/// each turret/missile's per-shot damage is derated by its own reload cycle
+/// (`engine::cycle::cycle_of`) — the fraction of an average cycle actually
+/// spent firing once clip depletion + `reloadTime` are factored in. Scaling
+/// `damage_per_shot` (rather than the whole DPS figure) keeps this exactly
+/// on `dps_of`'s math for any weapon with infinite ammo (factor `1.0`).
+/// Drones never reload — full burst, same as `dps_of`. Always computed
+/// (independent of the `factor_reload` toggle, which only gates the cap
+/// sim) so the UI can switch between burst/sustained without re-simulating.
+pub(super) fn dps_sustained_of(
+    resolved: &ResolvedFit,
+    module_items: &[&FitItem],
+    drone_items: &[&FitItem],
+    drone_active: &[i32],
+) -> DpsBreakdown {
+    let mut turrets = Vec::new();
+    let mut missiles = Vec::new();
+    for (i, store) in resolved.modules.iter().enumerate() {
+        if module_items.get(i).is_some_and(|it| !is_running(it.state)) {
+            continue; // active/overheated weapons fire; inactive/offline = none
+        }
+        let Some(Some(charge)) = resolved.charges.get(i) else {
+            continue;
+        };
+        let rof_seconds = store.get(51) / 1000.0;
+        let factor = cycle_of(store, Some(charge)).sustained_factor(rof_seconds);
+        let damage_per_shot = resolved_damage(charge) * factor;
         let mult = store.get(64);
         if mult > 0.0 {
             turrets.push(Weapon {
@@ -814,6 +1101,10 @@ fn applied_dps_at(
         turret: turret_dps,
         missile: missile_dps,
         drone: drone_dps,
+        // Fighter travel/application modeling is a documented follow-up
+        // (#877 scope cut) — fighters never contribute to applied DPS or
+        // the DPS-vs-range curve today.
+        fighter: 0.0,
         total: turret_dps + missile_dps + drone_dps,
     }
 }
@@ -934,14 +1225,20 @@ pub(super) fn weapon_ranges_of(
 /// Capacitor stability from a resolved fit (#172). Steady drain assumes every
 /// cap-using module runs (capacitorNeed 6 / duration 73 ms); per-module on/off
 /// toggling is a UI follow-up. `neut_gjs` adds projected neut pressure (#706)
-/// on top of the module drain.
+/// on top of the module drain. `factor_reload` (#871) derates each weapon's
+/// steady drain by its own reload sustained-factor and feeds its clip/reload
+/// cycle to the discrete depletion sim, which then pauses draw during the
+/// reload window (`engine::capacitor::time_to_empty`); `false` reproduces
+/// pre-#871 behavior exactly (modules always draw every cycle, forever).
 pub(super) fn capacitor_of(
     resolved: &ResolvedFit,
     module_items: &[&FitItem],
     neut_gjs: f64,
+    factor_reload: bool,
 ) -> CapStats {
     let mut drain = 0.0;
-    let mut module_drains: Vec<(f64, f64)> = Vec::new();
+    let mut module_drains: Vec<ModuleDrain> = Vec::new();
+    let mut injections: Vec<ModuleDrain> = Vec::new();
     for (i, store) in resolved.modules.iter().enumerate() {
         if module_items.get(i).is_some_and(|it| !is_running(it.state)) {
             continue; // active/overheated modules draw capacitor
@@ -958,8 +1255,45 @@ pub(super) fn capacitor_of(
             }
         };
         if need > 0.0 && dur > 0.0 {
-            drain += need / (dur / 1000.0);
-            module_drains.push((need, dur));
+            let (clip_shots, reload_ms, factor) = if factor_reload {
+                let charge = resolved.charges.get(i).and_then(|c| c.as_ref());
+                let cycle = cycle_of(store, charge);
+                let factor = cycle.sustained_factor(dur / 1000.0);
+                (cycle.clip_shots, cycle.reload_seconds * 1000.0, factor)
+            } else {
+                (0.0, 0.0, 1.0)
+            };
+            drain += need / (dur / 1000.0) * factor;
+            module_drains.push(ModuleDrain {
+                need,
+                cycle_ms: dur,
+                clip_shots,
+                reload_ms,
+            });
+        }
+        // Cap booster injection (#875): a Capacitor Booster module — never a
+        // shield rep itself (`shieldBonus` 68 gates out Ancillary Shield
+        // Boosters, which load the same charge group but feed shield, not
+        // cap, per #878's `tank_of`) — with a loaded charge's
+        // `capacitorBonus` (67) injects that many GJ straight into the
+        // capacitor on the module's own `duration`, bounded by its own
+        // clip/reload cycle (#871). Always modeled (not gated on
+        // `factor_reload`): unlike the DPS/cap-drain sustained-rate
+        // *accounting* toggle, a cap booster's clip and reload are the
+        // mechanic itself, not an optional averaging refinement.
+        if dur > 0.0 && store.get(attr::SHIELD_BONUS) <= 0.0 {
+            if let Some(charge) = resolved.charges.get(i).and_then(|c| c.as_ref()) {
+                let bonus = charge.get(attr::CAPACITOR_BONUS);
+                if bonus > 0.0 {
+                    let cycle = cycle_of(store, Some(charge));
+                    injections.push(ModuleDrain {
+                        need: bonus,
+                        cycle_ms: dur,
+                        clip_shots: cycle.clip_shots,
+                        reload_ms: cycle.reload_seconds * 1000.0,
+                    });
+                }
+            }
         }
     }
     capacitor(
@@ -968,6 +1302,7 @@ pub(super) fn capacitor_of(
         drain,
         &module_drains,
         neut_gjs,
+        &injections,
     )
 }
 
@@ -975,6 +1310,25 @@ pub(super) fn capacitor_of(
 /// from shield boosters (shieldBonus 68) and armor repairers (armorDamageAmount
 /// 84). `profile` weighs the resonances (#702); callers default to even
 /// 25/25/25/25 when none is specified.
+///
+/// Reactive Armor Hardener (#878): a running RAH (`resistanceShiftAmount`
+/// 1849 > 0) has its own unshifted per-type armor resonance iterated to a
+/// fixed point against `profile` (`engine::tank::rah_shift`), then swapped
+/// back into the ship's finalized armor resonance in place of the RAH's own
+/// baseline (unshifted) contribution: `armor_resonance[k] /= rah_base[k]`
+/// (undoing the plain multiply the standard resolve pass already applied)
+/// `* shifted[k]`. Exact as long as the RAH is the only source of resist
+/// bonus multiplying that baseline in — true in practice, since only one RAH
+/// can ever be fitted (`maxGroupActive` 763) and its own contribution isn't
+/// stacking-penalized against itself.
+///
+/// Ancillary reps (#878): burst rep/s (the existing full-rate figure) and
+/// sustained rep/s — burst derated by the module's own reload cycle
+/// (`engine::cycle::cycle_of`/`sustained_factor`, #871) — both always
+/// computed regardless of the fit's `factor_reload` toggle, mirroring
+/// `dps`/`dps_sustained` so the UI can switch freely without re-simulating.
+/// Equal to burst for any rep with infinite "ammo" (no clip/reload attrs, or
+/// none loaded) — unchanged behavior for ordinary shield boosters/armor reps.
 pub(super) fn tank_of(
     resolved: &ResolvedFit,
     module_items: &[&FitItem],
@@ -986,7 +1340,7 @@ pub(super) fn tank_of(
         hp: s.get(263),
         resonance: [s.get(271), s.get(274), s.get(273), s.get(272)],
     };
-    let armor = Layer {
+    let mut armor = Layer {
         hp: s.get(265),
         resonance: [s.get(267), s.get(270), s.get(269), s.get(268)],
     };
@@ -995,7 +1349,33 @@ pub(super) fn tank_of(
         resonance: [s.get(113), s.get(110), s.get(109), s.get(111)],
     };
 
-    let (mut shield_rep_s, mut armor_rep_s) = (0.0, 0.0);
+    let mut rah_active = false;
+    for (i, store) in resolved.modules.iter().enumerate() {
+        let shift_amt = store.get(1849) / 100.0; // resistanceShiftAmount
+        if shift_amt <= 0.0 {
+            continue; // not a RAH
+        }
+        if module_items.get(i).is_some_and(|it| !is_running(it.state)) {
+            continue; // resist-shift only runs while the RAH is cycling
+        }
+        let base = [
+            store.get(267),
+            store.get(270),
+            store.get(269),
+            store.get(268),
+        ];
+        let shifted = rah_shift(base, shift_amt, profile);
+        for k in 0..4 {
+            if base[k] > 0.0 {
+                armor.resonance[k] = armor.resonance[k] / base[k] * shifted[k];
+            }
+        }
+        rah_active = true;
+        break; // only one RAH is ever fitted
+    }
+
+    let (mut shield_rep_s, mut shield_rep_s_sustained) = (0.0, 0.0);
+    let (mut armor_rep_s, mut armor_rep_s_sustained) = (0.0, 0.0);
     for (i, store) in resolved.modules.iter().enumerate() {
         if module_items.get(i).is_some_and(|it| !is_running(it.state)) {
             continue; // active/overheated reps cycle
@@ -1004,9 +1384,14 @@ pub(super) fn tank_of(
         if dur <= 0.0 {
             continue;
         }
+        let rof_seconds = dur / 1000.0;
+        let charge = resolved.charges.get(i).and_then(|c| c.as_ref());
+        let factor = cycle_of(store, charge).sustained_factor(rof_seconds);
         let sb = store.get(68);
         if sb > 0.0 {
-            shield_rep_s += sb / (dur / 1000.0);
+            let burst = sb / rof_seconds;
+            shield_rep_s += burst;
+            shield_rep_s_sustained += burst * factor;
         }
         let ar = store.get(84);
         if ar > 0.0 {
@@ -1024,7 +1409,9 @@ pub(super) fn tank_of(
             } else {
                 1.0
             };
-            armor_rep_s += ar * mult / (dur / 1000.0);
+            let burst = ar * mult / rof_seconds;
+            armor_rep_s += burst;
+            armor_rep_s_sustained += burst * factor;
         }
     }
 
@@ -1037,9 +1424,100 @@ pub(super) fn tank_of(
         0.0
     };
 
-    let mut t = tank(shield, armor, hull, profile, shield_rep_s, armor_rep_s);
+    let mut t = tank(
+        shield,
+        armor,
+        hull,
+        profile,
+        shield_rep_s,
+        armor_rep_s,
+        shield_rep_s_sustained,
+        armor_rep_s_sustained,
+    );
     t.passive_shield_s = passive_shield_s;
+    t.rah_active = rah_active;
     t
+}
+
+/// Overheat burnout time per fitted module (#874): expected-value seconds
+/// until an overheated module's own accumulated heat damage exhausts its
+/// structure hitpoints, from the per-rack heat-pool model in
+/// `engine::heat` (see that module's doc comment for the ported-approach
+/// license note and the "estimate, not exact" caveat). Parallel to
+/// `module_items`/`resolved.modules`; `None` for every module that isn't
+/// currently overheated, or that the model can never burn out (a dead
+/// rack — see `engine::heat::burnout_seconds`). `layout` is the *resolved*
+/// slot layout (T3 subsystems can grant slots) so the whole-ship slot
+/// factor matches what's actually fitted right now.
+pub(super) fn heat_of(
+    resolved: &ResolvedFit,
+    module_items: &[&FitItem],
+    layout: &ShipLayout,
+) -> Vec<Option<f64>> {
+    // Slot factor (Fs, shared by every rack): online+ (not offline) modules
+    // across the high/mid/low racks over every slot the hull has, including
+    // rigs — offline modules and genuinely empty slots both shrink this the
+    // same way, the mechanical source of "empty slots absorb heat" folklore.
+    let total_slots =
+        (layout.high_slots + layout.mid_slots + layout.low_slots + layout.rig_slots).max(0) as f64;
+    let online = module_items
+        .iter()
+        .filter(|it| {
+            matches!(it.slot, SlotKind::High | SlotKind::Mid | SlotKind::Low)
+                && it.state != ModuleState::Offline
+        })
+        .count() as f64;
+    let slot_factor = if total_slots > 0.0 {
+        online / total_slots
+    } else {
+        0.0
+    };
+
+    let mut result = vec![None; module_items.len()];
+    let racks = [
+        (
+            SlotKind::High,
+            attr::HEAT_CAPACITY_HI,
+            attr::HEAT_ATTENUATION_HI,
+        ),
+        (
+            SlotKind::Mid,
+            attr::HEAT_CAPACITY_MED,
+            attr::HEAT_ATTENUATION_MED,
+        ),
+        (
+            SlotKind::Low,
+            attr::HEAT_CAPACITY_LOW,
+            attr::HEAT_ATTENUATION_LOW,
+        ),
+    ];
+    for (kind, cap_attr, atten_attr) in racks {
+        let idxs: Vec<usize> = module_items
+            .iter()
+            .enumerate()
+            .filter(|(_, it)| it.slot == kind && it.state == ModuleState::Overheated)
+            .map(|(i, _)| i)
+            .collect();
+        if idxs.is_empty() {
+            continue;
+        }
+        let sources: Vec<HeatSource> = idxs
+            .iter()
+            .map(|&i| HeatSource {
+                position: module_items[i].index,
+                heat_damage: resolved.modules[i].get(attr::HEAT_DAMAGE),
+                heat_generation: resolved.modules[i].get(attr::HEAT_ABSORPTION_RATE),
+                cycle_ms: resolved.modules[i].get(attr::DURATION),
+                hp: resolved.modules[i].get(attr::HP),
+            })
+            .collect();
+        let rack = rack_heat(|id| resolved.ship.get(id), cap_attr, atten_attr);
+        let times = burnout_seconds(&rack, slot_factor, &sources);
+        for (k, &i) in idxs.iter().enumerate() {
+            result[i] = times[k];
+        }
+    }
+    result
 }
 
 pub(super) type AttrMap = HashMap<i64, Vec<(i64, f64)>>;
@@ -1095,7 +1573,11 @@ pub(super) fn required_skills_of(attrs: &AttrMap, type_id: i64) -> Vec<i64> {
 /// `environment_effect` is a wormhole-class or Pochven-metaliminal-storm
 /// beacon type id the fit is sitting in — see [`run_dogma`].
 /// `abyssal_weather` is the separate, mutually exclusive Abyssal Deadspace
-/// weather choice (also see [`run_dogma`]).
+/// weather choice (also see [`run_dogma`]). `spool_pct` (#872) is the
+/// requested Triglavian/spoolable-weapon ramp fraction (`None`/omitted
+/// defaults to `1.0`, fully spooled — how players quote Trig DPS).
+/// `factor_reload` (#871) toggles reload accounting in the cap sim
+/// (`None`/omitted defaults to `false` — see [`run_dogma`]).
 #[allow(clippy::too_many_arguments)] // one arg per independent sim input; a struct would just rename them
 pub(crate) fn simulate_fit(
     sde: &Sde,
@@ -1108,6 +1590,8 @@ pub(crate) fn simulate_fit(
     fleet_boosts: Option<Vec<[i64; 2]>>,
     environment_effect: Option<i64>,
     abyssal_weather: Option<AbyssalWeatherSelection>,
+    spool_pct: Option<f64>,
+    factor_reload: Option<bool>,
 ) -> Result<FitStats, String> {
     let Some(ship) = sde
         .ship_layout(fit.ship_type_id)
@@ -1147,6 +1631,17 @@ pub(crate) fn simulate_fit(
         } else {
             0.0
         };
+        let (fighter_category, fighter_volume) = if item.slot == SlotKind::Fighter {
+            let category = fighter::category_from_flags(get(2212), get(2213), get(2214));
+            let volume = sde
+                .type_info(item.type_id)
+                .map_err(|e| e.to_string())?
+                .and_then(|t| t.volume)
+                .unwrap_or(0.0);
+            (category, volume)
+        } else {
+            (None, 0.0)
+        };
         let fitted = draws_fitting_resources(item.slot, item.state);
         val_items.push(ValItem {
             slot: item.slot,
@@ -1156,6 +1651,8 @@ pub(crate) fn simulate_fit(
             is_turret,
             is_launcher,
             drone_volume,
+            fighter_category,
+            fighter_volume,
             quantity: item.quantity.max(1),
         });
     }
@@ -1185,6 +1682,8 @@ pub(crate) fn simulate_fit(
         &boosts,
         environment_effect,
         abyssal_weather,
+        spool_pct.unwrap_or(1.0).clamp(0.0, 1.0),
+        factor_reload.unwrap_or(false),
     )
     .ok();
 
@@ -1203,6 +1702,7 @@ pub(crate) fn simulate_fit(
         capacitor: dogma.as_ref().map(|d| d.capacitor.clone()),
         tank: dogma.as_ref().map(|d| d.tank.clone()),
         dps: dogma.as_ref().map(|d| d.dps.clone()),
+        dps_sustained: dogma.as_ref().map(|d| d.dps_sustained.clone()),
         navigation: dogma.as_ref().map(|d| d.navigation.clone()),
         layout: dogma.as_ref().map(|d| d.layout.clone()),
         weapon_ranges: dogma
@@ -1228,6 +1728,15 @@ pub(crate) fn simulate_fit(
         dps_range_curve: dogma
             .as_ref()
             .map(|d| d.dps_range_curve.clone())
+            .unwrap_or_default(),
+        is_spoolable: dogma.as_ref().is_some_and(|d| d.is_spoolable),
+        burnout_seconds: dogma
+            .as_ref()
+            .map(|d| d.burnout_seconds.clone())
+            .unwrap_or_default(),
+        fighter_abilities: dogma
+            .as_ref()
+            .map(|d| d.fighter_abilities.clone())
             .unwrap_or_default(),
     })
 }
@@ -1378,6 +1887,8 @@ mod tests {
             charge_type_id: charge,
             quantity: qty,
             active_drones: None,
+            mutation: None,
+            fighter_ability: None,
         }
     }
 
@@ -1390,6 +1901,7 @@ mod tests {
             ship: AttrStore::new(),
             modules,
             drones,
+            fighters: Vec::new(),
             charges,
             unresolved: 0,
         }
@@ -1445,6 +1957,45 @@ mod tests {
         assert_eq!(dps.missile, 0.0);
         assert_eq!(dps.drone, 2.0 * 40.0 * 3.0 / 1.0); // scaled by quantity, regardless of state
         assert_eq!(dps.total, dps.turret + dps.drone);
+    }
+
+    /// Sustained DPS (#871) derates burst by each weapon's own reload cycle:
+    /// a launcher with a 5-shot clip (capacity 5 ÷ charge volume 1) and a 10s
+    /// reload fires 5×2s = 10s per clip, so sustained is half of burst.
+    /// Drones never reload — their sustained DPS equals burst.
+    #[test]
+    fn dps_sustained_of_derates_by_reload_cycle() {
+        let launcher = store(&[(51, 2000.0), (38, 5.0), (1795, 10_000.0)]); // no damageMultiplier -> missile
+        let charge = store(&[
+            (114, 25.0),
+            (116, 25.0),
+            (117, 25.0),
+            (118, 25.0),
+            (161, 1.0),
+        ]); // 100 dmg, 1 m3
+        let resolved = resolved_fit(
+            vec![launcher],
+            vec![Some(charge)],
+            vec![store(&[(64, 2.0), (51, 1000.0), (114, 40.0)])], // drone: no reload attrs at all
+        );
+        let items = [item(100, Some(200), ModuleState::Active, 1)];
+        let module_items: Vec<&FitItem> = items.iter().collect();
+        let drone_item = item(300, None, ModuleState::Active, 1);
+        let drone_items = vec![&drone_item];
+
+        let burst = dps_of(&resolved, &module_items, &drone_items, &[1]);
+        let sustained = dps_sustained_of(&resolved, &module_items, &drone_items, &[1]);
+        assert_eq!(burst.missile, 100.0 / 2.0); // 50 dps burst
+        assert!(
+            (sustained.missile - burst.missile * 0.5).abs() < 1e-9,
+            "sustained {} should be half of burst {}",
+            sustained.missile,
+            burst.missile
+        );
+        assert_eq!(
+            sustained.drone, burst.drone,
+            "drones never reload — sustained == burst"
+        );
     }
 
     /// A turret-armed fit against a small/fast (hard-to-track) target profile
@@ -1670,6 +2221,8 @@ mod tests {
             charge_type_id: None,
             quantity: qty,
             active_drones: active,
+            mutation: None,
+            fighter_ability: None,
         }
     }
     fn drone_store(bandwidth_used: f64) -> AttrStore {
@@ -1840,8 +2393,33 @@ mod tests {
         ];
         let module_items: Vec<&FitItem> = items.iter().collect();
 
-        let cap = capacitor_of(&resolved, &module_items, 0.0);
+        let cap = capacitor_of(&resolved, &module_items, 0.0, false);
         assert_eq!(cap.drain, 20.0 / (4000.0 / 1000.0));
+    }
+
+    /// `factor_reload` (#871) derates a reloading weapon's steady drain by
+    /// its own sustained-factor: a launcher with a 5-shot clip and 10s
+    /// reload firing every 2s draws its full 8 GJ raw, but only half the
+    /// time on average (10s firing / 20s average cycle) — so the reported
+    /// `drain` halves, while `factor_reload: false` (or a module with no
+    /// clip/reload attrs) reports the raw undiscounted drain.
+    #[test]
+    fn capacitor_of_factor_reload_derates_steady_drain() {
+        let launcher = store(&[(6, 8.0), (51, 2000.0), (38, 5.0), (1795, 10_000.0)]);
+        let charge = store(&[(161, 1.0)]); // 1 m3/unit -> 5-shot clip
+        let resolved = resolved_fit(vec![launcher], vec![Some(charge)], Vec::new());
+        let items = [item(100, Some(200), ModuleState::Active, 1)];
+        let module_items: Vec<&FitItem> = items.iter().collect();
+
+        let raw = capacitor_of(&resolved, &module_items, 0.0, false);
+        assert_eq!(raw.drain, 8.0 / 2.0); // 4 GJ/s, no derating
+
+        let derated = capacitor_of(&resolved, &module_items, 0.0, true);
+        assert!(
+            (derated.drain - 2.0).abs() < 1e-9, // 4 GJ/s * 0.5 sustained factor
+            "derated drain = {}",
+            derated.drain
+        );
     }
 
     /// A different damage profile weighs the same resonances differently
@@ -1864,6 +2442,7 @@ mod tests {
             drones: Vec::new(),
             charges: Vec::new(),
             unresolved: 0,
+            fighters: Vec::new(),
         };
 
         let em_heavy = tank_of(&resolved, &[], &DamageProfile([1.0, 0.0, 0.0, 0.0]));
@@ -1891,17 +2470,70 @@ mod tests {
             drones: Vec::new(),
             charges: vec![None],
             unresolved: 0,
+            fighters: Vec::new(),
         };
         let items = [item(100, None, ModuleState::Active, 1)];
         let module_items: Vec<&FitItem> = items.iter().collect();
 
-        let no_neut = capacitor_of(&resolved, &module_items, 0.0);
-        let with_neut = capacitor_of(&resolved, &module_items, 3.0);
+        let no_neut = capacitor_of(&resolved, &module_items, 0.0, false);
+        let with_neut = capacitor_of(&resolved, &module_items, 3.0, false);
         let t_no_neut = no_neut.depletion_seconds.expect("unstable without neut");
         let t_with_neut = with_neut.depletion_seconds.expect("unstable with neut");
         assert!(
             t_with_neut < t_no_neut,
             "with-neut depletion {t_with_neut} should be < no-neut {t_no_neut}"
+        );
+    }
+
+    /// A genuine Capacitor Booster module (no `shieldBonus`) with a loaded
+    /// charge's `capacitorBonus` (67) injects GJ into the capacitor (#875)
+    /// and can stabilize an otherwise-unstable drain; the exact same charge
+    /// loaded into an Ancillary Shield Booster (`shieldBonus` present) must
+    /// NOT be treated as a cap injection — it reps shield, not capacitor
+    /// (#878's `tank_of` already handles that side).
+    #[test]
+    fn capacitor_of_cap_booster_injects_but_ancillary_shield_booster_charge_does_not() {
+        let mut ship = AttrStore::new();
+        ship.set_base(482, 250.0); // capacitorCapacity
+        ship.set_base(55, 125_000.0); // rechargeRate (ms) -> 5 GJ/s peak
+
+        let drain_module = store(&[(6, 8.0), (73, 1000.0)]); // 8 GJ/s steady drain, well over peak
+        let booster_module = store(&[(73, 6_000.0)]); // no capacitorNeed, no shieldBonus
+        let booster_charge = store(&[(attr::CAPACITOR_BONUS, 20.0)]); // no volume -> never reloads
+
+        let items = [
+            item(100, None, ModuleState::Active, 1),
+            item(200, Some(300), ModuleState::Active, 1),
+        ];
+        let module_items: Vec<&FitItem> = items.iter().collect();
+
+        let with_booster = ResolvedFit {
+            ship: ship.clone(),
+            modules: vec![drain_module.clone(), booster_module],
+            drones: Vec::new(),
+            charges: vec![None, Some(booster_charge.clone())],
+            unresolved: 0,
+            fighters: Vec::new(),
+        };
+        let boosted = capacitor_of(&with_booster, &module_items, 0.0, false);
+        assert!(
+            boosted.stable,
+            "a genuine cap booster module should inject and stabilize the cap"
+        );
+
+        let asb_module = store(&[(68, 100.0), (73, 6_000.0)]); // shieldBonus present
+        let with_asb = ResolvedFit {
+            ship,
+            modules: vec![drain_module, asb_module],
+            drones: Vec::new(),
+            charges: vec![None, Some(booster_charge)],
+            unresolved: 0,
+            fighters: Vec::new(),
+        };
+        let gated = capacitor_of(&with_asb, &module_items, 0.0, false);
+        assert!(
+            !gated.stable,
+            "an ASB loaded with a cap-booster-shaped charge should not inject capacitor"
         );
     }
 
@@ -1958,5 +2590,376 @@ mod tests {
         assert_eq!(idle, 0.0, "online (inactive) rep should not");
         assert!(is_running(ModuleState::Overheated));
         assert!(!is_running(ModuleState::Online));
+    }
+
+    /// Ancillary armor repairer sustained rep/s (#878): burst 120*3/6=60/s
+    /// (paste-loaded), derated by its own reload cycle — capacity 0.08 /
+    /// charge volume 0.01 -> an 8-shot clip, 60s reload, 6s cycle ->
+    /// sustained_factor (8*6)/(8*6+60) = 4/9.
+    #[test]
+    fn ancillary_armor_repairer_sustained_rep_derates_by_reload_cycle() {
+        let module = store(&[
+            (84, 120.0),
+            (73, 6000.0),
+            (1886, 3.0),
+            (38, 0.08),
+            (1795, 60_000.0),
+        ]);
+        let charge = store(&[(161, 0.01)]);
+        let resolved = resolved_fit(vec![module], vec![Some(charge)], Vec::new());
+        let loaded = [item(100, Some(28668), ModuleState::Active, 1)];
+        let t = tank_of(
+            &resolved,
+            &loaded.iter().collect::<Vec<_>>(),
+            &DamageProfile::default(),
+        );
+        assert!(
+            (t.armor_rep_s - 60.0).abs() < 1e-9,
+            "burst {}",
+            t.armor_rep_s
+        );
+        let expected = 60.0 * 4.0 / 9.0;
+        assert!(
+            (t.armor_rep_s_sustained - expected).abs() < 1e-9,
+            "sustained {}",
+            t.armor_rep_s_sustained
+        );
+    }
+
+    /// Ancillary shield booster sustained rep/s (#878): burst 390/4=97.5/s,
+    /// derated by its own reload cycle — capacity 42 / charge volume 16 -> a
+    /// 2-shot clip, 60s reload, 4s cycle -> sustained_factor
+    /// (2*4)/(2*4+60) = 2/17. Unlike the AAR, no charged-multiplier attribute
+    /// applies — the module's own `shieldBonus` is the full rate either way.
+    #[test]
+    fn ancillary_shield_booster_sustained_rep_derates_by_reload_cycle() {
+        let module = store(&[(68, 390.0), (73, 4000.0), (38, 42.0), (1795, 60_000.0)]);
+        let charge = store(&[(161, 16.0)]);
+        let resolved = resolved_fit(vec![module], vec![Some(charge)], Vec::new());
+        let loaded = [item(100, Some(11287), ModuleState::Active, 1)];
+        let t = tank_of(
+            &resolved,
+            &loaded.iter().collect::<Vec<_>>(),
+            &DamageProfile::default(),
+        );
+        assert!(
+            (t.shield_rep_s - 97.5).abs() < 1e-9,
+            "burst {}",
+            t.shield_rep_s
+        );
+        let expected = 97.5 * 2.0 / 17.0;
+        assert!(
+            (t.shield_rep_s_sustained - expected).abs() < 1e-9,
+            "sustained {}",
+            t.shield_rep_s_sustained
+        );
+    }
+
+    /// No charge loaded ⇒ `cycle_of` reports an infinite clip (never
+    /// reloads), so sustained must equal burst exactly — same "no reload
+    /// accounting without a charge" behavior #871 established for weapons.
+    #[test]
+    fn unloaded_ancillary_shield_booster_sustained_equals_burst() {
+        let module = store(&[(68, 390.0), (73, 4000.0), (38, 42.0), (1795, 60_000.0)]);
+        let resolved = resolved_fit(vec![module], vec![None], Vec::new());
+        let unloaded = [item(100, None, ModuleState::Active, 1)];
+        let t = tank_of(
+            &resolved,
+            &unloaded.iter().collect::<Vec<_>>(),
+            &DamageProfile::default(),
+        );
+        assert!(t.shield_rep_s > 0.0);
+        assert_eq!(t.shield_rep_s, t.shield_rep_s_sustained);
+    }
+
+    /// Reactive Armor Hardener (#878) end-to-end through `tank_of`: a naked
+    /// hull (armor resonance 1.0, i.e. no other resist source) with only a
+    /// running RAH (baseline 0.85/15% each, 6% shift/cycle) against a pure-EM
+    /// profile — same fixed point `rah_shift`'s own unit test hand-verifies —
+    /// converges to 60% EM resist and 0% on the other three, and flips
+    /// `rah_active`.
+    #[test]
+    fn rah_shifts_armor_resistances_to_a_fixed_point() {
+        let mut ship = AttrStore::new();
+        for id in [267, 270, 269, 268] {
+            ship.set_base(id, 0.85);
+        }
+        let rah = store(&[
+            (1849, 6.0),
+            (267, 0.85),
+            (270, 0.85),
+            (269, 0.85),
+            (268, 0.85),
+        ]);
+        let resolved = ResolvedFit {
+            ship,
+            modules: vec![rah],
+            drones: Vec::new(),
+            charges: vec![None],
+            unresolved: 0,
+            fighters: Vec::new(),
+        };
+        let em_only = DamageProfile([1.0, 0.0, 0.0, 0.0]);
+        let items = [item(100, None, ModuleState::Active, 1)];
+        let t = tank_of(&resolved, &items.iter().collect::<Vec<_>>(), &em_only);
+        assert!(t.rah_active);
+        assert!(
+            (t.armor_resists[0] - 0.6).abs() < 1e-9,
+            "em resist: {:?}",
+            t.armor_resists
+        );
+        for i in 1..4 {
+            assert!(
+                t.armor_resists[i].abs() < 1e-9,
+                "type {i} resist should be drained to 0: {:?}",
+                t.armor_resists
+            );
+        }
+    }
+
+    /// A RAH that isn't actively cycling (`Online`, not `Active`) doesn't
+    /// shift — `rah_active` stays false and the resistances stay at the
+    /// module's own unshifted baseline (15% each).
+    #[test]
+    fn inactive_rah_does_not_shift() {
+        let mut ship = AttrStore::new();
+        for id in [267, 270, 269, 268] {
+            ship.set_base(id, 0.85);
+        }
+        let rah = store(&[
+            (1849, 6.0),
+            (267, 0.85),
+            (270, 0.85),
+            (269, 0.85),
+            (268, 0.85),
+        ]);
+        let resolved = ResolvedFit {
+            ship,
+            modules: vec![rah],
+            drones: Vec::new(),
+            charges: vec![None],
+            unresolved: 0,
+            fighters: Vec::new(),
+        };
+        let em_only = DamageProfile([1.0, 0.0, 0.0, 0.0]);
+        let items = [item(100, None, ModuleState::Online, 1)];
+        let t = tank_of(&resolved, &items.iter().collect::<Vec<_>>(), &em_only);
+        assert!(!t.rah_active);
+        for v in t.armor_resists {
+            assert!((v - 0.15).abs() < 1e-9, "{:?}", t.armor_resists);
+        }
+    }
+
+    /// A minimal Rifter-shaped layout for heat tests: 4 highs (only used for
+    /// the whole-ship slot factor), 3 mids, 3 lows, no rigs.
+    fn frigate_layout() -> ShipLayout {
+        ShipLayout {
+            type_id: 587,
+            name: "Rifter".into(),
+            group_name: "Frigate".into(),
+            high_slots: 4,
+            mid_slots: 3,
+            low_slots: 3,
+            rig_slots: 0,
+            subsystem_slots: 0,
+            mode_slots: 0,
+            turret_hardpoints: 3,
+            launcher_hardpoints: 0,
+            cpu_output: 0.0,
+            powergrid_output: 0.0,
+            calibration: 0.0,
+            drone_bay: 0.0,
+            drone_bandwidth: 0.0,
+            fighter_tubes: 0,
+            fighter_light_slots: 0,
+            fighter_support_slots: 0,
+            fighter_heavy_slots: 0,
+            fighter_bay: 0.0,
+        }
+    }
+
+    /// heat_of correctly picks out only the overheated mid-slot module, skips
+    /// an idle high-slot module, and scatters `None`/`Some` back through the
+    /// parallel-to-`module_items` result — the integration surface
+    /// `run_dogma` relies on (#874).
+    #[test]
+    fn heat_of_targets_only_overheated_modules() {
+        let ship = store(&[
+            (attr::HEAT_CAPACITY_MED, 100.0),
+            (attr::HEAT_GENERATION_MULTIPLIER, 1.0),
+            (attr::HEAT_ATTENUATION_MED, 0.5),
+        ]);
+        let mwd = store(&[
+            (attr::HEAT_DAMAGE, 19.0),          // Thermo-resolved already
+            (attr::HEAT_ABSORPTION_RATE, 0.04), // prop mods: 4%/s (EVE University)
+            (attr::DURATION, 10_000.0),
+            (attr::HP, 40.0),
+        ]);
+        let idle_high = store(&[]);
+        let resolved = ResolvedFit {
+            ship,
+            modules: vec![idle_high, mwd],
+            drones: Vec::new(),
+            charges: vec![None, None],
+            unresolved: 0,
+            fighters: Vec::new(),
+        };
+        let items = [
+            FitItem {
+                slot: SlotKind::High,
+                state: ModuleState::Active,
+                ..item(1, None, ModuleState::Active, 1)
+            },
+            FitItem {
+                slot: SlotKind::Mid,
+                state: ModuleState::Overheated,
+                ..item(2, None, ModuleState::Overheated, 1)
+            },
+        ];
+        let module_items: Vec<&FitItem> = items.iter().collect();
+        let result = heat_of(&resolved, &module_items, &frigate_layout());
+        assert_eq!(result.len(), 2);
+        assert!(
+            result[0].is_none(),
+            "an active (not overheated) module never burns out"
+        );
+        assert!(
+            result[1].is_some(),
+            "the overheated MWD should get a burnout estimate"
+        );
+    }
+
+    /// The acceptance scenario (#874): a single overloaded MWD mid-rack on a
+    /// frigate, with Thermodynamics trained to V vs untrained, run through
+    /// the *actual* dogma engine — not hand-fed pre-scaled numbers. The
+    /// effect shapes mirror Thermodynamics (skill 28164 in the bundled SDE;
+    /// the issue's cited id 3455 is in fact "Warp Drive Operation" there,
+    /// verified with `sqlite3 sde.sqlite "SELECT typeID,typeName FROM
+    /// invTypes WHERE typeName='Thermodynamics'"` → 28164) exactly:
+    /// effect 3195 (`thermodynamicsSkillLevel`) preMuls the skill's own
+    /// `thermodynamicsHeatDamage` (1229, base -5.0 on the skill row) by
+    /// `skillLevel` (280); effect 3196 (`thermodynamicsSkillDamageBonus`) is
+    /// a `LocationModifier` postPercent-ing every module's `heatDamage`
+    /// (1211) by that scaled value — i.e. a stacking-exempt -5%/level with
+    /// no explicit required-skill gate, straight off `dgmEffects.modifierInfo`
+    /// for those two real effect rows.
+    #[test]
+    fn thermodynamics_skill_lengthens_mwd_burnout_through_dogma_engine() {
+        use crate::sde::ModifierInfo;
+
+        fn mi(func: &str, dom: &str, op: i64, tgt: i64, src: i64) -> ModifierInfo {
+            ModifierInfo {
+                domain: Some(dom.into()),
+                func: Some(func.into()),
+                modified_attribute_id: Some(tgt),
+                modifying_attribute_id: Some(src),
+                operation: Some(op),
+                group_id: None,
+                skill_type_id: None,
+            }
+        }
+        fn meta(id: i64, modifiers: Vec<ModifierInfo>) -> crate::sde::EffectMeta {
+            crate::sde::EffectMeta {
+                effect_id: id,
+                name: format!("e{id}"),
+                category: 0,
+                is_offensive: false,
+                is_assistance: false,
+                duration_attribute_id: None,
+                discharge_attribute_id: None,
+                range_attribute_id: None,
+                falloff_attribute_id: None,
+                tracking_speed_attribute_id: None,
+                modifiers,
+            }
+        }
+
+        let mut effects = HashMap::new();
+        // 3195: self preMul — thermodynamicsHeatDamage (1229) := base(-5.0) * skillLevel (280).
+        effects.insert(
+            3195,
+            meta(3195, vec![mi("ItemModifier", "itemID", 0, 1229, 280)]),
+        );
+        // 3196: LocationModifier postPercent — every module's heatDamage (1211) *= (1 + 1229%).
+        effects.insert(
+            3196,
+            meta(3196, vec![mi("LocationModifier", "shipID", 6, 1211, 1229)]),
+        );
+
+        let ship_attrs = vec![
+            (attr::HEAT_CAPACITY_MED, 100.0),
+            (attr::HEAT_GENERATION_MULTIPLIER, 1.0),
+            (attr::HEAT_ATTENUATION_MED, 0.5),
+        ];
+        let mwd_attrs = vec![
+            (attr::HEAT_DAMAGE, 19.0), // T1 5MN MWD, bundled SDE
+            (attr::HEAT_ABSORPTION_RATE, 0.04),
+            (attr::DURATION, 10_000.0),
+            (attr::HP, 40.0),
+        ];
+        let layout = frigate_layout();
+        let items = [FitItem {
+            slot: SlotKind::Mid,
+            state: ModuleState::Overheated,
+            ..item(438, None, ModuleState::Overheated, 1)
+        }];
+        let module_items: Vec<&FitItem> = items.iter().collect();
+
+        let burnout_at = |thermo_level: f64| {
+            let mut skills = Vec::new();
+            if thermo_level > 0.0 {
+                skills.push(EntityInput {
+                    type_id: 28164, // Thermodynamics
+                    attrs: vec![(280, thermo_level), (1229, -5.0)],
+                    effect_ids: vec![3195, 3196],
+                    ..Default::default()
+                });
+            }
+            let input = FitInput {
+                ship: EntityInput {
+                    attrs: ship_attrs.clone(),
+                    ..Default::default()
+                },
+                modules: vec![EntityInput {
+                    attrs: mwd_attrs.clone(),
+                    overheated: true,
+                    ..Default::default()
+                }],
+                skills,
+                ..Default::default()
+            };
+            let resolved = resolve(&input, &effects, &|_| true, &|_| 0.0);
+            heat_of(&resolved, &module_items, &layout)[0]
+                .expect("an overloaded MWD on a frigate always burns out eventually")
+        };
+
+        let t0 = burnout_at(0.0);
+        let t5 = burnout_at(5.0);
+        assert!(
+            t5 > t0,
+            "Thermodynamics V should sustain the overheat longer than untrained ({t5}s vs {t0}s)"
+        );
+        let ratio = t5 / t0;
+        // Not a straight 1/0.75 multiplier — rack heat keeps building while the
+        // module overheats, so cumulative expected damage isn't linear in time
+        // (see `engine::heat`'s doc comment); the acceptance criterion's "right
+        // ratio" is checked as landing near that naive scaling.
+        assert!(
+            (1.15..1.35).contains(&ratio),
+            "Thermo V (-25% heat damage) should land near the naive 1/0.75x ratio, got {ratio}x (t0={t0}s, t5={t5}s)"
+        );
+        // Plausible absolute range: EVE University's Propulsion equipment page
+        // notes a 5MN MWD "can completely burn itself out in as few as three
+        // overheated cycles" (worst-case RNG at a 10s cycle, i.e. ~20-30s) —
+        // our expected-value estimate should sit comfortably above that worst
+        // case and still be a matter of minutes, not hours.
+        assert!(
+            t0 > 20.0 && t0 < 600.0,
+            "untrained burnout time implausible: {t0}s"
+        );
+        assert!(
+            t5 > 20.0 && t5 < 900.0,
+            "Thermo V burnout time implausible: {t5}s"
+        );
     }
 }

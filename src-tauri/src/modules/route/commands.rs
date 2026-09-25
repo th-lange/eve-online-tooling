@@ -76,8 +76,14 @@ async fn activity_map(
     esi: &EsiClient,
     refresh: bool,
 ) -> Result<HashMap<i64, SystemActivity>, String> {
+    // Enriched with SDE name/security/region below — keyed to the SDE's
+    // generation so an SDE update invalidates this immediately instead of
+    // after 30 minutes (#884).
+    let generation = crate::sde::generation_id(dir)?;
     if !refresh {
-        if let Some(cached) = storage::cache_get::<Vec<SystemActivity>>(dir, "system_activity") {
+        if let Some(cached) =
+            storage::cache_get_versioned::<Vec<SystemActivity>>(dir, "system_activity", generation)
+        {
             return Ok(cached.into_iter().map(|r| (r.system_id, r)).collect());
         }
     }
@@ -103,7 +109,8 @@ async fn activity_map(
     }
 
     let rows: Vec<SystemActivity> = activity.values().cloned().collect();
-    let _ = storage::cache_put(dir, "system_activity", &rows, ACTIVITY_TTL_SECS);
+    let _ =
+        storage::cache_put_versioned(dir, "system_activity", &rows, ACTIVITY_TTL_SECS, generation);
     Ok(activity)
 }
 

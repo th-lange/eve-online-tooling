@@ -125,6 +125,35 @@ export function sdeTypeInfos(typeIds: number[]): Promise<TypeBrief[]> {
   return invoke<TypeBrief[]>("sde_type_infos", { typeIds });
 }
 
+/** One mutaplasmid's roll data (#876): the base module types it can be
+ *  applied to, and each affected attribute's roll range as a multiplier on
+ *  the base item's own value. */
+export interface MutaplasmidRoll {
+  mutaplasmidTypeId: number;
+  mutaplasmidName: string;
+  applicableTypeIds: number[];
+  /** attribute id (as a string key) -> `[minMultiplier, maxMultiplier]`. */
+  attributeRanges: Record<string, [number, number]>;
+}
+
+/** Every mutaplasmid applicable to a base module type id — for the module
+ *  editor's mutaplasmid picker. */
+export function sdeMutaplasmidsForType(
+  typeId: number,
+): Promise<MutaplasmidRoll[]> {
+  return invoke<MutaplasmidRoll[]>("sde_mutaplasmids_for_type", { typeId });
+}
+
+/** One mutaplasmid's roll data by its own type id, or `null` if it isn't
+ *  one. */
+export function sdeMutaplasmidRoll(
+  mutaplasmidTypeId: number,
+): Promise<MutaplasmidRoll | null> {
+  return invoke<MutaplasmidRoll | null>("sde_mutaplasmid_roll", {
+    mutaplasmidTypeId,
+  });
+}
+
 /** Subscribe to SDE download/decompress progress. */
 export function onSdeProgress(
   handler: (progress: SdeProgress) => void,

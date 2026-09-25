@@ -14,12 +14,37 @@ import {
 // per-character feature) is picked from a dropdown selector; Add opens the
 // browser SSO flow, and ✕ removes the selected character (clearing its keychain
 // entry).
+
+// Switching/adding/removing a character changes which ESI identity every
+// per-character query resolves against on the backend (it reads the
+// bookmarked active character from its own storage, not from the query
+// key), so a plain auth-state invalidation isn't enough — every
+// per-character query root needs to be swept too, or the previous
+// character's assets/orders/wallet/jobs/PI/notifications/skills keep
+// rendering until their own staleTime happens to lapse. Structural fix:
+// #887 also audited each of these queries to add the active character id
+// into its own key so TanStack refetches automatically on switch; this
+// sweep is the safety net for the rest (and for anything added later
+// without a character id in its key).
+const PER_CHARACTER_QUERY_ROOTS = [
+  ["auth"], // characters, active
+  ["owned"], // roster-wide Owned filter
+  ["transactions"], // wallet transaction ledger
+  ["orders"], // personal market orders
+  ["notifications"],
+  ["pi"], // PI colonies overview
+  ["char"], // skills, standings, research, mining, fleet
+  ["character"], // trade fees (broker/sales tax)
+  ["industry"], // industry jobs
+  ["esi"], // active character's current ship
+];
+
 export function Characters() {
   const qc = useQueryClient();
   const invalidate = () => {
-    qc.invalidateQueries({ queryKey: ["auth", "characters"] });
-    qc.invalidateQueries({ queryKey: ["auth", "active"] });
-    qc.invalidateQueries({ queryKey: ["owned"] }); // refresh the Owned filter
+    for (const queryKey of PER_CHARACTER_QUERY_ROOTS) {
+      qc.invalidateQueries({ queryKey });
+    }
   };
 
   const chars = useQuery({
@@ -37,7 +62,7 @@ export function Characters() {
   });
   const setActive = useMutation({
     mutationFn: (id: number) => setActiveCharacter(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["auth", "active"] }),
+    onSuccess: invalidate,
   });
 
   const activeId = active.data ?? chars.data?.[0]?.characterId ?? null;

@@ -24,6 +24,31 @@ export function fittingModuleInfo(
   });
 }
 
+/** One mutated attribute's slider bounds (#876): the module's own
+ *  (unmutated) value, and the absolute `[minValue, maxValue]` this
+ *  mutaplasmid can roll it to. */
+export interface MutationAttrRange {
+  attributeId: number;
+  attributeName: string;
+  baseValue: number;
+  minValue: number;
+  maxValue: number;
+}
+
+/** Per-attribute roll bounds for mutating `baseTypeId` with
+ *  `mutaplasmidTypeId` (#876) — backs the module editor's mutate sliders,
+ *  each clamped to `[minValue, maxValue]`. Rejects if the mutaplasmid isn't
+ *  applicable to this base type. */
+export function fittingMutationRanges(
+  baseTypeId: number,
+  mutaplasmidTypeId: number,
+): Promise<MutationAttrRange[]> {
+  return invoke<MutationAttrRange[]>("fitting_mutation_ranges", {
+    baseTypeId,
+    mutaplasmidTypeId,
+  });
+}
+
 // --- Fitting ---
 
 /** Where a fitted item sits on the hull. */
@@ -37,10 +62,22 @@ export type SlotKind =
   | "implant"
   | "booster"
   | "cargo"
+  | "fighter"
   | "mode";
 
 /** A module's activation state. */
 export type ModuleState = "offline" | "online" | "active" | "overheated";
+
+/** A mutaplasmid roll applied to a fitted item (#876): the base
+ *  (unmutated) type id, the mutaplasmid used, and the rolled **absolute**
+ *  attribute values (not multipliers) — one entry per attribute the
+ *  mutaplasmid touches. */
+export interface ItemMutation {
+  baseTypeId: number;
+  mutaplasmidTypeId: number;
+  /** attribute id (as a string key) -> rolled absolute value. */
+  attrs: Record<string, number>;
+}
 
 /** One fitted item: a module/rig/drone slot entry, optionally with a charge. */
 export interface FitItem {
@@ -54,6 +91,13 @@ export interface FitItem {
    * means "not yet customized" — defaults to as many as bandwidth/the 5-in-
    * space limit allow. Only meaningful for `slot === "drone"`. */
   activeDrones?: number | null;
+  /** Mutaplasmid roll applied to this item (#876), absent for an unmutated
+   *  item — the overwhelming majority. */
+  mutation?: ItemMutation | null;
+  /** Selected offensive ability for a fighter squadron (#877), e.g.
+   *  `"attackMissile"`. `null`/absent = auto (the squadron's highest-DPS
+   *  ability). Only meaningful for `slot === "fighter"`. */
+  fighterAbility?: string | null;
 }
 
 /** The editable fit document. */
@@ -85,6 +129,14 @@ export interface ShipLayout {
   calibration: number;
   droneBay: number;
   droneBandwidth: number;
+  /** Total fighter launch tubes — caps simultaneously fitted squadrons
+   *  regardless of category split (#877). */
+  fighterTubes: number;
+  fighterLightSlots: number;
+  fighterSupportSlots: number;
+  fighterHeavySlots: number;
+  /** Fighter bay volume, m³. */
+  fighterBay: number;
 }
 
 /** Fitting-resource usage vs the hull's output. */
@@ -140,9 +192,23 @@ export interface TankStats {
   shieldResists: [number, number, number, number];
   armorResists: [number, number, number, number];
   hullResists: [number, number, number, number];
-  /** Active local reps/s (shield boosters / armor repairers). */
+  /** Active local reps/s at full rate (burst): while an ancillary module's
+   *  charge/capacitor keeps it going, or always for a non-ancillary rep. */
   shieldRepS: number;
   armorRepS: number;
+  /** Cycle-averaged reps/s including any reload pause. Equal to
+   *  `shieldRepS`/`armorRepS` for a rep with infinite ammo. */
+  shieldRepSSustained: number;
+  armorRepSSustained: number;
+  /** Remote-rep multiplier per layer: `1 / effective resonance` — how much
+   *  a remote repair's raw GJ is amplified by this layer's resists. */
+  shieldRrm: number;
+  armorRrm: number;
+  hullRrm: number;
+  /** True when a running Reactive Armor Hardener's resist-shift was
+   *  simulated to a fixed point — `armorResists` reflects the shifted
+   *  values. */
+  rahActive: boolean;
   /** Peak passive shield regen (HP/s). */
   passiveShieldS: number;
 }
@@ -152,6 +218,9 @@ export interface DpsBreakdown {
   turret: number;
   missile: number;
   drone: number;
+  /** Fighter squadron DPS (#877); not yet folded into applied-DPS/DPS-vs-
+   *  range (travel/application modeling is a documented follow-up). */
+  fighter: number;
   total: number;
 }
 
@@ -190,6 +259,27 @@ export interface TargetProfile {
   missilesNeedOvertake: boolean;
 }
 
+/** One target/damage-pattern preset (#873): a built-in NPC combat profile
+ *  (derived from real SDE NPC ship dogma attributes, grouped by faction/
+ *  content-type) or a user-saved custom one ("Custom" group). Bundles both
+ *  halves of "what am I fighting" — the applied-DPS target profile and the
+ *  incoming damage split — so picking one preset feeds both
+ *  `TargetProfileBox` and the tank panel's damage-profile picker. */
+export interface NpcProfile {
+  id: string;
+  label: string;
+  group: string;
+  target: TargetProfile;
+  damageProfile: [number, number, number, number];
+}
+
+/** Response of `fittingTargetProfiles`: the SDE-derived built-in library
+ *  plus the user's persisted custom presets. */
+export interface TargetProfileLibrary {
+  builtIn: NpcProfile[];
+  custom: NpcProfile[];
+}
+
 /** Navigation: speed, agility, align and signature. */
 export interface NavStats {
   maxVelocity: number;
@@ -214,6 +304,10 @@ export interface FitStats {
   capacitor?: CapStats | null;
   tank?: TankStats | null;
   dps?: DpsBreakdown | null;
+  /** Sustained DPS: burst `dps` derated by each weapon's own reload cycle
+   * (clip depletion + reload time) — PYFA's `factorReload` figure. Equal to
+   * `dps` for infinite-ammo weapons. Always populated alongside `dps`. */
+  dpsSustained?: DpsBreakdown | null;
   navigation?: NavStats | null;
   /** Resolved slot layout (T3 subsystems grant slots). */
   layout?: ShipLayout | null;
@@ -239,6 +333,27 @@ export interface FitStats {
   /** DPS-over-range curve as `[distance_m, dps]` pairs; empty when no
    * target profile was given. */
   dpsRangeCurve?: [number, number][];
+  /** Whether the fit carries any spoolable weapon/rep (Triglavian Entropic
+   * Disintegrators and similar) — gates the spool selector. */
+  isSpoolable?: boolean;
+  /** Overheat burnout estimate (seconds) per fitted item, parallel to
+   * `Fit.items` — `null` for non-module items and modules that aren't
+   * currently overheated (or that never build meaningful rack heat). An
+   * expected-value estimate, not an exact prediction. */
+  burnoutSeconds?: Array<number | null>;
+  /** Each fitted fighter squadron's selected offensive ability + its DPS
+   *  contribution (#877), parallel to `Fit.items` — `null` for non-fighter
+   *  items and for a pure support/EW squadron with no offensive ability. */
+  fighterAbilities?: Array<FighterAbilityStats | null>;
+}
+
+/** One fitted fighter squadron's selected ability + its DPS contribution
+ *  (#877). See `FitStats.fighterAbilities`. */
+export interface FighterAbilityStats {
+  key: string;
+  label: string;
+  dps: number;
+  dpsSustained: number;
 }
 
 /** One priced line of a whole-fit valuation. */
@@ -266,7 +381,10 @@ export function fittingShipLayout(
   });
 }
 
-/** Parse an EFT clipboard string into a resolved fit. */
+/** Parse an EFT clipboard string or a Ship DNA string/link into a resolved
+ *  fit — format is auto-detected by shape (`[Ship, name]` vs. a leading
+ *  ship type id, #879). DNA is the compact format behind in-game chat fit
+ *  links and killboard links. */
 export function fittingImportEft(text: string): Promise<Fit> {
   return invoke<Fit>("fitting_import_eft", { text });
 }
@@ -333,6 +451,19 @@ export function fittingExportEft(fit: Fit): Promise<string> {
   return invoke<string>("fitting_export_eft", { fit });
 }
 
+/** Serialize a fit to a Ship DNA string (the compact format behind in-game
+ *  chat fit links and killboard links, #879). */
+export function fittingExportDna(fit: Fit): Promise<string> {
+  return invoke<string>("fitting_export_dna", { fit });
+}
+
+/** Serialize a fit's modules, loaded charges and drones as an EVE Multibuy-
+ *  pasteable item list — one `Name xQty` line per distinct type, hull
+ *  excluded (#879). */
+export function fittingExportMultibuy(fit: Fit): Promise<string> {
+  return invoke<string>("fitting_export_multibuy", { fit });
+}
+
 /** Skills basis for simulation: best-case all-V, or the logged-in character. */
 export type SkillSource = "allFive" | "character";
 
@@ -341,7 +472,12 @@ export type SkillSource = "allFive" | "character";
  *  "receiving" from a fleet member. `environmentEffect` is a wormhole-class
  *  or Pochven-metaliminal-storm environment beacon type id the fit is
  *  sitting in. `abyssalWeather` is the separate, mutually exclusive Abyssal
- *  Deadspace weather choice. */
+ *  Deadspace weather choice. `spoolPct` (#872) is the requested Triglavian/
+ *  spoolable-weapon ramp fraction (0..1); omitted defaults to 1 (fully
+ *  spooled — how players quote Trig DPS). `factorReload` (#871) toggles
+ *  reload accounting in the cap sim (default off) — clip depletion + reload
+ *  pauses a weapon's cap draw; burst/sustained DPS (`dps`/`dpsSustained`)
+ *  are always both returned regardless. */
 export function fittingSimulate(
   fit: Fit,
   skillSource: SkillSource = "allFive",
@@ -351,6 +487,8 @@ export function fittingSimulate(
   fleetBoosts?: FleetBoost[],
   environmentEffect?: number | null,
   abyssalWeather?: AbyssalWeatherSelection | null,
+  spoolPct?: number,
+  factorReload?: boolean,
 ): Promise<FitStats> {
   return invoke<FitStats>("fitting_simulate", {
     fit,
@@ -363,6 +501,8 @@ export function fittingSimulate(
       : null,
     environmentEffect: environmentEffect ?? null,
     abyssalWeather: abyssalWeather ?? null,
+    spoolPct: spoolPct ?? null,
+    factorReload: factorReload ?? null,
   });
 }
 
@@ -476,4 +616,23 @@ export function fittingEsiPush(fit: Fit): Promise<number> {
 /** Delete a locally saved fit by id. */
 export function fittingDeleteLocal(id: string): Promise<void> {
   return invoke<void>("fitting_delete_local", { id });
+}
+
+/** The built-in NPC target/damage profile library plus the user's persisted
+ *  custom presets (#873) — backs the searchable, faction/content-grouped
+ *  preset dropdowns in `TargetProfileBox` and the tank panel's damage-profile
+ *  picker. */
+export function fittingTargetProfiles(): Promise<TargetProfileLibrary> {
+  return invoke<TargetProfileLibrary>("fitting_target_profiles");
+}
+
+/** Save (insert or update by id) a custom target/damage profile preset
+ *  (#873); always grouped as "Custom". Returns the preset's id. */
+export function fittingSaveTargetProfile(profile: NpcProfile): Promise<string> {
+  return invoke<string>("fitting_save_target_profile", { profile });
+}
+
+/** Delete a custom target/damage profile preset by id. */
+export function fittingDeleteTargetProfile(id: string): Promise<void> {
+  return invoke<void>("fitting_delete_target_profile", { id });
 }

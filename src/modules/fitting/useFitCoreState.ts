@@ -41,6 +41,13 @@ export interface FitStateSlice {
   setEnvironmentEffect: (id: number | null) => void;
   abyssalWeather: AbyssalWeatherSelection | null;
   setAbyssalWeather: (selection: AbyssalWeatherSelection | null) => void;
+  spoolPct: number | undefined;
+  setSpoolPct: (pct: number | undefined) => void;
+  /** Reload accounting toggle (#871): when on, sustained DPS and a
+   *  reload-paused cap sim are shown instead of the infinite-ammo burst
+   *  figures. Off by default, matching today's behavior. */
+  factorReload: boolean;
+  setFactorReload: (v: boolean) => void;
 }
 
 /** Raw fit-editing state — the `FitStateSlice` half of `useFitEditor`'s old
@@ -93,6 +100,11 @@ export function useFitCoreState(): FitStateSlice {
   // beacon type id. Mutually exclusive with `environmentEffect`.
   const [abyssalWeather, setAbyssalWeatherRaw] =
     useState<AbyssalWeatherSelection | null>(null);
+  // Triglavian/spoolable-weapon ramp fraction (#872) for the simulate query;
+  // undefined means "let the backend default" (1.0, fully spooled).
+  const [spoolPct, setSpoolPct] = useState<number | undefined>(undefined);
+  // Reload accounting toggle (#871); off by default (infinite-ammo burst).
+  const [factorReload, setFactorReload] = useState(false);
   function setEnvironmentEffect(id: number | null) {
     setEnvironmentEffectRaw(id);
     if (id != null) setAbyssalWeatherRaw(null);
@@ -151,5 +163,9 @@ export function useFitCoreState(): FitStateSlice {
     setEnvironmentEffect,
     abyssalWeather,
     setAbyssalWeather,
+    spoolPct,
+    setSpoolPct,
+    factorReload,
+    setFactorReload,
   };
 }

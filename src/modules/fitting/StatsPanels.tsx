@@ -1,6 +1,8 @@
-import type { UseMutationResult } from "@tanstack/react-query";
-import { BatteryCharging, BatteryWarning } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useQuery, type UseMutationResult } from "@tanstack/react-query";
+import { BatteryCharging, BatteryWarning, ChevronDown } from "lucide-react";
 import {
+  fittingTargetProfiles,
   type CapStats,
   type DpsBreakdown,
   type EwTag,
@@ -8,6 +10,7 @@ import {
   type FitProblem,
   type FitStats,
   type NavStats,
+  type NpcProfile,
   type ResourceUsage,
   type TankStats,
 } from "../../lib/api";
@@ -19,12 +22,28 @@ import {
   ARCHETYPE_CLASS,
 } from "../../lib/shipArchetype";
 
-/** Per-layer HP + EM/Th/Kin/Exp resistances for shield, armor and hull. */
+/** Per-layer HP + EM/Th/Kin/Exp resistances for shield, armor and hull, plus
+ *  each layer's remote-rep multiplier (RRM: how much a remote repair's raw
+ *  GJ is amplified by that layer's resists against the selected profile).
+ *  The armor row gets a "RAH" badge when a Reactive Armor Hardener's
+ *  resist-shift was simulated — its resists are the shifted values, not the
+ *  module's static baseline. */
 export function TankResists({ tank }: { tank: TankStats }) {
   const layers = [
-    { name: "Shield", hp: tank.shieldHp, r: tank.shieldResists },
-    { name: "Armor", hp: tank.armorHp, r: tank.armorResists },
-    { name: "Hull", hp: tank.hullHp, r: tank.hullResists },
+    {
+      name: "Shield",
+      hp: tank.shieldHp,
+      r: tank.shieldResists,
+      rrm: tank.shieldRrm,
+    },
+    {
+      name: "Armor",
+      hp: tank.armorHp,
+      r: tank.armorResists,
+      rrm: tank.armorRrm,
+      rah: tank.rahActive,
+    },
+    { name: "Hull", hp: tank.hullHp, r: tank.hullResists, rrm: tank.hullRrm },
   ];
   return (
     <table className="w-full text-[11px] tabular-nums">
@@ -37,12 +56,23 @@ export function TankResists({ tank }: { tank: TankStats }) {
               {d}
             </th>
           ))}
+          <th className="pl-2 text-right font-normal">RRM</th>
         </tr>
       </thead>
       <tbody>
         {layers.map((l) => (
           <tr key={l.name}>
-            <td className="text-zinc-300">{l.name}</td>
+            <td className="text-zinc-300">
+              {l.name}
+              {l.rah && (
+                <span
+                  className="ml-1 text-[9px] uppercase text-amber-500"
+                  title="Reactive Armor Hardener resists shifted toward the selected damage profile"
+                >
+                  RAH
+                </span>
+              )}
+            </td>
             <td className="pr-1 text-right text-zinc-400">
               {formatInt(Math.round(l.hp))}
             </td>
@@ -51,6 +81,9 @@ export function TankResists({ tank }: { tank: TankStats }) {
                 {Math.round(v * 100)}
               </td>
             ))}
+            <td className="pl-2 text-right text-zinc-400">
+              {l.rrm.toFixed(2)}×
+            </td>
           </tr>
         ))}
       </tbody>
@@ -260,6 +293,118 @@ export function DpsRangeCurve({ curve }: { curve: [number, number][] }) {
   );
 }
 
+/** One overlaid line for `DpsRangeOverlayChart`: a labelled fit/ammo curve. */
+export interface DpsRangeSeries {
+  label: string;
+  curve: [number, number][];
+}
+
+/** Overlay palette (#880): colour cycles alongside a distinct dash pattern per
+ *  series so lines stay distinguishable in grayscale/for colourblind users,
+ *  not colour alone (CLAUDE.md's color-signaling convention). Solid first
+ *  (matches the single-curve `DpsRangeCurve`'s amber), then increasingly
+ *  broken patterns. */
+const OVERLAY_COLORS = [
+  "#f59e0b",
+  "#38bdf8",
+  "#34d399",
+  "#a78bfa",
+  "#fb7185",
+  "#facc15",
+];
+const OVERLAY_DASHES = [undefined, "6 3", "2 2", "8 2 2 2", "3 6", "1 3 4 3"];
+
+/** Multi-fit DPS-vs-range overlay (#880): same axis/scale convention as
+ *  [`DpsRangeCurve`], but N series sharing one x/y scale so crossovers
+ *  (e.g. Void vs Null falloff) are directly readable. Series with fewer
+ *  than 2 points (no target profile / no data) are dropped. */
+export function DpsRangeOverlayChart({ series }: { series: DpsRangeSeries[] }) {
+  const w = 480;
+  const h = 140;
+  const padY = 4;
+  const valid = series
+    .map((s, i) => ({
+      ...s,
+      color: OVERLAY_COLORS[i % OVERLAY_COLORS.length],
+      dash: OVERLAY_DASHES[i % OVERLAY_DASHES.length],
+    }))
+    .filter((s) => s.curve.length > 1);
+  if (valid.length === 0) {
+    return (
+      <p className="text-xs text-zinc-500">
+        Set a target profile to see the DPS-vs-range overlay.
+      </p>
+    );
+  }
+  const distMax = Math.max(
+    ...valid.map((s) => s.curve[s.curve.length - 1][0]),
+    1,
+  );
+  const dpsMax = Math.max(
+    ...valid.flatMap((s) => s.curve.map(([, dps]) => dps)),
+    1e-9,
+  );
+  const x = (d: number) => (d / distMax) * w;
+  const y = (dps: number) => padY + (1 - dps / dpsMax) * (h - 2 * padY);
+  return (
+    <div className="mt-1">
+      <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+        {valid.map((s) => (
+          <span key={s.label} className="flex items-center gap-1.5">
+            <svg width="16" height="6" className="shrink-0">
+              <line
+                x1={0}
+                x2={16}
+                y1={3}
+                y2={3}
+                stroke={s.color}
+                strokeWidth="2"
+                strokeDasharray={s.dash}
+              />
+            </svg>
+            <span className="text-zinc-300">{s.label}</span>
+          </span>
+        ))}
+      </div>
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        preserveAspectRatio="none"
+        className="w-full"
+        style={{ height: h }}
+      >
+        {[0.25, 0.5, 0.75].map((f) => (
+          <line
+            key={f}
+            x1={0}
+            x2={w}
+            y1={padY + f * (h - 2 * padY)}
+            y2={padY + f * (h - 2 * padY)}
+            stroke="#27272a"
+            strokeWidth="0.75"
+          />
+        ))}
+        {valid.map((s) => (
+          <polyline
+            key={s.label}
+            points={s.curve
+              .map(([d, dps]) => `${x(d).toFixed(1)},${y(dps).toFixed(1)}`)
+              .join(" ")}
+            fill="none"
+            stroke={s.color}
+            strokeWidth="1.5"
+            strokeDasharray={s.dash}
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+      </svg>
+      <div className="flex justify-between text-[10px] text-zinc-600">
+        <span>0km</span>
+        <span>{km(distMax)}</span>
+      </div>
+    </div>
+  );
+}
+
 export function ResourceBar({
   label,
   used,
@@ -291,15 +436,14 @@ export function ResourceBar({
   );
 }
 
-/** Damage-profile presets for the tank panel's "incoming damage" picker:
- *  `[label, [em, therm, kin, exp]]`. */
-const DAMAGE_PRESETS = [
+/** Generic damage-profile presets for the tank panel's "incoming damage"
+ *  picker: `[label, [em, therm, kin, exp]]`. Not fetched from the SDE — a
+ *  fallback for "no specific enemy in mind". Real faction/content presets
+ *  (#873) come from `fittingTargetProfiles`, grouped by faction alongside
+ *  these under "Generic". */
+const GENERIC_DAMAGE_PRESETS: [string, [number, number, number, number]][] = [
   ["Omni (even)", [0.25, 0.25, 0.25, 0.25]],
-  ["Guristas (kin/therm)", [0, 0.5, 0.5, 0]],
-  ["Serpentis (therm/kin)", [0, 0.667, 0.333, 0]],
-  ["Angel (exp/kin)", [0, 0, 0.5, 0.5]],
-  ["Sansha/Blood (em/therm)", [0.5, 0.5, 0, 0]],
-] as const;
+];
 
 /**
  * The four numbers a fitter actually swaps modules to chase (#708): DPS, EHP,
@@ -482,21 +626,73 @@ export function ResourcesPanel({
 export function DpsBreakdownPanel({
   skillLabel,
   dps,
+  dpsSustained,
   appliedDps,
   dpsRangeCurve,
   jammedActive,
+  isSpoolable = false,
+  spoolPct,
+  onSpoolPct,
+  factorReload = false,
+  onFactorReload,
 }: {
   skillLabel: string;
   dps: DpsBreakdown;
+  /** Sustained DPS (#871) — burst `dps` derated by clip depletion + reload
+   *  pauses. Shown instead of burst when `factorReload` is on. */
+  dpsSustained?: DpsBreakdown;
   appliedDps?: DpsBreakdown;
   dpsRangeCurve?: [number, number][];
   jammedActive: boolean;
+  /** Whether the fit carries a Triglavian/spoolable weapon — shows the spool
+   *  slider only then (#872). */
+  isSpoolable?: boolean;
+  spoolPct?: number;
+  onSpoolPct?: (pct: number | undefined) => void;
+  /** Reload-accounting toggle (#871): off shows infinite-ammo burst DPS
+   *  (today's behavior); on shows `dpsSustained`. */
+  factorReload?: boolean;
+  onFactorReload?: (v: boolean) => void;
 }) {
+  const spoolPercent = Math.round((spoolPct ?? 1) * 100);
+  const shown = factorReload && dpsSustained ? dpsSustained : dps;
   return (
     <div className="space-y-1">
       <h3 className="text-xs uppercase tracking-wide text-zinc-500">
         DPS ({skillLabel})
       </h3>
+      {isSpoolable && onSpoolPct && (
+        <div className="space-y-0.5">
+          <div className="flex items-center justify-between text-[10px] uppercase tracking-wide text-zinc-500">
+            <span>Spool-up</span>
+            <span>{spoolPercent}%</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={spoolPercent}
+            onChange={(e) => {
+              const v = Number(e.currentTarget.value);
+              onSpoolPct(v === 100 ? undefined : v / 100);
+            }}
+            className="w-full"
+            aria-label="Spool-up percentage"
+          />
+        </div>
+      )}
+      {onFactorReload && (
+        <label className="flex items-center justify-between text-[10px] uppercase tracking-wide text-zinc-500">
+          <span>Factor reload</span>
+          <input
+            type="checkbox"
+            checked={factorReload}
+            onChange={(e) => onFactorReload(e.currentTarget.checked)}
+            aria-label="Factor reload"
+          />
+        </label>
+      )}
       {jammedActive ? (
         <div className="text-sm text-amber-400">
           Jammed — 0 applied (no lock)
@@ -504,13 +700,22 @@ export function DpsBreakdownPanel({
       ) : (
         <>
           <div className="text-sm text-zinc-300">
-            {dps.total.toFixed(0)} dps
+            {shown.total.toFixed(0)} dps
+            {factorReload && dpsSustained && (
+              <span className="text-zinc-500"> (sustained)</span>
+            )}
           </div>
-          {dps.total > 0 && (
+          {shown.total > 0 && (
             <div className="text-xs text-zinc-500">
-              {dps.turret > 0 && `turret ${dps.turret.toFixed(0)} `}
-              {dps.missile > 0 && `· missile ${dps.missile.toFixed(0)} `}
-              {dps.drone > 0 && `· drone ${dps.drone.toFixed(0)}`}
+              {shown.turret > 0 && `turret ${shown.turret.toFixed(0)} `}
+              {shown.missile > 0 && `· missile ${shown.missile.toFixed(0)} `}
+              {shown.drone > 0 && `· drone ${shown.drone.toFixed(0)} `}
+              {shown.fighter > 0 && `· fighter ${shown.fighter.toFixed(0)}`}
+            </div>
+          )}
+          {factorReload && dpsSustained && (
+            <div className="text-xs text-zinc-500">
+              burst {dps.total.toFixed(0)} dps
             </div>
           )}
           {appliedDps && (
@@ -531,8 +736,17 @@ export function DpsBreakdownPanel({
   );
 }
 
-/** Tank section: incoming-damage-profile picker, EHP headline, active reps,
- *  and the per-layer resist table. */
+/** One flattened, filterable/groupable damage-profile option. */
+interface DamageOption {
+  kind: string;
+  label: string;
+  profile: [number, number, number, number];
+}
+
+/** Tank section: incoming-damage-profile picker (#873: a searchable dropdown
+ *  grouped by faction/content-type, sourced from the SDE-derived NPC library
+ *  plus generic fallbacks — see `fittingTargetProfiles`), EHP headline,
+ *  active reps, and the per-layer resist table. */
 export function TankResistsPanel({
   skillLabel,
   tank,
@@ -544,40 +758,117 @@ export function TankResistsPanel({
   damageProfile: [number, number, number, number] | undefined;
   onDamageProfile: (p: [number, number, number, number] | undefined) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const library = useQuery({
+    queryKey: ["fitting", "targetProfiles"],
+    queryFn: fittingTargetProfiles,
+  });
+  const grouped = useMemo(() => {
+    const options: DamageOption[] = [
+      ...GENERIC_DAMAGE_PRESETS.map(([label, profile]) => ({
+        kind: "Generic",
+        label,
+        profile,
+      })),
+      ...(library.data?.builtIn ?? []).map((p: NpcProfile) => ({
+        kind: p.group,
+        label: p.label,
+        profile: p.damageProfile,
+      })),
+      ...(library.data?.custom ?? []).map((p: NpcProfile) => ({
+        kind: "Custom",
+        label: p.label,
+        profile: p.damageProfile,
+      })),
+    ];
+    const needle = q.trim().toLowerCase();
+    const filtered = needle
+      ? options.filter(
+          (o) =>
+            o.label.toLowerCase().includes(needle) ||
+            o.kind.toLowerCase().includes(needle),
+        )
+      : options;
+    const byKind = new Map<string, DamageOption[]>();
+    for (const o of filtered)
+      byKind.set(o.kind, [...(byKind.get(o.kind) ?? []), o]);
+    return [...byKind.entries()];
+  }, [library.data, q]);
+  const selectedLabel =
+    [
+      ...GENERIC_DAMAGE_PRESETS,
+      ...(library.data?.builtIn ?? []).map(
+        (p) => [p.label, p.damageProfile] as const,
+      ),
+      ...(library.data?.custom ?? []).map(
+        (p) => [p.label, p.damageProfile] as const,
+      ),
+    ].find(
+      ([, p]) =>
+        damageProfile && JSON.stringify(p) === JSON.stringify(damageProfile),
+    )?.[0] ?? (damageProfile ? "Custom values" : "Omni (even)");
+
   return (
     <div className="space-y-1">
       <h3 className="text-xs uppercase tracking-wide text-zinc-500">
         Tank ({skillLabel})
       </h3>
-      <div className="space-y-0.5">
+      <div className="relative space-y-0.5">
         <div className="text-[10px] uppercase tracking-wide text-zinc-500">
           Incoming damage
         </div>
-        <select
-          value={damageProfile ? JSON.stringify(damageProfile) : ""}
-          onChange={(e) =>
-            onDamageProfile(
-              e.currentTarget.value
-                ? (JSON.parse(e.currentTarget.value) as [
-                    number,
-                    number,
-                    number,
-                    number,
-                  ])
-                : undefined,
-            )
-          }
-          className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-100"
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="flex items-center gap-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-100 hover:bg-zinc-700"
         >
-          {DAMAGE_PRESETS.map(([label, profile]) => (
-            <option
-              key={label}
-              value={label === "Omni (even)" ? "" : JSON.stringify(profile)}
-            >
-              {label}
-            </option>
-          ))}
-        </select>
+          <span className="max-w-40 truncate">{selectedLabel}</span>
+          <ChevronDown size={12} />
+        </button>
+        {open && (
+          <>
+            <div
+              className="fixed inset-0 z-10"
+              onClick={() => setOpen(false)}
+            />
+            <div className="absolute left-0 z-20 mt-1 max-h-80 w-72 overflow-y-auto rounded border border-zinc-700 bg-zinc-900 p-1 shadow-lg">
+              <input
+                autoFocus
+                value={q}
+                onChange={(e) => setQ(e.currentTarget.value)}
+                placeholder="filter (guristas, sleeper…)"
+                className="mb-1 w-full rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-100 outline-none placeholder:text-zinc-500"
+              />
+              {grouped.map(([kind, opts]) => (
+                <div key={kind}>
+                  <div className="mt-1 px-2 text-[10px] uppercase tracking-wide text-zinc-500">
+                    {kind}
+                  </div>
+                  <ul>
+                    {opts.map((o) => (
+                      <li key={`${o.kind}-${o.label}`}>
+                        <button
+                          onClick={() => {
+                            onDamageProfile(o.profile);
+                            setOpen(false);
+                          }}
+                          className="block w-full truncate rounded px-2 py-1 text-left text-xs text-zinc-200 hover:bg-zinc-800"
+                        >
+                          {o.label}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              {library.isFetched && grouped.length === 0 && (
+                <div className="px-2 py-1 text-xs text-zinc-500">
+                  No matches.
+                </div>
+              )}
+            </div>
+          </>
+        )}
       </div>
       <div className="text-sm text-zinc-300">
         {formatInt(Math.round(tank.ehp))} EHP
@@ -592,6 +883,16 @@ export function TankResistsPanel({
               <span className="tabular-nums text-sky-400">
                 {tank.shieldRepS.toFixed(1)}/s
               </span>
+              {tank.shieldRepSSustained < tank.shieldRepS - 0.05 && (
+                <span className="text-zinc-600">
+                  {" "}
+                  (
+                  <span className="tabular-nums text-sky-600">
+                    {tank.shieldRepSSustained.toFixed(1)}/s
+                  </span>{" "}
+                  sustained)
+                </span>
+              )}
             </span>
           )}
           {tank.armorRepS > 0 && (
@@ -600,6 +901,16 @@ export function TankResistsPanel({
               <span className="tabular-nums text-amber-400">
                 {tank.armorRepS.toFixed(1)}/s
               </span>
+              {tank.armorRepSSustained < tank.armorRepS - 0.05 && (
+                <span className="text-zinc-600">
+                  {" "}
+                  (
+                  <span className="tabular-nums text-amber-600">
+                    {tank.armorRepSSustained.toFixed(1)}/s
+                  </span>{" "}
+                  sustained)
+                </span>
+              )}
             </span>
           )}
           {tank.passiveShieldS > 0 && (

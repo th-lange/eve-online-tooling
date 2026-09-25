@@ -25,7 +25,7 @@ pub use download::download_sde;
 pub use error::SdeError;
 pub use types::{
     AttrMeta, BlueprintMaterial, BlueprintProduct, Decryptor, EffectMeta, ItemMeta, ModifierInfo,
-    PlanetSchematic, Recipe, ReprocessRecipe, ShipLayout, WormholeType,
+    MutaplasmidRoll, PlanetSchematic, Recipe, ReprocessRecipe, ShipLayout, WormholeType,
 };
 
 use std::path::{Path, PathBuf};
@@ -139,6 +139,18 @@ fn generation(db: &Path) -> Result<Generation, String> {
         .map_err(|e| e.to_string())?
         .as_secs();
     Ok((mtime, meta.len()))
+}
+
+/// Single-integer identity of the SDE database file, for callers outside this
+/// module that key an **on-disk** cache to the SDE version (#884) — the
+/// process-wide slots above already invalidate on [`Generation`] internally,
+/// but `storage::cache_put_versioned` needs one plain `u64` to persist
+/// alongside a cache entry. Cheaply mixes the same (mtime, size) identity
+/// [`generation`] uses; not cryptographic, just collision-resistant enough
+/// that an SDE swap always changes it.
+pub fn generation_id(dir: &Path) -> Result<u64, String> {
+    let (mtime, size) = generation(&SdePaths::new(dir.to_path_buf()).db)?;
+    Ok(mtime.wrapping_mul(1_000_003).wrapping_add(size))
 }
 
 /// Serve `slot`'s value while its generation matches; (re)build otherwise.

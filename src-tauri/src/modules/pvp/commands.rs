@@ -341,6 +341,8 @@ fn build_engine_fit(hull: i64, items: &[KmItem], cat_of: &dyn Fn(i64) -> i64) ->
                     charge_type_id: None,
                     quantity: (it.quantity_destroyed + it.quantity_dropped).max(1) as i32,
                     active_drones: None,
+                    mutation: None,
+                    fighter_ability: None,
                 });
                 drone_idx += 1;
             }
@@ -365,6 +367,8 @@ fn build_engine_fit(hull: i64, items: &[KmItem], cat_of: &dyn Fn(i64) -> i64) ->
                 charge_type_id: charge,
                 quantity: 1,
                 active_drones: None,
+                mutation: None,
+                fighter_ability: None,
             });
         }
     }
@@ -392,6 +396,8 @@ fn build_engine_fit(hull: i64, items: &[KmItem], cat_of: &dyn Fn(i64) -> i64) ->
             charge_type_id: None,
             quantity: quantity as i32,
             active_drones: None,
+            mutation: None,
+            fighter_ability: None,
         });
     }
     Fit {
@@ -500,9 +506,22 @@ fn build_lost_fit(sde: &Sde, dir: &std::path::Path, km: &Killmail, lost_count: i
         })
         .collect();
     let fit = build_engine_fit(km.victim.ship_type_id, &km.victim.items, &cat_of);
-    let analysis = simulate_fit(sde, dir, &fit, &|_| 5.0, None, None, None, None, None, None)
-        .ok()
-        .map(|s| analysis_from_stats(&s, &attrs, &fit, &name_of));
+    let analysis = simulate_fit(
+        sde,
+        dir,
+        &fit,
+        &|_| 5.0,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None, // factor_reload (#871)
+    )
+    .ok()
+    .map(|s| analysis_from_stats(&s, &attrs, &fit, &name_of));
     let eft = crate::modules::fitting::fit_to_eft(sde, &fit);
     LostFit {
         hull_type_id: km.victim.ship_type_id,
@@ -715,6 +734,8 @@ pub async fn pvp_weapon_ammo(
                 charge_type_id: Some(charge_id),
                 quantity: 1,
                 active_drones: None,
+                mutation: None,
+                fighter_ability: None,
             }],
             projected: Vec::new(),
         };
@@ -729,6 +750,8 @@ pub async fn pvp_weapon_ammo(
             None,
             None,
             None,
+            None,
+            None, // factor_reload (#871)
         ) else {
             continue;
         };
@@ -972,6 +995,8 @@ mod tests {
                 charge_type_id: None,
                 quantity: 1,
                 active_drones: None,
+                mutation: None,
+                fighter_ability: None,
             }],
             projected: vec![],
         };

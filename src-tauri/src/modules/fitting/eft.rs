@@ -28,6 +28,19 @@ use serde::Serialize;
 
 use super::types::SlotKind;
 
+/// A mutaplasmid roll attached to a module line (#876): an indented line
+/// right beneath it, `  <mutaplasmid name>: <attr1> <value1>, <attr2>
+/// <value2>, …` — the community EFT-dialect convention for mutated
+/// (abyssal) modules (attribute names are dogma's own internal
+/// `attributeName`s, e.g. `cpu`, `capacitorNeed`, `speedFactor`; values are
+/// the rolled absolute attribute values). Pure text — the command layer
+/// resolves the mutaplasmid name and attribute names against the SDE.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ParsedMutation {
+    pub mutaplasmid_name: String,
+    pub attrs: Vec<(String, f64)>,
+}
+
 /// A line that carries a module name and an optional charge (`Module, Charge`),
 /// or an explicit empty-slot placeholder.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -36,6 +49,8 @@ pub struct ParsedModule {
     pub charge: Option<String>,
     /// `Some(slot)` for an `[Empty <Slot> slot]` placeholder (no module).
     pub empty_slot: Option<SlotKind>,
+    /// The mutaplasmid roll on the line right beneath this module, if any.
+    pub mutation: Option<ParsedMutation>,
 }
 
 /// A trailing line with an `xN` count — a drone or cargo item (disambiguated by
@@ -94,6 +109,28 @@ fn split_quantity(line: &str) -> Option<(&str, i32)> {
     (!name.is_empty() && qty > 0).then_some((name, qty))
 }
 
+/// Parse a mutation line — `<mutaplasmid name>: <attr1> <value1>, <attr2>
+/// <value2>, …` — into `(name, [(attr, value), …])`, or `None` if the line
+/// doesn't have that shape. Strict on purpose: a false positive would eat an
+/// ordinary module name line.
+fn parse_mutation_line(line: &str) -> Option<(String, Vec<(String, f64)>)> {
+    let (name, rest) = line.split_once(':')?;
+    let name = name.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let attrs = rest
+        .split(',')
+        .map(|part| {
+            let (attr, value) = part.trim().rsplit_once(' ')?;
+            let attr = attr.trim();
+            let value: f64 = value.trim().parse().ok()?;
+            (!attr.is_empty()).then_some((attr.to_string(), value))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    (!attrs.is_empty()).then_some((name.to_string(), attrs))
+}
+
 /// Parse an EFT string into its structural [`ParsedEft`] form (pure — no SDE).
 ///
 /// Heuristics, matching the common in-game / PYFA export:
@@ -103,7 +140,11 @@ fn split_quantity(line: &str) -> Option<(&str, i32)> {
 /// - `Module, Charge` → a module with a loaded charge.
 /// - anything else → a bare module.
 pub fn parse_eft(text: &str) -> Result<ParsedEft, EftError> {
-    let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+    let mut lines = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .peekable();
 
     // Header: `[Ship, fit name]`.
     let header = lines.next().ok_or(EftError::MissingHeader)?;
@@ -120,7 +161,7 @@ pub fn parse_eft(text: &str) -> Result<ParsedEft, EftError> {
 
     let mut modules = Vec::new();
     let mut extras = Vec::new();
-    for line in lines {
+    while let Some(line) = lines.next() {
         // `[Empty High slot]` placeholder.
         if let Some(inner) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
             let word = inner
@@ -132,6 +173,7 @@ pub fn parse_eft(text: &str) -> Result<ParsedEft, EftError> {
                 name: String::new(),
                 charge: None,
                 empty_slot: empty_slot_kind(word).or(Some(SlotKind::High)),
+                mutation: None,
             });
             continue;
         }
@@ -148,10 +190,23 @@ pub fn parse_eft(text: &str) -> Result<ParsedEft, EftError> {
             Some((m, c)) => (m.trim().to_string(), Some(c.trim().to_string())),
             None => (line.to_string(), None),
         };
+        // A mutaplasmid roll (#876): an indented `<mutaplasmid>: attr val, …`
+        // line right beneath this module.
+        let mutation = lines
+            .peek()
+            .and_then(|next| parse_mutation_line(next))
+            .inspect(|_| {
+                lines.next();
+            })
+            .map(|(mutaplasmid_name, attrs)| ParsedMutation {
+                mutaplasmid_name,
+                attrs,
+            });
         modules.push(ParsedModule {
             name,
             charge,
             empty_slot: None,
+            mutation,
         });
     }
 
@@ -175,6 +230,15 @@ pub fn format_eft(fit: &ParsedEft) -> String {
                 (Some(slot), _) => out.push_str(&format!("[Empty {} slot]\n", slot_word(*slot))),
                 (None, Some(charge)) => out.push_str(&format!("{}, {}\n", m.name, charge)),
                 (None, None) => out.push_str(&format!("{}\n", m.name)),
+            }
+            if let Some(mutation) = &m.mutation {
+                let attrs = mutation
+                    .attrs
+                    .iter()
+                    .map(|(name, value)| format!("{name} {value}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                out.push_str(&format!("  {}: {attrs}\n", mutation.mutaplasmid_name));
             }
         }
     }
@@ -271,6 +335,38 @@ Barrage S x500\n";
         let text = format_eft(&fit);
         // Re-parsing the serialized form yields the same structure.
         assert_eq!(parse_eft(&text).unwrap(), fit);
+    }
+
+    #[test]
+    fn parses_and_emits_mutation_block() {
+        let text = "[Tiamat, Shield]\n\
+\n\
+Gistum A-Type 50MN Microwarpdrive\n\
+  Unstable 50MN Microwarpdrive Mutaplasmid: cpu 40, power 150.4, speedFactor 569.8\n\
+Thukker Large Shield Extender\n";
+        let fit = parse_eft(text).unwrap();
+        assert_eq!(fit.modules.len(), 2);
+        let mwd = &fit.modules[0];
+        assert_eq!(mwd.name, "Gistum A-Type 50MN Microwarpdrive");
+        let mutation = mwd.mutation.as_ref().expect("mutation attached");
+        assert_eq!(
+            mutation.mutaplasmid_name,
+            "Unstable 50MN Microwarpdrive Mutaplasmid"
+        );
+        assert_eq!(
+            mutation.attrs,
+            vec![
+                ("cpu".to_string(), 40.0),
+                ("power".to_string(), 150.4),
+                ("speedFactor".to_string(), 569.8),
+            ]
+        );
+        // The second module has no mutation line attached.
+        assert_eq!(fit.modules[1].mutation, None);
+
+        // Round-trips.
+        let out = format_eft(&fit);
+        assert_eq!(parse_eft(&out).unwrap(), fit);
     }
 
     #[test]

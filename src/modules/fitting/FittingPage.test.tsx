@@ -23,6 +23,11 @@ const RIFTER_LAYOUT: ShipLayout = {
   calibration: 400,
   droneBay: 0,
   droneBandwidth: 0,
+  fighterTubes: 0,
+  fighterLightSlots: 0,
+  fighterSupportSlots: 0,
+  fighterHeavySlots: 0,
+  fighterBay: 0,
 };
 
 const FIT: Fit = {
@@ -96,9 +101,15 @@ const STATS: FitStats = {
     hullResists: [0, 0, 0, 0],
     shieldRepS: 0,
     armorRepS: 0,
+    shieldRepSSustained: 0,
+    armorRepSSustained: 0,
+    shieldRrm: 1,
+    armorRrm: 1.5,
+    hullRrm: 1,
+    rahActive: false,
     passiveShieldS: 0,
   },
-  dps: { turret: 45.5, missile: 0, drone: 0, total: 45.5 },
+  dps: { turret: 45.5, missile: 0, drone: 0, fighter: 0, total: 45.5 },
   navigation: {
     maxVelocity: 480,
     alignTime: 3.2,
@@ -200,7 +211,7 @@ describe("FittingPage", () => {
     // Not visible until opened.
     expect(screen.queryByPlaceholderText(/paste an EFT fit/)).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Import EFT" }));
+    fireEvent.click(screen.getByRole("button", { name: "Import EFT / DNA" }));
     const textarea = screen.getByPlaceholderText(/paste an EFT fit/);
     fireEvent.change(textarea, { target: { value: "[Rifter, test]" } });
     fireEvent.click(screen.getByRole("button", { name: "Import" }));

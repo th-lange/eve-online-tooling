@@ -7,6 +7,7 @@
 //! skills may show as slightly over here. The hard structural checks (slot and
 //! hardpoint counts, drone bay) are exact regardless.
 
+use super::fighter::FighterCategory;
 use crate::modules::fitting::types::{FitProblem, ResourceUsage, Severity, SlotKind};
 use crate::sde::ShipLayout;
 
@@ -26,7 +27,13 @@ pub struct ValItem {
     pub is_launcher: bool,
     /// Packaged volume of a single drone (m³); only meaningful for drone items.
     pub drone_volume: f64,
-    /// Count (drones/charges); 1 for a single module.
+    /// Which fighter-tube category this squadron belongs to (#877); `None`
+    /// for non-fighter items.
+    pub fighter_category: Option<FighterCategory>,
+    /// Packaged volume of a single fighter (m³); only meaningful for
+    /// fighter items.
+    pub fighter_volume: f64,
+    /// Count (drones/fighters/charges); 1 for a single module.
     pub quantity: i32,
 }
 
@@ -111,6 +118,51 @@ pub fn validate(ship: &ShipLayout, items: &[ValItem]) -> (ResourceUsage, Vec<Fit
         )));
     }
 
+    // Fighter squadron tubes/bay (#877): `fighterTubes` caps the total
+    // squadron count regardless of category split (e.g. a Thanatos has 4
+    // tubes but 3 light + 2 support bays — only 4 can ever launch at once);
+    // each category's own bay slot count further caps that category alone.
+    let fighter_items: Vec<&ValItem> = items
+        .iter()
+        .filter(|i| i.slot == SlotKind::Fighter)
+        .collect();
+    let squadrons = fighter_items.len() as i64;
+    if squadrons > ship.fighter_tubes {
+        problems.push(error(format!(
+            "{squadrons} fighter squadrons fitted but the hull has only {} fighter tubes",
+            ship.fighter_tubes
+        )));
+    }
+    for (category, max, label) in [
+        (FighterCategory::Light, ship.fighter_light_slots, "light"),
+        (
+            FighterCategory::Support,
+            ship.fighter_support_slots,
+            "support",
+        ),
+        (FighterCategory::Heavy, ship.fighter_heavy_slots, "heavy"),
+    ] {
+        let used = fighter_items
+            .iter()
+            .filter(|i| i.fighter_category == Some(category))
+            .count() as i64;
+        if used > max {
+            problems.push(error(format!(
+                "{used} {label} fighter squadrons fitted but the hull allows only {max}"
+            )));
+        }
+    }
+    let fighter_volume: f64 = fighter_items
+        .iter()
+        .map(|i| i.fighter_volume * i.quantity as f64)
+        .sum();
+    if fighter_volume > ship.fighter_bay + EPS {
+        problems.push(error(format!(
+            "Fighter bay over by {:.0} m³",
+            fighter_volume - ship.fighter_bay
+        )));
+    }
+
     let usage = ResourceUsage {
         cpu_used,
         cpu_output: ship.cpu_output,
@@ -144,6 +196,25 @@ mod tests {
             calibration: 400.0,
             drone_bay: 10.0,
             drone_bandwidth: 0.0,
+            fighter_tubes: 0,
+            fighter_light_slots: 0,
+            fighter_support_slots: 0,
+            fighter_heavy_slots: 0,
+            fighter_bay: 0.0,
+        }
+    }
+
+    /// A carrier hull for fighter validation tests: 4 tubes (3 light + 2
+    /// support — a real Thanatos-shaped split, more bays than tubes), 75000
+    /// m³ fighter bay.
+    fn carrier() -> ShipLayout {
+        ShipLayout {
+            fighter_tubes: 4,
+            fighter_light_slots: 3,
+            fighter_support_slots: 2,
+            fighter_heavy_slots: 0,
+            fighter_bay: 75_000.0,
+            ..rifter()
         }
     }
 
@@ -156,7 +227,24 @@ mod tests {
             is_turret: true,
             is_launcher: false,
             drone_volume: 0.0,
+            fighter_category: None,
+            fighter_volume: 0.0,
             quantity: 1,
+        }
+    }
+
+    fn fighter_squadron(category: FighterCategory, volume: f64, count: i32) -> ValItem {
+        ValItem {
+            slot: SlotKind::Fighter,
+            cpu: 0.0,
+            powergrid: 0.0,
+            calibration: 0.0,
+            is_turret: false,
+            is_launcher: false,
+            drone_volume: 0.0,
+            fighter_category: Some(category),
+            fighter_volume: volume,
+            quantity: count,
         }
     }
 
@@ -197,6 +285,8 @@ mod tests {
             is_turret: false,
             is_launcher: false,
             drone_volume: 0.0,
+            fighter_category: None,
+            fighter_volume: 0.0,
             quantity: 1,
         });
         let (_usage, problems) = validate(&rifter(), &items);
@@ -216,11 +306,69 @@ mod tests {
             is_turret: false,
             is_launcher: false,
             drone_volume: 5.0,
+            fighter_category: None,
+            fighter_volume: 0.0,
             quantity: 5, // 25 m³ > 10 m³ bay
         }];
         let (_usage, problems) = validate(&rifter(), &items);
         assert!(problems
             .iter()
             .any(|p| p.message.contains("Drone bay over")));
+    }
+
+    #[test]
+    fn clean_carrier_fit_has_no_fighter_problems() {
+        let items = vec![
+            fighter_squadron(FighterCategory::Light, 1000.0, 6),
+            fighter_squadron(FighterCategory::Light, 1000.0, 6),
+            fighter_squadron(FighterCategory::Support, 3000.0, 3),
+        ];
+        let (_usage, problems) = validate(&carrier(), &items);
+        assert!(problems.is_empty());
+    }
+
+    #[test]
+    fn flags_too_many_fighter_tubes() {
+        // 3 light + 2 support = 5 squadrons, over the hull's 4 total tubes,
+        // even though each category individually is within its own bay cap.
+        let items = vec![
+            fighter_squadron(FighterCategory::Light, 1000.0, 6),
+            fighter_squadron(FighterCategory::Light, 1000.0, 6),
+            fighter_squadron(FighterCategory::Light, 1000.0, 6),
+            fighter_squadron(FighterCategory::Support, 3000.0, 3),
+            fighter_squadron(FighterCategory::Support, 3000.0, 3),
+        ];
+        let (_usage, problems) = validate(&carrier(), &items);
+        assert!(problems.iter().any(|p| p.message.contains("fighter tubes")));
+    }
+
+    #[test]
+    fn flags_too_many_of_one_fighter_category() {
+        // 3 support squadrons fitted, but the hull only has 2 support bays
+        // (even though 3 total squadrons is within the 4-tube cap).
+        let items = vec![
+            fighter_squadron(FighterCategory::Support, 3000.0, 3),
+            fighter_squadron(FighterCategory::Support, 3000.0, 3),
+            fighter_squadron(FighterCategory::Support, 3000.0, 3),
+        ];
+        let (_usage, problems) = validate(&carrier(), &items);
+        assert!(problems
+            .iter()
+            .any(|p| p.message.contains("support fighter squadrons")));
+    }
+
+    #[test]
+    fn flags_overfull_fighter_bay() {
+        // 26 light fighters × 1000 m³ = 26000 m³, comfortably under the
+        // 75000 m³ carrier bay — use a tiny bay instead to force an overflow.
+        let tiny_bay = ShipLayout {
+            fighter_bay: 1000.0,
+            ..carrier()
+        };
+        let items = vec![fighter_squadron(FighterCategory::Light, 1000.0, 6)]; // 6000 m³ > 1000 m³
+        let (_usage, problems) = validate(&tiny_bay, &items);
+        assert!(problems
+            .iter()
+            .any(|p| p.message.contains("Fighter bay over")));
     }
 }

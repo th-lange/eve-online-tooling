@@ -16,6 +16,7 @@ mod markets;
 mod service;
 mod types;
 
+pub use flight::{deduplicated_cached_fetch_with_stale_fallback, KeyLocks};
 pub use markets::{default_region_id, jita_location, location_label, regions, resolve_location};
 // `BestSell` is re-exported by name so appraisal's shared `price_items`
 // helper can take a `&HashMap<i64, BestSell>` parameter.

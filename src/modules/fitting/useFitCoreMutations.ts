@@ -5,11 +5,14 @@ import {
 } from "@tanstack/react-query";
 import {
   fittingAddItem,
+  fittingExportDna,
   fittingExportEft,
+  fittingExportMultibuy,
   fittingImportEft,
   fittingImportList,
   fittingSaveLocal,
   type Fit,
+  type ItemMutation,
   type ModuleState,
 } from "../../lib/api";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
@@ -27,6 +30,7 @@ export interface FitMutationsSlice {
   setCharge: (globalIndex: number, chargeTypeId: number | null) => void;
   setChargeForType: (weaponTypeId: number, chargeTypeId: number | null) => void;
   setModuleState: (globalIndex: number, state: ModuleState) => void;
+  setMutation: (globalIndex: number, mutation: ItemMutation | null) => void;
   setQuantity: (globalIndex: number, quantity: number) => void;
   setActiveDrones: (globalIndex: number, activeDrones: number) => void;
   addProjected: (typeId: number) => void;
@@ -37,6 +41,8 @@ export interface FitMutationsSlice {
   setListText: (v: string) => void;
   importList: UseMutationResult<Fit, Error, void, unknown>;
   exportEft: UseMutationResult<string, Error, void, unknown>;
+  exportDna: UseMutationResult<string, Error, void, unknown>;
+  exportMultibuy: UseMutationResult<string, Error, void, unknown>;
   save: UseMutationResult<string, Error, void, unknown>;
 }
 
@@ -80,6 +86,16 @@ export function useFitCoreMutations(state: FitStateSlice): FitMutationsSlice {
       setEft(text);
     },
   });
+  // DNA/MultiBuy exports copy to the clipboard only — unlike EFT, neither
+  // has an on-page textarea to mirror them into.
+  const exportDna = useMutation({
+    mutationFn: () => fittingExportDna(fit!),
+    onSuccess: (text) => copyToClipboard(text),
+  });
+  const exportMultibuy = useMutation({
+    mutationFn: () => fittingExportMultibuy(fit!),
+    onSuccess: (text) => copyToClipboard(text),
+  });
 
   function pickShip(id: number, name: string) {
     setFit({ id: "", name: `${name} fit`, shipTypeId: id, items: [] });
@@ -110,6 +126,20 @@ export function useFitCoreMutations(state: FitStateSlice): FitMutationsSlice {
             ...f,
             items: f.items.map((it, i) =>
               i === globalIndex ? { ...it, state } : it,
+            ),
+          }
+        : f,
+    );
+  }
+  // Set/clear a mutaplasmid roll on a fitted item (#876) — re-simulates off
+  // the new fit, same as any other slot edit.
+  function setMutation(globalIndex: number, mutation: ItemMutation | null) {
+    setFit((f) =>
+      f
+        ? {
+            ...f,
+            items: f.items.map((it, i) =>
+              i === globalIndex ? { ...it, mutation } : it,
             ),
           }
         : f,
@@ -204,6 +234,7 @@ export function useFitCoreMutations(state: FitStateSlice): FitMutationsSlice {
     setCharge,
     setChargeForType,
     setModuleState,
+    setMutation,
     setQuantity,
     setActiveDrones,
     addProjected,
@@ -214,6 +245,8 @@ export function useFitCoreMutations(state: FitStateSlice): FitMutationsSlice {
     setListText,
     importList,
     exportEft,
+    exportDna,
+    exportMultibuy,
     save,
   };
 }

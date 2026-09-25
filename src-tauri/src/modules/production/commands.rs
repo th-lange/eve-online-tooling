@@ -7,7 +7,10 @@ use tauri::{AppHandle, State};
 
 use crate::esi::EsiClient;
 use crate::lists::{self, ListItem};
-use crate::market::{default_region_id, location_label, resolve_location, MarketService};
+use crate::market::{
+    deduplicated_cached_fetch_with_stale_fallback, default_region_id, location_label,
+    resolve_location, KeyLocks, MarketService,
+};
 use crate::model::AppError;
 use crate::sde::Sde;
 use crate::storage;
@@ -536,61 +539,53 @@ struct EsiCostIndex {
 /// map beats erroring out (#774).
 const COST_INDEX_MAX_STALE_SECS: u64 = 24 * 3600;
 
-/// Fallback decision for a failed refresh: prefer the bounded-stale cached
-/// map, else surface the fetch error. Pure, for the unit test (#774).
-fn cost_index_fallback(
-    stale: Option<HashMap<i64, f64>>,
-    fetch_err: String,
-) -> Result<HashMap<i64, f64>, String> {
-    stale.ok_or(fetch_err)
-}
+/// Single-flight guard for the on-disk industry-cost-index cache read,
+/// mirroring the per-cache `KeyLocks` fields in `market::service`. Managed
+/// as its own Tauri state since production has no `MarketService`-like
+/// struct of its own to hold it (#888).
+#[derive(Default)]
+pub struct CostIndexLocks(KeyLocks<()>);
 
 /// The **manufacturing** cost index CCP applies to job fees in a solar system,
 /// from ESI `/industry/systems/` (public). The full list is fetched once and
 /// cached ~1h on disk, then looked up per system. `None` when the system isn't
 /// listed (e.g. wormhole space). Lets the production tab use the real index
 /// instead of a hand-entered guess. When the refresh fails but a map ≤24h past
-/// expiry sits on disk, the stale map is served instead of an error (#774).
+/// expiry sits on disk, the stale map is served instead of an error via the
+/// shared [`deduplicated_cached_fetch_with_stale_fallback`] helper (#774, #888).
 #[tauri::command]
 #[specta::specta]
 pub async fn production_system_cost_index(
     app: AppHandle,
     esi: State<'_, EsiClient>,
+    locks: State<'_, CostIndexLocks>,
     system_id: i64,
 ) -> Result<Option<f64>, AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
-    let map: HashMap<i64, f64> = match storage::cache_get(&dir, "industry_cost_indices") {
-        Some(cached) => cached,
-        None => {
-            let fetched: Result<Vec<EsiIndustrySystem>, String> = esi
+    let map: HashMap<i64, f64> = deduplicated_cached_fetch_with_stale_fallback(
+        &locks.0,
+        &(),
+        || storage::cache_get(&dir, "industry_cost_indices"),
+        || async {
+            let systems: Vec<EsiIndustrySystem> = esi
                 .get_json("/latest/industry/systems/", &[])
                 .await
-                .map_err(|e| e.to_string());
-            match fetched {
-                Ok(systems) => {
-                    let map: HashMap<i64, f64> = systems
-                        .into_iter()
-                        .filter_map(|s| {
-                            s.cost_indices
-                                .iter()
-                                .find(|c| c.activity == "manufacturing")
-                                .map(|c| (s.solar_system_id, c.cost_index))
-                        })
-                        .collect();
-                    let _ = storage::cache_put(&dir, "industry_cost_indices", &map, 3600);
-                    map
-                }
-                Err(e) => cost_index_fallback(
-                    storage::cache_get_stale(
-                        &dir,
-                        "industry_cost_indices",
-                        COST_INDEX_MAX_STALE_SECS,
-                    ),
-                    e,
-                )?,
-            }
-        }
-    };
+                .map_err(|e| e.to_string())?;
+            let map: HashMap<i64, f64> = systems
+                .into_iter()
+                .filter_map(|s| {
+                    s.cost_indices
+                        .iter()
+                        .find(|c| c.activity == "manufacturing")
+                        .map(|c| (s.solar_system_id, c.cost_index))
+                })
+                .collect();
+            let _ = storage::cache_put(&dir, "industry_cost_indices", &map, 3600);
+            Ok::<_, String>(map)
+        },
+        || storage::cache_get_stale(&dir, "industry_cost_indices", COST_INDEX_MAX_STALE_SECS),
+    )
+    .await?;
     Ok(map.get(&system_id).copied())
 }
 
@@ -609,19 +604,47 @@ pub fn specta_commands() -> tauri_specta::Commands<tauri::Wry> {
 mod cost_index_fallback_tests {
     use super::*;
 
-    /// Expired-but-recoverable cache + failing ESI → the stale map is served.
+    /// Expired-but-recoverable cache + failing ESI → the stale map is served
+    /// (moved/adapted onto the generalized helper for #888; was a pure test
+    /// of the bespoke `cost_index_fallback` before #774's pattern generalized).
     #[test]
     fn stale_map_beats_fetch_error() {
-        let stale: HashMap<i64, f64> = [(30000142, 0.041)].into();
-        let got = cost_index_fallback(Some(stale.clone()), "esi down".into());
-        assert_eq!(got.unwrap(), stale);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let locks = KeyLocks::<()>::new();
+            let stale: HashMap<i64, f64> = [(30000142, 0.041)].into();
+            let got = deduplicated_cached_fetch_with_stale_fallback(
+                &locks,
+                &(),
+                || None,
+                || async { Err::<HashMap<i64, f64>, String>("esi down".into()) },
+                || Some(stale.clone()),
+            )
+            .await;
+            assert_eq!(got.unwrap(), stale);
+        });
     }
 
     /// No usable cache + failing ESI → the fetch error surfaces unchanged.
     #[test]
     fn no_cache_surfaces_the_error() {
-        let got = cost_index_fallback(None, "esi down".into());
-        assert_eq!(got.unwrap_err(), "esi down");
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let locks = KeyLocks::<()>::new();
+            let got = deduplicated_cached_fetch_with_stale_fallback(
+                &locks,
+                &(),
+                || None,
+                || async { Err::<HashMap<i64, f64>, String>("esi down".into()) },
+                || None,
+            )
+            .await;
+            assert_eq!(got.unwrap_err(), "esi down");
+        });
     }
 }
 

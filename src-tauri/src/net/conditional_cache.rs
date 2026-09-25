@@ -1,0 +1,522 @@
+//! Disk-backed conditional HTTP cache: ETag/`If-None-Match` revalidation plus
+//! `Cache-Control`/`Expires` freshness — provider-agnostic (#886).
+//!
+//! Originally lived only in `esi::cache`, hardcoded to ESI's error-budget-aware
+//! [`crate::esi`] retry policy. Extracted here so any provider that also emits
+//! real validators (confirmed via `curl -I` for #886: EVE-Scout's
+//! `/v2/public/signatures` sends a weak `ETag`; zKillboard's stats endpoint
+//! sends `Cache-Control: no-store` with no `ETag` and Fuzzwork's aggregates
+//! endpoint sends neither, so those two use a response-hash short-circuit
+//! instead — see `zkill::stats_for_characters` and `storage::cache_put_if_changed`)
+//! can reuse the same revalidation logic without inheriting ESI's retry/budget
+//! policy. Callers supply their own `send` (ESI plugs in
+//! `esi::net::send_retrying`; a plain provider does a one-shot `send()`),
+//! matching how `esi::net` already separates `get_immutable_json` (no
+//! revalidation) from the conditional path.
+//!
+//! 1. While an entry is still fresh (now < its `Expires`/`max-age` deadline) it
+//!    is served straight from cache — **no network call at all**.
+//! 2. Once stale, the next request is sent with `If-None-Match: <etag>`. A
+//!    conformant server answers **304 Not Modified** (tiny, body-less) when
+//!    nothing changed, and we just push the freshness deadline forward and
+//!    reuse the stored body.
+//! 3. On a **200** we store the new body, ETag, and a deadline derived from the
+//!    response's `Cache-Control: max-age` (preferred) or `Expires` − `Date`.
+//!
+//! Entries live on disk (`<app_data_dir>/esi-cache/<key>.json`) so the cache
+//! survives restarts, with an in-memory layer in front to avoid re-reading disk
+//! within a session. A cache with no directory (`disabled`) is a transparent
+//! pass-through — every call hits the network — used where no data dir is
+//! wired.
+
+use parking_lot::Mutex;
+use std::collections::HashMap;
+use std::future::Future;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
+
+use reqwest::header::{CACHE_CONTROL, DATE, ETAG, EXPIRES, IF_NONE_MATCH};
+use reqwest::{RequestBuilder, Response, StatusCode};
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+/// Fallback freshness window when a response carries no cache headers. Kept
+/// short: with an ETag, revalidation is cheap (a 304), so erring small is safe.
+const DEFAULT_TTL: u64 = 60;
+
+/// How long a stale (expired) entry is kept around after its deadline passes.
+/// Recently-expired entries still carry a usable ETag, so revalidation stays
+/// a cheap 304 instead of a full re-fetch — but nothing needs to be kept
+/// forever, so both the in-memory map (swept on every [`store`](ConditionalCache::store))
+/// and the on-disk directory (pruned once at startup) drop anything older
+/// than this.
+const STALE_RETENTION_SECS: u64 = 7 * 24 * 60 * 60;
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct CachedResponse {
+    /// The response's `ETag`, replayed as `If-None-Match` on revalidation.
+    pub(crate) etag: Option<String>,
+    /// Unix epoch (secs) after which a revalidation is due.
+    pub(crate) expires: u64,
+    /// Response body as UTF-8 JSON text. For paged collections this is the
+    /// concatenated array of every page.
+    pub(crate) body: String,
+}
+
+/// Errors from a conditional GET: transport failure or a body that didn't
+/// decode as the expected JSON shape. Providers with their own error type
+/// (e.g. ESI's `EsiError`) convert via `From`.
+#[derive(Debug, Error)]
+pub enum ConditionalCacheError {
+    #[error(transparent)]
+    Http(#[from] reqwest::Error),
+    #[error("decode error: {0}")]
+    Json(#[from] serde_json::Error),
+}
+
+/// A conditional HTTP cache. Cheap to clone-share behind an `Arc`.
+pub struct ConditionalCache {
+    /// `None` disables persistence/caching (transparent pass-through).
+    dir: Option<PathBuf>,
+    mem: Mutex<HashMap<String, CachedResponse>>,
+}
+
+fn sanitize(key: &str) -> String {
+    key.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Freshness TTL (secs) from cache headers: `Cache-Control: max-age` wins, else
+/// `Expires` − `Date`. Pure over the header strings so it can be unit-tested.
+fn compute_ttl(
+    cache_control: Option<&str>,
+    expires: Option<&str>,
+    date: Option<&str>,
+) -> Option<u64> {
+    if let Some(cc) = cache_control {
+        for part in cc.split(',') {
+            if let Some(n) = part.trim().strip_prefix("max-age=") {
+                if let Ok(secs) = n.parse::<u64>() {
+                    return Some(secs);
+                }
+            }
+        }
+    }
+    let expires = httpdate::parse_http_date(expires?).ok()?;
+    let base = date
+        .and_then(|d| httpdate::parse_http_date(d).ok())
+        .unwrap_or_else(SystemTime::now);
+    expires.duration_since(base).ok().map(|d| d.as_secs())
+}
+
+pub(crate) fn ttl_from(headers: &reqwest::header::HeaderMap) -> u64 {
+    let get = |name| headers.get(name).and_then(|v| v.to_str().ok());
+    compute_ttl(get(CACHE_CONTROL), get(EXPIRES), get(DATE)).unwrap_or(DEFAULT_TTL)
+}
+
+pub(crate) fn etag_of(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    headers
+        .get(ETAG)
+        .and_then(|v| v.to_str().ok())
+        .map(String::from)
+}
+
+impl ConditionalCache {
+    /// A transparent pass-through (no persistence, always hits the network).
+    pub fn disabled() -> Self {
+        Self {
+            dir: None,
+            mem: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// A cache persisting under `<dir>/esi-cache/`.
+    pub fn on_disk(dir: PathBuf) -> Self {
+        Self {
+            dir: Some(dir),
+            mem: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Whether this instance is a transparent pass-through (see [`disabled`](Self::disabled)).
+    pub(crate) fn is_disabled(&self) -> bool {
+        self.dir.is_none()
+    }
+
+    fn path(&self, key: &str) -> Option<PathBuf> {
+        self.dir
+            .as_ref()
+            .map(|d| d.join("esi-cache").join(format!("{}.json", sanitize(key))))
+    }
+
+    pub(crate) async fn load(&self, key: &str) -> Option<CachedResponse> {
+        if let Some(hit) = self.mem.lock().get(key).cloned() {
+            return Some(hit);
+        }
+        let bytes = tokio::fs::read(self.path(key)?).await.ok()?;
+        let entry: CachedResponse = serde_json::from_slice(&bytes).ok()?;
+        self.mem.lock().insert(key.to_string(), entry.clone());
+        Some(entry)
+    }
+
+    pub(crate) async fn store(&self, key: &str, entry: CachedResponse) {
+        if let Some(path) = self.path(key) {
+            if let Some(parent) = path.parent() {
+                let _ = tokio::fs::create_dir_all(parent).await;
+            }
+            if let Ok(bytes) = serde_json::to_vec(&entry) {
+                let _ = tokio::fs::write(path, bytes).await;
+            }
+        }
+        let mut mem = self.mem.lock();
+        mem.insert(key.to_string(), entry);
+        // Opportunistic sweep: drop entries that have been stale for longer
+        // than the retention window. Cheap relative to the write we just did,
+        // and keeps the in-memory map from growing without bound over a long
+        // session.
+        let cutoff = crate::util::time::now_secs().saturating_sub(STALE_RETENTION_SECS);
+        mem.retain(|_, e| e.expires >= cutoff);
+    }
+
+    /// Startup maintenance: delete on-disk cache files whose TTL has been
+    /// expired for longer than [`STALE_RETENTION_SECS`]. Synchronous — this
+    /// runs once, early, in the Tauri `setup` closure before the async
+    /// runtime is spun up for anything cache-related.
+    pub fn prune_disk_startup(dir: &Path) {
+        let cache_dir = dir.join("esi-cache");
+        let Ok(entries) = std::fs::read_dir(&cache_dir) else {
+            return;
+        };
+        let cutoff = crate::util::time::now_secs().saturating_sub(STALE_RETENTION_SECS);
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            let Ok(cached) = serde_json::from_slice::<CachedResponse>(&bytes) else {
+                continue;
+            };
+            if cached.expires < cutoff {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+
+    /// Push a cached entry's freshness deadline forward after a 304, keeping the
+    /// body. No-op if the entry has since vanished.
+    pub(crate) async fn touch(&self, key: &str, ttl: u64) {
+        if let Some(mut e) = self.load(key).await {
+            e.expires = crate::util::time::now_secs() + ttl;
+            self.store(key, e).await;
+        }
+    }
+
+    /// The stored freshness deadline (Unix epoch secs) for `key`, if a
+    /// cached entry exists. Exposes the same deadline the conditional-GET
+    /// path already derives from `Cache-Control`/`Expires` so callers can
+    /// surface it downstream (e.g. the frontend's `expiresAt` freshness cue,
+    /// #885) without duplicating the header parsing here.
+    pub(crate) async fn expires_at(&self, key: &str) -> Option<u64> {
+        self.load(key).await.map(|e| e.expires)
+    }
+
+    /// Conditional GET of a single JSON document.
+    ///
+    /// `build` produces the request (URL + query + any auth) and is called once
+    /// per network attempt; the cache adds `If-None-Match` itself. `send`
+    /// actually dispatches a built request — plug in an error-budget-aware
+    /// retry policy (ESI) or a plain one-shot `RequestBuilder::send` (most
+    /// third-party providers).
+    pub async fn get_json<T, F, S, Fut>(
+        &self,
+        key: &str,
+        build: F,
+        send: S,
+    ) -> Result<T, ConditionalCacheError>
+    where
+        T: DeserializeOwned,
+        F: Fn() -> RequestBuilder,
+        S: Fn(RequestBuilder) -> Fut,
+        Fut: Future<Output = Result<Response, reqwest::Error>>,
+    {
+        if self.is_disabled() {
+            let bytes = send(build()).await?.error_for_status()?.bytes().await?;
+            return Ok(serde_json::from_slice(&bytes)?);
+        }
+
+        let entry = self.load(key).await;
+        if let Some(e) = &entry {
+            if e.expires > crate::util::time::now_secs() {
+                return Ok(serde_json::from_str(&e.body)?);
+            }
+        }
+
+        let tag = entry.as_ref().and_then(|e| e.etag.as_deref());
+        let resp = send(match tag {
+            Some(t) => build().header(IF_NONE_MATCH, t),
+            None => build(),
+        })
+        .await?;
+        if resp.status() == StatusCode::NOT_MODIFIED {
+            if let Some(e) = &entry {
+                self.touch(key, ttl_from(resp.headers())).await;
+                return Ok(serde_json::from_str(&e.body)?);
+            }
+        }
+        let resp = resp.error_for_status()?;
+        let etag = etag_of(resp.headers());
+        let ttl = ttl_from(resp.headers());
+        let body = resp.text().await?;
+        let value: T = serde_json::from_str(&body)?;
+        self.store(
+            key,
+            CachedResponse {
+                etag,
+                expires: crate::util::time::now_secs() + ttl,
+                body,
+            },
+        )
+        .await;
+        Ok(value)
+    }
+}
+
+/// A stable cache key from a URL and its query pairs (page param excluded by
+/// callers, which key on the unpaginated request).
+pub fn cache_key(url: &str, query: &[(&str, String)]) -> String {
+    if query.is_empty() {
+        return url.to_string();
+    }
+    let q: Vec<String> = query.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    format!("{url}?{}", q.join("&"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_age_wins_over_expires() {
+        let ttl = compute_ttl(
+            Some("public, max-age=1200"),
+            Some("Wed, 21 Oct 2026 07:28:00 GMT"),
+            Some("Wed, 21 Oct 2026 07:00:00 GMT"),
+        );
+        assert_eq!(ttl, Some(1200));
+    }
+
+    #[test]
+    fn expires_minus_date() {
+        let ttl = compute_ttl(
+            None,
+            Some("Wed, 21 Oct 2026 07:30:00 GMT"),
+            Some("Wed, 21 Oct 2026 07:00:00 GMT"),
+        );
+        assert_eq!(ttl, Some(1800));
+    }
+
+    #[test]
+    fn no_headers_is_none() {
+        assert_eq!(compute_ttl(None, None, None), None);
+        // Garbled max-age falls through to expires (also absent) → None.
+        assert_eq!(compute_ttl(Some("public"), None, None), None);
+    }
+
+    #[test]
+    fn expires_in_the_past_is_zero_not_error() {
+        let ttl = compute_ttl(
+            None,
+            Some("Wed, 21 Oct 2026 07:00:00 GMT"),
+            Some("Wed, 21 Oct 2026 07:30:00 GMT"),
+        );
+        // expires < date → duration_since errors → None (treated as no signal).
+        assert_eq!(ttl, None);
+    }
+
+    #[test]
+    fn cache_round_trips_and_gates_on_expiry() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let dir = std::env::temp_dir().join(format!("eve-net-cache-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let cache = ConditionalCache::on_disk(dir.clone());
+
+            assert!(cache.load("k").await.is_none());
+            cache
+                .store(
+                    "k",
+                    CachedResponse {
+                        etag: Some("\"abc\"".into()),
+                        expires: crate::util::time::now_secs() + 3600,
+                        body: "[1,2,3]".into(),
+                    },
+                )
+                .await;
+            let e = cache.load("k").await.expect("present");
+            assert_eq!(e.body, "[1,2,3]");
+            assert!(e.expires > crate::util::time::now_secs());
+
+            // A fresh process (cold mem) still reads it from disk.
+            let cold = ConditionalCache::on_disk(dir.clone());
+            assert_eq!(cold.load("k").await.map(|e| e.body), Some("[1,2,3]".into()));
+
+            let _ = std::fs::remove_dir_all(&dir);
+        });
+    }
+
+    /// A 200 response whose body doesn't deserialize as `T` must not be
+    /// persisted — the parse happens before the store commits.
+    #[test]
+    fn failed_deserialize_does_not_populate_cache() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let server = tiny_http::Server::http("127.0.0.1:0").expect("bind loopback");
+            let addr = server.server_addr().to_ip().expect("ip addr");
+            let server_thread = std::thread::spawn(move || {
+                if let Ok(request) = server.recv() {
+                    let _ = request.respond(tiny_http::Response::from_string("not json"));
+                }
+            });
+
+            let dir =
+                std::env::temp_dir().join(format!("eve-net-cache-bad-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let cache = ConditionalCache::on_disk(dir.clone());
+            let client = reqwest::Client::new();
+            let url = format!("http://{}/", addr);
+
+            let result: Result<serde_json::Value, ConditionalCacheError> = cache
+                .get_json(
+                    "bad-key",
+                    || client.get(&url),
+                    |rb| async move { rb.send().await },
+                )
+                .await;
+            assert!(result.is_err());
+            assert!(cache.load("bad-key").await.is_none());
+
+            server_thread.join().expect("server thread");
+            let _ = std::fs::remove_dir_all(&dir);
+        });
+    }
+
+    #[test]
+    fn store_sweeps_stale_entries_but_keeps_recently_expired_ones() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let cache = ConditionalCache::disabled();
+            let now = crate::util::time::now_secs();
+
+            // Long-stale: expired well past the retention window — should be swept.
+            cache
+                .store(
+                    "stale",
+                    CachedResponse {
+                        etag: None,
+                        expires: now - STALE_RETENTION_SECS - 3600,
+                        body: "[]".into(),
+                    },
+                )
+                .await;
+            // Recently-expired: still within the window, so its ETag remains
+            // usable for a cheap 304 revalidation — must survive the sweep.
+            cache
+                .store(
+                    "recent",
+                    CachedResponse {
+                        etag: Some("\"x\"".into()),
+                        expires: now - 60,
+                        body: "[]".into(),
+                    },
+                )
+                .await;
+            // A later store triggers another sweep pass; the fresh entry itself
+            // must obviously survive too.
+            cache
+                .store(
+                    "fresh",
+                    CachedResponse {
+                        etag: None,
+                        expires: now + 3600,
+                        body: "[]".into(),
+                    },
+                )
+                .await;
+
+            let mem = cache.mem.lock();
+            assert!(mem.get("stale").is_none(), "long-stale entry not swept");
+            assert!(
+                mem.get("recent").is_some(),
+                "recently-expired entry should survive for 304 revalidation"
+            );
+            assert!(mem.get("fresh").is_some());
+        });
+    }
+
+    #[test]
+    fn prune_disk_startup_removes_only_long_stale_files() {
+        let dir = std::env::temp_dir().join(format!(
+            "eve-net-cache-prune-{}-{}",
+            std::process::id(),
+            crate::util::time::now_secs()
+        ));
+        let cache_dir = dir.join("esi-cache");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&cache_dir).expect("mkdir");
+        let now = crate::util::time::now_secs();
+
+        let write = |name: &str, expires: u64| {
+            let entry = CachedResponse {
+                etag: None,
+                expires,
+                body: "[]".into(),
+            };
+            std::fs::write(
+                cache_dir.join(name),
+                serde_json::to_vec(&entry).expect("serialize"),
+            )
+            .expect("write");
+        };
+        write("stale.json", now - STALE_RETENTION_SECS - 3600);
+        write("recent.json", now - 60);
+        write("fresh.json", now + 3600);
+
+        ConditionalCache::prune_disk_startup(&dir);
+
+        assert!(!cache_dir.join("stale.json").exists());
+        assert!(cache_dir.join("recent.json").exists());
+        assert!(cache_dir.join("fresh.json").exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn key_includes_query() {
+        assert_eq!(cache_key("u", &[]), "u");
+        assert_eq!(
+            cache_key(
+                "u",
+                &[("type_id", "34".into()), ("order_type", "all".into())]
+            ),
+            "u?type_id=34&order_type=all"
+        );
+    }
+}

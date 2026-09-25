@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import {
+  activeCharacter,
   errorMessage,
   marketOrders,
   openMarketWindow,
@@ -19,11 +20,19 @@ import { DataAge } from "../../components/DataAge";
 import { Page, PageHeader, PrimaryButton } from "../../components/page";
 
 export function OrdersPage() {
+  // The backend resolves orders against its own bookmarked active character
+  // (or the whole roster for "All characters") — folding that selection into
+  // the query key means switching characters refetches instead of rendering
+  // the previous character's orders from cache.
+  const active = useQuery({
+    queryKey: ["auth", "active"],
+    queryFn: activeCharacter,
+  });
   const orders = useQuery({
-    queryKey: ["orders", "market"],
+    queryKey: ["orders", "market", active.data ?? null],
     queryFn: marketOrders,
   });
-  const rows = useMemo(() => orders.data ?? [], [orders.data]);
+  const rows = useMemo(() => orders.data?.data ?? [], [orders.data]);
   const undercut = rows.filter((r) => r.undercut).length;
   // Show the Character column only once orders span more than one character
   // (i.e. "All characters" is active); single-character views stay exactly
@@ -105,6 +114,7 @@ export function OrdersPage() {
             </PrimaryButton>
             <DataAge
               updatedAt={orders.dataUpdatedAt}
+              expiresAt={orders.data?.expiresAt}
               fetching={orders.isFetching}
             />
           </>
@@ -116,7 +126,7 @@ export function OrdersPage() {
           isError: orders.isError,
           error: orders.error,
           isPending: orders.isPending,
-          data: orders.data,
+          data: orders.data?.data,
         }}
         pendingLabel="Loading…"
         loginMessage="Log in a character first to view your market orders."

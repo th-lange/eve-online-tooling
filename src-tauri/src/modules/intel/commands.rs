@@ -279,7 +279,13 @@ pub async fn intel_fw_systems(
     esi: State<'_, EsiClient>,
 ) -> Result<FwMap, AppError> {
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
-    if let Some(cached) = storage::cache_get::<FwMap>(&dir, "intel_fw_systems") {
+    // Includes stargate edges + system info from the SDE graph — keyed to the
+    // SDE's generation so an SDE update invalidates this immediately instead
+    // of after 5 minutes (#884).
+    let generation = crate::sde::generation_id(&dir)?;
+    if let Some(cached) =
+        storage::cache_get_versioned::<FwMap>(&dir, "intel_fw_systems", generation)
+    {
         return Ok(cached);
     }
 
@@ -363,7 +369,7 @@ pub async fn intel_fw_systems(
     });
 
     let map = FwMap { nodes, edges };
-    let _ = storage::cache_put(&dir, "intel_fw_systems", &map, 300);
+    let _ = storage::cache_put_versioned(&dir, "intel_fw_systems", &map, 300, generation);
     Ok(map)
 }
 

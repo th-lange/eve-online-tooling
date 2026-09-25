@@ -293,6 +293,34 @@ pub struct ShipLayout {
     pub calibration: f64,
     pub drone_bay: f64,
     pub drone_bandwidth: f64,
+    /// Total fighter launch tubes (#877, `fighterTubes`) — the hard cap on
+    /// simultaneously fitted squadrons regardless of category split (e.g. a
+    /// Thanatos has 4 tubes but 3 light + 2 support bays; only 4 total can
+    /// ever be launched).
+    pub fighter_tubes: i64,
+    /// Light fighter squadron bays (`fighterLightSlots`).
+    pub fighter_light_slots: i64,
+    /// Support fighter squadron bays (`fighterSupportSlots`).
+    pub fighter_support_slots: i64,
+    /// Heavy fighter squadron bays (`fighterHeavySlots`).
+    pub fighter_heavy_slots: i64,
+    /// Fighter bay volume, m³ (`fighterCapacity`).
+    pub fighter_bay: f64,
+}
+
+/// One mutaplasmid's roll data (#876): the base module types it can be
+/// applied to, and each affected attribute's roll range as a multiplier on
+/// the base item's own value for that attribute. See `sde::db::mutaplasmid`
+/// for where this is sourced from and why it isn't a plain SDE query.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MutaplasmidRoll {
+    pub mutaplasmid_type_id: i64,
+    pub mutaplasmid_name: String,
+    /// Base module type ids this mutaplasmid can be applied to.
+    pub applicable_type_ids: Vec<i64>,
+    /// attribute id -> (min multiplier, max multiplier).
+    pub attribute_ranges: std::collections::HashMap<i64, (f64, f64)>,
 }
 
 /// A solar system's identity plus the region it belongs to, for point

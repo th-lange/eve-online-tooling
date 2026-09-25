@@ -74,6 +74,17 @@ impl EsiClient {
             .await
     }
 
+    /// The cached freshness deadline (Unix epoch secs) for a prior
+    /// `get_json`/`get_paged` call at `path`+`query`, if the response is
+    /// still cached. Lets callers surface ESI's own `Cache-Control`/
+    /// `Expires` window downstream (e.g. the frontend's `expiresAt`
+    /// freshness cue, #885) without re-deriving the cache key.
+    pub(crate) async fn expires_at(&self, path: &str, query: &[(&str, String)]) -> Option<u64> {
+        let url = format!("{}{}", self.base, path);
+        let key = cache_key(&url, query);
+        self.cache.expires_at(&key).await
+    }
+
     /// GET a paginated collection, following the `X-Pages` header and
     /// concatenating every page (conditionally cached on page 1).
     pub async fn get_paged<T: DeserializeOwned>(

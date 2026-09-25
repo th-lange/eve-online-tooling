@@ -39,6 +39,8 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
     fleetBoosts,
     environmentEffect,
     abyssalWeather,
+    spoolPct,
+    factorReload,
     jammed,
   } = state;
 
@@ -87,6 +89,8 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
       fleetBoosts,
       environmentEffect,
       abyssalWeather,
+      spoolPct,
+      factorReload,
     ],
     queryFn: fit
       ? () =>
@@ -99,6 +103,8 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
             fleetBoosts.length > 0 ? fleetBoosts : undefined,
             environmentEffect,
             abyssalWeather,
+            spoolPct,
+            factorReload,
           )
       : undefined,
     enabled: fit != null,
@@ -137,6 +143,7 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
         rig: free("rig", ship.rigSlots),
         subsystem: free("subsystem", ship.subsystemSlots),
         mode: free("mode", ship.modeSlots),
+        fighter: free("fighter", ship.fighterTubes),
       },
       cpu: (res?.cpuOutput ?? ship.cpuOutput) - (res?.cpuUsed ?? 0),
       pg:

@@ -18,6 +18,8 @@ use super::stacking::combine_penalized;
 #[allow(dead_code)] // ids land here as the tank/damage/nav calculators consume them
 #[allow(clippy::module_inception)] // `attr::attr` — a named constant bag, kept nested on purpose
 pub mod attr {
+    /// Module structure hitpoints — heat damage (#874) is dealt against this.
+    pub const HP: i64 = 9;
     pub const MASS: i64 = 4;
     pub const POWER_OUTPUT: i64 = 11;
     pub const LOW_SLOTS: i64 = 12;
@@ -25,10 +27,12 @@ pub mod attr {
     pub const HI_SLOTS: i64 = 14;
     pub const POWER_USAGE: i64 = 30;
     pub const MAX_VELOCITY: i64 = 37;
+    pub const CAPACITY: i64 = 38;
     pub const CPU_OUTPUT: i64 = 48;
     pub const CPU_USAGE: i64 = 50;
     pub const RATE_OF_FIRE: i64 = 51;
     pub const RECHARGE_RATE: i64 = 55;
+    pub const CHARGES_PER_CYCLE: i64 = 56;
     pub const DAMAGE_MULTIPLIER: i64 = 64;
     pub const AGILITY: i64 = 70;
     pub const LAUNCHER_HARDPOINTS: i64 = 101;
@@ -37,15 +41,68 @@ pub mod attr {
     pub const EXPLOSIVE_DAMAGE: i64 = 116;
     pub const KINETIC_DAMAGE: i64 = 117;
     pub const THERMAL_DAMAGE: i64 = 118;
+    pub const VOLUME: i64 = 161;
+    /// Charge attribute (#875): GJ a cap booster/ASB charge injects into the
+    /// capacitor per shot.
+    pub const CAPACITOR_BONUS: i64 = 67;
+    /// Module attribute: a running shield booster/ASB's rep-per-cycle
+    /// (#875 gates cap booster injection on its *absence*, since ASBs load
+    /// the same charge group but feed shield, not cap — see #878's `tank_of`).
+    pub const SHIELD_BONUS: i64 = 68;
     pub const SHIELD_CAPACITY: i64 = 263;
     pub const DRONE_CAPACITY: i64 = 283;
     pub const CAPACITOR_CAPACITY: i64 = 482;
     pub const CALIBRATION: i64 = 1132;
-    pub const CALIBRATION_COST: i64 = 1153;
     pub const RIG_SLOTS: i64 = 1137;
+    pub const CALIBRATION_COST: i64 = 1153;
     pub const DRONE_BANDWIDTH: i64 = 1271;
     pub const DRONE_BANDWIDTH_USED: i64 = 1272;
     pub const SUBSYSTEM_SLOTS: i64 = 1367;
+    pub const RELOAD_TIME: i64 = 1795;
+    /// Module cycle time (ms) — also the interval between heat-damage rolls
+    /// while overheated (#874).
+    pub const DURATION: i64 = 73;
+    /// Ship attribute: rack heat pool size, as a percentage (`heatCapacityHi`).
+    pub const HEAT_CAPACITY_HI: i64 = 1178;
+    /// `heatCapacityMed`.
+    pub const HEAT_CAPACITY_MED: i64 = 1199;
+    /// `heatCapacityLow`.
+    pub const HEAT_CAPACITY_LOW: i64 = 1200;
+    /// Module attribute: HP dealt to a heat-damage roll's target at distance 0
+    /// (`heatDamage`), already Thermodynamics/ship-bonus-adjusted once resolved.
+    pub const HEAT_DAMAGE: i64 = 1211;
+    /// Ship attribute: hull-size rack heat build-up rate (`heatGenerationMultiplier`).
+    pub const HEAT_GENERATION_MULTIPLIER: i64 = 1224;
+    /// Ship attribute: per-slot-distance heat-damage falloff for the high rack
+    /// (`heatAttenuationHi`).
+    pub const HEAT_ATTENUATION_HI: i64 = 1259;
+    /// `heatAttenuationMed`.
+    pub const HEAT_ATTENUATION_MED: i64 = 1261;
+    /// `heatAttenuationLow`.
+    pub const HEAT_ATTENUATION_LOW: i64 = 1262;
+    /// Module attribute: this module's own contribution to its rack's heat
+    /// build-up while overheated, as a fraction of rack capacity per second
+    /// (`heatAbsorbtionRateModifier`).
+    pub const HEAT_ABSORPTION_RATE: i64 = 1180;
+    /// Ship attribute: fighter bay volume, m³ (`fighterCapacity`, #877).
+    pub const FIGHTER_CAPACITY: i64 = 2055;
+    /// Ship attribute: total fighter launch tubes (`fighterTubes`) — caps
+    /// simultaneously fitted squadrons regardless of category split.
+    pub const FIGHTER_TUBES: i64 = 2216;
+    /// Ship attribute: light fighter squadron bays (`fighterLightSlots`).
+    pub const FIGHTER_LIGHT_SLOTS: i64 = 2217;
+    /// Ship attribute: support fighter squadron bays (`fighterSupportSlots`).
+    pub const FIGHTER_SUPPORT_SLOTS: i64 = 2218;
+    /// Ship attribute: heavy fighter squadron bays (`fighterHeavySlots`).
+    pub const FIGHTER_HEAVY_SLOTS: i64 = 2219;
+    /// Fighter-type attribute: fighters per squadron (`fighterSquadronMaxSize`).
+    pub const FIGHTER_SQUADRON_MAX_SIZE: i64 = 2215;
+    /// Fighter-type attribute: flags a light-category squadron (`fighterSquadronIsLight`).
+    pub const FIGHTER_SQUADRON_IS_LIGHT: i64 = 2212;
+    /// Fighter-type attribute: flags a support-category squadron (`fighterSquadronIsSupport`).
+    pub const FIGHTER_SQUADRON_IS_SUPPORT: i64 = 2213;
+    /// Fighter-type attribute: flags a heavy-category squadron (`fighterSquadronIsHeavy`).
+    pub const FIGHTER_SQUADRON_IS_HEAVY: i64 = 2214;
 }
 
 /// A single attribute's base value plus accumulating modifier buckets.

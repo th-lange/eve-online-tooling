@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { Fresh } from "./common";
 
 export interface SkillsView {
   totalSp: number;
@@ -6,8 +7,8 @@ export interface SkillsView {
   trainedCount: number;
   queue: { skillName: string; level: number; finishDate: string | null }[];
 }
-export function characterSkills(): Promise<SkillsView> {
-  return invoke<SkillsView>("character_skills");
+export function characterSkills(): Promise<Fresh<SkillsView>> {
+  return invoke<Fresh<SkillsView>>("character_skills");
 }
 
 export interface StandingRow {

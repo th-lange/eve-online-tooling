@@ -169,6 +169,8 @@ pub(super) fn new_module(type_id: i64, slot: SlotKind, index: i32) -> FitItem {
         charge_type_id: None,
         quantity: 1,
         active_drones: None,
+        mutation: None,
+        fighter_ability: None,
     }
 }
 
@@ -382,7 +384,7 @@ pub(super) fn evaluate(
     };
     Some(Eval {
         objective,
-        cap_stable: capacitor_of(&resolved, &module_items, 0.0).stable,
+        cap_stable: capacitor_of(&resolved, &module_items, 0.0, false).stable,
         cost: fit_cost(fit, prices),
     })
 }
@@ -999,6 +1001,8 @@ fn fit_drone_bay(
             charge_type_id: None,
             quantity: count as i32,
             active_drones: None,
+            mutation: None,
+            fighter_ability: None,
         });
     }
 }
@@ -1202,6 +1206,7 @@ mod tests {
             ship: AttrStore::new(),
             modules,
             drones: Vec::new(),
+            fighters: Vec::new(),
             charges: Vec::new(),
             unresolved: 0,
         }
@@ -1225,6 +1230,11 @@ mod tests {
             calibration: 400.0,
             drone_bay: 0.0,
             drone_bandwidth: 0.0,
+            fighter_tubes: 0,
+            fighter_light_slots: 0,
+            fighter_support_slots: 0,
+            fighter_heavy_slots: 0,
+            fighter_bay: 0.0,
         }
     }
 
@@ -1237,6 +1247,8 @@ mod tests {
             charge_type_id: charge,
             quantity: qty,
             active_drones: None,
+            mutation: None,
+            fighter_ability: None,
         }
     }
 

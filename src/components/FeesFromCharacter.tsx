@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { UserCog } from "lucide-react";
-import { characterTradeFees } from "../lib/api";
+import { activeCharacter, characterTradeFees } from "../lib/api";
 import { queryErrorText } from "./QueryErrorNotice";
 
 const round2 = (x: number) => Math.round(x * 100) / 100;
@@ -18,8 +18,15 @@ export function FeesFromCharacter({
   onApply: (brokerPct: number, salesTaxPct: number) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // The backend resolves fees against its own bookmarked active character —
+  // folding that selection into the query key means switching characters
+  // refetches instead of showing the previous character's fees.
+  const active = useQuery({
+    queryKey: ["auth", "active"],
+    queryFn: activeCharacter,
+  });
   const q = useQuery({
-    queryKey: ["character", "tradeFees"],
+    queryKey: ["character", "tradeFees", active.data ?? null],
     queryFn: characterTradeFees,
     staleTime: 10 * 60_000,
     retry: false,

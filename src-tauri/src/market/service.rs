@@ -11,13 +11,22 @@ use crate::esi::{EsiClient, EsiError};
 
 use super::aggregate::assemble_price_model;
 use super::cache::TtlCache;
-use super::flight::{deduplicated_cached_fetch, KeyLocks};
+use super::flight::{
+    deduplicated_cached_fetch, deduplicated_cached_fetch_with_stale_fallback, KeyLocks,
+};
 use super::fuzzwork::{Aggregate, FuzzworkClient};
 use super::markets::Location;
 use super::types::{AdjustedPrice, HistoryDay, Order, PriceModel};
 
 /// Default window for the moving-average vector.
 const MA_DAYS: usize = 7;
+
+/// Max staleness accepted for cached history when a live ESI refresh fails:
+/// 24h past its TTL. Daily market history drifts slowly, so a day-old cache
+/// beats erroring out — the same bound production's system cost index uses
+/// for its own cache (#774), generalized to `history_for`'s `TtlCache`
+/// via [`deduplicated_cached_fetch_with_stale_fallback`] (#888).
+const HISTORY_MAX_STALE: Duration = Duration::from_secs(24 * 3600);
 
 /// ESI returns 404 for `history`/`orders` of a type that isn't traded on the
 /// market (some blueprint inputs aren't). That's "no data", not a hard error.
@@ -69,7 +78,7 @@ impl MarketService {
             ma_days: MA_DAYS,
             // TTLs roughly track ESI cache timers.
             orders: TtlCache::new(Duration::from_secs(300)),
-            history: TtlCache::new(Duration::from_secs(1200)),
+            history: TtlCache::with_max_stale(Duration::from_secs(1200), HISTORY_MAX_STALE),
             aggregates: TtlCache::new(Duration::from_secs(900)),
             prices: TtlCache::new(Duration::from_secs(3600)),
             orders_flight: KeyLocks::new(),
@@ -77,6 +86,16 @@ impl MarketService {
             aggregates_flight: KeyLocks::new(),
             prices_flight: KeyLocks::new(),
         }
+    }
+
+    /// Test-only: like [`with_client`](Self::with_client), but lets a test
+    /// shrink the history cache's TTL/stale window so a bounded-stale
+    /// fallback (#888) can be exercised without waiting real time out.
+    #[cfg(test)]
+    fn with_client_and_history_ttl(esi: EsiClient, ttl: Duration, max_stale: Duration) -> Self {
+        let mut svc = Self::with_client(esi);
+        svc.history = TtlCache::with_max_stale(ttl, max_stale);
+        svc
     }
 
     /// Spot orders for a type in a region (cached per region).
@@ -120,10 +139,13 @@ impl MarketService {
         self.orders_for(region_id, type_id).await
     }
 
-    /// Daily history for a type in a region (cached per region).
+    /// Daily history for a type in a region (cached per region). When a live
+    /// refresh fails but a cached value ≤[`HISTORY_MAX_STALE`] past its TTL
+    /// sits in the in-memory cache, the stale history is served instead of
+    /// erroring the whole lookup (#774, #888).
     async fn history_for(&self, region_id: i64, type_id: i64) -> Result<Vec<HistoryDay>, EsiError> {
         let key = (region_id, type_id);
-        deduplicated_cached_fetch(
+        deduplicated_cached_fetch_with_stale_fallback(
             &self.history_flight,
             &key,
             || self.history.get(&key),
@@ -141,6 +163,7 @@ impl MarketService {
                 self.history.put(key, history.clone());
                 Ok(history)
             },
+            || self.history.get_stale(&key),
         )
         .await
     }
@@ -168,6 +191,19 @@ impl MarketService {
     /// cached. Feeds the market history explorer.
     pub async fn history(&self, region_id: i64, type_id: i64) -> Result<Vec<HistoryDay>, EsiError> {
         self.history_for(region_id, type_id).await
+    }
+
+    /// The ESI-derived freshness deadline (Unix epoch secs) for the cached
+    /// history response, if the disk-backed conditional cache still holds an
+    /// entry — independent of the in-memory `TtlCache` layer [`history_for`]
+    /// also applies, so this reflects ESI's own `Cache-Control`/`Expires`
+    /// window even when [`history`](Self::history) served from that faster
+    /// in-memory cache rather than a live fetch (#885).
+    pub async fn history_expires_at(&self, region_id: i64, type_id: i64) -> Option<u64> {
+        let path = format!("/latest/markets/{region_id}/history/");
+        self.esi
+            .expires_at(&path, &[("type_id", type_id.to_string())])
+            .await
     }
 
     /// Full price model for one type at a location, using live ESI orders +
@@ -729,6 +765,61 @@ mod tests {
             assert_eq!(orders_hits.load(Ordering::SeqCst), 2);
             assert_eq!(history_hits.load(Ordering::SeqCst), 2);
             assert_eq!(prices_hits.load(Ordering::SeqCst), 1);
+        });
+    }
+
+    /// A live refresh failing must fall back to a still-in-window stale
+    /// cache entry instead of erroring the whole lookup — pins
+    /// `history_for`'s [`deduplicated_cached_fetch_with_stale_fallback`]
+    /// wiring (#774, #888).
+    #[test]
+    fn history_serves_stale_cache_on_fetch_failure() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let server = tiny_http::Server::http("127.0.0.1:0").expect("bind loopback");
+            let addr = server.server_addr().to_ip().expect("ip addr");
+            let history_hits = Arc::new(AtomicUsize::new(0));
+            let hits = history_hits.clone();
+            std::thread::spawn(move || {
+                for request in server.incoming_requests() {
+                    hits.fetch_add(1, Ordering::SeqCst);
+                    // 400 is not one of the transient/error-budget statuses
+                    // `send_retrying` retries, so this fails on first try
+                    // instead of spending several backoff cycles.
+                    let _ = request.respond(
+                        tiny_http::Response::from_string("simulated failure").with_status_code(400),
+                    );
+                }
+            });
+
+            let esi = EsiClient::with_base(format!("http://{addr}"), ConditionalCache::disabled());
+            // TTL of 1ms so the seeded entry is already expired by the time
+            // `history_for` runs, but the 1h stale window still covers it.
+            let service = MarketService::with_client_and_history_ttl(
+                esi,
+                Duration::from_millis(1),
+                Duration::from_secs(3600),
+            );
+            let region_id = 10000002;
+            let type_id = 987;
+            let seeded = vec![day(5)];
+            service.history.put((region_id, type_id), seeded.clone());
+            std::thread::sleep(Duration::from_millis(20));
+
+            let history = service
+                .history(region_id, type_id)
+                .await
+                .expect("bounded-stale cache must be served instead of the fetch error");
+            assert_eq!(history.len(), 1);
+            assert_eq!(history[0].volume, seeded[0].volume);
+            assert_eq!(
+                history_hits.load(Ordering::SeqCst),
+                1,
+                "must have attempted the live refresh before falling back"
+            );
         });
     }
 }

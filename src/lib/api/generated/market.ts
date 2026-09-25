@@ -9,12 +9,15 @@
 
 export const commands = {
   /**
-   * Daily market history for a type in a region (ascending by date).
+   * Daily market history for a type in a region (ascending by date), wrapped
+   * with the server's real ESI cache deadline (#885) so the frontend can
+   * derive its `staleTime`/`DataAge` cue from `expiresAt` instead of a
+   * hand-set constant.
    */
   async marketHistory(
     regionId: number,
     typeId: number,
-  ): Promise<Result<HistoryPoint[], AppError>> {
+  ): Promise<Result<Fresh<HistoryPoint[]>, AppError>> {
     try {
       return {
         status: "ok",
@@ -177,6 +180,22 @@ export type CurrentLocation = {
  * One price level in the order book: total remaining units at that price.
  */
 export type DepthLevel = { price: number; volume: number };
+/**
+ * Server-derived cache-freshness envelope (#885). Wraps command data with
+ * the same `fetchedAt`/`expiresAt` deadline the backend's conditional
+ * cache (`net::conditional_cache::ConditionalCache`, wrapped per-provider
+ * by e.g. `esi::cache::ConditionalCache`) already computed from the
+ * upstream `Cache-Control`/`Expires` headers, instead of the frontend
+ * re-guessing a per-endpoint `staleTime` constant that drifts as those
+ * headers change server-side.
+ *
+ * Both timestamps are Unix epoch **milliseconds** (matching JS
+ * `Date.now()`), so `DataAge` and `queryKeys.ts` can compare directly with
+ * no unit conversion. `expires_at` is `None` when the underlying cache has
+ * no persisted entry for this call (cache disabled, or nothing cached
+ * yet) — callers fall back to their existing hand-set `staleTime`.
+ */
+export type Fresh<T> = { data: T; fetchedAt: number; expiresAt: number | null };
 /**
  * One day of market history, for the history explorer (camelCase for the UI).
  */

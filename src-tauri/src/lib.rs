@@ -15,6 +15,7 @@
 //! - [`util`]     — cross-cutting helpers (time: epoch-now, civil dates, RFC-3339)
 //! - [`lists`]    — persisted type-id lists (blacklist/favorites)
 //! - [`evescout`] — EVE-Scout public Thera/Turnur wormhole connections
+//! - [`net`]      — cross-cutting network helpers (provider-agnostic conditional HTTP cache)
 //!
 //! Feature modules live under [`modules`]; the frontend registry in
 //! `src/modules/registry.ts` is the canonical catalogue of them.
@@ -31,6 +32,7 @@ mod market;
 mod mcp;
 mod model;
 mod modules;
+mod net;
 mod plugins;
 mod sde;
 mod storage;
@@ -203,6 +205,7 @@ pub fn run() {
             app.manage(std::sync::Arc::new(plugins::PluginRegistry::load(&dir)));
             app.manage(std::sync::Arc::new(plugins::PluginManager::new()));
             app.manage(esi::AuthState::with_cache(dir.clone()));
+            app.manage(modules::production::commands::CostIndexLocks::default());
             modules::dpsmeter::init(app);
             mcp::init(app);
 
@@ -281,6 +284,8 @@ pub fn run() {
             sde::commands::sde_market_group_children,
             sde::commands::sde_type_names,
             sde::commands::sde_type_infos,
+            sde::commands::sde_mutaplasmids_for_type,
+            sde::commands::sde_mutaplasmid_roll,
             market::commands::market_regions,
             market::commands::market_price,
             market::commands::market_history,
@@ -316,10 +321,13 @@ pub fn run() {
             modules::fitting::commands::fitting_import_eft,
             modules::fitting::commands::fitting_import_list,
             modules::fitting::commands::fitting_add_item,
+            modules::fitting::commands::fitting_mutation_ranges,
             modules::fitting::commands::fitting_module_info,
             modules::fitting::commands::fitting_compatible_charges,
             modules::fitting::commands::fitting_environment_effects,
             modules::fitting::commands::fitting_export_eft,
+            modules::fitting::commands::fitting_export_dna,
+            modules::fitting::commands::fitting_export_multibuy,
             modules::fitting::commands::fitting_esi_list,
             modules::fitting::commands::fitting_esi_push,
             modules::fitting::commands::fitting_simulate,
@@ -330,6 +338,9 @@ pub fn run() {
             modules::fitting::commands::fitting_save_local,
             modules::fitting::commands::fitting_list_local,
             modules::fitting::commands::fitting_delete_local,
+            modules::fitting::commands::fitting_target_profiles,
+            modules::fitting::commands::fitting_save_target_profile,
+            modules::fitting::commands::fitting_delete_target_profile,
             modules::appraisal::commands::appraisal_run,
             modules::appraisal::commands::appraisal_reprocess,
             modules::assets::commands::assets_load,

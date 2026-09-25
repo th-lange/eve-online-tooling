@@ -11,11 +11,13 @@
 
 pub mod commands;
 mod context;
+pub mod dna;
 pub mod eft;
 pub mod engine;
 pub mod esi_fittings;
 #[cfg(test)]
 mod golden_tests;
+mod npc_profiles;
 pub mod optimizer;
 mod stats;
 pub mod types;
