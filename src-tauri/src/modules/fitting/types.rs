@@ -38,6 +38,24 @@ fn one() -> i32 {
     1
 }
 
+/// A mutaplasmid-rolled item's per-instance attribute overrides (#876).
+/// `base_type_id` is the item's own (unmutated) type id — always equal to
+/// the owning [`FitItem::type_id`], carried here too so the mutation stays
+/// self-describing wherever it travels alone (EFT round-trip, UI slider
+/// state). `attrs` are **absolute** overridden values (not multipliers),
+/// one entry per attribute the mutaplasmid touches; the resolve pass seeds
+/// these as the entity's base attributes before dogma effects apply (see
+/// `stats::run_dogma`), so any bonus a skill/other module grants that
+/// attribute still stacks on top of the rolled value exactly as it would on
+/// the unmutated base value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemMutation {
+    pub base_type_id: i64,
+    pub mutaplasmid_type_id: i64,
+    pub attrs: std::collections::HashMap<i64, f64>,
+}
+
 /// One fitted item: a module/rig/subsystem/drone slot entry, optionally with a
 /// loaded charge.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -60,6 +78,10 @@ pub struct FitItem {
     /// `slot == Drone`.
     #[serde(default)]
     pub active_drones: Option<i32>,
+    /// Mutaplasmid roll applied to this item (#876), `None` for an unmutated
+    /// item — the overwhelming majority.
+    #[serde(default)]
+    pub mutation: Option<ItemMutation>,
 }
 
 /// The editable fit document. `id` is a stable key for local storage; `items`
@@ -469,6 +491,7 @@ mod tests {
                 charge_type_id: None,
                 quantity: 1,
                 active_drones: None,
+                mutation: None,
             }],
             projected: Vec::new(),
         };

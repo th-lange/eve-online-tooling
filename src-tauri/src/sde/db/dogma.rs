@@ -202,6 +202,51 @@ impl Sde {
         Ok(map)
     }
 
+    /// Internal + display names for a set of dogma attribute ids (#876):
+    /// `(attributeName, displayName)`. The EFT mutation block uses the
+    /// internal name (the community convention, e.g. `cpu`, `capacitorNeed`
+    /// — see `fitting::eft`); the module editor's mutate sliders use the
+    /// display name.
+    pub fn attribute_names(
+        &self,
+        attribute_ids: &[i64],
+    ) -> Result<HashMap<i64, (String, String)>, SdeError> {
+        if attribute_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let placeholders = vec!["?"; attribute_ids.len()].join(", ");
+        let sql = format!(
+            "SELECT attributeID, attributeName, COALESCE(NULLIF(displayName, ''), attributeName)
+             FROM dgmAttributeTypes
+             WHERE attributeID IN ({placeholders})",
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(attribute_ids.iter()), |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?;
+        rows.map(|r| r.map(|(id, name, disp)| (id, (name, disp))))
+            .collect::<Result<HashMap<_, _>, _>>()
+            .map_err(Into::into)
+    }
+
+    /// Attribute id for its internal `attributeName` (#876) — the reverse of
+    /// [`Self::attribute_names`], for parsing an EFT mutation block's
+    /// `attrName value` pairs back to attribute ids.
+    pub fn attribute_id_by_name(&self, name: &str) -> Result<Option<i64>, SdeError> {
+        self.conn
+            .query_row(
+                "SELECT attributeID FROM dgmAttributeTypes WHERE attributeName = ?1",
+                params![name],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
     /// The effects attached to a type as `(effectID, isDefault)` from
     /// `dgmTypeEffects` (#159). `isDefault` marks a module's auto-selected
     /// effect (e.g. the charge a launcher fires). Also used by the EFT importer

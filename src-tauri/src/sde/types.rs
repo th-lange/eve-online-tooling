@@ -295,6 +295,21 @@ pub struct ShipLayout {
     pub drone_bandwidth: f64,
 }
 
+/// One mutaplasmid's roll data (#876): the base module types it can be
+/// applied to, and each affected attribute's roll range as a multiplier on
+/// the base item's own value for that attribute. See `sde::db::mutaplasmid`
+/// for where this is sourced from and why it isn't a plain SDE query.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MutaplasmidRoll {
+    pub mutaplasmid_type_id: i64,
+    pub mutaplasmid_name: String,
+    /// Base module type ids this mutaplasmid can be applied to.
+    pub applicable_type_ids: Vec<i64>,
+    /// attribute id -> (min multiplier, max multiplier).
+    pub attribute_ranges: std::collections::HashMap<i64, (f64, f64)>,
+}
+
 /// A solar system's identity plus the region it belongs to, for point
 /// lookups (e.g. "where is this character right now?") that shouldn't pay
 /// for a full-map load. `security` is the raw SDE float (−1.0 … 1.0).

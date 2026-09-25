@@ -169,6 +169,7 @@ pub(super) fn new_module(type_id: i64, slot: SlotKind, index: i32) -> FitItem {
         charge_type_id: None,
         quantity: 1,
         active_drones: None,
+        mutation: None,
     }
 }
 
@@ -999,6 +1000,7 @@ fn fit_drone_bay(
             charge_type_id: None,
             quantity: count as i32,
             active_drones: None,
+            mutation: None,
         });
     }
 }
@@ -1237,6 +1239,7 @@ mod tests {
             charge_type_id: charge,
             quantity: qty,
             active_drones: None,
+            mutation: None,
         }
     }
 

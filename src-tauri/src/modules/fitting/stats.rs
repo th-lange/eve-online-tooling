@@ -192,6 +192,19 @@ pub(super) fn run_dogma(
     for it in &module_items {
         // All required skills (182/183/184) drive *RequiredSkillModifier targeting.
         let mut e = ctx.entity(it.type_id, required_skills_of(&ctx.attrs, it.type_id));
+        // Mutaplasmid roll (#876): seed the entity's base attributes with the
+        // rolled overrides before any effect/skill/module modifier applies —
+        // a mutated module's *baseline* is the rolled value, but every
+        // external bonus (skills, other modules' LocationGroupModifiers, …)
+        // still stacks on top of it exactly as it would on an unmutated item.
+        if let Some(mutation) = &it.mutation {
+            for (&attr_id, &value) in &mutation.attrs {
+                match e.attrs.iter_mut().find(|(id, _)| *id == attr_id) {
+                    Some(existing) => existing.1 = value,
+                    None => e.attrs.push((attr_id, value)),
+                }
+            }
+        }
         // State gates which effects run. Offline: none (no ship modifiers, no
         // fitting use). Online (not active): only passive effects — drop the
         // activatable ones (those with a duration), so e.g. an *active* hardener
@@ -1703,6 +1716,7 @@ mod tests {
             charge_type_id: charge,
             quantity: qty,
             active_drones: None,
+            mutation: None,
         }
     }
 
@@ -2034,6 +2048,7 @@ mod tests {
             charge_type_id: None,
             quantity: qty,
             active_drones: active,
+            mutation: None,
         }
     }
     fn drone_store(bandwidth_used: f64) -> AttrStore {
