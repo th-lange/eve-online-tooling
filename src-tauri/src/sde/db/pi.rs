@@ -1,3 +1,4 @@
+use rusqlite::params;
 #[cfg(test)]
 use rusqlite::Connection;
 use std::collections::HashMap;
@@ -61,6 +62,26 @@ impl Sde {
         Ok(map)
     }
 
+    /// Search published Planetary Commodities (category 43: P1–P4) by name
+    /// substring, capped. For the production-chain planner's item picker
+    /// (#882) — P0 raw resources (category 42) have no schematic, so aren't
+    /// valid planner targets.
+    pub fn search_pi_commodities(
+        &self,
+        query: &str,
+        limit: i64,
+    ) -> Result<Vec<(i64, String)>, SdeError> {
+        let pattern = format!("%{}%", query.trim());
+        let mut stmt = self.conn.prepare(
+            "SELECT t.typeID, t.typeName FROM invTypes t
+             JOIN invGroups g ON g.groupID = t.groupID
+             WHERE g.categoryID = 43 AND t.published = 1 AND t.typeName LIKE ?1
+             ORDER BY LENGTH(t.typeName), t.typeName LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![pattern, limit], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// `(volume, capacity)` in m³ for the given type ids (`invTypes`). PI uses
     /// volume to fill storage and capacity to size storage/launchpad/command pins.
     pub fn types_dims(&self, ids: &[i64]) -> Result<HashMap<i64, (f64, f64)>, SdeError> {
@@ -116,5 +137,24 @@ mod tests {
         assert_eq!(s.cycle_time, 3600);
         assert_eq!(s.inputs, vec![(2309, 3000)]);
         assert_eq!(s.outputs, vec![(2389, 20)]);
+    }
+
+    #[test]
+    fn search_pi_commodities_scopes_to_category_43() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE invGroups(groupID INT, categoryID INT);
+             CREATE TABLE invTypes(typeID INT, typeName TEXT, groupID INT, published INT);
+             INSERT INTO invGroups VALUES (1042, 43), (42, 42);
+             INSERT INTO invTypes VALUES
+               (2398, 'Reactive Metals', 1042, 1),
+               (2267, 'Base Metals', 42, 1);",
+        )
+        .unwrap();
+        let sde = Sde::from_connection(conn);
+        let hits = sde.search_pi_commodities("metal", 10).unwrap();
+        // "Base Metals" matches by name but is category 42 (P0, no
+        // schematic) — excluded, only the P1 (category 43) commodity hits.
+        assert_eq!(hits, vec![(2398, "Reactive Metals".to_string())]);
     }
 }

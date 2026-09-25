@@ -145,46 +145,43 @@ pub struct OwnedBlueprint {
 /// All blueprints owned across the whole roster — personal **and** corporation
 /// (where the character has the Director role + corp scope). A character whose
 /// token can't be refreshed is skipped rather than failing the whole call.
-#[tauri::command]
-#[specta::specta]
-pub async fn esi_owned_blueprints(
-    app: AppHandle,
-    auth_state: State<'_, AuthState>,
+/// Factored out of the Tauri command (mirrors `pi::commands::pi_overview_core`)
+/// so `massprod_plan` can call it directly with a plain dir/auth pair instead
+/// of round-tripping through the Tauri command layer (#883).
+pub async fn owned_blueprints_core(
+    dir: &std::path::Path,
+    auth_state: &AuthState,
 ) -> Result<Vec<OwnedBlueprint>, crate::model::AppError> {
-    let dir = crate::storage::app_data_dir(&app)?;
-    let roster = storage::load_roster(&dir);
+    let roster = storage::load_roster(dir);
 
     // Characters have independent refresh tokens, so their ESI fetches are
     // safe to run concurrently instead of one-at-a-time.
-    let fetches = roster.into_iter().map(|c| {
-        let auth_state = &auth_state;
-        async move {
-            let to_owned = |b: character::RawBlueprint, corporation: bool| OwnedBlueprint {
-                character_id: c.character_id,
-                character_name: c.name.clone(),
-                corporation,
-                type_id: b.type_id,
-                name: String::new(),
-                material_efficiency: b.material_efficiency,
-                time_efficiency: b.time_efficiency,
-                runs: b.runs,
-                quantity: b.quantity,
-            };
+    let fetches = roster.into_iter().map(|c| async move {
+        let to_owned = |b: character::RawBlueprint, corporation: bool| OwnedBlueprint {
+            character_id: c.character_id,
+            character_name: c.name.clone(),
+            corporation,
+            type_id: b.type_id,
+            name: String::new(),
+            material_efficiency: b.material_efficiency,
+            time_efficiency: b.time_efficiency,
+            runs: b.runs,
+            quantity: b.quantity,
+        };
 
-            let mut owned = Vec::new();
-            if let Ok(blueprints) = character::fetch_blueprints(auth_state, c.character_id).await {
-                owned.extend(blueprints.into_iter().map(|b| to_owned(b, false)));
-            }
-            // Corp blueprints (empty if the character lacks the role/scope).
-            if let Ok(corp_id) = character::corporation_id(auth_state, c.character_id).await {
-                if let Ok(blueprints) =
-                    character::fetch_corp_blueprints(auth_state, c.character_id, corp_id).await
-                {
-                    owned.extend(blueprints.into_iter().map(|b| to_owned(b, true)));
-                }
-            }
-            owned
+        let mut owned = Vec::new();
+        if let Ok(blueprints) = character::fetch_blueprints(auth_state, c.character_id).await {
+            owned.extend(blueprints.into_iter().map(|b| to_owned(b, false)));
         }
+        // Corp blueprints (empty if the character lacks the role/scope).
+        if let Ok(corp_id) = character::corporation_id(auth_state, c.character_id).await {
+            if let Ok(blueprints) =
+                character::fetch_corp_blueprints(auth_state, c.character_id, corp_id).await
+            {
+                owned.extend(blueprints.into_iter().map(|b| to_owned(b, true)));
+            }
+        }
+        owned
     });
     let mut out: Vec<OwnedBlueprint> = futures_util::future::join_all(fetches)
         .await
@@ -193,7 +190,7 @@ pub async fn esi_owned_blueprints(
         .collect();
 
     // Resolve blueprint names from the SDE (cached per type id).
-    if let Ok(sde) = crate::sde::open_from_dir(&dir) {
+    if let Ok(sde) = crate::sde::open_from_dir(dir) {
         let mut names: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
         for bp in &mut out {
             let name = names
@@ -203,6 +200,17 @@ pub async fn esi_owned_blueprints(
         }
     }
     Ok(out)
+}
+
+/// Tauri wrapper: all blueprints owned across the whole roster.
+#[tauri::command]
+#[specta::specta]
+pub async fn esi_owned_blueprints(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+) -> Result<Vec<OwnedBlueprint>, crate::model::AppError> {
+    let dir = crate::storage::app_data_dir(&app)?;
+    owned_blueprints_core(&dir, &auth_state).await
 }
 
 /// Total owned quantity per type across the **whole roster** (personal assets),

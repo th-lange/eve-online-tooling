@@ -11,6 +11,7 @@
 
 pub mod aggregate;
 pub mod commands;
+pub mod overview;
 pub mod parser;
 
 /// Register this module's managed state with the app.

@@ -92,6 +92,7 @@ export function StatsAside({
             dpsSustained={stats.data.dpsSustained ?? undefined}
             appliedDps={stats.data.appliedDps}
             dpsRangeCurve={stats.data.dpsRangeCurve}
+            archetypeDps={stats.data.archetypeDps}
             jammedActive={jammedActive}
             isSpoolable={!!stats.data.isSpoolable}
             spoolPct={spoolPct}

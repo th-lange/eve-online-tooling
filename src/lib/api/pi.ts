@@ -78,3 +78,27 @@ export function piLockedGet(): Promise<number[]> {
 export function piLockedSet(typeIds: number[]): Promise<void> {
   return invoke<void>("pi_locked_set", { typeIds });
 }
+
+// --- Production-chain planner (#882) ---
+
+export interface ChainNode {
+  typeId: number;
+  name: string;
+  /** 0 = a raw P0 resource, 1..4 = P1..P4. */
+  tier: number;
+  /** How much of this node the parent schematic consumes per cycle; 0 for
+   * the root and for tier-0 (P0) leaves. */
+  qtyPerCycle: number;
+  /** Planet types that alone can supply this node's whole subtree; empty
+   * means no single planet can — the colony needs imports. */
+  planetTypes: string[];
+  children: ChainNode[];
+}
+
+/**
+ * The production-chain tree for a P1–P4 commodity: which planet type(s) can
+ * produce it single-planet (no imports), and the full P0→target stage tree.
+ */
+export function piProductionChain(typeId: number): Promise<ChainNode> {
+  return invoke<ChainNode>("pi_production_chain", { typeId });
+}

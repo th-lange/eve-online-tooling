@@ -235,6 +235,10 @@ pub struct WeaponRange {
     pub falloff: f64,
     /// Turret tracking speed (rad/s). 0 for missiles and mining lasers.
     pub tracking: f64,
+    /// Missile explosion radius (m, charge attr `aoeCloudSize` 654). 0 for turrets/mining.
+    pub explosion_radius: f64,
+    /// Missile explosion velocity (m/s, charge attr `aoeVelocity` 653). 0 for turrets/mining.
+    pub explosion_velocity: f64,
 }
 
 /// Target profile for applied-DPS calculation (#701). Signature radius and
@@ -305,6 +309,20 @@ pub struct NpcProfile {
 pub struct TargetProfileLibrary {
     pub built_in: Vec<NpcProfile>,
     pub custom: Vec<NpcProfile>,
+}
+
+/// One generic hull-class target archetype's applied DPS (#890): the fit's
+/// applied-DPS total against a fixed built-in `TargetProfile` — "how does
+/// this fit perform against a typical frigate/cruiser/battleship" — computed
+/// within the same resolve pass as everything else in `FitStats`, never
+/// re-running dogma resolution per archetype. See `target_archetypes` for
+/// how each archetype's profile is derived from real SDE hull data.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchetypeDps {
+    pub id: String,
+    pub label: String,
+    pub applied_dps: f64,
 }
 
 /// Which Abyssal Deadspace weather a fit is sitting in (#env-selector). See
@@ -452,6 +470,14 @@ pub struct FitStats {
     /// all. Empty until the dogma engine runs.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub fighter_abilities: Vec<Option<FighterAbilityStats>>,
+    /// Applied DPS against each of the 4 built-in hull-class target
+    /// archetypes (#890) — Frigate/AB, Frigate/MWD, Cruiser/AB,
+    /// Battleship/AB, all "high transversal" — computed within the same
+    /// resolve pass, so a hover/fit-change never re-runs dogma resolution
+    /// per archetype. Empty until the dogma engine runs. See
+    /// `target_archetypes` for the derivation.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub archetype_dps: Vec<ArchetypeDps>,
 }
 
 /// One fitted fighter squadron's selected ability + its DPS contribution

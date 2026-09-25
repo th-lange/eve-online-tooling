@@ -10,10 +10,10 @@
 pub mod commands;
 mod engine;
 
-#[cfg(test)]
-pub(crate) use engine::required_quantity;
 /// Curated cross-module surface, mirroring fitting's `simulate_fit` pattern:
 /// the MCP dev-tier `production_profit` capability needs the pure engine
 /// directly (one blueprint, not the whole-catalogue ranking `commands`
 /// exposes), without poking into `engine` from outside the module.
-pub(crate) use engine::{evaluate, manufacturing_step, ProfitConfig};
+/// `required_quantity` is also the ME-rounding formula the Mass Production
+/// module (#883) sums per owned blueprint copy.
+pub(crate) use engine::{evaluate, manufacturing_step, required_quantity, ProfitConfig};

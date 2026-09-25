@@ -23,17 +23,28 @@ use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
 use super::engine::spool::apply_spool;
 use super::engine::tank::{rah_shift, tank, DamageProfile, Layer};
 use super::engine::validate::{validate, ValItem};
+use super::target_archetypes;
 use super::types::{
-    AbyssalWeatherSelection, CapStats, DpsBreakdown, EwTag, FighterAbilityStats, Fit, FitItem,
-    FitProblem, FitStats, ModuleState, NavStats, ResourceUsage, Severity, SlotKind, TankStats,
-    TargetProfile, TargetStats, WeaponRange,
+    AbyssalWeatherSelection, ArchetypeDps, CapStats, DpsBreakdown, EwTag, FighterAbilityStats, Fit,
+    FitItem, FitProblem, FitStats, ModuleState, NavStats, ResourceUsage, Severity, SlotKind,
+    TankStats, TargetProfile, TargetStats, WeaponRange,
 };
 use crate::sde::{Sde, ShipLayout};
+use crate::storage;
 
 /// The hard cap on simultaneously active drones — five, at Drones V, which
 /// the app assumes (all-V skills by default, same basis as everything else
 /// in this module).
 const MAX_ACTIVE_DRONES: i32 = 5;
+
+/// Cache key for the built-in hull-class target archetype library (#890),
+/// mirroring `commands.rs`'s `NPC_PROFILE_CACHE_KEY` — rebuilding it is a
+/// handful of SDE queries per `fitting_simulate` call otherwise.
+const ARCHETYPE_CACHE_KEY: &str = "fitting_target_archetypes";
+/// Same week-long TTL as the NPC profile library cache (#873) — well past
+/// any plausible SDE update cadence; `cache_get_versioned` invalidates on
+/// SDE swap regardless.
+const ARCHETYPE_CACHE_TTL_SECS: u64 = 7 * 24 * 3600;
 
 /// Dogma-engine stats derived from one resolution pass.
 pub(super) struct DogmaStats {
@@ -81,6 +92,10 @@ pub(super) struct DogmaStats {
     /// parallel to `fit.items` — `None` for non-fighter items and for a
     /// pure support/EW squadron with no offensive ability.
     pub(super) fighter_abilities: Vec<Option<FighterAbilityStats>>,
+    /// Applied DPS against each of the 4 built-in hull-class target
+    /// archetypes (#890), computed within this same resolve pass. See
+    /// `target_archetypes` for the derivation.
+    pub(super) archetype_dps: Vec<ArchetypeDps>,
 }
 
 /// Build the engine inputs (ship + modules + all-V skills) from the SDE, resolve
@@ -454,6 +469,46 @@ pub(super) fn run_dogma(
         (None, Vec::new())
     };
 
+    // Applied DPS against each of the 4 built-in hull-class target
+    // archetypes (#890), reusing this same resolve pass — the archetype
+    // library itself is cached per SDE generation (rebuilding it is a
+    // handful of SDE queries, not free, but the SDE almost never changes).
+    let archetype_dps: Vec<ArchetypeDps> = {
+        let generation = crate::sde::generation_id(dir).unwrap_or(0);
+        let archetypes = storage::cache_get_versioned::<Vec<target_archetypes::TargetArchetype>>(
+            dir,
+            ARCHETYPE_CACHE_KEY,
+            generation,
+        )
+        .unwrap_or_else(|| {
+            let built = target_archetypes::built_in_archetypes(sde);
+            let _ = storage::cache_put_versioned(
+                dir,
+                ARCHETYPE_CACHE_KEY,
+                &built,
+                ARCHETYPE_CACHE_TTL_SECS,
+                generation,
+            );
+            built
+        });
+        archetypes
+            .iter()
+            .map(|a| ArchetypeDps {
+                id: a.id.clone(),
+                label: a.label.clone(),
+                applied_dps: applied_dps_of(
+                    &resolved,
+                    &module_items,
+                    &drone_items,
+                    &drone_active_counts,
+                    &a.target,
+                    &weapon_ranges,
+                )
+                .total,
+            })
+            .collect()
+    };
+
     // Overheat burnout estimate (#874), scattered back to `fit.items` order —
     // same "next() over the module-list positions" pattern as drone_active/
     // drone_max_active above.
@@ -562,6 +617,7 @@ pub(super) fn run_dogma(
         is_spoolable,
         burnout_seconds: burnout_seconds_full,
         fighter_abilities: fighter_abilities_full,
+        archetype_dps,
     })
 }
 
@@ -1005,12 +1061,16 @@ fn applied_dps_at(
             );
             turret_dps += mult * damage_per_shot / rof_seconds * app;
         } else {
-            let explosion_radius = charge.get(103);
+            // Missile explosion radius/velocity: `aoeCloudSize` (654) /
+            // `aoeVelocity` (653) — not 103/104 (`warpScrambleRange`/
+            // `warpScrambleStatus`, unrelated attributes; verified against
+            // real SDE missile charges, which never carry 103/104 at all).
+            let explosion_radius = charge.get(654);
             if explosion_radius <= 0.0 {
                 continue; // not a missile weapon
             }
             // Missile flight velocity (37) — the missile's own speed, distinct
-            // from `explosionVelocity` (104), which only governs the damage
+            // from `explosionVelocity` (653), which only governs the damage
             // taper for fast/small targets it *does* reach.
             let missile_speed = charge.get(37);
             let outrun = target.missiles_need_overtake
@@ -1020,7 +1080,7 @@ fn applied_dps_at(
             let mut app = if outrun {
                 0.0
             } else {
-                let explosion_velocity = charge.get(104);
+                let explosion_velocity = charge.get(653);
                 missile_application(
                     explosion_radius,
                     explosion_velocity,
@@ -1180,9 +1240,12 @@ pub(super) fn dps_range_curve_of(
 
 /// Per-weapon engagement ranges from the resolved fit: turret optimal(54)/
 /// falloff(158), mining-laser reach (also `maxRange`), and missile flight range
-/// (velocity × flight time) from the loaded missile. Deduped by (type, charge),
-/// since identical loadouts share a range. `module_items` is parallel to
-/// `resolved.modules`/`resolved.charges`.
+/// (velocity × flight time) from the loaded missile. Also carries turret
+/// tracking (160) and, for missiles, the loaded charge's explosion radius
+/// (`aoeCloudSize`, 654) / explosion velocity (`aoeVelocity`, 653) — the
+/// same one-shot application stat block turrets get, surfaced for missiles
+/// too (#890). Deduped by (type, charge), since identical loadouts share a
+/// range. `module_items` is parallel to `resolved.modules`/`resolved.charges`.
 pub(super) fn weapon_ranges_of(
     resolved: &ResolvedFit,
     module_items: &[&FitItem],
@@ -1198,9 +1261,10 @@ pub(super) fn weapon_ranges_of(
         }
         let mut optimal = store.get(54); // maxRange: turrets + mining lasers
         let falloff = store.get(158);
+        let charge = resolved.charges.get(i).and_then(|c| c.as_ref());
         // Missile launchers have no maxRange — use the loaded missile's flight range.
         if optimal == 0.0 {
-            if let Some(Some(charge)) = resolved.charges.get(i) {
+            if let Some(charge) = charge {
                 let flight = charge.get(37) * charge.get(281) / 1000.0;
                 if flight > 0.0 {
                     optimal = flight;
@@ -1216,6 +1280,10 @@ pub(super) fn weapon_ranges_of(
                 // Turret tracking (rad/s); 0 for missiles/mining. Reflects the
                 // loaded charge, so an ammo comparison can read it per ammo.
                 tracking: store.get(160),
+                // Missile explosion radius/velocity (m / m/s); 0 for
+                // turrets/mining, whose charges (if any) carry neither attr.
+                explosion_radius: charge.map_or(0.0, |c| c.get(654)),
+                explosion_velocity: charge.map_or(0.0, |c| c.get(653)),
             });
         }
     }
@@ -1738,6 +1806,10 @@ pub(crate) fn simulate_fit(
             .as_ref()
             .map(|d| d.fighter_abilities.clone())
             .unwrap_or_default(),
+        archetype_dps: dogma
+            .as_ref()
+            .map(|d| d.archetype_dps.clone())
+            .unwrap_or_default(),
     })
 }
 
@@ -2061,6 +2133,7 @@ mod tests {
             optimal: 1_000.0,
             falloff: 2_000.0,
             tracking: 0.0,
+            ..Default::default()
         }];
         let target = TargetProfile {
             sig_radius: 100.0,
@@ -2180,8 +2253,8 @@ mod tests {
             (116, 25.0),
             (117, 25.0),
             (118, 25.0),    // 100 dmg
-            (103, 40.0),    // explosion radius
-            (104, 2_000.0), // explosion velocity
+            (654, 40.0),    // explosion radius (aoeCloudSize)
+            (653, 2_000.0), // explosion velocity (aoeVelocity)
             (37, 1_000.0),  // missile flight velocity — slower than the target
         ]);
         let resolved = resolved_fit(vec![launcher], vec![Some(charge)], Vec::new());
@@ -2351,6 +2424,7 @@ mod tests {
                     optimal: 5000.0,
                     falloff: 2000.0,
                     tracking: 0.0,
+                    ..Default::default()
                 },
                 WeaponRange {
                     type_id: 300,
@@ -2358,6 +2432,7 @@ mod tests {
                     optimal: 2000.0,
                     falloff: 0.0,
                     tracking: 0.0,
+                    ..Default::default()
                 },
                 WeaponRange {
                     type_id: 600,
@@ -2365,6 +2440,7 @@ mod tests {
                     optimal: 3000.0,
                     falloff: 1000.0,
                     tracking: 0.0,
+                    ..Default::default()
                 },
             ]
         );

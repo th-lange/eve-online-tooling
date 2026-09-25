@@ -25,7 +25,8 @@ pub use download::download_sde;
 pub use error::SdeError;
 pub use types::{
     AttrMeta, BlueprintMaterial, BlueprintProduct, Decryptor, EffectMeta, ItemMeta, ModifierInfo,
-    MutaplasmidRoll, PlanetSchematic, Recipe, ReprocessRecipe, ShipLayout, WormholeType,
+    MutaplasmidRoll, PlanetSchematic, Recipe, ReprocessRecipe, ShipLayout, TypeNameMap,
+    WormholeType,
 };
 
 use std::path::{Path, PathBuf};

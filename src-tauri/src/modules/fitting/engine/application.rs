@@ -37,8 +37,8 @@ pub fn turret_application(
 }
 
 /// Missile application (explosion radius/velocity model).
-/// - `explosion_radius` — attr 103 on the loaded charge (m).
-/// - `explosion_velocity` — attr 104 on the loaded charge (m/s).
+/// - `explosion_radius` — `aoeCloudSize` (654) on the loaded charge (m).
+/// - `explosion_velocity` — `aoeVelocity` (653) on the loaded charge (m/s).
 /// - `target_sig` — target signature radius (m).
 /// - `target_speed` — target speed (m/s).
 pub fn missile_application(

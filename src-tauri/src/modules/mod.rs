@@ -15,6 +15,7 @@ pub mod intel;
 pub mod localintel;
 pub mod logs;
 pub mod lpstore;
+pub mod massprod;
 pub mod notifications;
 pub mod orders;
 pub mod pi;

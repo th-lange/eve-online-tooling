@@ -291,6 +291,20 @@ pub fn sde_search_ships(app: AppHandle, query: String) -> Result<Vec<IdName>, St
         .map_err(|e| e.to_string())
 }
 
+/// Search published Planetary Commodities (P1–P4, category 43) only — for
+/// the PI production-chain planner's item picker (#882). P0 raw resources
+/// (category 42) have no schematic, so aren't valid planner targets.
+#[tauri::command]
+pub fn sde_search_pi_commodities(app: AppHandle, query: String) -> Result<Vec<IdName>, String> {
+    if query.trim().len() < 2 {
+        return Ok(Vec::new());
+    }
+    open(&app)?
+        .search_pi_commodities(&query, 25)
+        .map(id_names)
+        .map_err(|e| e.to_string())
+}
+
 /// A market-group node in the browse tree.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
