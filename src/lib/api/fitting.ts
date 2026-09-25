@@ -24,6 +24,31 @@ export function fittingModuleInfo(
   });
 }
 
+/** One mutated attribute's slider bounds (#876): the module's own
+ *  (unmutated) value, and the absolute `[minValue, maxValue]` this
+ *  mutaplasmid can roll it to. */
+export interface MutationAttrRange {
+  attributeId: number;
+  attributeName: string;
+  baseValue: number;
+  minValue: number;
+  maxValue: number;
+}
+
+/** Per-attribute roll bounds for mutating `baseTypeId` with
+ *  `mutaplasmidTypeId` (#876) — backs the module editor's mutate sliders,
+ *  each clamped to `[minValue, maxValue]`. Rejects if the mutaplasmid isn't
+ *  applicable to this base type. */
+export function fittingMutationRanges(
+  baseTypeId: number,
+  mutaplasmidTypeId: number,
+): Promise<MutationAttrRange[]> {
+  return invoke<MutationAttrRange[]>("fitting_mutation_ranges", {
+    baseTypeId,
+    mutaplasmidTypeId,
+  });
+}
+
 // --- Fitting ---
 
 /** Where a fitted item sits on the hull. */
@@ -42,6 +67,17 @@ export type SlotKind =
 /** A module's activation state. */
 export type ModuleState = "offline" | "online" | "active" | "overheated";
 
+/** A mutaplasmid roll applied to a fitted item (#876): the base
+ *  (unmutated) type id, the mutaplasmid used, and the rolled **absolute**
+ *  attribute values (not multipliers) — one entry per attribute the
+ *  mutaplasmid touches. */
+export interface ItemMutation {
+  baseTypeId: number;
+  mutaplasmidTypeId: number;
+  /** attribute id (as a string key) -> rolled absolute value. */
+  attrs: Record<string, number>;
+}
+
 /** One fitted item: a module/rig/drone slot entry, optionally with a charge. */
 export interface FitItem {
   typeId: number;
@@ -54,6 +90,9 @@ export interface FitItem {
    * means "not yet customized" — defaults to as many as bandwidth/the 5-in-
    * space limit allow. Only meaningful for `slot === "drone"`. */
   activeDrones?: number | null;
+  /** Mutaplasmid roll applied to this item (#876), absent for an unmutated
+   *  item — the overwhelming majority. */
+  mutation?: ItemMutation | null;
 }
 
 /** The editable fit document. */

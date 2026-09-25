@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Circle,
   Crosshair,
+  FlaskConical,
   Flame,
   Info,
   Minus,
@@ -13,8 +14,11 @@ import {
 } from "lucide-react";
 import {
   fittingCompatibleCharges,
+  fittingMutationRanges,
+  sdeMutaplasmidsForType,
   type AmmoRow,
   type Fit,
+  type ItemMutation,
   type ModuleState,
   type SlotKind,
   type WeaponRange,
@@ -185,6 +189,163 @@ export function ChargeControl({
   );
 }
 
+/** Mutaplasmid picker + per-attribute roll sliders (#876): a flask icon
+ *  (filled amber when a mutation is applied) that opens a popover to pick a
+ *  mutaplasmid and drag each affected attribute's slider within its rolled
+ *  range — every drag calls `onSetMutation` immediately, so the stats panel
+ *  updates live. Self-hides when the SDE has no mutaplasmid for this type
+ *  (and none is already applied), mirroring `ChargeControl`. */
+function MutateControl({
+  typeId,
+  mutation,
+  onSetMutation,
+}: {
+  typeId: number;
+  mutation: ItemMutation | null | undefined;
+  onSetMutation: (mutation: ItemMutation | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const options = useQuery({
+    queryKey: ["fitting", "mutaplasmids", typeId],
+    queryFn: () => sdeMutaplasmidsForType(typeId),
+  });
+  const list = options.data ?? [];
+  const [selectedId, setSelectedId] = useState<number | null>(
+    mutation?.mutaplasmidTypeId ?? null,
+  );
+  useEffect(() => {
+    if (open)
+      setSelectedId(
+        mutation?.mutaplasmidTypeId ?? list[0]?.mutaplasmidTypeId ?? null,
+      );
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  const ranges = useQuery({
+    queryKey: ["fitting", "mutationRanges", typeId, selectedId],
+    queryFn: () => fittingMutationRanges(typeId, selectedId as number),
+    enabled: open && selectedId != null,
+  });
+
+  if (options.isSuccess && list.length === 0 && !mutation) return null;
+
+  const attrs = ranges.data ?? [];
+  const currentValue = (attributeId: number, baseValue: number) => {
+    const key = String(attributeId);
+    if (
+      mutation &&
+      mutation.mutaplasmidTypeId === selectedId &&
+      key in mutation.attrs
+    ) {
+      return mutation.attrs[key];
+    }
+    return baseValue;
+  };
+  const setAttr = (attributeId: number, value: number) => {
+    if (selectedId == null) return;
+    const base: Record<string, number> =
+      mutation && mutation.mutaplasmidTypeId === selectedId
+        ? mutation.attrs
+        : {};
+    onSetMutation({
+      baseTypeId: typeId,
+      mutaplasmidTypeId: selectedId,
+      attrs: { ...base, [String(attributeId)]: value },
+    });
+  };
+
+  return (
+    <span className="relative shrink-0">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title={mutation ? "Edit mutaplasmid roll" : "Apply a mutaplasmid"}
+        className={`flex items-center rounded border p-1 ${
+          mutation
+            ? "border-violet-700/60 text-violet-400 hover:bg-violet-900/20"
+            : "border-zinc-700 text-zinc-400 hover:border-zinc-600 hover:text-violet-300"
+        }`}
+      >
+        <FlaskConical size={11} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-20 mt-1 w-64 rounded border border-zinc-700 bg-zinc-900 p-2 text-xs shadow-lg">
+            {options.isLoading ? (
+              <div className="px-1 py-1 text-zinc-500">Loading…</div>
+            ) : list.length === 0 ? (
+              <div className="px-1 py-1 text-zinc-500">
+                No mutaplasmid applies to this module.
+              </div>
+            ) : (
+              <>
+                <select
+                  value={selectedId ?? ""}
+                  onChange={(e) => setSelectedId(Number(e.currentTarget.value))}
+                  className="mb-2 w-full rounded bg-zinc-800 px-2 py-1 text-zinc-100 outline-none"
+                >
+                  {list.map((m) => (
+                    <option
+                      key={m.mutaplasmidTypeId}
+                      value={m.mutaplasmidTypeId}
+                    >
+                      {m.mutaplasmidName}
+                    </option>
+                  ))}
+                </select>
+                {ranges.isLoading ? (
+                  <div className="px-1 py-1 text-zinc-500">Loading ranges…</div>
+                ) : (
+                  <div className="space-y-2">
+                    {attrs.map((a) => {
+                      const value = currentValue(a.attributeId, a.baseValue);
+                      const lo = Math.min(a.minValue, a.maxValue);
+                      const hi = Math.max(a.minValue, a.maxValue);
+                      return (
+                        <label key={a.attributeId} className="block">
+                          <div className="mb-0.5 flex items-center justify-between text-zinc-400">
+                            <span className="truncate">{a.attributeName}</span>
+                            <span className="tabular-nums text-zinc-200">
+                              {value.toFixed(2)}
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={lo}
+                            max={hi}
+                            step={(hi - lo) / 1000 || 0.01}
+                            value={Math.min(hi, Math.max(lo, value))}
+                            onChange={(e) =>
+                              setAttr(
+                                a.attributeId,
+                                Number(e.currentTarget.value),
+                              )
+                            }
+                            className="w-full accent-violet-500"
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+            {mutation && (
+              <button
+                onClick={() => {
+                  onSetMutation(null);
+                  setOpen(false);
+                }}
+                className="mt-2 flex w-full items-center justify-center gap-1 rounded bg-zinc-800 px-2 py-1 text-zinc-300 hover:bg-zinc-700"
+              >
+                <X size={11} /> Remove mutation
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </span>
+  );
+}
+
 /** A compact stepper for a cargo/drone stack's quantity — the count you
  *  actually carry (or fly, for drones), editable in place instead of only via
  *  EFT re-import. */
@@ -286,6 +447,7 @@ function ModuleRow({
   onSetActiveDrones,
   onSetCharge,
   onSetChargeForType,
+  onSetMutation,
   onFitAmmo,
   range,
   ammo,
@@ -308,6 +470,7 @@ function ModuleRow({
     weaponTypeId: number,
     chargeTypeId: number | null,
   ) => void;
+  onSetMutation: (globalIndex: number, mutation: ItemMutation | null) => void;
   onFitAmmo?: (ammoTypeId: number) => void;
   /** Resolved engagement range for this item's type + charge, when known. */
   range: WeaponRange | undefined;
@@ -490,6 +653,18 @@ function ModuleRow({
             onSetChargeAll={(c) => onSetChargeForType(it.typeId, c)}
           />
         )}
+        {/* Mutaplasmid roll picker (#876) — self-hides when the SDE has no
+            mutaplasmid for this type and none is applied. */}
+        {(slot === "high" ||
+          slot === "mid" ||
+          slot === "low" ||
+          slot === "rig") && (
+          <MutateControl
+            typeId={it.typeId}
+            mutation={it.mutation}
+            onSetMutation={(m) => onSetMutation(i, m)}
+          />
+        )}
       </div>
       {slot === "drone" && (
         <div className="flex items-center gap-2 pl-6">
@@ -520,6 +695,7 @@ function SlotBank({
   onAddToSlot,
   onSetCharge,
   onSetChargeForType,
+  onSetMutation,
   onSetState,
   onSetQuantity,
   onSetActiveDrones,
@@ -544,6 +720,7 @@ function SlotBank({
     weaponTypeId: number,
     chargeTypeId: number | null,
   ) => void;
+  onSetMutation: (globalIndex: number, mutation: ItemMutation | null) => void;
   onSetState: (globalIndex: number, state: ModuleState) => void;
   onSetQuantity: (globalIndex: number, quantity: number) => void;
   onSetActiveDrones: (globalIndex: number, activeDrones: number) => void;
@@ -604,6 +781,7 @@ function SlotBank({
               onSetActiveDrones={onSetActiveDrones}
               onSetCharge={onSetCharge}
               onSetChargeForType={onSetChargeForType}
+              onSetMutation={onSetMutation}
               onFitAmmo={onFitAmmo}
               range={rangeOf.get(`${it.typeId}:${it.chargeTypeId ?? 0}`)}
               ammo={slot === "cargo" ? ammoStats?.[it.typeId] : undefined}
@@ -647,6 +825,7 @@ export function SlotGrid({
     setCharge: onSetCharge,
     setChargeForType: onSetChargeForType,
     setModuleState: onSetState,
+    setMutation: onSetMutation,
     setQuantity: onSetQuantity,
     setActiveDrones: onSetActiveDrones,
     removeItem: onRemove,
@@ -678,6 +857,7 @@ export function SlotGrid({
     onAddToSlot,
     onSetCharge,
     onSetChargeForType,
+    onSetMutation,
     onSetState,
     onSetQuantity,
     onSetActiveDrones,
