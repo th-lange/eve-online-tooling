@@ -44,7 +44,10 @@ export function DpsPage() {
           dir={dps.dir}
           onSetDir={dps.setDir}
           mode={dps.mode}
-          onDirBlur={() => dps.mode === "playback" && dps.refreshLogs()}
+          onDirBlur={() => {
+            void dps.refreshCharacters();
+            if (dps.mode === "playback") void dps.refreshLogs();
+          }}
           windowSecs={dps.windowSecs}
           onSetWindow={dps.setWindow}
           logs={dps.logs}
@@ -52,6 +55,9 @@ export function DpsPage() {
           onSetFile={dps.setFile}
           speed={dps.speed}
           onSetSpeed={dps.setSpeed}
+          characters={dps.characters}
+          character={dps.character}
+          onSetCharacter={dps.setCharacter}
         />
         <PlaybackControls
           mode={dps.mode}

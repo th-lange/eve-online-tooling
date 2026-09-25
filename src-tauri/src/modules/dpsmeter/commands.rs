@@ -62,6 +62,13 @@ pub struct DpsSettings {
     /// keeps `extract_actor`'s default-format scan.
     #[serde(default)]
     pub extraction_plan: Option<ExtractionPlan>,
+    /// Follow this character's newest gamelog instead of the raw newest
+    /// file (#870) — resolved from each file's header, re-checked every
+    /// poll tick so a new session log for the same character hot-swaps in
+    /// and a livelier other character's file never wins. `None` keeps the
+    /// unchanged newest-file behavior (single-boxer flow).
+    #[serde(default)]
+    pub character: Option<String>,
 }
 
 fn default_window() -> u32 {
@@ -106,6 +113,12 @@ pub struct LogFile {
     pub path: String,
     /// Epoch seconds of last modification.
     pub modified: u64,
+    /// The character the header's localized `Listener:` line names (#870).
+    /// `None` for a log whose header doesn't match any known phrase (a
+    /// language without a sourced `Listener:` phrase yet, or a malformed
+    /// header) — the file still lists and is still tailable directly, just
+    /// not selectable via the character picker.
+    pub character: Option<String>,
 }
 
 /// How many buckets [`dps_log_summary`] splits a log's time span into for the
@@ -168,7 +181,7 @@ pub async fn dps_start(
         let mut weapon_kinds: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
         // Start at the *current* end of the active log: only new combat counts,
         // never a replay of the whole session as one burst.
-        let mut current = newest_gamelog(&dir);
+        let mut current = pick_newest_gamelog(&dir, settings.character.as_deref());
         let mut offset = current
             .as_ref()
             .and_then(|p| std::fs::metadata(p).ok())
@@ -192,8 +205,11 @@ pub async fn dps_start(
             }
 
             // A new session creates a new file — switch to it, read from 0,
-            // and re-detect its language.
-            if let Some(newest) = newest_gamelog(&dir) {
+            // and re-detect its language. When a character is selected this
+            // re-check is also the hot-swap: a livelier other character's
+            // file (newer by mtime) never wins over this character's own
+            // newest session log (#870).
+            if let Some(newest) = pick_newest_gamelog(&dir, settings.character.as_deref()) {
                 if current.as_deref() != Some(newest.as_path()) {
                     lang = detect_file_lang(&newest).await;
                     current = Some(newest);
@@ -573,7 +589,11 @@ pub fn dps_log_stat(file: String) -> Result<u64, String> {
         .map_err(|e| format!("{file}: {e}"))
 }
 
-/// List gamelog `*.txt` files in `gamelogs_dir`, newest first.
+/// List gamelog `*.txt` files in `gamelogs_dir`, newest first. Each file's
+/// `character` is read from its header's localized `Listener:` line (#870,
+/// building on #868's language detection) — `None` for a log whose header
+/// doesn't map to a known phrase; the file still lists, it's just
+/// unattributed (still tailable directly by picking it in playback).
 #[tauri::command]
 pub fn dps_list_logs(gamelogs_dir: String) -> Result<Vec<LogFile>, String> {
     let dir = Path::new(&gamelogs_dir);
@@ -585,15 +605,39 @@ pub fn dps_list_logs(gamelogs_dir: String) -> Result<Vec<LogFile>, String> {
         .into_iter()
         .filter_map(|(path, mtime)| {
             let modified = mtime.duration_since(UNIX_EPOCH).ok()?.as_secs();
+            let character = super::parser::detect_character(&read_header_sync(&path));
             Some(LogFile {
                 name: path.file_name()?.to_string_lossy().into_owned(),
                 path: path.to_string_lossy().into_owned(),
                 modified,
+                character,
             })
         })
         .collect();
     files.sort_by_key(|f| std::cmp::Reverse(f.modified));
     Ok(files)
+}
+
+/// Distinct characters seen in a gamelog modified within the last 24h (PELD's
+/// `CharacterDetector` window) — the character picker's dropdown source.
+/// Ordered by most recent activity; logs with no recognised `Listener:`
+/// header (see [`dps_list_logs`]) are skipped, not listed as unattributed.
+#[tauri::command]
+pub fn dps_list_characters(gamelogs_dir: String) -> Result<Vec<String>, String> {
+    let cutoff = crate::util::time::now_secs().saturating_sub(24 * 3600);
+    let mut seen = std::collections::HashSet::new();
+    let mut characters = Vec::new();
+    for log in dps_list_logs(gamelogs_dir)? {
+        if log.modified < cutoff {
+            continue;
+        }
+        if let Some(character) = log.character {
+            if seen.insert(character.clone()) {
+                characters.push(character);
+            }
+        }
+    }
+    Ok(characters)
 }
 
 /// Parse a user's overview export (YAML, from the overview settings window's
@@ -616,6 +660,47 @@ fn newest_gamelog(dir: &Path) -> Option<PathBuf> {
     crate::util::fs::newest_file_by_mtime(dir, is_gamelog)
         .ok()
         .flatten()
+}
+
+/// [`newest_gamelog`] when `character` is `None` (unchanged single-boxer
+/// behavior); otherwise [`newest_gamelog_for_character`] — the dispatch
+/// [`dps_start`]'s loop re-runs every poll tick (#870).
+fn pick_newest_gamelog(dir: &Path, character: Option<&str>) -> Option<PathBuf> {
+    match character {
+        Some(c) => newest_gamelog_for_character(dir, c),
+        None => newest_gamelog(dir),
+    }
+}
+
+/// The newest `*.txt` in `dir` whose header names `character`, by mtime
+/// (#870). Scans newest-first and reads each header until one matches, so a
+/// livelier other character's file — newer by mtime — never wins over this
+/// character's own session: the multiboxing bug this issue fixes.
+fn newest_gamelog_for_character(dir: &Path, character: &str) -> Option<PathBuf> {
+    let mut files = crate::util::fs::list_files_by_mtime(dir, is_gamelog).ok()?;
+    files.sort_by_key(|(_, mtime)| std::cmp::Reverse(*mtime));
+    files
+        .into_iter()
+        .find(|(path, _)| {
+            super::parser::detect_character(&read_header_sync(path)).as_deref() == Some(character)
+        })
+        .map(|(path, _)| path)
+}
+
+/// Read the first few KB of `path`, synchronously — enough to cover the
+/// localized `Listener:` header line (and any login-collision divider
+/// blocks stacked ahead of it, see [`super::parser::detect_character`]).
+/// [`dps_list_logs`] and [`newest_gamelog_for_character`] both run on sync
+/// command/loop paths, unlike [`detect_file_lang`]'s async equivalent.
+fn read_header_sync(path: &Path) -> String {
+    use std::io::Read;
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return String::new();
+    };
+    let mut buf = vec![0u8; 4096];
+    let n = file.read(&mut buf).unwrap_or(0);
+    buf.truncate(n);
+    String::from_utf8_lossy(&buf).into_owned()
 }
 
 /// Read bytes appended to `path` since `offset`. Returns the decoded text up to
@@ -780,6 +865,23 @@ mod tests {
         path
     }
 
+    /// Create `name` in `dir` with a `Listener: <character>` gamelog header
+    /// and a mtime `secs_ago` seconds in the past — a fixture file
+    /// [`detect_character`](super::super::parser::detect_character) resolves
+    /// to `character` (#870).
+    fn touch_with_header(dir: &Path, name: &str, secs_ago: u64, character: &str) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(
+            &path,
+            format!("Gamelog\r\nListener: {character}\r\nSession Started: 2026.06.25 12:00:00\r\n"),
+        )
+        .expect("create file");
+        let mtime = std::time::SystemTime::now() - Duration::from_secs(secs_ago);
+        let file = std::fs::File::open(&path).expect("open file");
+        file.set_modified(mtime).expect("set mtime");
+        path
+    }
+
     #[tokio::test]
     async fn read_appended_reads_complete_lines_and_reoffsets() {
         let tmp = TmpDir::new("read-appended");
@@ -822,6 +924,86 @@ mod tests {
 
         let newest = newest_gamelog(&tmp.0).expect("some txt file");
         assert_eq!(newest, expected);
+    }
+
+    // --- #870: header-based character mapping ------------------------------
+
+    #[test]
+    fn newest_gamelog_for_character_ignores_a_newer_files_from_other_characters() {
+        // The multiboxing bug this issue fixes: Bob's file is newer by
+        // mtime, but selecting Alice must never follow it.
+        let tmp = TmpDir::new("newest-for-character");
+        let alice = touch_with_header(&tmp.0, "alice.txt", 30, "Alice");
+        let bob = touch_with_header(&tmp.0, "bob.txt", 5, "Bob");
+
+        assert_eq!(
+            newest_gamelog_for_character(&tmp.0, "Alice").expect("alice log"),
+            alice
+        );
+        assert_eq!(
+            newest_gamelog_for_character(&tmp.0, "Bob").expect("bob log"),
+            bob
+        );
+        assert!(newest_gamelog_for_character(&tmp.0, "Carol").is_none());
+    }
+
+    #[test]
+    fn newest_gamelog_for_character_hot_swaps_to_a_new_session_log() {
+        // A relog (or daily downtime) starts a new session file for the same
+        // character — the newest one for that character must win.
+        let tmp = TmpDir::new("hot-swap");
+        touch_with_header(&tmp.0, "alice-old.txt", 30, "Alice");
+        let newer = touch_with_header(&tmp.0, "alice-new.txt", 1, "Alice");
+
+        assert_eq!(
+            newest_gamelog_for_character(&tmp.0, "Alice").expect("alice log"),
+            newer
+        );
+    }
+
+    #[test]
+    fn pick_newest_gamelog_with_no_character_matches_plain_newest_gamelog() {
+        let tmp = TmpDir::new("pick-newest-unset");
+        touch_with_header(&tmp.0, "alice.txt", 30, "Alice");
+        let newer = touch_with_header(&tmp.0, "bob.txt", 5, "Bob");
+
+        assert_eq!(pick_newest_gamelog(&tmp.0, None).unwrap(), newer);
+        assert_eq!(
+            pick_newest_gamelog(&tmp.0, Some("Alice")).unwrap(),
+            tmp.0.join("alice.txt")
+        );
+    }
+
+    #[test]
+    fn dps_list_logs_reads_each_files_character_from_its_header() {
+        let tmp = TmpDir::new("list-logs-character");
+        touch_with_header(&tmp.0, "alice.txt", 30, "Alice");
+        touch(&tmp.0, "unattributed.txt", 20); // no header at all.
+
+        let logs = dps_list_logs(tmp.0.to_string_lossy().into_owned()).expect("list logs");
+        assert_eq!(logs.len(), 2);
+        let alice = logs.iter().find(|l| l.name == "alice.txt").unwrap();
+        assert_eq!(alice.character.as_deref(), Some("Alice"));
+        let unattributed = logs.iter().find(|l| l.name == "unattributed.txt").unwrap();
+        assert_eq!(unattributed.character, None);
+    }
+
+    #[test]
+    fn dps_list_characters_dedupes_and_skips_stale_and_unattributed_logs() {
+        let tmp = TmpDir::new("list-characters");
+        // Two sessions for Alice within 24h — only one "Alice" in the result.
+        touch_with_header(&tmp.0, "alice-1.txt", 60 * 60, "Alice");
+        touch_with_header(&tmp.0, "alice-2.txt", 60, "Alice");
+        touch_with_header(&tmp.0, "bob.txt", 30, "Bob");
+        // Older than 24h — excluded even though it has a character.
+        touch_with_header(&tmp.0, "carol-stale.txt", 25 * 60 * 60, "Carol");
+        // No recognised header — excluded, never shown as "unattributed".
+        touch(&tmp.0, "unattributed.txt", 10);
+
+        let mut characters =
+            dps_list_characters(tmp.0.to_string_lossy().into_owned()).expect("list characters");
+        characters.sort();
+        assert_eq!(characters, vec!["Alice".to_string(), "Bob".to_string()]);
     }
 
     #[test]

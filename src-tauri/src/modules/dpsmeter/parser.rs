@@ -166,6 +166,41 @@ pub fn detect_lang(header: &str) -> Lang {
         .unwrap_or(Lang::En)
 }
 
+/// Extract the character name from a gamelog's header block (the localized
+/// `Listener:` line — see [`detect_lang`]). EVE inserts a divider line of
+/// dashes (`------`) and writes a second header block when a same-second
+/// login collision reuses one file for two sessions; PyEveLiveDPS's
+/// `CharacterDetector` keeps only the last block (the file's current
+/// owner), so this does the same — everything before the last divider line
+/// is discarded before searching for `Listener:`. The language is
+/// re-detected within that last block (a re-login could in principle run a
+/// different client language), so this never needs a caller-supplied
+/// [`Lang`]. Returns `None` when no known `Listener:` phrase is found (a
+/// malformed header, a truncated read, or a language without a sourced
+/// phrase yet — `#870`'s soft dependency on `#868`) — never panics.
+pub fn detect_character(header: &str) -> Option<String> {
+    let lines: Vec<&str> = header.lines().collect();
+    let block_start = lines
+        .iter()
+        .rposition(|l| is_divider_line(l))
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let block = lines[block_start..].join("\n");
+    let listener = marker_row(detect_lang(&block)).listener;
+    let name = block
+        .lines()
+        .find_map(|l| l.trim_start().strip_prefix(listener))?
+        .trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
+/// A login-collision divider: a line made up solely of `-` characters (EVE
+/// writes a run of dashes, not a fixed-width one).
+fn is_divider_line(line: &str) -> bool {
+    let t = line.trim();
+    t.len() >= 4 && t.chars().all(|c| c == '-')
+}
+
 /// What a parsed combat line represents, already resolved to a direction
 /// (out = you are the source, in = you are the target).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -982,6 +1017,42 @@ mod tests {
     fn unrecognised_header_falls_back_to_english_without_panicking() {
         assert_eq!(detect_lang("garbage header, no listener line"), Lang::En);
         assert_eq!(detect_lang(""), Lang::En);
+    }
+
+    // --- #870: header-based character mapping -----------------------------
+
+    #[test]
+    fn detects_character_from_the_listener_header() {
+        assert_eq!(
+            detect_character(
+                "Gamelog\r\nListener: Some Pilot\r\nSession Started: 2026.06.25 12:00:00\r\n"
+            ),
+            Some("Some Pilot".to_string())
+        );
+        // Localized header — reuses #868's per-language table, no caller-side
+        // `Lang` needed.
+        assert_eq!(
+            detect_character("Игровой журнал\r\nСлушатель: Другой Пилот\r\nSession Started: …\r\n"),
+            Some("Другой Пилот".to_string())
+        );
+    }
+
+    #[test]
+    fn detect_character_takes_the_last_block_across_a_login_collision_divider() {
+        // A same-second relog writes a second header block after a divider
+        // line of dashes; the file's current owner is the last block.
+        let header = "Gamelog\r\nListener: First Pilot\r\nSession Started: 2026.06.25 12:00:00\r\n\
+------------------------------------------------------------\r\n\
+Gamelog\r\nListener: Second Pilot\r\nSession Started: 2026.06.25 12:00:05\r\n";
+        assert_eq!(detect_character(header), Some("Second Pilot".to_string()));
+    }
+
+    #[test]
+    fn detect_character_returns_none_for_a_header_with_no_recognised_listener_phrase() {
+        assert_eq!(detect_character("garbage header, no listener line"), None);
+        assert_eq!(detect_character(""), None);
+        // A `Listener:` line with nothing after it is not a character.
+        assert_eq!(detect_character("Gamelog\r\nListener: \r\n"), None);
     }
 
     /// Localized damage-direction markers (`>to</>from<` equivalents) are

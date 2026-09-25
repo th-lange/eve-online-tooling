@@ -1,6 +1,7 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { ModuleActiveContext } from "../../components/moduleActiveContext";
 import {
+  dpsListCharacters,
   dpsListLogs,
   dpsLogSummary,
   dpsLogStat,
@@ -47,6 +48,15 @@ export function useDpsPlaybackState() {
     STORAGE_KEYS.dpsOverviewExportFile,
     "",
   );
+  // Selected character to follow (#870): persisted like the gamelogs
+  // folder/overview export. Empty string = no selection, the unchanged
+  // newest-file behavior. `characters` is the last-fetched distinct-character
+  // listing (last 24h) the dropdown renders from.
+  const [character, setCharacter] = usePersistentState<string>(
+    STORAGE_KEYS.dpsCharacter,
+    "",
+  );
+  const [characters, setCharacters] = useState<string[]>([]);
   const [extractionPlan, setExtractionPlan] =
     useState<DpsExtractionPlan | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
@@ -133,6 +143,32 @@ export function useDpsPlaybackState() {
       setOverviewError(errorMessage(e));
     }
   }
+
+  /** Refresh the distinct-character listing (last 24h) for `dir` — the
+   *  character dropdown's source (#870). A folder with no logs, or that
+   *  isn't set yet, just clears the list rather than surfacing an error;
+   *  this runs opportunistically alongside the folder field, not as a
+   *  user-triggered action. */
+  async function refreshCharacters() {
+    if (!dir.trim()) {
+      setCharacters([]);
+      return;
+    }
+    try {
+      const list = await dpsListCharacters(dir);
+      setCharacters(Array.isArray(list) ? list : []);
+    } catch {
+      setCharacters([]);
+    }
+  }
+
+  // Fetch the character list once on mount (if a folder was already
+  // persisted from last session) so the dropdown isn't empty until the next
+  // folder-field blur.
+  useEffect(() => {
+    if (dir.trim()) void refreshCharacters();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Re-derive the plan from whatever export path was persisted last session,
   // once, on mount — so a saved overview export keeps working across restarts
@@ -258,6 +294,7 @@ export function useDpsPlaybackState() {
         gamelogsDir: dir,
         windowSecs: win,
         extractionPlan: extractionPlan ?? undefined,
+        character: character || undefined,
       });
       setRunning(true);
     } catch (e) {
@@ -485,6 +522,10 @@ export function useDpsPlaybackState() {
     setWindow,
     overviewFile,
     setOverviewFile,
+    character,
+    setCharacter,
+    characters,
+    refreshCharacters,
     extractionPlan,
     overviewError,
     loadOverviewExport,

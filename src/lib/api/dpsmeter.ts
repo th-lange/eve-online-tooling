@@ -106,6 +106,9 @@ export interface DpsSettings {
   /** Overview-export-derived pilot/ship extraction plan (#869); omitted
    *  keeps the default `NAME[CORP](SHIP)` scan. */
   extractionPlan?: DpsExtractionPlan;
+  /** Follow this character's newest gamelog instead of the raw newest file
+   *  (#870); omitted keeps the unchanged newest-file behavior. */
+  character?: string;
 }
 
 /** A gamelog file (for status / future playback). */
@@ -114,6 +117,10 @@ export interface DpsLogFile {
   path: string;
   /** Epoch seconds of last modification. */
   modified: number;
+  /** The character named in the file's `Listener:` header, when recognised
+   *  (#870); `undefined` for a log whose header doesn't map to a known
+   *  phrase — the file still lists, it's just unattributed. */
+  character?: string;
 }
 
 /** Settings for replaying a past gamelog. */
@@ -179,6 +186,12 @@ export function dpsResume(): Promise<void> {
 /** List gamelog files in a folder, newest first. */
 export function dpsListLogs(gamelogsDir: string): Promise<DpsLogFile[]> {
   return invoke<DpsLogFile[]>("dps_list_logs", { gamelogsDir });
+}
+
+/** Distinct characters seen in a gamelog modified within the last 24h
+ *  (#870) — the character picker's dropdown source. */
+export function dpsListCharacters(gamelogsDir: string): Promise<string[]> {
+  return invoke<string[]>("dps_list_characters", { gamelogsDir });
 }
 
 /** Time span + activity-density buckets for a log file, for the playback

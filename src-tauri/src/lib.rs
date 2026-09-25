@@ -413,6 +413,7 @@ pub fn run() {
             modules::dpsmeter::commands::dps_pause,
             modules::dpsmeter::commands::dps_resume,
             modules::dpsmeter::commands::dps_list_logs,
+            modules::dpsmeter::commands::dps_list_characters,
             modules::dpsmeter::commands::dps_playback,
             modules::dpsmeter::commands::dps_log_summary,
             modules::dpsmeter::commands::dps_log_stat,

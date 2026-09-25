@@ -14,6 +14,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 import {
+  dpsListCharacters,
   dpsListLogs,
   dpsPlayback,
   dpsStart,
@@ -198,6 +199,25 @@ describe("api.dpsmeter", () => {
     await dpsListLogs("/logs/Gamelogs");
     expect(invokeMock).toHaveBeenCalledWith("dps_list_logs", {
       gamelogsDir: "/logs/Gamelogs",
+    });
+
+    await dpsListCharacters("/logs/Gamelogs");
+    expect(invokeMock).toHaveBeenCalledWith("dps_list_characters", {
+      gamelogsDir: "/logs/Gamelogs",
+    });
+
+    invokeMock.mockResolvedValue(undefined);
+    await dpsStart({
+      gamelogsDir: "/logs/Gamelogs",
+      windowSecs: 10,
+      character: "Alice",
+    });
+    expect(invokeMock).toHaveBeenCalledWith("dps_start", {
+      settings: {
+        gamelogsDir: "/logs/Gamelogs",
+        windowSecs: 10,
+        character: "Alice",
+      },
     });
   });
 

@@ -93,6 +93,9 @@ export function LogFilePanel({
   onSetFile,
   speed,
   onSetSpeed,
+  characters,
+  character,
+  onSetCharacter,
 }: {
   dir: string;
   onSetDir: (v: string) => void;
@@ -105,6 +108,11 @@ export function LogFilePanel({
   onSetFile: (path: string) => void;
   speed: number;
   onSetSpeed: (n: number) => void;
+  /** Distinct characters seen in the folder's logs in the last 24h (#870). */
+  characters: string[];
+  /** Selected character to follow; `""` = newest file (unchanged behavior). */
+  character: string;
+  onSetCharacter: (name: string) => void;
 }) {
   return (
     <>
@@ -120,6 +128,25 @@ export function LogFilePanel({
           className="w-full rounded bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
         />
       </label>
+      {characters.length > 0 && (
+        <label className="min-w-[10rem]">
+          <span className="mb-1 block text-xs uppercase tracking-wide text-zinc-500">
+            Character
+          </span>
+          <select
+            value={character}
+            onChange={(e) => onSetCharacter(e.currentTarget.value)}
+            className="w-full rounded bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100 outline-none"
+          >
+            <option value="">Newest log (any character)</option>
+            {characters.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <div>
         <span className="mb-1 block text-xs uppercase tracking-wide text-zinc-500">
           Window (s)
