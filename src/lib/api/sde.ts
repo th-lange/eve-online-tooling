@@ -79,6 +79,12 @@ export function sdeSearchShips(query: string): Promise<IdName[]> {
   return invoke<IdName[]>("sde_search_ships", { query });
 }
 
+/** Search published Planetary Commodities (P1–P4) only — for the PI
+ * production-chain planner's item picker (#882). */
+export function sdeSearchPiCommodities(query: string): Promise<IdName[]> {
+  return invoke<IdName[]>("sde_search_pi_commodities", { query });
+}
+
 /** A market-group node in the browse tree. */
 export interface MarketGroupNode {
   id: number;

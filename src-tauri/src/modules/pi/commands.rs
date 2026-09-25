@@ -488,6 +488,158 @@ pub fn pi_locked_set(app: AppHandle, type_ids: Vec<i64>) -> Result<(), String> {
     storage::save_id_list(&dir, LOCKED_LIST, &type_ids)
 }
 
+// --- Production-chain planner (#882) ---
+
+/// One node of a P1–P4 commodity's production-chain tree, from the target
+/// down to its P0 raw-material leaves.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChainNode {
+    pub type_id: i64,
+    pub name: String,
+    /// 0 = a raw P0 resource (no schematic produces it), 1..=4 = P1..P4.
+    pub tier: u8,
+    /// How much of this node the *parent* schematic consumes per cycle; 0 for
+    /// the root (nothing consumes it) and for tier-0 leaves.
+    pub qty_per_cycle: i64,
+    /// Planet types that alone can supply this node's whole subtree (every
+    /// input available on the same planet); empty means no single planet can
+    /// — the colony needs imports.
+    pub planet_types: Vec<String>,
+    pub children: Vec<ChainNode>,
+}
+
+/// A tree shape identical to [`ChainNode`] but keyed by type id instead of
+/// name, so the recursive walk doesn't need a name lookup (and therefore
+/// doesn't need to hit the SDE) per node — names for every id in the tree are
+/// batch-resolved once after the shape (and `planet_types`, which only
+/// depends on ids) is fully known.
+struct RawNode {
+    type_id: i64,
+    tier: u8,
+    qty_per_cycle: i64,
+    planet_types: Vec<&'static str>,
+    children: Vec<RawNode>,
+}
+
+/// Reverse index of `planet_schematics()`: product type id → the schematic
+/// that outputs it (each PI commodity has exactly one producing schematic).
+fn schematics_by_product(schematics: &HashMap<i64, PlanetSchematic>) -> HashMap<i64, i64> {
+    let mut by_product = HashMap::new();
+    for schematic in schematics.values() {
+        for &(type_id, _) in &schematic.outputs {
+            by_product.insert(type_id, schematic.schematic_id);
+        }
+    }
+    by_product
+}
+
+/// The planet types common to every child's `planet_types` — a node's whole
+/// subtree needs every input available on the *same* planet, so this is a
+/// straight set intersection (empty children list ⇒ empty, since a P0 leaf
+/// computes its own `planet_types` directly instead of going through this).
+fn intersect_planet_types(children: &[RawNode]) -> Vec<&'static str> {
+    let Some((first, rest)) = children.split_first() else {
+        return Vec::new();
+    };
+    let mut set: HashSet<&'static str> = first.planet_types.iter().copied().collect();
+    for child in rest {
+        let child_set: HashSet<&'static str> = child.planet_types.iter().copied().collect();
+        set.retain(|pt| child_set.contains(pt));
+    }
+    // Keep PLANET_TYPE_RESOURCES's declared order rather than HashSet order.
+    super::planet_types::PLANET_TYPE_RESOURCES
+        .iter()
+        .map(|&(name, _)| name)
+        .filter(|name| set.contains(name))
+        .collect()
+}
+
+fn build_raw_node(
+    type_id: i64,
+    qty_per_cycle: i64,
+    schematics: &HashMap<i64, PlanetSchematic>,
+    by_product: &HashMap<i64, i64>,
+) -> RawNode {
+    match by_product.get(&type_id).and_then(|sid| schematics.get(sid)) {
+        // No schematic produces this type — it's a raw P0 resource.
+        None => RawNode {
+            type_id,
+            tier: 0,
+            qty_per_cycle: 0,
+            planet_types: super::planet_types::planet_types_for(type_id),
+            children: Vec::new(),
+        },
+        Some(schematic) => {
+            let children: Vec<RawNode> = schematic
+                .inputs
+                .iter()
+                .map(|&(child_id, child_qty)| {
+                    build_raw_node(child_id, child_qty, schematics, by_product)
+                })
+                .collect();
+            let tier = children.iter().map(|c| c.tier).max().unwrap_or(0) + 1;
+            let planet_types = intersect_planet_types(&children);
+            RawNode {
+                type_id,
+                tier,
+                qty_per_cycle,
+                planet_types,
+                children,
+            }
+        }
+    }
+}
+
+fn collect_type_ids(node: &RawNode, out: &mut Vec<i64>) {
+    out.push(node.type_id);
+    for child in &node.children {
+        collect_type_ids(child, out);
+    }
+}
+
+fn to_chain_node(node: RawNode, names: &crate::sde::TypeNameMap) -> ChainNode {
+    ChainNode {
+        name: names.get(node.type_id),
+        type_id: node.type_id,
+        tier: node.tier,
+        qty_per_cycle: node.qty_per_cycle,
+        planet_types: node.planet_types.into_iter().map(String::from).collect(),
+        children: node
+            .children
+            .into_iter()
+            .map(|c| to_chain_node(c, names))
+            .collect(),
+    }
+}
+
+/// Build the [`ChainNode`] production-chain tree for a P1–P4 commodity —
+/// recursively walks `planetSchematics` inputs down to P0 raw-material
+/// leaves, intersecting each node's children's `planet_types` bottom-up (a
+/// node's whole subtree needs every input available on the *same* planet;
+/// this is what makes e.g. Robotics Plasma-only despite each individual P0
+/// input being available on 2-4 planet types). Pure — testable without ESI.
+pub fn production_chain(sde: &Sde, type_id: i64) -> Result<ChainNode, crate::sde::SdeError> {
+    let schematics = sde.planet_schematics()?;
+    let by_product = schematics_by_product(&schematics);
+    let raw = build_raw_node(type_id, 0, &schematics, &by_product);
+    let mut ids = Vec::new();
+    collect_type_ids(&raw, &mut ids);
+    let names = sde.type_name_map(&ids)?;
+    Ok(to_chain_node(raw, &names))
+}
+
+/// The production-chain tree for a P1–P4 commodity: which planet type(s) can
+/// produce it single-planet (no imports), and the full P0→target stage tree.
+#[tauri::command]
+pub fn pi_production_chain(
+    app: AppHandle,
+    type_id: i64,
+) -> Result<ChainNode, crate::model::AppError> {
+    let sde = crate::sde::open_from_app(&app)?;
+    production_chain(&sde, type_id).map_err(|e| e.to_string().into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -555,5 +707,187 @@ mod tests {
         assert_eq!(idle[0].character_id, 1);
         assert_eq!(idle[0].system_name, "Jita");
         assert_eq!(idle[0].planet_type, "Barren");
+    }
+
+    /// Real schematic ids/quantities pulled from the SDE (planetSchematics /
+    /// planetSchematicsTypeMap) for a slice of the P1→P2 chain, covering
+    /// every named single-planet fixture in #882.
+    fn single_planet_fixture_sde() -> Sde {
+        crate::sde::test_sde(
+            "CREATE TABLE planetSchematics(schematicID INT, schematicName TEXT, cycleTime INT);
+             CREATE TABLE planetSchematicsTypeMap(schematicID INT, typeID INT, quantity INT, isInput INT);
+             CREATE TABLE invTypes(typeID INT, typeName TEXT);
+             INSERT INTO planetSchematics VALUES
+               (126, 'Reactive Metals', 1800), (127, 'Precious Metals', 1800),
+               (128, 'Toxic Metals', 1800), (129, 'Chiral Structures', 1800),
+               (130, 'Silicon', 1800), (123, 'Electrolytes', 1800),
+               (122, 'Plasmoids', 1800), (121, 'Water', 1800),
+               (73, 'Mechanical Parts', 3600), (76, 'Consumer Electronics', 3600),
+               (74, 'Construction Blocks', 3600), (77, 'Miniature Electronics', 3600),
+               (67, 'Rocket Fuel', 3600), (65, 'Superconductors', 3600),
+               (97, 'Robotics', 3600);
+             INSERT INTO planetSchematicsTypeMap VALUES
+               (126, 2267, 3000, 1), (126, 2398, 20, 0),
+               (127, 2270, 3000, 1), (127, 2399, 20, 0),
+               (128, 2272, 3000, 1), (128, 2400, 20, 0),
+               (129, 2306, 3000, 1), (129, 2401, 20, 0),
+               (130, 2307, 3000, 1), (130, 9828, 20, 0),
+               (123, 2309, 3000, 1), (123, 2390, 20, 0),
+               (122, 2308, 3000, 1), (122, 2389, 20, 0),
+               (121, 2268, 3000, 1), (121, 3645, 20, 0),
+               (73, 2398, 40, 1), (73, 2399, 40, 1), (73, 3689, 5, 0),
+               (76, 2400, 40, 1), (76, 2401, 40, 1), (76, 9836, 5, 0),
+               (74, 2398, 40, 1), (74, 2400, 40, 1), (74, 3828, 5, 0),
+               (77, 2401, 40, 1), (77, 9828, 40, 1), (77, 9842, 5, 0),
+               (67, 2389, 40, 1), (67, 2390, 40, 1), (67, 9830, 5, 0),
+               (65, 2389, 40, 1), (65, 3645, 40, 1), (65, 9838, 5, 0),
+               (97, 3689, 10, 1), (97, 9836, 10, 1), (97, 9848, 3, 0);
+             INSERT INTO invTypes VALUES
+               (2267, 'Base Metals'), (2270, 'Noble Metals'), (2272, 'Heavy Metals'),
+               (2306, 'Non-CS Crystals'), (2307, 'Felsic Magma'), (2308, 'Suspended Plasma'),
+               (2309, 'Ionic Solutions'), (2268, 'Aqueous Liquids'),
+               (2398, 'Reactive Metals'), (2399, 'Precious Metals'), (2400, 'Toxic Metals'),
+               (2401, 'Chiral Structures'), (9828, 'Silicon'), (2390, 'Electrolytes'),
+               (2389, 'Plasmoids'), (3645, 'Water'),
+               (3689, 'Mechanical Parts'), (9836, 'Consumer Electronics'),
+               (3828, 'Construction Blocks'), (9842, 'Miniature Electronics'),
+               (9830, 'Rocket Fuel'), (9838, 'Superconductors'), (9848, 'Robotics');",
+        )
+    }
+
+    #[test]
+    fn production_chain_pins_known_single_planet_fixtures() {
+        let sde = single_planet_fixture_sde();
+
+        let cases: &[(i64, &[&str])] = &[
+            (3689, &["Barren", "Plasma"]), // Mechanical Parts
+            (3828, &["Lava", "Plasma"]),   // Construction Blocks
+            (9842, &["Lava"]),             // Miniature Electronics
+            (9830, &["Storm"]),            // Rocket Fuel
+            (9838, &["Storm"]),            // Superconductors
+            (9848, &["Plasma"]),           // Robotics
+        ];
+        for &(type_id, expected) in cases {
+            let node = production_chain(&sde, type_id).unwrap();
+            assert_eq!(
+                node.planet_types, expected,
+                "type {type_id} ({})",
+                node.name
+            );
+        }
+    }
+
+    #[test]
+    fn production_chain_walks_the_full_tree_with_qty_and_p0_leaf() {
+        let sde = single_planet_fixture_sde();
+        let robotics = production_chain(&sde, 9848).unwrap();
+        assert_eq!(robotics.name, "Robotics");
+        assert_eq!(robotics.tier, 3);
+        assert_eq!(robotics.qty_per_cycle, 0);
+        assert_eq!(robotics.children.len(), 2);
+
+        let mech_parts = robotics
+            .children
+            .iter()
+            .find(|c| c.type_id == 3689)
+            .unwrap();
+        assert_eq!(mech_parts.tier, 2);
+        assert_eq!(mech_parts.qty_per_cycle, 10); // Robotics needs 10/cycle
+        assert_eq!(mech_parts.planet_types, vec!["Barren", "Plasma"]);
+
+        let reactive_metals = mech_parts
+            .children
+            .iter()
+            .find(|c| c.type_id == 2398)
+            .unwrap();
+        assert_eq!(reactive_metals.name, "Reactive Metals");
+        assert_eq!(reactive_metals.tier, 1);
+        assert_eq!(reactive_metals.qty_per_cycle, 40); // Mechanical Parts needs 40/cycle
+        assert_eq!(reactive_metals.children.len(), 1);
+
+        let base_metals = &reactive_metals.children[0];
+        assert_eq!(base_metals.type_id, 2267);
+        assert_eq!(base_metals.name, "Base Metals");
+        assert_eq!(base_metals.tier, 0);
+        assert_eq!(base_metals.qty_per_cycle, 0);
+        assert!(base_metals.children.is_empty());
+        assert_eq!(
+            base_metals.planet_types,
+            vec!["Barren", "Gas", "Lava", "Plasma", "Storm"]
+        );
+    }
+
+    #[test]
+    fn production_chain_p4_has_no_single_planet_option() {
+        // Nano-Factory (P4) = Industrial Explosives(P3) + Reactive Metals(P1)
+        // + Ukomi Superconductors(P3) — real SDE chain, cross-checked against
+        // EVE University's Planetary Commodities table. Industrial
+        // Explosives bottoms out at {Temperate} only, which shares nothing
+        // with Reactive Metals' {Barren,Gas,Lava,Plasma,Storm}, so the P4
+        // itself has an empty single-planet set (#882).
+        let sde = crate::sde::test_sde(
+            "CREATE TABLE planetSchematics(schematicID INT, schematicName TEXT, cycleTime INT);
+             CREATE TABLE planetSchematicsTypeMap(schematicID INT, typeID INT, quantity INT, isInput INT);
+             CREATE TABLE invTypes(typeID INT, typeName TEXT);
+             INSERT INTO planetSchematics VALUES
+               (114, 'Nano-Factory', 3600), (106, 'Industrial Explosives', 3600),
+               (126, 'Reactive Metals', 1800), (89, 'Ukomi Superconductor', 3600),
+               (82, 'Fertilizer', 3600), (85, 'Polytextiles', 3600),
+               (68, 'Synthetic Oil', 3600), (65, 'Superconductors', 3600),
+               (131, 'Bacteria', 1800), (133, 'Proteins', 1800),
+               (134, 'Biofuels', 1800), (135, 'Industrial Fibers', 1800),
+               (123, 'Electrolytes', 1800), (124, 'Oxygen', 1800),
+               (122, 'Plasmoids', 1800), (121, 'Water', 1800);
+             INSERT INTO planetSchematicsTypeMap VALUES
+               (114, 2360, 6, 1), (114, 2398, 40, 1), (114, 17136, 6, 1), (114, 2869, 1, 0),
+               (106, 3693, 10, 1), (106, 3695, 10, 1), (106, 2360, 3, 0),
+               (126, 2267, 3000, 1), (126, 2398, 20, 0),
+               (89, 3691, 10, 1), (89, 9838, 10, 1), (89, 17136, 3, 0),
+               (82, 2393, 40, 1), (82, 2395, 40, 1), (82, 3693, 5, 0),
+               (85, 2396, 40, 1), (85, 2397, 40, 1), (85, 3695, 5, 0),
+               (68, 2390, 40, 1), (68, 3683, 40, 1), (68, 3691, 5, 0),
+               (65, 2389, 40, 1), (65, 3645, 40, 1), (65, 9838, 5, 0),
+               (131, 2073, 3000, 1), (131, 2393, 20, 0),
+               (133, 2287, 3000, 1), (133, 2395, 20, 0),
+               (134, 2288, 3000, 1), (134, 2396, 20, 0),
+               (135, 2305, 3000, 1), (135, 2397, 20, 0),
+               (123, 2309, 3000, 1), (123, 2390, 20, 0),
+               (124, 2310, 3000, 1), (124, 3683, 20, 0),
+               (122, 2308, 3000, 1), (122, 2389, 20, 0),
+               (121, 2268, 3000, 1), (121, 3645, 20, 0);
+             INSERT INTO invTypes VALUES
+               (2360, 'Industrial Explosives'), (2398, 'Reactive Metals'),
+               (17136, 'Ukomi Superconductors'), (2869, 'Nano-Factory'),
+               (3693, 'Fertilizer'), (3695, 'Polytextiles'), (2393, 'Bacteria'),
+               (2395, 'Proteins'), (3691, 'Synthetic Oil'), (9838, 'Superconductors'),
+               (2396, 'Biofuels'), (2397, 'Industrial Fibers'), (2390, 'Electrolytes'),
+               (3683, 'Oxygen'), (2389, 'Plasmoids'), (3645, 'Water'),
+               (2073, 'Microorganisms'), (2287, 'Complex Organisms'),
+               (2288, 'Carbon Compounds'), (2305, 'Autotrophs'),
+               (2309, 'Ionic Solutions'), (2310, 'Noble Gas'),
+               (2308, 'Suspended Plasma'), (2267, 'Base Metals'), (2268, 'Aqueous Liquids');",
+        );
+
+        let nano_factory = production_chain(&sde, 2869).unwrap();
+        assert_eq!(nano_factory.name, "Nano-Factory");
+        assert_eq!(nano_factory.tier, 4);
+        assert!(
+            nano_factory.planet_types.is_empty(),
+            "expected no single-planet option, got {:?}",
+            nano_factory.planet_types
+        );
+
+        let industrial_explosives = nano_factory
+            .children
+            .iter()
+            .find(|c| c.type_id == 2360)
+            .unwrap();
+        assert_eq!(industrial_explosives.planet_types, vec!["Temperate"]);
+        let ukomi = nano_factory
+            .children
+            .iter()
+            .find(|c| c.type_id == 17136)
+            .unwrap();
+        assert_eq!(ukomi.planet_types, vec!["Storm"]);
     }
 }

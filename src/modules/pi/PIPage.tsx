@@ -6,13 +6,17 @@ import {
   piLockedGet,
   piLockedSet,
   piOverview,
+  piProductionChain,
   piShowInGame,
+  sdeSearchPiCommodities,
+  type ChainNode,
   type ColonyView,
   type ExtractorView,
   type StorageView,
 } from "../../lib/api";
 import { InlineError } from "../../components/InlineError";
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
+import { Combo } from "../../components/Combo";
 import { formatInt } from "../../lib/format";
 import {
   Page,
@@ -28,6 +32,8 @@ import {
   runwayThresholds,
   stockMaps,
 } from "./balance";
+
+type Tab = "colonies" | "planner";
 
 const TITLE = "Planetary Interaction";
 const SUBTITLE =
@@ -71,6 +77,7 @@ function Workbench() {
   // Tick so extractor restart countdowns stay live (minute granularity is plenty).
   const [now, setNow] = useState(() => Date.now());
   const [sort, setSort] = useState<"default" | "restart">("default");
+  const [tab, setTab] = useState<Tab>("colonies");
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(id);
@@ -100,61 +107,193 @@ function Workbench() {
         title={TITLE}
         subtitle={SUBTITLE}
         actions={
-          <div className="flex items-center gap-2">
-            <label className="flex items-center gap-1 text-xs text-zinc-400">
-              Sort
-              <select
-                value={sort}
-                onChange={(e) =>
-                  setSort(e.currentTarget.value as "default" | "restart")
-                }
-                className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-100 outline-none"
+          tab === "colonies" ? (
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1 text-xs text-zinc-400">
+                Sort
+                <select
+                  value={sort}
+                  onChange={(e) =>
+                    setSort(e.currentTarget.value as "default" | "restart")
+                  }
+                  className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-100 outline-none"
+                >
+                  <option value="default">Default</option>
+                  <option value="restart">Restart required</option>
+                </select>
+              </label>
+              <PrimaryButton
+                onClick={() => colonies.refetch()}
+                disabled={colonies.isFetching}
+                pending={colonies.isFetching}
+                pendingLabel="Loading…"
               >
-                <option value="default">Default</option>
-                <option value="restart">Restart required</option>
-              </select>
-            </label>
-            <PrimaryButton
-              onClick={() => colonies.refetch()}
-              disabled={colonies.isFetching}
-              pending={colonies.isFetching}
-              pendingLabel="Loading…"
-            >
-              Refresh
-            </PrimaryButton>
-          </div>
+                Refresh
+              </PrimaryButton>
+            </div>
+          ) : null
         }
       />
 
-      <QueryErrorNotice
-        error={colonies.error}
-        loginMessage="Log in a character first to view your colonies."
-        scopeHint={
-          <>
-            needs <code>esi-planets.manage_planets.v1</code> — re-login if just
-            enabled
-          </>
-        }
-        className="mt-4 text-sm"
-      />
-
-      {!colonies.isError && rows.length === 0 && !colonies.isFetching && (
-        <Centered>No colonies found for this character.</Centered>
-      )}
-
-      <div className="mt-4 grid gap-4 xl:grid-cols-2">
-        {rows.map((c) => (
-          <Colony
-            key={`${c.characterId}:${c.planetId}`}
-            colony={c}
-            now={now}
-            lockedSet={lockedSet}
-            onToggleLock={toggleLock}
-            showCharacter={multiCharacter}
-          />
+      {/* Tab strip */}
+      <div className="mt-4 inline-flex rounded border border-zinc-800 bg-zinc-900 p-0.5">
+        {(["colonies", "planner"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`rounded px-3 py-1.5 text-sm capitalize ${
+              tab === t
+                ? "bg-zinc-700 text-zinc-100"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            {t === "planner" ? "Planner" : "Colonies"}
+          </button>
         ))}
       </div>
+
+      {tab === "colonies" ? (
+        <>
+          <QueryErrorNotice
+            error={colonies.error}
+            loginMessage="Log in a character first to view your colonies."
+            scopeHint={
+              <>
+                needs <code>esi-planets.manage_planets.v1</code> — re-login if
+                just enabled
+              </>
+            }
+            className="mt-4 text-sm"
+          />
+
+          {!colonies.isError && rows.length === 0 && !colonies.isFetching && (
+            <Centered>No colonies found for this character.</Centered>
+          )}
+
+          <div className="mt-4 grid gap-4 xl:grid-cols-2">
+            {rows.map((c) => (
+              <Colony
+                key={`${c.characterId}:${c.planetId}`}
+                colony={c}
+                now={now}
+                lockedSet={lockedSet}
+                onToggleLock={toggleLock}
+                showCharacter={multiCharacter}
+              />
+            ))}
+          </div>
+        </>
+      ) : (
+        <Planner />
+      )}
     </Page>
+  );
+}
+
+function Planner() {
+  const [picked, setPicked] = useState<{ id: number; name: string } | null>(
+    null,
+  );
+  const chain = useQuery({
+    queryKey: ["pi", "production-chain", picked?.id ?? null],
+    queryFn: () => piProductionChain(picked!.id),
+    enabled: picked != null,
+  });
+
+  return (
+    <div className="mt-4">
+      <Combo
+        label="Commodity"
+        value={picked}
+        onPick={setPicked}
+        search={sdeSearchPiCommodities}
+        placeholder="Search a P1-P4 commodity…"
+      />
+
+      {chain.isError && (
+        <InlineError message={errorMessage(chain.error)} className="mt-3" />
+      )}
+
+      {!picked && (
+        <Centered>
+          Pick a P1-P4 commodity to see which planet type(s) can produce it
+          alone, and its full production chain down to raw resources.
+        </Centered>
+      )}
+
+      {chain.data && (
+        <div className="mt-4 rounded border border-zinc-800 bg-zinc-900/40 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-lg font-medium text-zinc-100">
+              {chain.data.name}{" "}
+              <span className="text-xs text-zinc-500">P{chain.data.tier}</span>
+            </div>
+            <PlanetBadges planetTypes={chain.data.planetTypes} />
+          </div>
+          <div className="mt-3 space-y-1">
+            {chain.data.children.map((c) => (
+              <ChainRow key={c.typeId} node={c} depth={0} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PlanetBadges({ planetTypes }: { planetTypes: string[] }) {
+  if (planetTypes.length === 0) {
+    return (
+      <span className="rounded bg-amber-900/40 px-2 py-1 text-xs text-amber-300">
+        Needs imports — no single planet
+      </span>
+    );
+  }
+  return (
+    <div className="flex flex-wrap gap-1">
+      {planetTypes.map((pt) => (
+        <span
+          key={pt}
+          className="rounded bg-emerald-900/40 px-2 py-0.5 text-xs text-emerald-300"
+        >
+          {pt}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** A P1 node has exactly one child — the P0 raw resource it depends on;
+ * inline it as "← <name>" instead of a nested bullet, per the planner's
+ * design in #882. */
+function ChainRow({ node, depth }: { node: ChainNode; depth: number }) {
+  const p0 = node.tier === 1 ? node.children[0] : null;
+  return (
+    <div>
+      <div
+        className="flex flex-wrap items-center gap-2 py-0.5 text-sm"
+        style={{ paddingLeft: `${depth * 1.25}rem` }}
+      >
+        <span className="text-zinc-600">├─</span>
+        <span className="text-zinc-200">{node.name}</span>
+        <span className="text-xs text-zinc-500">P{node.tier}</span>
+        {node.qtyPerCycle > 0 && (
+          <span className="text-xs text-zinc-400">
+            {formatInt(node.qtyPerCycle)}/cycle
+          </span>
+        )}
+        {p0 && <span className="text-xs text-zinc-500">← {p0.name} (P0)</span>}
+        {node.tier > 0 && node.planetTypes.length === 0 && (
+          <span className="rounded bg-amber-900/40 px-1.5 text-xs text-amber-300">
+            needs imports
+          </span>
+        )}
+      </div>
+      {node.tier > 1 &&
+        node.children.map((c) => (
+          <ChainRow key={c.typeId} node={c} depth={depth + 1} />
+        ))}
+    </div>
   );
 }
 

@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeEach } from "vitest";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { extractionAdvice, runway, runwayThresholds } from "./balance";
-import type { ColonyView } from "../../lib/api";
+import type { ChainNode, ColonyView, SdeStatus } from "../../lib/api";
+import { invokeMock, mockInvoke, renderWithQuery } from "../../test/harness";
+import { PIPage } from "./PIPage";
 
 const PLASMOID = 1;
 const WATER = 2;
@@ -234,5 +237,140 @@ describe("runwayThresholds", () => {
     const cadence = { redHours: 10, amberHours: 20 };
     expect(runway(800, -100, cadence).tone).toContain("rose"); // 8h < 10h → red
     expect(runway(800, -100).tone).toContain("amber"); // 8h in fallback [6,24) → amber
+  });
+});
+
+const SDE_INSTALLED: SdeStatus = {
+  installed: true,
+  path: "/tmp/sde.sqlite",
+  sizeBytes: 1,
+  updated: false,
+};
+
+// Robotics-shaped chain: Plasma-only, exercising the nested tree + a P1
+// node's inline "← <P0> (P0)" resource line.
+const ROBOTICS_CHAIN: ChainNode = {
+  typeId: 9848,
+  name: "Robotics",
+  tier: 3,
+  qtyPerCycle: 0,
+  planetTypes: ["Plasma"],
+  children: [
+    {
+      typeId: 3689,
+      name: "Mechanical Parts",
+      tier: 2,
+      qtyPerCycle: 10,
+      planetTypes: ["Barren", "Plasma"],
+      children: [
+        {
+          typeId: 2398,
+          name: "Reactive Metals",
+          tier: 1,
+          qtyPerCycle: 40,
+          planetTypes: ["Barren", "Gas", "Lava", "Plasma", "Storm"],
+          children: [
+            {
+              typeId: 2267,
+              name: "Base Metals",
+              tier: 0,
+              qtyPerCycle: 0,
+              planetTypes: ["Barren", "Gas", "Lava", "Plasma", "Storm"],
+              children: [],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+// Nano-Factory-shaped chain: the P4 target has no single-planet option, and
+// one of its P3 branches (Ukomi Superconductors) is itself empty too.
+const NANO_FACTORY_CHAIN: ChainNode = {
+  typeId: 2869,
+  name: "Nano-Factory",
+  tier: 4,
+  qtyPerCycle: 0,
+  planetTypes: [],
+  children: [
+    {
+      typeId: 2360,
+      name: "Industrial Explosives",
+      tier: 3,
+      qtyPerCycle: 6,
+      planetTypes: ["Temperate"],
+      children: [],
+    },
+    {
+      typeId: 17136,
+      name: "Ukomi Superconductors",
+      tier: 3,
+      qtyPerCycle: 6,
+      planetTypes: [],
+      children: [],
+    },
+  ],
+};
+
+describe("PIPage Planner tab", () => {
+  beforeEach(() => invokeMock.mockReset());
+
+  it("searches via Combo and renders a single-planet badge with the nested chain tree", async () => {
+    mockInvoke({
+      sde_status: () => SDE_INSTALLED,
+      auth_active_character: () => null,
+      pi_overview: () => [],
+      pi_locked_get: () => [],
+      sde_search_pi_commodities: () => [{ id: 9848, name: "Robotics" }],
+      pi_production_chain: () => ROBOTICS_CHAIN,
+    });
+    renderWithQuery(<PIPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Planner" }));
+    fireEvent.change(screen.getByPlaceholderText(/search a p1-p4 commodity/i), {
+      target: { value: "robo" },
+    });
+    fireEvent.click(await screen.findByText("Robotics", {}, { timeout: 2000 }));
+
+    // Root badge: Plasma-only, single-planet.
+    expect(await screen.findByText("Plasma")).toBeInTheDocument();
+    // Nested P2 row, and its P1 child inlining the P0 dependency instead of
+    // a separate bullet.
+    expect(screen.getByText("Mechanical Parts")).toBeInTheDocument();
+    expect(screen.getByText("Reactive Metals")).toBeInTheDocument();
+    expect(screen.getByText(/← Base Metals \(P0\)/)).toBeInTheDocument();
+    expect(screen.getByText("40/cycle")).toBeInTheDocument();
+    // The P0 leaf itself never gets its own bullet row.
+    expect(screen.queryByText("Base Metals", { exact: true })).toBeNull();
+  });
+
+  it("shows a 'needs imports' notice for a commodity with no single-planet option", async () => {
+    mockInvoke({
+      sde_status: () => SDE_INSTALLED,
+      auth_active_character: () => null,
+      pi_overview: () => [],
+      pi_locked_get: () => [],
+      sde_search_pi_commodities: () => [{ id: 2869, name: "Nano-Factory" }],
+      pi_production_chain: () => NANO_FACTORY_CHAIN,
+    });
+    renderWithQuery(<PIPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Planner" }));
+    fireEvent.change(screen.getByPlaceholderText(/search a p1-p4 commodity/i), {
+      target: { value: "nano" },
+    });
+    fireEvent.click(
+      await screen.findByText("Nano-Factory", {}, { timeout: 2000 }),
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Needs imports — no single planet"),
+      ).toBeInTheDocument(),
+    );
+    // The empty branch inside the tree also flags itself.
+    expect(screen.getByText("Ukomi Superconductors")).toBeInTheDocument();
+    expect(screen.getAllByText("needs imports").length).toBeGreaterThan(0);
   });
 });
