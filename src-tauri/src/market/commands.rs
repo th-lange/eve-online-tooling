@@ -14,7 +14,7 @@ use super::markets::{regions, resolve_location, Region};
 use super::service::MarketService;
 use super::types::{Order, PriceModel};
 
-pub use crate::model::{id_names, AppError, IdName};
+pub use crate::model::{id_names, AppError, Fresh, IdName};
 
 /// One day of market history, for the history explorer (camelCase for the UI).
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -28,19 +28,23 @@ pub struct HistoryPoint {
     pub order_count: i64,
 }
 
-/// Daily market history for a type in a region (ascending by date).
+/// Daily market history for a type in a region (ascending by date), wrapped
+/// with the server's real ESI cache deadline (#885) so the frontend can
+/// derive its `staleTime`/`DataAge` cue from `expiresAt` instead of a
+/// hand-set constant.
 #[tauri::command]
 #[specta::specta]
 pub async fn market_history(
     service: State<'_, MarketService>,
     region_id: i64,
     type_id: i64,
-) -> Result<Vec<HistoryPoint>, AppError> {
+) -> Result<Fresh<Vec<HistoryPoint>>, AppError> {
     let days = service
         .history(region_id, type_id)
         .await
         .map_err(|e| e.to_string())?;
-    Ok(days
+    let expires_at = service.history_expires_at(region_id, type_id).await;
+    let points = days
         .into_iter()
         .map(|d| HistoryPoint {
             date: d.date,
@@ -50,7 +54,8 @@ pub async fn market_history(
             volume: d.volume,
             order_count: d.order_count,
         })
-        .collect())
+        .collect();
+    Ok(Fresh::new(points, expires_at))
 }
 
 /// The selectable regions, each with its hub station.

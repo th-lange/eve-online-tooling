@@ -48,6 +48,14 @@ impl ConditionalCache {
         Self(CoreCache::on_disk(dir))
     }
 
+    /// The cached freshness deadline (Unix epoch secs) for `key`, if an
+    /// entry exists. Proxies [`CoreCache::expires_at`] so ESI-specific
+    /// callers (e.g. [`super::client::EsiClient`]) can surface the same
+    /// deadline downstream (#885).
+    pub(crate) async fn expires_at(&self, key: &str) -> Option<u64> {
+        self.0.expires_at(key).await
+    }
+
     /// Startup maintenance: delete on-disk cache files whose TTL has been
     /// expired for longer than the retention window. Synchronous — this runs
     /// once, early, in the Tauri `setup` closure before the async runtime is

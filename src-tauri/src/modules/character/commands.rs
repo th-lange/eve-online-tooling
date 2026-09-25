@@ -6,10 +6,11 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::esi::{
-    authed_get, authed_get_paged_pub, character_skill_levels, resolve_names, AuthState,
+    authed_get, authed_get_expires_at, authed_get_paged_pub, character_skill_levels, resolve_names,
+    AuthState,
 };
 use crate::market::{jita_location, MarketService};
-use crate::model::AppError;
+use crate::model::{AppError, Fresh};
 use crate::storage;
 
 // --- Skills (#55) ---
@@ -43,17 +44,28 @@ pub struct QueueRow {
 pub async fn character_skills(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
-) -> Result<SkillsView, AppError> {
+) -> Result<Fresh<SkillsView>, AppError> {
     let (_, character_id) = storage::dir_and_primary_character(&app)?;
     let sde = crate::sde::open_from_app(&app)?;
 
     let skills = character_skill_levels(&auth_state, character_id).await?;
-    let queue: Vec<EsiQueueItem> = authed_get(
+    let queue_path = format!("/latest/characters/{character_id}/skillqueue/");
+    let queue: Vec<EsiQueueItem> = authed_get(&auth_state, character_id, &queue_path).await?;
+
+    // Freshness is the earlier of the two underlying ESI responses (skills +
+    // skill queue) this view combines (#885) — whichever expires first is
+    // when the combined view should be considered stale.
+    let skills_expires_at = authed_get_expires_at(
         &auth_state,
         character_id,
-        &format!("/latest/characters/{character_id}/skillqueue/"),
+        &format!("/latest/characters/{character_id}/skills/"),
     )
-    .await?;
+    .await;
+    let queue_expires_at = authed_get_expires_at(&auth_state, character_id, &queue_path).await;
+    let expires_at = match (skills_expires_at, queue_expires_at) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    };
 
     let name = |type_id: i64| {
         sde.type_info(type_id)
@@ -62,19 +74,22 @@ pub async fn character_skills(
             .map(|t| t.name)
             .unwrap_or_else(|| format!("Skill {type_id}"))
     };
-    Ok(SkillsView {
-        total_sp: skills.total_sp,
-        unallocated_sp: skills.unallocated_sp,
-        trained_count: skills.trained_count() as i64,
-        queue: queue
-            .into_iter()
-            .map(|q| QueueRow {
-                skill_name: name(q.skill_id),
-                level: q.finished_level,
-                finish_date: q.finish_date,
-            })
-            .collect(),
-    })
+    Ok(Fresh::new(
+        SkillsView {
+            total_sp: skills.total_sp,
+            unallocated_sp: skills.unallocated_sp,
+            trained_count: skills.trained_count() as i64,
+            queue: queue
+                .into_iter()
+                .map(|q| QueueRow {
+                    skill_name: name(q.skill_id),
+                    level: q.finished_level,
+                    finish_date: q.finish_date,
+                })
+                .collect(),
+        },
+        expires_at,
+    ))
 }
 
 // --- Standings (#56) ---

@@ -8,22 +8,26 @@ use tauri::{AppHandle, State};
 
 use crate::esi::AuthState;
 use crate::market::{self, MarketService};
-use crate::model::AppError;
+use crate::model::{AppError, Fresh};
 
 /// Open market orders across the target characters (the whole roster when
 /// "All characters" is active, else just the active one), each flagged as
 /// undercut or top-of-book against the current best price **at the order's
 /// own station**. A character whose orders can't be fetched is skipped
-/// rather than failing the whole call.
+/// rather than failing the whole call. Wrapped with the server's real ESI
+/// cache deadline (#885) so the frontend can derive its `staleTime`/
+/// `DataAge` cue from `expiresAt` instead of a hand-set constant.
 #[tauri::command]
 #[specta::specta]
 pub async fn orders_list(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
     market: State<'_, MarketService>,
-) -> Result<Vec<market::orders::OrderRow>, AppError> {
+) -> Result<Fresh<Vec<market::orders::OrderRow>>, AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
-    market::orders::collect_orders(&dir, &auth_state, &market).await
+    let rows = market::orders::collect_orders(&dir, &auth_state, &market).await?;
+    let expires_at = market::orders::orders_expires_at(&dir, &auth_state).await;
+    Ok(Fresh::new(rows, expires_at))
 }
 
 /// Collects this module's specta-annotated commands for [`crate::bindings`].

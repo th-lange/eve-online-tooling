@@ -193,6 +193,19 @@ impl MarketService {
         self.history_for(region_id, type_id).await
     }
 
+    /// The ESI-derived freshness deadline (Unix epoch secs) for the cached
+    /// history response, if the disk-backed conditional cache still holds an
+    /// entry — independent of the in-memory `TtlCache` layer [`history_for`]
+    /// also applies, so this reflects ESI's own `Cache-Control`/`Expires`
+    /// window even when [`history`](Self::history) served from that faster
+    /// in-memory cache rather than a live fetch (#885).
+    pub async fn history_expires_at(&self, region_id: i64, type_id: i64) -> Option<u64> {
+        let path = format!("/latest/markets/{region_id}/history/");
+        self.esi
+            .expires_at(&path, &[("type_id", type_id.to_string())])
+            .await
+    }
+
     /// Full price model for one type at a location, using live ESI orders +
     /// history (precise, with real daily-traded volume).
     pub async fn price_model(

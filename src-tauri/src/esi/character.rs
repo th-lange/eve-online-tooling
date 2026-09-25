@@ -95,6 +95,17 @@ pub async fn authed_get<T: DeserializeOwned>(
     Ok(val)
 }
 
+/// The cached freshness deadline (Unix epoch secs) for a prior
+/// [`authed_get`] call at `path` for `character_id`, if the conditional
+/// cache still holds an entry. Lets callers surface ESI's own
+/// `Cache-Control`/`Expires` window downstream (e.g. the frontend's
+/// `expiresAt` freshness cue, #885) without duplicating [`authed_get`]'s
+/// cache-key derivation.
+pub async fn authed_get_expires_at(auth: &AuthState, character_id: i64, path: &str) -> Option<u64> {
+    let key = format!("c{character_id}:{path}");
+    auth.cache().expires_at(&key).await
+}
+
 /// Public wrapper over the paginated authed GET (for the mining ledger).
 pub async fn authed_get_paged_pub<T: DeserializeOwned>(
     auth: &AuthState,

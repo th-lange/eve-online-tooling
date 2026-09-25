@@ -222,6 +222,15 @@ impl ConditionalCache {
         }
     }
 
+    /// The stored freshness deadline (Unix epoch secs) for `key`, if a
+    /// cached entry exists. Exposes the same deadline the conditional-GET
+    /// path already derives from `Cache-Control`/`Expires` so callers can
+    /// surface it downstream (e.g. the frontend's `expiresAt` freshness cue,
+    /// #885) without duplicating the header parsing here.
+    pub(crate) async fn expires_at(&self, key: &str) -> Option<u64> {
+        self.load(key).await.map(|e| e.expires)
+    }
+
     /// Conditional GET of a single JSON document.
     ///
     /// `build` produces the request (URL + query + any auth) and is called once

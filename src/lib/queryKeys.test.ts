@@ -15,8 +15,43 @@ describe("marketKeys.history", () => {
     expect(a.queryKey).not.toEqual(b.queryKey);
   });
 
-  it("caches history for 30 minutes, matching PriceHistoryPopover's original policy", () => {
-    expect(marketKeys.history(10000002, 34).staleTime).toBe(30 * 60 * 1000);
+  it("falls back to 30 minutes when the backend hasn't cached a real expiresAt yet", () => {
+    const opts = marketKeys.history(10000002, 34);
+    const staleTime = opts.staleTime as (query: unknown) => number;
+    expect(staleTime({ state: { data: undefined } })).toBe(30 * 60 * 1000);
+    expect(staleTime({ state: { data: { data: [], expiresAt: null } } })).toBe(
+      30 * 60 * 1000,
+    );
+  });
+
+  it("derives staleTime from the server's real expiresAt when present", () => {
+    const opts = marketKeys.history(10000002, 34);
+    const staleTime = opts.staleTime as (query: unknown) => number;
+    const expiresAt = Date.now() + 5_000;
+    const remaining = staleTime({
+      state: { data: { data: [], expiresAt } },
+    });
+    expect(remaining).toBeGreaterThan(0);
+    expect(remaining).toBeLessThanOrEqual(5_000);
+  });
+
+  it("projects the Fresh envelope down to the plain history points", () => {
+    const opts = marketKeys.history(10000002, 34);
+    const point = {
+      date: "2024-01-01",
+      average: 1,
+      highest: 1,
+      lowest: 1,
+      volume: 1,
+      orderCount: 1,
+    };
+    expect(
+      (opts.select as (fresh: unknown) => unknown)({
+        data: [point],
+        fetchedAt: Date.now(),
+        expiresAt: null,
+      }),
+    ).toEqual([point]);
   });
 });
 

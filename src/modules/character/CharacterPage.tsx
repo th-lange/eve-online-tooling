@@ -9,6 +9,7 @@ import {
   characterStandings,
 } from "../../lib/api";
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
+import { DataAge } from "../../components/DataAge";
 import { formatInt, formatIsk } from "../../lib/format";
 import { Page, PageHeader } from "../../components/page";
 import { Stat } from "../../components/Stat";
@@ -61,9 +62,16 @@ function Skills({ activeId }: { activeId: number | null }) {
       />
     );
   if (!q.data) return <Loading />;
-  const d = q.data;
+  const d = q.data.data;
   return (
     <div>
+      <div className="mb-2 flex justify-end">
+        <DataAge
+          updatedAt={q.dataUpdatedAt}
+          expiresAt={q.data.expiresAt}
+          fetching={q.isFetching}
+        />
+      </div>
       <div className="mb-3 flex gap-6 text-sm">
         <Stat label="Total SP" value={formatInt(d.totalSp)} />
         <Stat label="Unallocated SP" value={formatInt(d.unallocatedSp)} />

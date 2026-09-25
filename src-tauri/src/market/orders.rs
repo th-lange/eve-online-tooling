@@ -80,6 +80,27 @@ pub async fn collect_orders(
     Ok(rows)
 }
 
+/// The earliest ESI-derived freshness deadline (Unix epoch secs) across the
+/// target characters' open-orders responses, if any are cached — the
+/// soonest of those deadlines is when [`collect_orders`]'s result should be
+/// considered stale (#885). `None` when nothing is cached yet (e.g. the
+/// cache is disabled, or no target character has been fetched).
+pub async fn orders_expires_at(dir: &Path, auth: &AuthState) -> Option<u64> {
+    let mut expires_at: Option<u64> = None;
+    for character_id in storage::target_characters(dir) {
+        if let Some(e) = crate::esi::authed_get_expires_at(
+            auth,
+            character_id,
+            &format!("/latest/characters/{character_id}/orders/"),
+        )
+        .await
+        {
+            expires_at = Some(expires_at.map_or(e, |cur| cur.min(e)));
+        }
+    }
+    expires_at
+}
+
 /// One character's open orders, priced and flagged for undercut.
 async fn fetch_character_orders(
     auth_state: &AuthState,

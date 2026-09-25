@@ -10,7 +10,7 @@ import {
   type SellOrdersParams,
   type Station,
 } from "./generated/market";
-import { unwrapCommand, type IdName } from "./common";
+import { unwrapCommand, type Fresh, type IdName } from "./common";
 
 export type {
   CurrentLocation,
@@ -24,11 +24,12 @@ export type {
   Station,
 };
 
-/** Daily market history for a type in a region (ascending by date). */
+/** Daily market history for a type in a region (ascending by date), wrapped
+ *  with the server's real ESI cache deadline (#885). */
 export async function marketHistory(
   regionId: number,
   typeId: number,
-): Promise<HistoryPoint[]> {
+): Promise<Fresh<HistoryPoint[]>> {
   return unwrapCommand(await commands.marketHistory(regionId, typeId));
 }
 

@@ -29,6 +29,40 @@ pub fn id_names(pairs: Vec<(i64, String)>) -> Vec<IdName> {
         .collect()
 }
 
+/// Server-derived cache-freshness envelope (#885). Wraps command data with
+/// the same `fetchedAt`/`expiresAt` deadline the backend's conditional
+/// cache (`net::conditional_cache::ConditionalCache`, wrapped per-provider
+/// by e.g. `esi::cache::ConditionalCache`) already computed from the
+/// upstream `Cache-Control`/`Expires` headers, instead of the frontend
+/// re-guessing a per-endpoint `staleTime` constant that drifts as those
+/// headers change server-side.
+///
+/// Both timestamps are Unix epoch **milliseconds** (matching JS
+/// `Date.now()`), so `DataAge` and `queryKeys.ts` can compare directly with
+/// no unit conversion. `expires_at` is `None` when the underlying cache has
+/// no persisted entry for this call (cache disabled, or nothing cached
+/// yet) — callers fall back to their existing hand-set `staleTime`.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Fresh<T> {
+    pub data: T,
+    pub fetched_at: i64,
+    pub expires_at: Option<i64>,
+}
+
+impl<T> Fresh<T> {
+    /// Wraps `data` with the current time as `fetchedAt` and `expires_at_secs`
+    /// (a Unix-epoch-seconds deadline, as stored by `ConditionalCache`)
+    /// converted to `expiresAt` milliseconds.
+    pub fn new(data: T, expires_at_secs: Option<u64>) -> Self {
+        Fresh {
+            data,
+            fetched_at: crate::util::time::now_secs() as i64 * 1000,
+            expires_at: expires_at_secs.map(|secs| secs as i64 * 1000),
+        }
+    }
+}
+
 /// A structured, serializable command error (#337). Serializes to
 /// `{ "kind": …, "message": … }` so the frontend can tell an auth-required
 /// state apart from a generic failure and show a clearer message, rather than
