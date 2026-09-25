@@ -38,6 +38,7 @@ fn golden_pyfa_fits() {
         charge_type_id: charge.map(tid),
         quantity: 1,
         active_drones: None,
+        mutation: None,
     };
     let drone = |name: &str, qty: i32| FitItem {
         type_id: tid(name),
@@ -47,6 +48,7 @@ fn golden_pyfa_fits() {
         charge_type_id: None,
         quantity: qty,
         active_drones: None,
+        mutation: None,
     };
     let fit = |name: &str, items: Vec<FitItem>| Fit {
         id: "t".into(),
@@ -470,6 +472,7 @@ fn vedmak_spool_up_matches_hand_computed_ratio() {
             charge_type_id: Some(tid("Occult M")),
             quantity: 1,
             active_drones: None,
+            mutation: None,
         }],
         projected: Vec::new(),
     };
@@ -596,6 +599,7 @@ fn rapid_light_missile_launcher_sustained_dps_matches_hand_computed_ratio() {
             charge_type_id: Some(tid("Scourge Light Missile")),
             quantity: 1,
             active_drones: None,
+            mutation: None,
         }],
         projected: Vec::new(),
     };
@@ -685,6 +689,7 @@ fn punisher_ancillary_armor_repairer_matches_hand_computed_burst_and_sustained()
             charge_type_id: Some(tid("Nanite Repair Paste")),
             quantity: 1,
             active_drones: None,
+            mutation: None,
         }],
         projected: Vec::new(),
     };
@@ -762,6 +767,7 @@ fn cyclone_ancillary_shield_booster_matches_hand_computed_burst_and_sustained() 
             charge_type_id: Some(tid("Cap Booster 400")),
             quantity: 1,
             active_drones: None,
+            mutation: None,
         }],
         projected: Vec::new(),
     };
@@ -866,6 +872,7 @@ fn rifter_reactive_armor_hardener_converges_to_hand_computed_em_resists() {
         charge_type_id: None,
         quantity: 1,
         active_drones: None,
+        mutation: None,
     }]);
     assert!(
         hardened.tank.rah_active,
@@ -967,6 +974,7 @@ fn rifter_cap_booster_stabilizes_an_otherwise_neut_unstable_hull() {
             charge_type_id: Some(tid("Cap Booster 400")),
             quantity: 1,
             active_drones: None,
+            mutation: None,
         }],
         6.0,
     );
@@ -974,4 +982,198 @@ fn rifter_cap_booster_stabilizes_an_otherwise_neut_unstable_hull() {
         boosted.capacitor.stable,
         "the same neut pressure should be absorbed once the cap booster is fitted"
     );
+}
+
+/// Mutated (abyssal) module support (#876): a max-rolled mutaplasmid on a
+/// fitted MWD changes the ship's max velocity by exactly the amount
+/// `engine::navigation::prop_velocity`'s formula (`base_velocity × (1 +
+/// speedFactor·speedBoostFactor/mass/100)`) predicts for the rolled
+/// `speedFactor`. Uses the "Unstable 5MN Microwarpdrive Mutaplasmid"
+/// (typeID 47738) on a Rifter's 5MN Microwarpdrive II — the issue's own
+/// example is a 50MN MWD, but this substitutes the same mechanic on the
+/// size variant already wired into this file's Rifter fixture; the roll
+/// math is identical for every MWD size.
+///
+/// The velocity *bonus* the prop module grants (`speedFactor ·
+/// speedBoostFactor/mass/100`) is exactly proportional to its resolved
+/// `speedFactor` (20) — confirmed against every `dgmEffects.modifierInfo`
+/// row touching that attribute: they're all `LocationRequiredSkillModifier`/
+/// `LocationGroupModifier` percent scalings (e.g. effect 8291, Acceleration
+/// Control's `+X%/level` to any module requiring its skill), never a reset
+/// to a constant. So mutating the *base* `speedFactor` the resolve pass
+/// seeds by a known multiplier (this mutaplasmid's real max-roll, from the
+/// bundled `dynamic_item_attributes.json` — CCP's `dynamicitemattributes`
+/// data, see `sde::db::mutaplasmid`) must scale the *resolved* bonus by
+/// that exact same multiplier, regardless of what all-V skill bonuses also
+/// apply on top — this is what the test derives and checks, rather than
+/// hand-deriving the skill chain (Acceleration Control's own magnitude
+/// isn't this feature's concern). A mutation that silently no-ops would
+/// leave the mutated run's bonus ratio at `1.0`, not the mutaplasmid's
+/// rolled multiplier, failing the assertion below.
+#[test]
+fn mutated_mwd_max_roll_speed_bonus_changes_max_velocity() {
+    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        eprintln!(
+            "mutated_mwd_max_roll_speed_bonus_changes_max_velocity: EVE_SDE_PATH unset — skipping"
+        );
+        return;
+    };
+    let path = std::path::PathBuf::from(&path);
+    if !path.exists() {
+        eprintln!(
+            "mutated_mwd_max_roll_speed_bonus_changes_max_velocity: {path:?} missing — skipping"
+        );
+        return;
+    }
+    let sde = Sde::open(&path).expect("open sde");
+    let dir = path.parent().unwrap();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let all5 = |_: i64| 5.0;
+    let mwd_type_id = tid("5MN Microwarpdrive II");
+    let mutaplasmid_type_id = tid("Unstable 5MN Microwarpdrive Mutaplasmid");
+    let ship_type_id = tid("Rifter");
+    let layout = sde.ship_layout(ship_type_id).unwrap().expect("layout");
+
+    // Real base speedFactor (bundled Fuzzwork SDE, cross-checked live).
+    let base_speed_factor = sde
+        .type_attributes_raw(mwd_type_id)
+        .unwrap()
+        .into_iter()
+        .find(|&(id, _)| id == 20)
+        .map(|(_, v)| v)
+        .expect("5MN Microwarpdrive II should carry speedFactor");
+    assert_eq!(base_speed_factor, 510.0);
+    // This mutaplasmid's real speedFactor roll range (bundled
+    // `dynamic_item_attributes.json`): [0.9, 1.100000023841858]×.
+    let max_roll_speed_factor = base_speed_factor * 1.100000023841858_f64;
+
+    let mwd_item = |mutation: Option<super::types::ItemMutation>| FitItem {
+        type_id: mwd_type_id,
+        slot: SlotKind::Mid,
+        index: 0,
+        state: ModuleState::Active,
+        charge_type_id: None,
+        quantity: 1,
+        active_drones: None,
+        mutation,
+    };
+    let run = |items: Vec<FitItem>| {
+        let fit = Fit {
+            id: "t".into(),
+            name: "Rifter".into(),
+            ship_type_id,
+            items,
+            projected: Vec::new(),
+        };
+        run_dogma(
+            &sde,
+            dir,
+            &fit,
+            &layout,
+            &all5,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+            None,
+            None,
+            1.0,
+            false, // factor_reload (#871) — irrelevant to navigation
+        )
+        .expect("dogma")
+    };
+
+    // The formula's `base_velocity` term (whatever Navigation/other all-V
+    // ship-speed skills resolve it to — unrelated to this feature).
+    let bare_velocity = run(Vec::new()).navigation.max_velocity;
+    let bonus_of = |velocity: f64| velocity / bare_velocity - 1.0;
+
+    let unmutated = run(vec![mwd_item(None)]);
+    let mutated = run(vec![mwd_item(Some(super::types::ItemMutation {
+        base_type_id: mwd_type_id,
+        mutaplasmid_type_id,
+        attrs: [(20i64, max_roll_speed_factor)].into_iter().collect(),
+    }))]);
+
+    assert!(
+        mutated.navigation.max_velocity > unmutated.navigation.max_velocity,
+        "a max-roll speed mutaplasmid must raise max velocity: {} vs {}",
+        mutated.navigation.max_velocity,
+        unmutated.navigation.max_velocity
+    );
+    let bonus_ratio =
+        bonus_of(mutated.navigation.max_velocity) / bonus_of(unmutated.navigation.max_velocity);
+    let expected_ratio = max_roll_speed_factor / base_speed_factor;
+    assert!(
+        (bonus_ratio - expected_ratio).abs() < 1e-9,
+        "the mutated/unmutated velocity-bonus ratio should equal the mutaplasmid's rolled \
+         speedFactor multiplier ({expected_ratio}), got {bonus_ratio}"
+    );
+}
+
+/// Unmutated fits are byte-for-byte unaffected by the mutation machinery
+/// (#876 acceptance: "unmutated fits: zero change") — a plain `FitItem`
+/// with `mutation: None` resolves identically whether or not the dogma
+/// engine's mutation-override branch exists at all, since it's simply never
+/// entered.
+#[test]
+fn unmutated_item_is_unaffected_by_mutation_field() {
+    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        eprintln!("unmutated_item_is_unaffected_by_mutation_field: EVE_SDE_PATH unset — skipping");
+        return;
+    };
+    let path = std::path::PathBuf::from(&path);
+    if !path.exists() {
+        eprintln!("unmutated_item_is_unaffected_by_mutation_field: {path:?} missing — skipping");
+        return;
+    }
+    let sde = Sde::open(&path).expect("open sde");
+    let dir = path.parent().unwrap();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let all5 = |_: i64| 5.0;
+    let layout = sde.ship_layout(tid("Rifter")).unwrap().expect("layout");
+    let item = FitItem {
+        type_id: tid("200mm AutoCannon II"),
+        slot: SlotKind::High,
+        index: 0,
+        state: ModuleState::Active,
+        charge_type_id: Some(tid("Barrage S")),
+        quantity: 1,
+        active_drones: None,
+        mutation: None,
+    };
+    let fit = Fit {
+        id: "t".into(),
+        name: "Rifter".into(),
+        ship_type_id: tid("Rifter"),
+        items: vec![item],
+        projected: Vec::new(),
+    };
+    let d = run_dogma(
+        &sde,
+        dir,
+        &fit,
+        &layout,
+        &all5,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,
+        1.0,
+        false,
+    )
+    .expect("dogma");
+    assert!(d.dps.turret > 0.0, "unmutated gun should still deal damage");
 }

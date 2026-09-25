@@ -12,13 +12,13 @@ use tauri::{AppHandle, State};
 
 use super::context::DogmaContext;
 use super::dna::{self, DnaItem, ParsedDna};
-use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule};
+use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule, ParsedMutation};
 use super::engine::resolve::{resolve, FitInput};
 use super::esi_fittings::EsiFitSource;
 use super::npc_profiles;
 use super::types::{
-    AbyssalWeatherSelection, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ModuleState,
-    NpcProfile, SlotKind, TargetProfile, TargetProfileLibrary,
+    AbyssalWeatherSelection, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ItemMutation,
+    ModuleState, NpcProfile, SlotKind, TargetProfile, TargetProfileLibrary,
 };
 use crate::esi::{self, corporation_id, AuthState, SkillLevels};
 use crate::market::{resolve_location, MarketService};
@@ -37,6 +37,35 @@ fn new_fit_id() -> String {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     format!("{nanos:x}")
+}
+
+/// Resolve a parsed EFT mutation block against the SDE: the mutaplasmid
+/// name and each attribute name to their ids (#876). `None` if the
+/// mutaplasmid name is unknown or applies to nothing — a best-effort import
+/// keeps the base module unmutated rather than failing the whole paste,
+/// matching the "unknown module — skip" leniency the rest of this parser
+/// already uses. Unknown *individual* attribute names are dropped, not
+/// fatal, since a future SDE could rename/retire one.
+fn resolve_mutation(sde: &Sde, base_type_id: i64, parsed: &ParsedMutation) -> Option<ItemMutation> {
+    let (mutaplasmid_type_id, _) = sde.type_by_name(&parsed.mutaplasmid_name).ok()??;
+    let attrs: HashMap<i64, f64> = parsed
+        .attrs
+        .iter()
+        .filter_map(|(name, value)| {
+            sde.attribute_id_by_name(name)
+                .ok()
+                .flatten()
+                .map(|id| (id, *value))
+        })
+        .collect();
+    if attrs.is_empty() {
+        return None;
+    }
+    Some(ItemMutation {
+        base_type_id,
+        mutaplasmid_type_id,
+        attrs,
+    })
 }
 
 /// A hull's slot layout + fitting resources, for the empty editor (#160).
@@ -97,6 +126,10 @@ pub(crate) fn import_eft_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
             charge_type_id,
             quantity: 1,
             active_drones: None,
+            mutation: m
+                .mutation
+                .as_ref()
+                .and_then(|pm| resolve_mutation(sde, type_id, pm)),
         });
     }
 
@@ -117,6 +150,7 @@ pub(crate) fn import_eft_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
             charge_type_id: None,
             quantity: e.quantity,
             active_drones: None,
+            mutation: None,
         });
     }
 
@@ -213,6 +247,7 @@ pub(crate) fn import_dna_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
                     charge_type_id: None,
                     quantity: 1,
                     active_drones: None,
+                    mutation: None,
                 });
             }
         } else {
@@ -224,6 +259,7 @@ pub(crate) fn import_dna_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
                 charge_type_id: None,
                 quantity: entry.quantity.max(1),
                 active_drones: None,
+                mutation: None,
             });
         }
     }
@@ -371,6 +407,7 @@ pub(crate) fn import_list_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
                     charge_type_id: None,
                     quantity: 1,
                     active_drones: None,
+                    mutation: None,
                 });
             }
         } else {
@@ -382,6 +419,7 @@ pub(crate) fn import_list_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
                 charge_type_id: None,
                 quantity: qty.min(i32::MAX as i64) as i32,
                 active_drones: None,
+                mutation: None,
             });
         }
     }
@@ -634,6 +672,67 @@ pub async fn fitting_module_info(
         .collect()
 }
 
+/// One mutated attribute's slider bounds (#876): the module's own
+/// (unmutated) value on `base_type_id`, and the absolute `[min, max]` this
+/// mutaplasmid can roll it to (`base_value * multiplier` from
+/// [`crate::sde::MutaplasmidRoll::attribute_ranges`]).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MutationAttrRange {
+    pub attribute_id: i64,
+    pub attribute_name: String,
+    pub base_value: f64,
+    pub min_value: f64,
+    pub max_value: f64,
+}
+
+/// Per-attribute roll bounds for mutating `base_type_id` with
+/// `mutaplasmid_type_id` (#876) — backs the module editor's mutate sliders,
+/// each clamped to `[minValue, maxValue]`. Errors if the mutaplasmid isn't
+/// applicable to this base type.
+#[tauri::command]
+pub fn fitting_mutation_ranges(
+    app: AppHandle,
+    base_type_id: i64,
+    mutaplasmid_type_id: i64,
+) -> Result<Vec<MutationAttrRange>, String> {
+    let sde = crate::sde::open_from_app(&app)?;
+    let roll = sde
+        .mutaplasmid_roll(mutaplasmid_type_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "unknown mutaplasmid".to_string())?;
+    if !roll.applicable_type_ids.contains(&base_type_id) {
+        return Err("mutaplasmid does not apply to this module".to_string());
+    }
+    let base_attrs: HashMap<i64, f64> = sde
+        .type_attributes_raw(base_type_id)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .collect();
+    let attr_ids: Vec<i64> = roll.attribute_ranges.keys().copied().collect();
+    let names = sde.attribute_names(&attr_ids).map_err(|e| e.to_string())?;
+    let mut out: Vec<MutationAttrRange> =
+        roll.attribute_ranges
+            .iter()
+            .map(|(&attribute_id, &(min_mult, max_mult))| {
+                let base_value = base_attrs.get(&attribute_id).copied().unwrap_or(0.0);
+                let (_, display_name) = names.get(&attribute_id).cloned().unwrap_or_else(|| {
+                    (format!("attr{attribute_id}"), format!("attr{attribute_id}"))
+                });
+                let (lo, hi) = (base_value * min_mult, base_value * max_mult);
+                MutationAttrRange {
+                    attribute_id,
+                    attribute_name: display_name,
+                    base_value,
+                    min_value: lo.min(hi),
+                    max_value: lo.max(hi),
+                }
+            })
+            .collect();
+    out.sort_by_key(|a| a.attribute_id);
+    Ok(out)
+}
+
 /// Finalized CPU(50)/PG(30)/calibration(1153) for each candidate module, resolved
 /// on `ship_type_id` with the active skills via the dogma engine — identical to
 /// how fitted modules are computed. Resolving the candidates together is safe:
@@ -702,8 +801,35 @@ pub fn fitting_add_item(
         charge_type_id,
         quantity: 1,
         active_drones: None,
+        mutation: None,
     });
     Ok(fit)
+}
+
+/// Build the EFT mutation block for an [`ItemMutation`] (#876) — the
+/// inverse of [`resolve_mutation`]: attribute ids -> their internal
+/// `attributeName`s, alphabet-sorted (matching the community EFT-dialect
+/// convention discussed for this format), mutaplasmid id -> its full type
+/// name (unambiguous on import, unlike an abbreviated grade word).
+fn export_mutation(sde: &Sde, m: &ItemMutation) -> ParsedMutation {
+    let attr_ids: Vec<i64> = m.attrs.keys().copied().collect();
+    let names = sde.attribute_names(&attr_ids).unwrap_or_default();
+    let mut attrs: Vec<(String, f64)> = m
+        .attrs
+        .iter()
+        .map(|(id, value)| {
+            let name = names
+                .get(id)
+                .map(|(internal, _)| internal.clone())
+                .unwrap_or_else(|| format!("attr{id}"));
+            (name, *value)
+        })
+        .collect();
+    attrs.sort_by(|a, b| a.0.cmp(&b.0));
+    ParsedMutation {
+        mutaplasmid_name: sde.type_name_or_id(m.mutaplasmid_type_id),
+        attrs,
+    }
 }
 
 /// Serialize a resolved [`Fit`] to EFT text: modules grouped high→mid→low→rig→
@@ -729,6 +855,7 @@ pub(crate) fn fit_to_eft(sde: &Sde, fit: &Fit) -> String {
                 name: sde.type_name_or_id(i.type_id),
                 charge,
                 empty_slot: None,
+                mutation: i.mutation.as_ref().map(|m| export_mutation(sde, m)),
             });
         }
     }
@@ -1457,6 +1584,7 @@ mod tests {
             charge_type_id: charge,
             quantity: qty,
             active_drones: None,
+            mutation: None,
         }
     }
 
@@ -1486,6 +1614,7 @@ mod tests {
                 charge_type_id: Some(tid("Republic Fleet EMP S")),
                 quantity: 1,
                 active_drones: None,
+                mutation: None,
             }],
             projected: Vec::new(),
         };
@@ -1526,6 +1655,7 @@ mod tests {
                 charge_type_id: Some(tid("Scorch S")),
                 quantity: 1,
                 active_drones: None,
+                mutation: None,
             }],
             projected: Vec::new(),
         };
@@ -1576,6 +1706,7 @@ mod tests {
                 charge_type_id: Some(tid("Republic Fleet EMP S")),
                 quantity: 1,
                 active_drones: None,
+                mutation: None,
             }],
             projected: Vec::new(),
         };
@@ -1672,6 +1803,7 @@ mod tests {
                 charge_type_id: None,
                 quantity: 1,
                 active_drones: None,
+                mutation: None,
             }],
             projected: Vec::new(),
         };
@@ -1759,6 +1891,7 @@ mod tests {
                 charge_type_id: None,
                 quantity: 1,
                 active_drones: None,
+                mutation: None,
             }],
             projected: Vec::new(),
         };
@@ -1830,6 +1963,7 @@ mod tests {
                 charge_type_id: Some(tid("Republic Fleet EMP S")),
                 quantity: 1,
                 active_drones: None,
+                mutation: None,
             }],
             projected: Vec::new(),
         };
@@ -2318,6 +2452,7 @@ Nanite Repair Paste\t50\tCommodity";
                     charge_type_id: Some(barrage),
                     quantity: 1,
                     active_drones: None,
+                    mutation: None,
                 },
                 FitItem {
                     type_id: gun,
@@ -2327,6 +2462,7 @@ Nanite Repair Paste\t50\tCommodity";
                     charge_type_id: Some(barrage),
                     quantity: 1,
                     active_drones: None,
+                    mutation: None,
                 },
                 FitItem {
                     type_id: drone,
@@ -2336,6 +2472,7 @@ Nanite Repair Paste\t50\tCommodity";
                     charge_type_id: None,
                     quantity: 5,
                     active_drones: None,
+                    mutation: None,
                 },
             ],
             projected: Vec::new(),
