@@ -13,6 +13,7 @@ use super::engine::attr::{attr, AttrStore};
 use super::engine::capacitor::{capacitor, ModuleDrain};
 use super::engine::cycle::cycle_of;
 use super::engine::damage::{damage, Weapon};
+use super::engine::fighter;
 use super::engine::heat::{burnout_seconds, rack_heat, HeatSource};
 use super::engine::navigation::{navigation, prop_velocity, targeting};
 use super::engine::projection::{
@@ -23,9 +24,9 @@ use super::engine::spool::apply_spool;
 use super::engine::tank::{rah_shift, tank, DamageProfile, Layer};
 use super::engine::validate::{validate, ValItem};
 use super::types::{
-    AbyssalWeatherSelection, CapStats, DpsBreakdown, EwTag, Fit, FitItem, FitProblem, FitStats,
-    ModuleState, NavStats, ResourceUsage, SlotKind, TankStats, TargetProfile, TargetStats,
-    WeaponRange,
+    AbyssalWeatherSelection, CapStats, DpsBreakdown, EwTag, FighterAbilityStats, Fit, FitItem,
+    FitProblem, FitStats, ModuleState, NavStats, ResourceUsage, Severity, SlotKind, TankStats,
+    TargetProfile, TargetStats, WeaponRange,
 };
 use crate::sde::{Sde, ShipLayout};
 
@@ -76,6 +77,10 @@ pub(super) struct DogmaStats {
     /// `fit.items` — `None` for non-module items and modules that aren't
     /// currently overheated. See `heat_of`.
     pub(super) burnout_seconds: Vec<Option<f64>>,
+    /// Each fitted fighter squadron's selected ability + DPS (#877),
+    /// parallel to `fit.items` — `None` for non-fighter items and for a
+    /// pure support/EW squadron with no offensive ability.
+    pub(super) fighter_abilities: Vec<Option<FighterAbilityStats>>,
 }
 
 /// Build the engine inputs (ship + modules + all-V skills) from the SDE, resolve
@@ -140,6 +145,13 @@ pub(super) fn run_dogma(
         .iter()
         .filter(|i| i.slot == SlotKind::Drone)
         .collect();
+    // Fighter squadrons (#877) resolve exactly like drones — pure aux
+    // targets of carrier skill/ship `fighterBonus*` bonuses.
+    let fighter_items: Vec<&FitItem> = fit
+        .items
+        .iter()
+        .filter(|i| i.slot == SlotKind::Fighter)
+        .collect();
     // Implants modify ship attributes via shipID effects, like skills (stacking-
     // exempt), so they resolve as skill-like entities.
     let implant_items: Vec<&FitItem> = fit
@@ -153,6 +165,7 @@ pub(super) fn run_dogma(
     let mut extra_ids = Vec::with_capacity(
         1 + module_items.len() * 2
             + drone_items.len()
+            + fighter_items.len()
             + implant_items.len()
             + fit.projected.len()
             + fleet_boosts.len() * 2
@@ -162,6 +175,7 @@ pub(super) fn run_dogma(
     extra_ids.extend(module_items.iter().map(|i| i.type_id));
     extra_ids.extend(module_items.iter().filter_map(|i| i.charge_type_id));
     extra_ids.extend(drone_items.iter().map(|i| i.type_id));
+    extra_ids.extend(fighter_items.iter().map(|i| i.type_id));
     extra_ids.extend(implant_items.iter().map(|i| i.type_id));
     extra_ids.extend(fit.projected.iter().map(|i| i.type_id));
     extra_ids.extend(fleet_boosts.iter().map(|&(m, _)| m));
@@ -240,6 +254,10 @@ pub(super) fn run_dogma(
     for it in &drone_items {
         drones.push(ctx.entity(it.type_id, required_skills_of(&ctx.attrs, it.type_id)));
     }
+    let mut fighters = Vec::with_capacity(fighter_items.len());
+    for it in &fighter_items {
+        fighters.push(ctx.entity(it.type_id, required_skills_of(&ctx.attrs, it.type_id)));
+    }
 
     // Skills at the chosen level (all-V or the character's). skillLevel (280) is
     // forced to that level; untrained (level 0) skills are skipped entirely.
@@ -279,6 +297,7 @@ pub(super) fn run_dogma(
             modules,
             skills,
             drones,
+            fighters,
             charges,
             gang_modules,
         },
@@ -342,8 +361,10 @@ pub(super) fn run_dogma(
 
     // Finalized fitting resources + validation from the *resolved* ship + modules
     // (skills/rigs/modules reflected, not base attributes) — shared with the
-    // optimizer's feasibility gate. Drone-bay volume comes from the SDE.
-    let (resources, validation, layout) =
+    // optimizer's feasibility gate. Drone/fighter bay volume comes from the SDE
+    // (both a drone's and a fighter's packaged unit volume live on the same
+    // `invTypes.volume` column).
+    let (resources, mut validation, layout) =
         resolved_feasibility(&resolved, base_layout, &ctx.effects, fit, &|tid| {
             sde.type_info(tid)
                 .ok()
@@ -459,6 +480,33 @@ pub(super) fn run_dogma(
             .collect()
     };
 
+    // Fighter squadron DPS + validation (#877): each squadron fires one
+    // ability (`fighter_of`), scattered back to `fit.items` order the same
+    // way `drone_active_full`/`burnout_seconds_full` are above.
+    let (fighter_problems, fighter_ability_per_squadron, fighter_dps, fighter_dps_sustained) =
+        fighter_of(&fighter_items, &resolved.fighters);
+    validation.extend(fighter_problems);
+    let fighter_abilities_full: Vec<Option<FighterAbilityStats>> = {
+        let mut abilities = fighter_ability_per_squadron.into_iter();
+        fit.items
+            .iter()
+            .map(|it| {
+                if it.slot == SlotKind::Fighter {
+                    abilities.next().flatten()
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+    let mut dps = dps_of(&resolved, &module_items, &drone_items, &drone_active_counts);
+    dps.fighter = fighter_dps.fighter;
+    dps.total += fighter_dps.fighter;
+    let mut dps_sustained =
+        dps_sustained_of(&resolved, &module_items, &drone_items, &drone_active_counts);
+    dps_sustained.fighter = fighter_dps_sustained.fighter;
+    dps_sustained.total += fighter_dps_sustained.fighter;
+
     Ok(DogmaStats {
         resources,
         validation,
@@ -466,13 +514,8 @@ pub(super) fn run_dogma(
         activatable_types,
         capacitor: capacitor_of(&resolved, &module_items, neut_gjs, factor_reload),
         tank: tank_of(&resolved, &module_items, damage_profile),
-        dps: dps_of(&resolved, &module_items, &drone_items, &drone_active_counts),
-        dps_sustained: dps_sustained_of(
-            &resolved,
-            &module_items,
-            &drone_items,
-            &drone_active_counts,
-        ),
+        dps,
+        dps_sustained,
         weapon_ranges,
         navigation: {
             // Prop modules (AB/MWD) are identified by speedFactor (20) +
@@ -518,6 +561,7 @@ pub(super) fn run_dogma(
         dps_range_curve,
         is_spoolable,
         burnout_seconds: burnout_seconds_full,
+        fighter_abilities: fighter_abilities_full,
     })
 }
 
@@ -525,14 +569,15 @@ pub(super) fn run_dogma(
 /// [`ValItem`]s from a resolved fit and [`validate`] them, so CPU/PG/calibration and
 /// slot/hardpoint checks reflect skills, rigs and fitting modules (RCUs, ACRs, …)
 /// rather than base attributes. Shared by the simulator (#172) and the optimizer's
-/// feasibility gate (#156). `drone_volume_of` supplies packaged drone volume for the
-/// bay check (the optimizer passes `|_| 0.0`, as it never reworks drones in-search).
+/// feasibility gate (#156). `packaged_volume_of` supplies a drone's or fighter's
+/// packaged unit volume for the bay checks (the optimizer passes `|_| 0.0`, as it
+/// never reworks drones/fighters in-search).
 pub(super) fn resolved_feasibility(
     resolved: &ResolvedFit,
     base_layout: &ShipLayout,
     effects_by_type: &EffectMap,
     fit: &Fit,
-    drone_volume_of: &dyn Fn(i64) -> f64,
+    packaged_volume_of: &dyn Fn(i64) -> f64,
 ) -> (ResourceUsage, Vec<FitProblem>, ShipLayout) {
     let s = &resolved.ship;
     let resolved_layout = ShipLayout {
@@ -553,8 +598,14 @@ pub(super) fn resolved_feasibility(
         calibration: s.get(1132),
         drone_bay: s.get(283),
         drone_bandwidth: s.get(1271),
+        fighter_tubes: s.get(2216) as i64,
+        fighter_light_slots: s.get(2217) as i64,
+        fighter_support_slots: s.get(2218) as i64,
+        fighter_heavy_slots: s.get(2219) as i64,
+        fighter_bay: s.get(2055),
     };
     let mut module_stores = resolved.modules.iter();
+    let mut fighter_stores = resolved.fighters.iter();
     let mut val_items: Vec<ValItem> = Vec::with_capacity(fit.items.len());
     for item in &fit.items {
         if is_ship_module(item.slot) {
@@ -575,6 +626,8 @@ pub(super) fn resolved_feasibility(
                 is_turret,
                 is_launcher,
                 drone_volume: 0.0,
+                fighter_category: None,
+                fighter_volume: 0.0,
                 quantity: item.quantity.max(1),
             });
         } else if item.slot == SlotKind::Drone {
@@ -585,7 +638,25 @@ pub(super) fn resolved_feasibility(
                 calibration: 0.0,
                 is_turret: false,
                 is_launcher: false,
-                drone_volume: drone_volume_of(item.type_id),
+                drone_volume: packaged_volume_of(item.type_id),
+                fighter_category: None,
+                fighter_volume: 0.0,
+                quantity: item.quantity.max(1),
+            });
+        } else if item.slot == SlotKind::Fighter {
+            let Some(store) = fighter_stores.next() else {
+                continue;
+            };
+            val_items.push(ValItem {
+                slot: SlotKind::Fighter,
+                cpu: 0.0,
+                powergrid: 0.0,
+                calibration: 0.0,
+                is_turret: false,
+                is_launcher: false,
+                drone_volume: 0.0,
+                fighter_category: fighter::category_of(store),
+                fighter_volume: packaged_volume_of(item.type_id),
                 quantity: item.quantity.max(1),
             });
         }
@@ -677,6 +748,85 @@ pub(super) fn max_active_drones(
                 .max(0)
         })
         .collect()
+}
+
+/// Fighter squadron problems + DPS (#877): fighters resolve like drones
+/// (aux pass-4 targets — carrier skill/ship fighter bonuses already apply),
+/// so `fighters` is parallel to `fighter_items`. Squadron size is the
+/// item's own `quantity`; oversizing it past the type's own
+/// `fighterSquadronMaxSize` is a validation problem, not a silent clamp
+/// (mirroring how an over-full drone bay is reported rather than trimmed).
+/// Each squadron fires one ability — `FitItem::fighter_ability` picks
+/// which, defaulting to the highest-DPS one the type carries; an explicit
+/// choice the type doesn't have is also a validation problem (the "one
+/// ability type" constraint — you can't select a channel your fighters
+/// don't carry). A pure support/EW squadron with no offensive ability
+/// contributes `None`/0 DPS.
+pub(super) fn fighter_of(
+    fighter_items: &[&FitItem],
+    fighters: &[AttrStore],
+) -> (
+    Vec<FitProblem>,
+    Vec<Option<FighterAbilityStats>>,
+    DpsBreakdown,
+    DpsBreakdown,
+) {
+    let mut problems = Vec::new();
+    let mut per_squadron = Vec::with_capacity(fighter_items.len());
+    let mut burst = 0.0;
+    let mut sustained = 0.0;
+    for (item, store) in fighter_items.iter().zip(fighters) {
+        let size = item.quantity.max(0) as f64;
+        let max_size = store.get(attr::FIGHTER_SQUADRON_MAX_SIZE);
+        if max_size > 0.0 && size > max_size {
+            problems.push(FitProblem {
+                severity: Severity::Error,
+                message: format!(
+                    "{} fighters in a squadron but the type caps it at {max_size:.0}",
+                    item.quantity
+                ),
+                item_index: None,
+            });
+        }
+        let abilities = fighter::abilities_of(store);
+        if let Some(requested) = item.fighter_ability.as_deref() {
+            if !abilities.iter().any(|a| a.key == requested) {
+                problems.push(FitProblem {
+                    severity: Severity::Error,
+                    message: format!(
+                        "Selected fighter ability \"{requested}\" isn't one this squadron carries"
+                    ),
+                    item_index: None,
+                });
+            }
+        }
+        let selected = fighter::selected_ability(&abilities, item.fighter_ability.as_deref());
+        per_squadron.push(selected.map(|a| {
+            let dps = a.dps_per_fighter * size;
+            let dps_sustained = a.sustained_dps_per_fighter * size;
+            burst += dps;
+            sustained += dps_sustained;
+            FighterAbilityStats {
+                key: a.key.to_string(),
+                label: a.label.to_string(),
+                dps,
+                dps_sustained,
+            }
+        }));
+    }
+    let breakdown = |fighter: f64| DpsBreakdown {
+        turret: 0.0,
+        missile: 0.0,
+        drone: 0.0,
+        fighter,
+        total: fighter,
+    };
+    (
+        problems,
+        per_squadron,
+        breakdown(burst),
+        breakdown(sustained),
+    )
 }
 
 /// DPS from a resolved fit (#174, #176). Turrets read finalized `damageMultiplier`
@@ -951,6 +1101,10 @@ fn applied_dps_at(
         turret: turret_dps,
         missile: missile_dps,
         drone: drone_dps,
+        // Fighter travel/application modeling is a documented follow-up
+        // (#877 scope cut) — fighters never contribute to applied DPS or
+        // the DPS-vs-range curve today.
+        fighter: 0.0,
         total: turret_dps + missile_dps + drone_dps,
     }
 }
@@ -1477,6 +1631,17 @@ pub(crate) fn simulate_fit(
         } else {
             0.0
         };
+        let (fighter_category, fighter_volume) = if item.slot == SlotKind::Fighter {
+            let category = fighter::category_from_flags(get(2212), get(2213), get(2214));
+            let volume = sde
+                .type_info(item.type_id)
+                .map_err(|e| e.to_string())?
+                .and_then(|t| t.volume)
+                .unwrap_or(0.0);
+            (category, volume)
+        } else {
+            (None, 0.0)
+        };
         let fitted = draws_fitting_resources(item.slot, item.state);
         val_items.push(ValItem {
             slot: item.slot,
@@ -1486,6 +1651,8 @@ pub(crate) fn simulate_fit(
             is_turret,
             is_launcher,
             drone_volume,
+            fighter_category,
+            fighter_volume,
             quantity: item.quantity.max(1),
         });
     }
@@ -1566,6 +1733,10 @@ pub(crate) fn simulate_fit(
         burnout_seconds: dogma
             .as_ref()
             .map(|d| d.burnout_seconds.clone())
+            .unwrap_or_default(),
+        fighter_abilities: dogma
+            .as_ref()
+            .map(|d| d.fighter_abilities.clone())
             .unwrap_or_default(),
     })
 }
@@ -1717,6 +1888,7 @@ mod tests {
             quantity: qty,
             active_drones: None,
             mutation: None,
+            fighter_ability: None,
         }
     }
 
@@ -1729,6 +1901,7 @@ mod tests {
             ship: AttrStore::new(),
             modules,
             drones,
+            fighters: Vec::new(),
             charges,
             unresolved: 0,
         }
@@ -2049,6 +2222,7 @@ mod tests {
             quantity: qty,
             active_drones: active,
             mutation: None,
+            fighter_ability: None,
         }
     }
     fn drone_store(bandwidth_used: f64) -> AttrStore {
@@ -2268,6 +2442,7 @@ mod tests {
             drones: Vec::new(),
             charges: Vec::new(),
             unresolved: 0,
+            fighters: Vec::new(),
         };
 
         let em_heavy = tank_of(&resolved, &[], &DamageProfile([1.0, 0.0, 0.0, 0.0]));
@@ -2295,6 +2470,7 @@ mod tests {
             drones: Vec::new(),
             charges: vec![None],
             unresolved: 0,
+            fighters: Vec::new(),
         };
         let items = [item(100, None, ModuleState::Active, 1)];
         let module_items: Vec<&FitItem> = items.iter().collect();
@@ -2337,6 +2513,7 @@ mod tests {
             drones: Vec::new(),
             charges: vec![None, Some(booster_charge.clone())],
             unresolved: 0,
+            fighters: Vec::new(),
         };
         let boosted = capacitor_of(&with_booster, &module_items, 0.0, false);
         assert!(
@@ -2351,6 +2528,7 @@ mod tests {
             drones: Vec::new(),
             charges: vec![None, Some(booster_charge)],
             unresolved: 0,
+            fighters: Vec::new(),
         };
         let gated = capacitor_of(&with_asb, &module_items, 0.0, false);
         assert!(
@@ -2519,6 +2697,7 @@ mod tests {
             drones: Vec::new(),
             charges: vec![None],
             unresolved: 0,
+            fighters: Vec::new(),
         };
         let em_only = DamageProfile([1.0, 0.0, 0.0, 0.0]);
         let items = [item(100, None, ModuleState::Active, 1)];
@@ -2560,6 +2739,7 @@ mod tests {
             drones: Vec::new(),
             charges: vec![None],
             unresolved: 0,
+            fighters: Vec::new(),
         };
         let em_only = DamageProfile([1.0, 0.0, 0.0, 0.0]);
         let items = [item(100, None, ModuleState::Online, 1)];
@@ -2590,6 +2770,11 @@ mod tests {
             calibration: 0.0,
             drone_bay: 0.0,
             drone_bandwidth: 0.0,
+            fighter_tubes: 0,
+            fighter_light_slots: 0,
+            fighter_support_slots: 0,
+            fighter_heavy_slots: 0,
+            fighter_bay: 0.0,
         }
     }
 
@@ -2617,6 +2802,7 @@ mod tests {
             drones: Vec::new(),
             charges: vec![None, None],
             unresolved: 0,
+            fighters: Vec::new(),
         };
         let items = [
             FitItem {

@@ -293,6 +293,19 @@ pub struct ShipLayout {
     pub calibration: f64,
     pub drone_bay: f64,
     pub drone_bandwidth: f64,
+    /// Total fighter launch tubes (#877, `fighterTubes`) — the hard cap on
+    /// simultaneously fitted squadrons regardless of category split (e.g. a
+    /// Thanatos has 4 tubes but 3 light + 2 support bays; only 4 total can
+    /// ever be launched).
+    pub fighter_tubes: i64,
+    /// Light fighter squadron bays (`fighterLightSlots`).
+    pub fighter_light_slots: i64,
+    /// Support fighter squadron bays (`fighterSupportSlots`).
+    pub fighter_support_slots: i64,
+    /// Heavy fighter squadron bays (`fighterHeavySlots`).
+    pub fighter_heavy_slots: i64,
+    /// Fighter bay volume, m³ (`fighterCapacity`).
+    pub fighter_bay: f64,
 }
 
 /// One mutaplasmid's roll data (#876): the base module types it can be

@@ -468,13 +468,18 @@ impl Sde {
             subsystem_slots: a(1367) as i64, // maxSubSystems
             // Tactical Destroyers (groupID 1305) have exactly 1 mode slot.
             mode_slots: (group_id == 1305) as i64,
-            turret_hardpoints: a(102) as i64,   // turretSlotsLeft
-            launcher_hardpoints: a(101) as i64, // launcherSlotsLeft
-            cpu_output: a(48),                  // cpuOutput
-            powergrid_output: a(11),            // powerOutput
-            calibration: a(1132),               // upgradeCapacity
-            drone_bay: a(283),                  // droneCapacity
-            drone_bandwidth: a(1271),           // droneBandwidth
+            turret_hardpoints: a(102) as i64,      // turretSlotsLeft
+            launcher_hardpoints: a(101) as i64,    // launcherSlotsLeft
+            cpu_output: a(48),                     // cpuOutput
+            powergrid_output: a(11),               // powerOutput
+            calibration: a(1132),                  // upgradeCapacity
+            drone_bay: a(283),                     // droneCapacity
+            drone_bandwidth: a(1271),              // droneBandwidth
+            fighter_tubes: a(2216) as i64,         // fighterTubes
+            fighter_light_slots: a(2217) as i64,   // fighterLightSlots
+            fighter_support_slots: a(2218) as i64, // fighterSupportSlots
+            fighter_heavy_slots: a(2219) as i64,   // fighterHeavySlots
+            fighter_bay: a(2055),                  // fighterCapacity
         }))
     }
 }

@@ -39,6 +39,7 @@ fn golden_pyfa_fits() {
         quantity: 1,
         active_drones: None,
         mutation: None,
+        fighter_ability: None,
     };
     let drone = |name: &str, qty: i32| FitItem {
         type_id: tid(name),
@@ -49,6 +50,7 @@ fn golden_pyfa_fits() {
         quantity: qty,
         active_drones: None,
         mutation: None,
+        fighter_ability: None,
     };
     let fit = |name: &str, items: Vec<FitItem>| Fit {
         id: "t".into(),
@@ -473,6 +475,7 @@ fn vedmak_spool_up_matches_hand_computed_ratio() {
             quantity: 1,
             active_drones: None,
             mutation: None,
+            fighter_ability: None,
         }],
         projected: Vec::new(),
     };
@@ -600,6 +603,7 @@ fn rapid_light_missile_launcher_sustained_dps_matches_hand_computed_ratio() {
             quantity: 1,
             active_drones: None,
             mutation: None,
+            fighter_ability: None,
         }],
         projected: Vec::new(),
     };
@@ -690,6 +694,7 @@ fn punisher_ancillary_armor_repairer_matches_hand_computed_burst_and_sustained()
             quantity: 1,
             active_drones: None,
             mutation: None,
+            fighter_ability: None,
         }],
         projected: Vec::new(),
     };
@@ -768,6 +773,7 @@ fn cyclone_ancillary_shield_booster_matches_hand_computed_burst_and_sustained() 
             quantity: 1,
             active_drones: None,
             mutation: None,
+            fighter_ability: None,
         }],
         projected: Vec::new(),
     };
@@ -873,6 +879,7 @@ fn rifter_reactive_armor_hardener_converges_to_hand_computed_em_resists() {
         quantity: 1,
         active_drones: None,
         mutation: None,
+        fighter_ability: None,
     }]);
     assert!(
         hardened.tank.rah_active,
@@ -975,6 +982,7 @@ fn rifter_cap_booster_stabilizes_an_otherwise_neut_unstable_hull() {
             quantity: 1,
             active_drones: None,
             mutation: None,
+            fighter_ability: None,
         }],
         6.0,
     );
@@ -1061,6 +1069,7 @@ fn mutated_mwd_max_roll_speed_bonus_changes_max_velocity() {
         quantity: 1,
         active_drones: None,
         mutation,
+        fighter_ability: None,
     };
     let run = |items: Vec<FitItem>| {
         let fit = Fit {
@@ -1151,6 +1160,7 @@ fn unmutated_item_is_unaffected_by_mutation_field() {
         quantity: 1,
         active_drones: None,
         mutation: None,
+        fighter_ability: None,
     };
     let fit = Fit {
         id: "t".into(),
@@ -1176,4 +1186,134 @@ fn unmutated_item_is_unaffected_by_mutation_field() {
     )
     .expect("dogma");
     assert!(d.dps.turret > 0.0, "unmutated gun should still deal damage");
+}
+
+/// Thanatos with 2 light fighter squadrons (#877) — the issue's acceptance
+/// scenario. No pyfa-oracle fixture exists for a fighter fit yet
+/// (`tools/pyfa-oracle/golden.json` predates #877), so per the issue's
+/// documented fallback (the same one #871/#872/#878 used) this is a
+/// hand-computed check against real Firbolg I / Thanatos attribute values
+/// (bundled SDE, cross-checked against everef.net).
+///
+/// Firbolg I (Gallente light fighter) carries two offensive abilities;
+/// `attackMissile` ("Rockets") is the higher-DPS one and wins auto-
+/// selection: 112.5 thermal damage per cycle, 1.0 damage multiplier,
+/// 5.0s rate of fire (`fighterAbilityAttackMissileDuration` 2233 = 5000ms).
+/// A Thanatos's own role bonus (`shipBonusCarrierG1FighterDamage`, effect
+/// 6601 — ship-intrinsic, exempt from the stacking penalty and from any
+/// skill gate since it's the ship's own effect, not a trained skill's)
+/// postPercent-boosts `fighterAbilityAttackMissileDamageMultiplier` by the
+/// ship's own `shipBonusCarrierG1` attribute (design value 5.0 = +5%) for
+/// any fighter requiring the "Gallente Carrier"-gated skill id the Firbolg
+/// carries as its second required skill — the *trained* Carrier skill's own
+/// self-scaling effect on that same ship attribute is skipped here (zero
+/// skills, untrained skills never resolve), so the ship's raw, unscaled
+/// design value is what applies: `112.5 × 1.05 / 5.0` = 23.625 dps per
+/// fighter. A full-size (6-fighter) squadron is 141.75 dps; two squadrons
+/// (both light, both under the hull's 3-light-bay / 4-tube caps) sum to
+/// 283.5 dps burst. No fighter ability carries clip/reload attributes in
+/// the SDE, so sustained equals burst exactly.
+#[test]
+fn thanatos_two_light_fighter_squadrons_matches_hand_computed_dps() {
+    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        eprintln!(
+            "thanatos_two_light_fighter_squadrons_matches_hand_computed_dps: EVE_SDE_PATH unset — skipping"
+        );
+        return;
+    };
+    let path = std::path::PathBuf::from(&path);
+    if !path.exists() {
+        eprintln!(
+            "thanatos_two_light_fighter_squadrons_matches_hand_computed_dps: {path:?} missing — skipping"
+        );
+        return;
+    }
+    let sde = Sde::open(&path).expect("open sde");
+    let dir = path.parent().unwrap();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    // Untrained (level 0) skills are skipped entirely by the dogma engine —
+    // avoids the trained Carrier skill's own self-scaling of the ship's role
+    // bonus, keeping the hand math exact against the ship's raw design value.
+    let zero_skills = |_: i64| 0.0;
+    let fit = Fit {
+        id: "t".into(),
+        name: "Thanatos".into(),
+        ship_type_id: tid("Thanatos"),
+        items: vec![
+            FitItem {
+                type_id: tid("Firbolg I"),
+                slot: SlotKind::Fighter,
+                index: 0,
+                state: ModuleState::Active,
+                charge_type_id: None,
+                quantity: 6,
+                active_drones: None,
+                mutation: None,
+                fighter_ability: None,
+            },
+            FitItem {
+                type_id: tid("Firbolg I"),
+                slot: SlotKind::Fighter,
+                index: 1,
+                state: ModuleState::Active,
+                charge_type_id: None,
+                quantity: 6,
+                active_drones: None,
+                mutation: None,
+                fighter_ability: None,
+            },
+        ],
+        projected: Vec::new(),
+    };
+    let layout = sde.ship_layout(fit.ship_type_id).unwrap().expect("layout");
+    let d = run_dogma(
+        &sde,
+        dir,
+        &fit,
+        &layout,
+        &zero_skills,
+        &DamageProfile::default(),
+        0.0,
+        None,
+        &[],
+        None,
+        None,
+        1.0,
+        false,
+    )
+    .expect("dogma");
+
+    assert!(
+        d.validation.is_empty(),
+        "2 light squadrons of 6 should be well within a Thanatos's tubes/bays/bay volume: {:?}",
+        d.validation
+    );
+    let expected = 112.5 * 1.05 / 5.0 * 6.0 * 2.0;
+    assert!(
+        (d.dps.fighter - expected).abs() < 0.5,
+        "fighter dps {} should match hand-computed {expected}",
+        d.dps.fighter
+    );
+    assert!(
+        (d.dps_sustained.fighter - expected).abs() < 0.5,
+        "no fighter ability reloads — sustained {} should equal burst {expected}",
+        d.dps_sustained.fighter
+    );
+    assert_eq!(
+        d.dps.total, d.dps.fighter,
+        "an unarmed hull's only DPS source is its fighters"
+    );
+    assert_eq!(d.fighter_abilities.len(), 2);
+    for squadron in d.fighter_abilities.iter().flatten() {
+        assert_eq!(
+            squadron.key, "attackMissile",
+            "Rockets outDPS the longer-range Fighter Missiles ability"
+        );
+        assert!((squadron.dps - expected / 2.0).abs() < 0.5);
+    }
 }

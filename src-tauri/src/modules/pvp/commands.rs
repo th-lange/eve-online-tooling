@@ -342,6 +342,7 @@ fn build_engine_fit(hull: i64, items: &[KmItem], cat_of: &dyn Fn(i64) -> i64) ->
                     quantity: (it.quantity_destroyed + it.quantity_dropped).max(1) as i32,
                     active_drones: None,
                     mutation: None,
+                    fighter_ability: None,
                 });
                 drone_idx += 1;
             }
@@ -367,6 +368,7 @@ fn build_engine_fit(hull: i64, items: &[KmItem], cat_of: &dyn Fn(i64) -> i64) ->
                 quantity: 1,
                 active_drones: None,
                 mutation: None,
+                fighter_ability: None,
             });
         }
     }
@@ -395,6 +397,7 @@ fn build_engine_fit(hull: i64, items: &[KmItem], cat_of: &dyn Fn(i64) -> i64) ->
             quantity: quantity as i32,
             active_drones: None,
             mutation: None,
+            fighter_ability: None,
         });
     }
     Fit {
@@ -732,6 +735,7 @@ pub async fn pvp_weapon_ammo(
                 quantity: 1,
                 active_drones: None,
                 mutation: None,
+                fighter_ability: None,
             }],
             projected: Vec::new(),
         };
@@ -992,6 +996,7 @@ mod tests {
                 quantity: 1,
                 active_drones: None,
                 mutation: None,
+                fighter_ability: None,
             }],
             projected: vec![],
         };

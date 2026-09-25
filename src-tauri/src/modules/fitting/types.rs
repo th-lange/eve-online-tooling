@@ -20,6 +20,9 @@ pub enum SlotKind {
     Implant,
     Booster,
     Cargo,
+    /// A fighter squadron launched from a carrier/super's fighter tubes
+    /// (#877). `FitItem::quantity` is the squadron's fighter count.
+    Fighter,
     /// Tactical Destroyer mode slot (one per T3D hull).
     Mode,
 }
@@ -82,6 +85,17 @@ pub struct FitItem {
     /// item — the overwhelming majority.
     #[serde(default)]
     pub mutation: Option<ItemMutation>,
+    /// Selected offensive ability for a fighter squadron (#877), a stable
+    /// key from `engine::fighter::abilities_of` (e.g. `"attackMissile"`).
+    /// `None` = auto (the squadron's highest-DPS ability) — the overwhelming
+    /// majority, since most fighter types only ever carry one damage
+    /// ability anyway. Only meaningful for `slot == Fighter`; a squadron
+    /// with no offensive ability at all (a pure support/EW type) ignores
+    /// this. An explicit choice the type doesn't actually carry is a
+    /// validation problem (the "one ability type" constraint — you can't
+    /// select a channel your fighters don't have).
+    #[serde(default)]
+    pub fighter_ability: Option<String>,
 }
 
 /// The editable fit document. `id` is a stable key for local storage; `items`
@@ -200,6 +214,11 @@ pub struct DpsBreakdown {
     pub turret: f64,
     pub missile: f64,
     pub drone: f64,
+    /// Fighter squadron DPS (#877) — each squadron's selected ability ×
+    /// squadron size. Not yet folded into applied-DPS/DPS-vs-range
+    /// (travel/application modeling for fighters is a documented follow-up),
+    /// so `applied_dps`/`dps_range_curve` always carry `0.0` here.
+    pub fighter: f64,
     pub total: f64,
 }
 
@@ -427,6 +446,29 @@ pub struct FitStats {
     /// engine runs.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub burnout_seconds: Vec<Option<f64>>,
+    /// Each fitted fighter squadron's selected offensive ability + its DPS
+    /// contribution (#877), parallel to `Fit::items` — `None` for non-fighter
+    /// items and for a pure support/EW squadron with no offensive ability at
+    /// all. Empty until the dogma engine runs.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub fighter_abilities: Vec<Option<FighterAbilityStats>>,
+}
+
+/// One fitted fighter squadron's selected ability + its DPS contribution
+/// (#877). See [`FitStats::fighter_abilities`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FighterAbilityStats {
+    /// Stable ability key (`FitItem::fighter_ability` uses the same key).
+    pub key: String,
+    /// Human label, e.g. "Rockets", "Fighter Missiles".
+    pub label: String,
+    /// This squadron's total burst DPS at its current size.
+    pub dps: f64,
+    /// Sustained DPS (#871 reload accounting via `engine::cycle`); equal to
+    /// `dps` today since no fighter ability carries clip/reload attributes
+    /// in the SDE yet.
+    pub dps_sustained: f64,
 }
 
 /// One category of electronic warfare projected onto the fit (presence only).
@@ -492,6 +534,7 @@ mod tests {
                 quantity: 1,
                 active_drones: None,
                 mutation: None,
+                fighter_ability: None,
             }],
             projected: Vec::new(),
         };

@@ -130,6 +130,7 @@ pub(crate) fn import_eft_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
                 .mutation
                 .as_ref()
                 .and_then(|pm| resolve_mutation(sde, type_id, pm)),
+            fighter_ability: None,
         });
     }
 
@@ -137,9 +138,10 @@ pub(crate) fn import_eft_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
         let Some((type_id, _)) = sde.type_by_name(&e.name).map_err(|e| e.to_string())? else {
             continue;
         };
-        // Category 18 = Drone; everything else trailing is cargo.
+        // Category 18 = Drone; 87 = Fighter; everything else trailing is cargo.
         let slot = match sde.type_category(type_id).map_err(|e| e.to_string())? {
             Some(18) => SlotKind::Drone,
+            Some(87) => SlotKind::Fighter,
             _ => SlotKind::Cargo,
         };
         items.push(FitItem {
@@ -151,6 +153,7 @@ pub(crate) fn import_eft_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
             quantity: e.quantity,
             active_drones: None,
             mutation: None,
+            fighter_ability: None,
         });
     }
 
@@ -248,6 +251,7 @@ pub(crate) fn import_dna_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
                     quantity: 1,
                     active_drones: None,
                     mutation: None,
+                    fighter_ability: None,
                 });
             }
         } else {
@@ -260,6 +264,7 @@ pub(crate) fn import_dna_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
                 quantity: entry.quantity.max(1),
                 active_drones: None,
                 mutation: None,
+                fighter_ability: None,
             });
         }
     }
@@ -408,6 +413,7 @@ pub(crate) fn import_list_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
                     quantity: 1,
                     active_drones: None,
                     mutation: None,
+                    fighter_ability: None,
                 });
             }
         } else {
@@ -420,6 +426,7 @@ pub(crate) fn import_list_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
                 quantity: qty.min(i32::MAX as i64) as i32,
                 active_drones: None,
                 mutation: None,
+                fighter_ability: None,
             });
         }
     }
@@ -451,12 +458,13 @@ fn next_slot_index(items: &[FitItem], slot: SlotKind) -> i32 {
         .map_or(0, |m| m + 1)
 }
 
-/// Classify a type's slot: drones (category 18) and implants (20) by category,
-/// mode items (group 1306 — Ship Modifiers) by group, otherwise from its
-/// slot-defining dogma effects, falling back to Cargo.
+/// Classify a type's slot: drones (category 18), fighters (87) and implants
+/// (20) by category, mode items (group 1306 — Ship Modifiers) by group,
+/// otherwise from its slot-defining dogma effects, falling back to Cargo.
 fn classify_slot(sde: &Sde, type_id: i64) -> Result<SlotKind, String> {
     match sde.type_category(type_id).map_err(|e| e.to_string())? {
         Some(18) => return Ok(SlotKind::Drone),
+        Some(87) => return Ok(SlotKind::Fighter),
         Some(20) => return Ok(SlotKind::Implant),
         _ => {}
     }
@@ -483,6 +491,7 @@ fn classify_slots_batch(sde: &Sde, type_ids: &[i64]) -> Result<HashMap<i64, Slot
         .map(|&id| {
             let slot = match categories.get(&id) {
                 Some(18) => SlotKind::Drone,
+                Some(87) => SlotKind::Fighter,
                 Some(20) => SlotKind::Implant,
                 _ => {
                     if groups.get(&id).copied() == Some(1306) {
@@ -763,6 +772,7 @@ fn resolve_module_costs(
             modules,
             skills,
             drones: Vec::new(),
+            fighters: Vec::new(),
             charges,
             gang_modules: Vec::new(),
         },
@@ -802,6 +812,7 @@ pub fn fitting_add_item(
         quantity: 1,
         active_drones: None,
         mutation: None,
+        fighter_ability: None,
     });
     Ok(fit)
 }
@@ -860,11 +871,12 @@ pub(crate) fn fit_to_eft(sde: &Sde, fit: &Fit) -> String {
         }
     }
     let mut extras = Vec::new();
-    for i in fit
-        .items
-        .iter()
-        .filter(|i| matches!(i.slot, SlotKind::Drone | SlotKind::Cargo))
-    {
+    for i in fit.items.iter().filter(|i| {
+        matches!(
+            i.slot,
+            SlotKind::Drone | SlotKind::Fighter | SlotKind::Cargo
+        )
+    }) {
         extras.push(ParsedExtra {
             name: sde.type_name_or_id(i.type_id),
             quantity: i.quantity,
@@ -1033,7 +1045,12 @@ pub(crate) fn fit_to_multibuy(sde: &Sde, fit: &Fit) -> String {
     let mut extras: Vec<&FitItem> = fit
         .items
         .iter()
-        .filter(|i| matches!(i.slot, SlotKind::Drone | SlotKind::Cargo))
+        .filter(|i| {
+            matches!(
+                i.slot,
+                SlotKind::Drone | SlotKind::Fighter | SlotKind::Cargo
+            )
+        })
         .collect();
     extras.sort_by_key(|i| i.index);
     for i in extras {
@@ -1585,6 +1602,7 @@ mod tests {
             quantity: qty,
             active_drones: None,
             mutation: None,
+            fighter_ability: None,
         }
     }
 
@@ -1615,6 +1633,7 @@ mod tests {
                 quantity: 1,
                 active_drones: None,
                 mutation: None,
+                fighter_ability: None,
             }],
             projected: Vec::new(),
         };
@@ -1656,6 +1675,7 @@ mod tests {
                 quantity: 1,
                 active_drones: None,
                 mutation: None,
+                fighter_ability: None,
             }],
             projected: Vec::new(),
         };
@@ -1707,6 +1727,7 @@ mod tests {
                 quantity: 1,
                 active_drones: None,
                 mutation: None,
+                fighter_ability: None,
             }],
             projected: Vec::new(),
         };
@@ -1804,6 +1825,7 @@ mod tests {
                 quantity: 1,
                 active_drones: None,
                 mutation: None,
+                fighter_ability: None,
             }],
             projected: Vec::new(),
         };
@@ -1892,6 +1914,7 @@ mod tests {
                 quantity: 1,
                 active_drones: None,
                 mutation: None,
+                fighter_ability: None,
             }],
             projected: Vec::new(),
         };
@@ -1964,6 +1987,7 @@ mod tests {
                 quantity: 1,
                 active_drones: None,
                 mutation: None,
+                fighter_ability: None,
             }],
             projected: Vec::new(),
         };
@@ -2453,6 +2477,7 @@ Nanite Repair Paste\t50\tCommodity";
                     quantity: 1,
                     active_drones: None,
                     mutation: None,
+                    fighter_ability: None,
                 },
                 FitItem {
                     type_id: gun,
@@ -2463,6 +2488,7 @@ Nanite Repair Paste\t50\tCommodity";
                     quantity: 1,
                     active_drones: None,
                     mutation: None,
+                    fighter_ability: None,
                 },
                 FitItem {
                     type_id: drone,
@@ -2473,6 +2499,7 @@ Nanite Repair Paste\t50\tCommodity";
                     quantity: 5,
                     active_drones: None,
                     mutation: None,
+                    fighter_ability: None,
                 },
             ],
             projected: Vec::new(),

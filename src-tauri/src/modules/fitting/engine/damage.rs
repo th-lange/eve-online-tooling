@@ -43,6 +43,10 @@ pub fn damage(turrets: &[Weapon], missiles: &[Weapon], drones: &[Weapon]) -> Dps
         turret,
         missile,
         drone,
+        // Fighters are computed separately (`stats::fighter_of`) and merged
+        // in by the caller — this aggregator only ever sees turret/missile/
+        // drone weapons.
+        fighter: 0.0,
         total: turret + missile + drone,
     }
 }

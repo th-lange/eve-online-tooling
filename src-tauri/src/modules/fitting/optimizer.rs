@@ -170,6 +170,7 @@ pub(super) fn new_module(type_id: i64, slot: SlotKind, index: i32) -> FitItem {
         quantity: 1,
         active_drones: None,
         mutation: None,
+        fighter_ability: None,
     }
 }
 
@@ -1001,6 +1002,7 @@ fn fit_drone_bay(
             quantity: count as i32,
             active_drones: None,
             mutation: None,
+            fighter_ability: None,
         });
     }
 }
@@ -1204,6 +1206,7 @@ mod tests {
             ship: AttrStore::new(),
             modules,
             drones: Vec::new(),
+            fighters: Vec::new(),
             charges: Vec::new(),
             unresolved: 0,
         }
@@ -1227,6 +1230,11 @@ mod tests {
             calibration: 400.0,
             drone_bay: 0.0,
             drone_bandwidth: 0.0,
+            fighter_tubes: 0,
+            fighter_light_slots: 0,
+            fighter_support_slots: 0,
+            fighter_heavy_slots: 0,
+            fighter_bay: 0.0,
         }
     }
 
@@ -1240,6 +1248,7 @@ mod tests {
             quantity: qty,
             active_drones: None,
             mutation: None,
+            fighter_ability: None,
         }
     }
 

@@ -84,6 +84,25 @@ pub mod attr {
     /// build-up while overheated, as a fraction of rack capacity per second
     /// (`heatAbsorbtionRateModifier`).
     pub const HEAT_ABSORPTION_RATE: i64 = 1180;
+    /// Ship attribute: fighter bay volume, m³ (`fighterCapacity`, #877).
+    pub const FIGHTER_CAPACITY: i64 = 2055;
+    /// Ship attribute: total fighter launch tubes (`fighterTubes`) — caps
+    /// simultaneously fitted squadrons regardless of category split.
+    pub const FIGHTER_TUBES: i64 = 2216;
+    /// Ship attribute: light fighter squadron bays (`fighterLightSlots`).
+    pub const FIGHTER_LIGHT_SLOTS: i64 = 2217;
+    /// Ship attribute: support fighter squadron bays (`fighterSupportSlots`).
+    pub const FIGHTER_SUPPORT_SLOTS: i64 = 2218;
+    /// Ship attribute: heavy fighter squadron bays (`fighterHeavySlots`).
+    pub const FIGHTER_HEAVY_SLOTS: i64 = 2219;
+    /// Fighter-type attribute: fighters per squadron (`fighterSquadronMaxSize`).
+    pub const FIGHTER_SQUADRON_MAX_SIZE: i64 = 2215;
+    /// Fighter-type attribute: flags a light-category squadron (`fighterSquadronIsLight`).
+    pub const FIGHTER_SQUADRON_IS_LIGHT: i64 = 2212;
+    /// Fighter-type attribute: flags a support-category squadron (`fighterSquadronIsSupport`).
+    pub const FIGHTER_SQUADRON_IS_SUPPORT: i64 = 2213;
+    /// Fighter-type attribute: flags a heavy-category squadron (`fighterSquadronIsHeavy`).
+    pub const FIGHTER_SQUADRON_IS_HEAVY: i64 = 2214;
 }
 
 /// A single attribute's base value plus accumulating modifier buckets.

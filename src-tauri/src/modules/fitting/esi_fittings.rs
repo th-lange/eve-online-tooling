@@ -33,10 +33,13 @@ pub fn flag_to_slot(flag: &str) -> Option<(SlotKind, i32)> {
     if let Some(i) = index_of("SubSystemSlot") {
         return Some((SlotKind::Subsystem, i));
     }
+    if let Some(i) = index_of("FighterTube") {
+        return Some((SlotKind::Fighter, i));
+    }
     match flag {
         "DroneBay" => Some((SlotKind::Drone, 0)),
         "Cargo" => Some((SlotKind::Cargo, 0)),
-        _ => None, // FighterBay / ServiceSlot / implants — not placed in the editor
+        _ => None, // FighterBay (unfitted spares) / ServiceSlot / implants — not placed in the editor
     }
 }
 
@@ -50,6 +53,7 @@ pub fn slot_to_flag(slot: SlotKind, index: i32) -> Option<String> {
         SlotKind::Low => format!("LoSlot{index}"),
         SlotKind::Rig => format!("RigSlot{index}"),
         SlotKind::Subsystem => format!("SubSystemSlot{index}"),
+        SlotKind::Fighter => format!("FighterTube{index}"),
         SlotKind::Drone => "DroneBay".into(),
         SlotKind::Cargo => "Cargo".into(),
         SlotKind::Implant | SlotKind::Booster | SlotKind::Mode => return None,
@@ -206,6 +210,7 @@ fn module(type_id: i64, slot: SlotKind, index: i32, state: ModuleState, quantity
         quantity,
         active_drones: None,
         mutation: None,
+        fighter_ability: None,
     }
 }
 

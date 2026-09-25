@@ -13,6 +13,7 @@ pub mod capacitor;
 pub mod cycle;
 pub mod damage;
 pub mod effects;
+pub mod fighter;
 pub mod heat;
 pub mod modifier;
 pub mod navigation;
