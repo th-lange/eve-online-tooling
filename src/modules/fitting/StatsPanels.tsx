@@ -709,7 +709,8 @@ export function DpsBreakdownPanel({
             <div className="text-xs text-zinc-500">
               {shown.turret > 0 && `turret ${shown.turret.toFixed(0)} `}
               {shown.missile > 0 && `· missile ${shown.missile.toFixed(0)} `}
-              {shown.drone > 0 && `· drone ${shown.drone.toFixed(0)}`}
+              {shown.drone > 0 && `· drone ${shown.drone.toFixed(0)} `}
+              {shown.fighter > 0 && `· fighter ${shown.fighter.toFixed(0)}`}
             </div>
           )}
           {factorReload && dpsSustained && (

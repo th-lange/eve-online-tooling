@@ -12,6 +12,7 @@ export const SLOT_BADGE: Partial<Record<SlotKind, string>> = {
   subsystem: "Sub",
   implant: "Implant",
   drone: "Drone",
+  fighter: "Fighter",
   cargo: "Cargo",
   mode: "Mode",
 };

@@ -23,6 +23,11 @@ const RIFTER_LAYOUT: ShipLayout = {
   calibration: 400,
   droneBay: 0,
   droneBandwidth: 0,
+  fighterTubes: 0,
+  fighterLightSlots: 0,
+  fighterSupportSlots: 0,
+  fighterHeavySlots: 0,
+  fighterBay: 0,
 };
 
 const FIT: Fit = {
@@ -104,7 +109,7 @@ const STATS: FitStats = {
     rahActive: false,
     passiveShieldS: 0,
   },
-  dps: { turret: 45.5, missile: 0, drone: 0, total: 45.5 },
+  dps: { turret: 45.5, missile: 0, drone: 0, fighter: 0, total: 45.5 },
   navigation: {
     maxVelocity: 480,
     alignTime: 3.2,

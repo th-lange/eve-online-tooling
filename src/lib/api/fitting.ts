@@ -62,6 +62,7 @@ export type SlotKind =
   | "implant"
   | "booster"
   | "cargo"
+  | "fighter"
   | "mode";
 
 /** A module's activation state. */
@@ -93,6 +94,10 @@ export interface FitItem {
   /** Mutaplasmid roll applied to this item (#876), absent for an unmutated
    *  item — the overwhelming majority. */
   mutation?: ItemMutation | null;
+  /** Selected offensive ability for a fighter squadron (#877), e.g.
+   *  `"attackMissile"`. `null`/absent = auto (the squadron's highest-DPS
+   *  ability). Only meaningful for `slot === "fighter"`. */
+  fighterAbility?: string | null;
 }
 
 /** The editable fit document. */
@@ -124,6 +129,14 @@ export interface ShipLayout {
   calibration: number;
   droneBay: number;
   droneBandwidth: number;
+  /** Total fighter launch tubes — caps simultaneously fitted squadrons
+   *  regardless of category split (#877). */
+  fighterTubes: number;
+  fighterLightSlots: number;
+  fighterSupportSlots: number;
+  fighterHeavySlots: number;
+  /** Fighter bay volume, m³. */
+  fighterBay: number;
 }
 
 /** Fitting-resource usage vs the hull's output. */
@@ -205,6 +218,9 @@ export interface DpsBreakdown {
   turret: number;
   missile: number;
   drone: number;
+  /** Fighter squadron DPS (#877); not yet folded into applied-DPS/DPS-vs-
+   *  range (travel/application modeling is a documented follow-up). */
+  fighter: number;
   total: number;
 }
 
@@ -325,6 +341,19 @@ export interface FitStats {
    * currently overheated (or that never build meaningful rack heat). An
    * expected-value estimate, not an exact prediction. */
   burnoutSeconds?: Array<number | null>;
+  /** Each fitted fighter squadron's selected offensive ability + its DPS
+   *  contribution (#877), parallel to `Fit.items` — `null` for non-fighter
+   *  items and for a pure support/EW squadron with no offensive ability. */
+  fighterAbilities?: Array<FighterAbilityStats | null>;
+}
+
+/** One fitted fighter squadron's selected ability + its DPS contribution
+ *  (#877). See `FitStats.fighterAbilities`. */
+export interface FighterAbilityStats {
+  key: string;
+  label: string;
+  dps: number;
+  dpsSustained: number;
 }
 
 /** One priced line of a whole-fit valuation. */

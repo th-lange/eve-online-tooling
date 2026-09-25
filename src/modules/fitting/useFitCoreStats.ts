@@ -143,6 +143,7 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
         rig: free("rig", ship.rigSlots),
         subsystem: free("subsystem", ship.subsystemSlots),
         mode: free("mode", ship.modeSlots),
+        fighter: free("fighter", ship.fighterTubes),
       },
       cpu: (res?.cpuOutput ?? ship.cpuOutput) - (res?.cpuUsed ?? 0),
       pg:

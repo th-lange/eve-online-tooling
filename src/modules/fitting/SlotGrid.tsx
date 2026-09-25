@@ -18,6 +18,7 @@ import {
   sdeMutaplasmidsForType,
   type AmmoRow,
   type Fit,
+  type FighterAbilityStats,
   type ItemMutation,
   type ModuleState,
   type SlotKind,
@@ -44,6 +45,7 @@ const SECONDARY_BANKS: [SlotKind, string][] = [
   ["subsystem", "Subsystem"],
   ["implant", "Implants"],
   ["drone", "Drones"],
+  ["fighter", "Fighters"],
   ["cargo", "Cargo"],
 ];
 
@@ -456,6 +458,7 @@ function ModuleRow({
   droneActive,
   droneMaxActive,
   burnoutSeconds,
+  fighterAbility,
 }: {
   item: Fit["items"][number];
   index: number;
@@ -486,6 +489,8 @@ function ModuleRow({
   /** Overheat burnout estimate (#874, seconds) — only meaningful while
    *  `it.state === "overheated"`. */
   burnoutSeconds: number | null | undefined;
+  /** Selected fighter ability + DPS for this squadron (#877). */
+  fighterAbility?: FighterAbilityStats | null;
 }) {
   const it = item;
   const i = index;
@@ -495,7 +500,8 @@ function ModuleRow({
   const canToggle = slot === "high" || slot === "mid" || slot === "low";
   // Only cargo/drone stacks carry more than one — modules/rigs are always
   // exactly one per slot index, so the live stepper only applies here.
-  const editableQuantity = slot === "cargo" || slot === "drone";
+  const editableQuantity =
+    slot === "cargo" || slot === "drone" || slot === "fighter";
   const offline = it.state === "offline";
   // One icon shows the module's state and cycles it on click: activatable
   // modules run active → overheated → online → offline → active; passive /
@@ -675,6 +681,13 @@ function ModuleRow({
           />
         </div>
       )}
+      {slot === "fighter" && (
+        <div className="pl-6 text-xs text-zinc-500">
+          {fighterAbility
+            ? `${fighterAbility.label} · ${formatInt(fighterAbility.dps)} dps`
+            : "no offensive ability"}
+        </div>
+      )}
     </li>
   );
 }
@@ -702,6 +715,7 @@ function SlotBank({
   droneActive,
   droneMaxActive,
   burnoutSeconds,
+  fighterAbilities,
   rangeOf,
   activatable,
   ammoStats,
@@ -729,6 +743,9 @@ function SlotBank({
   /** Overheat burnout estimate per fitted item (#874, seconds), parallel to
    *  `fit.items`. */
   burnoutSeconds?: Array<number | null>;
+  /** Selected fighter ability + DPS per squadron (#877), parallel to
+   *  `fit.items`. */
+  fighterAbilities?: Array<FighterAbilityStats | null>;
   rangeOf: Map<string, WeaponRange>;
   activatable: Set<number>;
   ammoStats?: Record<number, AmmoRow>;
@@ -792,6 +809,7 @@ function SlotBank({
               droneActive={droneActive?.[i]}
               droneMaxActive={droneMaxActive?.[i]}
               burnoutSeconds={burnoutSeconds?.[i]}
+              fighterAbility={fighterAbilities?.[i]}
             />
           ))}
         </ul>
@@ -842,12 +860,14 @@ export function SlotGrid({
   const droneActive = stats.data?.droneActive;
   const droneMaxActive = stats.data?.droneMaxActive;
   const burnoutSeconds = stats.data?.burnoutSeconds;
+  const fighterAbilities = stats.data?.fighterAbilities;
   const counts: Partial<Record<SlotKind, number>> = {
     high: layout.highSlots,
     mid: layout.midSlots,
     low: layout.lowSlots,
     rig: layout.rigSlots,
     mode: layout.modeSlots,
+    fighter: layout.fighterTubes,
   };
 
   const bankProps = {
@@ -864,6 +884,7 @@ export function SlotGrid({
     droneActive,
     droneMaxActive,
     burnoutSeconds,
+    fighterAbilities,
     rangeOf,
     activatable,
     ammoStats,
