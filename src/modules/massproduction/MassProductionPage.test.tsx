@@ -15,6 +15,7 @@ const PLAN: MassProductionPlan = {
       typeId: 1073,
       ownedCopies: 30,
       totalRuns: 300,
+      assumed: null,
     },
   ],
   groups: [
@@ -22,6 +23,26 @@ const PLAN: MassProductionPlan = {
       groupName: "Mineral",
       categoryName: "Material",
       items: [{ typeId: 11399, name: "Morphite", quantity: 5010 }],
+    },
+  ],
+};
+
+const HYPOTHETICAL_PLAN: MassProductionPlan = {
+  unresolvedNames: [],
+  matchedBlueprints: [
+    {
+      name: "Republic Fleet Gyrostabilizer Blueprint",
+      typeId: 2000,
+      ownedCopies: 0,
+      totalRuns: 1,
+      assumed: { runs: 1, materialEfficiency: 0, specialEdition: true },
+    },
+  ],
+  groups: [
+    {
+      groupName: "Mineral",
+      categoryName: "Material",
+      items: [{ typeId: 34, name: "Tritanium", quantity: 100 }],
     },
   ],
 };
@@ -63,6 +84,35 @@ describe("MassProductionPage", () => {
         "5MN Microwarpdrive II Blueprint",
         "Not A Real Blueprint",
       ],
+      mode: "owned",
+      hypotheticalConfig: { t1Runs: 1, t1Me: 10, t2Me: 2 },
+    });
+  });
+
+  it("switches to Hypothetical mode, sends the config, and flags special-edition items", async () => {
+    mockInvoke({
+      sde_status: () => SDE_OK,
+      massprod_plan: () => HYPOTHETICAL_PLAN,
+    });
+    renderWithQuery(<MassProductionPage />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Hypothetical" }),
+    );
+    // The settings row only shows up in Hypothetical mode.
+    expect(screen.getByText("T1 assumed runs")).toBeInTheDocument();
+
+    await pasteAndImport("Republic Fleet Gyrostabilizer Blueprint");
+
+    expect(
+      await screen.findByText("Republic Fleet Gyrostabilizer Blueprint"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Special edition · ME0")).toBeInTheDocument();
+
+    expect(invokeMock).toHaveBeenCalledWith("massprod_plan", {
+      blueprintNames: ["Republic Fleet Gyrostabilizer Blueprint"],
+      mode: "hypothetical",
+      hypotheticalConfig: { t1Runs: 1, t1Me: 10, t2Me: 2 },
     });
   });
 

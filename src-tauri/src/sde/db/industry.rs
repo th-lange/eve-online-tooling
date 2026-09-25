@@ -76,6 +76,26 @@ impl Sde {
         self.materials_for(blueprint_type_id, activity::MANUFACTURING)
     }
 
+    /// A blueprint's own documented run cap on a single BPC —
+    /// `industryBlueprints.maxProductionLimit` — the real per-BPC run
+    /// ceiling CCP defines for that blueprint type (distinct from a
+    /// player's chosen run count). Used as the assumed run count for T2
+    /// blueprints in Mass Production's Hypothetical mode (#893), since this
+    /// is a documented game-mechanics cap, not a guess. `None` if the
+    /// blueprint has no `industryBlueprints` row (shouldn't happen for a
+    /// real blueprint type, but the SDE occasionally has gaps).
+    pub fn max_production_limit(&self, blueprint_type_id: i64) -> Result<Option<i64>, SdeError> {
+        self.conn
+            .query_row(
+                "SELECT maxProductionLimit FROM industryBlueprints WHERE typeID = ?1",
+                params![blueprint_type_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )
+            .optional()
+            .map(Option::flatten)
+            .map_err(Into::into)
+    }
+
     /// Manufacturing inputs (activity 1) for *every* blueprint, keyed by
     /// blueprint type id — one query for the whole catalogue instead of one
     /// per blueprint (#765). A blueprint absent from the map simply has no
@@ -644,5 +664,26 @@ mod tests {
         assert_eq!(bps.len(), 1);
         assert_eq!(bps[0].blueprint_type_id, 999);
         assert_eq!(bps[0].product_type_id, 100);
+    }
+
+    #[test]
+    fn max_production_limit_reads_the_real_bpc_run_cap() {
+        // Spot-checked against a real local Fuzzwork SDE snapshot (2026-09-25):
+        // typeID 1073 is "5MN Microwarpdrive II Blueprint", and
+        // `industryBlueprints.maxProductionLimit` for it is genuinely 10 —
+        // this locks the query against that real value (#893).
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE industryBlueprints(typeID INT, maxProductionLimit INT);
+             INSERT INTO industryBlueprints VALUES (1073, 10), (999, NULL);",
+        )
+        .unwrap();
+        let sde = Sde::from_connection(conn);
+
+        assert_eq!(sde.max_production_limit(1073).unwrap(), Some(10));
+        // A row with a NULL limit is a data gap, not zero.
+        assert_eq!(sde.max_production_limit(999).unwrap(), None);
+        // No row at all for this blueprint.
+        assert_eq!(sde.max_production_limit(424242).unwrap(), None);
     }
 }
