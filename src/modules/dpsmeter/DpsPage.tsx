@@ -5,6 +5,7 @@ import { FightBreakdown, TackleTags } from "./FightBreakdown";
 import { PrimaryExtras } from "./HitQualityIndicators";
 import { LogFilePanel } from "./LogFilePanel";
 import { MiningPanel } from "./MiningPanel";
+import { OverviewExportPanel } from "./OverviewExportPanel";
 import { PlaybackControls } from "./PlaybackControls";
 import { PlaybackTimeline } from "./PlaybackTimeline";
 import { useDpsPlayback } from "./useDpsPlayback";
@@ -65,6 +66,16 @@ export function DpsPage() {
           onStop={() => void dps.stop()}
           onStart={() => void dps.start()}
           onPlayCurrent={dps.playCurrent}
+        />
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-start gap-3">
+        <OverviewExportPanel
+          path={dps.overviewFile}
+          onSetPath={dps.setOverviewFile}
+          plan={dps.extractionPlan}
+          error={dps.overviewError}
+          onLoad={() => void dps.loadOverviewExport()}
         />
       </div>
 

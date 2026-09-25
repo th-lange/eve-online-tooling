@@ -37,8 +37,20 @@
 //! verifiable literal phrase text could be found, so those categories stay
 //! English-only for now: a detected non-English log falls back to the
 //! English markers for them (skips the line rather than misparsing it).
+//!
+//! # Overview-pack-aware attribution (#869)
+//!
+//! [`extract_actor`] hardcodes EVE's *default* overview layout
+//! (`NAME[CORP](SHIP)`), but a custom overview pack changes that field
+//! order and the separators around each field. [`super::overview`] turns a
+//! user's overview export into an [`ExtractionPlan`]; [`parse_line_with_plan`]
+//! threads it into [`extract_actor`], which tries the plan first
+//! ([`extract_with_plan`]) and falls back to the default scan whenever the
+//! plan doesn't yield a pilot name. [`parse_line`] (no plan) is unaffected.
 
 use serde::Serialize;
+
+use super::overview::{ExtractionPlan, LabelField};
 
 /// A gamelog's detected client language. Defaults to [`Lang::En`] when the
 /// header doesn't match any known localized `Listener:` phrase.
@@ -223,7 +235,23 @@ pub struct DpsEvent {
 /// `lang` is the file's already-detected [`Lang`] (see [`detect_lang`]) —
 /// this function never re-detects per line, so a caller processing a whole
 /// file only pays the header scan once.
+///
+/// Equivalent to [`parse_line_with_plan`] with no plan — always uses the
+/// default-format pilot/ship scan. Callers that don't have an overview
+/// export configured (or don't care about pilot/ship at all, e.g. the log
+/// summary's activity buckets) use this directly.
 pub fn parse_line(line: &str, lang: Lang) -> Vec<DpsEvent> {
+    parse_line_with_plan(line, lang, None)
+}
+
+/// Same as [`parse_line`], but resolves a damage line's pilot/ship through
+/// `plan` (#869) when one is given — see [`extract_actor`]. `plan: None`
+/// behaves identically to [`parse_line`].
+pub fn parse_line_with_plan(
+    line: &str,
+    lang: Lang,
+    plan: Option<&ExtractionPlan>,
+) -> Vec<DpsEvent> {
     if line.contains("(mining)") {
         return parse_mining(line).into_iter().collect();
     }
@@ -255,7 +283,7 @@ pub fn parse_line(line: &str, lang: Lang) -> Vec<DpsEvent> {
     // Pilot/ship/weapon are only meaningful (and only present) on damage lines;
     // they drive the breakdown tables.
     let (pilot, ship, weapon, quality) = match kind {
-        EventKind::DamageOut | EventKind::DamageIn => extract_actor(line),
+        EventKind::DamageOut | EventKind::DamageIn => extract_actor(line, plan),
         _ => (None, None, None, None),
     };
     let mut events = vec![DpsEvent {
@@ -464,8 +492,17 @@ fn first_inner_text(s: &str) -> Option<String> {
 /// discards that wrapper (and any other single-level markup) before the
 /// `[`/`(` bracket search runs, so it needs no special casing here — see the
 /// `localized_wrapper_tags_are_stripped_before_bracket_parsing` test.
+///
+/// `plan` (#869), when given, is tried first via [`extract_with_plan`] — a
+/// user's overview export may render the name block in a different field
+/// order with different separators (a custom overview pack). Whenever the
+/// plan doesn't yield a pilot (an unconfigured field, an absent separator,
+/// or a line that doesn't match the plan's shape at all), this falls back to
+/// the default-format scan below unchanged — so a `None` plan, or a plan
+/// that fails to match, behaves exactly like before #869.
 fn extract_actor(
     line: &str,
+    plan: Option<&ExtractionPlan>,
 ) -> (
     Option<String>,
     Option<String>,
@@ -479,22 +516,32 @@ fn extract_actor(
     if let Some(bpos) = line.rfind("<b>") {
         let after = &line[bpos + 3..];
         let (block, tail) = after.split_once("</b>").unwrap_or((after, ""));
-        let plain = strip_tags(block); // "NAME[CORP](SHIP)"
-        let name_end = plain.find(['[', '(']).unwrap_or(plain.len());
-        let name = plain[..name_end].trim();
-        if !name.is_empty() {
-            pilot = Some(name.to_string());
-        }
-        if let Some(open) = plain.find('(') {
-            if let Some(close) = plain[open + 1..].find(')') {
-                let s = plain[open + 1..open + 1 + close].trim();
-                if !s.is_empty() {
-                    ship = Some(s.to_string());
+        let plain = strip_tags(block); // "NAME[CORP](SHIP)", or plan-shaped
+
+        match plan.and_then(|p| extract_with_plan(&plain, p)) {
+            Some((p, s)) => {
+                pilot = p;
+                ship = s;
+            }
+            None => {
+                let name_end = plain.find(['[', '(']).unwrap_or(plain.len());
+                let name = plain[..name_end].trim();
+                if !name.is_empty() {
+                    pilot = Some(name.to_string());
+                }
+                if let Some(open) = plain.find('(') {
+                    if let Some(close) = plain[open + 1..].find(')') {
+                        let s = plain[open + 1..open + 1 + close].trim();
+                        if !s.is_empty() {
+                            ship = Some(s.to_string());
+                        }
+                    }
                 }
             }
         }
         // The tail after the name block looks like ` - WEAPON - quality`; drop
-        // the leading separator, then split on " - ".
+        // the leading separator, then split on " - ". Unaffected by the
+        // overview plan — only the ship-label block above is configurable.
         let tail_txt = strip_tags(tail);
         let fields: Vec<&str> = tail_txt
             .trim_start_matches(['-', ' '])
@@ -514,6 +561,76 @@ fn extract_actor(
         quality = fields.last().map(|s| s.to_string());
     }
     (pilot, ship, weapon, quality)
+}
+
+/// Walk `plain` (the tag-stripped text of the final `<b>…</b>` block)
+/// against `plan`'s enabled fields in order, slicing out pilot name/ship
+/// type wherever the plan's separators actually appear. This is PELD's
+/// `createOverviewRegex` alternation expressed as sequential substring
+/// scans, matching this codebase's non-regex convention (see the module
+/// doc): each field's value runs from its `pre` separator (or the cursor,
+/// if `pre` is empty) to its `post` separator (or the next field's `pre`, or
+/// end of string).
+///
+/// EVE omits a field's separators entirely when its data is absent (no
+/// alliance) or the label is off — not an empty pair — so a field whose
+/// `pre` isn't found is simply skipped rather than treated as a failure.
+/// Returns `None` (telling [`extract_actor`] to fall back to the default
+/// scan) only when the walk never captured a pilot name at all, since pilot
+/// name is the one field every damage line renders.
+fn extract_with_plan(
+    plain: &str,
+    plan: &ExtractionPlan,
+) -> Option<(Option<String>, Option<String>)> {
+    let mut pilot = None;
+    let mut ship = None;
+    let mut pos = 0usize;
+
+    for (i, field) in plan.fields.iter().enumerate() {
+        let value_start = if field.pre.is_empty() {
+            pos
+        } else {
+            match plain[pos..].find(field.pre.as_str()) {
+                Some(p) => pos + p + field.pre.len(),
+                None => continue, // this field's data isn't present on this line
+            }
+        };
+        let value_end = if !field.post.is_empty() {
+            match plain[value_start..].find(field.post.as_str()) {
+                Some(p) => value_start + p,
+                None => continue,
+            }
+        } else {
+            // No trailing separator of its own — ends where the next enabled
+            // field's `pre` starts (whichever field actually appears first),
+            // else runs to the end of the block.
+            plan.fields[i + 1..]
+                .iter()
+                .filter(|f| !f.pre.is_empty())
+                .filter_map(|f| plain[value_start..].find(f.pre.as_str()))
+                .min()
+                .map(|p| value_start + p)
+                .unwrap_or(plain.len())
+        };
+        if value_end < value_start {
+            continue;
+        }
+        let value = plain[value_start..value_end].trim();
+        if !value.is_empty() {
+            match field.field {
+                LabelField::PilotName => pilot = Some(value.to_string()),
+                LabelField::ShipType => ship = Some(value.to_string()),
+                _ => {}
+            }
+        }
+        pos = if field.post.is_empty() {
+            value_end
+        } else {
+            value_end + field.post.len()
+        };
+    }
+
+    pilot.is_some().then_some((pilot, ship))
 }
 
 /// Strip `<…>` markup from a fragment, returning the trimmed plain text.
@@ -641,6 +758,7 @@ fn parse_ts(line: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::modules::dpsmeter::overview::PlanField;
 
     // Representative gamelog lines (English overview). Real lines are longer but
     // contain these exact markers.
@@ -921,5 +1039,131 @@ mod tests {
         assert_eq!(e.pilot.as_deref(), Some("Целевой Пилот"));
         assert_eq!(e.ship.as_deref(), Some("Cynabal"));
         assert_eq!(e.weapon.as_deref(), Some("425mm AutoCannon II"));
+    }
+
+    // --- #869: overview-pack-aware attribution ----------------------------
+
+    /// One damage-out line, with the counterparty's name block built from
+    /// whatever text `block` supplies (already the un-tagged content of the
+    /// final `<b>…</b>`), so the same weapon/quality tail can be reused
+    /// across a default-format and a Z-S-style shaped block.
+    fn damage_line(block: &str) -> String {
+        format!(
+            "[ 2026.06.25 12:00:00 ] (combat) <color=0xff00ffff><b>342</b> <color=0x77ffffff><font size=10>to</font> <b><color=0xffffffff>{block}</b><color=0x77ffffff><font size=10> - 425mm AutoCannon II - Hits</font></color>"
+        )
+    }
+
+    /// A Z-S-style plan: ship type first (`«…» :: `), then pilot name with no
+    /// separators — a genuinely different order/separator set than the
+    /// hardcoded `NAME[CORP](SHIP)` default.
+    fn zs_plan() -> ExtractionPlan {
+        ExtractionPlan {
+            fields: vec![
+                PlanField {
+                    field: LabelField::ShipType,
+                    pre: "«".into(),
+                    post: "» :: ".into(),
+                },
+                PlanField {
+                    field: LabelField::PilotName,
+                    pre: String::new(),
+                    post: String::new(),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn plan_attributes_a_non_default_label_order_and_separators() {
+        let line = damage_line("«Cynabal» :: Target Pilot");
+        let plan = zs_plan();
+        let mut events = parse_line_with_plan(&line, Lang::En, Some(&plan));
+        assert_eq!(events.len(), 1);
+        let e = events.remove(0);
+        assert_eq!(e.kind, EventKind::DamageOut);
+        assert_eq!(e.amount, 342);
+        assert_eq!(e.pilot.as_deref(), Some("Target Pilot"));
+        assert_eq!(e.ship.as_deref(), Some("Cynabal"));
+        assert_eq!(e.weapon.as_deref(), Some("425mm AutoCannon II"));
+    }
+
+    #[test]
+    fn plan_shaped_line_falls_back_cleanly_without_a_plan() {
+        // The exact same Z-S-shaped line, parsed with no plan at all: the
+        // default `[`/`(` bracket scan finds neither in this text, so pilot
+        // ends up as the whole (garbled) block rather than "Target Pilot" —
+        // but nothing panics and the damage amount is still counted, so DPS
+        // totals stay correct even when per-pilot attribution can't resolve.
+        let line = damage_line("«Cynabal» :: Target Pilot");
+        let mut events = parse_line(&line, Lang::En);
+        assert_eq!(events.len(), 1);
+        let e = events.remove(0);
+        assert_eq!(e.kind, EventKind::DamageOut);
+        assert_eq!(e.amount, 342);
+        assert_eq!(e.ship, None);
+    }
+
+    #[test]
+    fn plan_matching_no_field_falls_back_to_default_scan() {
+        // A plan configured, but fed a line whose block doesn't contain any
+        // of the plan's separators at all (e.g. an NPC name under a plan
+        // that only knows a corp-ticker/alliance shape) — `extract_with_plan`
+        // never captures a pilot, so `extract_actor` falls back to the
+        // default scan instead of returning nothing.
+        let plan = ExtractionPlan {
+            fields: vec![PlanField {
+                field: LabelField::Alliance,
+                pre: "<".into(),
+                post: ">".into(),
+            }],
+        };
+        let line = damage_line("Angel Cartel Outlaw");
+        let mut events = parse_line_with_plan(&line, Lang::En, Some(&plan));
+        assert_eq!(events.len(), 1);
+        let e = events.remove(0);
+        assert_eq!(e.pilot.as_deref(), Some("Angel Cartel Outlaw"));
+        assert_eq!(e.ship, None);
+    }
+
+    #[test]
+    fn default_format_lines_parse_identically_with_or_without_a_plan() {
+        // A plan that reproduces the default `NAME[CORP](SHIP)` layout field
+        // for field must extract exactly what the no-plan default scan does
+        // — for both a full player name and a bracket-less NPC name.
+        let default_plan = ExtractionPlan {
+            fields: vec![
+                PlanField {
+                    field: LabelField::Corporation,
+                    pre: "[".into(),
+                    post: "]".into(),
+                },
+                PlanField {
+                    field: LabelField::PilotName,
+                    pre: String::new(),
+                    post: String::new(),
+                },
+                PlanField {
+                    field: LabelField::ShipType,
+                    pre: "(".into(),
+                    post: ")".into(),
+                },
+            ],
+        };
+
+        let player = damage_line("Target Pilot[CORP](Cynabal)");
+        let without = one(&player);
+        let with = parse_line_with_plan(&player, Lang::En, Some(&default_plan)).remove(0);
+        assert_eq!(with.pilot, without.pilot);
+        assert_eq!(with.ship, without.ship);
+        assert_eq!(with.pilot.as_deref(), Some("Target Pilot"));
+        assert_eq!(with.ship.as_deref(), Some("Cynabal"));
+
+        let npc = damage_line("Angel Cartel Outlaw");
+        let without = one(&npc);
+        let with = parse_line_with_plan(&npc, Lang::En, Some(&default_plan)).remove(0);
+        assert_eq!(with.pilot, without.pilot);
+        assert_eq!(with.ship, without.ship);
+        assert_eq!(with.pilot.as_deref(), Some("Angel Cartel Outlaw"));
+        assert_eq!(with.ship, None);
     }
 }

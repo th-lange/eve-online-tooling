@@ -75,12 +75,37 @@ export interface DpsTick {
   at: number;
 }
 
+/** A ship-label field from an overview export (#869); `"other"` covers any
+ *  label this app doesn't capture (faction, custom-pack extra slots, …) —
+ *  its separators still occupy space in the parsed layout. */
+export type DpsLabelField =
+  "pilotName" | "shipType" | "shipName" | "corporation" | "alliance" | "other";
+
+/** One enabled label in a user's overview export, in `shipLabelOrder`'s
+ *  order: which field it is and the literal text EVE renders immediately
+ *  before/after its value. */
+export interface DpsPlanField {
+  field: DpsLabelField;
+  pre: string;
+  post: string;
+}
+
+/** Ordered pilot/ship label layout parsed from a user's overview export
+ *  (see {@link dpsParseOverviewExport}), stored alongside DPS settings and
+ *  passed back into {@link dpsStart}/{@link dpsPlayback}. */
+export interface DpsExtractionPlan {
+  fields: DpsPlanField[];
+}
+
 /** Settings to start a capture. */
 export interface DpsSettings {
   /** The EVE `Gamelogs` folder. */
   gamelogsDir: string;
   /** Moving-average window in seconds. */
   windowSecs: number;
+  /** Overview-export-derived pilot/ship extraction plan (#869); omitted
+   *  keeps the default `NAME[CORP](SHIP)` scan. */
+  extractionPlan?: DpsExtractionPlan;
 }
 
 /** A gamelog file (for status / future playback). */
@@ -104,6 +129,9 @@ export interface DpsPlaybackSettings {
   /** Stop (and, if re-issued, loop) at this epoch second instead of the
    *  file's end — set when playing a selected fight region. */
   stopTs?: number;
+  /** Overview-export-derived pilot/ship extraction plan (#869); omitted
+   *  keeps the default `NAME[CORP](SHIP)` scan. */
+  extractionPlan?: DpsExtractionPlan;
 }
 
 /** One time bucket's activity, normalized 0..1 against that category's
@@ -163,6 +191,14 @@ export function dpsLogSummary(file: string): Promise<DpsLogSummary> {
  *  polls this to rebuild its summary while the log is still being written. */
 export function dpsLogStat(file: string): Promise<number> {
   return invoke<number>("dps_log_stat", { file });
+}
+
+/** Parse an overview export file (YAML, from the overview settings window's
+ *  "Export Overview Settings" button) into an extraction plan (#869). */
+export function dpsParseOverviewExport(
+  path: string,
+): Promise<DpsExtractionPlan> {
+  return invoke<DpsExtractionPlan>("dps_parse_overview_export", { path });
 }
 
 /** Subscribe to live DPS ticks. */

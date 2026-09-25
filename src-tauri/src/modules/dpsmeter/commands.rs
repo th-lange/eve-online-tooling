@@ -24,7 +24,8 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader, SeekFrom};
 
 use super::aggregate::Window;
-use super::parser::{parse_line, EventKind, Lang};
+use super::overview::{parse_overview_export, ExtractionPlan};
+use super::parser::{parse_line, parse_line_with_plan, EventKind, Lang};
 use crate::model::AppError;
 use crate::sde::{Sde, SdePaths};
 
@@ -57,6 +58,10 @@ pub struct DpsSettings {
     /// Averaging window in seconds (PyEveLiveDPS-style moving average).
     #[serde(default = "default_window")]
     pub window_secs: u32,
+    /// Overview-export-derived pilot/ship extraction plan (#869); `None`
+    /// keeps `extract_actor`'s default-format scan.
+    #[serde(default)]
+    pub extraction_plan: Option<ExtractionPlan>,
 }
 
 fn default_window() -> u32 {
@@ -87,6 +92,10 @@ pub struct PlaybackSettings {
     /// the file's end — set when playing a selected fight region.
     #[serde(default)]
     pub stop_ts: Option<i64>,
+    /// Overview-export-derived pilot/ship extraction plan (#869); `None`
+    /// keeps `extract_actor`'s default-format scan.
+    #[serde(default)]
+    pub extraction_plan: Option<ExtractionPlan>,
 }
 
 /// A gamelog file the UI can list (newest first) — used for status + playback.
@@ -195,8 +204,12 @@ pub async fn dps_start(
             if let Some(path) = &current {
                 if let Some((text, next)) = read_appended(path, offset).await {
                     offset = next;
-                    let mut batch: Vec<_> =
-                        text.lines().flat_map(|l| parse_line(l, lang)).collect();
+                    let mut batch: Vec<_> = text
+                        .lines()
+                        .flat_map(|l| {
+                            parse_line_with_plan(l, lang, settings.extraction_plan.as_ref())
+                        })
+                        .collect();
                     resolve_ore_volumes(&batch, &mut ore_vol, sde_db.as_deref());
                     for mut ev in batch.drain(..) {
                         if ev.kind == EventKind::Mining {
@@ -254,11 +267,15 @@ pub fn dps_resume(state: State<'_, DpsState>) {
 async fn load_and_resolve_events(
     app: &AppHandle,
     file: &str,
+    plan: Option<&ExtractionPlan>,
 ) -> Result<Vec<super::parser::DpsEvent>, String> {
     let bytes = tokio::fs::read(file).await.map_err(|e| e.to_string())?;
     let text = String::from_utf8_lossy(&bytes);
     let lang = super::parser::detect_lang(&text);
-    let mut events: Vec<_> = text.lines().flat_map(|l| parse_line(l, lang)).collect();
+    let mut events: Vec<_> = text
+        .lines()
+        .flat_map(|l| parse_line_with_plan(l, lang, plan))
+        .collect();
     events.sort_by_key(|e| e.ts);
     if events.is_empty() {
         return Err("no combat lines in that log".into());
@@ -333,7 +350,8 @@ pub async fn dps_playback(
             MAX_PLAYBACK_LOG_BYTES / (1024 * 1024),
         ));
     }
-    let events = load_and_resolve_events(&app, &settings.file).await?;
+    let events =
+        load_and_resolve_events(&app, &settings.file, settings.extraction_plan.as_ref()).await?;
 
     let generation = state.generation.clone();
     let my_gen = generation.fetch_add(1, Ordering::SeqCst) + 1;
@@ -576,6 +594,16 @@ pub fn dps_list_logs(gamelogs_dir: String) -> Result<Vec<LogFile>, String> {
         .collect();
     files.sort_by_key(|f| std::cmp::Reverse(f.modified));
     Ok(files)
+}
+
+/// Parse a user's overview export (YAML, from the overview settings window's
+/// "Export Overview Settings" button) into an [`ExtractionPlan`] (#869). The
+/// frontend stores the returned plan alongside the rest of the DPS meter's
+/// settings and passes it back into [`dps_start`]/[`dps_playback`].
+#[tauri::command]
+pub fn dps_parse_overview_export(path: String) -> Result<ExtractionPlan, String> {
+    let yaml = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
+    parse_overview_export(&yaml)
 }
 
 /// Name predicate for gamelog files (fed lowercased names by `util::fs`).

@@ -4,6 +4,7 @@ import {
   dpsListLogs,
   dpsLogSummary,
   dpsLogStat,
+  dpsParseOverviewExport,
   dpsPause,
   dpsPlayback,
   dpsResume,
@@ -12,6 +13,7 @@ import {
   errorMessage,
   onDpsDone,
   onDpsTick,
+  type DpsExtractionPlan,
   type DpsLogFile,
   type DpsLogSummary,
   type DpsTick,
@@ -37,6 +39,17 @@ export function useDpsPlaybackState() {
   const [windowSecs, setWindowSecs] = useState(() =>
     Number(localStorage.getItem(STORAGE_KEYS.dpsWindowSecs) ?? 10),
   );
+  // Overview-export-derived pilot/ship extraction plan (#869): the export
+  // file path is persisted (like the gamelogs folder); the parsed plan
+  // itself is not — it's re-derived from the file on load/change so a
+  // stale localStorage blob can never drift from the file on disk.
+  const [overviewFile, setOverviewFile] = usePersistentState<string>(
+    STORAGE_KEYS.dpsOverviewExportFile,
+    "",
+  );
+  const [extractionPlan, setExtractionPlan] =
+    useState<DpsExtractionPlan | null>(null);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ticks, setTicks] = useState<DpsTick[]>([]);
@@ -102,6 +115,33 @@ export function useDpsPlaybackState() {
     lastAt: null,
   });
 
+  /** Parse `overviewFile` (or the given path) into an extraction plan;
+   *  clears the plan and surfaces the error on failure so a stale/garbled
+   *  export never silently reverts to the default scan without saying why. */
+  async function loadOverviewExport(path = overviewFile) {
+    if (!path.trim()) {
+      setExtractionPlan(null);
+      setOverviewError(null);
+      return;
+    }
+    try {
+      const plan = await dpsParseOverviewExport(path);
+      setExtractionPlan(plan);
+      setOverviewError(null);
+    } catch (e) {
+      setExtractionPlan(null);
+      setOverviewError(errorMessage(e));
+    }
+  }
+
+  // Re-derive the plan from whatever export path was persisted last session,
+  // once, on mount — so a saved overview export keeps working across restarts
+  // without the user re-picking it.
+  useEffect(() => {
+    if (overviewFile.trim()) void loadOverviewExport(overviewFile);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Subscribe once; the feed survives navigation. Ticks only arrive while a
   // capture is running.
   useEffect(() => {
@@ -141,8 +181,22 @@ export function useDpsPlaybackState() {
 
   // Stable ref for loop: always holds the current playback params so the
   // done-handler can restart without capturing stale closure values.
-  const loopParamsRef = useRef({ file, speed, windowSecs, looping, region });
-  loopParamsRef.current = { file, speed, windowSecs, looping, region };
+  const loopParamsRef = useRef({
+    file,
+    speed,
+    windowSecs,
+    looping,
+    region,
+    extractionPlan,
+  });
+  loopParamsRef.current = {
+    file,
+    speed,
+    windowSecs,
+    looping,
+    region,
+    extractionPlan,
+  };
 
   // When playback ends naturally, mark as stopped and auto-loop if enabled.
   useEffect(() => {
@@ -166,6 +220,7 @@ export function useDpsPlaybackState() {
           // the whole log. Both bounds are i64 in Rust — round them.
           seekTs: p.region ? Math.round(p.region.start) : undefined,
           stopTs: p.region ? Math.round(p.region.end) : undefined,
+          extractionPlan: p.extractionPlan ?? undefined,
         })
           .then(() => setRunning(true))
           .catch((e) => setError(errorMessage(e)));
@@ -199,7 +254,11 @@ export function useDpsPlaybackState() {
     setSeekPos(null);
     pausedAtRef.current = null;
     try {
-      await dpsStart({ gamelogsDir: dir, windowSecs: win });
+      await dpsStart({
+        gamelogsDir: dir,
+        windowSecs: win,
+        extractionPlan: extractionPlan ?? undefined,
+      });
       setRunning(true);
     } catch (e) {
       setError(errorMessage(e));
@@ -251,6 +310,7 @@ export function useDpsPlaybackState() {
         // timestamps, so round before crossing the bridge.
         seekTs: seekTs == null ? undefined : Math.round(seekTs),
         stopTs: stopTs == null ? undefined : Math.round(stopTs),
+        extractionPlan: extractionPlan ?? undefined,
       });
       setRunning(true);
     } catch (e) {
@@ -423,6 +483,11 @@ export function useDpsPlaybackState() {
     setDir,
     windowSecs,
     setWindow,
+    overviewFile,
+    setOverviewFile,
+    extractionPlan,
+    overviewError,
+    loadOverviewExport,
     running,
     error,
     ticks,
