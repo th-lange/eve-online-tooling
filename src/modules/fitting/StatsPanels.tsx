@@ -293,6 +293,118 @@ export function DpsRangeCurve({ curve }: { curve: [number, number][] }) {
   );
 }
 
+/** One overlaid line for `DpsRangeOverlayChart`: a labelled fit/ammo curve. */
+export interface DpsRangeSeries {
+  label: string;
+  curve: [number, number][];
+}
+
+/** Overlay palette (#880): colour cycles alongside a distinct dash pattern per
+ *  series so lines stay distinguishable in grayscale/for colourblind users,
+ *  not colour alone (CLAUDE.md's color-signaling convention). Solid first
+ *  (matches the single-curve `DpsRangeCurve`'s amber), then increasingly
+ *  broken patterns. */
+const OVERLAY_COLORS = [
+  "#f59e0b",
+  "#38bdf8",
+  "#34d399",
+  "#a78bfa",
+  "#fb7185",
+  "#facc15",
+];
+const OVERLAY_DASHES = [undefined, "6 3", "2 2", "8 2 2 2", "3 6", "1 3 4 3"];
+
+/** Multi-fit DPS-vs-range overlay (#880): same axis/scale convention as
+ *  [`DpsRangeCurve`], but N series sharing one x/y scale so crossovers
+ *  (e.g. Void vs Null falloff) are directly readable. Series with fewer
+ *  than 2 points (no target profile / no data) are dropped. */
+export function DpsRangeOverlayChart({ series }: { series: DpsRangeSeries[] }) {
+  const w = 480;
+  const h = 140;
+  const padY = 4;
+  const valid = series
+    .map((s, i) => ({
+      ...s,
+      color: OVERLAY_COLORS[i % OVERLAY_COLORS.length],
+      dash: OVERLAY_DASHES[i % OVERLAY_DASHES.length],
+    }))
+    .filter((s) => s.curve.length > 1);
+  if (valid.length === 0) {
+    return (
+      <p className="text-xs text-zinc-500">
+        Set a target profile to see the DPS-vs-range overlay.
+      </p>
+    );
+  }
+  const distMax = Math.max(
+    ...valid.map((s) => s.curve[s.curve.length - 1][0]),
+    1,
+  );
+  const dpsMax = Math.max(
+    ...valid.flatMap((s) => s.curve.map(([, dps]) => dps)),
+    1e-9,
+  );
+  const x = (d: number) => (d / distMax) * w;
+  const y = (dps: number) => padY + (1 - dps / dpsMax) * (h - 2 * padY);
+  return (
+    <div className="mt-1">
+      <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+        {valid.map((s) => (
+          <span key={s.label} className="flex items-center gap-1.5">
+            <svg width="16" height="6" className="shrink-0">
+              <line
+                x1={0}
+                x2={16}
+                y1={3}
+                y2={3}
+                stroke={s.color}
+                strokeWidth="2"
+                strokeDasharray={s.dash}
+              />
+            </svg>
+            <span className="text-zinc-300">{s.label}</span>
+          </span>
+        ))}
+      </div>
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        preserveAspectRatio="none"
+        className="w-full"
+        style={{ height: h }}
+      >
+        {[0.25, 0.5, 0.75].map((f) => (
+          <line
+            key={f}
+            x1={0}
+            x2={w}
+            y1={padY + f * (h - 2 * padY)}
+            y2={padY + f * (h - 2 * padY)}
+            stroke="#27272a"
+            strokeWidth="0.75"
+          />
+        ))}
+        {valid.map((s) => (
+          <polyline
+            key={s.label}
+            points={s.curve
+              .map(([d, dps]) => `${x(d).toFixed(1)},${y(dps).toFixed(1)}`)
+              .join(" ")}
+            fill="none"
+            stroke={s.color}
+            strokeWidth="1.5"
+            strokeDasharray={s.dash}
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+      </svg>
+      <div className="flex justify-between text-[10px] text-zinc-600">
+        <span>0km</span>
+        <span>{km(distMax)}</span>
+      </div>
+    </div>
+  );
+}
+
 export function ResourceBar({
   label,
   used,
