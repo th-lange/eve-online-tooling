@@ -187,7 +187,7 @@ pub async fn dps_start(
             if let Some(path) = &current {
                 if let Some((text, next)) = read_appended(path, offset).await {
                     offset = next;
-                    let mut batch: Vec<_> = text.lines().filter_map(parse_line).collect();
+                    let mut batch: Vec<_> = text.lines().flat_map(parse_line).collect();
                     resolve_ore_volumes(&batch, &mut ore_vol, sde_db.as_deref());
                     for mut ev in batch.drain(..) {
                         if ev.kind == EventKind::Mining {
@@ -249,7 +249,7 @@ async fn load_and_resolve_events(
     let bytes = tokio::fs::read(file).await.map_err(|e| e.to_string())?;
     let mut events: Vec<_> = String::from_utf8_lossy(&bytes)
         .lines()
-        .filter_map(parse_line)
+        .flat_map(parse_line)
         .collect();
     events.sort_by_key(|e| e.ts);
     if events.is_empty() {
@@ -462,13 +462,12 @@ async fn scan_log_span(file: &str) -> Result<(i64, i64), String> {
     let mut lines = BufReader::new(handle).lines();
     let mut span: Option<(i64, i64)> = None;
     while let Some(line) = lines.next_line().await.map_err(|e| e.to_string())? {
-        let Some(ev) = parse_line(&line) else {
-            continue;
-        };
-        span = Some(match span {
-            Some((start, end)) => (start.min(ev.ts), end.max(ev.ts)),
-            None => (ev.ts, ev.ts),
-        });
+        for ev in parse_line(&line) {
+            span = Some(match span {
+                Some((start, end)) => (start.min(ev.ts), end.max(ev.ts)),
+                None => (ev.ts, ev.ts),
+            });
+        }
     }
     span.ok_or_else(|| "no combat lines in that log".into())
 }
@@ -500,28 +499,27 @@ async fn stream_log_summary(app: &AppHandle, file: &str) -> Result<LogSummary, S
         .map_err(|e| e.to_string())?;
     let mut lines = BufReader::new(handle).lines();
     while let Some(line) = lines.next_line().await.map_err(|e| e.to_string())? {
-        let Some(mut ev) = parse_line(&line) else {
-            continue;
-        };
-        if ev.kind == EventKind::Mining {
-            let per_unit = match ev.ore.as_deref() {
-                Some(ore) => *ore_vol.entry(ore.to_string()).or_insert_with(|| {
-                    sde.as_ref()
-                        .and_then(|s| s.type_by_name(ore).ok().flatten())
-                        .and_then(|(_, v)| v)
-                        .unwrap_or(0.0)
-                }),
-                None => 0.0,
-            };
-            ev.volume = ev.amount as f64 * per_unit;
-        }
-        let idx = (((ev.ts - start) as f64 / bucket_secs) as usize).min(SUMMARY_BUCKETS - 1);
-        let slot = &mut raw[idx];
-        match ev.kind {
-            EventKind::DamageOut => slot.0 += ev.amount as f64,
-            EventKind::DamageIn => slot.1 += ev.amount as f64,
-            EventKind::Mining => slot.2 += ev.volume,
-            _ => {}
+        for mut ev in parse_line(&line) {
+            if ev.kind == EventKind::Mining {
+                let per_unit = match ev.ore.as_deref() {
+                    Some(ore) => *ore_vol.entry(ore.to_string()).or_insert_with(|| {
+                        sde.as_ref()
+                            .and_then(|s| s.type_by_name(ore).ok().flatten())
+                            .and_then(|(_, v)| v)
+                            .unwrap_or(0.0)
+                    }),
+                    None => 0.0,
+                };
+                ev.volume = ev.amount as f64 * per_unit;
+            }
+            let idx = (((ev.ts - start) as f64 / bucket_secs) as usize).min(SUMMARY_BUCKETS - 1);
+            let slot = &mut raw[idx];
+            match ev.kind {
+                EventKind::DamageOut => slot.0 += ev.amount as f64,
+                EventKind::DamageIn => slot.1 += ev.amount as f64,
+                EventKind::Mining => slot.2 += ev.volume,
+                _ => {}
+            }
         }
     }
     Ok(buckets_from_raw(start, end, bucket_secs, raw))
@@ -864,7 +862,7 @@ mod tests {
 
     #[test]
     fn real_gamelog_text_parses_and_buckets_end_to_end() {
-        // Exercises the same `text.lines().filter_map(parse_line)` step
+        // Exercises the same `text.lines().flat_map(parse_line)` step
         // `load_and_resolve_events` runs, then feeds the result straight into
         // `bucket_events` — the whole non-Tauri pipeline `dps_log_summary`
         // wraps, on realistic gamelog markup (not synthetic DpsEvent structs).
@@ -874,7 +872,7 @@ mod tests {
 [ 2026.08.01 12:03:20 ] (mining) <color=0xff..><b>34</b> units of <color=0xff..>Veldspar</color>
 [ 2026.08.01 12:09:59 ] (combat) <color=0xff..><b>100</b> <color=0x77ffffff><font size=10>to</font> <b><color=0xff..>Target[X](Cruiser)</b> - Blaster - Hits
 not a combat line, ignored";
-        let mut events: Vec<_> = text.lines().filter_map(parse_line).collect();
+        let mut events: Vec<_> = text.lines().flat_map(parse_line).collect();
         events.sort_by_key(|e| e.ts);
         assert_eq!(events.len(), 4); // the chat-noise line is dropped.
                                      // `parse_line` leaves mining volume at 0.0 — only the SDE-backed

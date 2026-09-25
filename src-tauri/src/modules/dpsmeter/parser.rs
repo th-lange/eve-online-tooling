@@ -73,38 +73,51 @@ pub struct DpsEvent {
     pub volume: f64,
 }
 
-/// Parse one gamelog line into a [`DpsEvent`], or `None` if it isn't a combat
-/// or mining line we track (chat, system messages, malformed lines, …).
-pub fn parse_line(line: &str) -> Option<DpsEvent> {
+/// Parse one gamelog line into zero, one, or two [`DpsEvent`]s. Empty for
+/// lines that aren't a combat or mining line we track (chat, system
+/// messages, malformed lines, …). Almost always at most one event — the
+/// exception is a nosferatu drain (`energy drained from `), which is
+/// simultaneously cap warfare applied to the enemy *and* capacitor received
+/// by you; PyEveLiveDPS's `logreader.py` appends a nos match to both
+/// `capDamageDone` and `capRecieved`, so we emit a second `CapTransferIn`
+/// event alongside the primary `CapWarfareOut` one (#867) — the cap-received
+/// series already sums that kind, so no `aggregate.rs` change is needed.
+pub fn parse_line(line: &str) -> Vec<DpsEvent> {
     if line.contains("(mining)") {
-        return parse_mining(line);
+        return parse_mining(line).into_iter().collect();
     }
     if !line.contains("(combat)") {
-        return None;
+        return Vec::new();
     }
-    let ts = parse_ts(line)?;
+    let Some(ts) = parse_ts(line) else {
+        return Vec::new();
+    };
     // Miss lines carry no damage number and no `>to<`/`>from<` marker, so they
     // must be recognised before `classify`/`first_bold_int` (which would drop
     // them). "Your <weapon> misses <target> completely - <weapon>" outgoing,
     // "<attacker> misses you completely" incoming.
     if line.contains(" misses ") && line.contains("completely") {
-        return parse_miss(line, ts);
+        return parse_miss(line, ts).into_iter().collect();
     }
     // Tackle lines ("Warp scramble/disruption attempt from A to B") carry no
     // damage number, so they must be handled before `first_bold_int` drops
     // them. Only tackle you're part of is kept, attributed to the other pilot.
     if line.contains("Warp scramble attempt") || line.contains("Warp disruption attempt") {
-        return parse_tackle(line, ts);
+        return parse_tackle(line, ts).into_iter().collect();
     }
-    let kind = classify(line)?;
-    let amount = first_bold_int(line)?.unsigned_abs() as i64;
+    let Some(kind) = classify(line) else {
+        return Vec::new();
+    };
+    let Some(amount) = first_bold_int(line).map(|n| n.unsigned_abs() as i64) else {
+        return Vec::new();
+    };
     // Pilot/ship/weapon are only meaningful (and only present) on damage lines;
     // they drive the breakdown tables.
     let (pilot, ship, weapon, quality) = match kind {
         EventKind::DamageOut | EventKind::DamageIn => extract_actor(line),
         _ => (None, None, None, None),
     };
-    Some(DpsEvent {
+    let mut events = vec![DpsEvent {
         ts,
         kind,
         amount,
@@ -114,7 +127,21 @@ pub fn parse_line(line: &str) -> Option<DpsEvent> {
         quality,
         ore: None,
         volume: 0.0,
-    })
+    }];
+    if line.contains("energy drained from ") {
+        events.push(DpsEvent {
+            ts,
+            kind: EventKind::CapTransferIn,
+            amount,
+            pilot: None,
+            ship: None,
+            weapon: None,
+            quality: None,
+            ore: None,
+            volume: 0.0,
+        });
+    }
+    events
 }
 
 /// Parse a miss line (a `(combat)` line with no damage number):
@@ -468,23 +495,27 @@ mod tests {
         crate::util::time::days_from_civil(2026, 6, 25) * 86_400 + 12 * 3_600
     }
 
+    /// Parse `line`, asserting it yields exactly one event, and return it.
+    fn one(line: &str) -> DpsEvent {
+        let mut events = parse_line(line);
+        assert_eq!(events.len(), 1, "expected exactly one event from {line:?}");
+        events.remove(0)
+    }
+
     #[test]
     fn parses_damage_out_and_in() {
         let out = "[ 2026.06.25 12:00:00 ] (combat) <color=0xff..><b>342</b> <color=0x77ffffff><font size=10>to</font> <b><color=0xff..>Target[X](Cruiser)</b> - Tractor Beam I - Hits";
-        let e = parse_line(out).unwrap();
+        let e = one(out);
         assert_eq!(e.kind, EventKind::DamageOut);
         assert_eq!(e.amount, 342);
         assert_eq!(e.ts, ts());
         assert_eq!(e.quality.as_deref(), Some("Hits"));
 
         let smash = out.replace(" - Hits", " - Smashes");
-        assert_eq!(
-            parse_line(&smash).unwrap().quality.as_deref(),
-            Some("Smashes")
-        );
+        assert_eq!(one(&smash).quality.as_deref(), Some("Smashes"));
 
         let inc = "[ 2026.06.25 12:00:00 ] (combat) <color=0xff..><b>88</b> <color=0x77ffffff><font size=10>from</font> <b><color=0xff..>Bad Guy[Y](Frigate)</b> - Hits";
-        let e = parse_line(inc).unwrap();
+        let e = one(inc);
         assert_eq!(e.kind, EventKind::DamageIn);
         assert_eq!(e.amount, 88);
     }
@@ -492,21 +523,21 @@ mod tests {
     #[test]
     fn parses_remote_reps_both_directions() {
         let out = "[ 2026.06.25 12:00:00 ] (combat) <color=0xff..><b>250</b> remote shield boosted to <color=0xff..>Friendly</color>";
-        assert_eq!(parse_line(out).unwrap().kind, EventKind::RepOut);
+        assert_eq!(one(out).kind, EventKind::RepOut);
         let inc = "[ 2026.06.25 12:00:00 ] (combat) <color=0xff..><b>250</b> remote armor repaired by <color=0xff..>Logi</color>";
-        assert_eq!(parse_line(inc).unwrap().kind, EventKind::RepIn);
+        assert_eq!(one(inc).kind, EventKind::RepIn);
     }
 
     #[test]
     fn parses_cap_transfer_and_warfare() {
         let xfer = "[ 2026.06.25 12:00:00 ] (combat) <color=0xff..><b>40</b> remote capacitor transmitted to <color=0xff..>Mate</color>";
-        assert_eq!(parse_line(xfer).unwrap().kind, EventKind::CapTransferOut);
+        assert_eq!(one(xfer).kind, EventKind::CapTransferOut);
 
         let neut_out = "[ 2026.06.25 12:00:00 ] (combat) <color=0xffff7fffff><b>120</b> energy neutralized <color=0xff..>Victim</color>";
-        assert_eq!(parse_line(neut_out).unwrap().kind, EventKind::CapWarfareOut);
+        assert_eq!(one(neut_out).kind, EventKind::CapWarfareOut);
 
         let nos_in = "[ 2026.06.25 12:00:00 ] (combat) <color=0xff..><b>-60</b> energy drained to <color=0xff..>Thief</color>";
-        let e = parse_line(nos_in).unwrap();
+        let e = one(nos_in);
         assert_eq!(e.kind, EventKind::CapWarfareIn);
         assert_eq!(e.amount, 60); // sign stripped
     }
@@ -514,7 +545,7 @@ mod tests {
     #[test]
     fn extracts_pilot_ship_and_weapon_from_damage() {
         let line = "[ 2026.06.25 12:00:00 ] (combat) <color=0xff00ffff><b>342</b> <color=0x77ffffff><font size=10>to</font> <b><color=0xffffffff>Target Pilot[CORP](Cynabal)</b><color=0x77ffffff><font size=10> - 425mm AutoCannon II - Hits</font></color>";
-        let e = parse_line(line).unwrap();
+        let e = one(line);
         assert_eq!(e.kind, EventKind::DamageOut);
         assert_eq!(e.amount, 342);
         assert_eq!(e.pilot.as_deref(), Some("Target Pilot"));
@@ -525,7 +556,7 @@ mod tests {
     #[test]
     fn extracts_npc_name_without_corp_or_ship() {
         let line = "[ 2026.06.25 12:00:00 ] (combat) <color=0xffcc0000><b>88</b> <color=0x77ffffff><font size=10>from</font> <b><color=0xffffffff>Angel Cartel Outlaw</b><color=0x77ffffff><font size=10> - Hits</font></color>";
-        let e = parse_line(line).unwrap();
+        let e = one(line);
         assert_eq!(e.kind, EventKind::DamageIn);
         assert_eq!(e.pilot.as_deref(), Some("Angel Cartel Outlaw"));
         assert_eq!(e.ship, None);
@@ -538,7 +569,7 @@ mod tests {
     #[test]
     fn non_damage_lines_carry_no_actor() {
         let xfer = "[ 2026.06.25 12:00:00 ] (combat) <color=0xff..><b>40</b> remote capacitor transmitted to <color=0xff..>Mate</color>";
-        let e = parse_line(xfer).unwrap();
+        let e = one(xfer);
         assert_eq!(e.pilot, None);
         assert_eq!(e.weapon, None);
     }
@@ -546,7 +577,7 @@ mod tests {
     #[test]
     fn parses_mining_amount_and_ore() {
         let line = "[ 2026.06.25 12:00:00 ] (mining) <color=0xffffffff><b>34</b> units of <color=0xffe6b800><b>Dense Veldspar</b></color>";
-        let e = parse_line(line).unwrap();
+        let e = one(line);
         assert_eq!(e.kind, EventKind::Mining);
         assert_eq!(e.amount, 34);
         assert_eq!(e.ore.as_deref(), Some("Dense Veldspar"));
@@ -556,15 +587,15 @@ mod tests {
 
     #[test]
     fn ignores_non_combat_lines() {
-        assert!(parse_line("[ 2026.06.25 12:00:00 ] (none) Some other line").is_none());
-        assert!(parse_line("garbage").is_none());
+        assert!(parse_line("[ 2026.06.25 12:00:00 ] (none) Some other line").is_empty());
+        assert!(parse_line("garbage").is_empty());
     }
 
     #[test]
     fn parses_player_incoming_ammo_and_quality() {
         // A player attacker's ammo IS named on incoming lines ("- ammo - quality").
         let line = "[ 2026.06.25 12:00:00 ] (combat) <color=0xffcc0000><b>22</b> <color=0x77ffffff><font size=10>from</font> <b><color=0xffffffff>Dieter Isu</b><color=0x77ffffff><font size=10> - Inferno Rage Rocket - Hits</font></color>";
-        let e = parse_line(line).unwrap();
+        let e = one(line);
         assert_eq!(e.kind, EventKind::DamageIn);
         assert_eq!(e.pilot.as_deref(), Some("Dieter Isu"));
         assert_eq!(e.weapon.as_deref(), Some("Inferno Rage Rocket"));
@@ -574,7 +605,7 @@ mod tests {
     #[test]
     fn parses_outgoing_miss() {
         let line = "[ 2026.06.25 12:00:00 ] (combat) Your Hobgoblin II misses Imperial Coercer completely - Hobgoblin II";
-        let e = parse_line(line).unwrap();
+        let e = one(line);
         assert_eq!(e.kind, EventKind::DamageOut);
         assert_eq!(e.amount, 0);
         assert_eq!(e.pilot.as_deref(), Some("Imperial Coercer"));
@@ -585,7 +616,7 @@ mod tests {
     #[test]
     fn parses_incoming_miss() {
         let line = "[ 2026.06.25 12:00:00 ] (combat) Imperial Coercer misses you completely";
-        let e = parse_line(line).unwrap();
+        let e = one(line);
         assert_eq!(e.kind, EventKind::DamageIn);
         assert_eq!(e.amount, 0);
         assert_eq!(e.pilot.as_deref(), Some("Imperial Coercer"));
@@ -602,13 +633,13 @@ mod tests {
 
     #[test]
     fn parses_incoming_point_and_scram() {
-        let p = parse_line(POINT_IN).unwrap();
+        let p = one(POINT_IN);
         assert_eq!(p.kind, EventKind::PointIn);
         assert_eq!(p.pilot.as_deref(), Some("Renouncer Coercer"));
         assert_eq!(p.amount, 0);
         assert_eq!(p.ts, ts());
 
-        let s = parse_line(SCRAM_IN).unwrap();
+        let s = one(SCRAM_IN);
         assert_eq!(s.kind, EventKind::ScramIn);
         // The pilot name is pulled from the first real bold block, not the ship.
         assert_eq!(s.pilot.as_deref(), Some("Dieter Isu"));
@@ -616,7 +647,7 @@ mod tests {
 
     #[test]
     fn parses_outgoing_scram_to_the_target() {
-        let s = parse_line(SCRAM_OUT).unwrap();
+        let s = one(SCRAM_OUT);
         assert_eq!(s.kind, EventKind::ScramOut);
         assert_eq!(s.pilot.as_deref(), Some("Dieter Isu"));
     }
@@ -624,6 +655,21 @@ mod tests {
     #[test]
     fn ignores_tackle_between_two_other_pilots() {
         // Neither side is "you" — irrelevant to a personal meter.
-        assert!(parse_line(POINT_OTHERS).is_none());
+        assert!(parse_line(POINT_OTHERS).is_empty());
+    }
+
+    #[test]
+    fn nos_drain_line_credits_both_cap_warfare_out_and_cap_received() {
+        // #867: a nos drain is simultaneously cap warfare applied to the
+        // enemy AND capacitor received by you — PyEveLiveDPS appends the
+        // match to both series, so one nos-out line must yield two events.
+        let nos_out = "[ 2026.06.25 12:00:00 ] (combat) <color=0xff..><b>75</b> energy drained from <color=0xff..>Victim</color>";
+        let events = parse_line(nos_out);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, EventKind::CapWarfareOut);
+        assert_eq!(events[0].amount, 75);
+        assert_eq!(events[1].kind, EventKind::CapTransferIn);
+        assert_eq!(events[1].amount, 75);
+        assert_eq!(events[1].ts, events[0].ts);
     }
 }
