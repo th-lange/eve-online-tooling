@@ -233,6 +233,10 @@ export interface WeaponRange {
   falloff: number;
   /** Turret tracking (rad/s); 0 for missiles and mining. */
   tracking?: number;
+  /** Missile explosion radius (m); 0 for turrets/mining. */
+  explosionRadius?: number;
+  /** Missile explosion velocity (m/s); 0 for turrets/mining. */
+  explosionVelocity?: number;
 }
 
 /** A fleet boost module + optional charge projected onto this fit (#705) —
@@ -278,6 +282,16 @@ export interface NpcProfile {
 export interface TargetProfileLibrary {
   builtIn: NpcProfile[];
   custom: NpcProfile[];
+}
+
+/** One generic hull-class target archetype's applied DPS (#890): "how does
+ *  this fit perform against a typical frigate/cruiser/battleship", computed
+ *  in the same batched `fittingSimulate` call as everything else — never a
+ *  separate round-trip per archetype. See `FitStats.archetypeDps`. */
+export interface ArchetypeDps {
+  id: string;
+  label: string;
+  appliedDps: number;
 }
 
 /** Navigation: speed, agility, align and signature. */
@@ -345,6 +359,11 @@ export interface FitStats {
    *  contribution (#877), parallel to `Fit.items` — `null` for non-fighter
    *  items and for a pure support/EW squadron with no offensive ability. */
   fighterAbilities?: Array<FighterAbilityStats | null>;
+  /** Applied DPS against each of the 4 built-in hull-class target
+   *  archetypes (#890) — Frigate/AB, Frigate/MWD, Cruiser/AB, Battleship/AB,
+   *  all "high transversal" — computed within the same batched simulate
+   *  call, never re-run per archetype. Empty until the dogma engine runs. */
+  archetypeDps?: ArchetypeDps[];
 }
 
 /** One fitted fighter squadron's selected ability + its DPS contribution

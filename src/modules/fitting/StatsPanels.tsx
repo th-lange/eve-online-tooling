@@ -1,8 +1,14 @@
 import { useMemo, useState } from "react";
 import { useQuery, type UseMutationResult } from "@tanstack/react-query";
-import { BatteryCharging, BatteryWarning, ChevronDown } from "lucide-react";
+import {
+  BatteryCharging,
+  BatteryWarning,
+  ChevronDown,
+  Info,
+} from "lucide-react";
 import {
   fittingTargetProfiles,
+  type ArchetypeDps,
   type CapStats,
   type DpsBreakdown,
   type EwTag,
@@ -629,6 +635,7 @@ export function DpsBreakdownPanel({
   dpsSustained,
   appliedDps,
   dpsRangeCurve,
+  archetypeDps,
   jammedActive,
   isSpoolable = false,
   spoolPct,
@@ -643,6 +650,9 @@ export function DpsBreakdownPanel({
   dpsSustained?: DpsBreakdown;
   appliedDps?: DpsBreakdown;
   dpsRangeCurve?: [number, number][];
+  /** Applied DPS against the 4 built-in hull-class target archetypes
+   *  (#890) — backs the hover popover on the DPS total. */
+  archetypeDps?: ArchetypeDps[];
   jammedActive: boolean;
   /** Whether the fit carries a Triglavian/spoolable weapon — shows the spool
    *  slider only then (#872). */
@@ -699,10 +709,30 @@ export function DpsBreakdownPanel({
         </div>
       ) : (
         <>
-          <div className="text-sm text-zinc-300">
-            {shown.total.toFixed(0)} dps
-            {factorReload && dpsSustained && (
-              <span className="text-zinc-500"> (sustained)</span>
+          <div className="flex items-center gap-1 text-sm text-zinc-300">
+            <span>
+              {shown.total.toFixed(0)} dps
+              {factorReload && dpsSustained && (
+                <span className="text-zinc-500"> (sustained)</span>
+              )}
+            </span>
+            {archetypeDps && archetypeDps.length > 0 && (
+              <span className="group/archetypes relative inline-flex items-center">
+                <Info size={11} className="shrink-0 text-sky-500/70" />
+                <span className="absolute left-0 top-full z-30 mt-1 hidden w-max min-w-[190px] rounded border border-zinc-700 bg-zinc-900 p-2 text-left text-[11px] font-normal normal-case leading-relaxed text-zinc-400 shadow-lg group-hover/archetypes:block">
+                  <span className="mb-1 block font-medium text-zinc-200">
+                    Applied DPS vs archetypes
+                  </span>
+                  {archetypeDps.map((a) => (
+                    <span key={a.id} className="flex justify-between gap-3">
+                      <span>{a.label}</span>
+                      <span className="tabular-nums text-zinc-100">
+                        {a.appliedDps.toFixed(0)}
+                      </span>
+                    </span>
+                  ))}
+                </span>
+              </span>
             )}
           </div>
           {shown.total > 0 && (

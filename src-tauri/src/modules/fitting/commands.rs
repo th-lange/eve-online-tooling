@@ -2512,4 +2512,86 @@ Nanite Repair Paste\t50\tCommodity";
         // The hull itself isn't in the list.
         assert!(!text.contains("Rifter"));
     }
+
+    /// #890: every fitted missile launcher's `WeaponRange` should carry a
+    /// real, resolved explosion radius/velocity, and `archetype_dps` should
+    /// come back with all 4 built-in archetypes populated from one resolve
+    /// pass — regression test for a real bug this feature surfaced: the
+    /// explosion attrs were originally wired to ids 103/104
+    /// (`warpScrambleRange`/`warpScrambleStatus`, unrelated attributes no
+    /// missile charge ever carries), silently zeroing every missile's
+    /// applied-DPS hit-quality model. The real ids are `aoeCloudSize` (654)
+    /// and `aoeVelocity` (653) — see `engine::application::missile_application`.
+    #[test]
+    fn missile_weapon_range_and_archetype_dps_populate_from_real_sde_data() {
+        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+            eprintln!(
+                "missile_weapon_range_and_archetype_dps_populate_from_real_sde_data: EVE_SDE_PATH unset — skipping"
+            );
+            return;
+        };
+        let path = std::path::PathBuf::from(&path);
+        if !path.exists() {
+            return;
+        }
+        let sde = Sde::open(&path).unwrap();
+        // Real app_data_dir is the *grandparent* of sde.sqlite (SdePaths::new
+        // joins app_data_dir/sde/sde.sqlite) — not sde.sqlite's own parent.
+        let dir = path.parent().unwrap().parent().unwrap();
+        let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
+        let fit = Fit {
+            id: "t".into(),
+            name: "t".into(),
+            ship_type_id: tid("Caracal"),
+            items: vec![FitItem {
+                type_id: tid("Rapid Light Missile Launcher II"),
+                slot: SlotKind::High,
+                index: 0,
+                state: ModuleState::Active,
+                charge_type_id: Some(tid("Scourge Light Missile")),
+                quantity: 1,
+                active_drones: None,
+                mutation: None,
+                fighter_ability: None,
+            }],
+            projected: Vec::new(),
+        };
+        let layout = sde.ship_layout(fit.ship_type_id).unwrap().unwrap();
+        let d = run_dogma(
+            &sde,
+            dir,
+            &fit,
+            &layout,
+            &|_| 5.0,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+            None,
+            None,
+            1.0,
+            false,
+        )
+        .unwrap();
+        let r = d.weapon_ranges.first().expect("a missile weapon range");
+        assert!(
+            r.explosion_radius > 0.0,
+            "explosion_radius should be set: {r:?}"
+        );
+        assert!(
+            r.explosion_velocity > 0.0,
+            "explosion_velocity should be set: {r:?}"
+        );
+        assert_eq!(r.tracking, 0.0, "missiles have no tracking");
+
+        assert_eq!(d.archetype_dps.len(), 4, "should have 4 archetypes");
+        for a in &d.archetype_dps {
+            assert!(
+                a.applied_dps > 0.0,
+                "{}: applied_dps should be positive, got {}",
+                a.label,
+                a.applied_dps
+            );
+        }
+    }
 }

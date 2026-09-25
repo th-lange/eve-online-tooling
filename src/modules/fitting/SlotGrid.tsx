@@ -640,12 +640,23 @@ function ModuleRow({
           />
         )}
         {range && (
-          <span
-            className="shrink-0 whitespace-nowrap tabular-nums text-[11px] text-zinc-500"
-            title="optimal → max range (optimal + falloff)"
-          >
-            {km(range.optimal)}
-            {range.falloff > 0 ? ` → ${km(range.optimal + range.falloff)}` : ""}
+          <span className="flex shrink-0 items-center gap-1 whitespace-nowrap tabular-nums text-[11px] text-zinc-500">
+            <span title="optimal → max range (optimal + falloff)">
+              {km(range.optimal)}
+              {range.falloff > 0
+                ? ` → ${km(range.optimal + range.falloff)}`
+                : ""}
+            </span>
+            {range.tracking ? (
+              <span title="Turret tracking speed (rad/s)">
+                · trk {range.tracking.toFixed(3)}
+              </span>
+            ) : range.explosionRadius ? (
+              <span title="Missile explosion radius / explosion velocity">
+                · {formatInt(range.explosionRadius)}m /{" "}
+                {formatInt(range.explosionVelocity ?? 0)}m/s
+              </span>
+            ) : null}
           </span>
         )}
         {/* Ammo / charge picker for weapons, scripts and ancillary reps —

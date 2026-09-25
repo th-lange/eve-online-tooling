@@ -20,6 +20,7 @@ mod golden_tests;
 mod npc_profiles;
 pub mod optimizer;
 mod stats;
+mod target_archetypes;
 pub mod types;
 
 pub(crate) use commands::fit_to_eft;
