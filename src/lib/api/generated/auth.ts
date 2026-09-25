@@ -71,9 +71,7 @@ export const commands = {
     }
   },
   /**
-   * All blueprints owned across the whole roster — personal **and** corporation
-   * (where the character has the Director role + corp scope). A character whose
-   * token can't be refreshed is skipped rather than failing the whole call.
+   * Tauri wrapper: all blueprints owned across the whole roster.
    */
   async esiOwnedBlueprints(): Promise<Result<OwnedBlueprint[], AppError>> {
     try {

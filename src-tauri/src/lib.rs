@@ -318,6 +318,7 @@ pub fn run() {
             modules::shopping::commands::shopping_move_item,
             modules::shopping::commands::shopping_move_items,
             modules::shopping::commands::shopping_chat_sync,
+            modules::massprod::commands::massprod_plan,
             modules::fitting::commands::fitting_ship_layout,
             modules::fitting::commands::fitting_import_eft,
             modules::fitting::commands::fitting_import_list,
