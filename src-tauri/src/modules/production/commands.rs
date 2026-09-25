@@ -193,8 +193,11 @@ fn default_scc() -> f64 {
     0.04
 }
 
-/// Base material efficiency of a freshly invented T2 blueprint copy (no decryptor).
-const BASE_T2_ME: i64 = 2;
+/// Base material efficiency of a freshly invented T2 blueprint copy (no
+/// decryptor). `pub(crate)` so Mass Production's Hypothetical mode (#893) can
+/// default its T2-ME assumption to the same real EVE invention mechanic
+/// instead of duplicating the constant.
+pub(crate) const BASE_T2_ME: i64 = 2;
 
 /// Rank **every** manufacturable item by build-vs-buy profit at the chosen
 /// market. The whole catalogue is returned; the UI filters it client-side.

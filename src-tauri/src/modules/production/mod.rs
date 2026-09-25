@@ -10,6 +10,10 @@
 pub mod commands;
 mod engine;
 
+/// `BASE_T2_ME` is re-exported alongside for the same reason (#893): the
+/// documented "ME2, no decryptor" invention outcome the Mass Production
+/// module's Hypothetical mode defaults T2 assumptions to.
+pub(crate) use commands::BASE_T2_ME;
 /// Curated cross-module surface, mirroring fitting's `simulate_fit` pattern:
 /// the MCP dev-tier `production_profit` capability needs the pure engine
 /// directly (one blueprint, not the whole-catalogue ranking `commands`
