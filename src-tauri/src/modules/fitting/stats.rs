@@ -1039,6 +1039,7 @@ pub(super) fn capacitor_of(
 ) -> CapStats {
     let mut drain = 0.0;
     let mut module_drains: Vec<ModuleDrain> = Vec::new();
+    let mut injections: Vec<ModuleDrain> = Vec::new();
     for (i, store) in resolved.modules.iter().enumerate() {
         if module_items.get(i).is_some_and(|it| !is_running(it.state)) {
             continue; // active/overheated modules draw capacitor
@@ -1071,6 +1072,30 @@ pub(super) fn capacitor_of(
                 reload_ms,
             });
         }
+        // Cap booster injection (#875): a Capacitor Booster module — never a
+        // shield rep itself (`shieldBonus` 68 gates out Ancillary Shield
+        // Boosters, which load the same charge group but feed shield, not
+        // cap, per #878's `tank_of`) — with a loaded charge's
+        // `capacitorBonus` (67) injects that many GJ straight into the
+        // capacitor on the module's own `duration`, bounded by its own
+        // clip/reload cycle (#871). Always modeled (not gated on
+        // `factor_reload`): unlike the DPS/cap-drain sustained-rate
+        // *accounting* toggle, a cap booster's clip and reload are the
+        // mechanic itself, not an optional averaging refinement.
+        if dur > 0.0 && store.get(attr::SHIELD_BONUS) <= 0.0 {
+            if let Some(charge) = resolved.charges.get(i).and_then(|c| c.as_ref()) {
+                let bonus = charge.get(attr::CAPACITOR_BONUS);
+                if bonus > 0.0 {
+                    let cycle = cycle_of(store, Some(charge));
+                    injections.push(ModuleDrain {
+                        need: bonus,
+                        cycle_ms: dur,
+                        clip_shots: cycle.clip_shots,
+                        reload_ms: cycle.reload_seconds * 1000.0,
+                    });
+                }
+            }
+        }
     }
     capacitor(
         resolved.ship.get(482),
@@ -1078,6 +1103,7 @@ pub(super) fn capacitor_of(
         drain,
         &module_drains,
         neut_gjs,
+        &injections,
     )
 }
 
@@ -2148,6 +2174,56 @@ mod tests {
         assert!(
             t_with_neut < t_no_neut,
             "with-neut depletion {t_with_neut} should be < no-neut {t_no_neut}"
+        );
+    }
+
+    /// A genuine Capacitor Booster module (no `shieldBonus`) with a loaded
+    /// charge's `capacitorBonus` (67) injects GJ into the capacitor (#875)
+    /// and can stabilize an otherwise-unstable drain; the exact same charge
+    /// loaded into an Ancillary Shield Booster (`shieldBonus` present) must
+    /// NOT be treated as a cap injection — it reps shield, not capacitor
+    /// (#878's `tank_of` already handles that side).
+    #[test]
+    fn capacitor_of_cap_booster_injects_but_ancillary_shield_booster_charge_does_not() {
+        let mut ship = AttrStore::new();
+        ship.set_base(482, 250.0); // capacitorCapacity
+        ship.set_base(55, 125_000.0); // rechargeRate (ms) -> 5 GJ/s peak
+
+        let drain_module = store(&[(6, 8.0), (73, 1000.0)]); // 8 GJ/s steady drain, well over peak
+        let booster_module = store(&[(73, 6_000.0)]); // no capacitorNeed, no shieldBonus
+        let booster_charge = store(&[(attr::CAPACITOR_BONUS, 20.0)]); // no volume -> never reloads
+
+        let items = [
+            item(100, None, ModuleState::Active, 1),
+            item(200, Some(300), ModuleState::Active, 1),
+        ];
+        let module_items: Vec<&FitItem> = items.iter().collect();
+
+        let with_booster = ResolvedFit {
+            ship: ship.clone(),
+            modules: vec![drain_module.clone(), booster_module],
+            drones: Vec::new(),
+            charges: vec![None, Some(booster_charge.clone())],
+            unresolved: 0,
+        };
+        let boosted = capacitor_of(&with_booster, &module_items, 0.0, false);
+        assert!(
+            boosted.stable,
+            "a genuine cap booster module should inject and stabilize the cap"
+        );
+
+        let asb_module = store(&[(68, 100.0), (73, 6_000.0)]); // shieldBonus present
+        let with_asb = ResolvedFit {
+            ship,
+            modules: vec![drain_module, asb_module],
+            drones: Vec::new(),
+            charges: vec![None, Some(booster_charge)],
+            unresolved: 0,
+        };
+        let gated = capacitor_of(&with_asb, &module_items, 0.0, false);
+        assert!(
+            !gated.stable,
+            "an ASB loaded with a cap-booster-shaped charge should not inject capacitor"
         );
     }
 

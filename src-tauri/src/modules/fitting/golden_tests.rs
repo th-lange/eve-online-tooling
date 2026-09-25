@@ -886,3 +886,92 @@ fn rifter_reactive_armor_hardener_converges_to_hand_computed_em_resists() {
         );
     }
 }
+
+/// Cap booster injection (#875) — no pyfa-oracle fixture exists for a cap
+/// booster fit (`tools/pyfa-oracle/golden.json` predates #875), so per the
+/// issue's documented fallback this is a hand-computed check against real
+/// Rifter / Medium Capacitor Booster II / Cap Booster 400 attribute values
+/// (PYFA v2.67.0's bundled SDE, cross-checked against everef.net): Rifter
+/// `capacitorCapacity` (482) 250 GJ, `rechargeRate` (55) 250s → peak
+/// recharge `2.5 * 250 / 250 = 2.5` GJ/s. A projected neut at 6 GJ/s (#706)
+/// — well above that peak — makes the bare hull unstable outright. Medium
+/// Capacitor Booster II `duration` (73) 12s, `capacity` (38) 40 m3,
+/// `reloadTime` (1795) 10s; Cap Booster 400 `volume` (161) 16 m3 →
+/// `floor(40 / 16) = 2`-shot clip. Average injection `2*400 / (2*12+10) =
+/// 800/34 ≈ 23.5` GJ/s comfortably outstrips the 6 GJ/s neut, so the same
+/// hull holds indefinitely once the booster is fitted — matching Pyfa's
+/// capSim treatment of injectors (approach/formulas only, per the issue's
+/// license note; #875's own engine tests pin the exact discrete-sim math).
+#[test]
+fn rifter_cap_booster_stabilizes_an_otherwise_neut_unstable_hull() {
+    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        eprintln!(
+            "rifter_cap_booster_stabilizes_an_otherwise_neut_unstable_hull: EVE_SDE_PATH unset — skipping"
+        );
+        return;
+    };
+    let path = std::path::PathBuf::from(&path);
+    if !path.exists() {
+        eprintln!(
+            "rifter_cap_booster_stabilizes_an_otherwise_neut_unstable_hull: {path:?} missing — skipping"
+        );
+        return;
+    }
+    let sde = Sde::open(&path).expect("open sde");
+    let dir = path.parent().unwrap();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let zero_skills = |_: i64| 0.0;
+    let layout = sde.ship_layout(tid("Rifter")).unwrap().expect("layout");
+    let run = |items: Vec<FitItem>, neut_gjs: f64| {
+        run_dogma(
+            &sde,
+            dir,
+            &Fit {
+                id: "t".into(),
+                name: "Rifter".into(),
+                ship_type_id: tid("Rifter"),
+                items,
+                projected: Vec::new(),
+            },
+            &layout,
+            &zero_skills,
+            &DamageProfile::default(),
+            neut_gjs,
+            None,
+            &[],
+            None,
+            None,
+            1.0,
+            false, // factor_reload (#871) — irrelevant here; #875 always models the booster
+        )
+        .expect("dogma")
+    };
+
+    let bare = run(Vec::new(), 6.0);
+    assert!(
+        !bare.capacitor.stable,
+        "6 GJ/s neut should exceed the Rifter's 2.5 GJ/s peak recharge"
+    );
+
+    let boosted = run(
+        vec![FitItem {
+            type_id: tid("Medium Capacitor Booster II"),
+            slot: SlotKind::Mid,
+            index: 0,
+            state: ModuleState::Active,
+            charge_type_id: Some(tid("Cap Booster 400")),
+            quantity: 1,
+            active_drones: None,
+        }],
+        6.0,
+    );
+    assert!(
+        boosted.capacitor.stable,
+        "the same neut pressure should be absorbed once the cap booster is fitted"
+    );
+}

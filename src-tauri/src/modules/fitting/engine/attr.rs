@@ -40,6 +40,13 @@ pub mod attr {
     pub const KINETIC_DAMAGE: i64 = 117;
     pub const THERMAL_DAMAGE: i64 = 118;
     pub const VOLUME: i64 = 161;
+    /// Charge attribute (#875): GJ a cap booster/ASB charge injects into the
+    /// capacitor per shot.
+    pub const CAPACITOR_BONUS: i64 = 67;
+    /// Module attribute: a running shield booster/ASB's rep-per-cycle
+    /// (#875 gates cap booster injection on its *absence*, since ASBs load
+    /// the same charge group but feed shield, not cap — see #878's `tank_of`).
+    pub const SHIELD_BONUS: i64 = 68;
     pub const SHIELD_CAPACITY: i64 = 263;
     pub const DRONE_CAPACITY: i64 = 283;
     pub const CAPACITOR_CAPACITY: i64 = 482;
