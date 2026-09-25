@@ -13,6 +13,7 @@ use super::engine::attr::{attr, AttrStore};
 use super::engine::capacitor::{capacitor, ModuleDrain};
 use super::engine::cycle::cycle_of;
 use super::engine::damage::{damage, Weapon};
+use super::engine::heat::{burnout_seconds, rack_heat, HeatSource};
 use super::engine::navigation::{navigation, prop_velocity, targeting};
 use super::engine::projection::{
     apply_projection, apply_subsystem_slots, projected_from_attrs, ProjectedInput,
@@ -71,6 +72,10 @@ pub(super) struct DogmaStats {
     /// Whether the fit carries any spoolable weapon/rep (#872) — gates the
     /// UI's spool selector.
     pub(super) is_spoolable: bool,
+    /// Overheat burnout estimate per fitted item (#874), parallel to
+    /// `fit.items` — `None` for non-module items and modules that aren't
+    /// currently overheated. See `heat_of`.
+    pub(super) burnout_seconds: Vec<Option<f64>>,
 }
 
 /// Build the engine inputs (ship + modules + all-V skills) from the SDE, resolve
@@ -415,6 +420,32 @@ pub(super) fn run_dogma(
         (None, Vec::new())
     };
 
+    // Overheat burnout estimate (#874), scattered back to `fit.items` order —
+    // same "next() over the module-list positions" pattern as drone_active/
+    // drone_max_active above.
+    let burnout_per_module = heat_of(&resolved, &module_items, &layout);
+    let burnout_seconds_full: Vec<Option<f64>> = {
+        let mut times = burnout_per_module.into_iter();
+        fit.items
+            .iter()
+            .map(|it| {
+                if matches!(
+                    it.slot,
+                    SlotKind::High
+                        | SlotKind::Mid
+                        | SlotKind::Low
+                        | SlotKind::Rig
+                        | SlotKind::Subsystem
+                        | SlotKind::Mode
+                ) {
+                    times.next().flatten()
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+
     Ok(DogmaStats {
         resources,
         validation,
@@ -473,6 +504,7 @@ pub(super) fn run_dogma(
         applied_dps,
         dps_range_curve,
         is_spoolable,
+        burnout_seconds: burnout_seconds_full,
     })
 }
 
@@ -1240,6 +1272,87 @@ pub(super) fn tank_of(
     t
 }
 
+/// Overheat burnout time per fitted module (#874): expected-value seconds
+/// until an overheated module's own accumulated heat damage exhausts its
+/// structure hitpoints, from the per-rack heat-pool model in
+/// `engine::heat` (see that module's doc comment for the ported-approach
+/// license note and the "estimate, not exact" caveat). Parallel to
+/// `module_items`/`resolved.modules`; `None` for every module that isn't
+/// currently overheated, or that the model can never burn out (a dead
+/// rack — see `engine::heat::burnout_seconds`). `layout` is the *resolved*
+/// slot layout (T3 subsystems can grant slots) so the whole-ship slot
+/// factor matches what's actually fitted right now.
+pub(super) fn heat_of(
+    resolved: &ResolvedFit,
+    module_items: &[&FitItem],
+    layout: &ShipLayout,
+) -> Vec<Option<f64>> {
+    // Slot factor (Fs, shared by every rack): online+ (not offline) modules
+    // across the high/mid/low racks over every slot the hull has, including
+    // rigs — offline modules and genuinely empty slots both shrink this the
+    // same way, the mechanical source of "empty slots absorb heat" folklore.
+    let total_slots =
+        (layout.high_slots + layout.mid_slots + layout.low_slots + layout.rig_slots).max(0) as f64;
+    let online = module_items
+        .iter()
+        .filter(|it| {
+            matches!(it.slot, SlotKind::High | SlotKind::Mid | SlotKind::Low)
+                && it.state != ModuleState::Offline
+        })
+        .count() as f64;
+    let slot_factor = if total_slots > 0.0 {
+        online / total_slots
+    } else {
+        0.0
+    };
+
+    let mut result = vec![None; module_items.len()];
+    let racks = [
+        (
+            SlotKind::High,
+            attr::HEAT_CAPACITY_HI,
+            attr::HEAT_ATTENUATION_HI,
+        ),
+        (
+            SlotKind::Mid,
+            attr::HEAT_CAPACITY_MED,
+            attr::HEAT_ATTENUATION_MED,
+        ),
+        (
+            SlotKind::Low,
+            attr::HEAT_CAPACITY_LOW,
+            attr::HEAT_ATTENUATION_LOW,
+        ),
+    ];
+    for (kind, cap_attr, atten_attr) in racks {
+        let idxs: Vec<usize> = module_items
+            .iter()
+            .enumerate()
+            .filter(|(_, it)| it.slot == kind && it.state == ModuleState::Overheated)
+            .map(|(i, _)| i)
+            .collect();
+        if idxs.is_empty() {
+            continue;
+        }
+        let sources: Vec<HeatSource> = idxs
+            .iter()
+            .map(|&i| HeatSource {
+                position: module_items[i].index,
+                heat_damage: resolved.modules[i].get(attr::HEAT_DAMAGE),
+                heat_generation: resolved.modules[i].get(attr::HEAT_ABSORPTION_RATE),
+                cycle_ms: resolved.modules[i].get(attr::DURATION),
+                hp: resolved.modules[i].get(attr::HP),
+            })
+            .collect();
+        let rack = rack_heat(|id| resolved.ship.get(id), cap_attr, atten_attr);
+        let times = burnout_seconds(&rack, slot_factor, &sources);
+        for (k, &i) in idxs.iter().enumerate() {
+            result[i] = times[k];
+        }
+    }
+    result
+}
+
 pub(super) type AttrMap = HashMap<i64, Vec<(i64, f64)>>;
 
 pub(super) type EffectMap = HashMap<i64, Vec<i64>>;
@@ -1437,6 +1550,10 @@ pub(crate) fn simulate_fit(
             .map(|d| d.dps_range_curve.clone())
             .unwrap_or_default(),
         is_spoolable: dogma.as_ref().is_some_and(|d| d.is_spoolable),
+        burnout_seconds: dogma
+            .as_ref()
+            .map(|d| d.burnout_seconds.clone())
+            .unwrap_or_default(),
     })
 }
 
@@ -2436,5 +2553,212 @@ mod tests {
         for v in t.armor_resists {
             assert!((v - 0.15).abs() < 1e-9, "{:?}", t.armor_resists);
         }
+    }
+
+    /// A minimal Rifter-shaped layout for heat tests: 4 highs (only used for
+    /// the whole-ship slot factor), 3 mids, 3 lows, no rigs.
+    fn frigate_layout() -> ShipLayout {
+        ShipLayout {
+            type_id: 587,
+            name: "Rifter".into(),
+            group_name: "Frigate".into(),
+            high_slots: 4,
+            mid_slots: 3,
+            low_slots: 3,
+            rig_slots: 0,
+            subsystem_slots: 0,
+            mode_slots: 0,
+            turret_hardpoints: 3,
+            launcher_hardpoints: 0,
+            cpu_output: 0.0,
+            powergrid_output: 0.0,
+            calibration: 0.0,
+            drone_bay: 0.0,
+            drone_bandwidth: 0.0,
+        }
+    }
+
+    /// heat_of correctly picks out only the overheated mid-slot module, skips
+    /// an idle high-slot module, and scatters `None`/`Some` back through the
+    /// parallel-to-`module_items` result — the integration surface
+    /// `run_dogma` relies on (#874).
+    #[test]
+    fn heat_of_targets_only_overheated_modules() {
+        let ship = store(&[
+            (attr::HEAT_CAPACITY_MED, 100.0),
+            (attr::HEAT_GENERATION_MULTIPLIER, 1.0),
+            (attr::HEAT_ATTENUATION_MED, 0.5),
+        ]);
+        let mwd = store(&[
+            (attr::HEAT_DAMAGE, 19.0),          // Thermo-resolved already
+            (attr::HEAT_ABSORPTION_RATE, 0.04), // prop mods: 4%/s (EVE University)
+            (attr::DURATION, 10_000.0),
+            (attr::HP, 40.0),
+        ]);
+        let idle_high = store(&[]);
+        let resolved = ResolvedFit {
+            ship,
+            modules: vec![idle_high, mwd],
+            drones: Vec::new(),
+            charges: vec![None, None],
+            unresolved: 0,
+        };
+        let items = [
+            FitItem {
+                slot: SlotKind::High,
+                state: ModuleState::Active,
+                ..item(1, None, ModuleState::Active, 1)
+            },
+            FitItem {
+                slot: SlotKind::Mid,
+                state: ModuleState::Overheated,
+                ..item(2, None, ModuleState::Overheated, 1)
+            },
+        ];
+        let module_items: Vec<&FitItem> = items.iter().collect();
+        let result = heat_of(&resolved, &module_items, &frigate_layout());
+        assert_eq!(result.len(), 2);
+        assert!(
+            result[0].is_none(),
+            "an active (not overheated) module never burns out"
+        );
+        assert!(
+            result[1].is_some(),
+            "the overheated MWD should get a burnout estimate"
+        );
+    }
+
+    /// The acceptance scenario (#874): a single overloaded MWD mid-rack on a
+    /// frigate, with Thermodynamics trained to V vs untrained, run through
+    /// the *actual* dogma engine — not hand-fed pre-scaled numbers. The
+    /// effect shapes mirror Thermodynamics (skill 28164 in the bundled SDE;
+    /// the issue's cited id 3455 is in fact "Warp Drive Operation" there,
+    /// verified with `sqlite3 sde.sqlite "SELECT typeID,typeName FROM
+    /// invTypes WHERE typeName='Thermodynamics'"` → 28164) exactly:
+    /// effect 3195 (`thermodynamicsSkillLevel`) preMuls the skill's own
+    /// `thermodynamicsHeatDamage` (1229, base -5.0 on the skill row) by
+    /// `skillLevel` (280); effect 3196 (`thermodynamicsSkillDamageBonus`) is
+    /// a `LocationModifier` postPercent-ing every module's `heatDamage`
+    /// (1211) by that scaled value — i.e. a stacking-exempt -5%/level with
+    /// no explicit required-skill gate, straight off `dgmEffects.modifierInfo`
+    /// for those two real effect rows.
+    #[test]
+    fn thermodynamics_skill_lengthens_mwd_burnout_through_dogma_engine() {
+        use crate::sde::ModifierInfo;
+
+        fn mi(func: &str, dom: &str, op: i64, tgt: i64, src: i64) -> ModifierInfo {
+            ModifierInfo {
+                domain: Some(dom.into()),
+                func: Some(func.into()),
+                modified_attribute_id: Some(tgt),
+                modifying_attribute_id: Some(src),
+                operation: Some(op),
+                group_id: None,
+                skill_type_id: None,
+            }
+        }
+        fn meta(id: i64, modifiers: Vec<ModifierInfo>) -> crate::sde::EffectMeta {
+            crate::sde::EffectMeta {
+                effect_id: id,
+                name: format!("e{id}"),
+                category: 0,
+                is_offensive: false,
+                is_assistance: false,
+                duration_attribute_id: None,
+                discharge_attribute_id: None,
+                range_attribute_id: None,
+                falloff_attribute_id: None,
+                tracking_speed_attribute_id: None,
+                modifiers,
+            }
+        }
+
+        let mut effects = HashMap::new();
+        // 3195: self preMul — thermodynamicsHeatDamage (1229) := base(-5.0) * skillLevel (280).
+        effects.insert(
+            3195,
+            meta(3195, vec![mi("ItemModifier", "itemID", 0, 1229, 280)]),
+        );
+        // 3196: LocationModifier postPercent — every module's heatDamage (1211) *= (1 + 1229%).
+        effects.insert(
+            3196,
+            meta(3196, vec![mi("LocationModifier", "shipID", 6, 1211, 1229)]),
+        );
+
+        let ship_attrs = vec![
+            (attr::HEAT_CAPACITY_MED, 100.0),
+            (attr::HEAT_GENERATION_MULTIPLIER, 1.0),
+            (attr::HEAT_ATTENUATION_MED, 0.5),
+        ];
+        let mwd_attrs = vec![
+            (attr::HEAT_DAMAGE, 19.0), // T1 5MN MWD, bundled SDE
+            (attr::HEAT_ABSORPTION_RATE, 0.04),
+            (attr::DURATION, 10_000.0),
+            (attr::HP, 40.0),
+        ];
+        let layout = frigate_layout();
+        let items = [FitItem {
+            slot: SlotKind::Mid,
+            state: ModuleState::Overheated,
+            ..item(438, None, ModuleState::Overheated, 1)
+        }];
+        let module_items: Vec<&FitItem> = items.iter().collect();
+
+        let burnout_at = |thermo_level: f64| {
+            let mut skills = Vec::new();
+            if thermo_level > 0.0 {
+                skills.push(EntityInput {
+                    type_id: 28164, // Thermodynamics
+                    attrs: vec![(280, thermo_level), (1229, -5.0)],
+                    effect_ids: vec![3195, 3196],
+                    ..Default::default()
+                });
+            }
+            let input = FitInput {
+                ship: EntityInput {
+                    attrs: ship_attrs.clone(),
+                    ..Default::default()
+                },
+                modules: vec![EntityInput {
+                    attrs: mwd_attrs.clone(),
+                    overheated: true,
+                    ..Default::default()
+                }],
+                skills,
+                ..Default::default()
+            };
+            let resolved = resolve(&input, &effects, &|_| true, &|_| 0.0);
+            heat_of(&resolved, &module_items, &layout)[0]
+                .expect("an overloaded MWD on a frigate always burns out eventually")
+        };
+
+        let t0 = burnout_at(0.0);
+        let t5 = burnout_at(5.0);
+        assert!(
+            t5 > t0,
+            "Thermodynamics V should sustain the overheat longer than untrained ({t5}s vs {t0}s)"
+        );
+        let ratio = t5 / t0;
+        // Not a straight 1/0.75 multiplier — rack heat keeps building while the
+        // module overheats, so cumulative expected damage isn't linear in time
+        // (see `engine::heat`'s doc comment); the acceptance criterion's "right
+        // ratio" is checked as landing near that naive scaling.
+        assert!(
+            (1.15..1.35).contains(&ratio),
+            "Thermo V (-25% heat damage) should land near the naive 1/0.75x ratio, got {ratio}x (t0={t0}s, t5={t5}s)"
+        );
+        // Plausible absolute range: EVE University's Propulsion equipment page
+        // notes a 5MN MWD "can completely burn itself out in as few as three
+        // overheated cycles" (worst-case RNG at a 10s cycle, i.e. ~20-30s) —
+        // our expected-value estimate should sit comfortably above that worst
+        // case and still be a matter of minutes, not hours.
+        assert!(
+            t0 > 20.0 && t0 < 600.0,
+            "untrained burnout time implausible: {t0}s"
+        );
+        assert!(
+            t5 > 20.0 && t5 < 900.0,
+            "Thermo V burnout time implausible: {t5}s"
+        );
     }
 }

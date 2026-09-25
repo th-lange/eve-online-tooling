@@ -76,6 +76,15 @@ export function km(metres: number): string {
   return `${v >= 100 ? Math.round(v) : v.toFixed(1)} km`;
 }
 
+/** Seconds → a compact overheat burnout countdown ("48s" / "2m 5s"). */
+export function burnoutLabel(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return rem > 0 ? `${m}m ${rem}s` : `${m}m`;
+}
+
 export const DAMAGE_TYPES = ["EM", "Th", "Kin", "Exp"] as const;
 
 /** A resist % cell, tinted greener the higher the resistance (spot tank holes). */

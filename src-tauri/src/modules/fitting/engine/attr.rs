@@ -18,6 +18,8 @@ use super::stacking::combine_penalized;
 #[allow(dead_code)] // ids land here as the tank/damage/nav calculators consume them
 #[allow(clippy::module_inception)] // `attr::attr` — a named constant bag, kept nested on purpose
 pub mod attr {
+    /// Module structure hitpoints — heat damage (#874) is dealt against this.
+    pub const HP: i64 = 9;
     pub const MASS: i64 = 4;
     pub const POWER_OUTPUT: i64 = 11;
     pub const LOW_SLOTS: i64 = 12;
@@ -57,6 +59,31 @@ pub mod attr {
     pub const DRONE_BANDWIDTH_USED: i64 = 1272;
     pub const SUBSYSTEM_SLOTS: i64 = 1367;
     pub const RELOAD_TIME: i64 = 1795;
+    /// Module cycle time (ms) — also the interval between heat-damage rolls
+    /// while overheated (#874).
+    pub const DURATION: i64 = 73;
+    /// Ship attribute: rack heat pool size, as a percentage (`heatCapacityHi`).
+    pub const HEAT_CAPACITY_HI: i64 = 1178;
+    /// `heatCapacityMed`.
+    pub const HEAT_CAPACITY_MED: i64 = 1199;
+    /// `heatCapacityLow`.
+    pub const HEAT_CAPACITY_LOW: i64 = 1200;
+    /// Module attribute: HP dealt to a heat-damage roll's target at distance 0
+    /// (`heatDamage`), already Thermodynamics/ship-bonus-adjusted once resolved.
+    pub const HEAT_DAMAGE: i64 = 1211;
+    /// Ship attribute: hull-size rack heat build-up rate (`heatGenerationMultiplier`).
+    pub const HEAT_GENERATION_MULTIPLIER: i64 = 1224;
+    /// Ship attribute: per-slot-distance heat-damage falloff for the high rack
+    /// (`heatAttenuationHi`).
+    pub const HEAT_ATTENUATION_HI: i64 = 1259;
+    /// `heatAttenuationMed`.
+    pub const HEAT_ATTENUATION_MED: i64 = 1261;
+    /// `heatAttenuationLow`.
+    pub const HEAT_ATTENUATION_LOW: i64 = 1262;
+    /// Module attribute: this module's own contribution to its rack's heat
+    /// build-up while overheated, as a fraction of rack capacity per second
+    /// (`heatAbsorbtionRateModifier`).
+    pub const HEAT_ABSORPTION_RATE: i64 = 1180;
 }
 
 /// A single attribute's base value plus accumulating modifier buckets.

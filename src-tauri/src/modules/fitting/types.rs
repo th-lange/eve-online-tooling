@@ -397,6 +397,14 @@ pub struct FitStats {
     /// `false`/absent until the dogma engine runs.
     #[serde(default)]
     pub is_spoolable: bool,
+    /// Overheat burnout estimate (#874) per fitted item, parallel to
+    /// `Fit::items` — `None` for non-module items and modules that aren't
+    /// currently overheated (or that never build meaningful rack heat).
+    /// Expected-value seconds; see `engine::heat`'s doc comment for the
+    /// model and its "estimate, not exact" caveat. Empty until the dogma
+    /// engine runs.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub burnout_seconds: Vec<Option<f64>>,
 }
 
 /// One category of electronic warfare projected onto the fit (presence only).

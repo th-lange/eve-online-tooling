@@ -8,6 +8,7 @@ import {
   Minus,
   Plus,
   Star,
+  Timer,
   X,
 } from "lucide-react";
 import {
@@ -18,7 +19,7 @@ import {
   type SlotKind,
   type WeaponRange,
 } from "../../lib/api";
-import { SLOT_BADGE, km } from "./fitHelpers";
+import { SLOT_BADGE, burnoutLabel, km } from "./fitHelpers";
 import {
   useFitMutations,
   useFitState,
@@ -292,6 +293,7 @@ function ModuleRow({
   canActivate,
   droneActive,
   droneMaxActive,
+  burnoutSeconds,
 }: {
   item: Fit["items"][number];
   index: number;
@@ -318,6 +320,9 @@ function ModuleRow({
   canActivate: boolean;
   droneActive: number | null | undefined;
   droneMaxActive: number | null | undefined;
+  /** Overheat burnout estimate (#874, seconds) — only meaningful while
+   *  `it.state === "overheated"`. */
+  burnoutSeconds: number | null | undefined;
 }) {
   const it = item;
   const i = index;
@@ -399,6 +404,15 @@ function ModuleRow({
           >
             <stateIcon.Icon size={12} className={stateIcon.cls} />
           </button>
+        )}
+        {it.state === "overheated" && burnoutSeconds != null && (
+          <span
+            className="flex shrink-0 items-center gap-0.5 whitespace-nowrap rounded bg-red-950/60 px-1 py-0.5 text-[10px] tabular-nums text-red-300"
+            title="Estimated time until this module burns out (heat damage exhausts its structure hitpoints)"
+          >
+            <Timer size={10} />
+            {burnoutLabel(burnoutSeconds)}
+          </span>
         )}
         {ammo ? (
           <span className="group/ammo relative flex min-w-0 flex-1 items-center gap-1">
@@ -511,6 +525,7 @@ function SlotBank({
   onSetActiveDrones,
   droneActive,
   droneMaxActive,
+  burnoutSeconds,
   rangeOf,
   activatable,
   ammoStats,
@@ -534,6 +549,9 @@ function SlotBank({
   onSetActiveDrones: (globalIndex: number, activeDrones: number) => void;
   droneActive?: Array<number | null>;
   droneMaxActive?: Array<number | null>;
+  /** Overheat burnout estimate per fitted item (#874, seconds), parallel to
+   *  `fit.items`. */
+  burnoutSeconds?: Array<number | null>;
   rangeOf: Map<string, WeaponRange>;
   activatable: Set<number>;
   ammoStats?: Record<number, AmmoRow>;
@@ -595,6 +613,7 @@ function SlotBank({
               canActivate={activatable.has(it.typeId)}
               droneActive={droneActive?.[i]}
               droneMaxActive={droneMaxActive?.[i]}
+              burnoutSeconds={burnoutSeconds?.[i]}
             />
           ))}
         </ul>
@@ -643,6 +662,7 @@ export function SlotGrid({
   if (!fit || !layout) return null;
   const droneActive = stats.data?.droneActive;
   const droneMaxActive = stats.data?.droneMaxActive;
+  const burnoutSeconds = stats.data?.burnoutSeconds;
   const counts: Partial<Record<SlotKind, number>> = {
     high: layout.highSlots,
     mid: layout.midSlots,
@@ -663,6 +683,7 @@ export function SlotGrid({
     onSetActiveDrones,
     droneActive,
     droneMaxActive,
+    burnoutSeconds,
     rangeOf,
     activatable,
     ammoStats,

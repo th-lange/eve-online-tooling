@@ -281,6 +281,11 @@ export interface FitStats {
   /** Whether the fit carries any spoolable weapon/rep (Triglavian Entropic
    * Disintegrators and similar) — gates the spool selector. */
   isSpoolable?: boolean;
+  /** Overheat burnout estimate (seconds) per fitted item, parallel to
+   * `Fit.items` — `null` for non-module items and modules that aren't
+   * currently overheated (or that never build meaningful rack heat). An
+   * expected-value estimate, not an exact prediction. */
+  burnoutSeconds?: Array<number | null>;
 }
 
 /** One priced line of a whole-fit valuation. */
