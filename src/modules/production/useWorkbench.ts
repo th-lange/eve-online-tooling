@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  marketCurrentLocation,
   ownedBlueprints,
   productionDecryptors,
   productionProfit,
@@ -80,6 +81,25 @@ export function useWorkbench(): WorkbenchState {
   const [pasteMinRoiPct, setPasteMinRoiPct] = useState("20");
 
   const regions = useQuery(marketKeys.regions());
+  // Current character location — used to seed the region/station when the
+  // character's alliance has a configured market structure.
+  const current = useQuery({
+    queryKey: ["market", "current-location"],
+    queryFn: marketCurrentLocation,
+  });
+
+  // Seed region + station once from the current location, so alliance
+  // characters whose alliance has a private market structure default to it.
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current || !current.data) return;
+    seeded.current = true;
+    if (current.data.stationId) {
+      setRegionId(current.data.regionId);
+      setStationId(current.data.stationId);
+    }
+  }, [current.data]);
+
   const owned = useQuery({
     queryKey: ["owned", "blueprints"],
     queryFn: ownedBlueprints,
@@ -288,7 +308,17 @@ export function useWorkbench(): WorkbenchState {
     pastedNames,
   ]);
 
-  const stations = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
+  const stations = useMemo(() => {
+    const base = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
+    // The alliance market structure isn't in the SDE's 5-hub station list, so
+    // surface it here when the current location resolved to one — that's what
+    // makes the structure appear in the StationSelect dropdown.
+    const structureStation =
+      current.data?.stationId && current.data.stationName
+        ? [{ id: current.data.stationId, name: current.data.stationName }]
+        : [];
+    return [...base, ...structureStation];
+  }, [regions.data, regionId, current.data]);
   const rowsByType = useMemo(
     () => new Map(rows.map((r) => [r.blueprintTypeId, r])),
     [rows],
