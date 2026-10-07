@@ -1,7 +1,7 @@
-import type { Region, Station } from "../lib/api";
+import type { IdName, Station } from "../lib/api";
 
 // The region + station `<select>` markup was copy-pasted byte-for-byte across
-// the market-priced pages (trading, reprocessing, production, assets,
+// market-priced pages (trading, reprocessing, production, assets,
 // appraisal). Extracted here so there's one place to change; each page keeps
 // its own `<Field>` wrapper/label and its own change handler (so page-specific
 // side effects — dirty flags, refetch — stay put).
@@ -9,14 +9,16 @@ import type { Region, Station } from "../lib/api";
 const SELECT_CLASS =
   "w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none";
 
-/** Region dropdown from the `marketRegions` list. Changing region should reset
- *  the station — the caller does that in `onChange`. */
+/** Region dropdown. Accepts either the 5-hub `Region[]` or the full
+ *  `IdName[]` from `marketAllRegions` — the component only reads `id`/`name`,
+ *  so both shapes work. Changing region should reset the station — the
+ *  caller does that in `onChange`. */
 export function RegionSelect({
   regions,
   value,
   onChange,
 }: {
-  regions: Region[] | undefined;
+  regions: IdName[] | undefined;
   value: number;
   onChange: (regionId: number) => void;
 }) {

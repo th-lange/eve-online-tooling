@@ -1,6 +1,7 @@
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import type {
   Decryptor,
+  IdName,
   ListItem,
   ListName,
   OwnedBlueprint,
@@ -105,6 +106,10 @@ export interface WorkbenchState {
   setPasteMinRoiPct: (s: string) => void;
 
   regions: UseQueryResult<Region[], Error>;
+  /** All k-space regions (id + name only) for the region dropdown, so regions
+   *  outside the 5 trade hubs — e.g. an alliance structure's home region —
+   *  are selectable. */
+  allRegions: UseQueryResult<IdName[], Error>;
   owned: UseQueryResult<OwnedBlueprint[], Error>;
   decryptors: UseQueryResult<Decryptor[], Error>;
   stock: UseQueryResult<Record<string, number>, Error>;

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
+  marketAllRegions,
   marketCurrentLocation,
   ownedBlueprints,
   productionDecryptors,
@@ -81,6 +82,13 @@ export function useWorkbench(): WorkbenchState {
   const [pasteMinRoiPct, setPasteMinRoiPct] = useState("20");
 
   const regions = useQuery(marketKeys.regions());
+  // All k-space regions for the region dropdown — the 5-hub `regions` only
+  // covers trade hubs, so a structure in a non-hub region wouldn't appear.
+  const allRegions = useQuery({
+    queryKey: ["market", "all-regions"],
+    queryFn: marketAllRegions,
+    staleTime: 24 * 60 * 60 * 1000,
+  });
   // Current character location — used to seed the region/station when the
   // character's alliance has a configured market structure.
   const current = useQuery({
@@ -467,6 +475,7 @@ export function useWorkbench(): WorkbenchState {
     pasteMinRoiPct,
     setPasteMinRoiPct,
     regions,
+    allRegions,
     owned,
     decryptors,
     stock,

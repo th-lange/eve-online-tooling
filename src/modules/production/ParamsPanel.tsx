@@ -29,7 +29,7 @@ export function ParamsPanel({ wb }: { wb: WorkbenchState }) {
     metaOptions,
     metas,
     setMetas,
-    regions,
+    allRegions,
     regionId,
     setRegionId,
     setStationId,
@@ -171,7 +171,7 @@ export function ParamsPanel({ wb }: { wb: WorkbenchState }) {
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             <Field label="Region">
               <RegionSelect
-                regions={regions.data}
+                regions={allRegions.data}
                 value={regionId}
                 onChange={(id) => {
                   setRegionId(id);
