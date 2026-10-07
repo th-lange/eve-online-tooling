@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
-  marketAllRegions,
   marketCurrentLocation,
   ownedBlueprints,
   productionDecryptors,
@@ -82,13 +81,6 @@ export function useWorkbench(): WorkbenchState {
   const [pasteMinRoiPct, setPasteMinRoiPct] = useState("20");
 
   const regions = useQuery(marketKeys.regions());
-  // All k-space regions for the region dropdown — the 5-hub `regions` only
-  // covers trade hubs, so a structure in a non-hub region wouldn't appear.
-  const allRegions = useQuery({
-    queryKey: ["market", "all-regions"],
-    queryFn: marketAllRegions,
-    staleTime: 24 * 60 * 60 * 1000,
-  });
   // Current character location — used to seed the region/station when the
   // character's alliance has a configured market structure.
   const current = useQuery({
@@ -107,6 +99,34 @@ export function useWorkbench(): WorkbenchState {
       setStationId(current.data.stationId);
     }
   }, [current.data]);
+
+  // Combined region list: the 5 trade hubs + the alliance structure's region
+  // (if the character's alliance has one). Keeps the RegionSelect dropdown
+  // focused on regions that actually have stations/structures, rather than
+  // dumping all 100+ k-space regions on the user.
+  const uiRegions = useMemo(() => {
+    const hubs = regions.data ?? [];
+    const loc = current.data;
+    if (loc && loc.stationId && loc.stationName && loc.regionId) {
+      const hasRegion = hubs.some((r) => r.id === loc.regionId);
+      if (!hasRegion) {
+        return [
+          ...hubs,
+          {
+            id: loc.regionId,
+            name: loc.regionName,
+            stations: [
+              {
+                id: loc.stationId,
+                name: loc.stationName,
+              },
+            ],
+          },
+        ];
+      }
+    }
+    return hubs;
+  }, [regions.data, current.data]);
 
   const owned = useQuery({
     queryKey: ["owned", "blueprints"],
@@ -317,16 +337,8 @@ export function useWorkbench(): WorkbenchState {
   ]);
 
   const stations = useMemo(() => {
-    const base = regions.data?.find((r) => r.id === regionId)?.stations ?? [];
-    // The alliance market structure isn't in the SDE's 5-hub station list, so
-    // surface it here when the current location resolved to one — that's what
-    // makes the structure appear in the StationSelect dropdown.
-    const structureStation =
-      current.data?.stationId && current.data.stationName
-        ? [{ id: current.data.stationId, name: current.data.stationName }]
-        : [];
-    return [...base, ...structureStation];
-  }, [regions.data, regionId, current.data]);
+    return uiRegions.find((r) => r.id === regionId)?.stations ?? [];
+  }, [uiRegions, regionId]);
   const rowsByType = useMemo(
     () => new Map(rows.map((r) => [r.blueprintTypeId, r])),
     [rows],
@@ -475,7 +487,7 @@ export function useWorkbench(): WorkbenchState {
     pasteMinRoiPct,
     setPasteMinRoiPct,
     regions,
-    allRegions,
+    uiRegions,
     owned,
     decryptors,
     stock,
