@@ -98,6 +98,36 @@ const HUBS: &[Hub] = &[
     },
 ];
 
+/// A player-owned structure (citadel) that serves as a private market for a
+/// specific alliance. These ids aren't in the SDE — they're resolved at runtime
+/// via `GET /universe/structures/{id}/`.
+struct AllianceMarket {
+    alliance_id: i64,
+    /// One or more candidate structure ids for the alliance; the first that
+    /// resolves successfully at runtime is used.
+    structure_ids: &'static [i64],
+}
+
+/// Extensible table of alliances → their private market structure(s). Characters
+/// in one of these alliances see the structure as their default market location
+/// instead of a trade hub, so their pricing reflects the alliance's home structure
+/// (which may have different tax rates / broker fees than NPC stations). Add a row
+/// to onboard a new alliance — no lookup logic changes.
+const ALLIANCE_MARKETS: &[AllianceMarket] = &[AllianceMarket {
+    alliance_id: 1354830081,
+    structure_ids: &[1049588174021, 1049461661707],
+}];
+
+/// Look up the candidate market structure ids for a given alliance. Empty when
+/// the alliance has no special structure configured.
+pub fn market_structures_for_alliance(alliance_id: i64) -> &'static [i64] {
+    ALLIANCE_MARKETS
+        .iter()
+        .find(|m| m.alliance_id == alliance_id)
+        .map(|m| m.structure_ids)
+        .unwrap_or(&[])
+}
+
 /// All selectable regions, each with its hub station.
 pub fn regions() -> Vec<Region> {
     HUBS.iter()
@@ -153,5 +183,22 @@ pub fn location_label(region_id: i64, station_id: Option<i64>) -> String {
             format!("{station} — {region}")
         }
         None => format!("{region} (region average)"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_alliance_returns_its_structures() {
+        let structures = market_structures_for_alliance(1354830081);
+        assert_eq!(structures, &[1049588174021, 1049461661707]);
+    }
+
+    #[test]
+    fn unknown_alliance_returns_empty() {
+        let structures = market_structures_for_alliance(999999999);
+        assert!(structures.is_empty());
     }
 }

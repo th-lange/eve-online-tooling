@@ -77,6 +77,28 @@ describe("market api wrapper", () => {
     expect(invokeMock).toHaveBeenCalledWith("market_current_location");
   });
 
+  it("returns the station fields from market_current_location", async () => {
+    invokeMock.mockResolvedValue({
+      systemId: 30000148,
+      systemName: "Jita",
+      security: 0.9,
+      regionId: 10000002,
+      regionName: "The Forge",
+      stationId: 1049588174021,
+      stationName: "Test Structure",
+    });
+    const result = await marketCurrentLocation();
+    expect(result).toEqual({
+      systemId: 30000148,
+      systemName: "Jita",
+      security: 0.9,
+      regionId: 10000002,
+      regionName: "The Forge",
+      stationId: 1049588174021,
+      stationName: "Test Structure",
+    });
+  });
+
   it("forwards the whole params object to market_sell_orders under a params key", async () => {
     invokeMock.mockResolvedValue([]);
     const params: SellOrdersParams = { typeId: 34, regionId: 10000002 };

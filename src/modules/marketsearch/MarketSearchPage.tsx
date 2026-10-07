@@ -104,6 +104,15 @@ function Workbench() {
     seeded.current = true;
     setRegionId(current.data.regionId || FORGE);
     setOrigin({ id: current.data.systemId, name: current.data.systemName });
+    // When the character's alliance has a configured market structure, the
+    // backend returns it as the station — pre-select it so orders and prices
+    // default to that structure.
+    if (current.data.stationId) {
+      setStation({
+        id: current.data.stationId,
+        name: current.data.stationName ?? `Structure ${current.data.stationId}`,
+      });
+    }
   }, [current.data]);
 
   // Select an item handed in from elsewhere (e.g. the ⌘K command palette).

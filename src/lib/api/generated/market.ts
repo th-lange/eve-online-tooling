@@ -89,6 +89,16 @@ export const commands = {
    * Resolve the active character's current location (system + region). Returns
    * `None` when nobody is logged in (or the location scope is missing) so the UI
    * can fall back to a default region and a pickable jumps origin.
+   *
+   * When the character belongs to an alliance with a configured market structure
+   * (see [`market_structures_for_alliance`]), the structure's location is returned
+   * instead — the system/region point at the structure, and `station_id`/
+   * `station_name` identify it — so the UI prices against that structure by
+   * default. Structure info is fetched via the public ESI
+   * `GET /universe/structures/{id}/` endpoint; each candidate structure is tried
+   * in order and the first that resolves is used. Any failure (no affiliation
+   * data, no structure reachable, SDE gap) falls through to the character's
+   * actual current location.
    */
   async marketCurrentLocation(): Promise<
     Result<CurrentLocation | null, AppError>
@@ -168,6 +178,9 @@ export type AppError =
 /**
  * The logged-in character's current system + region, used to default the
  * search to "current region" and to anchor the jumps-to-station column.
+ * When the character belongs to an alliance with a configured market
+ * structure, `station_id`/`station_name` carry that structure and the
+ * system/region fields point at it instead of the character's location.
  */
 export type CurrentLocation = {
   systemId: number;
@@ -175,6 +188,16 @@ export type CurrentLocation = {
   security: number;
   regionId: number;
   regionName: string;
+  /**
+   * The station/structure id when the market is a specific location (e.g.
+   * an alliance's private structure), `None` when pricing against the
+   * character's current system or a region average.
+   */
+  stationId: number | null;
+  /**
+   * The display name of the station/structure, when one is selected.
+   */
+  stationName: string | null;
 };
 /**
  * One price level in the order book: total remaining units at that price.

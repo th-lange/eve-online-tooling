@@ -5,12 +5,12 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-use crate::esi::{authed_get, AuthState};
+use crate::esi::{authed_get, character_affiliation, fetch_structure_info, AuthState};
 use crate::sde::graph;
 use crate::storage;
 
 use super::aggregate::filter_outliers;
-use super::markets::{regions, resolve_location, Region};
+use super::markets::{market_structures_for_alliance, regions, resolve_location, Region};
 use super::service::MarketService;
 use super::types::{Order, PriceModel};
 
@@ -109,6 +109,9 @@ pub fn market_search_stations(app: AppHandle, query: String) -> Result<Vec<IdNam
 
 /// The logged-in character's current system + region, used to default the
 /// search to "current region" and to anchor the jumps-to-station column.
+/// When the character belongs to an alliance with a configured market
+/// structure, `station_id`/`station_name` carry that structure and the
+/// system/region fields point at it instead of the character's location.
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CurrentLocation {
@@ -117,6 +120,12 @@ pub struct CurrentLocation {
     pub security: f64,
     pub region_id: i64,
     pub region_name: String,
+    /// The station/structure id when the market is a specific location (e.g.
+    /// an alliance's private structure), `None` when pricing against the
+    /// character's current system or a region average.
+    pub station_id: Option<i64>,
+    /// The display name of the station/structure, when one is selected.
+    pub station_name: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -127,6 +136,16 @@ struct EsiLocation {
 /// Resolve the active character's current location (system + region). Returns
 /// `None` when nobody is logged in (or the location scope is missing) so the UI
 /// can fall back to a default region and a pickable jumps origin.
+///
+/// When the character belongs to an alliance with a configured market structure
+/// (see [`market_structures_for_alliance`]), the structure's location is returned
+/// instead — the system/region point at the structure, and `station_id`/
+/// `station_name` identify it — so the UI prices against that structure by
+/// default. Structure info is fetched via the public ESI
+/// `GET /universe/structures/{id}/` endpoint; each candidate structure is tried
+/// in order and the first that resolves is used. Any failure (no affiliation
+/// data, no structure reachable, SDE gap) falls through to the character's
+/// actual current location.
 #[tauri::command]
 #[specta::specta]
 pub async fn market_current_location(
@@ -137,6 +156,39 @@ pub async fn market_current_location(
     let Some(character_id) = storage::active_character(&dir) else {
         return Ok(None);
     };
+    let http = auth.http();
+
+    // Check whether this character's alliance has a configured market structure.
+    let structures = character_affiliation(http, &[character_id])
+        .await
+        .and_then(|mut affs| affs.pop())
+        .and_then(|aff| aff.alliance_id)
+        .map(|aid| market_structures_for_alliance(aid))
+        .unwrap_or(&[]);
+
+    if !structures.is_empty() {
+        let sde = crate::sde::open_from_app(&app)?;
+        for &structure_id in structures {
+            if let Some(info) = fetch_structure_info(http, structure_id).await {
+                if let Some(sys) = sde
+                    .system_info(info.solar_system_id)
+                    .map_err(|e| e.to_string())?
+                {
+                    return Ok(Some(CurrentLocation {
+                        system_id: info.solar_system_id,
+                        system_name: sys.name,
+                        security: sys.security,
+                        region_id: sys.region_id,
+                        region_name: sys.region_name,
+                        station_id: Some(structure_id),
+                        station_name: Some(info.name),
+                    }));
+                }
+            }
+        }
+    }
+
+    // Default: the character's actual current location.
     let loc: EsiLocation = match authed_get(
         &auth,
         character_id,
@@ -162,6 +214,8 @@ pub async fn market_current_location(
         security: info.security,
         region_id: info.region_id,
         region_name: info.region_name,
+        station_id: None,
+        station_name: None,
     }))
 }
 
