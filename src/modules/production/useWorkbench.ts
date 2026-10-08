@@ -92,9 +92,13 @@ export function useWorkbench(): WorkbenchState {
   // characters whose alliance has a private market structure default to it.
   const seeded = useRef(false);
   useEffect(() => {
-    if (seeded.current || !current.data) return;
-    seeded.current = true;
-    if (current.data.stationId) {
+    if (!current.data) return;
+    // Only mark as seeded (and thus stop re-seeding) once we've actually
+    // seeded from a structure result. If the first fetch returns a
+    // non-structure location (e.g. stale cache before re-login), keep
+    // retrying until stationId arrives.
+    if (current.data.stationId && !seeded.current) {
+      seeded.current = true;
       setRegionId(current.data.regionId);
       setStationId(current.data.stationId);
     }

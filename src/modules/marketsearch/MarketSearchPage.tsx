@@ -100,18 +100,26 @@ function Workbench() {
   // Default the region + jumps origin to the character's current location once.
   const seeded = useRef(false);
   useEffect(() => {
-    if (seeded.current || !current.data) return;
-    seeded.current = true;
-    setRegionId(current.data.regionId || FORGE);
-    setOrigin({ id: current.data.systemId, name: current.data.systemName });
+    const data = current.data;
+    if (!data) return;
+    // Region + origin are always seeded on the first non-null result.
+    // The station (alliance structure) is seeded separately — only when
+    // stationId is available — so a stale cached result without stationId
+    // doesn't block future results that do carry it.
+    if (!seeded.current) {
+      seeded.current = true;
+      setRegionId(data.regionId || FORGE);
+      setOrigin({ id: data.systemId, name: data.systemName });
+    }
     // When the character's alliance has a configured market structure, the
     // backend returns it as the station — pre-select it so orders and prices
     // default to that structure.
-    if (current.data.stationId) {
-      setStation({
-        id: current.data.stationId,
-        name: current.data.stationName ?? `Structure ${current.data.stationId}`,
-      });
+    if (data.stationId) {
+      const sid = data.stationId;
+      const sname = data.stationName ?? `Structure ${data.stationId}`;
+      setStation((prev) =>
+        prev?.id === sid ? prev : { id: sid, name: sname },
+      );
     }
   }, [current.data]);
 
