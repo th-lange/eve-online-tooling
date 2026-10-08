@@ -111,14 +111,15 @@ function Workbench() {
       setRegionId(data.regionId || FORGE);
       setOrigin({ id: data.systemId, name: data.systemName });
     }
-    // When the character's alliance has a configured market structure, the
-    // backend returns it as the station — pre-select it so orders and prices
-    // default to that structure.
-    if (data.stationId) {
-      const sid = data.stationId;
-      const sname = data.stationName ?? `Structure ${data.stationId}`;
+    // When the character's alliance has configured market structures, the
+    // backend returns them in `stations` — pre-select the first so orders
+    // and prices default to that structure.
+    if (data.stations.length > 0) {
+      const primary = data.stations[0];
       setStation((prev) =>
-        prev?.id === sid ? prev : { id: sid, name: sname },
+        prev?.id === primary.stationId
+          ? prev
+          : { id: primary.stationId, name: primary.stationName },
       );
     }
   }, [current.data]);
@@ -147,8 +148,10 @@ function Workbench() {
     combine: (results) => results.map((q) => q.data ?? []),
   });
   const price = useQuery({
-    queryKey: ["price", historyRegionId, picked?.id],
-    queryFn: picked ? () => marketPrice(historyRegionId, picked.id) : undefined,
+    queryKey: ["price", historyRegionId, picked?.id, station?.id ?? null],
+    queryFn: picked
+      ? () => marketPrice(historyRegionId, picked.id, station?.id ?? null)
+      : undefined,
     enabled: tab === "history" && picked != null,
   });
 

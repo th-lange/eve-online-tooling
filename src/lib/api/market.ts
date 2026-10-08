@@ -62,9 +62,9 @@ export async function marketSearchStations(query: string): Promise<IdName[]> {
 }
 
 /** The logged-in character's current system + region (null if not available).
- * When the character's alliance has a configured market structure, the
- * returned system/region point at the structure and `stationId`/`stationName`
- * identify it. */
+ * When the character's alliance has configured market structures, the
+ * returned system/region point at the first one, and `stations` lists
+ * all of them (so the UI can offer a choice). */
 export async function marketCurrentLocation(): Promise<CurrentLocation | null> {
   return unwrapCommand(await commands.marketCurrentLocation());
 }

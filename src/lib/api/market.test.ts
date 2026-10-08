@@ -77,15 +77,24 @@ describe("market api wrapper", () => {
     expect(invokeMock).toHaveBeenCalledWith("market_current_location");
   });
 
-  it("returns the station fields from market_current_location", async () => {
+  it("returns the stations field from market_current_location", async () => {
     invokeMock.mockResolvedValue({
       systemId: 30000148,
       systemName: "Jita",
       security: 0.9,
       regionId: 10000002,
       regionName: "The Forge",
-      stationId: 1049588174021,
-      stationName: "Test Structure",
+      stations: [
+        {
+          stationId: 1049588174021,
+          stationName: "Test Structure",
+          systemId: 30000148,
+          systemName: "Jita",
+          security: 0.9,
+          regionId: 10000002,
+          regionName: "The Forge",
+        },
+      ],
     });
     const result = await marketCurrentLocation();
     expect(result).toEqual({
@@ -94,8 +103,17 @@ describe("market api wrapper", () => {
       security: 0.9,
       regionId: 10000002,
       regionName: "The Forge",
-      stationId: 1049588174021,
-      stationName: "Test Structure",
+      stations: [
+        {
+          stationId: 1049588174021,
+          stationName: "Test Structure",
+          systemId: 30000148,
+          systemName: "Jita",
+          security: 0.9,
+          regionId: 10000002,
+          regionName: "The Forge",
+        },
+      ],
     });
   });
 

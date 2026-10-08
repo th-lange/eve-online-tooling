@@ -8,6 +8,7 @@ import {
   rosterStock,
   sdeUpdate,
   type PriceBasis,
+  type Region,
   type ProfitBreakdown,
   type ProfitParams,
 } from "../../lib/api";
@@ -89,47 +90,47 @@ export function useWorkbench(): WorkbenchState {
   });
 
   // Seed region + station once from the current location, so alliance
-  // characters whose alliance has a private market structure default to it.
+  // characters whose alliance has private market structures default to them.
+  // If the first fetch returns no structures (stale cache before re-login),
+  // keep retrying until stations arrive.
   const seeded = useRef(false);
   useEffect(() => {
-    if (!current.data) return;
-    // Only mark as seeded (and thus stop re-seeding) once we've actually
-    // seeded from a structure result. If the first fetch returns a
-    // non-structure location (e.g. stale cache before re-login), keep
-    // retrying until stationId arrives.
-    if (current.data.stationId && !seeded.current) {
-      seeded.current = true;
-      setRegionId(current.data.regionId);
-      setStationId(current.data.stationId);
-    }
+    const data = current.data;
+    if (!data || data.stations.length === 0) return;
+    if (seeded.current) return;
+    seeded.current = true;
+    const primary = data.stations[0];
+    setRegionId(primary.regionId);
+    setStationId(primary.stationId);
   }, [current.data]);
 
-  // Combined region list: the 5 trade hubs + the alliance structure's region
-  // (if the character's alliance has one). Keeps the RegionSelect dropdown
-  // focused on regions that actually have stations/structures, rather than
-  // dumping all 100+ k-space regions on the user.
+  // Combined region list: the 5 trade hubs + every alliance structure's
+  // region (so both 1049588174021 and 1049461661707 appear if they're in
+  // different regions). Keeps the RegionSelect dropdown focused on regions
+  // that actually have stations/structures.
   const uiRegions = useMemo(() => {
     const hubs = regions.data ?? [];
-    const loc = current.data;
-    if (loc && loc.stationId && loc.stationName && loc.regionId) {
-      const hasRegion = hubs.some((r) => r.id === loc.regionId);
-      if (!hasRegion) {
-        return [
-          ...hubs,
-          {
-            id: loc.regionId,
-            name: loc.regionName,
-            stations: [
-              {
-                id: loc.stationId,
-                name: loc.stationName,
-              },
-            ],
-          },
+    if (!current.data || current.data.stations.length === 0) return hubs;
+
+    // Clone so we don't mutate the query data; merge structures into any
+    // existing hub region, or append as a new region entry.
+    const out: Region[] = hubs.map((r) => ({ ...r, stations: [...r.stations] }));
+    for (const s of current.data.stations) {
+      const existing = out.find((r) => r.id === s.regionId);
+      if (existing) {
+        existing.stations = [
+          ...existing.stations,
+          { id: s.stationId, name: s.stationName },
         ];
+      } else {
+        out.push({
+          id: s.regionId,
+          name: s.regionName,
+          stations: [{ id: s.stationId, name: s.stationName }],
+        });
       }
     }
-    return hubs;
+    return out;
   }, [regions.data, current.data]);
 
   const owned = useQuery({
