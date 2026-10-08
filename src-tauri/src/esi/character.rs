@@ -294,13 +294,11 @@ pub async fn fetch_killmail<T: DeserializeOwned>(
 
 /// One public structure's info from `GET /universe/structures/{structure_id}/`
 /// — a player citadel (not in the SDE). Returns its `name` and the
-/// `solar_system_id` it sits in. `None` on any failure (network, status, or
-/// decode), so a 404 (unknown/removed structure) is treated the same as any
-/// other transient failure — the caller falls back gracefully.
-///
-/// This endpoint is public (no scopes required for public structures), so it
-/// mirrors the unauthenticated `get_immutable_json` pattern used by
-/// [`fetch_killmail`].
+/// `solar_system_id` it sits in. Uses the active character's access token so
+/// it can read *private* (alliance/corp-owned) structures — an unauthenticated
+/// GET 403s on those. `None` on any failure (network, scope missing, 404,
+/// decode), so a missing scope or unknown/removed structure is treated the
+/// same as any other transient failure — the caller falls back gracefully.
 #[derive(Debug, Clone, Deserialize)]
 pub struct StructureInfo {
     pub name: String,
@@ -308,14 +306,17 @@ pub struct StructureInfo {
 }
 
 pub async fn fetch_structure_info(
-    http: &reqwest::Client,
+    auth: &AuthState,
+    character_id: i64,
     structure_id: i64,
 ) -> Option<StructureInfo> {
-    get_immutable_json(
-        http,
-        &format!("{ESI_BASE}/latest/universe/structures/{structure_id}/"),
+    authed_get(
+        auth,
+        character_id,
+        &format!("/latest/universe/structures/{structure_id}/"),
     )
     .await
+    .ok()
 }
 
 /// Open the in-game market details window for a type (ESI UI write).

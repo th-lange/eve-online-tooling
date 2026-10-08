@@ -169,7 +169,7 @@ pub async fn market_current_location(
     if !structures.is_empty() {
         let sde = crate::sde::open_from_app(&app)?;
         for &structure_id in structures {
-            if let Some(info) = fetch_structure_info(http, structure_id).await {
+            if let Some(info) = fetch_structure_info(&auth, character_id, structure_id).await {
                 if let Some(sys) = sde
                     .system_info(info.solar_system_id)
                     .map_err(|e| e.to_string())?
