@@ -22,8 +22,8 @@ pub use character::{
     authed_get, authed_get_expires_at, authed_get_or_none_on_403, authed_get_paged_or_empty_on_403,
     authed_get_paged_pub, character_affiliation, character_skill_levels, corporation_id,
     create_character_fitting, fetch_assets, fetch_character_fittings, fetch_corp_assets,
-    fetch_corp_fittings, fetch_killmail, resolve_character_ids, resolve_names,
-    set_autopilot_waypoint, CharacterAffiliation, EsiFitting, RawAsset, SkillLevels,
+    fetch_corp_fittings, fetch_killmail, fetch_structure_info, resolve_character_ids,
+    resolve_names, set_autopilot_waypoint, CharacterAffiliation, EsiFitting, RawAsset, SkillLevels,
 };
 pub use client::EsiClient;
 pub use error::EsiError;

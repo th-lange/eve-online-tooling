@@ -52,7 +52,9 @@ pure-frontend commands (`vite`, `vitest`) do not.
 - **EVE developer application** (needed once SSO lands, issue #3): register at
   https://developers.eveonline.com for a **Client ID**, set the callback to the app's loopback
   `http://localhost:8765/callback`, scopes `publicData`, `esi-assets.read_assets.v1`,
-  `esi-characters.read_blueprints.v1`. Native PKCE flow — no client secret.
+  `esi-characters.read_blueprints.v1`, `esi-universe.read_structures.v1`
+  (resolves player-structure names in Assets). Native PKCE flow — no client secret.
+  **Re-login** after enabling newly added scopes so the SSO grant picks them up.
 
 ## Architecture
 

@@ -488,6 +488,61 @@ pub async fn fetch_corp_assets(
     .await
 }
 
+/// A player structure (citadel / upweller) as returned by
+/// `GET /universe/structures/{structure_id}/`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct StructureInfo {
+    pub name: String,
+    #[serde(rename = "solar_system_id")]
+    pub solar_system_id: i64,
+}
+
+/// Resolve player-structure names + home system ids via authenticated
+/// `GET /universe/structures/{id}/`. One request per structure, issued
+/// concurrently — there is no batch endpoint that resolves arbitrary ids.
+/// A 403/404 on an individual structure (not owned by or accessible to the
+/// character) is swallowed as absent; the caller falls back to a generic
+/// label for anything not resolved. All requests flow through
+/// [`send_retrying`] so the ESI error budget is respected.
+///
+/// Returns `HashMap<structure_id, (name, solar_system_id)>`.
+pub async fn fetch_structure_info(
+    auth: &AuthState,
+    character_id: i64,
+    structure_ids: &[i64],
+) -> HashMap<i64, (String, i64)> {
+    if structure_ids.is_empty() {
+        return HashMap::new();
+    }
+
+    let token = match auth.access_token_for(character_id).await {
+        Ok(t) => t,
+        Err(_) => return HashMap::new(),
+    };
+
+    let http = auth.http();
+    let fetches = structure_ids.iter().map(|&id| {
+        let url = format!("{ESI_BASE}/latest/universe/structures/{id}/");
+        let token = &token;
+        async move {
+            let resp = send_retrying(|| http.get(&url).bearer_auth(token))
+                .await
+                .ok()?;
+            if !resp.status().is_success() {
+                return None;
+            }
+            let info: StructureInfo = resp.json().await.ok()?;
+            Some((id, (info.name, info.solar_system_id)))
+        }
+    });
+
+    futures_util::future::join_all(fetches)
+        .await
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
 /// An in-game saved fitting from ESI (`/characters|corporations/{id}/fittings/`).
 #[derive(Debug, Clone, Deserialize)]
 pub struct EsiFitting {

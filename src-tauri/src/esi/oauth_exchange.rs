@@ -60,6 +60,10 @@ const SCOPES: &[&str] = &[
     // Faction-warfare militia auto-detect (#901). Must also be enabled on the
     // EVE developer application registration before the SSO grant includes it.
     "esi-characters.read_fw_stats.v1",
+    // Player structure (citadel / upweller) names in the assets view — not in
+    // the SDE, so resolved via GET /universe/structures/{id}/. Must also be
+    // enabled on the EVE developer application registration.
+    "esi-universe.read_structures.v1",
 ];
 /// How long to wait for the user to complete the browser login.
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(180);
