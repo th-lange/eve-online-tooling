@@ -23,6 +23,7 @@ const RESULT: PvpProfilesResult = {
         { typeId: 587, name: "Rifter", kills: 40 },
         { typeId: 621, name: "Caracal", kills: 12 },
       ],
+      militia: null,
     },
   ],
   unresolved: ["Nobody"],
@@ -279,5 +280,41 @@ describe("PvpPage", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /profile pilots/i }));
     expect(await screen.findByText(/no flown-ship data/i)).toBeInTheDocument();
+  });
+
+  it("shows a militia/cartel badge next to an enlisted pilot's name", async () => {
+    const result: PvpProfilesResult = {
+      pilots: [
+        {
+          ...RESULT.pilots[0],
+          militia: "Angel Cartel",
+        },
+      ],
+      unresolved: [],
+    };
+    invokeMock.mockResolvedValue(result);
+    renderPage();
+
+    fireEvent.change(screen.getByPlaceholderText(/paste pilot names/i), {
+      target: { value: "Hunter" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /profile pilots/i }));
+
+    expect(await screen.findByText("Angel Cartel")).toBeInTheDocument();
+  });
+
+  it("renders no militia badge for an unenlisted pilot", async () => {
+    invokeMock.mockResolvedValue(RESULT); // RESULT's pilot has militia: null
+    renderPage();
+
+    fireEvent.change(screen.getByPlaceholderText(/paste pilot names/i), {
+      target: { value: "Hunter" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /profile pilots/i }));
+
+    await screen.findByRole("link", { name: /Hunter/ });
+    expect(
+      screen.queryByTitle("Faction-warfare militia enlistment"),
+    ).not.toBeInTheDocument();
   });
 });

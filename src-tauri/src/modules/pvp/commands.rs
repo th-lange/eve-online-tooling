@@ -6,7 +6,7 @@ use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-use crate::esi::{fetch_killmail, resolve_character_ids, AuthState};
+use crate::esi::{cached_character_affiliations, fetch_killmail, resolve_character_ids, AuthState};
 use crate::modules::fitting::{simulate_fit, Fit, FitItem, FitStats, ModuleState, SlotKind};
 use crate::sde::Sde;
 use crate::storage;
@@ -51,6 +51,13 @@ pub struct PvpStats {
     /// `MAX_HULLS`, highest kills first. Per-hull *loss* counts aren't in the
     /// stats doc — they arrive with the loss killmails in a later slice.
     pub hulls: Vec<HullUsage>,
+    /// Faction-warfare militia enlistment, or one of the two pirate
+    /// factions (Guristas / Angel Cartel) for the Havoc insurgency
+    /// mechanic — `None` for anyone else/unenlisted. Resolved from the
+    /// character's current public affiliation, not from killmail data
+    /// (killmails carry no enlistment info). Neutral presentation only, same
+    /// as Local Intel's identical field — no friend/foe judgement here.
+    pub militia: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -68,8 +75,29 @@ fn is_junk_hull(name: &str) -> bool {
     name.contains("Capsule") || name.contains("Shuttle")
 }
 
+/// Faction-warfare militia/pirate-cartel display name for a `faction_id`, or
+/// `None` outside that set. Kept local to this module (same as Local
+/// Intel's identical helper) rather than shared — it's a 7-line match, not
+/// worth a cross-module dependency for.
+fn militia_name(faction_id: i64) -> Option<&'static str> {
+    match faction_id {
+        500001 => Some("Caldari State"),
+        500002 => Some("Minmatar Republic"),
+        500003 => Some("Amarr Empire"),
+        500004 => Some("Gallente Federation"),
+        500010 => Some("Guristas"),
+        500011 => Some("Angel Cartel"),
+        _ => None,
+    }
+}
+
 /// Map one raw zKill stats doc onto our surface for `character_id`/`name`.
-fn stats_from_raw(character_id: i64, name: String, r: ZkillStatsRaw) -> PvpStats {
+fn stats_from_raw(
+    character_id: i64,
+    name: String,
+    r: ZkillStatsRaw,
+    militia: Option<String>,
+) -> PvpStats {
     // The `shipType` top-list is the hulls the pilot flew to get kills, already
     // sorted by kills desc; take the top few.
     let hulls = r
@@ -102,6 +130,7 @@ fn stats_from_raw(character_id: i64, name: String, r: ZkillStatsRaw) -> PvpStats
         gang_ratio: r.gang_ratio,
         active: r.active(),
         hulls,
+        militia,
     }
 }
 
@@ -145,11 +174,21 @@ pub async fn pvp_profiles(
         .await?
         .into_iter()
         .collect();
+    let affiliations = cached_character_affiliations(http, Some(&dir), &ids).await;
 
     // Reassemble in pasted order (dropping pilots whose zKill fetch failed).
     let pilots: Vec<PvpStats> = resolved
         .into_iter()
-        .filter_map(|(id, name)| raw_by_id.remove(&id).map(|r| stats_from_raw(id, name, r)))
+        .filter_map(|(id, name)| {
+            let militia = affiliations
+                .get(&id)
+                .and_then(|a| a.faction_id)
+                .and_then(militia_name)
+                .map(str::to_string);
+            raw_by_id
+                .remove(&id)
+                .map(|r| stats_from_raw(id, name, r, militia))
+        })
         .collect();
 
     Ok(PvpProfilesResult { pilots, unresolved })
@@ -806,7 +845,7 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let s = stats_from_raw(42, "Hunter".into(), raw);
+        let s = stats_from_raw(42, "Hunter".into(), raw, None);
         assert_eq!(s.character_id, 42);
         assert_eq!(s.ships_destroyed, 120);
         assert_eq!(s.solo_kills, 30);
@@ -818,7 +857,7 @@ mod tests {
     fn missing_fields_default_and_no_activepvp_is_inactive() {
         // A pilot with no PvP: zKill omits the fields entirely.
         let raw: ZkillStatsRaw = serde_json::from_str("{}").unwrap();
-        let s = stats_from_raw(7, "Carebear".into(), raw);
+        let s = stats_from_raw(7, "Carebear".into(), raw, None);
         assert_eq!(s.ships_destroyed, 0);
         assert_eq!(s.isk_destroyed, 0.0);
         assert!(!s.active);
@@ -843,7 +882,7 @@ mod tests {
             }"#,
         )
         .unwrap();
-        let s = stats_from_raw(1, "Ace".into(), raw);
+        let s = stats_from_raw(1, "Ace".into(), raw, None);
         // Capsule + Shuttle + id-less rows gone; real hulls kept in order.
         assert_eq!(
             s.hulls.iter().map(|h| h.name.as_str()).collect::<Vec<_>>(),
@@ -862,9 +901,31 @@ mod tests {
     }
 
     #[test]
+    fn militia_name_covers_the_four_empires_and_two_pirate_cartels() {
+        assert_eq!(militia_name(500001), Some("Caldari State"));
+        assert_eq!(militia_name(500002), Some("Minmatar Republic"));
+        assert_eq!(militia_name(500003), Some("Amarr Empire"));
+        assert_eq!(militia_name(500004), Some("Gallente Federation"));
+        assert_eq!(militia_name(500010), Some("Guristas"));
+        assert_eq!(militia_name(500011), Some("Angel Cartel"));
+    }
+
+    #[test]
+    fn militia_name_is_none_outside_the_known_set() {
+        assert_eq!(militia_name(999999), None);
+    }
+
+    #[test]
+    fn stats_from_raw_carries_the_resolved_militia_through() {
+        let raw: ZkillStatsRaw = serde_json::from_str("{}").unwrap();
+        let s = stats_from_raw(1, "x".into(), raw, Some("Angel Cartel".to_string()));
+        assert_eq!(s.militia.as_deref(), Some("Angel Cartel"));
+    }
+
+    #[test]
     fn no_top_lists_yields_no_hulls() {
         let raw: ZkillStatsRaw = serde_json::from_str("{}").unwrap();
-        assert!(stats_from_raw(1, "x".into(), raw).hulls.is_empty());
+        assert!(stats_from_raw(1, "x".into(), raw, None).hulls.is_empty());
     }
 
     #[test]

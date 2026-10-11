@@ -24,6 +24,7 @@ import {
   ARCHETYPE_LABEL,
   ARCHETYPE_CLASS,
 } from "../../lib/shipArchetype";
+import { MILITIA_HEX } from "../localintel/militiaColors";
 
 /** ISK efficiency: share of ISK you destroy vs total ISK swung. */
 function efficiency(destroyed: number, lost: number): number {
@@ -432,16 +433,30 @@ function PilotCard({ p, fitLimit }: { p: PvpStats; fitLimit: number }) {
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
       <div className="flex items-center justify-between gap-2">
-        <a
-          href={`https://zkillboard.com/character/${p.characterId}/`}
-          target="_blank"
-          rel="noreferrer"
-          className="flex items-center gap-1 text-sm font-medium text-zinc-100 hover:text-indigo-300"
-          title="Open on zKillboard"
-        >
-          {p.name}
-          <ExternalLink size={11} className="opacity-60" />
-        </a>
+        <div className="flex min-w-0 items-center gap-2">
+          <a
+            href={`https://zkillboard.com/character/${p.characterId}/`}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1 text-sm font-medium text-zinc-100 hover:text-indigo-300"
+            title="Open on zKillboard"
+          >
+            {p.name}
+            <ExternalLink size={11} className="opacity-60" />
+          </a>
+          {p.militia && (
+            <span
+              className="rounded px-1.5 py-0.5 text-[10px] font-medium"
+              style={{
+                backgroundColor: `${MILITIA_HEX[p.militia] ?? "#a1a1aa"}26`,
+                color: MILITIA_HEX[p.militia] ?? "#a1a1aa",
+              }}
+              title="Faction-warfare militia enlistment"
+            >
+              {p.militia}
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-2 text-[11px]">
           {!p.active && (
             <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-500">
