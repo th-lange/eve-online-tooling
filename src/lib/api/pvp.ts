@@ -25,6 +25,10 @@ export interface PvpStats {
   active: boolean;
   /** Most-flown hulls (by kills), highest first. */
   hulls: HullUsage[];
+  /** Faction-warfare militia enlistment, or one of the two pirate factions
+   *  (Guristas / Angel Cartel) for the Havoc insurgency mechanic — `null`
+   *  for anyone else/unenlisted. */
+  militia: string | null;
 }
 
 export interface PvpProfilesResult {

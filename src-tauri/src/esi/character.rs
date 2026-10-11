@@ -1,7 +1,7 @@
 //! Authenticated ESI reads for a character's assets and blueprints.
 
 use serde::de::DeserializeOwned;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::auth::{AuthError, AuthState};
 use super::error::EsiError;
@@ -274,6 +274,80 @@ pub async fn character_affiliation(
         ids,
     )
     .await
+}
+
+/// On-disk cache of character id → affiliation, keyed under this name.
+const AFFILIATION_CACHE: &str = "esi_affiliations";
+/// Affiliations go stale slowly (corp/alliance moves, FW enlistment changes)
+/// but do change — unlike the permanent name→id cache, this one expires.
+const AFFILIATION_TTL_SECS: u64 = 60 * 60;
+
+#[derive(Serialize, Deserialize, Clone)]
+struct CachedAffiliation {
+    corporation_id: i64,
+    alliance_id: Option<i64>,
+    faction_id: Option<i64>,
+    /// Unix epoch (secs) of the fetch, for the TTL check.
+    ts: u64,
+}
+
+/// Resolve character ids → current corp/alliance/faction, cached on disk with
+/// a 1h TTL (only ids missing or past the TTL hit ESI's batch endpoint).
+/// Shared by Local Intel and PVP — both store under the same on-disk key, so
+/// a character either feature has already looked up warms the other's cache
+/// too. Ids ESI couldn't affiliate (or whose fetch failed this round) are
+/// simply absent from the result rather than erroring the whole batch.
+pub async fn cached_character_affiliations(
+    http: &reqwest::Client,
+    cache_dir: Option<&Path>,
+    ids: &[i64],
+) -> HashMap<i64, CharacterAffiliation> {
+    let now = crate::util::time::now_secs();
+    let mut cache: HashMap<i64, CachedAffiliation> = cache_dir
+        .and_then(|d| storage::load_data(d, AFFILIATION_CACHE))
+        .unwrap_or_default();
+    let stale: Vec<i64> = ids
+        .iter()
+        .copied()
+        .filter(|id| {
+            cache
+                .get(id)
+                .is_none_or(|c| now.saturating_sub(c.ts) >= AFFILIATION_TTL_SECS)
+        })
+        .collect();
+    if !stale.is_empty() {
+        if let Some(rows) = character_affiliation(http, &stale).await {
+            for a in rows {
+                cache.insert(
+                    a.character_id,
+                    CachedAffiliation {
+                        corporation_id: a.corporation_id,
+                        alliance_id: a.alliance_id,
+                        faction_id: a.faction_id,
+                        ts: now,
+                    },
+                );
+            }
+            if let Some(d) = cache_dir {
+                let _ = storage::save_data(d, AFFILIATION_CACHE, &cache);
+            }
+        }
+    }
+    ids.iter()
+        .filter_map(|id| {
+            cache.get(id).map(|c| {
+                (
+                    *id,
+                    CharacterAffiliation {
+                        character_id: *id,
+                        corporation_id: c.corporation_id,
+                        alliance_id: c.alliance_id,
+                        faction_id: c.faction_id,
+                    },
+                )
+            })
+        })
+        .collect()
 }
 
 /// Fetch one public killmail (`GET /killmails/{id}/{hash}/`). Killmails are
