@@ -3,7 +3,7 @@ import { Columns2, Layers, Rows2 } from "lucide-react";
 import type { DpsTick, WeaponRate } from "../../lib/api";
 import { formatInt } from "../../lib/format";
 import type { ChartLayout, ChartSeries } from "./dpsMeterShared";
-import { formatClock } from "./dpsMeterShared";
+import { formatClock, nearestTickIndex } from "./dpsMeterShared";
 
 /** One hover-tooltip block: a character (with optional ship) and its total for
  *  the moment, then one indented line per damage source (drones, each weapon)
@@ -59,10 +59,16 @@ const DpsChart = memo(function DpsChart({
   ticks,
   series: activeSeries,
   title,
+  markTs,
 }: {
   ticks: DpsTick[];
   series: readonly ChartSeries[];
   title?: string;
+  /** Timestamp the combat log is currently scrolled to (see
+   *  `CombatLogPanel`'s `onVisiblePositionChange`) — draws a persistent
+   *  marker at that point so the log's position reads on the chart too.
+   *  `null`/`undefined` while auto-scrolled to the live tail. */
+  markTs?: number | null;
 }) {
   const w = 960;
   const h = 280;
@@ -70,44 +76,51 @@ const DpsChart = memo(function DpsChart({
   const padY = 10;
   const padB = 24; // room for the time labels along the bottom
 
-  const { max, lines, grid, n, timeMarks, windowSecs } = useMemo(() => {
-    const n = ticks.length;
-    const max = Math.max(
-      1,
-      ...ticks.flatMap((t) => activeSeries.map((s) => s.get(t))),
-    );
-    const x = (i: number) => padX + (i / Math.max(n - 1, 1)) * (w - 2 * padX);
-    const y = (v: number) => padY + (1 - v / max) * (h - padY - padB);
-    const lines = activeSeries.map((s) => ({
-      key: s.id,
-      color: s.color,
-      primary: s.primary,
-      points: ticks
-        .map((t, i) => `${x(i).toFixed(1)},${y(s.get(t)).toFixed(1)}`)
-        .join(" "),
-    }));
-    const grid = [0, 0.25, 0.5, 0.75, 1].map(
-      (f) => padY + f * (h - padY - padB),
-    );
+  const { max, lines, grid, n, timeMarks, windowSecs, markX, markAt } =
+    useMemo(() => {
+      const n = ticks.length;
+      const max = Math.max(
+        1,
+        ...ticks.flatMap((t) => activeSeries.map((s) => s.get(t))),
+      );
+      const x = (i: number) => padX + (i / Math.max(n - 1, 1)) * (w - 2 * padX);
+      const y = (v: number) => padY + (1 - v / max) * (h - padY - padB);
+      const lines = activeSeries.map((s) => ({
+        key: s.id,
+        color: s.color,
+        primary: s.primary,
+        points: ticks
+          .map((t, i) => `${x(i).toFixed(1)},${y(s.get(t)).toFixed(1)}`)
+          .join(" "),
+      }));
+      const grid = [0, 0.25, 0.5, 0.75, 1].map(
+        (f) => padY + f * (h - padY - padB),
+      );
 
-    // Vertical time markers, one per rolling window (coarsened to ≤ 8 labels).
-    const windowSecs = ticks[n - 1]?.windowSecs ?? 0;
-    const timeMarks: { x: number; label: string }[] = [];
-    if (n > 1 && windowSecs > 0) {
-      const t0 = ticks[0].at;
-      const tN = ticks[n - 1].at;
-      const span = Math.max(1, tN - t0);
-      const step = windowSecs * Math.max(1, Math.ceil(span / (windowSecs * 8)));
-      const xAt = (t: number) => padX + ((t - t0) / span) * (w - 2 * padX);
-      for (let back = 0; back <= span; back += step) {
-        timeMarks.push({
-          x: xAt(tN - back),
-          label: back === 0 ? "now" : `-${back}s`,
-        });
+      // Vertical time markers, one per rolling window (coarsened to ≤ 8 labels).
+      const windowSecs = ticks[n - 1]?.windowSecs ?? 0;
+      const timeMarks: { x: number; label: string }[] = [];
+      if (n > 1 && windowSecs > 0) {
+        const t0 = ticks[0].at;
+        const tN = ticks[n - 1].at;
+        const span = Math.max(1, tN - t0);
+        const step =
+          windowSecs * Math.max(1, Math.ceil(span / (windowSecs * 8)));
+        const xAt = (t: number) => padX + ((t - t0) / span) * (w - 2 * padX);
+        for (let back = 0; back <= span; back += step) {
+          timeMarks.push({
+            x: xAt(tN - back),
+            label: back === 0 ? "now" : `-${back}s`,
+          });
+        }
       }
-    }
-    return { max, lines, grid, n, timeMarks, windowSecs };
-  }, [ticks, activeSeries]);
+
+      const markIndex = markTs == null ? null : nearestTickIndex(ticks, markTs);
+      const markX = markIndex == null || n < 2 ? null : x(markIndex);
+      const markAt = markIndex == null ? null : ticks[markIndex].at;
+
+      return { max, lines, grid, n, timeMarks, windowSecs, markX, markAt };
+    }, [ticks, activeSeries, markTs]);
 
   // Y-axis labels: top→bottom = max → 0. Five labels aligned to the grid lines.
   // Rendered in CSS divs (not SVG text) so they stay legible regardless of how
@@ -144,8 +157,14 @@ const DpsChart = memo(function DpsChart({
           {title ?? "Rolling rate"} (per second)
           {windowSecs > 0 ? ` · ${windowSecs}s window` : ""}
         </span>
-        <span className="tabular-nums text-zinc-300">
-          peak {formatInt(Math.round(max))}
+        <span className="flex items-center gap-2 tabular-nums text-zinc-300">
+          {markAt != null && (
+            <span className="flex items-center gap-1 text-indigo-400">
+              <span className="h-2 w-0.5 bg-indigo-400" />
+              log @ {formatClock(markAt)}
+            </span>
+          )}
+          <span>peak {formatInt(Math.round(max))}</span>
         </span>
       </div>
       <div className="flex items-stretch">
@@ -221,6 +240,16 @@ const DpsChart = memo(function DpsChart({
                   strokeOpacity={l.primary ? 1 : 0.7}
                 />
               ))}
+            {markX != null && (
+              <line
+                x1={markX}
+                x2={markX}
+                y1={padY}
+                y2={h - padB}
+                stroke="#818cf8"
+                strokeWidth="1.25"
+              />
+            )}
             {hover != null && n > 1 && (
               <line
                 x1={padX + hoverFrac * (w - 2 * padX)}
@@ -309,6 +338,7 @@ export function DpsChartContainer({
   outSeries,
   inSeries,
   combinedSeries,
+  markTs,
 }: {
   bySource: boolean;
   onSetBySource: (v: boolean) => void;
@@ -318,6 +348,9 @@ export function DpsChartContainer({
   outSeries: ChartSeries[];
   inSeries: ChartSeries[];
   combinedSeries: ChartSeries[];
+  /** See {@link DpsChart}'s `markTs` — forwarded to every chart so the log's
+   *  scroll position reads the same whichever layout is active. */
+  markTs?: number | null;
 }) {
   return (
     <>
@@ -382,6 +415,7 @@ export function DpsChartContainer({
             ticks={filteredTicks}
             series={combinedSeries}
             title="Damage — out + in"
+            markTs={markTs}
           />
         ) : (
           <>
@@ -389,11 +423,13 @@ export function DpsChartContainer({
               ticks={filteredTicks}
               series={outSeries}
               title="Outgoing"
+              markTs={markTs}
             />
             <DpsChart
               ticks={filteredTicks}
               series={inSeries}
               title="Incoming"
+              markTs={markTs}
             />
           </>
         )}

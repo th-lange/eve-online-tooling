@@ -22,7 +22,7 @@ import { FIGHT_OVERLAY_SHIP_POLL_INTERVAL_MS } from "../../lib/refreshIntervals"
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { Modal } from "../../components/Modal";
 import { CombatLogPanel } from "../dpsmeter/CombatLogPanel";
-import { appendEvents } from "../dpsmeter/dpsMeterShared";
+import { appendEvents, nearestTickIndex } from "../dpsmeter/dpsMeterShared";
 import { FightOverlayContext } from "./fightOverlayContext";
 
 /** Metres → compact km/m string. Used in AttackerCard and FightPanel. */
@@ -69,7 +69,15 @@ export function nextFightTicks(prev: DpsTick[], tick: DpsTick): DpsTick[] {
 // ---------------------------------------------------------------- MiniDpsChart
 
 /** Mini rolling DPS chart (dpsOut green, dpsIn red) from accumulated ticks. */
-function MiniDpsChart({ ticks }: { ticks: DpsTick[] }) {
+function MiniDpsChart({
+  ticks,
+  markTs,
+}: {
+  ticks: DpsTick[];
+  /** See `DpsChart`'s `markTs` (DPS meter) — same idea, mirrored here for
+   *  the overlay's own combat log. */
+  markTs?: number | null;
+}) {
   if (ticks.length < 2)
     return <div className="h-12 w-full rounded bg-zinc-950" />;
   const W = 100,
@@ -84,6 +92,8 @@ function MiniDpsChart({ ticks }: { ticks: DpsTick[] }) {
     ticks
       .map((t, i) => `${x(i).toFixed(1)},${y(t[field]).toFixed(1)}`)
       .join(" ");
+  const markIndex = markTs == null ? null : nearestTickIndex(ticks, markTs);
+  const markX = markIndex == null ? null : x(markIndex);
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded">
       <rect width={W} height={H} fill="#09090b" rx="3" />
@@ -99,6 +109,16 @@ function MiniDpsChart({ ticks }: { ticks: DpsTick[] }) {
         stroke="#f87171"
         strokeWidth="1.5"
       />
+      {markX != null && (
+        <line
+          x1={markX}
+          x2={markX}
+          y1={pad}
+          y2={H - pad}
+          stroke="#818cf8"
+          strokeWidth="1"
+        />
+      )}
     </svg>
   );
 }
@@ -198,6 +218,8 @@ function FightPanel({
   events,
   logCollapsed,
   onToggleLogCollapsed,
+  logMarkTs,
+  onLogVisiblePositionChange,
   attackers,
   myWeapons,
   localFits,
@@ -213,6 +235,10 @@ function FightPanel({
   events: DpsEvent[];
   logCollapsed: boolean;
   onToggleLogCollapsed: () => void;
+  /** See `CombatLogPanel`'s `onVisiblePositionChange` — threaded through to
+   *  mark the same position on `MiniDpsChart`. */
+  logMarkTs: number | null;
+  onLogVisiblePositionChange: (ts: number | null) => void;
   attackers: {
     name: string;
     dpsIn: number;
@@ -396,7 +422,7 @@ function FightPanel({
           <h3 className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
             DPS
           </h3>
-          <MiniDpsChart ticks={ticks} />
+          <MiniDpsChart ticks={ticks} markTs={logMarkTs} />
           <div className="flex gap-3 text-[10px] text-zinc-600">
             <span>
               <span className="text-emerald-500">▬</span> out
@@ -415,6 +441,7 @@ function FightPanel({
           events={events}
           collapsed={logCollapsed}
           onToggleCollapsed={onToggleLogCollapsed}
+          onVisiblePositionChange={onLogVisiblePositionChange}
           maxHeightClass="max-h-32"
           className="border-none bg-transparent p-0"
         />
@@ -582,6 +609,8 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     STORAGE_KEYS.fightOverlayCombatLogCollapsed,
     true,
   );
+  // Where the combat log footer is scrolled to — marked on MiniDpsChart.
+  const [fightLogMarkTs, setFightLogMarkTs] = useState<number | null>(null);
   const [fightOpen, setFightOpen] = useState(false);
   const [selectedFitId, setSelectedFitId] = useState<string | null>(null);
   // Settings "Test" preview: sample data, rebuilt each time the button is hit.
@@ -800,6 +829,8 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
           events={testFight.events}
           logCollapsed={logCollapsed}
           onToggleLogCollapsed={() => setLogCollapsed(!logCollapsed)}
+          logMarkTs={fightLogMarkTs}
+          onLogVisiblePositionChange={setFightLogMarkTs}
           attackers={testFight.attackers}
           myWeapons={testFight.myWeapons}
           localFits={localFits.data ?? []}
@@ -818,6 +849,8 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
             events={fightLogEvents}
             logCollapsed={logCollapsed}
             onToggleLogCollapsed={() => setLogCollapsed(!logCollapsed)}
+            logMarkTs={fightLogMarkTs}
+            onLogVisiblePositionChange={setFightLogMarkTs}
             attackers={activeAttackers}
             myWeapons={latestTick?.byWeapon ?? []}
             localFits={localFits.data ?? []}
@@ -833,6 +866,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
               setFightOpen(false);
               setFightTicks([]);
               setFightLogEvents([]);
+              setFightLogMarkTs(null);
             }}
           />
         )
