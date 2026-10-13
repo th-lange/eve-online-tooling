@@ -93,23 +93,19 @@ function MiniDpsChart({
     h = H - pad * 2;
   const t0 = buckets[0].start;
   const span = Math.max(BUCKET_SECS, buckets[buckets.length - 1].end - t0);
-  const maxVal = Math.max(
-    1,
-    ...buckets.flatMap((b) => [
-      b.damageOut / BUCKET_SECS,
-      b.damageIn / BUCKET_SECS,
-    ]),
-  );
-  // x by bucket *time* (midpoint), not index — the grid has no holes, but
-  // time-based placement keeps this honest if a frozen buffer is re-rendered.
-  const x = (ts: number) => pad + ((ts - t0) / span) * w;
-  const y = (v: number) => pad + h - (v / maxVal) * h;
   // Smooth each line (see `smoothSeries`) so a single volley's spike reads as
-  // a trend; the axis still uses the raw peak so heights aren't understated.
+  // a trend instead of a saw-tooth.
   const smoothed = {
     damageOut: smoothSeries(buckets.map((b) => b.damageOut / BUCKET_SECS)),
     damageIn: smoothSeries(buckets.map((b) => b.damageIn / BUCKET_SECS)),
   };
+  // Scale to the smoothed peak so the line fills the sparkline instead of
+  // hugging the bottom.
+  const maxVal = Math.max(1, ...smoothed.damageOut, ...smoothed.damageIn);
+  // x by bucket *time* (midpoint), not index — the grid has no holes, but
+  // time-based placement keeps this honest if a frozen buffer is re-rendered.
+  const x = (ts: number) => pad + ((ts - t0) / span) * w;
+  const y = (v: number) => pad + h - (v / maxVal) * h;
   const path = (field: "damageOut" | "damageIn") =>
     buckets
       .map(
