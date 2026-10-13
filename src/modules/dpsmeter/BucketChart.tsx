@@ -5,6 +5,8 @@ import {
   BUCKET_SECS,
   bucketStartOf,
   formatClock,
+  SMOOTH_WINDOW_BUCKETS,
+  smoothSeries,
   type BucketSeries,
 } from "./dpsMeterShared";
 
@@ -48,19 +50,21 @@ export const BucketChart = memo(function BucketChart({
   const width = Math.max(1, n) * PX_PER_BUCKET;
 
   const { max, lines, labels, yLabels } = useMemo(() => {
-    const max = Math.max(
-      1,
-      ...buckets.flatMap((b) => series.map((s) => s.get(b))),
-    );
+    // Axis + peak reflect the TRUE per-bucket rate (so the DPS numbers aren't
+    // understated), but the plotted lines use a centered moving average so a
+    // single volley's spike reads as a trend instead of a saw-tooth.
+    const rawValues = series.map((s) => buckets.map((b) => s.get(b)));
+    const max = Math.max(1, ...rawValues.flat());
+    const smoothed = rawValues.map(smoothSeries);
     const x = (b: DpsBucket) =>
       ((b.start - t0) / BUCKET_SECS) * PX_PER_BUCKET + PX_PER_BUCKET / 2;
     const y = (v: number) => PAD_Y + (1 - v / max) * (H - PAD_Y - PAD_B);
-    const lines = series.map((s) => ({
+    const lines = series.map((s, si) => ({
       key: s.id,
       color: s.color,
       primary: s.primary,
       points: buckets
-        .map((b) => `${x(b).toFixed(1)},${y(s.get(b)).toFixed(1)}`)
+        .map((b, i) => `${x(b).toFixed(1)},${y(smoothed[si][i]).toFixed(1)}`)
         .join(" "),
     }));
     const labels = buckets
@@ -94,7 +98,8 @@ export const BucketChart = memo(function BucketChart({
     <div className="rounded border border-zinc-800 bg-zinc-900 p-2">
       <div className="mb-1 flex items-center justify-between text-xs text-zinc-400">
         <span>
-          {title ?? "Rate"} (per second) · {BUCKET_SECS}s grid
+          {title ?? "Rate"} (per second) · {BUCKET_SECS}s grid ·{" "}
+          {SMOOTH_WINDOW_BUCKETS * BUCKET_SECS}s smoothed
         </span>
         <span className="flex items-center gap-2 tabular-nums text-zinc-300">
           {markStart != null && (

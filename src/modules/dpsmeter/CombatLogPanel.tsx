@@ -68,9 +68,9 @@ export function CombatLogPanel({
   collapsed: boolean;
   onToggleCollapsed: () => void;
   /** Fired as the user scrolls through history: the timestamp of the
-   *  topmost visible line, or `null` once back at the live tail (or
-   *  nothing to report — collapsed, empty). Lets a parent chart show where
-   *  in time the log is currently scrolled to. */
+   *  bottom-most (latest) visible line, or `null` once back at the live
+   *  tail (or nothing to report — collapsed, empty). Lets a parent chart
+   *  show where in time the log is currently scrolled to. */
   onVisiblePositionChange?: (ts: number | null) => void;
   className?: string;
   /** Tailwind max-height class for the scrolling list — the fight overlay's
@@ -116,15 +116,20 @@ export function CombatLogPanel({
         onVisiblePositionChange?.(null);
         return;
       }
-      // Scrolled away from the live tail: stop yanking back to it, and
-      // report the topmost (at least partially) visible line's time.
+      // Scrolled away from the live tail: stop yanking back to it, and report
+      // the **bottom-most** (latest) at-least-partially-visible line's time.
+      // Using the latest rather than the topmost line lets the final buckets
+      // be reached — the last viewport-worth of lines can only ever sit at
+      // the bottom, so a topmost reference could never highlight the end.
       if (autoScroll) setAutoScroll(false);
+      const viewportBottom = el.scrollTop + el.clientHeight;
       let ts: number | null = null;
       for (const child of el.children) {
         const row = child as HTMLElement;
         if (row.dataset.ts === undefined) continue;
-        if (row.offsetTop + row.offsetHeight > el.scrollTop) {
+        if (row.offsetTop < viewportBottom) {
           ts = Number(row.dataset.ts);
+        } else {
           break;
         }
       }
