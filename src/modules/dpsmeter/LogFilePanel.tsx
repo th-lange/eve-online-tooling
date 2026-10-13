@@ -79,15 +79,13 @@ function LogFilePicker({
   );
 }
 
-/** Source selection: gamelogs folder, moving-average window, and — in
- *  playback mode — which log file to replay and at what speed. */
+/** Source selection: gamelogs folder and — in playback mode — which log
+ *  file to replay and at what speed. */
 export function LogFilePanel({
   dir,
   onSetDir,
   mode,
   onDirBlur,
-  windowSecs,
-  onSetWindow,
   logs,
   file,
   onSetFile,
@@ -101,8 +99,6 @@ export function LogFilePanel({
   onSetDir: (v: string) => void;
   mode: Mode;
   onDirBlur: () => void;
-  windowSecs: number;
-  onSetWindow: (s: number) => void;
   logs: DpsLogFile[];
   file: string;
   onSetFile: (path: string) => void;
@@ -147,27 +143,6 @@ export function LogFilePanel({
           </select>
         </label>
       )}
-      <div>
-        <span className="mb-1 block text-xs uppercase tracking-wide text-zinc-500">
-          Window (s)
-        </span>
-        <div className="flex overflow-hidden rounded border border-zinc-800 text-sm">
-          {([10, 20, 30, 60] as const).map((s) => (
-            <button
-              key={s}
-              onClick={() => onSetWindow(s)}
-              aria-pressed={windowSecs === s}
-              className={`px-2.5 py-1.5 tabular-nums ${
-                windowSecs === s
-                  ? "bg-zinc-700 text-zinc-100"
-                  : "bg-zinc-900 text-zinc-500 hover:text-zinc-300"
-              }`}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-      </div>
 
       {mode === "playback" && (
         <>

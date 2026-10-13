@@ -82,7 +82,7 @@ pub struct HitQuality {
 }
 
 impl HitQuality {
-    fn count(&mut self, quality: Option<&str>) {
+    pub(crate) fn count(&mut self, quality: Option<&str>) {
         let Some(q) = quality else { return };
         if q.eq_ignore_ascii_case("misses") {
             self.misses += 1;

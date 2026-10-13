@@ -36,9 +36,6 @@ export function formatClock(epochSecs: number): string {
   });
 }
 
-// How many ticks to keep on screen (~2 min at the 500 ms backend cadence).
-export const BUFFER = 240;
-
 // The series we graph + read out. `out` series share warm colours, `in` cool.
 export const SERIES = [
   { key: "dpsOut", label: "DPS out", color: "#34d399", primary: true },
@@ -75,39 +72,6 @@ export const SERIES = [
   color: string;
   primary: boolean;
 }[];
-
-/** A chart line: identity + colour + a per-tick value accessor. The accessor
- *  lets the same chart draw aggregate series (tick fields) and per-source
- *  series (rows inside `byPilot`) without special-casing either. */
-export type ChartSeries = {
-  id: string;
-  color: string;
-  primary: boolean;
-  get: (t: DpsTick) => number;
-};
-
-/** Series drawn on the outgoing (dealt) chart. */
-export const SERIES_OUT: ChartSeries[] = SERIES.filter((s) =>
-  (
-    ["dpsOut", "logiOut", "capWarfareOut", "capTransferOut"] as string[]
-  ).includes(s.key),
-).map((s) => ({
-  id: s.key,
-  color: s.color,
-  primary: s.primary,
-  get: (t) => t[s.key],
-}));
-/** Series drawn on the incoming (taken) chart. */
-export const SERIES_IN: ChartSeries[] = SERIES.filter((s) =>
-  (["dpsIn", "logiIn", "capWarfareIn", "capTransferIn"] as string[]).includes(
-    s.key,
-  ),
-).map((s) => ({
-  id: s.key,
-  color: s.color,
-  primary: s.primary,
-  get: (t) => t[s.key],
-}));
 
 // Width of one fixed detail-timeline bucket (s) — mirrors the backend's grid
 // (#983). Buckets are epoch-aligned: start = ts - ts % BUCKET_SECS.
@@ -193,13 +157,6 @@ export const SOURCE_COLORS = [
   "#2dd4bf", // teal
   "#e879f9", // fuchsia
 ];
-
-/** Append a tick to the rolling buffer, dropping the oldest past `BUFFER`. */
-export function appendTick(prev: DpsTick[], t: DpsTick): DpsTick[] {
-  const next = prev.length >= BUFFER ? prev.slice(1) : prev.slice();
-  next.push(t);
-  return next;
-}
 
 // How many combat-log lines to keep on screen — generous enough to scroll
 // back through a real fight without unbounded memory growth.

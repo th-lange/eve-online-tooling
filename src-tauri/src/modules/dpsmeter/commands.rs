@@ -283,6 +283,9 @@ pub async fn dps_start(
                 fold.advance_to(crate::util::time::now_secs() as i64 - LIVE_BUCKET_GRACE_SECS),
             );
             if !finalized.is_empty() {
+                for b in &mut finalized {
+                    attach_weapon_kinds_bucket(b, &mut weapon_kinds, sde_db.as_deref());
+                }
                 let _ = app.emit("dps://buckets", &finalized);
             }
 
@@ -477,6 +480,9 @@ pub async fn dps_playback(
             // grace is needed before finalizing what it has passed.
             finalized.extend(fold.advance_to(now));
             if !finalized.is_empty() {
+                for b in &mut finalized {
+                    attach_weapon_kinds_bucket(b, &mut weapon_kinds, sde_db.as_deref());
+                }
                 let _ = app.emit("dps://buckets", &finalized);
             }
             let mut tick = win.tick(now);
@@ -842,16 +848,37 @@ fn attach_weapon_kinds(
     cache: &mut HashMap<String, (Option<String>, Option<String>)>,
     sde_db: Option<&Path>,
 ) {
+    attach_weapon_kinds_rows(&mut tick.by_weapon, &mut tick.by_pilot, cache, sde_db);
+}
+
+/// The same enrichment for a finalized 5 s bucket (#984) — buckets reuse the
+/// tick's row shapes, so one core serves both.
+#[allow(clippy::type_complexity)]
+fn attach_weapon_kinds_bucket(
+    bucket: &mut super::bucket::DpsBucket,
+    cache: &mut HashMap<String, (Option<String>, Option<String>)>,
+    sde_db: Option<&Path>,
+) {
+    attach_weapon_kinds_rows(&mut bucket.by_weapon, &mut bucket.by_pilot, cache, sde_db);
+}
+
+#[allow(clippy::type_complexity)]
+fn attach_weapon_kinds_rows(
+    by_weapon: &mut [super::aggregate::WeaponRate],
+    by_pilot: &mut [super::aggregate::PilotRate],
+    cache: &mut HashMap<String, (Option<String>, Option<String>)>,
+    sde_db: Option<&Path>,
+) {
     let mut unknown: Vec<String> = Vec::new();
     let mut consider = |name: &str| {
         if !cache.contains_key(name) && !unknown.iter().any(|u| u == name) {
             unknown.push(name.to_string());
         }
     };
-    for wr in &tick.by_weapon {
+    for wr in by_weapon.iter() {
         consider(&wr.name);
     }
-    for p in &tick.by_pilot {
+    for p in by_pilot.iter() {
         for wr in p.weapons_out.iter().chain(&p.weapons_in) {
             consider(&wr.name);
         }
@@ -874,10 +901,10 @@ fn attach_weapon_kinds(
             wr.damage = damage.clone();
         }
     };
-    for wr in &mut tick.by_weapon {
+    for wr in by_weapon.iter_mut() {
         apply(wr);
     }
-    for p in &mut tick.by_pilot {
+    for p in by_pilot.iter_mut() {
         for wr in p.weapons_out.iter_mut().chain(p.weapons_in.iter_mut()) {
             apply(wr);
         }

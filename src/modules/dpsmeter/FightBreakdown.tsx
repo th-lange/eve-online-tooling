@@ -1,5 +1,5 @@
 import { memo } from "react";
-import type { DpsTick, PilotRate, WeaponRate } from "../../lib/api";
+import type { PilotRate, WeaponRate } from "../../lib/api";
 import { formatInt } from "../../lib/format";
 import { QualityBar } from "./HitQualityIndicators";
 
@@ -208,13 +208,14 @@ const AttackersTable = memo(function AttackersTable({
 });
 
 /** Breakdowns: weapons you used · targets you shot · attackers on you.
- *  Shown once the latest tick has any tracked activity. */
+ *  Shown once the newest bucket has any tracked activity. Structural prop:
+ *  anything carrying `byWeapon`/`byPilot` rows works (the 5 s bucket, #984). */
 export function FightBreakdown({
   latest,
   pilotRows,
   colors,
 }: {
-  latest: DpsTick | undefined;
+  latest: { byWeapon: WeaponRate[]; byPilot: PilotRate[] } | undefined;
   pilotRows: PilotRate[];
   colors: Map<string, string>;
 }) {

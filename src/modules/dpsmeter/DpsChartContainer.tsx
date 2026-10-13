@@ -1,374 +1,35 @@
-import { memo, useMemo, useState } from "react";
 import { Columns2, Layers, Rows2 } from "lucide-react";
-import type { DpsBucket, DpsTick, WeaponRate } from "../../lib/api";
-import { formatInt } from "../../lib/format";
+import type { DpsBucket } from "../../lib/api";
 import { BucketChart } from "./BucketChart";
-import type { ChartLayout, ChartSeries } from "./dpsMeterShared";
-import {
-  BUCKET_SERIES_COMBINED,
-  BUCKET_SERIES_IN,
-  BUCKET_SERIES_OUT,
-  formatClock,
-  nearestTickIndex,
-} from "./dpsMeterShared";
-
-/** One hover-tooltip block: a character (with optional ship) and its total for
- *  the moment, then one indented line per damage source (drones, each weapon)
- *  below it. Reused for both the Dealt and Taken sections. */
-function HoverPilotRow({
-  name,
-  ship,
-  total,
-  weapons,
-}: {
-  name: string;
-  ship?: string;
-  total: number;
-  weapons?: WeaponRate[];
-}) {
-  return (
-    <div className="mt-0.5">
-      <div className="flex justify-between gap-3">
-        <span className="max-w-[12rem] truncate text-zinc-300">
-          {name}
-          {ship ? <span className="text-zinc-500"> ({ship})</span> : null}
-        </span>
-        <span className="tabular-nums text-zinc-300">
-          {formatInt(Math.round(total))}
-        </span>
-      </div>
-      {weapons?.map((wpn) => (
-        <div
-          key={wpn.name}
-          className="flex justify-between gap-3 pl-3 text-zinc-500"
-        >
-          <span className="max-w-[11rem] truncate">
-            {wpn.name}
-            {wpn.kind ? (
-              <span className="text-zinc-600"> · {wpn.kind}</span>
-            ) : null}
-            {wpn.damage ? (
-              <span className="text-zinc-600"> [{wpn.damage}]</span>
-            ) : null}
-          </span>
-          <span className="tabular-nums">{formatInt(Math.round(wpn.dps))}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/** Multi-line rolling chart, inline SVG. `series` selects which lines to draw.
- *  Y-axis labels on both sides scale with the live peak so you can read
- *  absolute values without hovering. Memoized — only a new `ticks` array or a
- *  different `series` reference re-runs the path math. */
-const DpsChart = memo(function DpsChart({
-  ticks,
-  series: activeSeries,
-  title,
-  markTs,
-}: {
-  ticks: DpsTick[];
-  series: readonly ChartSeries[];
-  title?: string;
-  /** Timestamp the combat log is currently scrolled to (see
-   *  `CombatLogPanel`'s `onVisiblePositionChange`) — draws a persistent
-   *  marker at that point so the log's position reads on the chart too.
-   *  `null`/`undefined` while auto-scrolled to the live tail. */
-  markTs?: number | null;
-}) {
-  const w = 960;
-  const h = 280;
-  const padX = 8;
-  const padY = 10;
-  const padB = 24; // room for the time labels along the bottom
-
-  const { max, lines, grid, n, timeMarks, windowSecs, markX, markAt } =
-    useMemo(() => {
-      const n = ticks.length;
-      const max = Math.max(
-        1,
-        ...ticks.flatMap((t) => activeSeries.map((s) => s.get(t))),
-      );
-      const x = (i: number) => padX + (i / Math.max(n - 1, 1)) * (w - 2 * padX);
-      const y = (v: number) => padY + (1 - v / max) * (h - padY - padB);
-      const lines = activeSeries.map((s) => ({
-        key: s.id,
-        color: s.color,
-        primary: s.primary,
-        points: ticks
-          .map((t, i) => `${x(i).toFixed(1)},${y(s.get(t)).toFixed(1)}`)
-          .join(" "),
-      }));
-      const grid = [0, 0.25, 0.5, 0.75, 1].map(
-        (f) => padY + f * (h - padY - padB),
-      );
-
-      // Vertical time markers, one per rolling window (coarsened to ≤ 8 labels).
-      const windowSecs = ticks[n - 1]?.windowSecs ?? 0;
-      const timeMarks: { x: number; label: string }[] = [];
-      if (n > 1 && windowSecs > 0) {
-        const t0 = ticks[0].at;
-        const tN = ticks[n - 1].at;
-        const span = Math.max(1, tN - t0);
-        const step =
-          windowSecs * Math.max(1, Math.ceil(span / (windowSecs * 8)));
-        const xAt = (t: number) => padX + ((t - t0) / span) * (w - 2 * padX);
-        for (let back = 0; back <= span; back += step) {
-          timeMarks.push({
-            x: xAt(tN - back),
-            label: back === 0 ? "now" : `-${back}s`,
-          });
-        }
-      }
-
-      const markIndex = markTs == null ? null : nearestTickIndex(ticks, markTs);
-      const markX = markIndex == null || n < 2 ? null : x(markIndex);
-      const markAt = markIndex == null ? null : ticks[markIndex].at;
-
-      return { max, lines, grid, n, timeMarks, windowSecs, markX, markAt };
-    }, [ticks, activeSeries, markTs]);
-
-  // Y-axis labels: top→bottom = max → 0. Five labels aligned to the grid lines.
-  // Rendered in CSS divs (not SVG text) so they stay legible regardless of how
-  // narrow the chart is (SVG text scales with the viewBox when preserveAspectRatio
-  // is "none", which would make them tiny in the split-chart layout).
-  const yLabels = [1, 0.75, 0.5, 0.25, 0].map((f) =>
-    formatInt(Math.round(max * f)),
-  );
-  const yAxisStyle = { height: h, paddingTop: padY, paddingBottom: padB };
-
-  // Hover: tick index under the cursor. The tooltip always shows BOTH
-  // directions for that moment (dealt + taken), whatever this chart draws, so
-  // e.g. the stacked layout still gives the full picture from one hover.
-  const [hover, setHover] = useState<number | null>(null);
-  const hoverTick = hover != null ? ticks[hover] : undefined;
-  const hoverFrac = hover != null && n > 1 ? hover / (n - 1) : 0;
-  const dealt = hoverTick
-    ? [...hoverTick.byPilot]
-        .filter((p) => p.dpsOut > 0)
-        .sort((a, b) => b.dpsOut - a.dpsOut)
-        .slice(0, 5)
-    : [];
-  const taken = hoverTick
-    ? [...hoverTick.byPilot]
-        .filter((p) => p.dpsIn > 0)
-        .sort((a, b) => b.dpsIn - a.dpsIn)
-        .slice(0, 5)
-    : [];
-
-  return (
-    <div className="rounded border border-zinc-800 bg-zinc-900 p-2">
-      <div className="mb-1 flex items-center justify-between text-xs text-zinc-400">
-        <span>
-          {title ?? "Rolling rate"} (per second)
-          {windowSecs > 0 ? ` · ${windowSecs}s window` : ""}
-        </span>
-        <span className="flex items-center gap-2 tabular-nums text-zinc-300">
-          {markAt != null && (
-            <span className="flex items-center gap-1 text-indigo-400">
-              <span className="h-2 w-0.5 bg-indigo-400" />
-              log @ {formatClock(markAt)}
-            </span>
-          )}
-          <span>peak {formatInt(Math.round(max))}</span>
-        </span>
-      </div>
-      <div className="flex items-stretch">
-        {/* Left Y-axis */}
-        <div
-          className="flex shrink-0 flex-col justify-between pr-1 text-right text-[10px] tabular-nums text-zinc-500"
-          style={yAxisStyle}
-        >
-          {yLabels.map((lbl, i) => (
-            <span key={i}>{lbl}</span>
-          ))}
-        </div>
-        <div className="relative min-w-0 flex-1">
-          <svg
-            viewBox={`0 0 ${w} ${h}`}
-            preserveAspectRatio="none"
-            className={`block w-full ${n > 1 ? "cursor-crosshair" : ""}`}
-            style={{ height: h }}
-            onPointerMove={
-              n > 1
-                ? (e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const frac = Math.max(
-                      0,
-                      Math.min(1, (e.clientX - rect.left) / rect.width),
-                    );
-                    setHover(Math.round(frac * (n - 1)));
-                  }
-                : undefined
-            }
-            onPointerLeave={() => setHover(null)}
-          >
-            {grid.map((gy, i) => (
-              <line
-                key={i}
-                x1={padX}
-                x2={w - padX}
-                y1={gy}
-                y2={gy}
-                stroke="#27272a"
-                strokeWidth="0.75"
-              />
-            ))}
-            {timeMarks.map((m, i) => (
-              <g key={`t${i}`}>
-                <line
-                  x1={m.x}
-                  x2={m.x}
-                  y1={padY}
-                  y2={h - padB}
-                  stroke="#27272a"
-                  strokeWidth="0.75"
-                />
-                <text
-                  x={m.x}
-                  y={h - 8}
-                  textAnchor={i === 0 ? "end" : "middle"}
-                  fill="#71717a"
-                  fontSize="11"
-                >
-                  {m.label}
-                </text>
-              </g>
-            ))}
-            {n > 1 &&
-              lines.map((l) => (
-                <polyline
-                  key={l.key}
-                  points={l.points}
-                  fill="none"
-                  stroke={l.color}
-                  strokeWidth={l.primary ? 1.75 : 1}
-                  strokeOpacity={l.primary ? 1 : 0.7}
-                />
-              ))}
-            {markX != null && (
-              <line
-                x1={markX}
-                x2={markX}
-                y1={padY}
-                y2={h - padB}
-                stroke="#818cf8"
-                strokeWidth="1.25"
-              />
-            )}
-            {hover != null && n > 1 && (
-              <line
-                x1={padX + hoverFrac * (w - 2 * padX)}
-                x2={padX + hoverFrac * (w - 2 * padX)}
-                y1={padY}
-                y2={h - padB}
-                stroke="#a1a1aa"
-                strokeWidth="0.75"
-                strokeDasharray="4 3"
-              />
-            )}
-          </svg>
-          {hoverTick && (dealt.length > 0 || taken.length > 0) && (
-            <div
-              className="pointer-events-none absolute top-1 z-10 w-64 -translate-x-1/2 rounded border border-zinc-700 bg-zinc-900/95 px-2 py-1 text-[11px] shadow-lg"
-              style={{
-                left: `${Math.max(14, Math.min(86, ((padX + hoverFrac * (w - 2 * padX)) / w) * 100))}%`,
-              }}
-            >
-              <div className="mb-0.5 tabular-nums text-zinc-500">
-                {formatClock(hoverTick.at)}
-              </div>
-              {dealt.length > 0 && (
-                <>
-                  <div className="mt-0.5 flex justify-between font-medium text-emerald-400">
-                    <span>Dealt</span>
-                    <span className="tabular-nums">
-                      {formatInt(Math.round(hoverTick.dpsOut))}
-                    </span>
-                  </div>
-                  {dealt.map((p) => (
-                    <HoverPilotRow
-                      key={`o-${p.name}`}
-                      name={p.name}
-                      ship={p.ship}
-                      total={p.dpsOut}
-                      weapons={p.weaponsOut}
-                    />
-                  ))}
-                </>
-              )}
-              {taken.length > 0 && (
-                <>
-                  <div className="mt-1 flex justify-between font-medium text-rose-400">
-                    <span>Taken</span>
-                    <span className="tabular-nums">
-                      {formatInt(Math.round(hoverTick.dpsIn))}
-                    </span>
-                  </div>
-                  {taken.map((p) => (
-                    <HoverPilotRow
-                      key={`i-${p.name}`}
-                      name={p.name}
-                      ship={p.ship}
-                      total={p.dpsIn}
-                      weapons={p.weaponsIn}
-                    />
-                  ))}
-                </>
-              )}
-            </div>
-          )}
-        </div>
-        {/* Right Y-axis */}
-        <div
-          className="flex shrink-0 flex-col justify-between pl-1 text-left text-[10px] tabular-nums text-zinc-500"
-          style={yAxisStyle}
-        >
-          {yLabels.map((lbl, i) => (
-            <span key={i}>{lbl}</span>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-});
+import type { BucketSeries, ChartLayout } from "./dpsMeterShared";
 
 /** Graphs — outgoing and incoming; layout + breakdown toggles + the two (or
- *  one, in combined layout) rolling charts. */
+ *  one, in combined layout) time-grid charts. Everything draws from the
+ *  session's 5 s buckets (#984); the series decide what each line reads
+ *  (aggregate rates, a pilot-scoped rate, or one line per counterparty). */
 export function DpsChartContainer({
   bySource,
   onSetBySource,
   chartLayout,
   onSetChartLayout,
-  filteredTicks,
+  buckets,
   outSeries,
   inSeries,
   combinedSeries,
-  buckets,
-  pilotScoped,
   markTs,
 }: {
   bySource: boolean;
   onSetBySource: (v: boolean) => void;
   chartLayout: ChartLayout;
   onSetChartLayout: (v: ChartLayout) => void;
-  filteredTicks: DpsTick[];
-  outSeries: ChartSeries[];
-  inSeries: ChartSeries[];
-  combinedSeries: ChartSeries[];
-  /** Finalized 5 s buckets (#983) — the fixed time grid Totals mode draws
-   *  on. By-source and pilot-scoped views still use the rolling ticks (the
-   *  per-pilot breakdowns reach buckets with #984). */
   buckets: DpsBucket[];
-  /** True while a pilot filter is active — per-pilot data only exists on the
-   *  rolling ticks until #984, so those views keep the legacy chart. */
-  pilotScoped: boolean;
-  /** See {@link DpsChart}'s `markTs` — forwarded to every chart so the log's
-   *  scroll position reads the same whichever layout is active. */
+  outSeries: BucketSeries[];
+  inSeries: BucketSeries[];
+  combinedSeries: BucketSeries[];
+  /** See {@link BucketChart}'s `markTs` — forwarded to every chart so the
+   *  log's scroll position reads the same whichever layout is active. */
   markTs?: number | null;
 }) {
-  const showBuckets = !bySource && !pilotScoped;
   return (
     <>
       <div className="mt-6 flex items-center justify-end gap-2">
@@ -428,46 +89,22 @@ export function DpsChartContainer({
         }`}
       >
         {chartLayout === "combined" ? (
-          showBuckets ? (
-            <BucketChart
-              buckets={buckets}
-              series={BUCKET_SERIES_COMBINED}
-              title="Damage — out + in"
-              markTs={markTs}
-            />
-          ) : (
-            <DpsChart
-              ticks={filteredTicks}
-              series={combinedSeries}
-              title="Damage — out + in"
-              markTs={markTs}
-            />
-          )
-        ) : showBuckets ? (
-          <>
-            <BucketChart
-              buckets={buckets}
-              series={BUCKET_SERIES_OUT}
-              title="Outgoing"
-              markTs={markTs}
-            />
-            <BucketChart
-              buckets={buckets}
-              series={BUCKET_SERIES_IN}
-              title="Incoming"
-              markTs={markTs}
-            />
-          </>
+          <BucketChart
+            buckets={buckets}
+            series={combinedSeries}
+            title="Damage — out + in"
+            markTs={markTs}
+          />
         ) : (
           <>
-            <DpsChart
-              ticks={filteredTicks}
+            <BucketChart
+              buckets={buckets}
               series={outSeries}
               title="Outgoing"
               markTs={markTs}
             />
-            <DpsChart
-              ticks={filteredTicks}
+            <BucketChart
+              buckets={buckets}
               series={inSeries}
               title="Incoming"
               markTs={markTs}

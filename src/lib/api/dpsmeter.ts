@@ -130,6 +130,15 @@ export interface DpsBucket {
   capWarfareOut: number;
   capWarfareIn: number;
   miningM3: number;
+  /** Hit-quality tally of your hits within the bucket (#984). */
+  hitsOut: HitQuality;
+  /** Hit-quality tally of hits on you within the bucket. */
+  hitsIn: HitQuality;
+  /** Outgoing damage by weapon/ammo/drone — the rolling tick's row shape
+   *  (fields are per-second rates); all rows, sorted by rate desc. */
+  byWeapon: WeaponRate[];
+  /** Per-pilot engagement rows (rates + tackle flags); all rows, sorted. */
+  byPilot: PilotRate[];
 }
 
 /** A ship-label field from an overview export (#869); `"other"` covers any

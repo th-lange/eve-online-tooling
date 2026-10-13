@@ -25,7 +25,6 @@ export const STORAGE_KEYS = {
   // Shopping: which list chat capture imports into
   shoppingChatTarget: "shopping.chatTarget",
   // DPS meter
-  dpsWindowSecs: "dps.windowSecs",
   dpsChartLayout: "dps.chartLayout",
   dpsChartBySource: "dps.chartBySource",
   dpsMiningInterval: "dps.miningInterval",

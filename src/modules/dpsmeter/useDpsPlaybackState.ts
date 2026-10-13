@@ -15,38 +15,36 @@ import {
   onDpsBuckets,
   onDpsDone,
   onDpsEvents,
-  onDpsTick,
   type DpsBucket,
   type DpsEvent,
   type DpsExtractionPlan,
   type DpsLogFile,
   type DpsLogSummary,
-  type DpsTick,
 } from "../../lib/api";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { useEveLogDir } from "../../lib/useEveLogDir";
 import { usePersistentState } from "../../lib/usePersistentState";
 import {
-  BUFFER,
   LOG_BUFFER,
-  MINING_BUCKET_SECS,
   appendBuckets,
   appendEvents,
-  appendTick,
   type ChartLayout,
   type Mode,
 } from "./dpsMeterShared";
 
+// The backend's rolling tick still needs an averaging window — the PVP fight
+// overlay consumes it until #986, and the whole rolling pipeline is deleted
+// in #987. The DPS meter page itself no longer reads ticks (#984), so the
+// user-facing window setting is gone and this constant is all that's left.
+const LEGACY_TICK_WINDOW_SECS = 10;
+
 /** Playback transport state + mutations: `dpsStart` / `dpsPause` /
- *  `dpsPlayback` / `dpsResume`, tick buffering while hidden, the scrub/
- *  region/loop lifecycle, and the space-bar shortcut. Derived per-tick stats
- *  (pilot classification, chart series, mining) live in
- *  {@link ../useDpsPlaybackDerived.useDpsPlaybackDerived}. */
+ *  `dpsPlayback` / `dpsResume`, bucket/event buffering while hidden, the
+ *  scrub/region/loop lifecycle, and the space-bar shortcut. Derived
+ *  per-bucket stats (pilot classification, chart series, readout rates,
+ *  mining) live in {@link ../useDpsPlaybackDerived.useDpsPlaybackDerived}. */
 export function useDpsPlaybackState() {
   const [dir, setDir, persistDir] = useEveLogDir("gamelogs");
-  const [windowSecs, setWindowSecs] = useState(() =>
-    Number(localStorage.getItem(STORAGE_KEYS.dpsWindowSecs) ?? 10),
-  );
   // Overview-export-derived pilot/ship extraction plan (#869): the export
   // file path is persisted (like the gamelogs folder); the parsed plan
   // itself is not — it's re-derived from the file on load/change so a
@@ -69,10 +67,9 @@ export function useDpsPlaybackState() {
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [ticks, setTicks] = useState<DpsTick[]>([]);
   const [logEvents, setLogEvents] = useState<DpsEvent[]>([]);
   // Finalized 5 s buckets (#983) — the whole session, in order; the bucket
-  // chart scrolls over these.
+  // chart scrolls over these and every readout derives from them (#984).
   const [buckets, setBuckets] = useState<DpsBucket[]>([]);
   const [mode, setMode] = useState<Mode>("live");
   const [logs, setLogs] = useState<DpsLogFile[]>([]);
@@ -112,31 +109,19 @@ export function useDpsPlaybackState() {
   // (seeking no longer autoplays). Cleared once playback takes over.
   const [seekPos, setSeekPos] = useState<number | null>(null);
 
-  const latest = ticks[ticks.length - 1];
+  // The playhead, as event time: the end of the newest finalized bucket.
+  const lastBucket = buckets[buckets.length - 1];
+  const lastBucketEnd = lastBucket?.end;
 
   // The page stays mounted while backgrounded (ModuleHost), so without this it
-  // would keep re-rendering ~2×/s off the tick feed while invisible. Track the
-  // active flag in a ref so the single subscription reads the latest value
-  // without resubscribing, and buffer ticks that arrive while hidden.
+  // would keep re-rendering off the feeds while invisible. Track the active
+  // flag in a ref so the subscriptions read the latest value without
+  // resubscribing, and buffer what arrives while hidden.
   const active = useContext(ModuleActiveContext);
   const activeRef = useRef(active);
   activeRef.current = active;
-  const bufferedRef = useRef<DpsTick[]>([]);
   const bufferedEventsRef = useRef<DpsEvent[]>([]);
   const bufferedBucketsRef = useRef<DpsBucket[]>([]);
-  // Session peaks for the two primary readouts (reset on Start / Play).
-  const peaksRef = useRef({ out: 0, in: 0 });
-  // Mined volume per 15 s bucket (bucket start-epoch → m³), session-lifetime.
-  // Accumulated in the tick subscription (not from the `ticks` state) so mining
-  // history is not capped by the 2-min chart buffer and keeps counting while
-  // the page is hidden. Reset on Start / Play.
-  const miningRef = useRef<{
-    buckets: Map<number, number>;
-    lastAt: number | null;
-  }>({
-    buckets: new Map(),
-    lastAt: null,
-  });
 
   /** Parse `overviewFile` (or the given path) into an extraction plan;
    *  clears the plan and surfaces the error on failure so a stale/garbled
@@ -191,49 +176,9 @@ export function useDpsPlaybackState() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Subscribe once; the feed survives navigation. Ticks only arrive while a
-  // capture is running.
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    onDpsTick((t) => {
-      const peaks = peaksRef.current;
-      peaks.out = Math.max(peaks.out, t.dpsOut);
-      peaks.in = Math.max(peaks.in, t.dpsIn);
-      // Integrate the windowed mining rate into interval buckets: rate × the
-      // gap since the previous tick (clamped — a stall must not book a huge
-      // spurious volume into one bucket).
-      const mining = miningRef.current;
-      const dt =
-        mining.lastAt == null
-          ? 0
-          : Math.min(Math.max(t.at - mining.lastAt, 0), 5);
-      mining.lastAt = t.at;
-      if (t.miningM3 > 0 && dt > 0) {
-        const bucket =
-          Math.floor(t.at / MINING_BUCKET_SECS) * MINING_BUCKET_SECS;
-        mining.buckets.set(
-          bucket,
-          (mining.buckets.get(bucket) ?? 0) + t.miningM3 * dt,
-        );
-      }
-      if (!activeRef.current) {
-        // Hidden: accumulate without triggering a render; flushed on re-show.
-        const buf = bufferedRef.current;
-        buf.push(t);
-        if (buf.length > BUFFER) buf.splice(0, buf.length - BUFFER);
-        return;
-      }
-      setTicks((prev) => appendTick(prev, t));
-    }).then((u) => (unlisten = u));
-    return () => unlisten?.();
-  }, []);
-
-  // Combat-log view: the same batched events that feed each tick, for a
-  // scrolling line-by-line log alongside the rate graph. Subscribed
-  // separately from ticks (different payload shape/cadence relationship —
-  // zero, one, or many events can land between two ticks) but mirrors the
-  // exact same hidden-page buffering so the log doesn't re-render 2×/s while
-  // the page is backgrounded either.
+  // Combat-log view: the raw events each poll parsed, for a scrolling
+  // line-by-line log alongside the rate graph. Buffered while the page is
+  // hidden so it doesn't re-render in the background.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     onDpsEvents((batch) => {
@@ -248,9 +193,10 @@ export function useDpsPlaybackState() {
     return () => unlisten?.();
   }, []);
 
-  // Fixed-grid 5 s buckets (#983): the detail chart's time axis. Same
-  // hidden-page buffering as ticks/events; no cap — the whole session is
-  // kept (12 buckets/minute) so the chart can scroll over all of it.
+  // Fixed-grid 5 s buckets (#983): the page's single data feed — charts,
+  // readouts, peaks, tackle, and mining all derive from these (#984). Same
+  // hidden-page buffering as events; no cap — the whole session is kept
+  // (12 buckets/minute) so the chart can scroll over all of it.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     onDpsBuckets((batch) => {
@@ -268,7 +214,6 @@ export function useDpsPlaybackState() {
   const loopParamsRef = useRef({
     file,
     speed,
-    windowSecs,
     looping,
     region,
     extractionPlan,
@@ -276,7 +221,6 @@ export function useDpsPlaybackState() {
   loopParamsRef.current = {
     file,
     speed,
-    windowSecs,
     looping,
     region,
     extractionPlan,
@@ -289,20 +233,17 @@ export function useDpsPlaybackState() {
       setRunning(false);
       const p = loopParamsRef.current;
       if (!p.looping) return;
-      // Small pause so the final tick renders before the restart clears ticks.
+      // Small pause so the final bucket renders before the restart clears it.
       setTimeout(() => {
-        setTicks([]);
         setLogEvents([]);
         setBuckets([]);
         bufferedBucketsRef.current = [];
-        peaksRef.current = { out: 0, in: 0 };
-        miningRef.current = { buckets: new Map(), lastAt: null };
         setSelectedPilot(null);
         setPaused(false);
         void dpsPlayback({
           file: p.file,
           speed: p.speed,
-          windowSecs: p.windowSecs,
+          windowSecs: LEGACY_TICK_WINDOW_SECS,
           // Loop within the selected fight region if one is set, else replay
           // the whole log. Both bounds are i64 in Rust — round them.
           seekTs: p.region ? Math.round(p.region.start) : undefined,
@@ -319,16 +260,6 @@ export function useDpsPlaybackState() {
   // On becoming visible again, flush whatever arrived while hidden in one update.
   useEffect(() => {
     if (!active) return;
-    if (bufferedRef.current.length > 0) {
-      const buffered = bufferedRef.current;
-      bufferedRef.current = [];
-      setTicks((prev) => {
-        const merged = prev.concat(buffered);
-        return merged.length > BUFFER
-          ? merged.slice(merged.length - BUFFER)
-          : merged;
-      });
-    }
     if (bufferedEventsRef.current.length > 0) {
       const buffered = bufferedEventsRef.current;
       bufferedEventsRef.current = [];
@@ -341,26 +272,22 @@ export function useDpsPlaybackState() {
     }
   }, [active]);
 
-  async function start(win = windowSecs) {
+  async function start() {
     setError(null);
     persistDir();
-    localStorage.setItem(STORAGE_KEYS.dpsWindowSecs, String(win));
-    peaksRef.current = { out: 0, in: 0 };
-    miningRef.current = { buckets: new Map(), lastAt: null };
     setSelectedPilot(null);
     setPaused(false);
     setRegion(null);
     setSeekPos(null);
     pausedAtRef.current = null;
-    // Unlike `ticks` (a short rolling window where a stale tail ages out on
-    // its own), buckets are a time axis for the whole session — a fresh
-    // capture must not chart-gap against the previous one's grid.
+    // Buckets are a time axis for the whole session — a fresh capture must
+    // not chart-gap against the previous one's grid.
     setBuckets([]);
     bufferedBucketsRef.current = [];
     try {
       await dpsStart({
         gamelogsDir: dir,
-        windowSecs: win,
+        windowSecs: LEGACY_TICK_WINDOW_SECS,
         extractionPlan: extractionPlan ?? undefined,
         character: character || undefined,
       });
@@ -373,9 +300,9 @@ export function useDpsPlaybackState() {
   async function stop() {
     // Remember where playback stopped so Play / Space resumes there instead of
     // restarting from the beginning (live capture has no position to resume).
-    if (mode === "playback" && latest) {
-      pausedAtRef.current = latest.at;
-      setSeekPos(latest.at);
+    if (mode === "playback" && lastBucketEnd != null) {
+      pausedAtRef.current = lastBucketEnd;
+      setSeekPos(lastBucketEnd);
     }
     await dpsStop();
     setRunning(false);
@@ -394,18 +321,14 @@ export function useDpsPlaybackState() {
     }
   }
 
-  /** Replay the log. `seekTs` starts the virtual clock mid-file (the backend
-   *  pre-warms the window so the readout isn't cold); `stopTs` ends playback
-   *  at a fight region's boundary; `win` overrides the averaging window so a
-   *  live window change can restart cleanly. */
-  async function playback(seekTs?: number, stopTs?: number, win = windowSecs) {
+  /** Replay the log. `seekTs` starts the virtual clock mid-file (the bucket
+   *  grid anchors there — buckets are self-contained, nothing to pre-warm);
+   *  `stopTs` ends playback at a fight region's boundary. */
+  async function playback(seekTs?: number, stopTs?: number) {
     setError(null);
-    setTicks([]);
     setLogEvents([]);
     setBuckets([]);
     bufferedBucketsRef.current = [];
-    peaksRef.current = { out: 0, in: 0 };
-    miningRef.current = { buckets: new Map(), lastAt: null };
     setSelectedPilot(null);
     setPaused(false);
     setSeekPos(null);
@@ -413,7 +336,7 @@ export function useDpsPlaybackState() {
       await dpsPlayback({
         file,
         speed,
-        windowSecs: win,
+        windowSecs: LEGACY_TICK_WINDOW_SECS,
         // Both bounds are i64 in Rust — the region/scrubber emit fractional
         // timestamps, so round before crossing the bridge.
         seekTs: seekTs == null ? undefined : Math.round(seekTs),
@@ -458,21 +381,10 @@ export function useDpsPlaybackState() {
     setPaused(false);
   }
 
-  /** Change the moving-average window. Applies live by restarting the current
-   *  capture/playback (the window is baked into the backend loop). */
-  function setWindow(win: number) {
-    setWindowSecs(win);
-    localStorage.setItem(STORAGE_KEYS.dpsWindowSecs, String(win));
-    if (!running) return;
-    if (mode === "live") void start(win);
-    else void playback(latest?.at ?? region?.start, region?.end, win);
-  }
-
-  /** True pause: freeze the backend loop in place (the graph + window are kept
-   *  intact). Resume continues from the exact same point — no re-seek, so the
-   *  DPS doesn't jump. */
+  /** True pause: freeze the backend loop in place. Resume continues from the
+   *  exact same point — no re-seek, so the grid doesn't jump. */
   async function pause() {
-    pausedAtRef.current = latest?.at ?? null;
+    pausedAtRef.current = lastBucketEnd ?? null;
     setPaused(true);
     try {
       await dpsPause();
@@ -589,8 +501,6 @@ export function useDpsPlaybackState() {
   return {
     dir,
     setDir,
-    windowSecs,
-    setWindow,
     overviewFile,
     setOverviewFile,
     character,
@@ -602,9 +512,9 @@ export function useDpsPlaybackState() {
     loadOverviewExport,
     running,
     error,
-    ticks,
     logEvents,
     buckets,
+    lastBucketEnd,
     mode,
     switchMode,
     logs,
@@ -635,9 +545,5 @@ export function useDpsPlaybackState() {
     seekTo,
     pause,
     resume,
-    latest,
-    miningRef,
-    peakOut: peaksRef.current.out,
-    peakIn: peaksRef.current.in,
   };
 }
