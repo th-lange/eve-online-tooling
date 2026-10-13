@@ -65,6 +65,17 @@ the market/production calculations, which use public data.
 | `npm run test` | Frontend unit tests (Vitest) |
 | `cd src-tauri && cargo test` | Rust unit tests |
 
+Every PR runs two GitHub Actions workflows: **CI**
+(`.github/workflows/ci.yml`) — the merge gate, running everything the table
+above lists plus lint/format/clippy/fmt — and **Security**
+(`.github/workflows/security.yml`) — CodeQL (JS/TS + Rust) and dependency
+audits (`npm audit`, `cargo audit`). Security also runs weekly against
+`main`, so newly-disclosed advisories surface without a new PR. Its audit
+jobs are currently informational (`continue-on-error`) rather than merge-
+blocking, since the existing dependency tree has known advisories that need
+a deliberate, tested bump rather than a silent CI-driven one — flip that off
+once those are triaged.
+
 See [`CLAUDE.md`](https://github.com/th-lange/eve-online-tooling/blob/main/CLAUDE.md) for architecture and EVE domain notes, and the
 other docs for subsystems: [plugins](plugins.md), [scripts](scripts.md),
 [MCP](mcp.md).
