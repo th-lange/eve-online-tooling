@@ -105,4 +105,25 @@ describe("BucketChart", () => {
     // grows past the viewport to scroll (sticking to the live edge).
     expect(container.querySelector("svg")!.getAttribute("width")).toBe("2000");
   });
+
+  it("snaps a highlight span that runs past the last bucket onto it", () => {
+    // 5 buckets: starts 0,5,10,15,20 (last starts at 20). The combat log runs
+    // ahead of the chart, so a visible span can end beyond the newest bucket —
+    // the shade clamps from its start bucket through the last drawn bucket.
+    const buckets = Array.from({ length: 5 }, (_, i) => bucket(i, 100));
+    const { container } = render(
+      <BucketChart
+        buckets={buckets}
+        series={BUCKET_SERIES_OUT}
+        markRange={{ start: 12, end: 999 }}
+      />,
+    );
+    const rect = container.querySelector('rect[fill="#818cf8"]')!;
+    const x = Number(rect.getAttribute("x"));
+    const w = Number(rect.getAttribute("width"));
+    // Start bucket = 10 (x = 2 buckets in), end clamped to the last bucket
+    // (start 20) → spans buckets 10,15,20 = 3 wide. 10px/bucket (jsdom floor).
+    expect(x).toBe((10 / 5) * 10);
+    expect(w).toBe(3 * 10);
+  });
 });

@@ -108,18 +108,26 @@ export const BucketChart = memo(function BucketChart({
     if (el && stickRightRef.current) el.scrollLeft = el.scrollWidth;
   }, [n]);
 
-  // Shade from the first visible line's bucket through the last's (clamped to
-  // the rendered range). `null`/out-of-range → no highlight.
-  const markLo = markRange == null ? null : bucketStartOf(markRange.start);
-  const markHi = markRange == null ? null : bucketStartOf(markRange.end);
+  // The combat log runs ahead of the chart (buckets finalize only once their
+  // 5 s window closes), so a visible line can point past the newest drawn
+  // bucket. Snap the span onto the rendered range [first, last] so the
+  // highlight always lands on real segments — and at the live edge it extends
+  // through the last bucket. `null` only when the span is entirely before the
+  // chart or there are no buckets.
+  const lastStart = n > 0 ? buckets[n - 1].start : t0;
+  const rawLo = markRange == null ? null : bucketStartOf(markRange.start);
+  const rawHi = markRange == null ? null : bucketStartOf(markRange.end);
+  const inRange = rawLo != null && rawHi != null && n > 0 && rawHi >= t0;
+  const markLo =
+    inRange && rawLo != null ? Math.min(Math.max(rawLo, t0), lastStart) : null;
+  const markHi =
+    inRange && rawHi != null ? Math.min(Math.max(rawHi, t0), lastStart) : null;
   const markX =
-    markLo == null || markHi == null || n === 0 || markHi < t0
-      ? null
-      : (Math.max(markLo - t0, 0) / BUCKET_SECS) * pxPerBucket;
+    markLo == null ? null : ((markLo - t0) / BUCKET_SECS) * pxPerBucket;
   const markW =
-    markLo == null || markHi == null || markX == null
+    markLo == null || markHi == null
       ? 0
-      : ((markHi - Math.max(markLo, t0)) / BUCKET_SECS + 1) * pxPerBucket;
+      : ((markHi - markLo) / BUCKET_SECS + 1) * pxPerBucket;
 
   const hoverBucket = hover != null ? buckets[hover] : undefined;
   const yAxisStyle = { height: H, paddingTop: PAD_Y, paddingBottom: PAD_B };
