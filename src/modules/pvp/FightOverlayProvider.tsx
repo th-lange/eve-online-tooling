@@ -707,7 +707,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     }
     if (!gamelogsDir || startedDirRef.current === gamelogsDir) return;
     startedDirRef.current = gamelogsDir;
-    void dpsStart({ gamelogsDir, windowSecs: 10 }).catch(() => {});
+    void dpsStart({ gamelogsDir }).catch(() => {});
   }, [enabled, gamelogsDir]);
 
   const latestBucket = fightBuckets[fightBuckets.length - 1];

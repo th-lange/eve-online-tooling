@@ -65,7 +65,6 @@ describe("PlaybackTimeline — segment grid (#985)", () => {
     return {
       start: START,
       end: START + minutes * 60,
-      buckets: [],
       segments: Array.from({ length: minutes }, (_, i) =>
         seg(START + i * 60, i % 7),
       ),

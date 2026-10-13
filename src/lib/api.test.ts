@@ -22,7 +22,7 @@ import {
   fittingImportEft,
   fittingPrice,
   fittingShipLayout,
-  onDpsTick,
+  onDpsBuckets,
   piLockedSet,
   piOverview,
   ping,
@@ -33,7 +33,7 @@ import {
   whTripwireConnect,
   whTripwireImport,
   whTypeReference,
-  type DpsTick,
+  type DpsBucket,
   type Fit,
 } from "./api";
 
@@ -182,17 +182,17 @@ describe("api.dpsmeter", () => {
 
   it("wraps the start/stop/list commands", async () => {
     invokeMock.mockResolvedValue(undefined);
-    await dpsStart({ gamelogsDir: "/logs/Gamelogs", windowSecs: 10 });
+    await dpsStart({ gamelogsDir: "/logs/Gamelogs" });
     expect(invokeMock).toHaveBeenCalledWith("dps_start", {
-      settings: { gamelogsDir: "/logs/Gamelogs", windowSecs: 10 },
+      settings: { gamelogsDir: "/logs/Gamelogs" },
     });
 
     await dpsStop();
     expect(invokeMock).toHaveBeenCalledWith("dps_stop");
 
-    await dpsPlayback({ file: "/logs/a.txt", speed: 4, windowSecs: 10 });
+    await dpsPlayback({ file: "/logs/a.txt", speed: 4 });
     expect(invokeMock).toHaveBeenCalledWith("dps_playback", {
-      settings: { file: "/logs/a.txt", speed: 4, windowSecs: 10 },
+      settings: { file: "/logs/a.txt", speed: 4 },
     });
 
     invokeMock.mockResolvedValue([]);
@@ -209,28 +209,31 @@ describe("api.dpsmeter", () => {
     invokeMock.mockResolvedValue(undefined);
     await dpsStart({
       gamelogsDir: "/logs/Gamelogs",
-      windowSecs: 10,
       character: "Alice",
     });
     expect(invokeMock).toHaveBeenCalledWith("dps_start", {
       settings: {
         gamelogsDir: "/logs/Gamelogs",
-        windowSecs: 10,
         character: "Alice",
       },
     });
   });
 
-  it("subscribes onDpsTick to dps://tick and forwards the payload", async () => {
+  it("subscribes onDpsBuckets to dps://buckets and forwards the payload", async () => {
     listenMock.mockResolvedValue(() => {});
     const handler = vi.fn();
-    await onDpsTick(handler);
-    expect(listenMock).toHaveBeenCalledWith("dps://tick", expect.any(Function));
+    await onDpsBuckets(handler);
+    expect(listenMock).toHaveBeenCalledWith(
+      "dps://buckets",
+      expect.any(Function),
+    );
 
     // The registered listener should hand the event's payload to our handler.
-    const cb = listenMock.mock.calls[0][1] as (e: { payload: DpsTick }) => void;
-    const tick = { dpsOut: 123 } as DpsTick;
-    cb({ payload: tick });
-    expect(handler).toHaveBeenCalledWith(tick);
+    const cb = listenMock.mock.calls[0][1] as (e: {
+      payload: DpsBucket[];
+    }) => void;
+    const buckets = [{ start: 0 }] as DpsBucket[];
+    cb({ payload: buckets });
+    expect(handler).toHaveBeenCalledWith(buckets);
   });
 });
