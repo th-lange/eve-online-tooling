@@ -116,21 +116,18 @@ function MiniDpsChart({
           ).toFixed(1)}`,
       )
       .join(" ");
-  // The combat log runs ahead of the chart (buckets finalize only once their
-  // 5 s window closes). Snap the visible span onto the rendered buckets
-  // [first, last] so the highlight always lands on real segments and extends
-  // through the last bucket at the live edge.
-  const lastStart = buckets[buckets.length - 1].start;
-  const rawLo = markRange == null ? null : bucketStartOf(markRange.start);
-  const rawHi = markRange == null ? null : bucketStartOf(markRange.end);
-  const inRange = rawLo != null && rawHi != null && rawHi >= t0;
-  const markLo =
-    inRange && rawLo != null ? Math.min(Math.max(rawLo, t0), lastStart) : null;
-  const markHi =
-    inRange && rawHi != null ? Math.min(Math.max(rawHi, t0), lastStart) : null;
-  const markX = markLo == null ? null : x(markLo);
+  // Shade from the first visible log line's bucket through the last's.
+  const markLo = markRange == null ? null : bucketStartOf(markRange.start);
+  const markHi = markRange == null ? null : bucketStartOf(markRange.end);
+  const markX =
+    markLo == null || markHi == null || markHi < t0 || markLo >= t0 + span
+      ? null
+      : x(Math.max(markLo, t0));
   const markW =
-    markLo == null || markHi == null ? 0 : x(markHi + BUCKET_SECS) - x(markLo);
+    markX == null || markLo == null || markHi == null
+      ? 0
+      : x(Math.min(markHi, t0 + span - BUCKET_SECS) + BUCKET_SECS) -
+        x(Math.max(markLo, t0));
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded">
       <rect width={W} height={H} fill="#09090b" rx="3" />
