@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { DpsEvent } from "../../lib/api";
-import { formatClock } from "./dpsMeterShared";
+import { formatClock, type LogMarkRange } from "./dpsMeterShared";
 
 /** Render one parsed combat-log line as plain English, e.g.
  *  "450 dmg → Some Pilot (Caracal) — Heavy Missile Launcher II [Wrecks]".
@@ -60,18 +60,18 @@ export function CombatLogPanel({
   events,
   collapsed,
   onToggleCollapsed,
-  onVisiblePositionChange,
+  onVisibleRangeChange,
   className = "",
   maxHeightClass = "max-h-64",
 }: {
   events: DpsEvent[];
   collapsed: boolean;
   onToggleCollapsed: () => void;
-  /** Fired as the user scrolls through history: the timestamp of the
-   *  bottom-most (latest) visible line, or `null` once back at the live
-   *  tail (or nothing to report — collapsed, empty). Lets a parent chart
-   *  show where in time the log is currently scrolled to. */
-  onVisiblePositionChange?: (ts: number | null) => void;
+  /** Fired as the user scrolls through history: the timestamp span of the
+   *  visible lines (first→last at-least-partially-visible), or `null` once
+   *  back at the live tail (or nothing to report — collapsed, empty). Lets a
+   *  parent chart shade exactly the stretch of time the log is showing. */
+  onVisibleRangeChange?: (range: LogMarkRange | null) => void;
   className?: string;
   /** Tailwind max-height class for the scrolling list — the fight overlay's
    *  compact footer passes a shorter one than the DPS meter page. */
@@ -98,9 +98,9 @@ export function CombatLogPanel({
     }
   }, [events.length, autoScroll, collapsed]);
 
-  // Collapsing hides the log — any chart marker it was driving should go too.
+  // Collapsing hides the log — any chart highlight it was driving should go too.
   useEffect(() => {
-    if (collapsed) onVisiblePositionChange?.(null);
+    if (collapsed) onVisibleRangeChange?.(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collapsed]);
 
@@ -113,27 +113,29 @@ export function CombatLogPanel({
       const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
       if (atBottom) {
         if (!autoScroll) setAutoScroll(true);
-        onVisiblePositionChange?.(null);
+        onVisibleRangeChange?.(null);
         return;
       }
       // Scrolled away from the live tail: stop yanking back to it, and report
-      // the **bottom-most** (latest) at-least-partially-visible line's time.
-      // Using the latest rather than the topmost line lets the final buckets
-      // be reached — the last viewport-worth of lines can only ever sit at
-      // the bottom, so a topmost reference could never highlight the end.
+      // the full visible span — the first and last at-least-partially-visible
+      // lines — so the chart shades exactly the stretch of time on screen.
       if (autoScroll) setAutoScroll(false);
-      const viewportBottom = el.scrollTop + el.clientHeight;
-      let ts: number | null = null;
+      const top = el.scrollTop;
+      const bottom = el.scrollTop + el.clientHeight;
+      let first: number | null = null;
+      let last: number | null = null;
       for (const child of el.children) {
         const row = child as HTMLElement;
         if (row.dataset.ts === undefined) continue;
-        if (row.offsetTop < viewportBottom) {
-          ts = Number(row.dataset.ts);
-        } else {
-          break;
+        if (row.offsetTop + row.offsetHeight > top && row.offsetTop < bottom) {
+          const ts = Number(row.dataset.ts);
+          if (first === null) first = ts;
+          last = ts;
         }
       }
-      onVisiblePositionChange?.(ts);
+      onVisibleRangeChange?.(
+        first === null ? null : { start: first, end: last ?? first },
+      );
     });
   }
 

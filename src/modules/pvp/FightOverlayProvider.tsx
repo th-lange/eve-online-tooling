@@ -27,6 +27,7 @@ import {
   appendEvents,
   bucketStartOf,
   smoothSeries,
+  type LogMarkRange,
 } from "../dpsmeter/dpsMeterShared";
 import { FightOverlayContext } from "./fightOverlayContext";
 
@@ -77,12 +78,12 @@ export function nextFightBuckets(
 /** Mini DPS chart (out green, in red) over the fight's 5 s buckets. */
 function MiniDpsChart({
   buckets,
-  markTs,
+  markRange,
 }: {
   buckets: DpsBucket[];
-  /** The combat-log footer's scroll position — shades the enclosing 5 s
-   *  bucket, same arithmetic as the DPS meter's chart (#986). */
-  markTs?: number | null;
+  /** The combat-log footer's scroll span — shades every enclosing 5 s bucket,
+   *  same arithmetic as the DPS meter's chart (#986). */
+  markRange?: LogMarkRange | null;
 }) {
   if (buckets.length < 2)
     return <div className="h-12 w-full rounded bg-zinc-950" />;
@@ -115,11 +116,18 @@ function MiniDpsChart({
           ).toFixed(1)}`,
       )
       .join(" ");
-  const markStart = markTs == null ? null : bucketStartOf(markTs);
+  // Shade from the first visible log line's bucket through the last's.
+  const markLo = markRange == null ? null : bucketStartOf(markRange.start);
+  const markHi = markRange == null ? null : bucketStartOf(markRange.end);
   const markX =
-    markStart == null || markStart < t0 || markStart >= t0 + span
+    markLo == null || markHi == null || markHi < t0 || markLo >= t0 + span
       ? null
-      : x(markStart);
+      : x(Math.max(markLo, t0));
+  const markW =
+    markX == null || markLo == null || markHi == null
+      ? 0
+      : x(Math.min(markHi, t0 + span - BUCKET_SECS) + BUCKET_SECS) -
+        x(Math.max(markLo, t0));
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded">
       <rect width={W} height={H} fill="#09090b" rx="3" />
@@ -139,7 +147,7 @@ function MiniDpsChart({
         <rect
           x={markX}
           y={pad}
-          width={(BUCKET_SECS / span) * w}
+          width={markW}
           height={H - pad * 2}
           fill="#818cf8"
           fillOpacity="0.25"
@@ -246,8 +254,8 @@ function FightPanel({
   events,
   logCollapsed,
   onToggleLogCollapsed,
-  logMarkTs,
-  onLogVisiblePositionChange,
+  logMarkRange,
+  onLogVisibleRangeChange,
   attackers,
   myWeapons,
   localFits,
@@ -263,10 +271,10 @@ function FightPanel({
   events: DpsEvent[];
   logCollapsed: boolean;
   onToggleLogCollapsed: () => void;
-  /** See `CombatLogPanel`'s `onVisiblePositionChange` — threaded through to
-   *  mark the same position on `MiniDpsChart`. */
-  logMarkTs: number | null;
-  onLogVisiblePositionChange: (ts: number | null) => void;
+  /** See `CombatLogPanel`'s `onVisibleRangeChange` — threaded through to
+   *  shade the same span on `MiniDpsChart`. */
+  logMarkRange: LogMarkRange | null;
+  onLogVisibleRangeChange: (range: LogMarkRange | null) => void;
   attackers: {
     name: string;
     dpsIn: number;
@@ -450,7 +458,7 @@ function FightPanel({
           <h3 className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
             DPS
           </h3>
-          <MiniDpsChart buckets={buckets} markTs={logMarkTs} />
+          <MiniDpsChart buckets={buckets} markRange={logMarkRange} />
           <div className="flex gap-3 text-[10px] text-zinc-600">
             <span>
               <span className="text-emerald-500">▬</span> out
@@ -469,7 +477,7 @@ function FightPanel({
           events={events}
           collapsed={logCollapsed}
           onToggleCollapsed={onToggleLogCollapsed}
-          onVisiblePositionChange={onLogVisiblePositionChange}
+          onVisibleRangeChange={onLogVisibleRangeChange}
           maxHeightClass="max-h-32"
           className="border-none bg-transparent p-0"
         />
@@ -640,7 +648,8 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     true,
   );
   // Where the combat log footer is scrolled to — marked on MiniDpsChart.
-  const [fightLogMarkTs, setFightLogMarkTs] = useState<number | null>(null);
+  const [fightLogMarkRange, setFightLogMarkRange] =
+    useState<LogMarkRange | null>(null);
   const [fightOpen, setFightOpen] = useState(false);
   const [selectedFitId, setSelectedFitId] = useState<string | null>(null);
   // Settings "Test" preview: sample data, rebuilt each time the button is hit.
@@ -859,8 +868,8 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
           events={testFight.events}
           logCollapsed={logCollapsed}
           onToggleLogCollapsed={() => setLogCollapsed(!logCollapsed)}
-          logMarkTs={fightLogMarkTs}
-          onLogVisiblePositionChange={setFightLogMarkTs}
+          logMarkRange={fightLogMarkRange}
+          onLogVisibleRangeChange={setFightLogMarkRange}
           attackers={testFight.attackers}
           myWeapons={testFight.myWeapons}
           localFits={localFits.data ?? []}
@@ -879,8 +888,8 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
             events={fightLogEvents}
             logCollapsed={logCollapsed}
             onToggleLogCollapsed={() => setLogCollapsed(!logCollapsed)}
-            logMarkTs={fightLogMarkTs}
-            onLogVisiblePositionChange={setFightLogMarkTs}
+            logMarkRange={fightLogMarkRange}
+            onLogVisibleRangeChange={setFightLogMarkRange}
             attackers={activeAttackers}
             myWeapons={latestBucket?.byWeapon ?? []}
             localFits={localFits.data ?? []}
@@ -896,7 +905,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
               setFightOpen(false);
               setFightBuckets([]);
               setFightLogEvents([]);
-              setFightLogMarkTs(null);
+              setFightLogMarkRange(null);
             }}
           />
         )

@@ -72,19 +72,19 @@ async function scrollAndFlush(list: HTMLElement) {
 }
 
 describe("CombatLogPanel scrolling", () => {
-  it("reports the bottom-most visible line's time and pauses auto-scroll when scrolled away from the bottom", async () => {
+  it("reports the visible line range and pauses auto-scroll when scrolled away from the bottom", async () => {
     vi.useFakeTimers();
     try {
       const events = Array.from({ length: 10 }, (_, i) =>
         ev(1000 + i, `p${i}`),
       );
-      const onVisiblePositionChange = vi.fn();
+      const onVisibleRangeChange = vi.fn();
       const { container } = render(
         <CombatLogPanel
           events={events}
           collapsed={false}
           onToggleCollapsed={() => {}}
-          onVisiblePositionChange={onVisiblePositionChange}
+          onVisibleRangeChange={onVisibleRangeChange}
         />,
       );
       const list = container.querySelector(".overflow-y-auto") as HTMLElement;
@@ -93,8 +93,7 @@ describe("CombatLogPanel scrolling", () => {
       await act(() => vi.advanceTimersByTimeAsync(650));
 
       // 10 rows × 20px = 200px content in a 50px viewport, scrolled to 80px:
-      // the viewport covers [80, 130), so row 6 (ts 1006, top at 120px) is the
-      // bottom-most at-least-partially-visible line.
+      // the viewport covers [80, 130), so rows 4–6 (ts 1004–1006) are visible.
       stubGeometry(list, {
         scrollTop: 80,
         scrollHeight: 200,
@@ -102,7 +101,10 @@ describe("CombatLogPanel scrolling", () => {
       });
       await scrollAndFlush(list);
 
-      expect(onVisiblePositionChange).toHaveBeenCalledWith(1006);
+      expect(onVisibleRangeChange).toHaveBeenCalledWith({
+        start: 1004,
+        end: 1006,
+      });
       expect(
         screen.getByRole("checkbox", { name: "Auto-scroll" }),
       ).not.toBeChecked();
@@ -117,13 +119,13 @@ describe("CombatLogPanel scrolling", () => {
       const events = Array.from({ length: 10 }, (_, i) =>
         ev(1000 + i, `p${i}`),
       );
-      const onVisiblePositionChange = vi.fn();
+      const onVisibleRangeChange = vi.fn();
       const { container } = render(
         <CombatLogPanel
           events={events}
           collapsed={false}
           onToggleCollapsed={() => {}}
-          onVisiblePositionChange={onVisiblePositionChange}
+          onVisibleRangeChange={onVisibleRangeChange}
         />,
       );
       const list = container.querySelector(".overflow-y-auto") as HTMLElement;
@@ -147,7 +149,7 @@ describe("CombatLogPanel scrolling", () => {
       });
       await scrollAndFlush(list);
 
-      expect(onVisiblePositionChange).toHaveBeenLastCalledWith(null);
+      expect(onVisibleRangeChange).toHaveBeenLastCalledWith(null);
       expect(
         screen.getByRole("checkbox", { name: "Auto-scroll" }),
       ).toBeChecked();
@@ -157,13 +159,13 @@ describe("CombatLogPanel scrolling", () => {
   });
 
   it("clears the marker when the panel is collapsed", () => {
-    const onVisiblePositionChange = vi.fn();
+    const onVisibleRangeChange = vi.fn();
     const { rerender } = render(
       <CombatLogPanel
         events={[ev(1000, "a")]}
         collapsed={false}
         onToggleCollapsed={() => {}}
-        onVisiblePositionChange={onVisiblePositionChange}
+        onVisibleRangeChange={onVisibleRangeChange}
       />,
     );
     rerender(
@@ -171,9 +173,9 @@ describe("CombatLogPanel scrolling", () => {
         events={[ev(1000, "a")]}
         collapsed
         onToggleCollapsed={() => {}}
-        onVisiblePositionChange={onVisiblePositionChange}
+        onVisibleRangeChange={onVisibleRangeChange}
       />,
     );
-    expect(onVisiblePositionChange).toHaveBeenLastCalledWith(null);
+    expect(onVisibleRangeChange).toHaveBeenLastCalledWith(null);
   });
 });
