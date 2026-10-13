@@ -94,6 +94,29 @@ export function bucketStartOf(ts: number): number {
   return Math.floor(ts / BUCKET_SECS) * BUCKET_SECS;
 }
 
+// Buckets in the centered smoothing window for the rate charts. A single
+// volley lands entirely in one 5 s bucket, so the raw per-bucket rate swings
+// between a tall spike and zero on the next bucket; averaging over a small
+// window turns that into a readable trend. Odd so the window is symmetric
+// around each bucket; 3 ≈ a 15 s moving average (close to the old rolling
+// readout) while staying responsive.
+export const SMOOTH_WINDOW_BUCKETS = 3;
+
+/** Centered moving average of `values` over {@link SMOOTH_WINDOW_BUCKETS},
+ *  clamped at the ends (each point averages only the neighbours that exist).
+ *  Pure **display** smoothing for the rate lines — the underlying bucket data
+ *  is untouched, so tooltips, peaks and the y-axis still read true rates. */
+export function smoothSeries(values: number[]): number[] {
+  const r = Math.floor(SMOOTH_WINDOW_BUCKETS / 2);
+  return values.map((_, i) => {
+    const lo = Math.max(0, i - r);
+    const hi = Math.min(values.length - 1, i + r);
+    let sum = 0;
+    for (let j = lo; j <= hi; j++) sum += values[j];
+    return sum / (hi - lo + 1);
+  });
+}
+
 /** A bucket chart line: identity + colour + a per-bucket **rate** accessor
  *  (bucket fields are absolute sums; rate = sum / BUCKET_SECS). Mirrors
  *  {@link ChartSeries} on the fixed grid. */

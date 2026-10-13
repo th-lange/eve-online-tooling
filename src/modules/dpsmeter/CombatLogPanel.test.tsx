@@ -72,7 +72,7 @@ async function scrollAndFlush(list: HTMLElement) {
 }
 
 describe("CombatLogPanel scrolling", () => {
-  it("reports the topmost visible line's time and pauses auto-scroll when scrolled away from the bottom", async () => {
+  it("reports the bottom-most visible line's time and pauses auto-scroll when scrolled away from the bottom", async () => {
     vi.useFakeTimers();
     try {
       const events = Array.from({ length: 10 }, (_, i) =>
@@ -92,8 +92,9 @@ describe("CombatLogPanel scrolling", () => {
       // ignore it" grace window elapse before simulating a real user scroll.
       await act(() => vi.advanceTimersByTimeAsync(650));
 
-      // 10 rows × 20px = 200px content in a 50px viewport, scrolled to row 4
-      // (80px) — row 4 (ts 1004) is the first (at least partially) visible one.
+      // 10 rows × 20px = 200px content in a 50px viewport, scrolled to 80px:
+      // the viewport covers [80, 130), so row 6 (ts 1006, top at 120px) is the
+      // bottom-most at-least-partially-visible line.
       stubGeometry(list, {
         scrollTop: 80,
         scrollHeight: 200,
@@ -101,7 +102,7 @@ describe("CombatLogPanel scrolling", () => {
       });
       await scrollAndFlush(list);
 
-      expect(onVisiblePositionChange).toHaveBeenCalledWith(1004);
+      expect(onVisiblePositionChange).toHaveBeenCalledWith(1006);
       expect(
         screen.getByRole("checkbox", { name: "Auto-scroll" }),
       ).not.toBeChecked();

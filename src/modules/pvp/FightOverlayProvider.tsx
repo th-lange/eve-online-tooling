@@ -26,6 +26,7 @@ import {
   BUCKET_SECS,
   appendEvents,
   bucketStartOf,
+  smoothSeries,
 } from "../dpsmeter/dpsMeterShared";
 import { FightOverlayContext } from "./fightOverlayContext";
 
@@ -103,12 +104,18 @@ function MiniDpsChart({
   // time-based placement keeps this honest if a frozen buffer is re-rendered.
   const x = (ts: number) => pad + ((ts - t0) / span) * w;
   const y = (v: number) => pad + h - (v / maxVal) * h;
+  // Smooth each line (see `smoothSeries`) so a single volley's spike reads as
+  // a trend; the axis still uses the raw peak so heights aren't understated.
+  const smoothed = {
+    damageOut: smoothSeries(buckets.map((b) => b.damageOut / BUCKET_SECS)),
+    damageIn: smoothSeries(buckets.map((b) => b.damageIn / BUCKET_SECS)),
+  };
   const path = (field: "damageOut" | "damageIn") =>
     buckets
       .map(
-        (b) =>
+        (b, i) =>
           `${x(b.start + BUCKET_SECS / 2).toFixed(1)},${y(
-            b[field] / BUCKET_SECS,
+            smoothed[field][i],
           ).toFixed(1)}`,
       )
       .join(" ");
