@@ -257,6 +257,37 @@ export function groupEventsByBucket(events: DpsEvent[]): EventBucketGroup[] {
   return groups;
 }
 
+/** The in-progress bucket at the live edge (#1004): the newest events arrive
+ *  up to ~5 s before the bucket covering them finalizes, so the chart draws
+ *  this as a dashed ghost cell. Sums damage out/in over the events inside the
+ *  newest event's bucket; `null` when that bucket already exists on the chart
+ *  (`lastEnd` = the last finalized bucket's end) or there are no events. */
+export type GhostBucket = {
+  start: number;
+  damageOut: number;
+  damageIn: number;
+};
+
+export function pendingGhostBucket(
+  events: DpsEvent[],
+  lastEnd: number | null,
+): GhostBucket | null {
+  const newest = events[events.length - 1];
+  if (!newest) return null;
+  const start = bucketStartOf(newest.ts);
+  if (lastEnd != null && start < lastEnd) return null;
+  let damageOut = 0;
+  let damageIn = 0;
+  // Events are time-ordered; walk back only as far as the ghost's bucket.
+  for (let i = events.length - 1; i >= 0; i--) {
+    const ev = events[i];
+    if (ev.ts < start) break;
+    if (ev.kind === "damageOut") damageOut += ev.amount;
+    else if (ev.kind === "damageIn") damageIn += ev.amount;
+  }
+  return { start, damageOut, damageIn };
+}
+
 // Finest mining bucket granularity (s). Volumes accumulate at this resolution;
 // the panel's 30 s view merges adjacent pairs, so both intervals share one store.
 export const MINING_BUCKET_SECS = 15;

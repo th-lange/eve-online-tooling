@@ -1,13 +1,16 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import type { DpsBucket } from "../../lib/api";
+import type { DpsBucket, DpsEvent } from "../../lib/api";
 import { formatInt } from "../../lib/format";
+import { eventToneClass, formatEventLine } from "./CombatLogPanel";
 import {
   BUCKET_SECS,
+  bucketStartOf,
   formatClock,
   nearestBucketStart,
   SMOOTH_WINDOW_BUCKETS,
   smoothSeries,
   type BucketSeries,
+  type GhostBucket,
 } from "./dpsMeterShared";
 
 // Minimum horizontal pixels per 5 s bucket. The chart fits its buckets to the
@@ -29,17 +32,26 @@ const LABEL_EVERY = 12;
  *  sticks to the live edge until the user scrolls back.
  *
  *  `markTs` highlights the single bucket closest in time to the combat log's
- *  centre line. */
+ *  centre line. `ghost` is the in-progress bucket at the live edge (#1004),
+ *  drawn dashed. Clicking a cell reports its bucket start via
+ *  `onSelectBucket`; `eventsByBucket` feeds the hover tooltip's log-line
+ *  count and preview. */
 export const BucketChart = memo(function BucketChart({
   buckets,
   series,
   title,
   markTs,
+  ghost,
+  onSelectBucket,
+  eventsByBucket,
 }: {
   buckets: DpsBucket[];
   series: readonly BucketSeries[];
   title?: string;
   markTs?: number | null;
+  ghost?: GhostBucket | null;
+  onSelectBucket?: (bucketStart: number) => void;
+  eventsByBucket?: Map<number, DpsEvent[]>;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // Stick to the live (right) edge until the user scrolls away from it; a
@@ -64,9 +76,12 @@ export const BucketChart = memo(function BucketChart({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  const cells = n + (ghost ? 1 : 0);
   const pxPerBucket =
-    n > 0 ? Math.max(MIN_PX_PER_BUCKET, viewportW / n) : MIN_PX_PER_BUCKET;
-  const width = Math.max(1, n) * pxPerBucket;
+    cells > 0
+      ? Math.max(MIN_PX_PER_BUCKET, viewportW / cells)
+      : MIN_PX_PER_BUCKET;
+  const width = Math.max(1, cells) * pxPerBucket;
 
   const { max, lines, labels, yLabels } = useMemo(() => {
     // Plot a centered moving average so a single volley's spike reads as a
@@ -108,8 +123,14 @@ export const BucketChart = memo(function BucketChart({
   }, [n]);
 
   // Highlight the single bucket closest in time to the log's centre line
-  // (`markTs`), snapped to an existing bucket. `null` → no highlight.
-  const markStart = markTs == null ? null : nearestBucketStart(buckets, markTs);
+  // (`markTs`), snapped to an existing bucket — or the ghost cell when the
+  // centre group IS the in-progress bucket. `null` → no highlight.
+  const markStart =
+    markTs == null
+      ? null
+      : ghost && bucketStartOf(markTs) === ghost.start
+        ? ghost.start
+        : nearestBucketStart(buckets, markTs);
   const markX =
     markStart == null ? null : ((markStart - t0) / BUCKET_SECS) * pxPerBucket;
 
@@ -170,6 +191,13 @@ export const BucketChart = memo(function BucketChart({
                   setHover(i >= 0 && i < n ? i : null);
                 }}
                 onPointerLeave={() => setHover(null)}
+                onClick={(e) => {
+                  if (!onSelectBucket) return;
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const i = Math.floor((e.clientX - rect.left) / pxPerBucket);
+                  if (i >= 0 && i < n) onSelectBucket(buckets[i].start);
+                  else if (ghost && i === n) onSelectBucket(ghost.start);
+                }}
               >
                 {[0, 0.25, 0.5, 0.75, 1].map((f) => (
                   <line
@@ -226,6 +254,47 @@ export const BucketChart = memo(function BucketChart({
                       strokeOpacity={l.primary ? 1 : 0.7}
                     />
                   ))}
+                {ghost && (
+                  <g>
+                    {/* In-progress bucket (#1004): dashed outline + the two
+                        damage rates so the newest log lines have a target
+                        before the bucket finalizes. */}
+                    <rect
+                      x={((ghost.start - t0) / BUCKET_SECS) * pxPerBucket + 1}
+                      y={PAD_Y}
+                      width={Math.max(1, pxPerBucket - 2)}
+                      height={H - PAD_Y - PAD_B}
+                      fill="none"
+                      stroke="#52525b"
+                      strokeWidth="1"
+                      strokeDasharray="3 3"
+                    />
+                    {(
+                      [
+                        ["dpsOut", ghost.damageOut, "#34d399"],
+                        ["dpsIn", ghost.damageIn, "#f87171"],
+                      ] as const
+                    )
+                      .filter(([id]) => series.some((s) => s.id === id))
+                      .map(([id, sum, color]) => (
+                        <circle
+                          key={id}
+                          cx={
+                            ((ghost.start - t0) / BUCKET_SECS) * pxPerBucket +
+                            pxPerBucket / 2
+                          }
+                          cy={
+                            PAD_Y +
+                            (1 - Math.min(sum / BUCKET_SECS, max) / max) *
+                              (H - PAD_Y - PAD_B)
+                          }
+                          r="2.5"
+                          fill={color}
+                          fillOpacity="0.6"
+                        />
+                      ))}
+                  </g>
+                )}
                 {hover != null && (
                   <line
                     x1={hover * pxPerBucket + pxPerBucket / 2}
@@ -304,6 +373,30 @@ export const BucketChart = memo(function BucketChart({
                     </span>
                   </div>
                 ))}
+              {/* The bucket's combat-log lines (#1003) — the same group the
+                  log shows between this bucket's dividers. */}
+              {(() => {
+                const lines = eventsByBucket?.get(hoverBucket.start);
+                if (!lines || lines.length === 0) return null;
+                return (
+                  <>
+                    <div className="mt-1 font-medium text-zinc-400">
+                      Log · {lines.length}{" "}
+                      {lines.length === 1 ? "line" : "lines"}
+                    </div>
+                    {lines.slice(0, 3).map((e, i) => (
+                      <div key={i} className={`truncate ${eventToneClass(e)}`}>
+                        {formatEventLine(e)}
+                      </div>
+                    ))}
+                    {lines.length > 3 && (
+                      <div className="text-zinc-600">
+                        +{lines.length - 3} more — click the bucket
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           )}
         </div>

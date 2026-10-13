@@ -1,7 +1,7 @@
 import { Columns2, Layers, Rows2 } from "lucide-react";
-import type { DpsBucket } from "../../lib/api";
+import type { DpsBucket, DpsEvent } from "../../lib/api";
 import { BucketChart } from "./BucketChart";
-import type { BucketSeries, ChartLayout } from "./dpsMeterShared";
+import type { BucketSeries, ChartLayout, GhostBucket } from "./dpsMeterShared";
 
 /** Graphs — outgoing and incoming; layout + breakdown toggles + the two (or
  *  one, in combined layout) time-grid charts. Everything draws from the
@@ -17,6 +17,9 @@ export function DpsChartContainer({
   inSeries,
   combinedSeries,
   markTs,
+  ghost,
+  onSelectBucket,
+  eventsByBucket,
 }: {
   bySource: boolean;
   onSetBySource: (v: boolean) => void;
@@ -29,6 +32,11 @@ export function DpsChartContainer({
   /** See {@link BucketChart}'s `markTs` — forwarded to every chart so the
    *  log's highlighted bucket reads the same whichever layout is active. */
   markTs?: number | null;
+  /** See {@link BucketChart} — the live-edge ghost, click-to-jump handler,
+   *  and the tooltip's per-bucket log lines, forwarded to every chart. */
+  ghost?: GhostBucket | null;
+  onSelectBucket?: (bucketStart: number) => void;
+  eventsByBucket?: Map<number, DpsEvent[]>;
 }) {
   return (
     <>
@@ -94,6 +102,9 @@ export function DpsChartContainer({
             series={combinedSeries}
             title="Damage — out + in"
             markTs={markTs}
+            ghost={ghost}
+            onSelectBucket={onSelectBucket}
+            eventsByBucket={eventsByBucket}
           />
         ) : (
           <>
@@ -102,12 +113,18 @@ export function DpsChartContainer({
               series={outSeries}
               title="Outgoing"
               markTs={markTs}
+              ghost={ghost}
+              onSelectBucket={onSelectBucket}
+              eventsByBucket={eventsByBucket}
             />
             <BucketChart
               buckets={buckets}
               series={inSeries}
               title="Incoming"
               markTs={markTs}
+              ghost={ghost}
+              onSelectBucket={onSelectBucket}
+              eventsByBucket={eventsByBucket}
             />
           </>
         )}
