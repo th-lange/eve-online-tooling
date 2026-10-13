@@ -28,7 +28,7 @@ export function DpsPage() {
     <Page>
       <PageHeader
         title="DPS Meter"
-        subtitle="Live combat readout from your EVE gamelog — damage, logistics and capacitor warfare as a moving average. Reads only the logs the client writes (EULA-safe)."
+        subtitle="Live combat readout from your EVE gamelog — damage, logistics and capacitor warfare on a fixed 5-second grid. Reads only the logs the client writes (EULA-safe)."
       />
 
       {/* Mode tabs */}
@@ -59,8 +59,6 @@ export function DpsPage() {
             void dps.refreshCharacters();
             if (dps.mode === "playback") void dps.refreshLogs();
           }}
-          windowSecs={dps.windowSecs}
-          onSetWindow={dps.setWindow}
           logs={dps.logs}
           file={dps.file}
           onSetFile={dps.setFile}
@@ -99,7 +97,7 @@ export function DpsPage() {
       {dps.mode === "playback" && dps.summary && (
         <PlaybackTimeline
           summary={dps.summary}
-          position={dps.seekPos ?? dps.latest?.at ?? null}
+          position={dps.seekPos ?? dps.lastBucketEnd ?? null}
           region={dps.region}
           onSeek={dps.seekTo}
           onSelectRegion={dps.selectRegion}
@@ -131,13 +129,19 @@ export function DpsPage() {
               }`}
               style={{ color: s.color }}
             >
-              {dps.filteredLatest ? formatRate(dps.filteredLatest[s.key]) : "—"}
+              {dps.latestRates ? formatRate(dps.latestRates[s.key]) : "—"}
             </div>
             {s.key === "dpsOut" && (
-              <PrimaryExtras peak={dps.peakOut} quality={dps.latest?.hitsOut} />
+              <PrimaryExtras
+                peak={dps.peakOut}
+                quality={dps.latestBucket?.hitsOut}
+              />
             )}
             {s.key === "dpsIn" && (
-              <PrimaryExtras peak={dps.peakIn} quality={dps.latest?.hitsIn} />
+              <PrimaryExtras
+                peak={dps.peakIn}
+                quality={dps.latestBucket?.hitsIn}
+              />
             )}
           </div>
         ))}
@@ -217,12 +221,10 @@ export function DpsPage() {
         onSetBySource={dps.setBySource}
         chartLayout={dps.chartLayout}
         onSetChartLayout={dps.setChartLayout}
-        filteredTicks={dps.filteredTicks}
+        buckets={dps.buckets}
         outSeries={dps.outSeries}
         inSeries={dps.inSeries}
         combinedSeries={dps.combinedSeries}
-        buckets={dps.buckets}
-        pilotScoped={dps.selectedPilot != null}
         markTs={logMarkTs}
       />
 
@@ -232,14 +234,14 @@ export function DpsPage() {
         <MiningPanel
           points={dps.miningPoints}
           total={dps.miningTotal}
-          rate={dps.latest?.miningM3 ?? 0}
+          rate={dps.miningRate}
           intervalSecs={dps.miningInterval}
           onSetInterval={dps.setMiningInterval}
         />
       )}
 
       <FightBreakdown
-        latest={dps.latest}
+        latest={dps.latestBucket}
         pilotRows={dps.pilotRows}
         colors={dps.sourceColors}
       />
@@ -252,7 +254,7 @@ export function DpsPage() {
         className="mt-4"
       />
 
-      {!dps.running && dps.ticks.length === 0 && (
+      {!dps.running && dps.buckets.length === 0 && (
         <p className="mt-4 text-sm text-zinc-500">
           Point this at your <code>Gamelogs</code> folder and press Start. Only
           combat logged after you start is counted.

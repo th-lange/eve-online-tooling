@@ -215,7 +215,7 @@ export const BucketChart = memo(function BucketChart({
           </div>
           {hoverBucket && (
             <div
-              className="pointer-events-none absolute left-2 top-1 z-10 w-max rounded border border-zinc-700 bg-zinc-900/95 px-2 py-1 text-[11px] shadow-lg"
+              className="pointer-events-none absolute left-2 top-1 z-10 w-56 rounded border border-zinc-700 bg-zinc-900/95 px-2 py-1 text-[11px] shadow-lg"
               data-testid="bucket-tooltip"
             >
               <div className="mb-0.5 tabular-nums text-zinc-500">
@@ -224,12 +224,59 @@ export const BucketChart = memo(function BucketChart({
               </div>
               {series.map((s) => (
                 <div key={s.id} className="flex justify-between gap-3">
-                  <span style={{ color: s.color }}>{s.id}</span>
+                  <span className="truncate" style={{ color: s.color }}>
+                    {s.id}
+                  </span>
                   <span className="tabular-nums text-zinc-300">
                     {formatInt(Math.round(s.get(hoverBucket)))}
                   </span>
                 </div>
               ))}
+              {/* Per-pilot engagement inside this bucket (dealt / taken). */}
+              {hoverBucket.byPilot.some((p) => p.dpsOut > 0) && (
+                <div className="mt-1 font-medium text-emerald-400">Dealt</div>
+              )}
+              {hoverBucket.byPilot
+                .filter((p) => p.dpsOut > 0)
+                .slice(0, 5)
+                .map((p) => (
+                  <div
+                    key={`o-${p.name}`}
+                    className="flex justify-between gap-3"
+                  >
+                    <span className="truncate text-zinc-300">
+                      {p.name}
+                      {p.ship ? (
+                        <span className="text-zinc-500"> · {p.ship}</span>
+                      ) : null}
+                    </span>
+                    <span className="tabular-nums text-zinc-400">
+                      {formatInt(Math.round(p.dpsOut))}
+                    </span>
+                  </div>
+                ))}
+              {hoverBucket.byPilot.some((p) => p.dpsIn > 0) && (
+                <div className="mt-1 font-medium text-rose-400">Taken</div>
+              )}
+              {hoverBucket.byPilot
+                .filter((p) => p.dpsIn > 0)
+                .slice(0, 5)
+                .map((p) => (
+                  <div
+                    key={`i-${p.name}`}
+                    className="flex justify-between gap-3"
+                  >
+                    <span className="truncate text-zinc-300">
+                      {p.name}
+                      {p.ship ? (
+                        <span className="text-zinc-500"> · {p.ship}</span>
+                      ) : null}
+                    </span>
+                    <span className="tabular-nums text-zinc-400">
+                      {formatInt(Math.round(p.dpsIn))}
+                    </span>
+                  </div>
+                ))}
             </div>
           )}
         </div>

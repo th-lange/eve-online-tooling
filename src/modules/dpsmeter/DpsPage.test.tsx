@@ -8,21 +8,17 @@ import type {
   DpsLogFile,
   DpsLogSummary,
   DpsPlaybackSettings,
-  DpsTick,
 } from "../../lib/api";
 
-// DpsPage subscribes to live ticks + combat-log events + 5s buckets via
-// `listen`; capture the callbacks so a test can push payloads directly.
-let tickHandler: ((t: DpsTick) => void) | undefined;
+// DpsPage subscribes to combat-log events + 5s buckets via `listen`; capture
+// the callbacks so a test can push payloads directly.
 let eventsHandler: ((events: DpsEvent[]) => void) | undefined;
 let bucketsHandler: ((buckets: DpsBucket[]) => void) | undefined;
 vi.mock("@tauri-apps/api/event", () => ({
   listen: (
     name: string,
-    handler: (e: { payload: DpsTick | DpsEvent[] | DpsBucket[] }) => void,
+    handler: (e: { payload: DpsEvent[] | DpsBucket[] }) => void,
   ) => {
-    if (name === "dps://tick")
-      tickHandler = (t: DpsTick) => handler({ payload: t });
     if (name === "dps://events")
       eventsHandler = (events: DpsEvent[]) => handler({ payload: events });
     if (name === "dps://buckets")
@@ -31,27 +27,29 @@ vi.mock("@tauri-apps/api/event", () => ({
   },
 }));
 
-function makeTick(at: number): DpsTick {
-  const hq = {
-    misses: 0,
-    glances: 0,
-    grazes: 0,
-    hits: 0,
-    penetrates: 0,
-    smashes: 0,
-    wrecks: 0,
-  };
+const hq = {
+  misses: 0,
+  glances: 0,
+  grazes: 0,
+  hits: 0,
+  penetrates: 0,
+  smashes: 0,
+  wrecks: 0,
+};
+
+/** A finalized 5 s bucket starting at `start` (end = start + 5). */
+function makeBucket(start: number, damageOut = 100): DpsBucket {
   return {
-    at,
-    windowSecs: 10,
-    dpsOut: 50,
-    dpsIn: 0,
-    logiOut: 0,
-    logiIn: 0,
-    capWarfareOut: 0,
-    capWarfareIn: 0,
+    start,
+    end: start + 5,
+    damageOut,
+    damageIn: 0,
+    repOut: 0,
+    repIn: 0,
     capTransferOut: 0,
     capTransferIn: 0,
+    capWarfareOut: 0,
+    capWarfareIn: 0,
     miningM3: 0,
     hitsOut: hq,
     hitsIn: hq,
@@ -125,7 +123,6 @@ function renderInPlayback() {
 beforeEach(() => {
   invokeMock.mockReset();
   localStorage.clear();
-  tickHandler = undefined;
   eventsHandler = undefined;
   bucketsHandler = undefined;
 });
@@ -218,9 +215,10 @@ describe("DpsPage — playback timeline", () => {
     fireEvent.click(screen.getByRole("button", { name: "Play" }));
     await screen.findByRole("button", { name: "Stop" });
 
-    // A tick advances the playhead to a mid-log position.
+    // A finalized bucket advances the playhead to its end — a mid-log
+    // position (`pos` is a multiple of 5, so it's a valid bucket end).
     const pos = SUMMARY_START + 200;
-    act(() => tickHandler?.(makeTick(pos)));
+    act(() => bucketsHandler?.([makeBucket(pos - 5)]));
 
     // Stop, then Play again — playback must resume at `pos`, not restart at 0.
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
@@ -310,22 +308,6 @@ describe("DpsPage — combat log", () => {
 });
 
 describe("DpsPage — 5s bucket time grid (#983)", () => {
-  function bucket(start: number, damageOut = 100): DpsBucket {
-    return {
-      start,
-      end: start + 5,
-      damageOut,
-      damageIn: 0,
-      repOut: 0,
-      repIn: 0,
-      capTransferOut: 0,
-      capTransferIn: 0,
-      capWarfareOut: 0,
-      capWarfareIn: 0,
-      miningM3: 0,
-    };
-  }
-
   it("renders buckets pushed over dps://buckets on the fixed time grid", async () => {
     mockInvoke({});
     renderWithQuery(<DpsPage />);
@@ -336,7 +318,9 @@ describe("DpsPage — 5s bucket time grid (#983)", () => {
       2,
     );
 
-    act(() => bucketsHandler!([bucket(1000), bucket(1005), bucket(1010)]));
+    act(() =>
+      bucketsHandler!([makeBucket(1000), makeBucket(1005), makeBucket(1010)]),
+    );
 
     expect(
       screen.queryByText(/Waiting for the first 5s bucket/),

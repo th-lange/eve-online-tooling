@@ -1,5 +1,5 @@
 //! Fixed-grid aggregation: a stream of [`DpsEvent`] → finalized, epoch-aligned
-//! 5-second buckets (#983).
+//! 5-second buckets (#983, #984).
 //!
 //! Unlike the rolling [`super::aggregate::Window`] (a moving average sampled on
 //! a wall-clock timer), a bucket is a fixed slice of *event time*:
@@ -9,12 +9,21 @@
 //! buckets to live-tailing the same lines — the fold has no notion of when it
 //! was called, only of the event clock it is advanced along.
 //!
+//! Each bucket carries everything the rolling tick carried (#984): hit-quality
+//! tallies, damage-by-weapon, and the per-pilot engagement breakdown — in the
+//! same row shapes ([`WeaponRate`], [`PilotRate`]), so the UI and the SDE
+//! enrichment apply unchanged. Unlike the window there is no top-N cut: a 5 s
+//! slice is small, so every pilot/weapon row is kept (sorted by rate, desc).
+//!
 //! The tail loops own one [`BucketFold`] each: they [`BucketFold::push`] every
 //! parsed event, then [`BucketFold::advance_to`] the loop's clock (wall time
 //! live, the virtual clock in playback) and emit whatever finalized.
 
+use std::collections::HashMap;
+
 use serde::Serialize;
 
+use super::aggregate::{HitQuality, PilotRate, WeaponRate};
 use super::parser::{DpsEvent, EventKind};
 
 /// Width of one detail-timeline bucket, in seconds.
@@ -25,10 +34,12 @@ pub fn bucket_start(ts: i64) -> i64 {
     ts - ts.rem_euclid(BUCKET_SECS)
 }
 
-/// One finalized 5-second slice of combat activity. All amount fields are
+/// One finalized 5-second slice of combat activity. The scalar fields are
 /// **absolute sums over the bucket** (hp, GJ, m³) — per-second rates are
 /// `sum / (end - start)`, derived at render time, so nothing is lost to
-/// premature division.
+/// premature division. The breakdown rows (`by_weapon`, `by_pilot`) reuse the
+/// rolling tick's shapes, whose fields are **per-second rates** — kept that
+/// way so every consumer and the SDE enrichment work on both unchanged.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DpsBucket {
@@ -46,6 +57,14 @@ pub struct DpsBucket {
     pub cap_warfare_in: f64,
     /// Mined volume (m³) booked in this bucket.
     pub mining_m3: f64,
+    /// Hit-quality tally of your hits within the bucket.
+    pub hits_out: HitQuality,
+    /// Hit-quality tally of hits on you within the bucket.
+    pub hits_in: HitQuality,
+    /// Your outgoing damage by weapon/ammo/drone (rates; all rows, sorted).
+    pub by_weapon: Vec<WeaponRate>,
+    /// Per-pilot engagement (rates + tackle flags; all rows, sorted).
+    pub by_pilot: Vec<PilotRate>,
 }
 
 impl DpsBucket {
@@ -62,35 +81,169 @@ impl DpsBucket {
             cap_warfare_out: 0.0,
             cap_warfare_in: 0.0,
             mining_m3: 0.0,
+            hits_out: HitQuality::default(),
+            hits_in: HitQuality::default(),
+            by_weapon: Vec::new(),
+            by_pilot: Vec::new(),
+        }
+    }
+}
+
+/// Per-pilot accumulator for the in-progress bucket — same attribution rules
+/// as the rolling window's (ship from incoming lines, per-source damage maps,
+/// tackle as sticky flags within the bucket).
+#[derive(Default)]
+struct PilotAcc {
+    out: f64,
+    inc: f64,
+    ship: Option<String>,
+    weapons_out: HashMap<String, f64>,
+    weapons_in: HashMap<String, f64>,
+    quality_out: HitQuality,
+    quality_in: HitQuality,
+    scram_out: bool,
+    point_out: bool,
+    scram_in: bool,
+    point_in: bool,
+}
+
+/// The in-progress bucket: scalar sums on the [`DpsBucket`] itself (its
+/// breakdown vecs stay empty until finalize) plus the breakdown accumulators.
+struct Acc {
+    bucket: DpsBucket,
+    weapons: HashMap<String, f64>,
+    pilots: HashMap<String, PilotAcc>,
+}
+
+impl Acc {
+    fn new(start: i64) -> Self {
+        Self {
+            bucket: DpsBucket::empty(start),
+            weapons: HashMap::new(),
+            pilots: HashMap::new(),
         }
     }
 
     fn add(&mut self, ev: &DpsEvent) {
-        let amt = ev.amount as f64;
+        let b = &mut self.bucket;
+        let v = ev.amount as f64;
         match ev.kind {
-            EventKind::DamageOut => self.damage_out += amt,
-            EventKind::DamageIn => self.damage_in += amt,
-            EventKind::RepOut => self.rep_out += amt,
-            EventKind::RepIn => self.rep_in += amt,
-            EventKind::CapTransferOut => self.cap_transfer_out += amt,
-            EventKind::CapTransferIn => self.cap_transfer_in += amt,
-            EventKind::CapWarfareOut => self.cap_warfare_out += amt,
-            EventKind::CapWarfareIn => self.cap_warfare_in += amt,
-            EventKind::Mining => self.mining_m3 += ev.volume,
-            // Tackle carries no magnitude; per-bucket flags arrive with the
-            // full aggregates (#984).
+            EventKind::DamageOut => {
+                b.damage_out += v;
+                b.hits_out.count(ev.quality.as_deref());
+            }
+            EventKind::DamageIn => {
+                b.damage_in += v;
+                b.hits_in.count(ev.quality.as_deref());
+            }
+            EventKind::RepOut => b.rep_out += v,
+            EventKind::RepIn => b.rep_in += v,
+            EventKind::CapTransferOut => b.cap_transfer_out += v,
+            EventKind::CapTransferIn => b.cap_transfer_in += v,
+            EventKind::CapWarfareOut => b.cap_warfare_out += v,
+            EventKind::CapWarfareIn => b.cap_warfare_in += v,
+            EventKind::Mining => b.mining_m3 += ev.volume,
+            // Tackle carries no magnitude — per-pilot flags below.
             EventKind::ScramOut | EventKind::ScramIn | EventKind::PointOut | EventKind::PointIn => {
             }
         }
+        // Global "damage by weapon" — your outgoing weapons only.
+        if ev.kind == EventKind::DamageOut {
+            if let Some(w) = ev.weapon.as_deref() {
+                *self.weapons.entry(w.to_string()).or_default() += v;
+            }
+        }
+        if let Some(p) = ev.pilot.as_deref() {
+            let slot = self.pilots.entry(p.to_string()).or_default();
+            let weapon = ev.weapon.as_deref();
+            match ev.kind {
+                EventKind::DamageOut => {
+                    slot.out += v;
+                    slot.quality_out.count(ev.quality.as_deref());
+                    if let Some(w) = weapon {
+                        *slot.weapons_out.entry(w.to_string()).or_default() += v;
+                    }
+                }
+                EventKind::DamageIn => {
+                    slot.inc += v;
+                    slot.quality_in.count(ev.quality.as_deref());
+                    if let Some(w) = weapon {
+                        *slot.weapons_in.entry(w.to_string()).or_default() += v;
+                    }
+                    // Capture the attacker's ship (keep most-recent).
+                    if ev.ship.is_some() {
+                        slot.ship = ev.ship.clone();
+                    }
+                }
+                EventKind::ScramOut => slot.scram_out = true,
+                EventKind::PointOut => slot.point_out = true,
+                EventKind::ScramIn => slot.scram_in = true,
+                EventKind::PointIn => slot.point_in = true,
+                _ => {}
+            }
+        }
     }
+
+    fn finalize(self) -> DpsBucket {
+        let w = BUCKET_SECS as f64;
+        let mut b = self.bucket;
+        b.by_weapon = weapon_rates(self.weapons, w);
+        let mut by_pilot: Vec<PilotRate> = self
+            .pilots
+            .into_iter()
+            .map(|(name, acc)| PilotRate {
+                name,
+                dps_out: acc.out / w,
+                dps_in: acc.inc / w,
+                ship: acc.ship,
+                weapons_out: weapon_rates(acc.weapons_out, w),
+                weapons_in: weapon_rates(acc.weapons_in, w),
+                quality_out: acc.quality_out,
+                quality_in: acc.quality_in,
+                scram_out: acc.scram_out,
+                point_out: acc.point_out,
+                scram_in: acc.scram_in,
+                point_in: acc.point_in,
+            })
+            .collect();
+        by_pilot.sort_by(|a, b| {
+            (b.dps_out + b.dps_in)
+                .partial_cmp(&(a.dps_out + a.dps_in))
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        b.by_pilot = by_pilot;
+        b
+    }
+}
+
+/// Owned-key sibling of the window's `weapon_rates`: per-source damage sums →
+/// sorted per-second rates (deterministic: rate desc, then name).
+fn weapon_rates(map: HashMap<String, f64>, window: f64) -> Vec<WeaponRate> {
+    let mut v: Vec<WeaponRate> = map
+        .into_iter()
+        .map(|(name, dmg)| WeaponRate {
+            name,
+            dps: dmg / window,
+            kind: None,
+            damage: None,
+        })
+        .collect();
+    v.sort_by(|a, b| {
+        b.dps
+            .partial_cmp(&a.dps)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    v
 }
 
 /// Folds an ascending event stream into finalized buckets. The in-progress
 /// bucket is held back until the clock passes its end — "complete buckets
 /// only", per the parent plan.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct BucketFold {
-    current: Option<DpsBucket>,
+    current: Option<Acc>,
 }
 
 impl BucketFold {
@@ -108,11 +261,11 @@ impl BucketFold {
         let mut done = Vec::new();
         match &mut self.current {
             None => {
-                let mut b = DpsBucket::empty(target);
-                b.add(ev);
-                self.current = Some(b);
+                let mut acc = Acc::new(target);
+                acc.add(ev);
+                self.current = Some(acc);
             }
-            Some(cur) if target <= cur.start => {
+            Some(cur) if target <= cur.bucket.start => {
                 cur.add(ev);
             }
             Some(_) => {
@@ -134,10 +287,10 @@ impl BucketFold {
         let target = bucket_start(now);
         match &self.current {
             None => {
-                self.current = Some(DpsBucket::empty(target));
+                self.current = Some(Acc::new(target));
                 Vec::new()
             }
-            Some(cur) if target <= cur.start => Vec::new(),
+            Some(cur) if target <= cur.bucket.start => Vec::new(),
             Some(_) => self.roll_to(target),
         }
     }
@@ -148,14 +301,15 @@ impl BucketFold {
     /// bucket start than the current one.
     fn roll_to(&mut self, target: i64) -> Vec<DpsBucket> {
         let cur = self.current.take().expect("roll_to requires a bucket");
-        let mut done = Vec::with_capacity(((target - cur.start) / BUCKET_SECS) as usize);
-        let mut next_start = cur.start + BUCKET_SECS;
-        done.push(cur);
+        let start = cur.bucket.start;
+        let mut done = Vec::with_capacity(((target - start) / BUCKET_SECS) as usize);
+        let mut next_start = start + BUCKET_SECS;
+        done.push(cur.finalize());
         while next_start < target {
             done.push(DpsBucket::empty(next_start));
             next_start += BUCKET_SECS;
         }
-        self.current = Some(DpsBucket::empty(target));
+        self.current = Some(Acc::new(target));
         done
     }
 }
@@ -173,6 +327,28 @@ mod tests {
             ship: None,
             weapon: None,
             quality: None,
+            ore: None,
+            volume: 0.0,
+        }
+    }
+
+    fn combat(
+        ts: i64,
+        kind: EventKind,
+        amount: i64,
+        pilot: &str,
+        ship: Option<&str>,
+        weapon: Option<&str>,
+        quality: Option<&str>,
+    ) -> DpsEvent {
+        DpsEvent {
+            ts,
+            kind,
+            amount,
+            pilot: Some(pilot.to_string()),
+            ship: ship.map(String::from),
+            weapon: weapon.map(String::from),
+            quality: quality.map(String::from),
             ore: None,
             volume: 0.0,
         }
@@ -286,9 +462,25 @@ mod tests {
     #[test]
     fn chunking_does_not_change_the_buckets_live_equals_replay() {
         let events: Vec<DpsEvent> = vec![
-            ev(100, EventKind::DamageOut, 10),
+            combat(
+                100,
+                EventKind::DamageOut,
+                10,
+                "A",
+                None,
+                Some("Gun"),
+                Some("Hits"),
+            ),
             ev(101, EventKind::DamageIn, 5),
-            ev(104, EventKind::DamageOut, 20),
+            combat(
+                104,
+                EventKind::DamageOut,
+                20,
+                "A",
+                None,
+                Some("Gun"),
+                Some("Wrecks"),
+            ),
             ev(113, EventKind::RepOut, 7),
             ev(114, EventKind::DamageOut, 1),
             ev(126, EventKind::DamageIn, 9),
@@ -325,5 +517,83 @@ mod tests {
         // The clock never passes 105, so nothing is finalized — the bucket in
         // progress is withheld (complete buckets only).
         assert!(f.advance_to(104).is_empty());
+    }
+
+    #[test]
+    fn pilot_breakdown_mirrors_the_window_attribution_rules() {
+        let mut f = BucketFold::new();
+        // Outgoing: 100 dmg to A with Gun (Wrecks), 50 to B with Launcher.
+        f.push(&combat(
+            100,
+            EventKind::DamageOut,
+            100,
+            "A",
+            None,
+            Some("Gun"),
+            Some("Wrecks"),
+        ));
+        f.push(&combat(
+            101,
+            EventKind::DamageOut,
+            50,
+            "B",
+            None,
+            Some("Launcher"),
+            Some("Hits"),
+        ));
+        // Incoming: 25 from A (Rifter, Autocannon), plus A scrams us.
+        f.push(&combat(
+            102,
+            EventKind::DamageIn,
+            25,
+            "A",
+            Some("Rifter"),
+            Some("Autocannon"),
+            Some("Grazes"),
+        ));
+        f.push(&combat(103, EventKind::ScramIn, 0, "A", None, None, None));
+        let done = f.advance_to(105);
+        let b = &done[0];
+
+        // Global weapon rows: outgoing only, rate = sum / 5, sorted desc.
+        assert_eq!(b.by_weapon.len(), 2);
+        assert_eq!(b.by_weapon[0].name, "Gun");
+        assert_eq!(b.by_weapon[0].dps, 20.0);
+        assert_eq!(b.by_weapon[1].name, "Launcher");
+        assert_eq!(b.by_weapon[1].dps, 10.0);
+
+        // Pilot rows: A first (engaged 125), then B; ship from the incoming
+        // line; tackle flags sticky; hit-quality tallied per direction.
+        assert_eq!(b.by_pilot.len(), 2);
+        let a = &b.by_pilot[0];
+        assert_eq!(a.name, "A");
+        assert_eq!(a.dps_out, 20.0);
+        assert_eq!(a.dps_in, 5.0);
+        assert_eq!(a.ship.as_deref(), Some("Rifter"));
+        assert!(a.scram_in);
+        assert!(!a.point_in);
+        assert_eq!(a.quality_out.wrecks, 1);
+        assert_eq!(a.quality_in.grazes, 1);
+        assert_eq!(a.weapons_out.len(), 1);
+        assert_eq!(a.weapons_out[0].name, "Gun");
+        assert_eq!(a.weapons_in[0].name, "Autocannon");
+        assert_eq!(b.by_pilot[1].name, "B");
+
+        // Bucket-level hit quality covers both directions.
+        assert_eq!(b.hits_out.wrecks, 1);
+        assert_eq!(b.hits_out.hits, 1);
+        assert_eq!(b.hits_in.grazes, 1);
+    }
+
+    #[test]
+    fn a_pure_tackler_still_gets_a_pilot_row() {
+        let mut f = BucketFold::new();
+        f.push(&combat(100, EventKind::PointIn, 0, "T", None, None, None));
+        let done = f.advance_to(105);
+        let b = &done[0];
+        assert_eq!(b.by_pilot.len(), 1);
+        assert_eq!(b.by_pilot[0].name, "T");
+        assert!(b.by_pilot[0].point_in);
+        assert_eq!(b.by_pilot[0].dps_out + b.by_pilot[0].dps_in, 0.0);
     }
 }

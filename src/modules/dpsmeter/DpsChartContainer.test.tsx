@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import type { DpsBucket, DpsTick } from "../../lib/api";
+import type { DpsBucket } from "../../lib/api";
 import { DpsChartContainer } from "./DpsChartContainer";
-import { formatClock, SERIES_OUT, SERIES_IN } from "./dpsMeterShared";
+import {
+  BUCKET_SERIES_IN,
+  BUCKET_SERIES_OUT,
+  formatClock,
+} from "./dpsMeterShared";
 
 const hq = {
   misses: 0,
@@ -13,26 +17,6 @@ const hq = {
   smashes: 0,
   wrecks: 0,
 };
-
-function tick(at: number, dpsOut = 10): DpsTick {
-  return {
-    at,
-    windowSecs: 10,
-    dpsOut,
-    dpsIn: 0,
-    logiOut: 0,
-    logiIn: 0,
-    capWarfareOut: 0,
-    capWarfareIn: 0,
-    capTransferOut: 0,
-    capTransferIn: 0,
-    miningM3: 0,
-    hitsOut: hq,
-    hitsIn: hq,
-    byWeapon: [],
-    byPilot: [],
-  };
-}
 
 function bucket(start: number, damageOut = 50): DpsBucket {
   return {
@@ -47,38 +31,38 @@ function bucket(start: number, damageOut = 50): DpsBucket {
     capWarfareOut: 0,
     capWarfareIn: 0,
     miningM3: 0,
+    hitsOut: hq,
+    hitsIn: hq,
+    byWeapon: [],
+    byPilot: [],
   };
 }
 
-const ticks = [tick(1000), tick(1010), tick(1020), tick(1030)];
 const buckets = [bucket(1000), bucket(1005), bucket(1010), bucket(1015)];
 
-function renderCharts({
-  markTs = null as number | null,
-  pilotScoped = false,
-} = {}) {
+function renderCharts({ markTs = null as number | null } = {}) {
   return render(
     <DpsChartContainer
       bySource={false}
       onSetBySource={vi.fn()}
       chartLayout="side"
       onSetChartLayout={vi.fn()}
-      filteredTicks={ticks}
-      outSeries={SERIES_OUT}
-      inSeries={SERIES_IN}
-      combinedSeries={SERIES_OUT}
       buckets={buckets}
-      pilotScoped={pilotScoped}
+      outSeries={BUCKET_SERIES_OUT}
+      inSeries={BUCKET_SERIES_IN}
+      combinedSeries={BUCKET_SERIES_OUT}
       markTs={markTs}
     />,
   );
 }
 
-describe("DpsChartContainer — bucket time grid (#983)", () => {
-  it("draws Totals mode from the fixed 5s buckets", () => {
+describe("DpsChartContainer — bucket time grid (#984)", () => {
+  it("draws both panels from the fixed 5s buckets", () => {
     renderCharts();
-    // Both panels (Outgoing + Incoming in side layout) carry the grid tag.
+    // Both panels (Outgoing + Incoming in side layout) carry the grid tag,
+    // and the out chart's peak is the bucket rate (50 hp / 5 s = 10/s).
     expect(screen.getAllByText(/5s grid/).length).toBe(2);
+    expect(screen.getByText("peak 10")).toBeInTheDocument();
   });
 
   it("labels the log position with the enclosing bucket's start", () => {
@@ -89,13 +73,5 @@ describe("DpsChartContainer — bucket time grid (#983)", () => {
   it("shows no log-position label when markTs is unset", () => {
     renderCharts();
     expect(screen.queryByText(/log @/)).not.toBeInTheDocument();
-  });
-
-  it("falls back to the rolling-tick chart while a pilot filter is active", () => {
-    renderCharts({ pilotScoped: true, markTs: 1022 });
-    // The legacy chart labels with the *nearest tick* (1020), and has no
-    // bucket-grid tag.
-    expect(screen.queryByText(/5s grid/)).not.toBeInTheDocument();
-    expect(screen.getAllByText(`log @ ${formatClock(1020)}`).length).toBe(2);
   });
 });
