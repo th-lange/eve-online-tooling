@@ -54,12 +54,31 @@ const MAX_PLAYBACK_LOG_BYTES: u64 = 50 * 1024 * 1024;
 
 /// Shared run-state. The active loop runs while its generation == `generation`;
 /// `dps_start`/`dps_playback`/`dps_stop` bump it. `paused` freezes the active
-/// loop's virtual clock in place (true pause/continue) without tearing it down
-/// — so resuming picks up the exact same moving-average window, no re-seek.
+/// loop's virtual clock in place (true pause/continue) without tearing it down.
+/// `speed_bits` is the playback speed multiplier as `f64::to_bits`, read live
+/// by the replay loop each tick so the speed slider adjusts the running replay
+/// without a restart (ignored by live capture). 0 bits = +0.0 → treated as the
+/// 1× default until the first `dps_playback` sets it.
 #[derive(Default)]
 pub struct DpsState {
     generation: Arc<AtomicU64>,
     paused: Arc<AtomicBool>,
+    speed_bits: Arc<AtomicU64>,
+}
+
+/// Clamp a raw speed to the supported range and encode it for `speed_bits`.
+fn encode_speed(speed: f64) -> u64 {
+    speed.clamp(0.1, 10.0).to_bits()
+}
+
+/// Decode `speed_bits` back to a multiplier, defaulting unset/garbage to 1×.
+fn decode_speed(bits: u64) -> f64 {
+    let s = f64::from_bits(bits);
+    if s.is_finite() && s > 0.0 {
+        s
+    } else {
+        1.0
+    }
 }
 
 /// Settings passed from the UI to start a capture.
@@ -312,6 +331,17 @@ pub fn dps_resume(state: State<'_, DpsState>) {
     state.paused.store(false, Ordering::SeqCst);
 }
 
+/// Adjust the speed of the running replay live (the UI's speed slider). The
+/// replay loop reads [`DpsState::speed_bits`] every tick, so this takes effect
+/// on the next ~500 ms POLL without restarting playback or losing position.
+/// No-op for a live capture (which ignores the knob).
+#[tauri::command]
+pub fn dps_set_playback_speed(state: State<'_, DpsState>, speed: f64) {
+    state
+        .speed_bits
+        .store(encode_speed(speed), Ordering::SeqCst);
+}
+
 /// Read + parse a whole gamelog file and resolve its mining volumes, sorted by
 /// timestamp. Used by [`dps_playback`] only — replay genuinely needs a
 /// globally ordered event vec, unlike [`dps_log_summary`], which streams the
@@ -401,7 +431,11 @@ pub async fn dps_playback(
     let my_gen = generation.fetch_add(1, Ordering::SeqCst) + 1;
     let paused = state.paused.clone();
     paused.store(false, Ordering::SeqCst);
-    let speed = settings.speed.max(0.1);
+    // Seed the live speed knob so the slider can adjust the running replay.
+    state
+        .speed_bits
+        .store(encode_speed(settings.speed), Ordering::SeqCst);
+    let speed_bits = state.speed_bits.clone();
     let seek_ts = settings.seek_ts;
     let stop_ts = settings.stop_ts;
 
@@ -423,8 +457,8 @@ pub async fn dps_playback(
         fold.advance_to(seek);
 
         // Virtual log clock; advances `step` log-seconds per real POLL tick.
+        // `step` is recomputed each tick from the live speed knob below.
         let mut vt = seek as f64;
-        let step = POLL.as_secs_f64() * speed;
 
         let mut ticker = tokio::time::interval(POLL);
         loop {
@@ -435,7 +469,7 @@ pub async fn dps_playback(
             if paused.load(Ordering::SeqCst) {
                 continue; // frozen: hold the virtual clock so resume continues.
             }
-            vt += step;
+            vt += POLL.as_secs_f64() * decode_speed(speed_bits.load(Ordering::SeqCst));
             let now = vt as i64;
             let mut batch: Vec<DpsEvent> = Vec::new();
             while idx < events.len() && events[idx].ts <= now {
@@ -968,6 +1002,19 @@ mod tests {
         // Truncated file (offset now beyond EOF) is also a no-op.
         std::fs::write(&path, "short").expect("truncate file");
         assert!(read_appended(&path, offset).await.is_none());
+    }
+
+    #[test]
+    fn speed_codec_round_trips_and_clamps_to_the_supported_range() {
+        // Round-trips an in-range speed.
+        assert_eq!(decode_speed(encode_speed(4.0)), 4.0);
+        // Clamps out-of-range inputs to [0.1, 10].
+        assert_eq!(decode_speed(encode_speed(0.0)), 0.1);
+        assert_eq!(decode_speed(encode_speed(-5.0)), 0.1);
+        assert_eq!(decode_speed(encode_speed(1000.0)), 10.0);
+        // An unset knob (0 bits = +0.0) decodes to the 1x default, not a
+        // frozen clock.
+        assert_eq!(decode_speed(0), 1.0);
     }
 
     #[test]

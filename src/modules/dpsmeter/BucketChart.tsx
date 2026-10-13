@@ -8,6 +8,7 @@ import {
   SMOOTH_WINDOW_BUCKETS,
   smoothSeries,
   type BucketSeries,
+  type LogMarkRange,
 } from "./dpsMeterShared";
 
 // Minimum horizontal pixels per 5 s bucket. The chart fits its buckets to the
@@ -28,18 +29,18 @@ const LABEL_EVERY = 12;
  *  compressing the axis. The viewport scrolls over the whole session and
  *  sticks to the live edge until the user scrolls back.
  *
- *  `markTs` shades the bucket a given timestamp falls inside — the combat
- *  log's scroll position (`floor(ts / 5) * 5`, exact by construction). */
+ *  `markRange` shades every bucket the combat log's visible span covers —
+ *  from the first visible line's bucket through the last's. */
 export const BucketChart = memo(function BucketChart({
   buckets,
   series,
   title,
-  markTs,
+  markRange,
 }: {
   buckets: DpsBucket[];
   series: readonly BucketSeries[];
   title?: string;
-  markTs?: number | null;
+  markRange?: LogMarkRange | null;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // Stick to the live (right) edge until the user scrolls away from it; a
@@ -107,11 +108,18 @@ export const BucketChart = memo(function BucketChart({
     if (el && stickRightRef.current) el.scrollLeft = el.scrollWidth;
   }, [n]);
 
-  const markStart = markTs == null ? null : bucketStartOf(markTs);
+  // Shade from the first visible line's bucket through the last's (clamped to
+  // the rendered range). `null`/out-of-range → no highlight.
+  const markLo = markRange == null ? null : bucketStartOf(markRange.start);
+  const markHi = markRange == null ? null : bucketStartOf(markRange.end);
   const markX =
-    markStart == null || n === 0 || markStart < t0
+    markLo == null || markHi == null || n === 0 || markHi < t0
       ? null
-      : ((markStart - t0) / BUCKET_SECS) * pxPerBucket;
+      : (Math.max(markLo - t0, 0) / BUCKET_SECS) * pxPerBucket;
+  const markW =
+    markLo == null || markHi == null || markX == null
+      ? 0
+      : ((markHi - Math.max(markLo, t0)) / BUCKET_SECS + 1) * pxPerBucket;
 
   const hoverBucket = hover != null ? buckets[hover] : undefined;
   const yAxisStyle = { height: H, paddingTop: PAD_Y, paddingBottom: PAD_B };
@@ -124,10 +132,11 @@ export const BucketChart = memo(function BucketChart({
           {SMOOTH_WINDOW_BUCKETS * BUCKET_SECS}s smoothed
         </span>
         <span className="flex items-center gap-2 tabular-nums text-zinc-300">
-          {markStart != null && (
+          {markLo != null && markHi != null && (
             <span className="flex items-center gap-1 text-indigo-400">
               <span className="h-2 w-0.5 bg-indigo-400" />
-              log @ {formatClock(markStart)}
+              log @ {formatClock(markLo)}
+              {markHi !== markLo ? `–${formatClock(markHi)}` : ""}
             </span>
           )}
           <span>peak {formatInt(Math.round(max))}</span>
@@ -207,7 +216,7 @@ export const BucketChart = memo(function BucketChart({
                   <rect
                     x={markX}
                     y={PAD_Y}
-                    width={pxPerBucket}
+                    width={markW}
                     height={H - PAD_Y - PAD_B}
                     fill="#818cf8"
                     fillOpacity="0.18"

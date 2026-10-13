@@ -11,6 +11,7 @@ import {
   dpsResume,
   dpsStart,
   dpsStop,
+  dpsSetPlaybackSpeed,
   errorMessage,
   onDpsBuckets,
   onDpsDone,
@@ -91,6 +92,16 @@ export function useDpsPlaybackState() {
   // playback automatically when it ends naturally.
   const [paused, setPaused] = useState(false);
   const pausedAtRef = useRef<number | null>(null);
+
+  /** Set the playback speed. While a replay is running (even paused), push it
+   *  to the backend so the running loop re-times live — no restart, position
+   *  preserved. Live capture ignores speed. */
+  function changeSpeed(next: number) {
+    setSpeed(next);
+    if (mode === "playback" && (running || paused)) {
+      void dpsSetPlaybackSpeed(next).catch(() => {});
+    }
+  }
   const [looping, setLooping] = usePersistentState<boolean>(
     STORAGE_KEYS.dpsLooping,
     false,
@@ -512,7 +523,7 @@ export function useDpsPlaybackState() {
     file,
     setFile,
     speed,
-    setSpeed,
+    setSpeed: changeSpeed,
     selectedPilot,
     setSelectedPilot,
     summary,

@@ -94,6 +94,12 @@ export function bucketStartOf(ts: number): number {
   return Math.floor(ts / BUCKET_SECS) * BUCKET_SECS;
 }
 
+/** The timestamp span the combat log is currently scrolled over — the first
+ *  and last at-least-partially-visible lines. Charts shade every bucket from
+ *  `start`'s bucket through `end`'s, so the highlight covers exactly what the
+ *  log viewport shows (not a single reference line). `null` at the live tail. */
+export type LogMarkRange = { start: number; end: number };
+
 // Buckets in the centered smoothing window for the rate charts. A single
 // volley lands entirely in one 5 s bucket, so the raw per-bucket rate swings
 // between a tall spike and zero on the next bucket; averaging over a small

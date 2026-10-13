@@ -224,6 +224,11 @@ export function dpsResume(): Promise<void> {
   return invoke<void>("dps_resume");
 }
 
+/** Adjust the running replay's speed live (no restart; next ~500 ms tick). */
+export function dpsSetPlaybackSpeed(speed: number): Promise<void> {
+  return invoke<void>("dps_set_playback_speed", { speed });
+}
+
 /** List gamelog files in a folder, newest first. */
 export function dpsListLogs(gamelogsDir: string): Promise<DpsLogFile[]> {
   return invoke<DpsLogFile[]>("dps_list_logs", { gamelogsDir });

@@ -4,7 +4,7 @@ import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { usePersistentState } from "../../lib/usePersistentState";
 import { CombatLogPanel } from "./CombatLogPanel";
 import { DpsChartContainer } from "./DpsChartContainer";
-import { SERIES, formatRate } from "./dpsMeterShared";
+import { SERIES, formatRate, type LogMarkRange } from "./dpsMeterShared";
 import { FightBreakdown, TackleTags } from "./FightBreakdown";
 import { PrimaryExtras } from "./HitQualityIndicators";
 import { LogFilePanel } from "./LogFilePanel";
@@ -20,9 +20,9 @@ export function DpsPage() {
     STORAGE_KEYS.dpsCombatLogCollapsed,
     false,
   );
-  // Where the combat log is scrolled to, as a timestamp — drawn as a marker
-  // on the rate chart below (null = auto-scrolled to the live tail).
-  const [logMarkTs, setLogMarkTs] = useState<number | null>(null);
+  // The timestamp span the combat log is scrolled over — shaded across the
+  // matching buckets on the rate chart below (null = auto-scrolled to live).
+  const [logMarkRange, setLogMarkRange] = useState<LogMarkRange | null>(null);
 
   return (
     <Page>
@@ -225,7 +225,7 @@ export function DpsPage() {
         outSeries={dps.outSeries}
         inSeries={dps.inSeries}
         combinedSeries={dps.combinedSeries}
-        markTs={logMarkTs}
+        markRange={logMarkRange}
       />
 
       {/* Mining overview — only once this session has actually mined. History
@@ -250,7 +250,7 @@ export function DpsPage() {
         events={dps.logEvents}
         collapsed={logCollapsed}
         onToggleCollapsed={() => setLogCollapsed(!logCollapsed)}
-        onVisiblePositionChange={setLogMarkTs}
+        onVisibleRangeChange={setLogMarkRange}
         className="mt-4"
       />
 
