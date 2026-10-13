@@ -50,12 +50,15 @@ export const BucketChart = memo(function BucketChart({
   const width = Math.max(1, n) * PX_PER_BUCKET;
 
   const { max, lines, labels, yLabels } = useMemo(() => {
-    // Axis + peak reflect the TRUE per-bucket rate (so the DPS numbers aren't
-    // understated), but the plotted lines use a centered moving average so a
-    // single volley's spike reads as a trend instead of a saw-tooth.
-    const rawValues = series.map((s) => buckets.map((b) => s.get(b)));
-    const max = Math.max(1, ...rawValues.flat());
-    const smoothed = rawValues.map(smoothSeries);
+    // Plot a centered moving average so a single volley's spike reads as a
+    // trend instead of a saw-tooth. The axis + peak track the *smoothed*
+    // series (not the raw per-bucket spikes) so the line fills the chart
+    // rather than hugging the bottom; hover tooltips still show each bucket's
+    // true rate.
+    const smoothed = series.map((s) =>
+      smoothSeries(buckets.map((b) => s.get(b))),
+    );
+    const max = Math.max(1, ...smoothed.flat());
     const x = (b: DpsBucket) =>
       ((b.start - t0) / BUCKET_SECS) * PX_PER_BUCKET + PX_PER_BUCKET / 2;
     const y = (v: number) => PAD_Y + (1 - v / max) * (H - PAD_Y - PAD_B);
