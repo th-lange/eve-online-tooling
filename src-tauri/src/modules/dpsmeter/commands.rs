@@ -1,16 +1,17 @@
-//! DPS meter — tail the active EVE gamelog and stream live per-second rates.
+//! DPS meter — tail the active EVE gamelog and stream the fixed time grid.
 //!
 //! `dps_start` spawns a background loop ([`tauri::async_runtime::spawn`], like
 //! the SDE refresh in `lib.rs`) that seeks to the end of the newest gamelog,
-//! then every ~500 ms reads whatever the EVE client appended, parses each combat
-//! line ([`super::parser`]), feeds a rolling [`Window`], and `emit`s a
-//! `dps://tick` (the same event pattern as `sde://progress`) plus the raw,
-//! fully-resolved [`super::parser::DpsEvent`]s parsed that poll on
-//! `dps://events` — one batch per poll, in the same order they'll be pushed
-//! into the window, for a scrolling combat-log view alongside the rate
-//! graph — plus the finalized, epoch-aligned 5 s [`super::bucket::DpsBucket`]s
-//! on `dps://buckets` (#983), the fixed time grid the detail charts draw on.
-//! The frontend `listen`s to all three.
+//! then every ~500 ms reads whatever the EVE client appended, parses each
+//! combat line ([`super::parser`]), and emits two streams (the same event
+//! pattern as `sde://progress`):
+//!
+//! - `dps://events` — the raw, fully-resolved [`super::parser::DpsEvent`]s
+//!   parsed that poll, one batch per poll, for the scrolling combat-log view;
+//! - `dps://buckets` — finalized, epoch-aligned 5 s
+//!   [`super::bucket::DpsBucket`]s (#983/#984), the fixed grid every chart and
+//!   readout draws on. `dps_playback` drives the same fold from a virtual
+//!   clock, so live and replay are identical.
 //!
 //! Lifecycle is a generation counter held in [`DpsState`]: each `dps_start`
 //! bumps it and the loop runs only while its captured generation is current, so
@@ -28,7 +29,6 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader, SeekFrom};
 
-use super::aggregate::Window;
 use super::bucket::BucketFold;
 use super::overview::{parse_overview_export, ExtractionPlan};
 use super::parser::{parse_line, parse_line_with_plan, DpsEvent, EventKind, Lang};
@@ -68,9 +68,6 @@ pub struct DpsState {
 pub struct DpsSettings {
     /// The EVE `Gamelogs` folder (text-entered + persisted on the frontend).
     pub gamelogs_dir: String,
-    /// Averaging window in seconds (PyEveLiveDPS-style moving average).
-    #[serde(default = "default_window")]
-    pub window_secs: u32,
     /// Overview-export-derived pilot/ship extraction plan (#869); `None`
     /// keeps `extract_actor`'s default-format scan.
     #[serde(default)]
@@ -82,10 +79,6 @@ pub struct DpsSettings {
     /// unchanged newest-file behavior (single-boxer flow).
     #[serde(default)]
     pub character: Option<String>,
-}
-
-fn default_window() -> u32 {
-    10
 }
 
 fn default_speed() -> f64 {
@@ -101,8 +94,6 @@ pub struct PlaybackSettings {
     /// Replay speed multiplier (1.0 = real time).
     #[serde(default = "default_speed")]
     pub speed: f64,
-    #[serde(default = "default_window")]
-    pub window_secs: u32,
     /// Start the virtual clock here instead of the file's first event (epoch
     /// seconds; clamped to the file's span) — scrubbing via the timeline
     /// slider restarts playback with this set.
@@ -134,24 +125,6 @@ pub struct LogFile {
     pub character: Option<String>,
 }
 
-/// How many buckets [`dps_log_summary`] splits a log's time span into for the
-/// timeline density strip — enough resolution for a wide slider, independent
-/// of how long the session ran.
-const SUMMARY_BUCKETS: usize = 200;
-
-/// One bucket's activity, normalized 0..1 against that category's busiest
-/// bucket in the file (so the timeline reads as relative intensity, not
-/// absolute numbers the UI has no scale for).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EventBucket {
-    /// Bucket start, epoch seconds.
-    pub at: i64,
-    pub damage_out: f32,
-    pub damage_in: f32,
-    pub mining: f32,
-}
-
 /// Width of one overview segment (s): the fixed 1-minute grid the playback
 /// overview renders and zooms on (#985). Segments are epoch-aligned
 /// (`start = ts - ts % 60`), so a growing live log appends whole new
@@ -174,22 +147,20 @@ pub struct OverviewSegment {
     pub mining: f64,
 }
 
-/// A log's time span + activity buckets, for the playback timeline slider.
+/// A log's time span + its fixed 1-minute segments, for the playback
+/// overview (#985).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogSummary {
     pub start: i64,
     pub end: i64,
-    /// Legacy span÷N normalized strip — superseded by `segments` (#985),
-    /// deleted with the rolling-window world in #987.
-    pub buckets: Vec<EventBucket>,
     /// Fixed, epoch-aligned 1-minute segments with absolute sums (#985).
     pub segments: Vec<OverviewSegment>,
 }
 
 /// Start (or restart) tailing the newest gamelog in `settings.gamelogs_dir`.
-/// Returns immediately; ticks arrive on `dps://tick`, raw combat-log events
-/// on `dps://events`, finalized 5 s buckets on `dps://buckets`.
+/// Returns immediately; raw combat-log events arrive on `dps://events`,
+/// finalized 5 s buckets on `dps://buckets`.
 #[tauri::command]
 pub async fn dps_start(
     app: AppHandle,
@@ -214,7 +185,6 @@ pub async fn dps_start(
         .map(|d| SdePaths::new(d).db);
 
     tauri::async_runtime::spawn(async move {
-        let mut win = Window::new(settings.window_secs);
         // Fixed-grid 5 s buckets (#983): anchored at capture start so empty
         // buckets stream from the first poll on, combat or not.
         let mut fold = BucketFold::new();
@@ -294,9 +264,8 @@ pub async fn dps_start(
                     if !batch.is_empty() {
                         let _ = app.emit("dps://events", &batch);
                     }
-                    for ev in batch.drain(..) {
-                        finalized.extend(fold.push(&ev));
-                        win.push(ev);
+                    for ev in &batch {
+                        finalized.extend(fold.push(ev));
                     }
                 }
             }
@@ -314,10 +283,6 @@ pub async fn dps_start(
                 }
                 let _ = app.emit("dps://buckets", &finalized);
             }
-
-            let mut tick = win.tick(crate::util::time::now_secs() as i64);
-            attach_weapon_kinds(&mut tick, &mut weapon_kinds, sde_db.as_deref());
-            let _ = app.emit("dps://tick", &tick);
         }
     });
 
@@ -390,36 +355,25 @@ async fn load_and_resolve_events(
 }
 
 /// Resolve a scrub-to timestamp against `events`: clamp it into the file's
-/// span, split events into "already past" (used to warm the window) vs "still
-/// ahead" (the resume index the poll loop continues from), and collect the
-/// trailing `window_secs` of history so the DPS readout isn't cold at the seek
-/// point. `None` seeks to the start (nothing to warm). Pure — for unit testing
-/// without spawning the playback loop; [`dps_playback`] is the thin wrapper.
-fn seek_start(
-    events: &[super::parser::DpsEvent],
-    seek_ts: Option<i64>,
-    window_secs: u32,
-) -> (i64, usize, Vec<super::parser::DpsEvent>) {
+/// span and return the resume index the poll loop continues from. The bucket
+/// grid is self-contained (each bucket sums only its own 5 s), so there is
+/// nothing to pre-warm — the fold just anchors at `seek`. `None` seeks to
+/// the start. Pure — for unit testing without spawning the playback loop.
+fn seek_start(events: &[super::parser::DpsEvent], seek_ts: Option<i64>) -> (i64, usize) {
     let start = events.first().map(|e| e.ts).unwrap_or(0);
     let end = events.last().map(|e| e.ts).unwrap_or(0);
     let seek = seek_ts.map(|t| t.clamp(start, end)).unwrap_or(start);
     let idx = events.partition_point(|e| e.ts <= seek);
-    let warm_cutoff = seek - window_secs as i64;
-    let warm = events[..idx]
-        .iter()
-        .filter(|e| e.ts >= warm_cutoff)
-        .cloned()
-        .collect();
-    (seek, idx, warm)
+    (seek, idx)
 }
 
-/// Replay a past gamelog through the same tick pipeline at `speed`× real time.
-/// Emits `dps://tick`, `dps://events`, and `dps://buckets` exactly like a
-/// live capture, so the UI (graph, combat log, time grid) is identical.
-/// `settings.seek_ts` (set by dragging the timeline slider) starts the virtual
-/// clock mid-file instead of at the first event; the window is pre-warmed with
-/// the trailing `window_secs` of history so the DPS readout isn't cold at the
-/// seek point. Rejects logs over [`MAX_PLAYBACK_LOG_BYTES`] instead of
+/// Replay a past gamelog through the same fold at `speed`× real time. Emits
+/// `dps://events` and `dps://buckets` exactly like a live capture, so the UI
+/// (combat log + time grid) is identical. `settings.seek_ts` (set by dragging
+/// the timeline slider) starts the virtual clock mid-file instead of at the
+/// first event; the bucket grid anchors there with nothing to pre-warm (each
+/// bucket is self-contained). Rejects logs over [`MAX_PLAYBACK_LOG_BYTES`]
+/// instead of
 /// silently loading + sorting an unbounded amount of memory (#816) — use
 /// [`dps_log_summary`]'s streaming timeline for a rough look at huge logs.
 #[tauri::command]
@@ -448,25 +402,19 @@ pub async fn dps_playback(
     let paused = state.paused.clone();
     paused.store(false, Ordering::SeqCst);
     let speed = settings.speed.max(0.1);
-    let window_secs = settings.window_secs;
     let seek_ts = settings.seek_ts;
     let stop_ts = settings.stop_ts;
 
-    let (seek, idx, warm) = seek_start(&events, seek_ts, window_secs);
+    let (seek, idx) = seek_start(&events, seek_ts);
     // SDE path for resolving weapon/ammo/drone → source type, cached per name.
     let sde_db = crate::storage::app_data_dir(&app)
         .ok()
         .map(|d| SdePaths::new(d).db);
 
     tauri::async_runtime::spawn(async move {
-        let mut win = Window::new(window_secs);
         let mut weapon_kinds: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
         let end = events.last().map(|e| e.ts).unwrap_or(0);
         let mut idx = idx;
-        // `push` order doesn't matter — `tick` only sums what's in the buffer.
-        for ev in warm {
-            win.push(ev);
-        }
 
         // Fixed-grid 5 s buckets (#983): anchored at the seek position, so a
         // replay's grid is identical wherever the virtual clock starts, and
@@ -498,9 +446,8 @@ pub async fn dps_playback(
                 let _ = app.emit("dps://events", &batch);
             }
             let mut finalized: Vec<super::bucket::DpsBucket> = Vec::new();
-            for ev in batch {
-                finalized.extend(fold.push(&ev));
-                win.push(ev);
+            for ev in &batch {
+                finalized.extend(fold.push(ev));
             }
             // The virtual clock trails nothing — it *is* event time, so no
             // grace is needed before finalizing what it has passed.
@@ -511,15 +458,12 @@ pub async fn dps_playback(
                 }
                 let _ = app.emit("dps://buckets", &finalized);
             }
-            let mut tick = win.tick(now);
-            attach_weapon_kinds(&mut tick, &mut weapon_kinds, sde_db.as_deref());
-            let _ = app.emit("dps://tick", &tick);
-            // End: at the region's stop mark when playing a selection, else one
-            // window past the last event so the rate decays to zero. Either way
-            // emit `dps://done` so the UI can loop.
+            // End: at the region's stop mark when playing a selection, else
+            // one bucket past the last event so its final bucket finalizes.
+            // Either way emit `dps://done` so the UI can loop.
             let ended = match stop_ts {
                 Some(s) => now >= s,
-                None => now > end + window_secs as i64,
+                None => now > end + super::bucket::BUCKET_SECS,
             };
             if ended {
                 let _ = app.emit("dps://done", ());
@@ -531,37 +475,13 @@ pub async fn dps_playback(
     Ok(())
 }
 
-/// Normalize raw per-bucket `(damage_out, damage_in, mining)` sums into a
-/// [`LogSummary`], each category against its own busiest bucket. Shared by
-/// [`bucket_events`] (in-memory, used by its unit tests) and
-/// [`stream_log_summary`] (the streaming path [`dps_log_summary`] actually
-/// calls).
-fn buckets_from_raw(
-    start: i64,
-    end: i64,
-    bucket_secs: f64,
-    raw: Vec<(f64, f64, f64)>,
-    segments: Vec<OverviewSegment>,
-) -> LogSummary {
-    let peak_out = raw.iter().map(|b| b.0).fold(0.0f64, f64::max).max(1.0);
-    let peak_in = raw.iter().map(|b| b.1).fold(0.0f64, f64::max).max(1.0);
-    let peak_mining = raw.iter().map(|b| b.2).fold(0.0f64, f64::max).max(1.0);
-
-    let buckets = raw
-        .iter()
-        .enumerate()
-        .map(|(i, &(out, inc, mining))| EventBucket {
-            at: start + (i as f64 * bucket_secs) as i64,
-            damage_out: (out / peak_out) as f32,
-            damage_in: (inc / peak_in) as f32,
-            mining: (mining / peak_mining) as f32,
-        })
-        .collect();
-
+/// Assemble a [`LogSummary`] from the log's span and its fixed 1-minute
+/// segments. Shared by [`bucket_events`] (in-memory, used by its unit tests)
+/// and [`stream_log_summary`] (the streaming path [`dps_log_summary`] calls).
+fn summary_from_segments(start: i64, end: i64, segments: Vec<OverviewSegment>) -> LogSummary {
     LogSummary {
         start,
         end,
-        buckets,
         segments,
     }
 }
@@ -613,33 +533,20 @@ impl SegmentAcc {
     }
 }
 
-/// Bucket parsed events into [`SUMMARY_BUCKETS`] equal-width time slices
-/// across their span (plus the fixed 1-minute segments, #985). Pure — no
-/// file IO. Test-only: it exercises the shared [`buckets_from_raw`] +
-/// [`SegmentAcc`] cores against realistic in-memory `DpsEvent`s;
+/// Accumulate parsed events onto the fixed 1-minute overview grid (#985).
+/// Pure — no file IO. Test-only: it exercises the shared [`SegmentAcc`] +
+/// [`summary_from_segments`] cores against realistic in-memory `DpsEvent`s;
 /// [`dps_log_summary`] itself calls the streaming [`stream_log_summary`]
 /// instead, so production never holds the full event vec.
 #[cfg(test)]
 fn bucket_events(events: &[super::parser::DpsEvent]) -> LogSummary {
     let start = events.first().map(|e| e.ts).unwrap_or(0);
     let end = events.last().map(|e| e.ts).unwrap_or(0);
-    let span = (end - start).max(1) as f64;
-    let bucket_secs = (span / SUMMARY_BUCKETS as f64).max(1.0);
-
-    let mut raw = vec![(0.0f64, 0.0f64, 0.0f64); SUMMARY_BUCKETS];
     let mut segs = SegmentAcc::new(start, end);
     for ev in events {
         segs.add(ev);
-        let idx = (((ev.ts - start) as f64 / bucket_secs) as usize).min(SUMMARY_BUCKETS - 1);
-        let slot = &mut raw[idx];
-        match ev.kind {
-            EventKind::DamageOut => slot.0 += ev.amount as f64,
-            EventKind::DamageIn => slot.1 += ev.amount as f64,
-            EventKind::Mining => slot.2 += ev.volume,
-            _ => {}
-        }
     }
-    buckets_from_raw(start, end, bucket_secs, raw, segs.finish())
+    summary_from_segments(start, end, segs.finish())
 }
 
 /// First streaming pass over `file`: find the min/max event timestamp
@@ -674,8 +581,6 @@ async fn scan_log_span(file: &str, lang: Lang) -> Result<(i64, i64), String> {
 async fn stream_log_summary(app: &AppHandle, file: &str) -> Result<LogSummary, String> {
     let lang = detect_file_lang(Path::new(file)).await;
     let (start, end) = scan_log_span(file, lang).await?;
-    let span = (end - start).max(1) as f64;
-    let bucket_secs = (span / SUMMARY_BUCKETS as f64).max(1.0);
 
     // Ore volumes are resolved per-line against a small name→m³ cache backed
     // by one SDE connection held open for the whole pass, mirroring
@@ -686,7 +591,6 @@ async fn stream_log_summary(app: &AppHandle, file: &str) -> Result<LogSummary, S
     let sde = sde_db.as_deref().and_then(|p| Sde::open(p).ok());
     let mut ore_vol: HashMap<String, f64> = HashMap::new();
 
-    let mut raw = vec![(0.0f64, 0.0f64, 0.0f64); SUMMARY_BUCKETS];
     let mut segs = SegmentAcc::new(start, end);
     let handle = tokio::fs::File::open(file)
         .await
@@ -707,23 +611,9 @@ async fn stream_log_summary(app: &AppHandle, file: &str) -> Result<LogSummary, S
                 ev.volume = ev.amount as f64 * per_unit;
             }
             segs.add(&ev);
-            let idx = (((ev.ts - start) as f64 / bucket_secs) as usize).min(SUMMARY_BUCKETS - 1);
-            let slot = &mut raw[idx];
-            match ev.kind {
-                EventKind::DamageOut => slot.0 += ev.amount as f64,
-                EventKind::DamageIn => slot.1 += ev.amount as f64,
-                EventKind::Mining => slot.2 += ev.volume,
-                _ => {}
-            }
         }
     }
-    Ok(buckets_from_raw(
-        start,
-        end,
-        bucket_secs,
-        raw,
-        segs.finish(),
-    ))
+    Ok(summary_from_segments(start, end, segs.finish()))
 }
 
 /// Time span + activity-density buckets for `file`, for the playback timeline
@@ -921,20 +811,6 @@ fn resolve_ore_volumes(
             .unwrap_or(0.0);
         cache.insert(ore, vol);
     }
-}
-
-/// Fill each weapon/ammo/drone's source `kind` (SDE group, e.g. "Rocket") and
-/// `damage` type (from the ammo's SDE damage attributes) on a tick — the
-/// combat log names only the ammo, not the weapon module or the damage type.
-/// Caches name → (kind, damage) so each name is looked up once; unknown names
-/// or a missing SDE leave both `None`.
-#[allow(clippy::type_complexity)]
-fn attach_weapon_kinds(
-    tick: &mut super::aggregate::DpsTick,
-    cache: &mut HashMap<String, (Option<String>, Option<String>)>,
-    sde_db: Option<&Path>,
-) {
-    attach_weapon_kinds_rows(&mut tick.by_weapon, &mut tick.by_pilot, cache, sde_db);
 }
 
 /// The same enrichment for a finalized 5 s bucket (#984) — buckets reuse the
@@ -1186,44 +1062,6 @@ mod tests {
     }
 
     #[test]
-    fn bucket_events_normalizes_each_category_against_its_own_peak() {
-        // 2000 s span / 200 buckets = 10 s/bucket: bucket 0 (ts 0-9), bucket
-        // 50 (ts 500-509), bucket 100 (ts 1000-1009), bucket 150 (ts 1500-1509).
-        let events = vec![
-            ev(0, EventKind::DamageOut, 300, 0.0),
-            ev(1000, EventKind::DamageOut, 100, 0.0), // 1/3 of the peak bucket
-            ev(500, EventKind::DamageIn, 50, 0.0),
-            ev(1500, EventKind::Mining, 0, 20.0),
-            ev(1999, EventKind::DamageOut, 0, 0.0), // last event pins `end`
-        ];
-        let summary = bucket_events(&events);
-
-        assert_eq!(summary.start, 0);
-        assert_eq!(summary.end, 1999);
-        assert_eq!(summary.buckets.len(), SUMMARY_BUCKETS);
-
-        assert_eq!(summary.buckets[0].damage_out, 1.0); // the busiest out-bucket
-        assert!((summary.buckets[100].damage_out - (100.0 / 300.0) as f32).abs() < 1e-6);
-        assert_eq!(summary.buckets[50].damage_in, 1.0); // only in-bucket → its own peak
-        assert_eq!(summary.buckets[150].mining, 1.0); // only mining bucket → its own peak
-
-        // Categories don't bleed into buckets/slots they didn't occupy.
-        assert_eq!(summary.buckets[0].damage_in, 0.0);
-        assert_eq!(summary.buckets[0].mining, 0.0);
-        assert_eq!(summary.buckets[50].damage_out, 0.0);
-    }
-
-    #[test]
-    fn bucket_events_single_timestamp_does_not_panic() {
-        // Every event at the same instant → zero span; must not divide by zero.
-        let events = vec![ev(1000, EventKind::DamageOut, 50, 0.0)];
-        let summary = bucket_events(&events);
-        assert_eq!(summary.start, 1000);
-        assert_eq!(summary.end, 1000);
-        assert_eq!(summary.buckets[0].damage_out, 1.0);
-    }
-
-    #[test]
     fn overview_segments_are_epoch_aligned_contiguous_and_absolute() {
         // Span 90..=130: starts mid-minute (partial first), ends mid-minute
         // (partial last) — both still land in epoch-aligned 60s segments.
@@ -1272,15 +1110,11 @@ mod tests {
             ev(0, EventKind::DamageOut, 10, 0.0),
             ev(30, EventKind::DamageOut, 20, 0.0),
         ];
-        let (seek, idx, warm) = seek_start(&events, None, 10);
+        let (seek, idx) = seek_start(&events, None);
         assert_eq!(seek, 0);
-        // The first event sits exactly at the seek point, so it's pre-warmed
-        // (equivalent to the main loop picking it up on its very first tick —
-        // vt starts at `seek` and only advances *after* the first poll).
+        // The first event sits at the seek point and is consumed on the
+        // loop's first poll; the resume index points past it.
         assert_eq!(idx, 1);
-        assert_eq!(warm.len(), 1);
-        assert_eq!(warm[0].ts, 0);
-        // The second event is still ahead, for the main loop to pick up.
         assert_eq!(events[idx].ts, 30);
     }
 
@@ -1290,28 +1124,24 @@ mod tests {
             ev(100, EventKind::DamageOut, 10, 0.0),
             ev(200, EventKind::DamageOut, 10, 0.0),
         ];
-        let (before, ..) = seek_start(&events, Some(0), 10);
+        let (before, _) = seek_start(&events, Some(0));
         assert_eq!(before, 100); // clamped up to the first event.
-        let (after, ..) = seek_start(&events, Some(10_000), 10);
+        let (after, _) = seek_start(&events, Some(10_000));
         assert_eq!(after, 200); // clamped down to the last event.
     }
 
     #[test]
-    fn seek_start_warms_only_the_trailing_window_and_resumes_after_the_seek_point() {
-        // Seek to ts=500 with a 10 s window: only the ts=495 event is inside
-        // [490, 500] and gets pre-warmed; ts=100 is long past and dropped;
-        // ts=600 is still ahead, so it stays for the main loop to pick up.
+    fn seek_start_resumes_from_the_first_event_after_the_seek_point() {
+        // Seek to ts=500: events at or before it are "past" (the self-
+        // contained bucket grid needs no pre-warm); ts=600 is still ahead.
         let events = vec![
             ev(100, EventKind::DamageOut, 10, 0.0),
             ev(495, EventKind::DamageOut, 20, 0.0),
             ev(600, EventKind::DamageOut, 30, 0.0),
         ];
-        let (seek, idx, warm) = seek_start(&events, Some(500), 10);
+        let (seek, idx) = seek_start(&events, Some(500));
         assert_eq!(seek, 500);
-        assert_eq!(idx, 2); // events[0..2] (ts 100, 495) are "past" the seek point.
-        assert_eq!(warm.len(), 1);
-        assert_eq!(warm[0].ts, 495);
-        // The still-ahead event resumes from `idx`.
+        assert_eq!(idx, 2); // events[0..2] (ts 100, 495) are past the seek.
         assert_eq!(events[idx].ts, 600);
     }
 
@@ -1344,21 +1174,21 @@ not a combat line, ignored";
         let summary = bucket_events(&events);
         assert_eq!(summary.start, events[0].ts);
         assert_eq!(summary.end, events[3].ts);
-        // The 300-damage line is the sole DamageOut bucket → its own peak.
-        assert!(summary.buckets.iter().any(|b| b.damage_out == 1.0));
-        // The 100-damage line (1/3 the amount) sits in a later bucket.
-        let out_values: Vec<f32> = summary
-            .buckets
+        // Segments carry absolute sums on the 1-minute grid. The two outgoing
+        // hits (300 and 100) fall in different minutes (12:00 and 12:09).
+        let out: Vec<f64> = summary
+            .segments
             .iter()
-            .map(|b| b.damage_out)
+            .map(|s| s.damage_out)
             .filter(|&v| v > 0.0)
             .collect();
-        assert_eq!(out_values.len(), 2);
-        assert!(out_values.contains(&1.0));
-        assert!((out_values.iter().cloned().fold(0.0, f32::max) - 1.0).abs() < 1e-6);
-        // Damage-in and mining each land in exactly one bucket, at their peak.
-        assert!(summary.buckets.iter().any(|b| b.damage_in == 1.0));
-        assert!(summary.buckets.iter().any(|b| b.mining == 1.0));
+        assert_eq!(out, vec![300.0, 100.0]);
+        // Damage-in (50) and mining (34 × 0.1 = 3.4 m³) each in one minute.
+        assert!(summary.segments.iter().any(|s| s.damage_in == 50.0));
+        assert!(summary
+            .segments
+            .iter()
+            .any(|s| (s.mining - 3.4).abs() < 1e-9));
     }
 
     #[tokio::test]

@@ -32,12 +32,6 @@ import {
   type Mode,
 } from "./dpsMeterShared";
 
-// The backend's rolling tick still needs an averaging window — the PVP fight
-// overlay consumes it until #986, and the whole rolling pipeline is deleted
-// in #987. The DPS meter page itself no longer reads ticks (#984), so the
-// user-facing window setting is gone and this constant is all that's left.
-const LEGACY_TICK_WINDOW_SECS = 10;
-
 /** Playback transport state + mutations: `dpsStart` / `dpsPause` /
  *  `dpsPlayback` / `dpsResume`, bucket/event buffering while hidden, the
  *  scrub/region/loop lifecycle, and the space-bar shortcut. Derived
@@ -243,7 +237,6 @@ export function useDpsPlaybackState() {
         void dpsPlayback({
           file: p.file,
           speed: p.speed,
-          windowSecs: LEGACY_TICK_WINDOW_SECS,
           // Loop within the selected fight region if one is set, else replay
           // the whole log. Both bounds are i64 in Rust — round them.
           seekTs: p.region ? Math.round(p.region.start) : undefined,
@@ -287,7 +280,6 @@ export function useDpsPlaybackState() {
     try {
       await dpsStart({
         gamelogsDir: dir,
-        windowSecs: LEGACY_TICK_WINDOW_SECS,
         extractionPlan: extractionPlan ?? undefined,
         character: character || undefined,
       });
@@ -336,7 +328,6 @@ export function useDpsPlaybackState() {
       await dpsPlayback({
         file,
         speed,
-        windowSecs: LEGACY_TICK_WINDOW_SECS,
         // Both bounds are i64 in Rust — the region/scrubber emit fractional
         // timestamps, so round before crossing the bridge.
         seekTs: seekTs == null ? undefined : Math.round(seekTs),

@@ -99,12 +99,6 @@ const SEEK_TS = 1_785_672_300;
 const SUMMARY: DpsLogSummary = {
   start: SUMMARY_START,
   end: SUMMARY_END,
-  buckets: Array.from({ length: 5 }, (_, i) => ({
-    at: SUMMARY_START + i * 120,
-    damageOut: i === 2 ? 1 : 0,
-    damageIn: 0,
-    mining: 0,
-  })),
   // Fixed 1-minute segments over the same 600s span (SUMMARY_START is a
   // multiple of 60, so the grid starts exactly there).
   segments: Array.from({ length: 10 }, (_, i) => ({

@@ -50,31 +50,6 @@ export interface PilotRate {
   pointIn?: boolean;
 }
 
-export interface DpsTick {
-  dpsOut: number;
-  dpsIn: number;
-  logiOut: number;
-  logiIn: number;
-  capTransferOut: number;
-  capTransferIn: number;
-  capWarfareOut: number;
-  capWarfareIn: number;
-  /** Mined volume per second (m³/s). */
-  miningM3: number;
-  /** High-quality outgoing hits within the window. */
-  hitsOut: HitQuality;
-  /** High-quality incoming hits within the window. */
-  hitsIn: HitQuality;
-  /** Top weapons by outgoing DPS. */
-  byWeapon: WeaponRate[];
-  /** Top counterparties by engaged DPS. */
-  byPilot: PilotRate[];
-  /** The averaging window, echoed for labelling. */
-  windowSecs: number;
-  /** Epoch seconds this tick was computed at. */
-  at: number;
-}
-
 /** What a parsed combat line represents — mirrors Rust's `EventKind`. */
 export type DpsEventKind =
   | "damageOut"
@@ -91,8 +66,8 @@ export type DpsEventKind =
   | "pointIn"
   | "mining";
 
-/** One parsed combat-log line, for a scrolling log view (as opposed to
- *  {@link DpsTick}'s rolling-window rates). `pilot`/`ship`/`weapon` are
+/** One parsed combat-log line, for a scrolling log view (as opposed to the
+ *  aggregated 5 s {@link DpsBucket}s). `pilot`/`ship`/`weapon` are
  *  populated for damage lines, `None` otherwise. */
 export interface DpsEvent {
   /** Epoch seconds, parsed from the gamelog's own timestamp. */
@@ -167,8 +142,6 @@ export interface DpsExtractionPlan {
 export interface DpsSettings {
   /** The EVE `Gamelogs` folder. */
   gamelogsDir: string;
-  /** Moving-average window in seconds. */
-  windowSecs: number;
   /** Overview-export-derived pilot/ship extraction plan (#869); omitted
    *  keeps the default `NAME[CORP](SHIP)` scan. */
   extractionPlan?: DpsExtractionPlan;
@@ -195,7 +168,6 @@ export interface DpsPlaybackSettings {
   file: string;
   /** Replay speed multiplier (1.0 = real time). */
   speed: number;
-  windowSecs: number;
   /** Start the virtual clock here instead of the file's first event (epoch
    *  seconds) — set when scrubbing the timeline slider. */
   seekTs?: number;
@@ -205,16 +177,6 @@ export interface DpsPlaybackSettings {
   /** Overview-export-derived pilot/ship extraction plan (#869); omitted
    *  keeps the default `NAME[CORP](SHIP)` scan. */
   extractionPlan?: DpsExtractionPlan;
-}
-
-/** One time bucket's activity, normalized 0..1 against that category's
- *  busiest bucket in the log — for the playback timeline density strip. */
-export interface DpsEventBucket {
-  /** Bucket start, epoch seconds. */
-  at: number;
-  damageOut: number;
-  damageIn: number;
-  mining: number;
 }
 
 /** One fixed, epoch-aligned 1-minute overview segment with **absolute**
@@ -229,22 +191,20 @@ export interface DpsOverviewSegment {
   mining: number;
 }
 
-/** A log's time span + activity buckets (see {@link dpsLogSummary}). */
+/** A log's time span + its fixed 1-minute segments (see {@link dpsLogSummary}). */
 export interface DpsLogSummary {
   start: number;
   end: number;
-  /** Legacy span÷N normalized strip — superseded by `segments` (#985). */
-  buckets: DpsEventBucket[];
   /** Fixed 1-minute segments the overview renders and zooms on (#985). */
   segments: DpsOverviewSegment[];
 }
 
-/** Start (or restart) tailing the newest gamelog. Ticks arrive via {@link onDpsTick}. */
+/** Start (or restart) tailing the newest gamelog. Buckets arrive via {@link onDpsBuckets}. */
 export function dpsStart(settings: DpsSettings): Promise<void> {
   return invoke<void>("dps_start", { settings });
 }
 
-/** Replay a past gamelog at `speed`×; ticks arrive via {@link onDpsTick}. */
+/** Replay a past gamelog at `speed`×; buckets arrive via {@link onDpsBuckets}. */
 export function dpsPlayback(settings: DpsPlaybackSettings): Promise<void> {
   return invoke<void>("dps_playback", { settings });
 }
@@ -295,15 +255,8 @@ export function dpsParseOverviewExport(
   return invoke<DpsExtractionPlan>("dps_parse_overview_export", { path });
 }
 
-/** Subscribe to live DPS ticks. */
-export function onDpsTick(
-  handler: (tick: DpsTick) => void,
-): Promise<UnlistenFn> {
-  return listen<DpsTick>("dps://tick", (event) => handler(event.payload));
-}
-
 /** Subscribe to raw combat-log events — one batch per poll, in the order
- *  they'll land in the next tick, for a scrolling log view. */
+ *  they'll land in the next bucket, for a scrolling log view. */
 export function onDpsEvents(
   handler: (events: DpsEvent[]) => void,
 ): Promise<UnlistenFn> {

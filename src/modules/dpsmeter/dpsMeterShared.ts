@@ -1,9 +1,4 @@
-import type {
-  DpsBucket,
-  DpsEvent,
-  DpsOverviewSegment,
-  DpsTick,
-} from "../../lib/api";
+import type { DpsBucket, DpsEvent, DpsOverviewSegment } from "../../lib/api";
 import { formatInt } from "../../lib/format";
 
 export type Mode = "live" | "playback";
@@ -41,6 +36,18 @@ export function formatClock(epochSecs: number): string {
   });
 }
 
+/** The rate series the page graphs + reads out. Each maps to an absolute
+ *  bucket sum field via {@link BUCKET_FIELD}; the rate is sum / BUCKET_SECS. */
+export type SeriesKey =
+  | "dpsOut"
+  | "dpsIn"
+  | "logiOut"
+  | "logiIn"
+  | "capWarfareOut"
+  | "capWarfareIn"
+  | "capTransferOut"
+  | "capTransferIn";
+
 // The series we graph + read out. `out` series share warm colours, `in` cool.
 export const SERIES = [
   { key: "dpsOut", label: "DPS out", color: "#34d399", primary: true },
@@ -72,7 +79,7 @@ export const SERIES = [
     primary: false,
   },
 ] as const satisfies readonly {
-  key: keyof DpsTick;
+  key: SeriesKey;
   label: string;
   color: string;
   primary: boolean;
@@ -98,7 +105,7 @@ export type BucketSeries = {
 };
 
 // Same palette/ordering as SERIES, keyed to bucket sum fields.
-const BUCKET_FIELD: Record<string, keyof DpsBucket> = {
+const BUCKET_FIELD: Record<SeriesKey, keyof DpsBucket> = {
   dpsOut: "damageOut",
   dpsIn: "damageIn",
   logiOut: "repOut",
