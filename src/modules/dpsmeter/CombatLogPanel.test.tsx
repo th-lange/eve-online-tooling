@@ -129,6 +129,33 @@ describe("CombatLogPanel scrolling", () => {
     );
   });
 
+  it("scrolls the jumped-to bucket's group into view (chart → log)", () => {
+    const events = [ev(1000, "a"), ev(1006, "b")];
+    const scrollSpy = vi.spyOn(Element.prototype, "scrollIntoView");
+    try {
+      render(
+        <CombatLogPanel
+          events={events}
+          collapsed={false}
+          onToggleCollapsed={() => {}}
+          jumpTo={{ start: 1005, n: 1 }}
+        />,
+      );
+      // The jump effect centres the 1005 group (the mount auto-scroll also
+      // calls scrollIntoView on the bottom anchor — look for the centred one).
+      expect(scrollSpy).toHaveBeenCalledWith({
+        block: "center",
+        behavior: "smooth",
+      });
+      const centred = scrollSpy.mock.contexts.find(
+        (el) => (el as unknown as HTMLElement).dataset?.bucket === "1005",
+      );
+      expect(centred).toBeTruthy();
+    } finally {
+      scrollSpy.mockRestore();
+    }
+  });
+
   it("clears the marker and re-enables auto-scroll once scrolled back to the bottom", async () => {
     vi.useFakeTimers();
     try {

@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { render } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { BucketChart } from "./BucketChart";
 import { BUCKET_SERIES_OUT } from "./dpsMeterShared";
-import type { DpsBucket } from "../../lib/api";
+import type { DpsBucket, DpsEvent } from "../../lib/api";
 
 // A ResizeObserver that reports a fixed viewport width to the chart (jsdom's
 // elements all measure 0 and the global stub never fires a callback).
@@ -126,5 +126,78 @@ describe("BucketChart", () => {
     );
     const endRect = end.container.querySelector('rect[fill="#818cf8"]')!;
     expect(Number(endRect.getAttribute("x"))).toBe((20 / 5) * 10); // last bucket
+  });
+
+  it("reports the clicked cell's bucket start (incl. the ghost cell)", () => {
+    const buckets = Array.from({ length: 5 }, (_, i) => bucket(i, 100));
+    const onSelectBucket = vi.fn();
+    const { container } = render(
+      <BucketChart
+        buckets={buckets}
+        series={BUCKET_SERIES_OUT}
+        onSelectBucket={onSelectBucket}
+        ghost={{ start: 25, damageOut: 50, damageIn: 0 }}
+      />,
+    );
+    const svg = container.querySelector("svg")!;
+    // jsdom rects are at 0, so clientX maps straight to chart px
+    // (10px/bucket floor): 25px → cell 2 → bucket start 10.
+    fireEvent.click(svg, { clientX: 25 });
+    expect(onSelectBucket).toHaveBeenLastCalledWith(10);
+    // 55px → cell 5, one past the 5 real buckets → the ghost (start 25).
+    fireEvent.click(svg, { clientX: 55 });
+    expect(onSelectBucket).toHaveBeenLastCalledWith(25);
+  });
+
+  it("draws the in-progress ghost cell dashed and highlights it when the cursor names it", () => {
+    const buckets = Array.from({ length: 5 }, (_, i) => bucket(i, 100));
+    const { container } = render(
+      <BucketChart
+        buckets={buckets}
+        series={BUCKET_SERIES_OUT}
+        ghost={{ start: 25, damageOut: 50, damageIn: 0 }}
+        markTs={26}
+      />,
+    );
+    // Dashed ghost outline at the cell past the last real bucket.
+    const dashed = container.querySelector('rect[stroke-dasharray="3 3"]')!;
+    expect(Number(dashed.getAttribute("x"))).toBe((25 / 5) * 10 + 1);
+    // The cursor (26 → bucket 25) lands on the ghost, not the last real one.
+    const mark = container.querySelector('rect[fill="#818cf8"]')!;
+    expect(Number(mark.getAttribute("x"))).toBe((25 / 5) * 10);
+  });
+
+  it("shows the bucket's log-line count and preview in the hover tooltip", () => {
+    const buckets = Array.from({ length: 3 }, (_, i) => bucket(i, 100));
+    const line: DpsEvent = {
+      ts: 11,
+      kind: "damageOut",
+      amount: 42,
+      pilot: "Bob",
+      ship: "Rifter",
+      weapon: "AC II",
+      quality: "Hits",
+      ore: null,
+      volume: 0,
+    };
+    const eventsByBucket = new Map<number, DpsEvent[]>([[10, [line]]]);
+    const { container } = render(
+      <BucketChart
+        buckets={buckets}
+        series={BUCKET_SERIES_OUT}
+        eventsByBucket={eventsByBucket}
+      />,
+    );
+    const svg = container.querySelector("svg")!;
+    // jsdom has no PointerEvent — a MouseEvent with the pointermove type
+    // carries clientX and still reaches React's onPointerMove listener.
+    fireEvent(
+      svg,
+      new MouseEvent("pointermove", { bubbles: true, clientX: 25 }),
+    ); // cell 2 → bucket start 10
+    expect(screen.getByTestId("bucket-tooltip").textContent).toContain(
+      "Log · 1 line",
+    );
+    expect(screen.getByTestId("bucket-tooltip").textContent).toContain("Bob");
   });
 });

@@ -4,6 +4,7 @@ import {
   appendEvents,
   groupEventsByBucket,
   LOG_BUFFER,
+  pendingGhostBucket,
 } from "./dpsMeterShared";
 import { eventToneClass, formatEventLine } from "./CombatLogPanel";
 
@@ -61,6 +62,35 @@ describe("groupEventsByBucket", () => {
 
   it("returns no groups for an empty log", () => {
     expect(groupEventsByBucket([])).toEqual([]);
+  });
+});
+
+describe("pendingGhostBucket", () => {
+  it("sums damage in/out over the newest event's bucket when it isn't finalized", () => {
+    const events = [
+      ev({ ts: 1003, amount: 50 }), // older bucket — excluded
+      ev({ ts: 1006, kind: "damageOut", amount: 100 }),
+      ev({ ts: 1008, kind: "damageIn", amount: 30 }),
+      ev({ ts: 1009, kind: "mining", amount: 40 }), // not damage — ignored
+    ];
+    expect(pendingGhostBucket(events, 1005)).toEqual({
+      start: 1005,
+      damageOut: 100,
+      damageIn: 30,
+    });
+  });
+
+  it("is null once the newest bucket is already finalized, and for no events", () => {
+    expect(pendingGhostBucket([ev({ ts: 1003 })], 1005)).toBeNull();
+    expect(pendingGhostBucket([], null)).toBeNull();
+  });
+
+  it("covers the very first bucket when nothing is finalized yet", () => {
+    expect(pendingGhostBucket([ev({ ts: 1002, amount: 10 })], null)).toEqual({
+      start: 1000,
+      damageOut: 10,
+      damageIn: 0,
+    });
   });
 });
 

@@ -65,6 +65,7 @@ export function CombatLogPanel({
   onToggleCollapsed,
   cursor,
   onVisibleCenterChange,
+  jumpTo,
   className = "",
   maxHeightClass = "max-h-64",
 }: {
@@ -78,6 +79,9 @@ export function CombatLogPanel({
    *  (or nothing to report — collapsed, empty). The parent chart highlights
    *  the bucket closest to this time. */
   onVisibleCenterChange?: (bucketStart: number | null) => void;
+  /** Chart → log jump (#1003): scroll this bucket's group to the viewport
+   *  centre. The nonce `n` lets the same bucket be jumped to twice. */
+  jumpTo?: { start: number; n: number } | null;
   className?: string;
   /** Tailwind max-height class for the scrolling list — the fight overlay's
    *  compact footer passes a shorter one than the DPS meter page. */
@@ -111,6 +115,28 @@ export function CombatLogPanel({
     if (collapsed) onVisibleCenterChange?.(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collapsed]);
+
+  // Chart → log (#1003): a bucket click scrolls its group to the viewport
+  // centre. The nonce makes re-clicking the same bucket jump again; the
+  // programmatic flag keeps the resulting scroll from reading as a user
+  // scroll (which would re-report the centre and fight the cursor).
+  useEffect(() => {
+    if (!jumpTo || collapsed) return;
+    const group = containerRef.current?.querySelector(
+      `[data-bucket="${jumpTo.start}"]`,
+    );
+    if (!group) return;
+    setAutoScroll(false);
+    programmaticScrollRef.current = true;
+    (group as HTMLElement).scrollIntoView({
+      block: "center",
+      behavior: "smooth",
+    });
+    const t = setTimeout(() => {
+      programmaticScrollRef.current = false;
+    }, 600);
+    return () => clearTimeout(t);
+  }, [jumpTo, collapsed]);
 
   function handleScroll() {
     if (programmaticScrollRef.current || rafRef.current != null) return;

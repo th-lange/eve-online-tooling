@@ -1,10 +1,15 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Page, PageHeader } from "../../components/page";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { usePersistentState } from "../../lib/usePersistentState";
 import { CombatLogPanel } from "./CombatLogPanel";
 import { DpsChartContainer } from "./DpsChartContainer";
-import { SERIES, formatRate } from "./dpsMeterShared";
+import {
+  SERIES,
+  formatRate,
+  groupEventsByBucket,
+  pendingGhostBucket,
+} from "./dpsMeterShared";
 import { FightBreakdown, TackleTags } from "./FightBreakdown";
 import { PrimaryExtras } from "./HitQualityIndicators";
 import { LogFilePanel } from "./LogFilePanel";
@@ -24,6 +29,37 @@ export function DpsPage() {
   // the viewport centre — the charts highlight it, the log tints it
   // (null = auto-scrolled to the live tail).
   const [cursor, setCursor] = useState<number | null>(null);
+  // Chart → log jump request; the nonce distinguishes repeat clicks (#1003).
+  const [logJump, setLogJump] = useState<{ start: number; n: number } | null>(
+    null,
+  );
+  // The bucket id → its combat-log lines, for chart tooltips (#1003).
+  const eventsByBucket = useMemo(
+    () =>
+      new Map(
+        groupEventsByBucket(dps.logEvents).map((g) => [g.start, g.events]),
+      ),
+    [dps.logEvents],
+  );
+  // The in-progress bucket at the live edge, drawn dashed (#1004).
+  const ghost = useMemo(
+    () =>
+      dps.running
+        ? pendingGhostBucket(
+            dps.logEvents,
+            dps.buckets[dps.buckets.length - 1]?.end ?? null,
+          )
+        : null,
+    [dps.logEvents, dps.buckets, dps.running],
+  );
+
+  /** A chart bucket was clicked: move the shared cursor there, make sure the
+   *  log is open, and scroll its group to the viewport centre. */
+  function selectBucket(start: number) {
+    setCursor(start);
+    setLogCollapsed(false);
+    setLogJump((prev) => ({ start, n: (prev?.n ?? 0) + 1 }));
+  }
 
   return (
     <Page>
@@ -227,6 +263,9 @@ export function DpsPage() {
         inSeries={dps.inSeries}
         combinedSeries={dps.combinedSeries}
         markTs={cursor}
+        ghost={ghost}
+        onSelectBucket={selectBucket}
+        eventsByBucket={eventsByBucket}
       />
 
       {/* Mining overview — only once this session has actually mined. History
@@ -253,6 +292,7 @@ export function DpsPage() {
         onToggleCollapsed={() => setLogCollapsed(!logCollapsed)}
         cursor={cursor}
         onVisibleCenterChange={setCursor}
+        jumpTo={logJump}
         className="mt-4"
       />
 
