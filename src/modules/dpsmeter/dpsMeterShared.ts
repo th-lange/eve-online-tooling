@@ -94,11 +94,27 @@ export function bucketStartOf(ts: number): number {
   return Math.floor(ts / BUCKET_SECS) * BUCKET_SECS;
 }
 
-/** The timestamp span the combat log is currently scrolled over — the first
- *  and last at-least-partially-visible lines. Charts shade every bucket from
- *  `start`'s bucket through `end`'s, so the highlight covers exactly what the
- *  log viewport shows (not a single reference line). `null` at the live tail. */
-export type LogMarkRange = { start: number; end: number };
+/** Start of the bucket whose time is closest to `ts` (by bucket midpoint), or
+ *  `null` if there are no buckets. The combat log runs ahead of the chart
+ *  (buckets finalize only once their 5 s window closes), so a log line can
+ *  point past the newest bucket — this snaps to the nearest existing one, the
+ *  single segment the chart highlights for the log's centre line. */
+export function nearestBucketStart(
+  buckets: DpsBucket[],
+  ts: number,
+): number | null {
+  if (buckets.length === 0) return null;
+  let best = buckets[0].start;
+  let bestDiff = Infinity;
+  for (const b of buckets) {
+    const diff = Math.abs(b.start + BUCKET_SECS / 2 - ts);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = b.start;
+    }
+  }
+  return best;
+}
 
 // Buckets in the centered smoothing window for the rate charts. A single
 // volley lands entirely in one 5 s bucket, so the raw per-bucket rate swings

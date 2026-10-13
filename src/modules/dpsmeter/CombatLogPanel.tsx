@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { DpsEvent } from "../../lib/api";
-import { formatClock, type LogMarkRange } from "./dpsMeterShared";
+import { formatClock } from "./dpsMeterShared";
 
 /** Render one parsed combat-log line as plain English, e.g.
  *  "450 dmg → Some Pilot (Caracal) — Heavy Missile Launcher II [Wrecks]".
@@ -60,18 +60,18 @@ export function CombatLogPanel({
   events,
   collapsed,
   onToggleCollapsed,
-  onVisibleRangeChange,
+  onVisibleCenterChange,
   className = "",
   maxHeightClass = "max-h-64",
 }: {
   events: DpsEvent[];
   collapsed: boolean;
   onToggleCollapsed: () => void;
-  /** Fired as the user scrolls through history: the timestamp span of the
-   *  visible lines (first→last at-least-partially-visible), or `null` once
-   *  back at the live tail (or nothing to report — collapsed, empty). Lets a
-   *  parent chart shade exactly the stretch of time the log is showing. */
-  onVisibleRangeChange?: (range: LogMarkRange | null) => void;
+  /** Fired as the user scrolls through history: the timestamp of the line at
+   *  the viewport's vertical centre, or `null` once back at the live tail (or
+   *  nothing to report — collapsed, empty). The parent chart highlights the
+   *  single bucket closest to this time. */
+  onVisibleCenterChange?: (ts: number | null) => void;
   className?: string;
   /** Tailwind max-height class for the scrolling list — the fight overlay's
    *  compact footer passes a shorter one than the DPS meter page. */
@@ -100,7 +100,7 @@ export function CombatLogPanel({
 
   // Collapsing hides the log — any chart highlight it was driving should go too.
   useEffect(() => {
-    if (collapsed) onVisibleRangeChange?.(null);
+    if (collapsed) onVisibleCenterChange?.(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collapsed]);
 
@@ -113,29 +113,27 @@ export function CombatLogPanel({
       const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
       if (atBottom) {
         if (!autoScroll) setAutoScroll(true);
-        onVisibleRangeChange?.(null);
+        onVisibleCenterChange?.(null);
         return;
       }
       // Scrolled away from the live tail: stop yanking back to it, and report
-      // the full visible span — the first and last at-least-partially-visible
-      // lines — so the chart shades exactly the stretch of time on screen.
+      // the timestamp of the line at the viewport's vertical centre — the
+      // chart highlights the single bucket closest to it.
       if (autoScroll) setAutoScroll(false);
-      const top = el.scrollTop;
-      const bottom = el.scrollTop + el.clientHeight;
-      let first: number | null = null;
-      let last: number | null = null;
+      const center = el.scrollTop + el.clientHeight / 2;
+      let ts: number | null = null;
+      let bestDiff = Infinity;
       for (const child of el.children) {
         const row = child as HTMLElement;
         if (row.dataset.ts === undefined) continue;
-        if (row.offsetTop + row.offsetHeight > top && row.offsetTop < bottom) {
-          const ts = Number(row.dataset.ts);
-          if (first === null) first = ts;
-          last = ts;
+        const rowCenter = row.offsetTop + row.offsetHeight / 2;
+        const diff = Math.abs(rowCenter - center);
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          ts = Number(row.dataset.ts);
         }
       }
-      onVisibleRangeChange?.(
-        first === null ? null : { start: first, end: last ?? first },
-      );
+      onVisibleCenterChange?.(ts);
     });
   }
 

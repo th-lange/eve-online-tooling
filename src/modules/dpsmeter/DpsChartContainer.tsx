@@ -1,7 +1,7 @@
 import { Columns2, Layers, Rows2 } from "lucide-react";
 import type { DpsBucket } from "../../lib/api";
 import { BucketChart } from "./BucketChart";
-import type { BucketSeries, ChartLayout, LogMarkRange } from "./dpsMeterShared";
+import type { BucketSeries, ChartLayout } from "./dpsMeterShared";
 
 /** Graphs — outgoing and incoming; layout + breakdown toggles + the two (or
  *  one, in combined layout) time-grid charts. Everything draws from the
@@ -16,7 +16,7 @@ export function DpsChartContainer({
   outSeries,
   inSeries,
   combinedSeries,
-  markRange,
+  markTs,
 }: {
   bySource: boolean;
   onSetBySource: (v: boolean) => void;
@@ -26,9 +26,9 @@ export function DpsChartContainer({
   outSeries: BucketSeries[];
   inSeries: BucketSeries[];
   combinedSeries: BucketSeries[];
-  /** See {@link BucketChart}'s `markRange` — forwarded to every chart so the
-   *  log's scroll span reads the same whichever layout is active. */
-  markRange?: LogMarkRange | null;
+  /** See {@link BucketChart}'s `markTs` — forwarded to every chart so the
+   *  log's highlighted bucket reads the same whichever layout is active. */
+  markTs?: number | null;
 }) {
   return (
     <>
@@ -93,7 +93,7 @@ export function DpsChartContainer({
             buckets={buckets}
             series={combinedSeries}
             title="Damage — out + in"
-            markRange={markRange}
+            markTs={markTs}
           />
         ) : (
           <>
@@ -101,13 +101,13 @@ export function DpsChartContainer({
               buckets={buckets}
               series={outSeries}
               title="Outgoing"
-              markRange={markRange}
+              markTs={markTs}
             />
             <BucketChart
               buckets={buckets}
               series={inSeries}
               title="Incoming"
-              markRange={markRange}
+              markTs={markTs}
             />
           </>
         )}
