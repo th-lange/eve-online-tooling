@@ -57,6 +57,7 @@ function bucket(i: number, damageOut: number): DpsBucket {
     hitsIn: hq,
     byWeapon: [],
     byPilot: [],
+    events: [],
   };
 }
 

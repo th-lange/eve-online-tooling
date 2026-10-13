@@ -46,6 +46,7 @@ function bucket(start: number, partial: Partial<DpsBucket> = {}): DpsBucket {
     hitsIn: hq,
     byWeapon: [],
     byPilot: [],
+    events: [],
     ...partial,
   };
 }

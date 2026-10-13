@@ -65,6 +65,10 @@ pub struct DpsBucket {
     pub by_weapon: Vec<WeaponRate>,
     /// Per-pilot engagement (rates + tackle flags; all rows, sorted).
     pub by_pilot: Vec<PilotRate>,
+    /// The raw combat-log events this bucket aggregates (#1000): the log is
+    /// rendered from these, so log segments and chart buckets are literally
+    /// the same data — nothing to correlate after the fact.
+    pub events: Vec<DpsEvent>,
 }
 
 impl DpsBucket {
@@ -85,6 +89,7 @@ impl DpsBucket {
             hits_in: HitQuality::default(),
             by_weapon: Vec::new(),
             by_pilot: Vec::new(),
+            events: Vec::new(),
         }
     }
 }
@@ -126,6 +131,9 @@ impl Acc {
 
     fn add(&mut self, ev: &DpsEvent) {
         let b = &mut self.bucket;
+        // The raw line rides along with the aggregates (#1000) — the combat
+        // log renders straight from the finalized bucket's events.
+        b.events.push(ev.clone());
         let v = ev.amount as f64;
         match ev.kind {
             EventKind::DamageOut => {
@@ -377,6 +385,12 @@ mod tests {
         assert_eq!(done[0].end, 105);
         assert_eq!(done[0].damage_out, 100.0);
         assert_eq!(done[0].damage_in, 25.0);
+        // The raw lines ride along for the log view (#1000), in push order.
+        assert_eq!(done[0].events.len(), 3);
+        assert_eq!(
+            done[0].events.iter().map(|e| e.ts).collect::<Vec<_>>(),
+            vec![100, 103, 104]
+        );
     }
 
     #[test]

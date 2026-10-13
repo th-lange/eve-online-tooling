@@ -88,7 +88,6 @@ export function CombatLogPanel({
   maxHeightClass?: string;
 }) {
   const [autoScroll, setAutoScroll] = useState(true);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   // Scrolling itself (the auto-scroll effect below) fires `scroll` events
   // indistinguishable from the user dragging the scrollbar; without this,
@@ -101,11 +100,15 @@ export function CombatLogPanel({
 
   useEffect(() => {
     if (!collapsed && autoScroll) {
+      const el = containerRef.current;
+      if (!el) return;
+      // Scroll the log container only — `scrollIntoView` on the bottom
+      // anchor would also scroll the page itself to the log on every batch.
       programmaticScrollRef.current = true;
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      el.scrollTop = el.scrollHeight;
       const t = setTimeout(() => {
         programmaticScrollRef.current = false;
-      }, 600);
+      }, 100);
       return () => clearTimeout(t);
     }
   }, [events.length, autoScroll, collapsed]);
@@ -117,24 +120,26 @@ export function CombatLogPanel({
   }, [collapsed]);
 
   // Chart → log (#1003): a bucket click scrolls its group to the viewport
-  // centre. The nonce makes re-clicking the same bucket jump again; the
-  // programmatic flag keeps the resulting scroll from reading as a user
-  // scroll (which would re-report the centre and fight the cursor).
+  // centre. The nonce makes re-clicking the same bucket jump again. Only the
+  // log container scrolls — `scrollIntoView` would scroll every ancestor
+  // including the page, yanking the viewport between chart and log (#1006
+  // follow-up); the programmatic flag keeps the resulting scroll event from
+  // re-reporting the centre and fighting the cursor.
   useEffect(() => {
     if (!jumpTo || collapsed) return;
-    const group = containerRef.current?.querySelector(
-      `[data-bucket="${jumpTo.start}"]`,
-    );
-    if (!group) return;
+    const el = containerRef.current;
+    const group = el?.querySelector(`[data-bucket="${jumpTo.start}"]`);
+    if (!el || !group) return;
     setAutoScroll(false);
     programmaticScrollRef.current = true;
-    (group as HTMLElement).scrollIntoView({
-      block: "center",
-      behavior: "smooth",
-    });
+    const g = group as HTMLElement;
+    el.scrollTop = Math.max(
+      0,
+      g.offsetTop - (el.clientHeight - g.offsetHeight) / 2,
+    );
     const t = setTimeout(() => {
       programmaticScrollRef.current = false;
-    }, 600);
+    }, 100);
     return () => clearTimeout(t);
   }, [jumpTo, collapsed]);
 
@@ -217,15 +222,24 @@ export function CombatLogPanel({
                     cursor === g.start ? "bg-indigo-500/10" : ""
                   }`}
                 >
-                  <div
-                    className={`flex items-center gap-2 pt-1 text-[10px] ${
-                      cursor === g.start ? "text-indigo-400" : "text-zinc-600"
-                    }`}
-                  >
-                    <span className="h-px flex-1 bg-zinc-800" />
-                    {formatClock(g.start)}
-                    <span className="h-px flex-1 bg-zinc-800" />
-                  </div>
+                  {/* A timestamped divider only where a minute begins (or at
+                      the very top) — one per 5 s bucket was unreadable noise.
+                      Other bucket boundaries keep just the thin rule. */}
+                  {gi === 0 || g.start % 60 === 0 ? (
+                    <div
+                      className={`flex items-center gap-2 pt-1 text-[10px] ${
+                        cursor === g.start ? "text-indigo-400" : "text-zinc-600"
+                      }`}
+                    >
+                      <span className="h-px flex-1 bg-zinc-800" />
+                      {formatClock(g.start)}
+                      <span className="h-px flex-1 bg-zinc-800" />
+                    </div>
+                  ) : (
+                    <div className="pt-1">
+                      <span className="block h-px bg-zinc-800/60" />
+                    </div>
+                  )}
                   {g.events.map((e, i) => (
                     <div key={i} className={`py-0.5 ${eventToneClass(e)}`}>
                       <span className="text-zinc-600">{formatClock(e.ts)}</span>{" "}
@@ -234,7 +248,6 @@ export function CombatLogPanel({
                   ))}
                 </div>
               ))}
-              <div ref={bottomRef} />
             </>
           )}
         </div>

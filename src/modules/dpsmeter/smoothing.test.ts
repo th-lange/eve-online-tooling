@@ -32,6 +32,7 @@ function bkt(start: number): DpsBucket {
     hitsIn: hq,
     byWeapon: [],
     byPilot: [],
+    events: [],
   };
 }
 
