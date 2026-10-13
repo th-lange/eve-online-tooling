@@ -217,11 +217,26 @@ export interface DpsEventBucket {
   mining: number;
 }
 
+/** One fixed, epoch-aligned 1-minute overview segment with **absolute**
+ *  sums (#985) — normalization for display happens at render time, at the
+ *  active 10^x grouping level. Contiguous; idle minutes are zero segments. */
+export interface DpsOverviewSegment {
+  /** Segment start, epoch seconds (a multiple of 60). */
+  start: number;
+  damageOut: number;
+  damageIn: number;
+  /** Mined volume (m³). */
+  mining: number;
+}
+
 /** A log's time span + activity buckets (see {@link dpsLogSummary}). */
 export interface DpsLogSummary {
   start: number;
   end: number;
+  /** Legacy span÷N normalized strip — superseded by `segments` (#985). */
   buckets: DpsEventBucket[];
+  /** Fixed 1-minute segments the overview renders and zooms on (#985). */
+  segments: DpsOverviewSegment[];
 }
 
 /** Start (or restart) tailing the newest gamelog. Ticks arrive via {@link onDpsTick}. */

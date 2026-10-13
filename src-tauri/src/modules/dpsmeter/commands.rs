@@ -152,13 +152,39 @@ pub struct EventBucket {
     pub mining: f32,
 }
 
+/// Width of one overview segment (s): the fixed 1-minute grid the playback
+/// overview renders and zooms on (#985). Segments are epoch-aligned
+/// (`start = ts - ts % 60`), so a growing live log appends whole new
+/// segments without re-bucketing history, and grouping 10 at a time yields
+/// the 10^x-minute zoom levels.
+pub const OVERVIEW_SEGMENT_SECS: i64 = 60;
+
+/// One fixed 1-minute segment with **absolute** sums (hp, hp, m³) — any
+/// normalization for display happens at render time, at whatever grouping
+/// level is active. Contiguous over the log's span; idle minutes are
+/// explicit zero segments.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverviewSegment {
+    /// Segment start, epoch seconds (a multiple of [`OVERVIEW_SEGMENT_SECS`]).
+    pub start: i64,
+    pub damage_out: f64,
+    pub damage_in: f64,
+    /// Mined volume (m³).
+    pub mining: f64,
+}
+
 /// A log's time span + activity buckets, for the playback timeline slider.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogSummary {
     pub start: i64,
     pub end: i64,
+    /// Legacy span÷N normalized strip — superseded by `segments` (#985),
+    /// deleted with the rolling-window world in #987.
     pub buckets: Vec<EventBucket>,
+    /// Fixed, epoch-aligned 1-minute segments with absolute sums (#985).
+    pub segments: Vec<OverviewSegment>,
 }
 
 /// Start (or restart) tailing the newest gamelog in `settings.gamelogs_dir`.
@@ -515,6 +541,7 @@ fn buckets_from_raw(
     end: i64,
     bucket_secs: f64,
     raw: Vec<(f64, f64, f64)>,
+    segments: Vec<OverviewSegment>,
 ) -> LogSummary {
     let peak_out = raw.iter().map(|b| b.0).fold(0.0f64, f64::max).max(1.0);
     let peak_in = raw.iter().map(|b| b.1).fold(0.0f64, f64::max).max(1.0);
@@ -535,12 +562,61 @@ fn buckets_from_raw(
         start,
         end,
         buckets,
+        segments,
+    }
+}
+
+/// Accumulates events onto the fixed, epoch-aligned 1-minute overview grid
+/// (#985). Sized up front from the log's span (both producers scan the span
+/// first); segments are contiguous, idle minutes stay zero.
+struct SegmentAcc {
+    seg0: i64,
+    raw: Vec<(f64, f64, f64)>,
+}
+
+impl SegmentAcc {
+    fn new(start: i64, end: i64) -> Self {
+        let seg0 = start - start.rem_euclid(OVERVIEW_SEGMENT_SECS);
+        let count = ((end.max(start) - seg0) / OVERVIEW_SEGMENT_SECS + 1).max(1) as usize;
+        Self {
+            seg0,
+            raw: vec![(0.0, 0.0, 0.0); count],
+        }
+    }
+
+    /// Book one event (mining volume must already be resolved into
+    /// `ev.volume`). Timestamps outside the scanned span clamp to the edge
+    /// segments, mirroring the legacy strip's clamp.
+    fn add(&mut self, ev: &DpsEvent) {
+        let idx =
+            (((ev.ts - self.seg0) / OVERVIEW_SEGMENT_SECS).max(0) as usize).min(self.raw.len() - 1);
+        let slot = &mut self.raw[idx];
+        match ev.kind {
+            EventKind::DamageOut => slot.0 += ev.amount as f64,
+            EventKind::DamageIn => slot.1 += ev.amount as f64,
+            EventKind::Mining => slot.2 += ev.volume,
+            _ => {}
+        }
+    }
+
+    fn finish(self) -> Vec<OverviewSegment> {
+        self.raw
+            .into_iter()
+            .enumerate()
+            .map(|(i, (out, inc, mining))| OverviewSegment {
+                start: self.seg0 + i as i64 * OVERVIEW_SEGMENT_SECS,
+                damage_out: out,
+                damage_in: inc,
+                mining,
+            })
+            .collect()
     }
 }
 
 /// Bucket parsed events into [`SUMMARY_BUCKETS`] equal-width time slices
-/// across their span. Pure — no file IO. Test-only: it exercises the shared
-/// [`buckets_from_raw`] core against realistic in-memory `DpsEvent`s;
+/// across their span (plus the fixed 1-minute segments, #985). Pure — no
+/// file IO. Test-only: it exercises the shared [`buckets_from_raw`] +
+/// [`SegmentAcc`] cores against realistic in-memory `DpsEvent`s;
 /// [`dps_log_summary`] itself calls the streaming [`stream_log_summary`]
 /// instead, so production never holds the full event vec.
 #[cfg(test)]
@@ -551,7 +627,9 @@ fn bucket_events(events: &[super::parser::DpsEvent]) -> LogSummary {
     let bucket_secs = (span / SUMMARY_BUCKETS as f64).max(1.0);
 
     let mut raw = vec![(0.0f64, 0.0f64, 0.0f64); SUMMARY_BUCKETS];
+    let mut segs = SegmentAcc::new(start, end);
     for ev in events {
+        segs.add(ev);
         let idx = (((ev.ts - start) as f64 / bucket_secs) as usize).min(SUMMARY_BUCKETS - 1);
         let slot = &mut raw[idx];
         match ev.kind {
@@ -561,7 +639,7 @@ fn bucket_events(events: &[super::parser::DpsEvent]) -> LogSummary {
             _ => {}
         }
     }
-    buckets_from_raw(start, end, bucket_secs, raw)
+    buckets_from_raw(start, end, bucket_secs, raw, segs.finish())
 }
 
 /// First streaming pass over `file`: find the min/max event timestamp
@@ -609,6 +687,7 @@ async fn stream_log_summary(app: &AppHandle, file: &str) -> Result<LogSummary, S
     let mut ore_vol: HashMap<String, f64> = HashMap::new();
 
     let mut raw = vec![(0.0f64, 0.0f64, 0.0f64); SUMMARY_BUCKETS];
+    let mut segs = SegmentAcc::new(start, end);
     let handle = tokio::fs::File::open(file)
         .await
         .map_err(|e| e.to_string())?;
@@ -627,6 +706,7 @@ async fn stream_log_summary(app: &AppHandle, file: &str) -> Result<LogSummary, S
                 };
                 ev.volume = ev.amount as f64 * per_unit;
             }
+            segs.add(&ev);
             let idx = (((ev.ts - start) as f64 / bucket_secs) as usize).min(SUMMARY_BUCKETS - 1);
             let slot = &mut raw[idx];
             match ev.kind {
@@ -637,7 +717,13 @@ async fn stream_log_summary(app: &AppHandle, file: &str) -> Result<LogSummary, S
             }
         }
     }
-    Ok(buckets_from_raw(start, end, bucket_secs, raw))
+    Ok(buckets_from_raw(
+        start,
+        end,
+        bucket_secs,
+        raw,
+        segs.finish(),
+    ))
 }
 
 /// Time span + activity-density buckets for `file`, for the playback timeline
@@ -1135,6 +1221,49 @@ mod tests {
         assert_eq!(summary.start, 1000);
         assert_eq!(summary.end, 1000);
         assert_eq!(summary.buckets[0].damage_out, 1.0);
+    }
+
+    #[test]
+    fn overview_segments_are_epoch_aligned_contiguous_and_absolute() {
+        // Span 90..=130: starts mid-minute (partial first), ends mid-minute
+        // (partial last) — both still land in epoch-aligned 60s segments.
+        let events = vec![
+            ev(90, EventKind::DamageOut, 10, 0.0),
+            ev(110, EventKind::DamageOut, 15, 0.0),
+            ev(125, EventKind::DamageIn, 7, 0.0),
+            ev(130, EventKind::Mining, 34, 3.4),
+        ];
+        let summary = bucket_events(&events);
+        let segs = &summary.segments;
+        // Grid: [60, 120), [120, 180) — aligned, contiguous, covering the span.
+        assert_eq!(
+            segs.iter().map(|s| s.start).collect::<Vec<_>>(),
+            vec![60, 120]
+        );
+        assert!(segs.iter().all(|s| s.start % OVERVIEW_SEGMENT_SECS == 0));
+        // Absolute sums, not normalized.
+        assert_eq!(segs[0].damage_out, 25.0);
+        assert_eq!(segs[0].damage_in, 0.0);
+        assert_eq!(segs[1].damage_in, 7.0);
+        assert_eq!(segs[1].mining, 3.4);
+    }
+
+    #[test]
+    fn overview_segments_grow_by_whole_minutes_without_rebucketing_history() {
+        // The same prefix of events yields identical leading segments whether
+        // the log has grown or not — fixed grid, unlike the span÷N strip.
+        let prefix = vec![
+            ev(60, EventKind::DamageOut, 10, 0.0),
+            ev(100, EventKind::DamageOut, 5, 0.0),
+        ];
+        let mut grown = prefix.clone();
+        grown.push(ev(400, EventKind::DamageIn, 9, 0.0));
+        let a = bucket_events(&prefix);
+        let b = bucket_events(&grown);
+        assert_eq!(a.segments[0], b.segments[0]);
+        assert_eq!(b.segments.len(), 6); // [60..420) in whole minutes
+        assert_eq!(b.segments.last().unwrap().start, 360);
+        assert_eq!(b.segments.last().unwrap().damage_in, 9.0);
     }
 
     #[test]

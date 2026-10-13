@@ -1,4 +1,9 @@
-import type { DpsBucket, DpsEvent, DpsTick } from "../../lib/api";
+import type {
+  DpsBucket,
+  DpsEvent,
+  DpsOverviewSegment,
+  DpsTick,
+} from "../../lib/api";
 import { formatInt } from "../../lib/format";
 
 export type Mode = "live" | "playback";
@@ -206,3 +211,63 @@ export const TIMELINE_COLORS = {
   damageIn: "#f87171",
   mining: "#fcd34d",
 } as const;
+
+// --- Overview segments (#985): fixed 1-minute grid, 10^x auto-fit zoom ---
+
+/** Width of one base overview segment (s) — mirrors the backend's grid. */
+export const OVERVIEW_SEGMENT_SECS = 60;
+/** Most bars the strip draws: the auto-fit picks the smallest 10^x-minute
+ *  grouping that stays under this (960 logical px ÷ ~6 px per bar). */
+export const OVERVIEW_MAX_BARS = 160;
+
+/** The grouping width (s) for a window: the smallest `60 × 10^x` whose bar
+ *  count fits the strip. 1 minute is the floor; levels only step in powers
+ *  of ten (1 min → 10 min → 100 min → …). */
+export function overviewGroupSecs(windowSecs: number): number {
+  let g = OVERVIEW_SEGMENT_SECS;
+  while (Math.ceil(Math.max(1, windowSecs) / g) > OVERVIEW_MAX_BARS) {
+    g *= 10;
+  }
+  return g;
+}
+
+/** Snap a window outward to whole group edges at width `groupSecs`. */
+export function snapWindow(
+  start: number,
+  end: number,
+  groupSecs: number,
+): { start: number; end: number } {
+  const s = Math.floor(start / groupSecs) * groupSecs;
+  const e = Math.ceil(Math.max(end, start + 1) / groupSecs) * groupSecs;
+  return { start: s, end: e };
+}
+
+/** Sum the base 1-minute segments into contiguous groups of `groupSecs`
+ *  covering `[winStart, winEnd)` (both multiples of `groupSecs`). Minutes
+ *  with no segment (outside the log, or idle) contribute zero, so the bar
+ *  count is pure arithmetic: `(winEnd - winStart) / groupSecs`. */
+export function groupOverview(
+  segments: DpsOverviewSegment[],
+  winStart: number,
+  winEnd: number,
+  groupSecs: number,
+): DpsOverviewSegment[] {
+  const count = Math.max(1, Math.round((winEnd - winStart) / groupSecs));
+  const groups: DpsOverviewSegment[] = Array.from(
+    { length: count },
+    (_, i) => ({
+      start: winStart + i * groupSecs,
+      damageOut: 0,
+      damageIn: 0,
+      mining: 0,
+    }),
+  );
+  for (const s of segments) {
+    if (s.start < winStart || s.start >= winEnd) continue;
+    const g = groups[Math.floor((s.start - winStart) / groupSecs)];
+    g.damageOut += s.damageOut;
+    g.damageIn += s.damageIn;
+    g.mining += s.mining;
+  }
+  return groups;
+}
