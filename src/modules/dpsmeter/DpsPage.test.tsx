@@ -105,6 +105,14 @@ const SUMMARY: DpsLogSummary = {
     damageIn: 0,
     mining: 0,
   })),
+  // Fixed 1-minute segments over the same 600s span (SUMMARY_START is a
+  // multiple of 60, so the grid starts exactly there).
+  segments: Array.from({ length: 10 }, (_, i) => ({
+    start: SUMMARY_START + i * 60,
+    damageOut: i === 5 ? 1000 : 0,
+    damageIn: 0,
+    mining: 0,
+  })),
 };
 
 function renderInPlayback() {
@@ -185,12 +193,13 @@ describe("DpsPage — playback timeline", () => {
     });
   });
 
-  it("rounds a fractional parked seek to an integer i64 when playback starts", async () => {
+  it("snaps a parked seek to the nearest 1-minute segment edge (#985)", async () => {
     renderInPlayback();
     await screen.findByText("dmg out");
 
-    // A fractional timestamp (as the slider can emit) must not reach the
-    // backend verbatim — Rust's `seek_ts: i64` rejects floats.
+    // A fractional, off-grid timestamp (as the slider can emit) must reach
+    // the backend as a whole-minute segment edge — Rust's `seek_ts: i64`
+    // rejects floats, and #985 pins seeks to the segment grid.
     const slider = screen.getByRole("slider", { name: "Playback position" });
     const fractional = SUMMARY_START + 123.565;
     fireEvent.change(slider, { target: { value: String(fractional) } });
@@ -202,8 +211,8 @@ describe("DpsPage — playback timeline", () => {
         .reverse()
         .find(([cmd]) => cmd === "dps_playback");
       const args = call?.[1] as { settings: DpsPlaybackSettings };
-      expect(args.settings.seekTs).toBe(Math.round(fractional));
-      expect(Number.isInteger(args.settings.seekTs)).toBe(true);
+      expect(args.settings.seekTs).toBe(SUMMARY_START + 120);
+      expect((args.settings.seekTs ?? 0) % 60).toBe(0);
     });
   });
 
