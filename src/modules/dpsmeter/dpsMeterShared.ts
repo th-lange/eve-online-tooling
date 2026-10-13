@@ -215,16 +215,46 @@ export const SOURCE_COLORS = [
   "#e879f9", // fuchsia
 ];
 
-// How many combat-log lines to keep on screen — generous enough to scroll
-// back through a real fight without unbounded memory growth.
+// Combat-log line cap for the PVP fight overlay's footer — a fight is
+// bounded (the bucket buffer freezes at 10 min), so a rolling window is
+// plenty there. The DPS meter page keeps the whole session uncapped so the
+// log always covers the same span as the bucket chart (#1001).
 export const LOG_BUFFER = 500;
 
 /** Append a batch of combat-log events (one `dps://events` payload is
- *  everything a single poll parsed, so more than one often arrives at
- *  once) to the rolling log, dropping the oldest past `LOG_BUFFER`. */
-export function appendEvents(prev: DpsEvent[], batch: DpsEvent[]): DpsEvent[] {
-  const next = prev.concat(batch);
-  return next.length > LOG_BUFFER ? next.slice(next.length - LOG_BUFFER) : next;
+ *  everything a single poll parsed, so more than one often arrives at once).
+ *  With `cap` set, the oldest lines past it are dropped (the fight overlay's
+ *  rolling footer); without it the log keeps the whole session, in lockstep
+ *  with the unbounded bucket buffer (#1001). */
+export function appendEvents(
+  prev: DpsEvent[],
+  batch: DpsEvent[],
+  cap?: number,
+): DpsEvent[] {
+  const next = batch.length === 0 ? prev : prev.concat(batch);
+  return cap != null && next.length > cap
+    ? next.slice(next.length - cap)
+    : next;
+}
+
+/** The session's events grouped onto the 5 s bucket grid, in time order —
+ *  the shared identity between the combat log and the charts (#1000): group
+ *  `start` is the bucket id (`bucketStartOf`), so a log group, a chart
+ *  bucket, and the cursor all name the same thing. */
+export type EventBucketGroup = { start: number; events: DpsEvent[] };
+
+export function groupEventsByBucket(events: DpsEvent[]): EventBucketGroup[] {
+  const groups: EventBucketGroup[] = [];
+  for (const ev of events) {
+    const start = bucketStartOf(ev.ts);
+    const last = groups[groups.length - 1];
+    if (last && last.start === start) {
+      last.events.push(ev);
+    } else {
+      groups.push({ start, events: [ev] });
+    }
+  }
+  return groups;
 }
 
 // Finest mining bucket granularity (s). Volumes accumulate at this resolution;

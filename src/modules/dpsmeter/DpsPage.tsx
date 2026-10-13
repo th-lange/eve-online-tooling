@@ -20,9 +20,10 @@ export function DpsPage() {
     STORAGE_KEYS.dpsCombatLogCollapsed,
     false,
   );
-  // The time of the combat log's centre line — the chart highlights the single
-  // closest bucket (null = auto-scrolled to the live tail).
-  const [logMarkTs, setLogMarkTs] = useState<number | null>(null);
+  // The shared bucket cursor (#1001): the bucket start of the log group at
+  // the viewport centre — the charts highlight it, the log tints it
+  // (null = auto-scrolled to the live tail).
+  const [cursor, setCursor] = useState<number | null>(null);
 
   return (
     <Page>
@@ -225,7 +226,7 @@ export function DpsPage() {
         outSeries={dps.outSeries}
         inSeries={dps.inSeries}
         combinedSeries={dps.combinedSeries}
-        markTs={logMarkTs}
+        markTs={cursor}
       />
 
       {/* Mining overview — only once this session has actually mined. History
@@ -250,7 +251,8 @@ export function DpsPage() {
         events={dps.logEvents}
         collapsed={logCollapsed}
         onToggleCollapsed={() => setLogCollapsed(!logCollapsed)}
-        onVisibleCenterChange={setLogMarkTs}
+        cursor={cursor}
+        onVisibleCenterChange={setCursor}
         className="mt-4"
       />
 

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { DpsEvent } from "../../lib/api";
-import { appendEvents, LOG_BUFFER } from "./dpsMeterShared";
+import {
+  appendEvents,
+  groupEventsByBucket,
+  LOG_BUFFER,
+} from "./dpsMeterShared";
 import { eventToneClass, formatEventLine } from "./CombatLogPanel";
 
 function ev(partial: Partial<DpsEvent>): DpsEvent {
@@ -19,12 +23,16 @@ function ev(partial: Partial<DpsEvent>): DpsEvent {
 }
 
 describe("appendEvents", () => {
-  it("appends a batch and caps the buffer at LOG_BUFFER", () => {
-    const next = appendEvents([ev({})], [ev({}), ev({})]);
-    expect(next).toHaveLength(3);
-
+  it("appends uncapped by default — the page log keeps the whole session", () => {
     const full = Array.from({ length: LOG_BUFFER }, () => ev({}));
-    const overflowed = appendEvents(full, [ev({ amount: 999 })]);
+    const next = appendEvents(full, [ev({ amount: 999 })]);
+    expect(next).toHaveLength(LOG_BUFFER + 1);
+    expect(next[next.length - 1].amount).toBe(999);
+  });
+
+  it("caps at the given limit — the fight overlay's rolling footer", () => {
+    const full = Array.from({ length: LOG_BUFFER }, () => ev({}));
+    const overflowed = appendEvents(full, [ev({ amount: 999 })], LOG_BUFFER);
     expect(overflowed).toHaveLength(LOG_BUFFER);
     // The oldest entry was dropped, the new one kept at the tail.
     expect(overflowed[overflowed.length - 1].amount).toBe(999);
@@ -32,7 +40,27 @@ describe("appendEvents", () => {
 
   it("is a no-op append for an empty batch", () => {
     const prev = [ev({})];
-    expect(appendEvents(prev, [])).toEqual(prev);
+    expect(appendEvents(prev, [])).toBe(prev);
+  });
+});
+
+describe("groupEventsByBucket", () => {
+  it("groups time-ordered events onto the 5 s grid, keyed by bucket start", () => {
+    const events = [
+      ev({ ts: 1000 }),
+      ev({ ts: 1003 }),
+      ev({ ts: 1005 }),
+      ev({ ts: 1012 }), // bucket 1010 — the empty 1005..1010 gap is no group
+    ];
+    const groups = groupEventsByBucket(events);
+    expect(groups.map((g) => g.start)).toEqual([1000, 1005, 1010]);
+    expect(groups[0].events).toHaveLength(2);
+    expect(groups[1].events).toHaveLength(1);
+    expect(groups[2].events[0].ts).toBe(1012);
+  });
+
+  it("returns no groups for an empty log", () => {
+    expect(groupEventsByBucket([])).toEqual([]);
   });
 });
 

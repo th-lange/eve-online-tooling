@@ -24,6 +24,7 @@ import { Modal } from "../../components/Modal";
 import { CombatLogPanel } from "../dpsmeter/CombatLogPanel";
 import {
   BUCKET_SECS,
+  LOG_BUFFER,
   appendEvents,
   nearestBucketStart,
   smoothSeries,
@@ -468,6 +469,7 @@ function FightPanel({
           events={events}
           collapsed={logCollapsed}
           onToggleCollapsed={onToggleLogCollapsed}
+          cursor={logMarkTs}
           onVisibleCenterChange={onLogVisibleCenterChange}
           maxHeightClass="max-h-32"
           className="border-none bg-transparent p-0"
@@ -684,7 +686,8 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     }
     let cancelled = false;
     onDpsEvents((batch) => {
-      if (!cancelled) setFightLogEvents((prev) => appendEvents(prev, batch));
+      if (!cancelled)
+        setFightLogEvents((prev) => appendEvents(prev, batch, LOG_BUFFER));
     }).then((fn) => {
       if (cancelled) fn();
       else unlistenEventsRef.current = fn;

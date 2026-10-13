@@ -1,7 +1,7 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { DpsEvent } from "../../lib/api";
-import { formatClock } from "./dpsMeterShared";
+import { formatClock, groupEventsByBucket } from "./dpsMeterShared";
 
 /** Render one parsed combat-log line as plain English, e.g.
  *  "450 dmg → Some Pilot (Caracal) — Heavy Missile Launcher II [Wrecks]".
@@ -52,14 +52,18 @@ export function eventToneClass(e: DpsEvent): string {
   return e.kind.endsWith("Out") ? "text-sky-400" : "text-rose-400";
 }
 
-/** Collapsible, auto-scrolling combat log: one line per parsed event, newest
- *  at the bottom. Shared between the DPS meter page and the PVP fight
- *  overlay — both already feed from the same `dps://events` stream, so this
- *  only needs the buffered array and open/close state as props. */
+/** Collapsible, auto-scrolling combat log, grouped onto the 5 s bucket grid
+ *  (#1002): a divider marks each bucket boundary, so "this chart bar = these
+ *  lines" is visible in the log itself, and the group whose bucket the shared
+ *  cursor names is tinted like the chart highlight. Shared between the DPS
+ *  meter page and the PVP fight overlay — both feed from the same
+ *  `dps://events` stream, so this only needs the buffered array, the cursor,
+ *  and open/close state as props. */
 export function CombatLogPanel({
   events,
   collapsed,
   onToggleCollapsed,
+  cursor,
   onVisibleCenterChange,
   className = "",
   maxHeightClass = "max-h-64",
@@ -67,11 +71,13 @@ export function CombatLogPanel({
   events: DpsEvent[];
   collapsed: boolean;
   onToggleCollapsed: () => void;
-  /** Fired as the user scrolls through history: the timestamp of the line at
-   *  the viewport's vertical centre, or `null` once back at the live tail (or
-   *  nothing to report — collapsed, empty). The parent chart highlights the
-   *  single bucket closest to this time. */
-  onVisibleCenterChange?: (ts: number | null) => void;
+  /** The shared bucket cursor — this group gets the chart highlight's tint. */
+  cursor?: number | null;
+  /** Fired as the user scrolls through history: the bucket start of the group
+   *  at the viewport's vertical centre, or `null` once back at the live tail
+   *  (or nothing to report — collapsed, empty). The parent chart highlights
+   *  the bucket closest to this time. */
+  onVisibleCenterChange?: (bucketStart: number | null) => void;
   className?: string;
   /** Tailwind max-height class for the scrolling list — the fight overlay's
    *  compact footer passes a shorter one than the DPS meter page. */
@@ -86,6 +92,8 @@ export function CombatLogPanel({
   // "user scrolled up" mid-animation and cancel itself.
   const programmaticScrollRef = useRef(false);
   const rafRef = useRef<number | null>(null);
+
+  const groups = useMemo(() => groupEventsByBucket(events), [events]);
 
   useEffect(() => {
     if (!collapsed && autoScroll) {
@@ -117,23 +125,23 @@ export function CombatLogPanel({
         return;
       }
       // Scrolled away from the live tail: stop yanking back to it, and report
-      // the timestamp of the line at the viewport's vertical centre — the
-      // chart highlights the single bucket closest to it.
+      // the bucket group at the viewport's vertical centre — group and chart
+      // bucket share the same id (the bucket start), so this maps exactly.
       if (autoScroll) setAutoScroll(false);
       const center = el.scrollTop + el.clientHeight / 2;
-      let ts: number | null = null;
+      let start: number | null = null;
       let bestDiff = Infinity;
       for (const child of el.children) {
-        const row = child as HTMLElement;
-        if (row.dataset.ts === undefined) continue;
-        const rowCenter = row.offsetTop + row.offsetHeight / 2;
-        const diff = Math.abs(rowCenter - center);
+        const group = child as HTMLElement;
+        if (group.dataset.bucket === undefined) continue;
+        const groupCenter = group.offsetTop + group.offsetHeight / 2;
+        const diff = Math.abs(groupCenter - center);
         if (diff < bestDiff) {
           bestDiff = diff;
-          ts = Number(row.dataset.ts);
+          start = Number(group.dataset.bucket);
         }
       }
-      onVisibleCenterChange?.(ts);
+      onVisibleCenterChange?.(start);
     });
   }
 
@@ -175,14 +183,29 @@ export function CombatLogPanel({
             <p className="py-2 text-zinc-600">No combat events yet.</p>
           ) : (
             <>
-              {events.map((e, i) => (
+              {groups.map((g, gi) => (
                 <div
-                  key={i}
-                  data-ts={e.ts}
-                  className={`py-0.5 ${eventToneClass(e)}`}
+                  key={`${g.start}:${gi}`}
+                  data-bucket={g.start}
+                  className={`rounded px-1 [content-visibility:auto] ${
+                    cursor === g.start ? "bg-indigo-500/10" : ""
+                  }`}
                 >
-                  <span className="text-zinc-600">{formatClock(e.ts)}</span>{" "}
-                  {formatEventLine(e)}
+                  <div
+                    className={`flex items-center gap-2 pt-1 text-[10px] ${
+                      cursor === g.start ? "text-indigo-400" : "text-zinc-600"
+                    }`}
+                  >
+                    <span className="h-px flex-1 bg-zinc-800" />
+                    {formatClock(g.start)}
+                    <span className="h-px flex-1 bg-zinc-800" />
+                  </div>
+                  {g.events.map((e, i) => (
+                    <div key={i} className={`py-0.5 ${eventToneClass(e)}`}>
+                      <span className="text-zinc-600">{formatClock(e.ts)}</span>{" "}
+                      {formatEventLine(e)}
+                    </div>
+                  ))}
                 </div>
               ))}
               <div ref={bottomRef} />

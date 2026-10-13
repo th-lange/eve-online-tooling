@@ -19,20 +19,20 @@ function ev(ts: number, pilot: string): DpsEvent {
 
 /** jsdom does no real layout, so scrollTop/scrollHeight/offsetTop/etc. are
  *  always 0 — override them per-instance to simulate a real scrolled list:
- *  `rowHeight`-tall rows stacked in event order inside a `clientHeight`-tall
- *  viewport, scrolled to `scrollTop`. */
+ *  `groupHeight`-tall bucket groups stacked in time order inside a
+ *  `clientHeight`-tall viewport, scrolled to `scrollTop`. */
 function stubGeometry(
   el: HTMLElement,
   {
     scrollTop,
     scrollHeight,
     clientHeight,
-    rowHeight = 20,
+    groupHeight = 120,
   }: {
     scrollTop: number;
     scrollHeight: number;
     clientHeight: number;
-    rowHeight?: number;
+    groupHeight?: number;
   },
 ) {
   Object.defineProperty(el, "scrollTop", {
@@ -49,13 +49,13 @@ function stubGeometry(
   });
   let i = 0;
   for (const child of el.children) {
-    if ((child as HTMLElement).dataset.ts === undefined) continue;
+    if ((child as HTMLElement).dataset.bucket === undefined) continue;
     Object.defineProperty(child, "offsetTop", {
-      value: i * rowHeight,
+      value: i * groupHeight,
       configurable: true,
     });
     Object.defineProperty(child, "offsetHeight", {
-      value: rowHeight,
+      value: groupHeight,
       configurable: true,
     });
     i++;
@@ -72,9 +72,10 @@ async function scrollAndFlush(list: HTMLElement) {
 }
 
 describe("CombatLogPanel scrolling", () => {
-  it("reports the centre line's time and pauses auto-scroll when scrolled away from the bottom", async () => {
+  it("reports the centre group's bucket start and pauses auto-scroll when scrolled away from the bottom", async () => {
     vi.useFakeTimers();
     try {
+      // ts 1000–1009 → two bucket groups: 1000 (1000–1004) and 1005 (1005–1009).
       const events = Array.from({ length: 10 }, (_, i) =>
         ev(1000 + i, `p${i}`),
       );
@@ -92,11 +93,11 @@ describe("CombatLogPanel scrolling", () => {
       // ignore it" grace window elapse before simulating a real user scroll.
       await act(() => vi.advanceTimersByTimeAsync(650));
 
-      // 10 rows × 20px = 200px content in a 50px viewport, scrolled to 80px:
-      // viewport centre = 105px → row 5 (centre 110, ts 1005) is the closest.
+      // Two 120px groups (240px content) in a 50px viewport, scrolled to
+      // 130px: viewport centre = 155px → group 1005 (centre 180) is closest.
       stubGeometry(list, {
-        scrollTop: 80,
-        scrollHeight: 200,
+        scrollTop: 130,
+        scrollHeight: 240,
         clientHeight: 50,
       });
       await scrollAndFlush(list);
@@ -108,6 +109,24 @@ describe("CombatLogPanel scrolling", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("tints the group the shared cursor names and draws bucket dividers", () => {
+    const events = [ev(1000, "a"), ev(1006, "b")];
+    const { container } = render(
+      <CombatLogPanel
+        events={events}
+        collapsed={false}
+        onToggleCollapsed={() => {}}
+        cursor={1005}
+      />,
+    );
+    const groups = container.querySelectorAll("[data-bucket]");
+    expect(groups).toHaveLength(2);
+    expect((groups[1] as HTMLElement).className).toContain("bg-indigo-500/10");
+    expect((groups[0] as HTMLElement).className).not.toContain(
+      "bg-indigo-500/10",
+    );
   });
 
   it("clears the marker and re-enables auto-scroll once scrolled back to the bottom", async () => {
