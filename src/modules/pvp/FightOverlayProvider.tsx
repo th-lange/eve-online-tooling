@@ -4,13 +4,13 @@ import {
   pvpProfiles,
   characterShip,
   pvpPilotFits,
-  onDpsTick,
+  onDpsBuckets,
   onDpsEvents,
   dpsStart,
   fittingListLocal,
   fittingSimulate,
+  type DpsBucket,
   type DpsEvent,
-  type DpsTick,
   type Fit,
   type WeaponRange,
   type CharacterShip,
@@ -22,7 +22,11 @@ import { FIGHT_OVERLAY_SHIP_POLL_INTERVAL_MS } from "../../lib/refreshIntervals"
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { Modal } from "../../components/Modal";
 import { CombatLogPanel } from "../dpsmeter/CombatLogPanel";
-import { appendEvents, nearestTickIndex } from "../dpsmeter/dpsMeterShared";
+import {
+  BUCKET_SECS,
+  appendEvents,
+  bucketStartOf,
+} from "../dpsmeter/dpsMeterShared";
 import { FightOverlayContext } from "./fightOverlayContext";
 
 /** Metres → compact km/m string. Used in AttackerCard and FightPanel. */
@@ -30,93 +34,114 @@ function km(m: number): string {
   return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
 }
 
-/** Whether a tick shows live combat: damage dealt/taken, or active tackle. The
- *  overlay stops accumulating ticks once combat ends (all of these fall to
- *  zero), so the chart freezes on the fight instead of scrolling a flat zero
- *  line as the idle capture keeps ticking. Exported for tests. */
-export function isCombatTick(t: DpsTick): boolean {
+/** Whether a bucket shows live combat: damage dealt/taken, or active tackle.
+ *  The overlay stops accumulating once combat ends, so the chart freezes on
+ *  the fight instead of scrolling an empty grid as the idle capture keeps
+ *  emitting empty buckets. Exported for tests. */
+export function isCombatBucket(b: DpsBucket): boolean {
   return (
-    t.dpsOut > 0 ||
-    t.dpsIn > 0 ||
-    t.byPilot.some((p) => p.scramIn || p.pointIn || p.scramOut || p.pointOut)
+    b.damageOut > 0 ||
+    b.damageIn > 0 ||
+    b.byPilot.some((p) => p.scramIn || p.pointIn || p.scramOut || p.pointOut)
   );
 }
 
-/** Overlay tick-buffer reducer: begin on first combat, keep appending while the
- *  fight is live (capped at 120, incl. the final wind-down-to-zero tick), then
- *  freeze once combat ends — and **stay** frozen, no matter what arrives next,
- *  until the caller explicitly clears the buffer (the panel's Dismiss button).
- *  Earlier this resumed into a brand-new one-tick buffer the moment any
- *  activity followed an idle tick, which silently threw away everything
- *  collected so far (the "Attackers"/"My weapons" columns going empty mid- or
- *  post-fight, #950) — a stray tick of quiet (common between volleys) was
- *  enough to trigger it. Now only Dismiss (or disabling the overlay) resets
- *  the buffer, so a fresh fight only ever starts from a deliberately-cleared
- *  slate. Exported for tests. */
-export function nextFightTicks(prev: DpsTick[], tick: DpsTick): DpsTick[] {
+/** Overlay bucket-buffer reducer (#986): begin on the first combat bucket,
+ *  keep appending while the fight is live (capped at 120 buckets = 10 min,
+ *  incl. the final empty wind-down bucket), then freeze after **one empty
+ *  bucket** (5 s of silence) — and **stay** frozen, no matter what arrives
+ *  next, until the caller explicitly clears the buffer (the panel's Dismiss
+ *  button). That only-Dismiss-resets rule is #950: a stray quiet moment
+ *  between volleys must never silently throw the collected fight away; on
+ *  the 5 s grid a quiet moment is a whole empty bucket, which is also the
+ *  freeze signal — so the freeze keeps the fight ON screen, and resumption
+ *  only ever starts from a deliberately-cleared slate. Exported for tests. */
+export function nextFightBuckets(
+  prev: DpsBucket[],
+  bucket: DpsBucket,
+): DpsBucket[] {
   if (prev.length === 0) {
-    return isCombatTick(tick) ? [tick] : prev;
+    return isCombatBucket(bucket) ? [bucket] : prev;
   }
-  // Already frozen: stays exactly as-is regardless of what this tick shows.
-  if (!isCombatTick(prev[prev.length - 1])) return prev;
-  // Still live (or this is the final idle tick that freezes it): append,
-  // capped at the last 120 (~60s at the 500ms tick rate).
-  return [...prev, tick].slice(-120);
+  // Already frozen: stays exactly as-is regardless of what arrives.
+  if (!isCombatBucket(prev[prev.length - 1])) return prev;
+  // Still live (or this is the final empty bucket that freezes it): append.
+  return [...prev, bucket].slice(-120);
 }
 
 // (audio cues use the shared cross-platform sound service — see lib/sound.ts)
 
 // ---------------------------------------------------------------- MiniDpsChart
 
-/** Mini rolling DPS chart (dpsOut green, dpsIn red) from accumulated ticks. */
+/** Mini DPS chart (out green, in red) over the fight's 5 s buckets. */
 function MiniDpsChart({
-  ticks,
+  buckets,
   markTs,
 }: {
-  ticks: DpsTick[];
-  /** See `DpsChart`'s `markTs` (DPS meter) — same idea, mirrored here for
-   *  the overlay's own combat log. */
+  buckets: DpsBucket[];
+  /** The combat-log footer's scroll position — shades the enclosing 5 s
+   *  bucket, same arithmetic as the DPS meter's chart (#986). */
   markTs?: number | null;
 }) {
-  if (ticks.length < 2)
+  if (buckets.length < 2)
     return <div className="h-12 w-full rounded bg-zinc-950" />;
   const W = 100,
     H = 48,
     pad = 2;
   const w = W - pad * 2,
     h = H - pad * 2;
-  const maxVal = Math.max(1, ...ticks.flatMap((t) => [t.dpsOut, t.dpsIn]));
-  const x = (i: number) => pad + (i / (ticks.length - 1)) * w;
+  const t0 = buckets[0].start;
+  const span = Math.max(BUCKET_SECS, buckets[buckets.length - 1].end - t0);
+  const maxVal = Math.max(
+    1,
+    ...buckets.flatMap((b) => [
+      b.damageOut / BUCKET_SECS,
+      b.damageIn / BUCKET_SECS,
+    ]),
+  );
+  // x by bucket *time* (midpoint), not index — the grid has no holes, but
+  // time-based placement keeps this honest if a frozen buffer is re-rendered.
+  const x = (ts: number) => pad + ((ts - t0) / span) * w;
   const y = (v: number) => pad + h - (v / maxVal) * h;
-  const path = (field: "dpsOut" | "dpsIn") =>
-    ticks
-      .map((t, i) => `${x(i).toFixed(1)},${y(t[field]).toFixed(1)}`)
+  const path = (field: "damageOut" | "damageIn") =>
+    buckets
+      .map(
+        (b) =>
+          `${x(b.start + BUCKET_SECS / 2).toFixed(1)},${y(
+            b[field] / BUCKET_SECS,
+          ).toFixed(1)}`,
+      )
       .join(" ");
-  const markIndex = markTs == null ? null : nearestTickIndex(ticks, markTs);
-  const markX = markIndex == null ? null : x(markIndex);
+  const markStart = markTs == null ? null : bucketStartOf(markTs);
+  const markX =
+    markStart == null || markStart < t0 || markStart >= t0 + span
+      ? null
+      : x(markStart);
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded">
       <rect width={W} height={H} fill="#09090b" rx="3" />
       <polyline
-        points={path("dpsOut")}
+        points={path("damageOut")}
         fill="none"
         stroke="#34d399"
         strokeWidth="1.5"
       />
       <polyline
-        points={path("dpsIn")}
+        points={path("damageIn")}
         fill="none"
         stroke="#f87171"
         strokeWidth="1.5"
       />
       {markX != null && (
-        <line
-          x1={markX}
-          x2={markX}
-          y1={pad}
-          y2={H - pad}
+        <rect
+          x={markX}
+          y={pad}
+          width={(BUCKET_SECS / span) * w}
+          height={H - pad * 2}
+          fill="#818cf8"
+          fillOpacity="0.25"
           stroke="#818cf8"
-          strokeWidth="1"
+          strokeWidth="0.5"
         />
       )}
     </svg>
@@ -214,7 +239,7 @@ function AttackerCard({
 
 /** Fixed bottom-of-screen panel that appears when a fight is detected. */
 function FightPanel({
-  ticks,
+  buckets,
   events,
   logCollapsed,
   onToggleLogCollapsed,
@@ -231,7 +256,7 @@ function FightPanel({
   droneReminder,
   onDismiss,
 }: {
-  ticks: DpsTick[];
+  buckets: DpsBucket[];
   events: DpsEvent[];
   logCollapsed: boolean;
   onToggleLogCollapsed: () => void;
@@ -257,7 +282,7 @@ function FightPanel({
   droneReminder: boolean;
   onDismiss: () => void;
 }) {
-  const latestTick = ticks[ticks.length - 1];
+  const latestBucket = buckets[buckets.length - 1];
   // Unique weapon ranges (deduped by optimal+falloff — all copies of the same
   // weapon type have identical ranges, so one representative is enough).
   const uniqueRanges = useMemo(() => {
@@ -286,15 +311,15 @@ function FightPanel({
             <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-rose-500" />
             Active Fight
           </span>
-          {latestTick && (
+          {latestBucket && (
             <span className="text-xs text-zinc-400">
               In{" "}
               <span className="tabular-nums text-rose-400">
-                {Math.round(latestTick.dpsIn)}
+                {Math.round(latestBucket.damageIn / BUCKET_SECS)}
               </span>{" "}
               · Out{" "}
               <span className="tabular-nums text-emerald-400">
-                {Math.round(latestTick.dpsOut)}
+                {Math.round(latestBucket.damageOut / BUCKET_SECS)}
               </span>{" "}
               dps
             </span>
@@ -422,7 +447,7 @@ function FightPanel({
           <h3 className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
             DPS
           </h3>
-          <MiniDpsChart ticks={ticks} markTs={logMarkTs} />
+          <MiniDpsChart buckets={buckets} markTs={logMarkTs} />
           <div className="flex gap-3 text-[10px] text-zinc-600">
             <span>
               <span className="text-emerald-500">▬</span> out
@@ -456,7 +481,7 @@ function FightPanel({
  *  exercise every part of the panel (attackers with ships/weapons, my weapons,
  *  ranges, known ship, drone reminder) without a live fight. */
 interface TestFight {
-  ticks: DpsTick[];
+  buckets: DpsBucket[];
   events: DpsEvent[];
   attackers: {
     name: string;
@@ -484,14 +509,18 @@ function buildTestFight(): TestFight {
   };
   let out = rnd(90, 130);
   let inc = rnd(25, 55);
-  const ticks: DpsTick[] = Array.from({ length: 30 }, (_, i) => {
+  // 30 finalized 5 s buckets (2.5 min of fight) on the epoch-aligned grid.
+  const buckets: DpsBucket[] = Array.from({ length: 30 }, (_, i) => {
     out = Math.max(0, out + rnd(-15, 15));
     inc = Math.max(0, inc + rnd(-10, 10));
+    const start = 1_700_000_000 + i * BUCKET_SECS;
     return {
-      dpsOut: out,
-      dpsIn: inc,
-      logiOut: 0,
-      logiIn: 0,
+      start,
+      end: start + BUCKET_SECS,
+      damageOut: out * BUCKET_SECS,
+      damageIn: inc * BUCKET_SECS,
+      repOut: 0,
+      repIn: 0,
       capTransferOut: 0,
       capTransferIn: 0,
       capWarfareOut: 0,
@@ -503,19 +532,17 @@ function buildTestFight(): TestFight {
         { name: "Caldari Navy Inferno Rocket", dps: out, kind: "Rocket" },
       ],
       byPilot: [],
-      windowSecs: 20,
-      at: 1_700_000_000 + i,
     };
   });
-  // Sample combat log — one outgoing hit per tick, an incoming hit every third
-  // (two attackers alternating), plus one scram/point pair, so the Test
-  // preview exercises every line kind the real log renders.
+  // Sample combat log — one outgoing hit per bucket, an incoming hit every
+  // third (two attackers alternating), plus one scram/point pair, so the
+  // Test preview exercises every line kind the real log renders.
   const qualities = ["Hits", "Grazes", "Penetrates", "Wrecks", "Smashes"];
-  const events: DpsEvent[] = ticks.flatMap((t, i) => {
+  const events: DpsEvent[] = buckets.flatMap((b, i) => {
     const dealt: DpsEvent = {
-      ts: t.at,
+      ts: b.start,
       kind: "damageOut",
-      amount: Math.max(1, Math.round(t.dpsOut / 2)),
+      amount: Math.max(1, Math.round(b.damageOut / BUCKET_SECS / 2)),
       pilot: i % 2 === 0 ? "John Doe" : "Jane Doe",
       ship: i % 2 === 0 ? "Kestrel" : "Incursus",
       weapon: "Caldari Navy Inferno Rocket",
@@ -525,9 +552,9 @@ function buildTestFight(): TestFight {
     };
     if (i % 3 !== 0) return [dealt];
     const taken: DpsEvent = {
-      ts: t.at,
+      ts: b.start,
       kind: "damageIn",
-      amount: Math.max(1, Math.round(t.dpsIn / 2)),
+      amount: Math.max(1, Math.round(b.damageIn / BUCKET_SECS / 2)),
       pilot: i % 2 === 0 ? "John Doe" : "Jane Doe",
       ship: i % 2 === 0 ? "Kestrel" : "Incursus",
       weapon: i % 2 === 0 ? "Inferno Rage Rocket" : "Light Ion Blaster II",
@@ -562,7 +589,7 @@ function buildTestFight(): TestFight {
     },
   );
   return {
-    ticks,
+    buckets,
     events,
     attackers: [
       {
@@ -603,7 +630,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     "pvp.fightScan",
     false,
   );
-  const [fightTicks, setFightTicks] = useState<DpsTick[]>([]);
+  const [fightBuckets, setFightBuckets] = useState<DpsBucket[]>([]);
   const [fightLogEvents, setFightLogEvents] = useState<DpsEvent[]>([]);
   const [logCollapsed, setLogCollapsed] = usePersistentState<boolean>(
     STORAGE_KEYS.fightOverlayCombatLogCollapsed,
@@ -622,12 +649,14 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     if (!enabled) {
       unlistenRef.current?.();
       unlistenRef.current = null;
-      setFightTicks([]);
+      setFightBuckets([]);
       return;
     }
     let cancelled = false;
-    onDpsTick((tick) => {
-      if (!cancelled) setFightTicks((prev) => nextFightTicks(prev, tick));
+    onDpsBuckets((batch) => {
+      if (!cancelled) {
+        setFightBuckets((prev) => batch.reduce(nextFightBuckets, prev));
+      }
     }).then((fn) => {
       if (cancelled) fn();
       else unlistenRef.current = fn;
@@ -639,12 +668,10 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     };
   }, [enabled]);
 
-  // Combat-log view alongside the tick chart — the same batched events, kept
-  // for as long as `fightTicks` is (cleared on the same two resets: disabling
-  // the overlay and Dismiss). Not gated by the tick freeze logic: once a fight
-  // freezes, any further activity is rare and still truthful to show, and
-  // trying to detect the freeze from this independent event stream would lag
-  // a poll cycle behind the tick that actually freezes it.
+  // Combat-log view alongside the bucket chart — the same batched events,
+  // kept for as long as `fightBuckets` is (cleared on the same two resets:
+  // disabling the overlay and Dismiss). Not gated by the freeze logic: once
+  // a fight freezes, any further activity is rare and still truthful to show.
   useEffect(() => {
     if (!enabled) {
       unlistenEventsRef.current?.();
@@ -683,24 +710,24 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     void dpsStart({ gamelogsDir, windowSecs: 10 }).catch(() => {});
   }, [enabled, gamelogsDir]);
 
-  const latestTick = fightTicks[fightTicks.length - 1];
-  const latestAt = latestTick?.at ?? 0;
+  const latestBucket = fightBuckets[fightBuckets.length - 1];
+  const latestAt = latestBucket?.end ?? 0;
 
-  // Active attackers: player pilots dealing incoming damage in the last 15 s.
-  // NPCs are filtered by requiring `ship` — EVE always emits `(SHIP)` for
-  // player characters in gamelogs; NPCs omit it.
+  // Active attackers: player pilots dealing incoming damage in the last 15 s
+  // (three buckets). NPCs are filtered by requiring `ship` — EVE always emits
+  // `(SHIP)` for player characters in gamelogs; NPCs omit it.
   const activeAttackers = useMemo(() => {
     const seen = new Map<
       string,
       { dpsIn: number; lastAt: number; ship?: string; weapons: string[] }
     >();
-    for (const tick of fightTicks) {
-      for (const p of tick.byPilot) {
+    for (const bucket of fightBuckets) {
+      for (const p of bucket.byPilot) {
         if (p.dpsIn > 0) {
           const ex = seen.get(p.name);
           seen.set(p.name, {
             dpsIn: p.dpsIn,
-            lastAt: Math.max(tick.at, ex?.lastAt ?? 0),
+            lastAt: Math.max(bucket.end, ex?.lastAt ?? 0),
             // Live log data: ship is authoritative; accumulate unique weapons.
             ship: p.ship ?? ex?.ship,
             weapons: ex
@@ -724,7 +751,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
         ship,
         weapons,
       }));
-  }, [fightTicks, latestAt]);
+  }, [fightBuckets, latestAt]);
 
   // Sticky open latch: a detected fight opens the overlay and it STAYS open
   // until you dismiss it (or disable the feature). It no longer auto-hides
@@ -777,7 +804,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
 
   // Drone reminder: only when we know your ship (via API) and its fit carries
   // drones, but no drone damage is landing in the current window.
-  const dronesFiring = (latestTick?.byWeapon ?? []).some((w) =>
+  const dronesFiring = (latestBucket?.byWeapon ?? []).some((w) =>
     (w.kind ?? "").includes("Drone"),
   );
   const fitHasDrones =
@@ -788,8 +815,8 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
   // Audio cues on state transitions (only while a real fight is live). Scram
   // and point come from the combat log; webs are never logged so there's no
   // web cue. Fires on the edge so it announces once per change, not per tick.
-  const scrammed = (latestTick?.byPilot ?? []).some((p) => p.scramIn);
-  const pointed = (latestTick?.byPilot ?? []).some((p) => p.pointIn);
+  const scrammed = (latestBucket?.byPilot ?? []).some((p) => p.scramIn);
+  const pointed = (latestBucket?.byPilot ?? []).some((p) => p.pointIn);
   const cuesRef = useRef({ scram: false, point: false, drones: false });
   useEffect(() => {
     if (!enabled || !fightActive) {
@@ -825,7 +852,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
           shows the sample; both are the same fixed panel. */}
       {testFight ? (
         <FightPanel
-          ticks={testFight.ticks}
+          buckets={testFight.buckets}
           events={testFight.events}
           logCollapsed={logCollapsed}
           onToggleLogCollapsed={() => setLogCollapsed(!logCollapsed)}
@@ -845,14 +872,14 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
       ) : (
         fightActive && (
           <FightPanel
-            ticks={fightTicks}
+            buckets={fightBuckets}
             events={fightLogEvents}
             logCollapsed={logCollapsed}
             onToggleLogCollapsed={() => setLogCollapsed(!logCollapsed)}
             logMarkTs={fightLogMarkTs}
             onLogVisiblePositionChange={setFightLogMarkTs}
             attackers={activeAttackers}
-            myWeapons={latestTick?.byWeapon ?? []}
+            myWeapons={latestBucket?.byWeapon ?? []}
             localFits={localFits.data ?? []}
             selectedFitId={selectedFitId}
             onSelectFit={setSelectedFitId}
@@ -864,7 +891,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
             droneReminder={droneReminder}
             onDismiss={() => {
               setFightOpen(false);
-              setFightTicks([]);
+              setFightBuckets([]);
               setFightLogEvents([]);
               setFightLogMarkTs(null);
             }}
