@@ -60,12 +60,18 @@ export function CombatLogPanel({
   events,
   collapsed,
   onToggleCollapsed,
+  onVisiblePositionChange,
   className = "",
   maxHeightClass = "max-h-64",
 }: {
   events: DpsEvent[];
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  /** Fired as the user scrolls through history: the timestamp of the
+   *  topmost visible line, or `null` once back at the live tail (or
+   *  nothing to report — collapsed, empty). Lets a parent chart show where
+   *  in time the log is currently scrolled to. */
+  onVisiblePositionChange?: (ts: number | null) => void;
   className?: string;
   /** Tailwind max-height class for the scrolling list — the fight overlay's
    *  compact footer passes a shorter one than the DPS meter page. */
@@ -73,12 +79,58 @@ export function CombatLogPanel({
 }) {
   const [autoScroll, setAutoScroll] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  // Scrolling itself (the auto-scroll effect below) fires `scroll` events
+  // indistinguishable from the user dragging the scrollbar; without this,
+  // the very act of auto-scrolling to a new line would immediately read as
+  // "user scrolled up" mid-animation and cancel itself.
+  const programmaticScrollRef = useRef(false);
+  const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!collapsed && autoScroll) {
+      programmaticScrollRef.current = true;
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      const t = setTimeout(() => {
+        programmaticScrollRef.current = false;
+      }, 600);
+      return () => clearTimeout(t);
     }
   }, [events.length, autoScroll, collapsed]);
+
+  // Collapsing hides the log — any chart marker it was driving should go too.
+  useEffect(() => {
+    if (collapsed) onVisiblePositionChange?.(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collapsed]);
+
+  function handleScroll() {
+    if (programmaticScrollRef.current || rafRef.current != null) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      const el = containerRef.current;
+      if (!el) return;
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+      if (atBottom) {
+        if (!autoScroll) setAutoScroll(true);
+        onVisiblePositionChange?.(null);
+        return;
+      }
+      // Scrolled away from the live tail: stop yanking back to it, and
+      // report the topmost (at least partially) visible line's time.
+      if (autoScroll) setAutoScroll(false);
+      let ts: number | null = null;
+      for (const child of el.children) {
+        const row = child as HTMLElement;
+        if (row.dataset.ts === undefined) continue;
+        if (row.offsetTop + row.offsetHeight > el.scrollTop) {
+          ts = Number(row.dataset.ts);
+          break;
+        }
+      }
+      onVisiblePositionChange?.(ts);
+    });
+  }
 
   return (
     <div
@@ -110,6 +162,8 @@ export function CombatLogPanel({
       </div>
       {!collapsed && (
         <div
+          ref={containerRef}
+          onScroll={handleScroll}
           className={`${maxHeightClass} overflow-y-auto border-t border-zinc-800 px-3 py-2 font-mono text-xs`}
         >
           {events.length === 0 ? (
@@ -117,7 +171,11 @@ export function CombatLogPanel({
           ) : (
             <>
               {events.map((e, i) => (
-                <div key={i} className={`py-0.5 ${eventToneClass(e)}`}>
+                <div
+                  key={i}
+                  data-ts={e.ts}
+                  className={`py-0.5 ${eventToneClass(e)}`}
+                >
                   <span className="text-zinc-600">{formatClock(e.ts)}</span>{" "}
                   {formatEventLine(e)}
                 </div>

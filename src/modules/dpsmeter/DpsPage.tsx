@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Page, PageHeader } from "../../components/page";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { usePersistentState } from "../../lib/usePersistentState";
@@ -19,6 +20,9 @@ export function DpsPage() {
     STORAGE_KEYS.dpsCombatLogCollapsed,
     false,
   );
+  // Where the combat log is scrolled to, as a timestamp — drawn as a marker
+  // on the rate chart below (null = auto-scrolled to the live tail).
+  const [logMarkTs, setLogMarkTs] = useState<number | null>(null);
 
   return (
     <Page>
@@ -217,6 +221,7 @@ export function DpsPage() {
         outSeries={dps.outSeries}
         inSeries={dps.inSeries}
         combinedSeries={dps.combinedSeries}
+        markTs={logMarkTs}
       />
 
       {/* Mining overview — only once this session has actually mined. History
@@ -241,6 +246,7 @@ export function DpsPage() {
         events={dps.logEvents}
         collapsed={logCollapsed}
         onToggleCollapsed={() => setLogCollapsed(!logCollapsed)}
+        onVisiblePositionChange={setLogMarkTs}
         className="mt-4"
       />
 

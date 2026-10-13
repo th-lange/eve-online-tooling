@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { DpsEvent } from "../../lib/api";
-import { appendEvents, LOG_BUFFER } from "./dpsMeterShared";
+import type { DpsEvent, DpsTick } from "../../lib/api";
+import { appendEvents, LOG_BUFFER, nearestTickIndex } from "./dpsMeterShared";
 import { eventToneClass, formatEventLine } from "./CombatLogPanel";
 
 function ev(partial: Partial<DpsEvent>): DpsEvent {
@@ -15,6 +15,36 @@ function ev(partial: Partial<DpsEvent>): DpsEvent {
     ore: null,
     volume: 0,
     ...partial,
+  };
+}
+
+const hq = {
+  misses: 0,
+  glances: 0,
+  grazes: 0,
+  hits: 0,
+  penetrates: 0,
+  smashes: 0,
+  wrecks: 0,
+};
+
+function tick(at: number): DpsTick {
+  return {
+    at,
+    windowSecs: 10,
+    dpsOut: 0,
+    dpsIn: 0,
+    logiOut: 0,
+    logiIn: 0,
+    capWarfareOut: 0,
+    capWarfareIn: 0,
+    capTransferOut: 0,
+    capTransferIn: 0,
+    miningM3: 0,
+    hitsOut: hq,
+    hitsIn: hq,
+    byWeapon: [],
+    byPilot: [],
   };
 }
 
@@ -123,5 +153,20 @@ describe("eventToneClass", () => {
     expect(eventToneClass(ev({ kind: "mining", quality: null }))).toBe(
       "text-amber-400",
     );
+  });
+});
+
+describe("nearestTickIndex", () => {
+  it("picks the closest tick by time, breaking a tie toward the earlier one", () => {
+    const ticks = [tick(100), tick(110), tick(120), tick(130)];
+    expect(nearestTickIndex(ticks, 100)).toBe(0);
+    expect(nearestTickIndex(ticks, 113)).toBe(1);
+    expect(nearestTickIndex(ticks, 118)).toBe(2);
+    expect(nearestTickIndex(ticks, 999)).toBe(3); // clamps to the last tick
+    expect(nearestTickIndex(ticks, 115)).toBe(1); // exact midpoint — earlier wins
+  });
+
+  it("returns null for an empty buffer", () => {
+    expect(nearestTickIndex([], 100)).toBeNull();
   });
 });

@@ -144,6 +144,24 @@ export function appendEvents(prev: DpsEvent[], batch: DpsEvent[]): DpsEvent[] {
   return next.length > LOG_BUFFER ? next.slice(next.length - LOG_BUFFER) : next;
 }
 
+/** Index of the tick closest in time to `ts`, or `null` for an empty
+ *  buffer. Projects a combat-log scroll position onto the rate chart's
+ *  tick-indexed x-axis (charts space points by index, not by elapsed time,
+ *  so a timestamp alone isn't a chart position without this). */
+export function nearestTickIndex(ticks: DpsTick[], ts: number): number | null {
+  if (ticks.length === 0) return null;
+  let best = 0;
+  let bestDiff = Infinity;
+  for (let i = 0; i < ticks.length; i++) {
+    const diff = Math.abs(ticks[i].at - ts);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = i;
+    }
+  }
+  return best;
+}
+
 // Finest mining bucket granularity (s). Volumes accumulate at this resolution;
 // the panel's 30 s view merges adjacent pairs, so both intervals share one store.
 export const MINING_BUCKET_SECS = 15;
