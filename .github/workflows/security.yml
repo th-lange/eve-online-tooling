@@ -1,0 +1,88 @@
+name: Security
+
+# Code scanning + dependency-vulnerability audits, separate from the `CI`
+# test gate: these run on the same PR/push triggers plus a weekly schedule
+# (so newly-disclosed advisories surface even on an otherwise-quiet repo),
+# but are informational rather than merge-blocking for now — see the
+# `continue-on-error` notes below. Flip those off once the existing
+# findings (tracked separately) are triaged.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "0 6 * * 1" # Mondays, 06:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, rust]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          # No Rust build step (webkit2gtk/gtk toolchain, SDE download, …) —
+          # `none` extracts without compiling, trading a little recall for a
+          # fast, dependency-free scan. Revisit if that proves too lossy.
+          build-mode: none
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
+
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Informational for now: the current tree has known high/critical
+      # advisories (postcss, react-router, tinypool, …) that need a
+      # deliberate, tested dependency bump, not a silent CI-driven one.
+      # `continue-on-error` keeps this from blocking merges while that's
+      # pending; the step output still shows red in the run log.
+      - name: Audit
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+  cargo-audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Also informational for now: the lockfile has known advisories
+      # (quick-xml, quinn-proto, rustls-webpki, and a high-severity wasmtime
+      # sandbox-escape — wasmtime backs the plugin sandbox, so that one
+      # warrants its own careful, tested bump rather than a blanket update).
+      - uses: rustsec/audit-check@v2.0.0
+        continue-on-error: true
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: src-tauri
