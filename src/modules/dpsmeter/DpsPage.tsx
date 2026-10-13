@@ -221,6 +221,8 @@ export function DpsPage() {
         outSeries={dps.outSeries}
         inSeries={dps.inSeries}
         combinedSeries={dps.combinedSeries}
+        buckets={dps.buckets}
+        pilotScoped={dps.selectedPilot != null}
         markTs={logMarkTs}
       />
 

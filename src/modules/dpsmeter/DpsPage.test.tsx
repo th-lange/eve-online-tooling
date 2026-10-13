@@ -3,6 +3,7 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { invokeMock, mockInvoke, renderWithQuery } from "../../test/harness";
 import { DpsPage } from "./DpsPage";
 import type {
+  DpsBucket,
   DpsEvent,
   DpsLogFile,
   DpsLogSummary,
@@ -10,19 +11,22 @@ import type {
   DpsTick,
 } from "../../lib/api";
 
-// DpsPage subscribes to live ticks + combat-log events via `listen`; capture
-// both callbacks so a test can push a tick/events batch directly.
+// DpsPage subscribes to live ticks + combat-log events + 5s buckets via
+// `listen`; capture the callbacks so a test can push payloads directly.
 let tickHandler: ((t: DpsTick) => void) | undefined;
 let eventsHandler: ((events: DpsEvent[]) => void) | undefined;
+let bucketsHandler: ((buckets: DpsBucket[]) => void) | undefined;
 vi.mock("@tauri-apps/api/event", () => ({
   listen: (
     name: string,
-    handler: (e: { payload: DpsTick | DpsEvent[] }) => void,
+    handler: (e: { payload: DpsTick | DpsEvent[] | DpsBucket[] }) => void,
   ) => {
     if (name === "dps://tick")
       tickHandler = (t: DpsTick) => handler({ payload: t });
     if (name === "dps://events")
       eventsHandler = (events: DpsEvent[]) => handler({ payload: events });
+    if (name === "dps://buckets")
+      bucketsHandler = (buckets: DpsBucket[]) => handler({ payload: buckets });
     return Promise.resolve(() => {});
   },
 }));
@@ -123,6 +127,7 @@ beforeEach(() => {
   localStorage.clear();
   tickHandler = undefined;
   eventsHandler = undefined;
+  bucketsHandler = undefined;
 });
 
 describe("DpsPage — playback file picker", () => {
@@ -301,5 +306,44 @@ describe("DpsPage — combat log", () => {
     expect(screen.queryByText(/Target Pilot/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Combat log/ }));
     expect(screen.getByText(/Target Pilot/)).toBeInTheDocument();
+  });
+});
+
+describe("DpsPage — 5s bucket time grid (#983)", () => {
+  function bucket(start: number, damageOut = 100): DpsBucket {
+    return {
+      start,
+      end: start + 5,
+      damageOut,
+      damageIn: 0,
+      repOut: 0,
+      repIn: 0,
+      capTransferOut: 0,
+      capTransferIn: 0,
+      capWarfareOut: 0,
+      capWarfareIn: 0,
+      miningM3: 0,
+    };
+  }
+
+  it("renders buckets pushed over dps://buckets on the fixed time grid", async () => {
+    mockInvoke({});
+    renderWithQuery(<DpsPage />);
+
+    await waitFor(() => expect(bucketsHandler).toBeDefined());
+    // Before any bucket arrives, the grid is waiting.
+    expect(screen.getAllByText(/Waiting for the first 5s bucket/).length).toBe(
+      2,
+    );
+
+    act(() => bucketsHandler!([bucket(1000), bucket(1005), bucket(1010)]));
+
+    expect(
+      screen.queryByText(/Waiting for the first 5s bucket/),
+    ).not.toBeInTheDocument();
+    // Both panels (Outgoing + Incoming, default side layout) show the grid,
+    // and the out chart's peak reads the bucket rate (100 hp / 5 s = 20/s).
+    expect(screen.getAllByText(/5s grid/).length).toBe(2);
+    expect(screen.getByText("peak 20")).toBeInTheDocument();
   });
 });

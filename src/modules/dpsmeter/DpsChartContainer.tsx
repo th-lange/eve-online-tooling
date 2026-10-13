@@ -1,9 +1,16 @@
 import { memo, useMemo, useState } from "react";
 import { Columns2, Layers, Rows2 } from "lucide-react";
-import type { DpsTick, WeaponRate } from "../../lib/api";
+import type { DpsBucket, DpsTick, WeaponRate } from "../../lib/api";
 import { formatInt } from "../../lib/format";
+import { BucketChart } from "./BucketChart";
 import type { ChartLayout, ChartSeries } from "./dpsMeterShared";
-import { formatClock, nearestTickIndex } from "./dpsMeterShared";
+import {
+  BUCKET_SERIES_COMBINED,
+  BUCKET_SERIES_IN,
+  BUCKET_SERIES_OUT,
+  formatClock,
+  nearestTickIndex,
+} from "./dpsMeterShared";
 
 /** One hover-tooltip block: a character (with optional ship) and its total for
  *  the moment, then one indented line per damage source (drones, each weapon)
@@ -338,6 +345,8 @@ export function DpsChartContainer({
   outSeries,
   inSeries,
   combinedSeries,
+  buckets,
+  pilotScoped,
   markTs,
 }: {
   bySource: boolean;
@@ -348,10 +357,18 @@ export function DpsChartContainer({
   outSeries: ChartSeries[];
   inSeries: ChartSeries[];
   combinedSeries: ChartSeries[];
+  /** Finalized 5 s buckets (#983) — the fixed time grid Totals mode draws
+   *  on. By-source and pilot-scoped views still use the rolling ticks (the
+   *  per-pilot breakdowns reach buckets with #984). */
+  buckets: DpsBucket[];
+  /** True while a pilot filter is active — per-pilot data only exists on the
+   *  rolling ticks until #984, so those views keep the legacy chart. */
+  pilotScoped: boolean;
   /** See {@link DpsChart}'s `markTs` — forwarded to every chart so the log's
    *  scroll position reads the same whichever layout is active. */
   markTs?: number | null;
 }) {
+  const showBuckets = !bySource && !pilotScoped;
   return (
     <>
       <div className="mt-6 flex items-center justify-end gap-2">
@@ -411,12 +428,36 @@ export function DpsChartContainer({
         }`}
       >
         {chartLayout === "combined" ? (
-          <DpsChart
-            ticks={filteredTicks}
-            series={combinedSeries}
-            title="Damage — out + in"
-            markTs={markTs}
-          />
+          showBuckets ? (
+            <BucketChart
+              buckets={buckets}
+              series={BUCKET_SERIES_COMBINED}
+              title="Damage — out + in"
+              markTs={markTs}
+            />
+          ) : (
+            <DpsChart
+              ticks={filteredTicks}
+              series={combinedSeries}
+              title="Damage — out + in"
+              markTs={markTs}
+            />
+          )
+        ) : showBuckets ? (
+          <>
+            <BucketChart
+              buckets={buckets}
+              series={BUCKET_SERIES_OUT}
+              title="Outgoing"
+              markTs={markTs}
+            />
+            <BucketChart
+              buckets={buckets}
+              series={BUCKET_SERIES_IN}
+              title="Incoming"
+              markTs={markTs}
+            />
+          </>
         ) : (
           <>
             <DpsChart
