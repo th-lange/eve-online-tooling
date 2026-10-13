@@ -40,9 +40,7 @@ function bucket(start: number, damageOut = 50): DpsBucket {
 
 const buckets = [bucket(1000), bucket(1005), bucket(1010), bucket(1015)];
 
-function renderCharts({
-  markRange = null as { start: number; end: number } | null,
-} = {}) {
+function renderCharts({ markTs = null as number | null } = {}) {
   return render(
     <DpsChartContainer
       bySource={false}
@@ -53,7 +51,7 @@ function renderCharts({
       outSeries={BUCKET_SERIES_OUT}
       inSeries={BUCKET_SERIES_IN}
       combinedSeries={BUCKET_SERIES_OUT}
-      markRange={markRange}
+      markTs={markTs}
     />,
   );
 }
@@ -67,13 +65,13 @@ describe("DpsChartContainer — bucket time grid (#984)", () => {
     expect(screen.getByText("peak 10")).toBeInTheDocument();
   });
 
-  it("labels the log position with the enclosing bucket's start", () => {
-    // A range inside the single bucket starting at 1010.
-    renderCharts({ markRange: { start: 1012, end: 1013 } });
+  it("labels the log position with the closest bucket's start", () => {
+    // 1012 is closest to the bucket starting at 1010 (midpoint 1012.5).
+    renderCharts({ markTs: 1012 });
     expect(screen.getAllByText(`log @ ${formatClock(1010)}`).length).toBe(2);
   });
 
-  it("shows no log-position label when markRange is unset", () => {
+  it("shows no log-position label when markTs is unset", () => {
     renderCharts();
     expect(screen.queryByText(/log @/)).not.toBeInTheDocument();
   });

@@ -72,19 +72,19 @@ async function scrollAndFlush(list: HTMLElement) {
 }
 
 describe("CombatLogPanel scrolling", () => {
-  it("reports the visible line range and pauses auto-scroll when scrolled away from the bottom", async () => {
+  it("reports the centre line's time and pauses auto-scroll when scrolled away from the bottom", async () => {
     vi.useFakeTimers();
     try {
       const events = Array.from({ length: 10 }, (_, i) =>
         ev(1000 + i, `p${i}`),
       );
-      const onVisibleRangeChange = vi.fn();
+      const onVisibleCenterChange = vi.fn();
       const { container } = render(
         <CombatLogPanel
           events={events}
           collapsed={false}
           onToggleCollapsed={() => {}}
-          onVisibleRangeChange={onVisibleRangeChange}
+          onVisibleCenterChange={onVisibleCenterChange}
         />,
       );
       const list = container.querySelector(".overflow-y-auto") as HTMLElement;
@@ -93,7 +93,7 @@ describe("CombatLogPanel scrolling", () => {
       await act(() => vi.advanceTimersByTimeAsync(650));
 
       // 10 rows × 20px = 200px content in a 50px viewport, scrolled to 80px:
-      // the viewport covers [80, 130), so rows 4–6 (ts 1004–1006) are visible.
+      // viewport centre = 105px → row 5 (centre 110, ts 1005) is the closest.
       stubGeometry(list, {
         scrollTop: 80,
         scrollHeight: 200,
@@ -101,10 +101,7 @@ describe("CombatLogPanel scrolling", () => {
       });
       await scrollAndFlush(list);
 
-      expect(onVisibleRangeChange).toHaveBeenCalledWith({
-        start: 1004,
-        end: 1006,
-      });
+      expect(onVisibleCenterChange).toHaveBeenCalledWith(1005);
       expect(
         screen.getByRole("checkbox", { name: "Auto-scroll" }),
       ).not.toBeChecked();
@@ -119,13 +116,13 @@ describe("CombatLogPanel scrolling", () => {
       const events = Array.from({ length: 10 }, (_, i) =>
         ev(1000 + i, `p${i}`),
       );
-      const onVisibleRangeChange = vi.fn();
+      const onVisibleCenterChange = vi.fn();
       const { container } = render(
         <CombatLogPanel
           events={events}
           collapsed={false}
           onToggleCollapsed={() => {}}
-          onVisibleRangeChange={onVisibleRangeChange}
+          onVisibleCenterChange={onVisibleCenterChange}
         />,
       );
       const list = container.querySelector(".overflow-y-auto") as HTMLElement;
@@ -149,7 +146,7 @@ describe("CombatLogPanel scrolling", () => {
       });
       await scrollAndFlush(list);
 
-      expect(onVisibleRangeChange).toHaveBeenLastCalledWith(null);
+      expect(onVisibleCenterChange).toHaveBeenLastCalledWith(null);
       expect(
         screen.getByRole("checkbox", { name: "Auto-scroll" }),
       ).toBeChecked();
@@ -159,13 +156,13 @@ describe("CombatLogPanel scrolling", () => {
   });
 
   it("clears the marker when the panel is collapsed", () => {
-    const onVisibleRangeChange = vi.fn();
+    const onVisibleCenterChange = vi.fn();
     const { rerender } = render(
       <CombatLogPanel
         events={[ev(1000, "a")]}
         collapsed={false}
         onToggleCollapsed={() => {}}
-        onVisibleRangeChange={onVisibleRangeChange}
+        onVisibleCenterChange={onVisibleCenterChange}
       />,
     );
     rerender(
@@ -173,9 +170,9 @@ describe("CombatLogPanel scrolling", () => {
         events={[ev(1000, "a")]}
         collapsed
         onToggleCollapsed={() => {}}
-        onVisibleRangeChange={onVisibleRangeChange}
+        onVisibleCenterChange={onVisibleCenterChange}
       />,
     );
-    expect(onVisibleRangeChange).toHaveBeenLastCalledWith(null);
+    expect(onVisibleCenterChange).toHaveBeenLastCalledWith(null);
   });
 });

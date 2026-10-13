@@ -1,5 +1,55 @@
 import { describe, expect, it } from "vitest";
-import { SMOOTH_WINDOW_BUCKETS, smoothSeries } from "./dpsMeterShared";
+import {
+  nearestBucketStart,
+  SMOOTH_WINDOW_BUCKETS,
+  smoothSeries,
+} from "./dpsMeterShared";
+import type { DpsBucket } from "../../lib/api";
+
+const hq = {
+  misses: 0,
+  glances: 0,
+  grazes: 0,
+  hits: 0,
+  penetrates: 0,
+  smashes: 0,
+  wrecks: 0,
+};
+function bkt(start: number): DpsBucket {
+  return {
+    start,
+    end: start + 5,
+    damageOut: 0,
+    damageIn: 0,
+    repOut: 0,
+    repIn: 0,
+    capTransferOut: 0,
+    capTransferIn: 0,
+    capWarfareOut: 0,
+    capWarfareIn: 0,
+    miningM3: 0,
+    hitsOut: hq,
+    hitsIn: hq,
+    byWeapon: [],
+    byPilot: [],
+  };
+}
+
+describe("nearestBucketStart", () => {
+  const buckets = [bkt(0), bkt(5), bkt(10)]; // midpoints 2.5, 7.5, 12.5
+  it("picks the bucket whose midpoint is closest to the time", () => {
+    expect(nearestBucketStart(buckets, 1)).toBe(0);
+    expect(nearestBucketStart(buckets, 6)).toBe(5);
+    expect(nearestBucketStart(buckets, 11)).toBe(10);
+  });
+  it("snaps a time past the end to the last bucket, before the start to the first", () => {
+    expect(nearestBucketStart(buckets, 9999)).toBe(10);
+    expect(nearestBucketStart(buckets, -9999)).toBe(0);
+  });
+  it("returns null for an empty chart", () => {
+    expect(nearestBucketStart([], 100)).toBeNull();
+  });
+});
 
 describe("smoothSeries", () => {
   it("averages each point with its immediate neighbours", () => {

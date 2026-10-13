@@ -105,4 +105,26 @@ describe("BucketChart", () => {
     // grows past the viewport to scroll (sticking to the live edge).
     expect(container.querySelector("svg")!.getAttribute("width")).toBe("2000");
   });
+
+  it("highlights the single bucket closest to markTs, snapping past the end", () => {
+    // 5 buckets: starts 0,5,10,15,20. markTs=12 is closest to bucket 10;
+    // markTs far past the end snaps to the last bucket (20).
+    const buckets = Array.from({ length: 5 }, (_, i) => bucket(i, 100));
+    const mid = render(
+      <BucketChart buckets={buckets} series={BUCKET_SERIES_OUT} markTs={12} />,
+    );
+    const midRect = mid.container.querySelector('rect[fill="#818cf8"]')!;
+    expect(Number(midRect.getAttribute("x"))).toBe((10 / 5) * 10); // bucket 10
+    expect(Number(midRect.getAttribute("width"))).toBe(10); // one bucket wide
+
+    const end = render(
+      <BucketChart
+        buckets={buckets}
+        series={BUCKET_SERIES_OUT}
+        markTs={9999}
+      />,
+    );
+    const endRect = end.container.querySelector('rect[fill="#818cf8"]')!;
+    expect(Number(endRect.getAttribute("x"))).toBe((20 / 5) * 10); // last bucket
+  });
 });

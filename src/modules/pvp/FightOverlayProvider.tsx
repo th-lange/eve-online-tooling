@@ -25,9 +25,8 @@ import { CombatLogPanel } from "../dpsmeter/CombatLogPanel";
 import {
   BUCKET_SECS,
   appendEvents,
-  bucketStartOf,
+  nearestBucketStart,
   smoothSeries,
-  type LogMarkRange,
 } from "../dpsmeter/dpsMeterShared";
 import { FightOverlayContext } from "./fightOverlayContext";
 
@@ -78,12 +77,12 @@ export function nextFightBuckets(
 /** Mini DPS chart (out green, in red) over the fight's 5 s buckets. */
 function MiniDpsChart({
   buckets,
-  markRange,
+  markTs,
 }: {
   buckets: DpsBucket[];
-  /** The combat-log footer's scroll span — shades every enclosing 5 s bucket,
-   *  same arithmetic as the DPS meter's chart (#986). */
-  markRange?: LogMarkRange | null;
+  /** The combat-log footer's centre-line time — highlights the single closest
+   *  5 s bucket, same as the DPS meter's chart (#986). */
+  markTs?: number | null;
 }) {
   if (buckets.length < 2)
     return <div className="h-12 w-full rounded bg-zinc-950" />;
@@ -116,18 +115,10 @@ function MiniDpsChart({
           ).toFixed(1)}`,
       )
       .join(" ");
-  // Shade from the first visible log line's bucket through the last's.
-  const markLo = markRange == null ? null : bucketStartOf(markRange.start);
-  const markHi = markRange == null ? null : bucketStartOf(markRange.end);
-  const markX =
-    markLo == null || markHi == null || markHi < t0 || markLo >= t0 + span
-      ? null
-      : x(Math.max(markLo, t0));
-  const markW =
-    markX == null || markLo == null || markHi == null
-      ? 0
-      : x(Math.min(markHi, t0 + span - BUCKET_SECS) + BUCKET_SECS) -
-        x(Math.max(markLo, t0));
+  // Highlight the single bucket closest in time to the log's centre line,
+  // snapped to an existing bucket.
+  const markStart = markTs == null ? null : nearestBucketStart(buckets, markTs);
+  const markX = markStart == null ? null : x(markStart);
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded">
       <rect width={W} height={H} fill="#09090b" rx="3" />
@@ -147,7 +138,7 @@ function MiniDpsChart({
         <rect
           x={markX}
           y={pad}
-          width={markW}
+          width={(BUCKET_SECS / span) * w}
           height={H - pad * 2}
           fill="#818cf8"
           fillOpacity="0.25"
@@ -254,8 +245,8 @@ function FightPanel({
   events,
   logCollapsed,
   onToggleLogCollapsed,
-  logMarkRange,
-  onLogVisibleRangeChange,
+  logMarkTs,
+  onLogVisibleCenterChange,
   attackers,
   myWeapons,
   localFits,
@@ -271,10 +262,10 @@ function FightPanel({
   events: DpsEvent[];
   logCollapsed: boolean;
   onToggleLogCollapsed: () => void;
-  /** See `CombatLogPanel`'s `onVisibleRangeChange` — threaded through to
-   *  shade the same span on `MiniDpsChart`. */
-  logMarkRange: LogMarkRange | null;
-  onLogVisibleRangeChange: (range: LogMarkRange | null) => void;
+  /** See `CombatLogPanel`'s `onVisibleCenterChange` — threaded through to
+   *  highlight the same single bucket on `MiniDpsChart`. */
+  logMarkTs: number | null;
+  onLogVisibleCenterChange: (ts: number | null) => void;
   attackers: {
     name: string;
     dpsIn: number;
@@ -458,7 +449,7 @@ function FightPanel({
           <h3 className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
             DPS
           </h3>
-          <MiniDpsChart buckets={buckets} markRange={logMarkRange} />
+          <MiniDpsChart buckets={buckets} markTs={logMarkTs} />
           <div className="flex gap-3 text-[10px] text-zinc-600">
             <span>
               <span className="text-emerald-500">▬</span> out
@@ -477,7 +468,7 @@ function FightPanel({
           events={events}
           collapsed={logCollapsed}
           onToggleCollapsed={onToggleLogCollapsed}
-          onVisibleRangeChange={onLogVisibleRangeChange}
+          onVisibleCenterChange={onLogVisibleCenterChange}
           maxHeightClass="max-h-32"
           className="border-none bg-transparent p-0"
         />
@@ -647,9 +638,9 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     STORAGE_KEYS.fightOverlayCombatLogCollapsed,
     true,
   );
-  // Where the combat log footer is scrolled to — marked on MiniDpsChart.
-  const [fightLogMarkRange, setFightLogMarkRange] =
-    useState<LogMarkRange | null>(null);
+  // The time of the combat log footer's centre line — the closest bucket is
+  // highlighted on MiniDpsChart.
+  const [fightLogMarkTs, setFightLogMarkTs] = useState<number | null>(null);
   const [fightOpen, setFightOpen] = useState(false);
   const [selectedFitId, setSelectedFitId] = useState<string | null>(null);
   // Settings "Test" preview: sample data, rebuilt each time the button is hit.
@@ -868,8 +859,8 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
           events={testFight.events}
           logCollapsed={logCollapsed}
           onToggleLogCollapsed={() => setLogCollapsed(!logCollapsed)}
-          logMarkRange={fightLogMarkRange}
-          onLogVisibleRangeChange={setFightLogMarkRange}
+          logMarkTs={fightLogMarkTs}
+          onLogVisibleCenterChange={setFightLogMarkTs}
           attackers={testFight.attackers}
           myWeapons={testFight.myWeapons}
           localFits={localFits.data ?? []}
@@ -888,8 +879,8 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
             events={fightLogEvents}
             logCollapsed={logCollapsed}
             onToggleLogCollapsed={() => setLogCollapsed(!logCollapsed)}
-            logMarkRange={fightLogMarkRange}
-            onLogVisibleRangeChange={setFightLogMarkRange}
+            logMarkTs={fightLogMarkTs}
+            onLogVisibleCenterChange={setFightLogMarkTs}
             attackers={activeAttackers}
             myWeapons={latestBucket?.byWeapon ?? []}
             localFits={localFits.data ?? []}
@@ -905,7 +896,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
               setFightOpen(false);
               setFightBuckets([]);
               setFightLogEvents([]);
-              setFightLogMarkRange(null);
+              setFightLogMarkTs(null);
             }}
           />
         )
