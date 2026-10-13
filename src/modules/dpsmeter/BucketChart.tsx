@@ -10,9 +10,12 @@ import {
   type BucketSeries,
 } from "./dpsMeterShared";
 
-// Horizontal pixels per 5 s bucket. The SVG's width grows with the session
-// (12 buckets/min — a 1 h capture is ~7200 px) inside a scrolling viewport.
-const PX_PER_BUCKET = 10;
+// Minimum horizontal pixels per 5 s bucket. The chart fits its buckets to the
+// available width so a short session fills the panel instead of leaving empty
+// room; only once buckets would fall below this floor (a long session — 12
+// buckets/min) does the SVG grow past the viewport and scroll, sticking to
+// the live edge.
+const MIN_PX_PER_BUCKET = 10;
 const H = 280;
 const PAD_Y = 10;
 const PAD_B = 24; // room for the time labels along the bottom
@@ -47,7 +50,23 @@ export const BucketChart = memo(function BucketChart({
 
   const t0 = buckets[0]?.start ?? 0;
   const n = buckets.length;
-  const width = Math.max(1, n) * PX_PER_BUCKET;
+  // Fit the buckets to the measured viewport: expand past the floor so a
+  // short session fills the width, and only overflow (scroll) once the floor
+  // binds. 0 before the first measure → falls back to the floor.
+  const [viewportW, setViewportW] = useState(0);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setViewportW(el.clientWidth);
+    const ro = new ResizeObserver(([entry]) => {
+      setViewportW(entry.contentRect.width);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const pxPerBucket =
+    n > 0 ? Math.max(MIN_PX_PER_BUCKET, viewportW / n) : MIN_PX_PER_BUCKET;
+  const width = Math.max(1, n) * pxPerBucket;
 
   const { max, lines, labels, yLabels } = useMemo(() => {
     // Plot a centered moving average so a single volley's spike reads as a
@@ -60,7 +79,7 @@ export const BucketChart = memo(function BucketChart({
     );
     const max = Math.max(1, ...smoothed.flat());
     const x = (b: DpsBucket) =>
-      ((b.start - t0) / BUCKET_SECS) * PX_PER_BUCKET + PX_PER_BUCKET / 2;
+      ((b.start - t0) / BUCKET_SECS) * pxPerBucket + pxPerBucket / 2;
     const y = (v: number) => PAD_Y + (1 - v / max) * (H - PAD_Y - PAD_B);
     const lines = series.map((s, si) => ({
       key: s.id,
@@ -73,14 +92,14 @@ export const BucketChart = memo(function BucketChart({
     const labels = buckets
       .filter((b) => b.start % (LABEL_EVERY * BUCKET_SECS) === 0)
       .map((b) => ({
-        x: x(b) - PX_PER_BUCKET / 2,
+        x: x(b) - pxPerBucket / 2,
         text: formatClock(b.start),
       }));
     const yLabels = [1, 0.75, 0.5, 0.25, 0].map((f) =>
       formatInt(Math.round(max * f)),
     );
     return { max, lines, labels, yLabels };
-  }, [buckets, series, t0]);
+  }, [buckets, series, t0, pxPerBucket]);
 
   // New buckets arrived: keep the live edge in view while stuck to it.
   useEffect(() => {
@@ -92,7 +111,7 @@ export const BucketChart = memo(function BucketChart({
   const markX =
     markStart == null || n === 0 || markStart < t0
       ? null
-      : ((markStart - t0) / BUCKET_SECS) * PX_PER_BUCKET;
+      : ((markStart - t0) / BUCKET_SECS) * pxPerBucket;
 
   const hoverBucket = hover != null ? buckets[hover] : undefined;
   const yAxisStyle = { height: H, paddingTop: PAD_Y, paddingBottom: PAD_B };
@@ -129,7 +148,7 @@ export const BucketChart = memo(function BucketChart({
             onScroll={(e) => {
               const el = e.currentTarget;
               stickRightRef.current =
-                el.scrollWidth - el.scrollLeft - el.clientWidth < PX_PER_BUCKET;
+                el.scrollWidth - el.scrollLeft - el.clientWidth < pxPerBucket;
             }}
             className="overflow-x-auto"
           >
@@ -147,7 +166,7 @@ export const BucketChart = memo(function BucketChart({
                 className="block cursor-crosshair"
                 onPointerMove={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect();
-                  const i = Math.floor((e.clientX - rect.left) / PX_PER_BUCKET);
+                  const i = Math.floor((e.clientX - rect.left) / pxPerBucket);
                   setHover(i >= 0 && i < n ? i : null);
                 }}
                 onPointerLeave={() => setHover(null)}
@@ -188,7 +207,7 @@ export const BucketChart = memo(function BucketChart({
                   <rect
                     x={markX}
                     y={PAD_Y}
-                    width={PX_PER_BUCKET}
+                    width={pxPerBucket}
                     height={H - PAD_Y - PAD_B}
                     fill="#818cf8"
                     fillOpacity="0.18"
@@ -209,8 +228,8 @@ export const BucketChart = memo(function BucketChart({
                   ))}
                 {hover != null && (
                   <line
-                    x1={hover * PX_PER_BUCKET + PX_PER_BUCKET / 2}
-                    x2={hover * PX_PER_BUCKET + PX_PER_BUCKET / 2}
+                    x1={hover * pxPerBucket + pxPerBucket / 2}
+                    x2={hover * pxPerBucket + pxPerBucket / 2}
                     y1={PAD_Y}
                     y2={H - PAD_B}
                     stroke="#a1a1aa"
