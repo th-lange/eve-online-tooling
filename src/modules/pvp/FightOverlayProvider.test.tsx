@@ -71,7 +71,7 @@ describe("FightOverlayProvider — combat log position marker", () => {
     expect(list).toBeTruthy();
     // No marker yet — the log opened auto-scrolled to its live tail.
     expect(
-      document.querySelector('svg line[stroke="#818cf8"]'),
+      document.querySelector('svg rect[fill="#818cf8"]'),
     ).not.toBeInTheDocument();
 
     // Real time throughout: the panel's own mount-triggered auto-scroll
@@ -112,7 +112,7 @@ describe("FightOverlayProvider — combat log position marker", () => {
     });
 
     expect(
-      document.querySelector('svg line[stroke="#818cf8"]'),
+      document.querySelector('svg rect[fill="#818cf8"]'),
     ).toBeInTheDocument();
   });
 });
