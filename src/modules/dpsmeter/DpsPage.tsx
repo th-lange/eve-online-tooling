@@ -4,12 +4,7 @@ import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { usePersistentState } from "../../lib/usePersistentState";
 import { CombatLogPanel } from "./CombatLogPanel";
 import { DpsChartContainer } from "./DpsChartContainer";
-import {
-  SERIES,
-  formatRate,
-  groupEventsByBucket,
-  pendingGhostBucket,
-} from "./dpsMeterShared";
+import { SERIES, formatRate, pendingGhostBucket } from "./dpsMeterShared";
 import { FightBreakdown, TackleTags } from "./FightBreakdown";
 import { PrimaryExtras } from "./HitQualityIndicators";
 import { LogFilePanel } from "./LogFilePanel";
@@ -33,24 +28,23 @@ export function DpsPage() {
   const [logJump, setLogJump] = useState<{ start: number; n: number } | null>(
     null,
   );
-  // The bucket id → its combat-log lines, for chart tooltips (#1003).
+  // The bucket id → its combat-log lines, for chart tooltips (#1003). Buckets
+  // now carry their own events (#1000), so this is a direct projection.
   const eventsByBucket = useMemo(
-    () =>
-      new Map(
-        groupEventsByBucket(dps.logEvents).map((g) => [g.start, g.events]),
-      ),
-    [dps.logEvents],
+    () => new Map(dps.buckets.map((b) => [b.start, b.events])),
+    [dps.buckets],
   );
-  // The in-progress bucket at the live edge, drawn dashed (#1004).
+  // The in-progress bucket at the live edge, drawn dashed (#1004) — summed
+  // from the raw event stream, the one thing the finalized buckets can't show.
   const ghost = useMemo(
     () =>
       dps.running
         ? pendingGhostBucket(
-            dps.logEvents,
+            dps.pendingEvents,
             dps.buckets[dps.buckets.length - 1]?.end ?? null,
           )
         : null,
-    [dps.logEvents, dps.buckets, dps.running],
+    [dps.pendingEvents, dps.buckets, dps.running],
   );
 
   /** A chart bucket was clicked: move the shared cursor there, make sure the

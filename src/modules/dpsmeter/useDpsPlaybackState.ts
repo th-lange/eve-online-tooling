@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ModuleActiveContext } from "../../components/moduleActiveContext";
 import {
   dpsListCharacters,
@@ -62,10 +62,16 @@ export function useDpsPlaybackState() {
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [logEvents, setLogEvents] = useState<DpsEvent[]>([]);
+  // The raw `dps://events` stream, capped — only the live-edge ghost reads
+  // it now (#1004): the log itself renders from the buckets' own events
+  // (#1000), so log segments and chart buckets are the same data.
+  const [pendingEvents, setPendingEvents] = useState<DpsEvent[]>([]);
   // Finalized 5 s buckets (#983) — the whole session, in order; the bucket
   // chart scrolls over these and every readout derives from them (#984).
   const [buckets, setBuckets] = useState<DpsBucket[]>([]);
+  // The displayed combat log IS the buckets' own events (#1000) — one source,
+  // so a log segment and a chart bucket can never drift apart.
+  const logEvents = useMemo(() => buckets.flatMap((b) => b.events), [buckets]);
   const [mode, setMode] = useState<Mode>("live");
   const [logs, setLogs] = useState<DpsLogFile[]>([]);
   const [file, setFile] = useState("");
@@ -193,7 +199,7 @@ export function useDpsPlaybackState() {
         if (buf.length > LOG_BUFFER) buf.splice(0, buf.length - LOG_BUFFER);
         return;
       }
-      setLogEvents((prev) => appendEvents(prev, batch));
+      setPendingEvents((prev) => appendEvents(prev, batch, LOG_BUFFER));
     }).then((u) => (unlisten = u));
     return () => unlisten?.();
   }, []);
@@ -240,7 +246,7 @@ export function useDpsPlaybackState() {
       if (!p.looping) return;
       // Small pause so the final bucket renders before the restart clears it.
       setTimeout(() => {
-        setLogEvents([]);
+        setPendingEvents([]);
         setBuckets([]);
         bufferedBucketsRef.current = [];
         setSelectedPilot(null);
@@ -267,7 +273,7 @@ export function useDpsPlaybackState() {
     if (bufferedEventsRef.current.length > 0) {
       const buffered = bufferedEventsRef.current;
       bufferedEventsRef.current = [];
-      setLogEvents((prev) => appendEvents(prev, buffered));
+      setPendingEvents((prev) => appendEvents(prev, buffered, LOG_BUFFER));
     }
     if (bufferedBucketsRef.current.length > 0) {
       const buffered = bufferedBucketsRef.current;
@@ -288,6 +294,7 @@ export function useDpsPlaybackState() {
     // not chart-gap against the previous one's grid.
     setBuckets([]);
     bufferedBucketsRef.current = [];
+    setPendingEvents([]);
     try {
       await dpsStart({
         gamelogsDir: dir,
@@ -329,7 +336,7 @@ export function useDpsPlaybackState() {
    *  `stopTs` ends playback at a fight region's boundary. */
   async function playback(seekTs?: number, stopTs?: number) {
     setError(null);
-    setLogEvents([]);
+    setPendingEvents([]);
     setBuckets([]);
     bufferedBucketsRef.current = [];
     setSelectedPilot(null);
@@ -515,6 +522,7 @@ export function useDpsPlaybackState() {
     running,
     error,
     logEvents,
+    pendingEvents,
     buckets,
     lastBucketEnd,
     mode,

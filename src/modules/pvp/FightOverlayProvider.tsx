@@ -5,7 +5,6 @@ import {
   characterShip,
   pvpPilotFits,
   onDpsBuckets,
-  onDpsEvents,
   dpsStart,
   fittingListLocal,
   fittingSimulate,
@@ -24,8 +23,6 @@ import { Modal } from "../../components/Modal";
 import { CombatLogPanel } from "../dpsmeter/CombatLogPanel";
 import {
   BUCKET_SECS,
-  LOG_BUFFER,
-  appendEvents,
   nearestBucketStart,
   smoothSeries,
 } from "../dpsmeter/dpsMeterShared";
@@ -243,7 +240,6 @@ function AttackerCard({
 /** Fixed bottom-of-screen panel that appears when a fight is detected. */
 function FightPanel({
   buckets,
-  events,
   logCollapsed,
   onToggleLogCollapsed,
   logMarkTs,
@@ -260,7 +256,6 @@ function FightPanel({
   onDismiss,
 }: {
   buckets: DpsBucket[];
-  events: DpsEvent[];
   logCollapsed: boolean;
   onToggleLogCollapsed: () => void;
   /** See `CombatLogPanel`'s `onVisibleCenterChange` — threaded through to
@@ -466,7 +461,7 @@ function FightPanel({
           3-column grid above; the same component the DPS meter page uses. */}
       <div className="shrink-0 border-t border-zinc-800 px-5 py-2">
         <CombatLogPanel
-          events={events}
+          events={buckets.flatMap((b) => b.events)}
           collapsed={logCollapsed}
           onToggleCollapsed={onToggleLogCollapsed}
           cursor={logMarkTs}
@@ -486,7 +481,6 @@ function FightPanel({
  *  ranges, known ship, drone reminder) without a live fight. */
 interface TestFight {
   buckets: DpsBucket[];
-  events: DpsEvent[];
   attackers: {
     name: string;
     dpsIn: number;
@@ -536,6 +530,7 @@ function buildTestFight(): TestFight {
         { name: "Caldari Navy Inferno Rocket", dps: out, kind: "Rocket" },
       ],
       byPilot: [],
+      events: [],
     };
   });
   // Sample combat log — one outgoing hit per bucket, an incoming hit every
@@ -592,9 +587,14 @@ function buildTestFight(): TestFight {
       volume: 0,
     },
   );
+  // The log rides inside the buckets (#1000), exactly like live data.
+  for (const e of events) {
+    const idx = Math.floor((e.ts - 1_700_000_000) / BUCKET_SECS);
+    buckets[idx]?.events.push(e);
+  }
+  buckets.forEach((b) => b.events.sort((a, z) => a.ts - z.ts));
   return {
     buckets,
-    events,
     attackers: [
       {
         name: "John Doe",
@@ -635,7 +635,6 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     false,
   );
   const [fightBuckets, setFightBuckets] = useState<DpsBucket[]>([]);
-  const [fightLogEvents, setFightLogEvents] = useState<DpsEvent[]>([]);
   const [logCollapsed, setLogCollapsed] = usePersistentState<boolean>(
     STORAGE_KEYS.fightOverlayCombatLogCollapsed,
     true,
@@ -648,7 +647,6 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
   // Settings "Test" preview: sample data, rebuilt each time the button is hit.
   const [testFight, setTestFight] = useState<TestFight | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
-  const unlistenEventsRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!enabled) {
@@ -670,32 +668,6 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
       cancelled = true;
       unlistenRef.current?.();
       unlistenRef.current = null;
-    };
-  }, [enabled]);
-
-  // Combat-log view alongside the bucket chart — the same batched events,
-  // kept for as long as `fightBuckets` is (cleared on the same two resets:
-  // disabling the overlay and Dismiss). Not gated by the freeze logic: once
-  // a fight freezes, any further activity is rare and still truthful to show.
-  useEffect(() => {
-    if (!enabled) {
-      unlistenEventsRef.current?.();
-      unlistenEventsRef.current = null;
-      setFightLogEvents([]);
-      return;
-    }
-    let cancelled = false;
-    onDpsEvents((batch) => {
-      if (!cancelled)
-        setFightLogEvents((prev) => appendEvents(prev, batch, LOG_BUFFER));
-    }).then((fn) => {
-      if (cancelled) fn();
-      else unlistenEventsRef.current = fn;
-    });
-    return () => {
-      cancelled = true;
-      unlistenEventsRef.current?.();
-      unlistenEventsRef.current = null;
     };
   }, [enabled]);
 
@@ -859,7 +831,6 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
       {testFight ? (
         <FightPanel
           buckets={testFight.buckets}
-          events={testFight.events}
           logCollapsed={logCollapsed}
           onToggleLogCollapsed={() => setLogCollapsed(!logCollapsed)}
           logMarkTs={fightLogMarkTs}
@@ -879,7 +850,6 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
         fightActive && (
           <FightPanel
             buckets={fightBuckets}
-            events={fightLogEvents}
             logCollapsed={logCollapsed}
             onToggleLogCollapsed={() => setLogCollapsed(!logCollapsed)}
             logMarkTs={fightLogMarkTs}
@@ -898,7 +868,6 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
             onDismiss={() => {
               setFightOpen(false);
               setFightBuckets([]);
-              setFightLogEvents([]);
               setFightLogMarkTs(null);
             }}
           />

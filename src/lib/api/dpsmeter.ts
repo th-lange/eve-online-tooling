@@ -114,6 +114,9 @@ export interface DpsBucket {
   byWeapon: WeaponRate[];
   /** Per-pilot engagement rows (rates + tackle flags); all rows, sorted. */
   byPilot: PilotRate[];
+  /** The raw combat-log events this bucket aggregates (#1000) — the log view
+   *  renders straight from these, so log segments ARE chart buckets. */
+  events: DpsEvent[];
 }
 
 /** A ship-label field from an overview export (#869); `"other"` covers any

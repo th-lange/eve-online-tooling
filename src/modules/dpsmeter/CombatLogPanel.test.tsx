@@ -37,6 +37,7 @@ function stubGeometry(
 ) {
   Object.defineProperty(el, "scrollTop", {
     value: scrollTop,
+    writable: true,
     configurable: true,
   });
   Object.defineProperty(el, "scrollHeight", {
@@ -129,31 +130,31 @@ describe("CombatLogPanel scrolling", () => {
     );
   });
 
-  it("scrolls the jumped-to bucket's group into view (chart → log)", () => {
+  it("centres the jumped-to bucket's group by scrolling the container only", () => {
     const events = [ev(1000, "a"), ev(1006, "b")];
-    const scrollSpy = vi.spyOn(Element.prototype, "scrollIntoView");
-    try {
-      render(
-        <CombatLogPanel
-          events={events}
-          collapsed={false}
-          onToggleCollapsed={() => {}}
-          jumpTo={{ start: 1005, n: 1 }}
-        />,
-      );
-      // The jump effect centres the 1005 group (the mount auto-scroll also
-      // calls scrollIntoView on the bottom anchor — look for the centred one).
-      expect(scrollSpy).toHaveBeenCalledWith({
-        block: "center",
-        behavior: "smooth",
-      });
-      const centred = scrollSpy.mock.contexts.find(
-        (el) => (el as unknown as HTMLElement).dataset?.bucket === "1005",
-      );
-      expect(centred).toBeTruthy();
-    } finally {
-      scrollSpy.mockRestore();
-    }
+    const { container, rerender } = render(
+      <CombatLogPanel
+        events={events}
+        collapsed={false}
+        onToggleCollapsed={() => {}}
+      />,
+    );
+    const list = container.querySelector(".overflow-y-auto") as HTMLElement;
+    // Two 120px groups in a 50px viewport (geometry stubbed — jsdom has no
+    // layout), then the jump request arrives.
+    stubGeometry(list, { scrollTop: 0, scrollHeight: 240, clientHeight: 50 });
+    rerender(
+      <CombatLogPanel
+        events={events}
+        collapsed={false}
+        onToggleCollapsed={() => {}}
+        jumpTo={{ start: 1005, n: 1 }}
+      />,
+    );
+    // Group 1005 sits at 120px, 120px tall → centred: 120 - (50-120)/2 = 155.
+    // Only the log container scrolled — the page/window is untouched
+    // (scrollIntoView would have scrolled every ancestor).
+    expect(list.scrollTop).toBe(155);
   });
 
   it("clears the marker and re-enables auto-scroll once scrolled back to the bottom", async () => {

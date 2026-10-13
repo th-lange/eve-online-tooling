@@ -4,23 +4,16 @@ import { invokeMock, mockInvoke, renderWithQuery } from "../../test/harness";
 import { DpsPage } from "./DpsPage";
 import type {
   DpsBucket,
-  DpsEvent,
   DpsLogFile,
   DpsLogSummary,
   DpsPlaybackSettings,
 } from "../../lib/api";
 
-// DpsPage subscribes to combat-log events + 5s buckets via `listen`; capture
-// the callbacks so a test can push payloads directly.
-let eventsHandler: ((events: DpsEvent[]) => void) | undefined;
+// DpsPage subscribes to the 5 s buckets via `listen` (the log rides inside
+// them, #1000); capture the callback so a test can push payloads directly.
 let bucketsHandler: ((buckets: DpsBucket[]) => void) | undefined;
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: (
-    name: string,
-    handler: (e: { payload: DpsEvent[] | DpsBucket[] }) => void,
-  ) => {
-    if (name === "dps://events")
-      eventsHandler = (events: DpsEvent[]) => handler({ payload: events });
+  listen: (name: string, handler: (e: { payload: DpsBucket[] }) => void) => {
     if (name === "dps://buckets")
       bucketsHandler = (buckets: DpsBucket[]) => handler({ payload: buckets });
     return Promise.resolve(() => {});
@@ -55,6 +48,7 @@ function makeBucket(start: number, damageOut = 100): DpsBucket {
     hitsIn: hq,
     byWeapon: [],
     byPilot: [],
+    events: [],
   };
 }
 
@@ -125,7 +119,6 @@ function renderInPlayback() {
 beforeEach(() => {
   invokeMock.mockReset();
   localStorage.clear();
-  eventsHandler = undefined;
   bucketsHandler = undefined;
 });
 
@@ -273,27 +266,29 @@ describe("DpsPage — playback timeline", () => {
 });
 
 describe("DpsPage — combat log", () => {
-  it("renders an events batch pushed over dps://events, newest line appended", async () => {
+  it("renders the log lines carried inside a dps://buckets payload", async () => {
     mockInvoke({});
     renderWithQuery(<DpsPage />);
 
     // The subscription is live as soon as the page mounts — no Start needed.
-    await waitFor(() => expect(eventsHandler).toBeDefined());
-    act(() =>
-      eventsHandler!([
-        {
-          ts: 1_700_000_000,
-          kind: "damageOut",
-          amount: 450,
-          pilot: "Target Pilot",
-          ship: "Cruiser",
-          weapon: "Dual Giga Pulse Laser II",
-          quality: "Wrecks",
-          ore: null,
-          volume: 0,
-        },
-      ]),
-    );
+    // The log renders from the buckets' own events (#1000): one source for
+    // chart and log, so a segment and its lines can never drift apart.
+    await waitFor(() => expect(bucketsHandler).toBeDefined());
+    const b = makeBucket(1_700_000_000, 450);
+    b.events = [
+      {
+        ts: 1_700_000_000,
+        kind: "damageOut",
+        amount: 450,
+        pilot: "Target Pilot",
+        ship: "Cruiser",
+        weapon: "Dual Giga Pulse Laser II",
+        quality: "Wrecks",
+        ore: null,
+        volume: 0,
+      },
+    ];
+    act(() => bucketsHandler!([b]));
 
     expect(
       await screen.findByText(
