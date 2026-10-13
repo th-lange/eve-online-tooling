@@ -1,4 +1,4 @@
-import type { DpsEvent, DpsTick } from "../../lib/api";
+import type { DpsBucket, DpsEvent, DpsTick } from "../../lib/api";
 import { formatInt } from "../../lib/format";
 
 export type Mode = "live" | "playback";
@@ -108,6 +108,75 @@ export const SERIES_IN: ChartSeries[] = SERIES.filter((s) =>
   primary: s.primary,
   get: (t) => t[s.key],
 }));
+
+// Width of one fixed detail-timeline bucket (s) — mirrors the backend's grid
+// (#983). Buckets are epoch-aligned: start = ts - ts % BUCKET_SECS.
+export const BUCKET_SECS = 5;
+
+/** Epoch-aligned start of the 5 s bucket containing `ts`. */
+export function bucketStartOf(ts: number): number {
+  return Math.floor(ts / BUCKET_SECS) * BUCKET_SECS;
+}
+
+/** A bucket chart line: identity + colour + a per-bucket **rate** accessor
+ *  (bucket fields are absolute sums; rate = sum / BUCKET_SECS). Mirrors
+ *  {@link ChartSeries} on the fixed grid. */
+export type BucketSeries = {
+  id: string;
+  color: string;
+  primary: boolean;
+  get: (b: DpsBucket) => number;
+};
+
+// Same palette/ordering as SERIES, keyed to bucket sum fields.
+const BUCKET_FIELD: Record<string, keyof DpsBucket> = {
+  dpsOut: "damageOut",
+  dpsIn: "damageIn",
+  logiOut: "repOut",
+  logiIn: "repIn",
+  capWarfareOut: "capWarfareOut",
+  capWarfareIn: "capWarfareIn",
+  capTransferOut: "capTransferOut",
+  capTransferIn: "capTransferIn",
+};
+
+function bucketSeries(keys: string[]): BucketSeries[] {
+  return SERIES.filter((s) => keys.includes(s.key)).map((s) => ({
+    id: s.key,
+    color: s.color,
+    primary: s.primary,
+    get: (b) => (b[BUCKET_FIELD[s.key]] as number) / BUCKET_SECS,
+  }));
+}
+
+/** Bucket series for the outgoing (dealt) chart. */
+export const BUCKET_SERIES_OUT: BucketSeries[] = bucketSeries([
+  "dpsOut",
+  "logiOut",
+  "capWarfareOut",
+  "capTransferOut",
+]);
+/** Bucket series for the incoming (taken) chart. */
+export const BUCKET_SERIES_IN: BucketSeries[] = bucketSeries([
+  "dpsIn",
+  "logiIn",
+  "capWarfareIn",
+  "capTransferIn",
+]);
+/** Both directions overlaid, for the combined layout. */
+export const BUCKET_SERIES_COMBINED: BucketSeries[] = [
+  ...BUCKET_SERIES_OUT,
+  ...BUCKET_SERIES_IN,
+];
+
+/** Append a batch of finalized buckets. The whole session is kept (12/min —
+ *  trivial), so the detail chart can scroll over all of it; no ring buffer. */
+export function appendBuckets(
+  prev: DpsBucket[],
+  batch: DpsBucket[],
+): DpsBucket[] {
+  return batch.length === 0 ? prev : prev.concat(batch);
+}
 
 // Palette for per-source (by-pilot) lines — distinct hues, assigned to each
 // source on first sighting and kept for the session so a source never changes

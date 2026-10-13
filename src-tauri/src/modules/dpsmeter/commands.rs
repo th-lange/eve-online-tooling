@@ -8,7 +8,9 @@
 //! fully-resolved [`super::parser::DpsEvent`]s parsed that poll on
 //! `dps://events` — one batch per poll, in the same order they'll be pushed
 //! into the window, for a scrolling combat-log view alongside the rate
-//! graph. The frontend `listen`s to both and draws the graph / log.
+//! graph — plus the finalized, epoch-aligned 5 s [`super::bucket::DpsBucket`]s
+//! on `dps://buckets` (#983), the fixed time grid the detail charts draw on.
+//! The frontend `listen`s to all three.
 //!
 //! Lifecycle is a generation counter held in [`DpsState`]: each `dps_start`
 //! bumps it and the loop runs only while its captured generation is current, so
@@ -27,6 +29,7 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader, SeekFrom};
 
 use super::aggregate::Window;
+use super::bucket::BucketFold;
 use super::overview::{parse_overview_export, ExtractionPlan};
 use super::parser::{parse_line, parse_line_with_plan, DpsEvent, EventKind, Lang};
 use crate::model::AppError;
@@ -34,6 +37,13 @@ use crate::sde::{Sde, SdePaths};
 
 /// How often the loop reads new bytes and emits a tick.
 const POLL: Duration = Duration::from_millis(500);
+
+/// Live mode finalizes a 5 s bucket only once wall time is this far past its
+/// end: a line stamped in the bucket's final second can still be read by the
+/// next poll (~500 ms cadence plus client write lag) without landing after the
+/// bucket already shipped. Playback needs no grace — its virtual clock trails
+/// the events it releases by construction.
+const LIVE_BUCKET_GRACE_SECS: i64 = 1;
 
 /// Above this size, [`dps_playback`] refuses to load the log rather than risk
 /// spiking memory by (file bytes + parsed-event overhead): replay genuinely
@@ -153,7 +163,7 @@ pub struct LogSummary {
 
 /// Start (or restart) tailing the newest gamelog in `settings.gamelogs_dir`.
 /// Returns immediately; ticks arrive on `dps://tick`, raw combat-log events
-/// on `dps://events`.
+/// on `dps://events`, finalized 5 s buckets on `dps://buckets`.
 #[tauri::command]
 pub async fn dps_start(
     app: AppHandle,
@@ -179,6 +189,10 @@ pub async fn dps_start(
 
     tauri::async_runtime::spawn(async move {
         let mut win = Window::new(settings.window_secs);
+        // Fixed-grid 5 s buckets (#983): anchored at capture start so empty
+        // buckets stream from the first poll on, combat or not.
+        let mut fold = BucketFold::new();
+        fold.advance_to(crate::util::time::now_secs() as i64 - LIVE_BUCKET_GRACE_SECS);
         // Cache of ore name → m³ per unit, resolved lazily from the SDE.
         let mut ore_vol: HashMap<String, f64> = HashMap::new();
         // Cache of weapon/ammo/drone name → source type (SDE group).
@@ -207,6 +221,10 @@ pub async fn dps_start(
             if paused.load(Ordering::SeqCst) {
                 continue; // frozen: don't read new lines or emit while paused.
             }
+
+            // Buckets finalized this poll — by events rolling past a boundary
+            // and/or by wall time passing one (collected below, emitted once).
+            let mut finalized: Vec<super::bucket::DpsBucket> = Vec::new();
 
             // A new session creates a new file — switch to it, read from 0,
             // and re-detect its language. When a character is selected this
@@ -251,9 +269,21 @@ pub async fn dps_start(
                         let _ = app.emit("dps://events", &batch);
                     }
                     for ev in batch.drain(..) {
+                        finalized.extend(fold.push(&ev));
                         win.push(ev);
                     }
                 }
+            }
+
+            // Fixed-grid buckets (#983): finalize everything wall time has
+            // passed (with a small grace for client write lag) — including
+            // explicit empty buckets while idle — and ship them in one batch
+            // together with whatever the events above already rolled past.
+            finalized.extend(
+                fold.advance_to(crate::util::time::now_secs() as i64 - LIVE_BUCKET_GRACE_SECS),
+            );
+            if !finalized.is_empty() {
+                let _ = app.emit("dps://buckets", &finalized);
             }
 
             let mut tick = win.tick(crate::util::time::now_secs() as i64);
@@ -355,8 +385,8 @@ fn seek_start(
 }
 
 /// Replay a past gamelog through the same tick pipeline at `speed`× real time.
-/// Emits `dps://tick` and `dps://events` exactly like a live capture, so the
-/// UI (graph and combat log alike) is identical either way.
+/// Emits `dps://tick`, `dps://events`, and `dps://buckets` exactly like a
+/// live capture, so the UI (graph, combat log, time grid) is identical.
 /// `settings.seek_ts` (set by dragging the timeline slider) starts the virtual
 /// clock mid-file instead of at the first event; the window is pre-warmed with
 /// the trailing `window_secs` of history so the DPS readout isn't cold at the
@@ -409,6 +439,12 @@ pub async fn dps_playback(
             win.push(ev);
         }
 
+        // Fixed-grid 5 s buckets (#983): anchored at the seek position, so a
+        // replay's grid is identical wherever the virtual clock starts, and
+        // empty buckets stream through idle stretches at `speed`×.
+        let mut fold = BucketFold::new();
+        fold.advance_to(seek);
+
         // Virtual log clock; advances `step` log-seconds per real POLL tick.
         let mut vt = seek as f64;
         let step = POLL.as_secs_f64() * speed;
@@ -432,8 +468,16 @@ pub async fn dps_playback(
             if !batch.is_empty() {
                 let _ = app.emit("dps://events", &batch);
             }
+            let mut finalized: Vec<super::bucket::DpsBucket> = Vec::new();
             for ev in batch {
+                finalized.extend(fold.push(&ev));
                 win.push(ev);
+            }
+            // The virtual clock trails nothing — it *is* event time, so no
+            // grace is needed before finalizing what it has passed.
+            finalized.extend(fold.advance_to(now));
+            if !finalized.is_empty() {
+                let _ = app.emit("dps://buckets", &finalized);
             }
             let mut tick = win.tick(now);
             attach_weapon_kinds(&mut tick, &mut weapon_kinds, sde_db.as_deref());

@@ -111,6 +111,27 @@ export interface DpsEvent {
   volume: number;
 }
 
+/** One finalized, epoch-aligned 5-second slice of combat activity (#983) —
+ *  the fixed time grid the detail charts draw on. All amount fields are
+ *  absolute sums over the bucket (hp, GJ, m³); per-second rates are
+ *  `sum / (end - start)`, derived at render time. Idle time arrives as
+ *  explicit all-zero buckets, so the grid has no holes. */
+export interface DpsBucket {
+  /** Inclusive start (unix seconds, a multiple of 5). */
+  start: number;
+  /** Exclusive end: `start + 5`. */
+  end: number;
+  damageOut: number;
+  damageIn: number;
+  repOut: number;
+  repIn: number;
+  capTransferOut: number;
+  capTransferIn: number;
+  capWarfareOut: number;
+  capWarfareIn: number;
+  miningM3: number;
+}
+
 /** A ship-label field from an overview export (#869); `"other"` covers any
  *  label this app doesn't capture (faction, custom-pack extra slots, …) —
  *  its separators still occupy space in the parsed layout. */
@@ -263,6 +284,16 @@ export function onDpsEvents(
   handler: (events: DpsEvent[]) => void,
 ): Promise<UnlistenFn> {
   return listen<DpsEvent[]>("dps://events", (event) => handler(event.payload));
+}
+
+/** Subscribe to finalized 5 s buckets — one batch per poll (usually a single
+ *  bucket, more after a seek or at high playback speed). */
+export function onDpsBuckets(
+  handler: (buckets: DpsBucket[]) => void,
+): Promise<UnlistenFn> {
+  return listen<DpsBucket[]>("dps://buckets", (event) =>
+    handler(event.payload),
+  );
 }
 
 /** Subscribe to natural playback-end notifications (loop support). */

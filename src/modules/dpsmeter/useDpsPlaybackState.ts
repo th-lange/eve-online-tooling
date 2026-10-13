@@ -12,9 +12,11 @@ import {
   dpsStart,
   dpsStop,
   errorMessage,
+  onDpsBuckets,
   onDpsDone,
   onDpsEvents,
   onDpsTick,
+  type DpsBucket,
   type DpsEvent,
   type DpsExtractionPlan,
   type DpsLogFile,
@@ -28,6 +30,7 @@ import {
   BUFFER,
   LOG_BUFFER,
   MINING_BUCKET_SECS,
+  appendBuckets,
   appendEvents,
   appendTick,
   type ChartLayout,
@@ -68,6 +71,9 @@ export function useDpsPlaybackState() {
   const [error, setError] = useState<string | null>(null);
   const [ticks, setTicks] = useState<DpsTick[]>([]);
   const [logEvents, setLogEvents] = useState<DpsEvent[]>([]);
+  // Finalized 5 s buckets (#983) — the whole session, in order; the bucket
+  // chart scrolls over these.
+  const [buckets, setBuckets] = useState<DpsBucket[]>([]);
   const [mode, setMode] = useState<Mode>("live");
   const [logs, setLogs] = useState<DpsLogFile[]>([]);
   const [file, setFile] = useState("");
@@ -117,6 +123,7 @@ export function useDpsPlaybackState() {
   activeRef.current = active;
   const bufferedRef = useRef<DpsTick[]>([]);
   const bufferedEventsRef = useRef<DpsEvent[]>([]);
+  const bufferedBucketsRef = useRef<DpsBucket[]>([]);
   // Session peaks for the two primary readouts (reset on Start / Play).
   const peaksRef = useRef({ out: 0, in: 0 });
   // Mined volume per 15 s bucket (bucket start-epoch → m³), session-lifetime.
@@ -241,6 +248,21 @@ export function useDpsPlaybackState() {
     return () => unlisten?.();
   }, []);
 
+  // Fixed-grid 5 s buckets (#983): the detail chart's time axis. Same
+  // hidden-page buffering as ticks/events; no cap — the whole session is
+  // kept (12 buckets/minute) so the chart can scroll over all of it.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    onDpsBuckets((batch) => {
+      if (!activeRef.current) {
+        bufferedBucketsRef.current.push(...batch);
+        return;
+      }
+      setBuckets((prev) => appendBuckets(prev, batch));
+    }).then((u) => (unlisten = u));
+    return () => unlisten?.();
+  }, []);
+
   // Stable ref for loop: always holds the current playback params so the
   // done-handler can restart without capturing stale closure values.
   const loopParamsRef = useRef({
@@ -271,6 +293,8 @@ export function useDpsPlaybackState() {
       setTimeout(() => {
         setTicks([]);
         setLogEvents([]);
+        setBuckets([]);
+        bufferedBucketsRef.current = [];
         peaksRef.current = { out: 0, in: 0 };
         miningRef.current = { buckets: new Map(), lastAt: null };
         setSelectedPilot(null);
@@ -310,6 +334,11 @@ export function useDpsPlaybackState() {
       bufferedEventsRef.current = [];
       setLogEvents((prev) => appendEvents(prev, buffered));
     }
+    if (bufferedBucketsRef.current.length > 0) {
+      const buffered = bufferedBucketsRef.current;
+      bufferedBucketsRef.current = [];
+      setBuckets((prev) => appendBuckets(prev, buffered));
+    }
   }, [active]);
 
   async function start(win = windowSecs) {
@@ -323,6 +352,11 @@ export function useDpsPlaybackState() {
     setRegion(null);
     setSeekPos(null);
     pausedAtRef.current = null;
+    // Unlike `ticks` (a short rolling window where a stale tail ages out on
+    // its own), buckets are a time axis for the whole session — a fresh
+    // capture must not chart-gap against the previous one's grid.
+    setBuckets([]);
+    bufferedBucketsRef.current = [];
     try {
       await dpsStart({
         gamelogsDir: dir,
@@ -368,6 +402,8 @@ export function useDpsPlaybackState() {
     setError(null);
     setTicks([]);
     setLogEvents([]);
+    setBuckets([]);
+    bufferedBucketsRef.current = [];
     peaksRef.current = { out: 0, in: 0 };
     miningRef.current = { buckets: new Map(), lastAt: null };
     setSelectedPilot(null);
@@ -568,6 +604,7 @@ export function useDpsPlaybackState() {
     error,
     ticks,
     logEvents,
+    buckets,
     mode,
     switchMode,
     logs,

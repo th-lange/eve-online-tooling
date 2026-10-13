@@ -7,9 +7,12 @@
 //!
 //! - [`parser`] — pure combat-line → [`parser::DpsEvent`].
 //! - [`aggregate`] — pure rolling-window → [`aggregate::DpsTick`].
+//! - [`bucket`] — pure fixed-grid fold → epoch-aligned 5 s [`bucket::DpsBucket`]s
+//!   (`dps://buckets`), the time axis the detail charts draw on (#983).
 //! - [`commands`] — the Tauri command surface + the background tail loop.
 
 pub mod aggregate;
+pub mod bucket;
 pub mod commands;
 pub mod overview;
 pub mod parser;
