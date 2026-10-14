@@ -1,7 +1,11 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DpsEvent } from "../../lib/api";
-import { formatClock, groupEventsByBucket } from "./dpsMeterShared";
+import {
+  formatClock,
+  groupEventsByBucket,
+  minuteStartOf,
+} from "./dpsMeterShared";
 
 /** Render one parsed combat-log line as plain English, e.g.
  *  "450 dmg → Some Pilot (Caracal) — Heavy Missile Launcher II [Wrecks]".
@@ -72,15 +76,16 @@ export function CombatLogPanel({
   events: DpsEvent[];
   collapsed: boolean;
   onToggleCollapsed: () => void;
-  /** The shared bucket cursor — this group gets the chart highlight's tint. */
+  /** The shared minute cursor — every group inside it gets the chart
+   *  highlight's tint. */
   cursor?: number | null;
-  /** Fired as the user scrolls through history: the bucket start of the group
-   *  at the viewport's vertical centre, or `null` once back at the live tail
-   *  (or nothing to report — collapsed, empty). The parent chart highlights
-   *  the bucket closest to this time. */
-  onVisibleCenterChange?: (bucketStart: number | null) => void;
-  /** Chart → log jump (#1003): scroll this bucket's group to the viewport
-   *  centre. The nonce `n` lets the same bucket be jumped to twice. */
+  /** Fired as the user scrolls through history: the minute of the group at
+   *  the viewport's vertical centre, or `null` once back at the live tail
+   *  (or nothing to report — collapsed, empty). Re-fired on content changes
+   *  while scrolled up, so the cursor never goes stale. */
+  onVisibleCenterChange?: (minuteStart: number | null) => void;
+  /** Chart → log jump (#1003): scroll the first group at or after this time
+   *  to the viewport centre. The nonce `n` lets the same target repeat. */
   jumpTo?: { start: number; n: number } | null;
   className?: string;
   /** Tailwind max-height class for the scrolling list — the fight overlay's
@@ -128,8 +133,15 @@ export function CombatLogPanel({
   useEffect(() => {
     if (!jumpTo || collapsed) return;
     const el = containerRef.current;
-    const group = el?.querySelector(`[data-bucket="${jumpTo.start}"]`);
-    if (!el || !group) return;
+    if (!el) return;
+    // Target the first group at or after the requested time (a chart click
+    // can land on an empty bucket with no group of its own), else the last.
+    const candidates = [...el.querySelectorAll("[data-bucket]")];
+    const group =
+      candidates.find(
+        (g) => Number((g as HTMLElement).dataset.bucket) >= jumpTo.start,
+      ) ?? candidates[candidates.length - 1];
+    if (!group) return;
     setAutoScroll(false);
     programmaticScrollRef.current = true;
     const g = group as HTMLElement;
@@ -142,6 +154,36 @@ export function CombatLogPanel({
     }, 100);
     return () => clearTimeout(t);
   }, [jumpTo, collapsed]);
+
+  /** The minute of the group nearest the viewport's vertical centre — the
+   *  shared cursor value — or `null` at the live tail. */
+  function centerMinute(el: HTMLElement): number | null {
+    const center = el.scrollTop + el.clientHeight / 2;
+    let start: number | null = null;
+    let bestDiff = Infinity;
+    for (const child of el.children) {
+      const group = child as HTMLElement;
+      if (group.dataset.bucket === undefined) continue;
+      const groupCenter = group.offsetTop + group.offsetHeight / 2;
+      const diff = Math.abs(groupCenter - center);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        start = Number(group.dataset.bucket);
+      }
+    }
+    return start == null ? null : minuteStartOf(start);
+  }
+
+  // While scrolled into history, the content keeps growing (and amendments
+  // can insert lines ABOVE the viewport), shifting what's visible without any
+  // scroll event — re-report the centre on every content change so the chart
+  // highlight can't go stale and drift away from the lines on screen.
+  useEffect(() => {
+    if (collapsed || autoScroll) return;
+    const el = containerRef.current;
+    if (el) onVisibleCenterChange?.(centerMinute(el));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [events, collapsed, autoScroll]);
 
   function handleScroll() {
     if (programmaticScrollRef.current || rafRef.current != null) return;
@@ -156,23 +198,9 @@ export function CombatLogPanel({
         return;
       }
       // Scrolled away from the live tail: stop yanking back to it, and report
-      // the bucket group at the viewport's vertical centre — group and chart
-      // bucket share the same id (the bucket start), so this maps exactly.
+      // the minute of the group at the viewport's vertical centre.
       if (autoScroll) setAutoScroll(false);
-      const center = el.scrollTop + el.clientHeight / 2;
-      let start: number | null = null;
-      let bestDiff = Infinity;
-      for (const child of el.children) {
-        const group = child as HTMLElement;
-        if (group.dataset.bucket === undefined) continue;
-        const groupCenter = group.offsetTop + group.offsetHeight / 2;
-        const diff = Math.abs(groupCenter - center);
-        if (diff < bestDiff) {
-          bestDiff = diff;
-          start = Number(group.dataset.bucket);
-        }
-      }
-      onVisibleCenterChange?.(start);
+      onVisibleCenterChange?.(centerMinute(el));
     });
   }
 
@@ -219,7 +247,7 @@ export function CombatLogPanel({
                   key={`${g.start}:${gi}`}
                   data-bucket={g.start}
                   className={`rounded px-1 [content-visibility:auto] ${
-                    cursor === g.start ? "bg-indigo-500/10" : ""
+                    cursor === minuteStartOf(g.start) ? "bg-indigo-500/10" : ""
                   }`}
                 >
                   {/* A timestamped divider only where a minute begins (or at
@@ -228,7 +256,9 @@ export function CombatLogPanel({
                   {gi === 0 || g.start % 60 === 0 ? (
                     <div
                       className={`flex items-center gap-2 pt-1 text-[10px] ${
-                        cursor === g.start ? "text-indigo-400" : "text-zinc-600"
+                        cursor === minuteStartOf(g.start)
+                          ? "text-indigo-400"
+                          : "text-zinc-600"
                       }`}
                     >
                       <span className="h-px flex-1 bg-zinc-800" />

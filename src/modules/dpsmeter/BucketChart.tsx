@@ -4,9 +4,8 @@ import { formatInt } from "../../lib/format";
 import { eventToneClass, formatEventLine } from "./CombatLogPanel";
 import {
   BUCKET_SECS,
-  bucketStartOf,
+  CURSOR_SECS,
   formatClock,
-  nearestBucketStart,
   SMOOTH_WINDOW_BUCKETS,
   smoothSeries,
   type BucketSeries,
@@ -30,8 +29,9 @@ const LABEL_EVERY = 12;
  *  compressing the axis. The viewport scrolls over the whole session and
  *  sticks to the live edge until the user scrolls back.
  *
- *  `markTs` highlights the single bucket closest in time to the combat log's
- *  centre line. `ghost` is the in-progress bucket at the live edge (#1004),
+ *  `markTs` (a minute start — the shared cursor) shades that whole minute,
+ *  matching the log's minute groups. `ghost` is the in-progress bucket at the
+ *  live edge (#1004),
  *  drawn dashed. Clicking a cell reports its bucket start via
  *  `onSelectBucket`; `eventsByBucket` feeds the hover tooltip's log-line
  *  count and preview. */
@@ -108,17 +108,27 @@ export const BucketChart = memo(function BucketChart({
     if (el && stickRightRef.current) el.scrollLeft = el.scrollWidth;
   }, [n]);
 
-  // Highlight the single bucket closest in time to the log's centre line
-  // (`markTs`), snapped to an existing bucket — or the ghost cell when the
-  // centre group IS the in-progress bucket. `null` → no highlight.
-  const markStart =
-    markTs == null
+  // Highlight the cursor's whole MINUTE (#minute-cursor): a 5 s sliver was
+  // too small to read and kept drifting against the log; the minute band
+  // matches the log's minute dividers exactly. Clamped to the drawn range
+  // (incl. the ghost cell); `null`/no-overlap → no highlight.
+  const dataEnd =
+    (ghost ? ghost.start + BUCKET_SECS : null) ??
+    (n > 0 ? buckets[n - 1].end : null);
+  const bandLo =
+    markTs == null || dataEnd == null ? null : Math.max(markTs, t0);
+  const bandHi =
+    markTs == null || dataEnd == null
       ? null
-      : ghost && bucketStartOf(markTs) === ghost.start
-        ? ghost.start
-        : nearestBucketStart(buckets, markTs);
+      : Math.min(markTs + CURSOR_SECS, dataEnd);
   const markX =
-    markStart == null ? null : ((markStart - t0) / BUCKET_SECS) * pxPerBucket;
+    bandLo == null || bandHi == null || bandHi <= bandLo
+      ? null
+      : ((bandLo - t0) / BUCKET_SECS) * pxPerBucket;
+  const markW =
+    markX == null || bandLo == null || bandHi == null
+      ? 0
+      : ((bandHi - bandLo) / BUCKET_SECS) * pxPerBucket;
 
   const hoverBucket = hover != null ? buckets[hover] : undefined;
   const yAxisStyle = { height: H, paddingTop: PAD_Y, paddingBottom: PAD_B };
@@ -131,10 +141,10 @@ export const BucketChart = memo(function BucketChart({
           {SMOOTH_WINDOW_BUCKETS * BUCKET_SECS}s smoothed
         </span>
         <span className="flex items-center gap-2 tabular-nums text-zinc-300">
-          {markStart != null && (
+          {markX != null && markTs != null && (
             <span className="flex items-center gap-1 text-indigo-400">
               <span className="h-2 w-0.5 bg-indigo-400" />
-              log @ {formatClock(markStart)}
+              log @ {formatClock(markTs)}
             </span>
           )}
           <span>peak {formatInt(Math.round(max))}</span>
@@ -221,7 +231,7 @@ export const BucketChart = memo(function BucketChart({
                   <rect
                     x={markX}
                     y={PAD_Y}
-                    width={pxPerBucket}
+                    width={markW}
                     height={H - PAD_Y - PAD_B}
                     fill="#818cf8"
                     fillOpacity="0.18"

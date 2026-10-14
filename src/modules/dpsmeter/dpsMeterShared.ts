@@ -94,26 +94,16 @@ export function bucketStartOf(ts: number): number {
   return Math.floor(ts / BUCKET_SECS) * BUCKET_SECS;
 }
 
-/** Start of the bucket whose time is closest to `ts` (by bucket midpoint), or
- *  `null` if there are no buckets. The combat log runs ahead of the chart
- *  (buckets finalize only once their 5 s window closes), so a log line can
- *  point past the newest bucket — this snaps to the nearest existing one, the
- *  single segment the chart highlights for the log's centre line. */
-export function nearestBucketStart(
-  buckets: DpsBucket[],
-  ts: number,
-): number | null {
-  if (buckets.length === 0) return null;
-  let best = buckets[0].start;
-  let bestDiff = Infinity;
-  for (const b of buckets) {
-    const diff = Math.abs(b.start + BUCKET_SECS / 2 - ts);
-    if (diff < bestDiff) {
-      bestDiff = diff;
-      best = b.start;
-    }
-  }
-  return best;
+// The log ⇄ chart cursor granularity (s): whole minutes. Minute bands match
+// the log's minute dividers, are wide enough to read on the chart
+// (12 buckets × 10 px), and stay put while new lines shift the log under a
+// fixed scroll position — 5 s precision kept drifting out of sync.
+export const CURSOR_SECS = 60;
+
+/** Epoch-aligned start of the minute containing `ts` — the shared cursor id
+ *  between the combat log and the charts. */
+export function minuteStartOf(ts: number): number {
+  return Math.floor(ts / CURSOR_SECS) * CURSOR_SECS;
 }
 
 // Buckets in the centered smoothing window for the rate charts. A single
