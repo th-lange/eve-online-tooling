@@ -68,7 +68,6 @@ export function CombatLogPanel({
   collapsed,
   onToggleCollapsed,
   cursor,
-  onVisibleCenterChange,
   jumpTo,
   className = "",
   maxHeightClass = "max-h-64",
@@ -76,14 +75,9 @@ export function CombatLogPanel({
   events: DpsEvent[];
   collapsed: boolean;
   onToggleCollapsed: () => void;
-  /** The shared minute cursor — every group inside it gets the chart
-   *  highlight's tint. */
+  /** The shared minute cursor, set by clicking a chart cell — every group
+   *  inside it gets the chart highlight's tint. */
   cursor?: number | null;
-  /** Fired as the user scrolls through history: the minute of the group at
-   *  the viewport's vertical centre, or `null` once back at the live tail
-   *  (or nothing to report — collapsed, empty). Re-fired on content changes
-   *  while scrolled up, so the cursor never goes stale. */
-  onVisibleCenterChange?: (minuteStart: number | null) => void;
   /** Chart → log jump (#1003): scroll the first group at or after this time
    *  to the viewport centre. The nonce `n` lets the same target repeat. */
   jumpTo?: { start: number; n: number } | null;
@@ -118,12 +112,6 @@ export function CombatLogPanel({
     }
   }, [events.length, autoScroll, collapsed]);
 
-  // Collapsing hides the log — any chart highlight it was driving should go too.
-  useEffect(() => {
-    if (collapsed) onVisibleCenterChange?.(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collapsed]);
-
   // Chart → log (#1003): a bucket click scrolls its group to the viewport
   // centre. The nonce makes re-clicking the same bucket jump again. Only the
   // log container scrolls — `scrollIntoView` would scroll every ancestor
@@ -155,52 +143,21 @@ export function CombatLogPanel({
     return () => clearTimeout(t);
   }, [jumpTo, collapsed]);
 
-  /** The minute of the group nearest the viewport's vertical centre — the
-   *  shared cursor value — or `null` at the live tail. */
-  function centerMinute(el: HTMLElement): number | null {
-    const center = el.scrollTop + el.clientHeight / 2;
-    let start: number | null = null;
-    let bestDiff = Infinity;
-    for (const child of el.children) {
-      const group = child as HTMLElement;
-      if (group.dataset.bucket === undefined) continue;
-      const groupCenter = group.offsetTop + group.offsetHeight / 2;
-      const diff = Math.abs(groupCenter - center);
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        start = Number(group.dataset.bucket);
-      }
-    }
-    return start == null ? null : minuteStartOf(start);
-  }
-
-  // While scrolled into history, the content keeps growing (and amendments
-  // can insert lines ABOVE the viewport), shifting what's visible without any
-  // scroll event — re-report the centre on every content change so the chart
-  // highlight can't go stale and drift away from the lines on screen.
-  useEffect(() => {
-    if (collapsed || autoScroll) return;
-    const el = containerRef.current;
-    if (el) onVisibleCenterChange?.(centerMinute(el));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [events, collapsed, autoScroll]);
-
   function handleScroll() {
     if (programmaticScrollRef.current || rafRef.current != null) return;
     rafRef.current = requestAnimationFrame(() => {
       rafRef.current = null;
       const el = containerRef.current;
       if (!el) return;
+      // Scrolling away from the live tail pauses auto-scroll; returning to
+      // the bottom resumes it. (The cursor is click-driven only — scroll
+      // reporting kept drifting against the lines on screen and was removed.)
       const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
       if (atBottom) {
         if (!autoScroll) setAutoScroll(true);
-        onVisibleCenterChange?.(null);
-        return;
+      } else if (autoScroll) {
+        setAutoScroll(false);
       }
-      // Scrolled away from the live tail: stop yanking back to it, and report
-      // the minute of the group at the viewport's vertical centre.
-      if (autoScroll) setAutoScroll(false);
-      onVisibleCenterChange?.(centerMinute(el));
     });
   }
 

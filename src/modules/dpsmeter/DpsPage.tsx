@@ -25,9 +25,8 @@ export function DpsPage() {
     STORAGE_KEYS.dpsCombatLogCollapsed,
     false,
   );
-  // The shared bucket cursor (#1001): the bucket start of the log group at
-  // the viewport centre — the charts highlight it, the log tints it
-  // (null = auto-scrolled to the live tail).
+  // The shared minute cursor, set by clicking a chart cell: the charts shade
+  // that minute and the log tints its groups (null = nothing selected yet).
   const [cursor, setCursor] = useState<number | null>(null);
   // Chart → log jump request; the nonce distinguishes repeat clicks (#1003).
   const [logJump, setLogJump] = useState<{ start: number; n: number } | null>(
@@ -290,7 +289,6 @@ export function DpsPage() {
         collapsed={logCollapsed}
         onToggleCollapsed={() => setLogCollapsed(!logCollapsed)}
         cursor={cursor}
-        onVisibleCenterChange={setCursor}
         jumpTo={logJump}
         className="mt-4"
       />
