@@ -1,8 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
-import { mockInvoke, renderWithQuery } from "../../test/harness";
+import { act, fireEvent, screen } from "@testing-library/react";
+import { invokeMock, mockInvoke, renderWithQuery } from "../../test/harness";
 import { FightOverlayProvider } from "./FightOverlayProvider";
 import { useFightOverlay } from "./fightOverlayContext";
+import type { DpsBucket } from "../../lib/api";
+
+// The overlay subscribes to dps://buckets via `listen`; capture the callback
+// so tests can push fight buckets directly.
+let bucketsHandler: ((buckets: DpsBucket[]) => void) | undefined;
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: (name: string, handler: (e: { payload: DpsBucket[] }) => void) => {
+    if (name === "dps://buckets")
+      bucketsHandler = (buckets) => handler({ payload: buckets });
+    return Promise.resolve(() => {});
+  },
+}));
 
 // jsdom has no audio playback — the Test button's staggered cue clips call
 // it (scrollIntoView is stubbed globally in src/test/setup.ts).
@@ -15,6 +27,19 @@ function TestTrigger() {
   return (
     <button type="button" onClick={runTest}>
       Run Test
+    </button>
+  );
+}
+
+// Consumer flipping the recording master switch off, like SettingsPage does.
+function DisableRecording() {
+  const { recording, setRecording } = useFightOverlay();
+  return (
+    <button
+      type="button"
+      onClick={() => setRecording({ ...recording, enabled: false })}
+    >
+      Disable rec
     </button>
   );
 }
@@ -46,5 +71,124 @@ describe("FightOverlayProvider — combat log", () => {
     // The scripted scram/point pair, which exercise the non-damage line kinds.
     expect(screen.getByText(/Scrambled ← Jane Doe/)).toBeVisible();
     expect(screen.getByText(/Pointed → John Doe/)).toBeVisible();
+  });
+});
+
+const hq = {
+  misses: 0,
+  glances: 0,
+  grazes: 0,
+  hits: 0,
+  penetrates: 0,
+  smashes: 0,
+  wrecks: 0,
+};
+
+function bucket(start: number, damageIn = 0): DpsBucket {
+  return {
+    start,
+    end: start + 5,
+    damageOut: 0,
+    damageIn,
+    repOut: 0,
+    repIn: 0,
+    capTransferOut: 0,
+    capTransferIn: 0,
+    capWarfareOut: 0,
+    capWarfareIn: 0,
+    miningM3: 0,
+    hitsOut: hq,
+    hitsIn: hq,
+    byWeapon: [],
+    byPilot: [],
+    events: [],
+  };
+}
+
+/** Commands passed to recording_run_hook so far, in order. */
+function hookCalls(): string[] {
+  return invokeMock.mock.calls
+    .filter((c) => c[0] === "recording_run_hook")
+    .map((c) => (c[1] as { command: string }).command);
+}
+
+describe("FightOverlayProvider — recording hooks (#1014)", () => {
+  it("runs the start hook on fight start and the end hook after the post-roll", async () => {
+    vi.useFakeTimers();
+    try {
+      localStorage.clear();
+      localStorage.setItem("pvp.fightScan", "true");
+      localStorage.setItem(
+        "pvp.fightRecording",
+        JSON.stringify({
+          enabled: true,
+          startCommand: "start-rec {start}",
+          endCommand: "stop-rec {start} {end}",
+          postRollSecs: 10,
+        }),
+      );
+      bucketsHandler = undefined;
+      invokeMock.mockClear();
+      mockInvoke({ pvp_profiles: () => ({ pilots: [], unresolved: [] }) });
+      renderWithQuery(
+        <FightOverlayProvider>
+          <div />
+        </FightOverlayProvider>,
+      );
+      // Flush the async listen subscription.
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(bucketsHandler).toBeDefined();
+
+      // Combat bucket → fight starts → start hook with {start} filled.
+      act(() => bucketsHandler!([bucket(1000, 50)]));
+      expect(hookCalls()).toEqual(["start-rec 1000"]);
+
+      // One empty bucket freezes the fight — but the end hook waits for the
+      // post-roll so the clip keeps the aftermath.
+      act(() => bucketsHandler!([bucket(1005)]));
+      expect(hookCalls()).toEqual(["start-rec 1000"]);
+      await act(() => vi.advanceTimersByTimeAsync(9_000));
+      expect(hookCalls()).toEqual(["start-rec 1000"]);
+      await act(() => vi.advanceTimersByTimeAsync(1_100));
+      expect(hookCalls()).toEqual(["start-rec 1000", "stop-rec 1000 1010"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops immediately (no post-roll) when recording is disabled mid-fight", async () => {
+    vi.useFakeTimers();
+    try {
+      localStorage.clear();
+      localStorage.setItem("pvp.fightScan", "true");
+      localStorage.setItem(
+        "pvp.fightRecording",
+        JSON.stringify({
+          enabled: true,
+          startCommand: "start-rec",
+          endCommand: "stop-rec",
+          postRollSecs: 60,
+        }),
+      );
+      bucketsHandler = undefined;
+      invokeMock.mockClear();
+      mockInvoke({ pvp_profiles: () => ({ pilots: [], unresolved: [] }) });
+      renderWithQuery(
+        <FightOverlayProvider>
+          <DisableRecording />
+        </FightOverlayProvider>,
+      );
+      await act(() => vi.advanceTimersByTimeAsync(0));
+
+      act(() => bucketsHandler!([bucket(0, 10)]));
+      expect(hookCalls()).toEqual(["start-rec"]);
+
+      // Mid-fight off switch: the end hook must fire right away, not after
+      // the 60 s post-roll.
+      fireEvent.click(screen.getByRole("button", { name: "Disable rec" }));
+      expect(hookCalls()).toEqual(["start-rec", "stop-rec"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
