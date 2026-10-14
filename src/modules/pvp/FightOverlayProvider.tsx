@@ -62,6 +62,9 @@ export function nextFightBuckets(
   if (prev.length === 0) {
     return isCombatBucket(bucket) ? [bucket] : prev;
   }
+  // Monotonic on the grid: a duplicated delivery of an already-kept bucket
+  // (e.g. a leaked double listener) must not stretch the fight buffer.
+  if (bucket.start <= prev[prev.length - 1].start) return prev;
   // Already frozen: stays exactly as-is regardless of what arrives.
   if (!isCombatBucket(prev[prev.length - 1])) return prev;
   // Still live (or this is the final empty bucket that freezes it): append.

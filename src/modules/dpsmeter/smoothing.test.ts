@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  appendBuckets,
   nearestBucketStart,
   SMOOTH_WINDOW_BUCKETS,
   smoothSeries,
@@ -49,6 +50,27 @@ describe("nearestBucketStart", () => {
   });
   it("returns null for an empty chart", () => {
     expect(nearestBucketStart([], 100)).toBeNull();
+  });
+});
+
+describe("appendBuckets", () => {
+  it("drops re-delivered buckets so the time axis can never double", () => {
+    const batch = [bkt(0), bkt(5)];
+    const once = appendBuckets([], batch);
+    expect(once.map((b) => b.start)).toEqual([0, 5]);
+    // The same batch delivered again (a leaked duplicate listener, a replayed
+    // payload) is a no-op — this is what made the chart line stop mid-panel
+    // and the log show every group twice.
+    expect(appendBuckets(once, batch)).toBe(once);
+    // Overlapping delivery keeps only the genuinely new tail.
+    const next = appendBuckets(once, [bkt(5), bkt(10)]);
+    expect(next.map((b) => b.start)).toEqual([0, 5, 10]);
+  });
+
+  it("appends normally in order and is a no-op for an empty batch", () => {
+    const prev = [bkt(0)];
+    expect(appendBuckets(prev, [])).toBe(prev);
+    expect(appendBuckets(prev, [bkt(5)]).map((b) => b.start)).toEqual([0, 5]);
   });
 });
 
