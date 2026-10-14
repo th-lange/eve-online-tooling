@@ -4,7 +4,12 @@ import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { usePersistentState } from "../../lib/usePersistentState";
 import { CombatLogPanel } from "./CombatLogPanel";
 import { DpsChartContainer } from "./DpsChartContainer";
-import { SERIES, formatRate, pendingGhostBucket } from "./dpsMeterShared";
+import {
+  SERIES,
+  formatRate,
+  minuteStartOf,
+  pendingGhostBucket,
+} from "./dpsMeterShared";
 import { FightBreakdown, TackleTags } from "./FightBreakdown";
 import { PrimaryExtras } from "./HitQualityIndicators";
 import { LogFilePanel } from "./LogFilePanel";
@@ -47,10 +52,10 @@ export function DpsPage() {
     [dps.pendingEvents, dps.buckets, dps.running],
   );
 
-  /** A chart bucket was clicked: move the shared cursor there, make sure the
-   *  log is open, and scroll its group to the viewport centre. */
+  /** A chart cell was clicked: move the shared cursor to its minute, make
+   *  sure the log is open, and scroll that moment's lines to the centre. */
   function selectBucket(start: number) {
-    setCursor(start);
+    setCursor(minuteStartOf(start));
     setLogCollapsed(false);
     setLogJump((prev) => ({ start, n: (prev?.n ?? 0) + 1 }));
   }

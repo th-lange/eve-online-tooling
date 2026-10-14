@@ -23,7 +23,7 @@ import { Modal } from "../../components/Modal";
 import { CombatLogPanel } from "../dpsmeter/CombatLogPanel";
 import {
   BUCKET_SECS,
-  nearestBucketStart,
+  CURSOR_SECS,
   smoothSeries,
 } from "../dpsmeter/dpsMeterShared";
 import { FightOverlayContext } from "./fightOverlayContext";
@@ -92,8 +92,8 @@ function MiniDpsChart({
   markTs,
 }: {
   buckets: DpsBucket[];
-  /** The combat-log footer's centre-line time — highlights the single closest
-   *  5 s bucket, same as the DPS meter's chart (#986). */
+  /** The combat-log footer's centre minute (the shared cursor) — shades that
+   *  whole minute, same as the DPS meter's chart. */
   markTs?: number | null;
 }) {
   if (buckets.length < 2)
@@ -127,10 +127,17 @@ function MiniDpsChart({
           ).toFixed(1)}`,
       )
       .join(" ");
-  // Highlight the single bucket closest in time to the log's centre line,
-  // snapped to an existing bucket.
-  const markStart = markTs == null ? null : nearestBucketStart(buckets, markTs);
-  const markX = markStart == null ? null : x(markStart);
+  // Shade the cursor's whole minute, clamped to the fight's span — same
+  // semantics as the DPS meter chart's minute band.
+  const bandLo = markTs == null ? null : Math.max(markTs, t0);
+  const bandHi =
+    markTs == null ? null : Math.min(markTs + CURSOR_SECS, t0 + span);
+  const markX =
+    bandLo == null || bandHi == null || bandHi <= bandLo ? null : x(bandLo);
+  const markW =
+    markX == null || bandLo == null || bandHi == null
+      ? 0
+      : x(bandHi) - x(bandLo);
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded">
       <rect width={W} height={H} fill="#09090b" rx="3" />
@@ -150,7 +157,7 @@ function MiniDpsChart({
         <rect
           x={markX}
           y={pad}
-          width={(BUCKET_SECS / span) * w}
+          width={markW}
           height={H - pad * 2}
           fill="#818cf8"
           fillOpacity="0.25"

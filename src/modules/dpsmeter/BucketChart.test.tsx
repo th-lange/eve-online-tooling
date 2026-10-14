@@ -72,26 +72,25 @@ describe("BucketChart", () => {
     expect(svg.getAttribute("class")).toContain("ml-auto");
   });
 
-  it("highlights the single bucket closest to markTs, snapping past the end", () => {
-    // 5 buckets: starts 0,5,10,15,20. markTs=12 is closest to bucket 10;
-    // markTs far past the end snaps to the last bucket (20).
+  it("shades the cursor's whole minute, clamped to the drawn data", () => {
+    // 5 buckets: 0..25s drawn. The cursor is a minute start; the band covers
+    // that minute but never extends past the data (no empty-space highlight).
     const buckets = Array.from({ length: 5 }, (_, i) => bucket(i, 100));
     const mid = render(
-      <BucketChart buckets={buckets} series={BUCKET_SERIES_OUT} markTs={12} />,
+      <BucketChart buckets={buckets} series={BUCKET_SERIES_OUT} markTs={0} />,
     );
     const midRect = mid.container.querySelector('rect[fill="#818cf8"]')!;
-    expect(Number(midRect.getAttribute("x"))).toBe((10 / 5) * 10); // bucket 10
-    expect(Number(midRect.getAttribute("width"))).toBe(10); // one bucket wide
+    expect(Number(midRect.getAttribute("x"))).toBe(0);
+    // Minute [0,60) clamps to the drawn [0,25) → 5 buckets × 10px.
+    expect(Number(midRect.getAttribute("width"))).toBe(50);
 
-    const end = render(
-      <BucketChart
-        buckets={buckets}
-        series={BUCKET_SERIES_OUT}
-        markTs={9999}
-      />,
+    // A minute entirely outside the drawn range shows no band.
+    const off = render(
+      <BucketChart buckets={buckets} series={BUCKET_SERIES_OUT} markTs={60} />,
     );
-    const endRect = end.container.querySelector('rect[fill="#818cf8"]')!;
-    expect(Number(endRect.getAttribute("x"))).toBe((20 / 5) * 10); // last bucket
+    expect(
+      off.container.querySelector('rect[fill="#818cf8"]'),
+    ).not.toBeInTheDocument();
   });
 
   it("reports the clicked cell's bucket start (incl. the ghost cell)", () => {
@@ -115,22 +114,23 @@ describe("BucketChart", () => {
     expect(onSelectBucket).toHaveBeenLastCalledWith(25);
   });
 
-  it("draws the in-progress ghost cell dashed and highlights it when the cursor names it", () => {
+  it("extends the minute band over the ghost cell at the live edge", () => {
     const buckets = Array.from({ length: 5 }, (_, i) => bucket(i, 100));
     const { container } = render(
       <BucketChart
         buckets={buckets}
         series={BUCKET_SERIES_OUT}
         ghost={{ start: 25, damageOut: 50, damageIn: 0 }}
-        markTs={26}
+        markTs={0}
       />,
     );
     // Dashed ghost outline at the cell past the last real bucket.
     const dashed = container.querySelector('rect[stroke-dasharray="3 3"]')!;
     expect(Number(dashed.getAttribute("x"))).toBe((25 / 5) * 10 + 1);
-    // The cursor (26 → bucket 25) lands on the ghost, not the last real one.
+    // Minute 0 clamps to the drawn range INCLUDING the ghost: [0, 30) → 60px.
     const mark = container.querySelector('rect[fill="#818cf8"]')!;
-    expect(Number(mark.getAttribute("x"))).toBe((25 / 5) * 10);
+    expect(Number(mark.getAttribute("x"))).toBe(0);
+    expect(Number(mark.getAttribute("width"))).toBe((30 / 5) * 10);
   });
 
   it("shows the bucket's log-line count and preview in the hover tooltip", () => {

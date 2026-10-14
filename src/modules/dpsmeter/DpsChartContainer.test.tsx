@@ -66,10 +66,11 @@ describe("DpsChartContainer — bucket time grid (#984)", () => {
     expect(screen.getByText("peak 10")).toBeInTheDocument();
   });
 
-  it("labels the log position with the closest bucket's start", () => {
-    // 1012 is closest to the bucket starting at 1010 (midpoint 1012.5).
-    renderCharts({ markTs: 1012 });
-    expect(screen.getAllByText(`log @ ${formatClock(1010)}`).length).toBe(2);
+  it("labels the log position with the cursor's minute", () => {
+    // The cursor is a minute start (960 here); buckets 1000..1015 are drawn,
+    // so the minute [960, 1020) overlaps them and the band + label show.
+    renderCharts({ markTs: 960 });
+    expect(screen.getAllByText(`log @ ${formatClock(960)}`).length).toBe(2);
   });
 
   it("shows no log-position label when markTs is unset", () => {

@@ -73,12 +73,12 @@ async function scrollAndFlush(list: HTMLElement) {
 }
 
 describe("CombatLogPanel scrolling", () => {
-  it("reports the centre group's bucket start and pauses auto-scroll when scrolled away from the bottom", async () => {
+  it("reports the centre group's minute and pauses auto-scroll when scrolled away from the bottom", async () => {
     vi.useFakeTimers();
     try {
-      // ts 1000–1009 → two bucket groups: 1000 (1000–1004) and 1005 (1005–1009).
+      // ts 3600–3609 → two bucket groups: 3600 and 3605, both in minute 3600.
       const events = Array.from({ length: 10 }, (_, i) =>
-        ev(1000 + i, `p${i}`),
+        ev(3600 + i, `p${i}`),
       );
       const onVisibleCenterChange = vi.fn();
       const { container } = render(
@@ -95,7 +95,8 @@ describe("CombatLogPanel scrolling", () => {
       await act(() => vi.advanceTimersByTimeAsync(650));
 
       // Two 120px groups (240px content) in a 50px viewport, scrolled to
-      // 130px: viewport centre = 155px → group 1005 (centre 180) is closest.
+      // 130px: viewport centre = 155px → group 3605 (centre 180) is closest;
+      // the report is its MINUTE (3600), the shared cursor id.
       stubGeometry(list, {
         scrollTop: 130,
         scrollHeight: 240,
@@ -103,7 +104,7 @@ describe("CombatLogPanel scrolling", () => {
       });
       await scrollAndFlush(list);
 
-      expect(onVisibleCenterChange).toHaveBeenCalledWith(1005);
+      expect(onVisibleCenterChange).toHaveBeenCalledWith(3600);
       expect(
         screen.getByRole("checkbox", { name: "Auto-scroll" }),
       ).not.toBeChecked();
@@ -112,14 +113,15 @@ describe("CombatLogPanel scrolling", () => {
     }
   });
 
-  it("tints the group the shared cursor names and draws bucket dividers", () => {
-    const events = [ev(1000, "a"), ev(1006, "b")];
+  it("tints every group inside the cursor's minute", () => {
+    // Groups 3540 and 3600 sit in different minutes.
+    const events = [ev(3541, "a"), ev(3601, "b")];
     const { container } = render(
       <CombatLogPanel
         events={events}
         collapsed={false}
         onToggleCollapsed={() => {}}
-        cursor={1005}
+        cursor={3600}
       />,
     );
     const groups = container.querySelectorAll("[data-bucket]");
@@ -128,6 +130,53 @@ describe("CombatLogPanel scrolling", () => {
     expect((groups[0] as HTMLElement).className).not.toContain(
       "bg-indigo-500/10",
     );
+  });
+
+  it("re-reports the centre when content changes while scrolled up (no stale cursor)", async () => {
+    vi.useFakeTimers();
+    try {
+      const events = Array.from({ length: 10 }, (_, i) =>
+        ev(3600 + i, `p${i}`),
+      );
+      const onVisibleCenterChange = vi.fn();
+      const { container, rerender } = render(
+        <CombatLogPanel
+          events={events}
+          collapsed={false}
+          onToggleCollapsed={() => {}}
+          onVisibleCenterChange={onVisibleCenterChange}
+        />,
+      );
+      const list = container.querySelector(".overflow-y-auto") as HTMLElement;
+      await act(() => vi.advanceTimersByTimeAsync(650));
+      stubGeometry(list, {
+        scrollTop: 130,
+        scrollHeight: 240,
+        clientHeight: 50,
+      });
+      await scrollAndFlush(list);
+      const callsAfterScroll = onVisibleCenterChange.mock.calls.length;
+      expect(callsAfterScroll).toBeGreaterThan(0);
+
+      // New lines arrive while scrolled into history: the content shifts
+      // under the fixed scroll position, so the centre MUST be re-reported
+      // without any further scroll event.
+      await act(async () => {
+        rerender(
+          <CombatLogPanel
+            events={[...events, ev(3620, "later")]}
+            collapsed={false}
+            onToggleCollapsed={() => {}}
+            onVisibleCenterChange={onVisibleCenterChange}
+          />,
+        );
+      });
+      expect(onVisibleCenterChange.mock.calls.length).toBeGreaterThan(
+        callsAfterScroll,
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("centres the jumped-to bucket's group by scrolling the container only", () => {
