@@ -7,6 +7,8 @@ import {
   onDpsBuckets,
   dpsStart,
   recordingRunHook,
+  obsFightStarted,
+  obsFightEnded,
   fittingListLocal,
   fittingSimulate,
   type DpsBucket,
@@ -637,9 +639,15 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     STORAGE_KEYS.fightOverlayCombatLogCollapsed,
     true,
   );
-  const [recording, setRecording] = usePersistentState<FightRecordingSettings>(
-    STORAGE_KEYS.fightRecording,
-    DEFAULT_FIGHT_RECORDING,
+  const [storedRecording, setRecording] =
+    usePersistentState<FightRecordingSettings>(
+      STORAGE_KEYS.fightRecording,
+      DEFAULT_FIGHT_RECORDING,
+    );
+  // Settings persisted by an older build miss newer fields — overlay defaults.
+  const recording: FightRecordingSettings = useMemo(
+    () => ({ ...DEFAULT_FIGHT_RECORDING, ...storedRecording }),
+    [storedRecording],
   );
   const [fightOpen, setFightOpen] = useState(false);
   const [selectedFitId, setSelectedFitId] = useState<string | null>(null);
@@ -776,6 +784,11 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
           start: fightStartTs,
         });
         if (cmd) void recordingRunHook(cmd).catch(() => {});
+        if (recording.obsEnabled)
+          void obsFightStarted({
+            url: recording.obsUrl,
+            password: recording.obsPassword || undefined,
+          }).catch(() => {});
       }
     } else if (rec.active) {
       rec.active = false;
@@ -785,6 +798,11 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
           end: fightEndTs,
         });
         if (cmd) void recordingRunHook(cmd).catch(() => {});
+        if (recording.obsEnabled)
+          void obsFightEnded({
+            url: recording.obsUrl,
+            password: recording.obsPassword || undefined,
+          }).catch(() => {});
       };
       if (!recording.enabled) {
         runEnd(); // setting switched off mid-fight: stop right away

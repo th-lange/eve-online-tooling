@@ -9,6 +9,12 @@ export interface FightRecordingSettings {
   startCommand: string;
   endCommand: string;
   postRollSecs: number;
+  /** Drive OBS over obs-websocket (#1015): SaveReplayBuffer + StartRecord on
+   *  fight start, StopRecord on fight end. Independent of the command hooks —
+   *  either or both can be active. */
+  obsEnabled: boolean;
+  obsUrl: string;
+  obsPassword: string;
 }
 
 export const DEFAULT_FIGHT_RECORDING: FightRecordingSettings = {
@@ -16,6 +22,9 @@ export const DEFAULT_FIGHT_RECORDING: FightRecordingSettings = {
   startCommand: "",
   endCommand: "",
   postRollSecs: 10,
+  obsEnabled: false,
+  obsUrl: "ws://127.0.0.1:4455",
+  obsPassword: "",
 };
 
 export interface FightOverlayCtx {
