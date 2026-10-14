@@ -13,12 +13,11 @@ import {
   type GhostBucket,
 } from "./dpsMeterShared";
 
-// Minimum horizontal pixels per 5 s bucket. The chart fits its buckets to the
-// available width so a short session fills the panel instead of leaving empty
-// room; only once buckets would fall below this floor (a long session — 12
-// buckets/min) does the SVG grow past the viewport and scroll, sticking to
-// the live edge.
-const MIN_PX_PER_BUCKET = 10;
+// Horizontal pixels per 5 s bucket — a fixed scale: the chart starts at the
+// right edge and flows left as buckets arrive (12/min), overflowing into a
+// scrolling, stick-to-live viewport once the session outgrows the panel.
+// Never rescaled, so time never compresses mid-session.
+const PX_PER_BUCKET = 10;
 const H = 280;
 const PAD_Y = 10;
 const PAD_B = 24; // room for the time labels along the bottom
@@ -62,25 +61,12 @@ export const BucketChart = memo(function BucketChart({
 
   const t0 = buckets[0]?.start ?? 0;
   const n = buckets.length;
-  // Fit the buckets to the measured viewport: expand past the floor so a
-  // short session fills the width, and only overflow (scroll) once the floor
-  // binds. 0 before the first measure → falls back to the floor.
-  const [viewportW, setViewportW] = useState(0);
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    setViewportW(el.clientWidth);
-    const ro = new ResizeObserver(([entry]) => {
-      setViewportW(entry.contentRect.width);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  // Fixed scale, right-anchored: the newest bucket sits at the right edge and
+  // history flows left (the SVG is right-aligned while narrower than the
+  // viewport, then overflows into a stick-to-live scroll). No fit-to-width —
+  // a pixel is always the same amount of time, nothing rescales mid-fight.
+  const pxPerBucket = PX_PER_BUCKET;
   const cells = n + (ghost ? 1 : 0);
-  const pxPerBucket =
-    cells > 0
-      ? Math.max(MIN_PX_PER_BUCKET, viewportW / cells)
-      : MIN_PX_PER_BUCKET;
   const width = Math.max(1, cells) * pxPerBucket;
 
   const { max, lines, labels, yLabels } = useMemo(() => {
@@ -184,7 +170,7 @@ export const BucketChart = memo(function BucketChart({
               <svg
                 width={width}
                 height={H}
-                className="block cursor-crosshair"
+                className="ml-auto block cursor-crosshair"
                 onPointerMove={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect();
                   const i = Math.floor((e.clientX - rect.left) / pxPerBucket);

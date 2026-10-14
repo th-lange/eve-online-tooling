@@ -191,8 +191,10 @@ export function useDpsPlaybackState() {
   // line-by-line log alongside the rate graph. Buffered while the page is
   // hidden so it doesn't re-render in the background.
   useEffect(() => {
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     onDpsEvents((batch) => {
+      if (cancelled) return;
       if (!activeRef.current) {
         const buf = bufferedEventsRef.current;
         buf.push(...batch);
@@ -200,8 +202,14 @@ export function useDpsPlaybackState() {
         return;
       }
       setPendingEvents((prev) => appendEvents(prev, batch, LOG_BUFFER));
-    }).then((u) => (unlisten = u));
-    return () => unlisten?.();
+    }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   // Fixed-grid 5 s buckets (#983): the page's single data feed — charts,
@@ -209,15 +217,27 @@ export function useDpsPlaybackState() {
   // hidden-page buffering as events; no cap — the whole session is kept
   // (12 buckets/minute) so the chart can scroll over all of it.
   useEffect(() => {
+    // `cancelled` guards the async-subscribe race: StrictMode/HMR re-runs
+    // this effect, and cleanup can fire BEFORE `onDpsBuckets` resolves — a
+    // bare `unlisten?.()` would then be a no-op and the old listener leaks,
+    // duplicating every bucket (the half-width chart + doubled log lines).
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     onDpsBuckets((batch) => {
+      if (cancelled) return;
       if (!activeRef.current) {
         bufferedBucketsRef.current.push(...batch);
         return;
       }
       setBuckets((prev) => appendBuckets(prev, batch));
-    }).then((u) => (unlisten = u));
-    return () => unlisten?.();
+    }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   // Stable ref for loop: always holds the current playback params so the
@@ -239,8 +259,10 @@ export function useDpsPlaybackState() {
 
   // When playback ends naturally, mark as stopped and auto-loop if enabled.
   useEffect(() => {
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     onDpsDone(() => {
+      if (cancelled) return;
       setRunning(false);
       const p = loopParamsRef.current;
       if (!p.looping) return;
@@ -263,8 +285,14 @@ export function useDpsPlaybackState() {
           .then(() => setRunning(true))
           .catch((e) => setError(errorMessage(e)));
       }, 350);
-    }).then((u) => (unlisten = u));
-    return () => unlisten?.();
+    }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   // On becoming visible again, flush whatever arrived while hidden in one update.

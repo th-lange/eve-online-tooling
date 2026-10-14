@@ -191,12 +191,17 @@ export const BUCKET_SERIES_COMBINED: BucketSeries[] = [
 ];
 
 /** Append a batch of finalized buckets. The whole session is kept (12/min —
- *  trivial), so the detail chart can scroll over all of it; no ring buffer. */
+ *  trivial), so the detail chart can scroll over all of it; no ring buffer.
+ *  Strictly monotonic on the grid: anything at or before the newest kept
+ *  bucket is dropped, so a duplicated delivery (a leaked double listener, a
+ *  replayed batch) can never double the time axis or the log groups. */
 export function appendBuckets(
   prev: DpsBucket[],
   batch: DpsBucket[],
 ): DpsBucket[] {
-  return batch.length === 0 ? prev : prev.concat(batch);
+  const lastStart = prev[prev.length - 1]?.start ?? -Infinity;
+  const fresh = batch.filter((b) => b.start > lastStart);
+  return fresh.length === 0 ? prev : prev.concat(fresh);
 }
 
 // Palette for per-source (by-pilot) lines — distinct hues, assigned to each

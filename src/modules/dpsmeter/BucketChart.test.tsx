@@ -1,34 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { BucketChart } from "./BucketChart";
 import { BUCKET_SERIES_OUT } from "./dpsMeterShared";
 import type { DpsBucket, DpsEvent } from "../../lib/api";
-
-// A ResizeObserver that reports a fixed viewport width to the chart (jsdom's
-// elements all measure 0 and the global stub never fires a callback).
-function stubResizeObserver(width: number) {
-  const real = globalThis.ResizeObserver;
-  globalThis.ResizeObserver = class {
-    constructor(private cb: ResizeObserverCallback) {}
-    observe() {
-      this.cb(
-        [{ contentRect: { width } } as ResizeObserverEntry],
-        this as unknown as ResizeObserver,
-      );
-    }
-    unobserve() {}
-    disconnect() {}
-  } as unknown as typeof ResizeObserver;
-  return () => {
-    globalThis.ResizeObserver = real;
-  };
-}
-
-let restoreRO: (() => void) | undefined;
-afterEach(() => {
-  restoreRO?.();
-  restoreRO = undefined;
-});
 
 const hq = {
   misses: 0,
@@ -85,26 +59,17 @@ describe("BucketChart", () => {
     expect(Math.min(...ys)).toBeCloseTo(PLOT_TOP, 1);
   });
 
-  it("fills the viewport width for a short session (no wasted room)", () => {
-    restoreRO = stubResizeObserver(800);
+  it("keeps a fixed time scale, right-anchored (newest flows in from the right)", () => {
     const buckets = Array.from({ length: 20 }, (_, i) => bucket(i, 100));
     const { container } = render(
       <BucketChart buckets={buckets} series={BUCKET_SERIES_OUT} />,
     );
-    // 20 buckets × 10px floor = 200px ≪ 800px viewport, so the SVG expands to
-    // fill the full width instead of leaving ~3/4 empty.
-    expect(container.querySelector("svg")!.getAttribute("width")).toBe("800");
-  });
-
-  it("overflows (scrolls) only once buckets hit the min width", () => {
-    restoreRO = stubResizeObserver(800);
-    const buckets = Array.from({ length: 200 }, (_, i) => bucket(i, 100));
-    const { container } = render(
-      <BucketChart buckets={buckets} series={BUCKET_SERIES_OUT} />,
-    );
-    // 200 × 10px = 2000px > 800px viewport: the floor binds and the chart
-    // grows past the viewport to scroll (sticking to the live edge).
-    expect(container.querySelector("svg")!.getAttribute("width")).toBe("2000");
+    const svg = container.querySelector("svg")!;
+    // A pixel is always the same amount of time — 20 buckets × 10px, never
+    // rescaled to the viewport (fit-to-width compressed mid-session).
+    expect(svg.getAttribute("width")).toBe("200");
+    // Right-anchored while narrower than the panel: history flows left.
+    expect(svg.getAttribute("class")).toContain("ml-auto");
   });
 
   it("highlights the single bucket closest to markTs, snapping past the end", () => {
