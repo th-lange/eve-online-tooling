@@ -21,11 +21,7 @@ import { FIGHT_OVERLAY_SHIP_POLL_INTERVAL_MS } from "../../lib/refreshIntervals"
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { Modal } from "../../components/Modal";
 import { CombatLogPanel } from "../dpsmeter/CombatLogPanel";
-import {
-  BUCKET_SECS,
-  CURSOR_SECS,
-  smoothSeries,
-} from "../dpsmeter/dpsMeterShared";
+import { BUCKET_SECS, smoothSeries } from "../dpsmeter/dpsMeterShared";
 import { FightOverlayContext } from "./fightOverlayContext";
 
 /** Metres → compact km/m string. Used in AttackerCard and FightPanel. */
@@ -87,15 +83,7 @@ export function nextFightBuckets(
 // ---------------------------------------------------------------- MiniDpsChart
 
 /** Mini DPS chart (out green, in red) over the fight's 5 s buckets. */
-function MiniDpsChart({
-  buckets,
-  markTs,
-}: {
-  buckets: DpsBucket[];
-  /** The combat-log footer's centre minute (the shared cursor) — shades that
-   *  whole minute, same as the DPS meter's chart. */
-  markTs?: number | null;
-}) {
+function MiniDpsChart({ buckets }: { buckets: DpsBucket[] }) {
   if (buckets.length < 2)
     return <div className="h-12 w-full rounded bg-zinc-950" />;
   const W = 100,
@@ -127,17 +115,6 @@ function MiniDpsChart({
           ).toFixed(1)}`,
       )
       .join(" ");
-  // Shade the cursor's whole minute, clamped to the fight's span — same
-  // semantics as the DPS meter chart's minute band.
-  const bandLo = markTs == null ? null : Math.max(markTs, t0);
-  const bandHi =
-    markTs == null ? null : Math.min(markTs + CURSOR_SECS, t0 + span);
-  const markX =
-    bandLo == null || bandHi == null || bandHi <= bandLo ? null : x(bandLo);
-  const markW =
-    markX == null || bandLo == null || bandHi == null
-      ? 0
-      : x(bandHi) - x(bandLo);
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded">
       <rect width={W} height={H} fill="#09090b" rx="3" />
@@ -153,18 +130,6 @@ function MiniDpsChart({
         stroke="#f87171"
         strokeWidth="1.5"
       />
-      {markX != null && (
-        <rect
-          x={markX}
-          y={pad}
-          width={markW}
-          height={H - pad * 2}
-          fill="#818cf8"
-          fillOpacity="0.25"
-          stroke="#818cf8"
-          strokeWidth="0.5"
-        />
-      )}
     </svg>
   );
 }
@@ -263,8 +228,6 @@ function FightPanel({
   buckets,
   logCollapsed,
   onToggleLogCollapsed,
-  logMarkTs,
-  onLogVisibleCenterChange,
   attackers,
   myWeapons,
   localFits,
@@ -279,10 +242,6 @@ function FightPanel({
   buckets: DpsBucket[];
   logCollapsed: boolean;
   onToggleLogCollapsed: () => void;
-  /** See `CombatLogPanel`'s `onVisibleCenterChange` — threaded through to
-   *  highlight the same single bucket on `MiniDpsChart`. */
-  logMarkTs: number | null;
-  onLogVisibleCenterChange: (ts: number | null) => void;
   attackers: {
     name: string;
     dpsIn: number;
@@ -466,7 +425,7 @@ function FightPanel({
           <h3 className="text-[10px] font-medium uppercase tracking-wide text-zinc-500">
             DPS
           </h3>
-          <MiniDpsChart buckets={buckets} markTs={logMarkTs} />
+          <MiniDpsChart buckets={buckets} />
           <div className="flex gap-3 text-[10px] text-zinc-600">
             <span>
               <span className="text-emerald-500">▬</span> out
@@ -485,8 +444,6 @@ function FightPanel({
           events={buckets.flatMap((b) => b.events)}
           collapsed={logCollapsed}
           onToggleCollapsed={onToggleLogCollapsed}
-          cursor={logMarkTs}
-          onVisibleCenterChange={onLogVisibleCenterChange}
           maxHeightClass="max-h-32"
           className="border-none bg-transparent p-0"
         />
@@ -660,9 +617,6 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     STORAGE_KEYS.fightOverlayCombatLogCollapsed,
     true,
   );
-  // The time of the combat log footer's centre line — the closest bucket is
-  // highlighted on MiniDpsChart.
-  const [fightLogMarkTs, setFightLogMarkTs] = useState<number | null>(null);
   const [fightOpen, setFightOpen] = useState(false);
   const [selectedFitId, setSelectedFitId] = useState<string | null>(null);
   // Settings "Test" preview: sample data, rebuilt each time the button is hit.
@@ -854,8 +808,6 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
           buckets={testFight.buckets}
           logCollapsed={logCollapsed}
           onToggleLogCollapsed={() => setLogCollapsed(!logCollapsed)}
-          logMarkTs={fightLogMarkTs}
-          onLogVisibleCenterChange={setFightLogMarkTs}
           attackers={testFight.attackers}
           myWeapons={testFight.myWeapons}
           localFits={localFits.data ?? []}
@@ -873,8 +825,6 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
             buckets={fightBuckets}
             logCollapsed={logCollapsed}
             onToggleLogCollapsed={() => setLogCollapsed(!logCollapsed)}
-            logMarkTs={fightLogMarkTs}
-            onLogVisibleCenterChange={setFightLogMarkTs}
             attackers={activeAttackers}
             myWeapons={latestBucket?.byWeapon ?? []}
             localFits={localFits.data ?? []}
@@ -889,7 +839,6 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
             onDismiss={() => {
               setFightOpen(false);
               setFightBuckets([]);
-              setFightLogMarkTs(null);
             }}
           />
         )
