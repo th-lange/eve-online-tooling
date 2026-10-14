@@ -33,6 +33,7 @@ export const STORAGE_KEYS = {
   dpsCharacter: "dps.character",
   dpsCombatLogCollapsed: "dps.combatLogCollapsed",
   fightOverlayCombatLogCollapsed: "pvp.fightOverlayCombatLogCollapsed",
+  fightRecording: "pvp.fightRecording",
   // Local Intel
   localintelSound: "localintel.sound",
   localintelAlertNeutrals: "localintel.alertNeutrals",

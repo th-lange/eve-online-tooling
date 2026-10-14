@@ -23,6 +23,7 @@ pub mod pi;
 pub mod pochven;
 pub mod production;
 pub mod pvp;
+pub mod recording;
 pub mod reprocessing;
 pub mod route;
 pub mod scripts;

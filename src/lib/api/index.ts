@@ -17,6 +17,7 @@ export * from "./intel";
 export * from "./orders";
 export * from "./localintel";
 export * from "./pvp";
+export * from "./recording";
 export * from "./notifications";
 export * from "./route";
 export * from "./wormholes";
