@@ -125,6 +125,9 @@ describe("FightOverlayProvider — recording hooks (#1014)", () => {
           startCommand: "start-rec {start}",
           endCommand: "stop-rec {start} {end}",
           postRollSecs: 10,
+          obsEnabled: true,
+          obsUrl: "ws://test:4455",
+          obsPassword: "pw",
         }),
       );
       bucketsHandler = undefined;
@@ -151,6 +154,15 @@ describe("FightOverlayProvider — recording hooks (#1014)", () => {
       expect(hookCalls()).toEqual(["start-rec 1000"]);
       await act(() => vi.advanceTimersByTimeAsync(1_100));
       expect(hookCalls()).toEqual(["start-rec 1000", "stop-rec 1000 1010"]);
+
+      // The OBS path fired alongside the hooks with the configured settings.
+      const obsCalls = invokeMock.mock.calls
+        .filter((c) => String(c[0]).startsWith("obs_"))
+        .map((c) => c[0]);
+      expect(obsCalls).toEqual(["obs_fight_started", "obs_fight_ended"]);
+      expect(
+        invokeMock.mock.calls.find((c) => c[0] === "obs_fight_started")?.[1],
+      ).toEqual({ settings: { url: "ws://test:4455", password: "pw" } });
     } finally {
       vi.useRealTimers();
     }

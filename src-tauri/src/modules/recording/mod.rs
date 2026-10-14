@@ -8,3 +8,4 @@
 //!   record), slice 3 (#1016) clip sidecar metadata.
 
 pub mod commands;
+pub mod obs;

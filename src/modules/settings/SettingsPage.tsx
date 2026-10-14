@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { errorMessage } from "../../lib/api";
+import { errorMessage, obsTestConnection } from "../../lib/api";
 import { Page, PageHeader } from "../../components/page";
 import { useFightOverlay } from "../pvp/fightOverlayContext";
 import { useFwHomeDefense } from "../faction-warfare/fwHomeDefenseContext";
@@ -40,6 +41,23 @@ export function SettingsPage() {
   const [checkForUpdates, setCheckForUpdates] = useCheckForUpdatesEnabled();
   const release = useReleaseCheck(checkForUpdates);
   const [confirmBeforeQuit, setConfirmBeforeQuit] = useConfirmBeforeQuit();
+  // OBS "Test connection" result — version string on success, error otherwise.
+  const [obsStatus, setObsStatus] = useState<{
+    ok: boolean;
+    text: string;
+  } | null>(null);
+  async function testObs() {
+    setObsStatus(null);
+    try {
+      const version = await obsTestConnection({
+        url: recording.obsUrl,
+        password: recording.obsPassword || undefined,
+      });
+      setObsStatus({ ok: true, text: version });
+    } catch (e) {
+      setObsStatus({ ok: false, text: errorMessage(e) });
+    }
+  }
 
   return (
     <Page>
@@ -167,6 +185,72 @@ export function SettingsPage() {
                 />
                 <span className="text-xs text-zinc-500">seconds</span>
               </label>
+              <div className="mt-1 border-t border-zinc-800 pt-3">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={recording.obsEnabled}
+                    onChange={(e) =>
+                      setRecording({
+                        ...recording,
+                        obsEnabled: e.currentTarget.checked,
+                      })
+                    }
+                    className="h-4 w-4 cursor-pointer accent-indigo-500"
+                    aria-label="Drive OBS"
+                  />
+                  <span className="text-xs text-zinc-300">
+                    Drive OBS (obs-websocket): save the replay buffer + start
+                    recording on fight start, stop on fight end
+                  </span>
+                </label>
+                {recording.obsEnabled && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <input
+                      type="text"
+                      value={recording.obsUrl}
+                      onChange={(e) =>
+                        setRecording({
+                          ...recording,
+                          obsUrl: e.currentTarget.value,
+                        })
+                      }
+                      placeholder="ws://127.0.0.1:4455"
+                      className="w-56 rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-200 placeholder:text-zinc-600"
+                      aria-label="OBS websocket URL"
+                    />
+                    <input
+                      type="password"
+                      value={recording.obsPassword}
+                      onChange={(e) =>
+                        setRecording({
+                          ...recording,
+                          obsPassword: e.currentTarget.value,
+                        })
+                      }
+                      placeholder="password (optional)"
+                      className="w-44 rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-200 placeholder:text-zinc-600"
+                      aria-label="OBS websocket password"
+                    />
+                    <button
+                      type="button"
+                      onClick={testObs}
+                      className="rounded border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
+                    >
+                      Test connection
+                    </button>
+                    {obsStatus && (
+                      <span
+                        className={`text-xs ${
+                          obsStatus.ok ? "text-emerald-400" : "text-rose-400"
+                        }`}
+                      >
+                        {obsStatus.text}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
