@@ -62,9 +62,20 @@ export function nextFightBuckets(
   if (prev.length === 0) {
     return isCombatBucket(bucket) ? [bucket] : prev;
   }
-  // Monotonic on the grid: a duplicated delivery of an already-kept bucket
-  // (e.g. a leaked double listener) must not stretch the fight buffer.
-  if (bucket.start <= prev[prev.length - 1].start) return prev;
+  // Not past the kept tail: either a backend amendment of a kept bucket
+  // (late-flushed line re-opened it — replace in place, even when frozen:
+  // it's the same data, just completed) or a stale duplicate (drop).
+  if (bucket.start <= prev[prev.length - 1].start) {
+    for (let i = prev.length - 1; i >= 0; i--) {
+      if (prev[i].start === bucket.start) {
+        const next = [...prev];
+        next[i] = bucket;
+        return next;
+      }
+      if (prev[i].start < bucket.start) break;
+    }
+    return prev;
+  }
   // Already frozen: stays exactly as-is regardless of what arrives.
   if (!isCombatBucket(prev[prev.length - 1])) return prev;
   // Still live (or this is the final empty bucket that freezes it): append.
