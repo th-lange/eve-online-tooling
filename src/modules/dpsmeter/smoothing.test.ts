@@ -54,17 +54,27 @@ describe("nearestBucketStart", () => {
 });
 
 describe("appendBuckets", () => {
-  it("drops re-delivered buckets so the time axis can never double", () => {
+  it("never doubles the time axis on re-delivery", () => {
     const batch = [bkt(0), bkt(5)];
     const once = appendBuckets([], batch);
     expect(once.map((b) => b.start)).toEqual([0, 5]);
     // The same batch delivered again (a leaked duplicate listener, a replayed
-    // payload) is a no-op — this is what made the chart line stop mid-panel
-    // and the log show every group twice.
-    expect(appendBuckets(once, batch)).toBe(once);
-    // Overlapping delivery keeps only the genuinely new tail.
+    // payload) replaces in place — the axis and log groups stay unique. This
+    // is what made the chart line stop mid-panel and the log double.
+    expect(appendBuckets(once, batch).map((b) => b.start)).toEqual([0, 5]);
+    // Overlapping delivery appends only the genuinely new tail.
     const next = appendBuckets(once, [bkt(5), bkt(10)]);
     expect(next.map((b) => b.start)).toEqual([0, 5, 10]);
+  });
+
+  it("applies a backend amendment: same id replaces the kept bucket", () => {
+    const prev = appendBuckets([], [bkt(0), bkt(5), bkt(10)]);
+    // A late-flushed line re-opened bucket 5 — it is re-emitted with
+    // updated sums; the kept copy is replaced, nothing is appended.
+    const amended = { ...bkt(5), damageOut: 999 };
+    const next = appendBuckets(prev, [amended]);
+    expect(next.map((b) => b.start)).toEqual([0, 5, 10]);
+    expect(next[1].damageOut).toBe(999);
   });
 
   it("appends normally in order and is a no-op for an empty batch", () => {

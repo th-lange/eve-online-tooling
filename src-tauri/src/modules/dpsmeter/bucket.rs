@@ -1,8 +1,8 @@
 //! Fixed-grid aggregation: a stream of [`DpsEvent`] → finalized, epoch-aligned
 //! 5-second buckets (#983, #984).
 //!
-//! Unlike the rolling [`super::aggregate::Window`] (a moving average sampled on
-//! a wall-clock timer), a bucket is a fixed slice of *event time*:
+//! Unlike the old rolling window (a moving average sampled on a wall-clock
+//! timer, deleted in #987), a bucket is a fixed slice of *event time*:
 //! `start = ts - ts % 5`, `end = start + 5`. Every event lands in exactly one
 //! bucket, idle time produces explicitly empty buckets (so a time axis never
 //! has holes to special-case), and replaying a log yields byte-identical
@@ -19,7 +19,7 @@
 //! parsed event, then [`BucketFold::advance_to`] the loop's clock (wall time
 //! live, the virtual clock in playback) and emit whatever finalized.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use serde::Serialize;
 
@@ -192,22 +192,28 @@ impl Acc {
         }
     }
 
-    fn finalize(self) -> DpsBucket {
+    /// Build the emit-ready bucket from the accumulator WITHOUT consuming it —
+    /// finalized accumulators stay parked for the amend window (late gamelog
+    /// flushes re-open them), so the same Acc may snapshot more than once.
+    fn snapshot(&self) -> DpsBucket {
         let w = BUCKET_SECS as f64;
-        let mut b = self.bucket;
-        b.by_weapon = weapon_rates(self.weapons, w);
+        let mut b = self.bucket.clone();
+        // Late lines append out of order within the bucket — keep the log view
+        // chronological.
+        b.events.sort_by_key(|e| e.ts);
+        b.by_weapon = weapon_rates(self.weapons.clone(), w);
         let mut by_pilot: Vec<PilotRate> = self
             .pilots
-            .into_iter()
+            .iter()
             .map(|(name, acc)| PilotRate {
-                name,
+                name: name.clone(),
                 dps_out: acc.out / w,
                 dps_in: acc.inc / w,
-                ship: acc.ship,
-                weapons_out: weapon_rates(acc.weapons_out, w),
-                weapons_in: weapon_rates(acc.weapons_in, w),
-                quality_out: acc.quality_out,
-                quality_in: acc.quality_in,
+                ship: acc.ship.clone(),
+                weapons_out: weapon_rates(acc.weapons_out.clone(), w),
+                weapons_in: weapon_rates(acc.weapons_in.clone(), w),
+                quality_out: acc.quality_out.clone(),
+                quality_in: acc.quality_in.clone(),
                 scram_out: acc.scram_out,
                 point_out: acc.point_out,
                 scram_in: acc.scram_in,
@@ -246,12 +252,24 @@ fn weapon_rates(map: HashMap<String, f64>, window: f64) -> Vec<WeaponRate> {
     v
 }
 
+/// How many finalized buckets stay amendable (2 minutes). EVE buffers gamelog
+/// writes — especially under Wine — so lines can be flushed to disk well after
+/// their 5 s bucket closed on the wall clock. A late line within this window
+/// re-opens its true bucket and the fold re-emits it as an **amendment**
+/// (same `start`, updated sums + events); the frontend upserts by bucket id.
+/// Without this, late lines were clamped into "now"'s bucket, booking damage
+/// up to a minute later than the log lines said it happened.
+const AMEND_WINDOW_BUCKETS: usize = 24;
+
 /// Folds an ascending event stream into finalized buckets. The in-progress
 /// bucket is held back until the clock passes its end — "complete buckets
-/// only", per the parent plan.
+/// only", per the parent plan — and the last [`AMEND_WINDOW_BUCKETS`]
+/// finalized buckets stay parked for amendment by late-flushed lines.
 #[derive(Default)]
 pub struct BucketFold {
     current: Option<Acc>,
+    /// Recently finalized, still-amendable accumulators (oldest first).
+    recent: VecDeque<Acc>,
 }
 
 impl BucketFold {
@@ -262,29 +280,48 @@ impl BucketFold {
     /// Fold one event in; returns every bucket this finalizes (the current one
     /// plus explicit empty gap buckets) when the event belongs to a later
     /// bucket than the one in progress. An event *older* than the current
-    /// bucket (slight reorder across a poll boundary) is clamped into the
-    /// current bucket rather than resurrecting an already-finalized one.
+    /// bucket amends its true bucket when that is still inside the amend
+    /// window — the amended bucket is returned again (same `start`) for the
+    /// frontend to upsert — and only falls back to clamping into the current
+    /// bucket when it is older than everything still parked.
     pub fn push(&mut self, ev: &DpsEvent) -> Vec<DpsBucket> {
         let target = bucket_start(ev.ts);
-        let mut done = Vec::new();
-        match &mut self.current {
+        let cur_start = self.current.as_ref().map(|c| c.bucket.start);
+        match cur_start {
             None => {
                 let mut acc = Acc::new(target);
                 acc.add(ev);
                 self.current = Some(acc);
+                Vec::new()
             }
-            Some(cur) if target <= cur.bucket.start => {
-                cur.add(ev);
+            Some(s) if target == s => {
+                self.current.as_mut().expect("checked above").add(ev);
+                Vec::new()
+            }
+            Some(s) if target < s => {
+                if let Some(acc) = self
+                    .recent
+                    .iter_mut()
+                    .rev()
+                    .find(|a| a.bucket.start == target)
+                {
+                    acc.add(ev);
+                    vec![acc.snapshot()]
+                } else {
+                    // Beyond the amend window: clamp rather than lose it.
+                    self.current.as_mut().expect("checked above").add(ev);
+                    Vec::new()
+                }
             }
             Some(_) => {
-                done = self.roll_to(target);
+                let done = self.roll_to(target);
                 self.current
                     .as_mut()
                     .expect("roll_to leaves a current bucket")
                     .add(ev);
+                done
             }
         }
-        done
     }
 
     /// Advance the fold's clock to `now`, finalizing every bucket whose end
@@ -305,20 +342,30 @@ impl BucketFold {
 
     /// Finalize from the current bucket up to (not including) the bucket at
     /// `target`, filling the gap with empty buckets; the bucket at `target`
-    /// becomes the new in-progress one. Caller guarantees `target` is a later
+    /// becomes the new in-progress one. Every finalized bucket (gaps too) is
+    /// parked in the amend window. Caller guarantees `target` is a later
     /// bucket start than the current one.
     fn roll_to(&mut self, target: i64) -> Vec<DpsBucket> {
         let cur = self.current.take().expect("roll_to requires a bucket");
         let start = cur.bucket.start;
         let mut done = Vec::with_capacity(((target - start) / BUCKET_SECS) as usize);
+        done.push(cur.snapshot());
+        self.park(cur);
         let mut next_start = start + BUCKET_SECS;
-        done.push(cur.finalize());
         while next_start < target {
             done.push(DpsBucket::empty(next_start));
+            self.park(Acc::new(next_start));
             next_start += BUCKET_SECS;
         }
         self.current = Some(Acc::new(target));
         done
+    }
+
+    fn park(&mut self, acc: Acc) {
+        self.recent.push_back(acc);
+        while self.recent.len() > AMEND_WINDOW_BUCKETS {
+            self.recent.pop_front();
+        }
     }
 }
 
@@ -427,16 +474,58 @@ mod tests {
     }
 
     #[test]
-    fn late_event_is_clamped_into_the_current_bucket() {
+    fn late_event_outside_the_amend_window_is_clamped_into_the_current_bucket() {
         let mut f = BucketFold::new();
         f.push(&ev(107, EventKind::DamageOut, 10));
-        // ts 104 belongs to the already-passed bucket at 100 — folded into the
-        // current one instead of resurrecting it.
+        // ts 104 belongs to a bucket that was never finalized (the fold
+        // started at 105), so there is nothing to amend — folded into the
+        // current one instead of inventing history.
         assert!(f.push(&ev(104, EventKind::DamageOut, 5)).is_empty());
         let done = f.advance_to(110);
         assert_eq!(done.len(), 1);
         assert_eq!(done[0].start, 105);
         assert_eq!(done[0].damage_out, 15.0);
+    }
+
+    #[test]
+    fn late_flushed_line_amends_its_finalized_bucket_and_reemits_it() {
+        let mut f = BucketFold::new();
+        f.push(&ev(100, EventKind::DamageOut, 40));
+        // Wall clock passed the bucket: finalized with what had flushed.
+        let done = f.advance_to(112);
+        assert_eq!(done.len(), 2); // bucket 100 + empty 105
+        assert_eq!(done[0].damage_out, 40.0);
+        // EVE flushes a straggler from ts 103 half a bucket later: the fold
+        // re-opens bucket 100 and re-emits it amended — same start, updated
+        // sums, and the line rides along for the log view.
+        let amended = f.push(&ev(103, EventKind::DamageOut, 25));
+        assert_eq!(amended.len(), 1);
+        assert_eq!(amended[0].start, 100);
+        assert_eq!(amended[0].damage_out, 65.0);
+        assert_eq!(
+            amended[0].events.iter().map(|e| e.ts).collect::<Vec<_>>(),
+            vec![100, 103]
+        );
+        // The current (in-progress) bucket was NOT polluted by the clamp.
+        let tail = f.advance_to(120);
+        assert_eq!(tail[0].start, 110);
+        assert_eq!(tail[0].damage_out, 0.0);
+    }
+
+    #[test]
+    fn late_line_amends_an_empty_gap_bucket_too() {
+        let mut f = BucketFold::new();
+        f.push(&ev(100, EventKind::DamageOut, 10));
+        // Idle through two gap buckets, then a straggler lands inside one.
+        let done = f.advance_to(117);
+        assert_eq!(
+            done.iter().map(|b| b.start).collect::<Vec<_>>(),
+            vec![100, 105, 110]
+        );
+        let amended = f.push(&ev(106, EventKind::DamageIn, 7));
+        assert_eq!(amended.len(), 1);
+        assert_eq!(amended[0].start, 105);
+        assert_eq!(amended[0].damage_in, 7.0);
     }
 
     #[test]

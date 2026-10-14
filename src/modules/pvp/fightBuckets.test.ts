@@ -109,4 +109,15 @@ describe("nextFightBuckets", () => {
     expect(buf).toHaveLength(120);
     expect(buf[0].start).toBe(30 * 5);
   });
+
+  it("replaces a kept bucket on backend amendment instead of growing", () => {
+    let buf: DpsBucket[] = [];
+    buf = nextFightBuckets(buf, bucket(0, { damageIn: 10 }));
+    buf = nextFightBuckets(buf, bucket(5, { damageIn: 4 }));
+    // A late-flushed line re-opened bucket 0 — the re-emitted amendment
+    // replaces the kept copy in place; the buffer must not stretch.
+    buf = nextFightBuckets(buf, bucket(0, { damageIn: 25 }));
+    expect(buf.map((b) => b.start)).toEqual([0, 5]);
+    expect(buf[0].damageIn).toBe(25);
+  });
 });

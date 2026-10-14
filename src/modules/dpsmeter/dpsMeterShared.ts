@@ -192,16 +192,38 @@ export const BUCKET_SERIES_COMBINED: BucketSeries[] = [
 
 /** Append a batch of finalized buckets. The whole session is kept (12/min —
  *  trivial), so the detail chart can scroll over all of it; no ring buffer.
- *  Strictly monotonic on the grid: anything at or before the newest kept
- *  bucket is dropped, so a duplicated delivery (a leaked double listener, a
- *  replayed batch) can never double the time axis or the log groups. */
+ *  Upserts by bucket id (the start): a newer start appends, a re-delivered
+ *  start **replaces** the kept bucket — that's how backend amendments land
+ *  (late-flushed gamelog lines re-open a recent bucket, which is re-emitted
+ *  with updated sums + events). Duplicated delivery therefore still can't
+ *  double the time axis or the log groups, and anything older than the kept
+ *  range is dropped. */
 export function appendBuckets(
   prev: DpsBucket[],
   batch: DpsBucket[],
 ): DpsBucket[] {
-  const lastStart = prev[prev.length - 1]?.start ?? -Infinity;
-  const fresh = batch.filter((b) => b.start > lastStart);
-  return fresh.length === 0 ? prev : prev.concat(fresh);
+  if (batch.length === 0) return prev;
+  const next = [...prev];
+  let changed = false;
+  for (const b of batch) {
+    const last = next[next.length - 1];
+    if (!last || b.start > last.start) {
+      next.push(b);
+      changed = true;
+      continue;
+    }
+    // Amendment (or stale duplicate): find the kept bucket with this id,
+    // scanning from the newest — amendments only ever target the recent tail.
+    for (let i = next.length - 1; i >= 0; i--) {
+      if (next[i].start === b.start) {
+        next[i] = b;
+        changed = true;
+        break;
+      }
+      if (next[i].start < b.start) break; // not kept → drop
+    }
+  }
+  return changed ? next : prev;
 }
 
 // Palette for per-source (by-pilot) lines — distinct hues, assigned to each
