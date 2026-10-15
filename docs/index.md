@@ -37,7 +37,8 @@ Transactions, Notifications, Fitting (a PYFA-grade fit editor + dogma engine),
 Shopping Lists.
 
 **Combat / Intel** — PVP (pilot threat + fit profiler from zKillboard), Local
-Intel, DPS Meter, Route, Wormholes, Pochven, Universe, Incursions, Faction
+Intel, DPS Meter, [automatic combat recording](combat-recording.md) (OBS /
+command hooks), Route, Wormholes, Pochven, Universe, Incursions, Faction
 Warfare, Exploration.
 
 **Extend it** — [Scripts](scripts.md) (Rhai/JS on a timer),
