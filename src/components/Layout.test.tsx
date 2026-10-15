@@ -77,6 +77,22 @@ describe("Layout sidebar", () => {
     expect(navOrder().slice(0, 2)).toEqual([PRODUCTION, REPROCESSING]);
   });
 
+  it("defaultHidden modules start in the Hidden section, restorable", () => {
+    renderLayout();
+    // Recording is defaultHidden: it opens in the Hidden section, not in its
+    // Combat / Intel group.
+    expect(screen.getByText("Hidden (1)")).toBeInTheDocument();
+    // Restoring moves it into the group and persists the choice, so it
+    // behaves like any user-hidden module from here on.
+    fireEvent.click(screen.getByRole("button", { name: "Restore Recording" }));
+    expect(screen.queryByText(/^Hidden \(/)).not.toBeInTheDocument();
+    const nav = screen.getByRole("navigation");
+    expect(within(nav).getByText("Recording")).toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem("sidebar.hidden") ?? "x")).toEqual(
+      [],
+    );
+  });
+
   it("drag-reorders pinned modules and persists the order", () => {
     localStorage.setItem(
       "sidebar.pins",
@@ -203,16 +219,20 @@ describe("Layout sidebar", () => {
         { timeout: 15000 },
       ),
     );
-    expect(screen.getByText("Hidden (1)")).toBeInTheDocument();
+    // Recording is already there by default, so Production makes two.
+    expect(screen.getByText("Hidden (2)")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: `Restore ${PRODUCTION}` }),
     ).toBeInTheDocument();
     expect(JSON.parse(localStorage.getItem("sidebar.hidden") ?? "[]")).toEqual([
+      "recording",
       id(PRODUCTION),
     ]);
   });
 
   it("restores a hidden module back to its group", () => {
+    // A profile where defaultHidden seeding already ran.
+    localStorage.setItem("sidebar.hiddenSeeded", JSON.stringify(["recording"]));
     localStorage.setItem("sidebar.hidden", JSON.stringify([id(PRODUCTION)]));
     renderLayout();
     expect(
@@ -229,7 +249,21 @@ describe("Layout sidebar", () => {
     );
   });
 
+  it("seeds defaultHidden into an existing profile once, so restore sticks", () => {
+    // Pre-provider profile: a hidden list was already persisted without
+    // recording (usePersistentState writes its default eagerly).
+    localStorage.setItem("sidebar.hidden", JSON.stringify([]));
+    const first = renderLayout();
+    expect(screen.getByText("Hidden (1)")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Restore Recording" }));
+    first.unmount();
+    // Next launch: the seed is remembered, so the restore is not re-hidden.
+    renderLayout();
+    expect(screen.queryByText(/^Hidden \(/)).not.toBeInTheDocument();
+  });
+
   it("keeps a hidden module out of the Pinned section too", () => {
+    localStorage.setItem("sidebar.hiddenSeeded", JSON.stringify(["recording"]));
     localStorage.setItem("sidebar.pins", JSON.stringify([id(TRADING)]));
     localStorage.setItem("sidebar.hidden", JSON.stringify([id(TRADING)]));
     renderLayout();

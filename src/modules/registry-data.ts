@@ -51,6 +51,10 @@ export interface ModuleMeta {
   /** When true the module is inactive until a character is logged in: the nav
    *  and command palette leave it out, and its page says so. */
   requiresCharacter?: boolean;
+  /** When true the module starts in the sidebar's "Hidden" section instead
+   *  of its group (restorable there; route and palette unaffected). For
+   *  niche modules that shouldn't widen the default nav. */
+  defaultHidden?: boolean;
 }
 
 // Note: this list isn't strictly 1:1 with src-tauri/src/modules/. Some entries are
@@ -238,6 +242,14 @@ export const MODULE_METADATA: ModuleMeta[] = [
     description:
       "Live combat meter from your gamelog — DPS, logi and cap, graphed.",
     group: "intel",
+  },
+  {
+    id: "recording",
+    title: "Recording",
+    description:
+      "Start an external recorder (OBS, command hooks) when a fight is detected.",
+    group: "intel",
+    defaultHidden: true,
   },
   {
     id: "pvp",

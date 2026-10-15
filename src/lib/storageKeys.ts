@@ -17,6 +17,7 @@ export const STORAGE_KEYS = {
   sidebarColors: "sidebar.colors",
   sidebarCollapsed: "sidebar.collapsed",
   sidebarHidden: "sidebar.hidden",
+  sidebarHiddenSeeded: "sidebar.hiddenSeeded",
   // Last-visited module — restored on next launch
   lastVisited: "layout.lastVisited",
   // EVE log folders
