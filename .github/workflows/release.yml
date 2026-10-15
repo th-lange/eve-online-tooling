@@ -113,8 +113,13 @@ jobs:
           releaseName: "EVE Online Tooling ${{ github.ref_name }}"
           releaseBody: "Download the installer for your platform below. The builds are **unsigned** — see the README for how to open them on macOS/Windows."
           releaseDraft: false
-          prerelease: false
-          args: ${{ matrix.args }}
+          # Pre-release tags (anything with a `-`, e.g. v0.75.0-beta.1) become
+          # GitHub prereleases: excluded from /releases/latest, so the in-app
+          # update check never offers a beta to stable users.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          # WiX requires numeric-only pre-release identifiers, so beta builds
+          # skip the MSI and ship the (primary) NSIS installer on Windows.
+          args: ${{ matrix.args }} ${{ matrix.platform == 'windows-latest' && contains(github.ref_name, '-') && '--bundles nsis' || '' }}
 
   # Fill in the GitHub Release description once the builds are up: "what goes
   # live" (the changed) is GitHub's auto-generated changelog (merged PRs since
