@@ -33,7 +33,11 @@ Project stack, commands, architecture, and naming conventions live in
   independent.
 - **Releases follow the same path:** bump the version on a branch, open a PR,
   auto-merge it once green, then tag `vX.Y.Z` on the resulting `main` commit
-  and push the tag.
+  and push the tag. **Beta releases** use a pre-release tag
+  (`vX.Y.Z-beta.N`): the Release workflow marks any `-` tag as a GitHub
+  prerelease (so `/releases/latest` and the in-app update check skip it) and
+  skips the Windows MSI, whose WiX versioning rejects non-numeric
+  pre-release identifiers — betas ship NSIS on Windows.
 - **Versioning:** use semantic versioning (major.minor.patch). Small fixes,
   cleanups, and non-substantial changes are always patch releases. Features
   and bug fixes that change observable behavior are minor. Breaking changes
