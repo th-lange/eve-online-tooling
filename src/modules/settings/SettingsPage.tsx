@@ -31,7 +31,8 @@ export function SettingsPage() {
     setEnabled: setCombatOverviewOn,
     runTest,
   } = useFightOverlay();
-  const { recording, setRecording } = useRecording();
+  const { recording, setRecording, runRecordingTest, recordingTestPhase } =
+    useRecording();
   const {
     vulnerableAlertOn,
     setVulnerableAlertOn,
@@ -297,6 +298,24 @@ export function SettingsPage() {
                     </label>
                   </div>
                 )}
+              </div>
+              <div className="mt-1 flex items-center gap-2 border-t border-zinc-800 pt-3">
+                <button
+                  type="button"
+                  onClick={runRecordingTest}
+                  disabled={recordingTestPhase != null}
+                  className="rounded border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 disabled:cursor-default disabled:opacity-50"
+                >
+                  Test recording
+                </button>
+                <span className="text-xs text-zinc-500">
+                  {recordingTestPhase === "recording" &&
+                    "synthetic fight live (5 s) — providers started…"}
+                  {recordingTestPhase === "post-roll" &&
+                    `fight over — stopping after the ${recording.postRollSecs} s post-roll…`}
+                  {recordingTestPhase == null &&
+                    "runs a 5 s synthetic fight through the enabled providers"}
+                </span>
               </div>
             </div>
           )}
