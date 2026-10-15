@@ -3,6 +3,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { errorMessage, obsTestConnection } from "../../lib/api";
 import { Page, PageHeader } from "../../components/page";
 import { useFightOverlay } from "../pvp/fightOverlayContext";
+import { useRecording } from "../recording/recordingContext";
 import { useFwHomeDefense } from "../faction-warfare/fwHomeDefenseContext";
 import type { NearbyFlipRadius } from "../faction-warfare/homeDefenseAlerts";
 import { useCheckForUpdatesEnabled, useReleaseCheck } from "./useReleaseCheck";
@@ -29,9 +30,8 @@ export function SettingsPage() {
     enabled: combatOverviewOn,
     setEnabled: setCombatOverviewOn,
     runTest,
-    recording,
-    setRecording,
   } = useFightOverlay();
+  const { recording, setRecording } = useRecording();
   const {
     vulnerableAlertOn,
     setVulnerableAlertOn,

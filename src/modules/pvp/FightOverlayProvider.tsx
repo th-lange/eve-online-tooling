@@ -6,10 +6,6 @@ import {
   pvpPilotFits,
   onDpsBuckets,
   dpsStart,
-  recordingRunHook,
-  obsFightStarted,
-  obsFightEnded,
-  recordingWriteSidecar,
   fittingListLocal,
   fittingSimulate,
   type DpsBucket,
@@ -26,11 +22,8 @@ import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { Modal } from "../../components/Modal";
 import { CombatLogPanel } from "../dpsmeter/CombatLogPanel";
 import { BUCKET_SECS, smoothSeries } from "../dpsmeter/dpsMeterShared";
-import {
-  DEFAULT_FIGHT_RECORDING,
-  FightOverlayContext,
-  type FightRecordingSettings,
-} from "./fightOverlayContext";
+import { FightOverlayContext } from "./fightOverlayContext";
+import { useFightRecorder } from "../recording/useFightRecorder";
 
 /** Metres → compact km/m string. Used in AttackerCard and FightPanel. */
 function km(m: number): string {
@@ -47,21 +40,6 @@ export function isCombatBucket(b: DpsBucket): boolean {
     b.damageIn > 0 ||
     b.byPilot.some((p) => p.scramIn || p.pointIn || p.scramOut || p.pointOut)
   );
-}
-
-/** Fill a recording hook command's placeholders (#1014): `{start}`/`{end}`
- *  become the fight's epoch-second bounds (empty string while unknown).
- *  Returns `""` for a blank command so callers can skip the spawn entirely.
- *  Exported for tests. */
-export function substituteHookVars(
-  command: string,
-  vars: { start?: number | null; end?: number | null },
-): string {
-  const cmd = command.trim();
-  if (!cmd) return "";
-  return cmd
-    .replaceAll("{start}", vars.start == null ? "" : String(vars.start))
-    .replaceAll("{end}", vars.end == null ? "" : String(vars.end));
 }
 
 /** Overlay bucket-buffer reducer (#986): begin on the first combat bucket,
@@ -640,16 +618,6 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     STORAGE_KEYS.fightOverlayCombatLogCollapsed,
     true,
   );
-  const [storedRecording, setRecording] =
-    usePersistentState<FightRecordingSettings>(
-      STORAGE_KEYS.fightRecording,
-      DEFAULT_FIGHT_RECORDING,
-    );
-  // Settings persisted by an older build miss newer fields — overlay defaults.
-  const recording: FightRecordingSettings = useMemo(
-    () => ({ ...DEFAULT_FIGHT_RECORDING, ...storedRecording }),
-    [storedRecording],
-  );
   const [fightOpen, setFightOpen] = useState(false);
   const [selectedFitId, setSelectedFitId] = useState<string | null>(null);
   // Settings "Test" preview: sample data, rebuilt each time the button is hit.
@@ -752,11 +720,9 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
 
   const fightActive = enabled && fightOpen;
 
-  // Combat recording hooks (#1014): the fight is LIVE while its newest kept
-  // bucket still shows combat; the freeze (one empty bucket) ends it. Start
-  // hook fires on the rising edge, end hook after the post-roll — unless the
-  // fight re-engages within it, in which case the recording just keeps
-  // rolling. Turning the setting off mid-fight stops immediately.
+  // Combat recording (#1013): the fight is LIVE while its newest kept bucket
+  // still shows combat; the freeze (one empty bucket) ends it. The recording
+  // module turns these edges into recorder start/stop.
   const fightLive =
     enabled &&
     fightBuckets.length > 0 &&
@@ -764,84 +730,12 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
   const fightStartTs = fightBuckets[0]?.start ?? null;
   const fightEndTs =
     fightBuckets.length > 0 ? fightBuckets[fightBuckets.length - 1].end : null;
-  const recRef = useRef<{
-    active: boolean;
-    endTimer: number | null;
-  }>({ active: false, endTimer: null });
-  useEffect(() => {
-    const rec = recRef.current;
-    if (recording.enabled && fightLive) {
-      if (rec.endTimer) {
-        // Re-engaged within the post-roll: cancel the pending stop and keep
-        // the running recording instead of restarting it.
-        clearTimeout(rec.endTimer);
-        rec.endTimer = null;
-        rec.active = true;
-        return;
-      }
-      if (!rec.active) {
-        rec.active = true;
-        const cmd = substituteHookVars(recording.startCommand, {
-          start: fightStartTs,
-        });
-        if (cmd) void recordingRunHook(cmd).catch(() => {});
-        if (recording.obsEnabled)
-          void obsFightStarted({
-            url: recording.obsUrl,
-            password: recording.obsPassword || undefined,
-          }).catch(() => {});
-      }
-    } else if (rec.active) {
-      rec.active = false;
-      // The freeze render captured the final (frozen) fight buffer — the
-      // sidecar summarises exactly what the clip shows (#1016).
-      const frozen = fightBuckets;
-      const runEnd = () => {
-        const cmd = substituteHookVars(recording.endCommand, {
-          start: fightStartTs,
-          end: fightEndTs,
-        });
-        if (cmd) void recordingRunHook(cmd).catch(() => {});
-        if (recording.obsEnabled)
-          void obsFightEnded({
-            url: recording.obsUrl,
-            password: recording.obsPassword || undefined,
-          })
-            .then((clip) => {
-              if (!clip) return;
-              const attackers = new Map<string, string | undefined>();
-              let damageOut = 0;
-              let damageIn = 0;
-              for (const b of frozen) {
-                damageOut += b.damageOut;
-                damageIn += b.damageIn;
-                for (const p of b.byPilot) {
-                  if (p.dpsIn > 0 && p.ship) attackers.set(p.name, p.ship);
-                }
-              }
-              return recordingWriteSidecar(clip, {
-                start: fightStartTs,
-                end: fightEndTs,
-                damageOut,
-                damageIn,
-                attackers: [...attackers].map(([name, ship]) => ({
-                  name,
-                  ship,
-                })),
-              });
-            })
-            .catch(() => {});
-      };
-      if (!recording.enabled) {
-        runEnd(); // setting switched off mid-fight: stop right away
-      } else {
-        rec.endTimer = window.setTimeout(() => {
-          rec.endTimer = null;
-          runEnd();
-        }, recording.postRollSecs * 1000);
-      }
-    }
-  }, [fightLive, recording, fightStartTs, fightEndTs, fightBuckets]);
+  useFightRecorder({
+    live: fightLive,
+    startTs: fightStartTs,
+    endTs: fightEndTs,
+    buckets: fightBuckets,
+  });
 
   // Fit data for "my ranges" in the fight panel.
   const localFits = useQuery({
@@ -923,9 +817,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <FightOverlayContext.Provider
-      value={{ enabled, setEnabled, runTest, recording, setRecording }}
-    >
+    <FightOverlayContext.Provider value={{ enabled, setEnabled, runTest }}>
       {children}
       {/* Test preview takes precedence over a live fight so the button always
           shows the sample; both are the same fixed panel. */}

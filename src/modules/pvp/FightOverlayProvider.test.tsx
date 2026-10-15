@@ -3,6 +3,8 @@ import { act, fireEvent, screen } from "@testing-library/react";
 import { invokeMock, mockInvoke, renderWithQuery } from "../../test/harness";
 import { FightOverlayProvider } from "./FightOverlayProvider";
 import { useFightOverlay } from "./fightOverlayContext";
+import { RecordingProvider } from "../recording/RecordingProvider";
+import { useRecording } from "../recording/recordingContext";
 import type { DpsBucket } from "../../lib/api";
 
 // The overlay subscribes to dps://buckets via `listen`; capture the callback
@@ -33,7 +35,7 @@ function TestTrigger() {
 
 // Consumer flipping the recording master switch off, like SettingsPage does.
 function DisableRecording() {
-  const { recording, setRecording } = useFightOverlay();
+  const { recording, setRecording } = useRecording();
   return (
     <button
       type="button"
@@ -137,9 +139,11 @@ describe("FightOverlayProvider — recording hooks (#1014)", () => {
         obs_fight_ended: () => "/tmp/fight.mkv",
       });
       renderWithQuery(
-        <FightOverlayProvider>
-          <div />
-        </FightOverlayProvider>,
+        <RecordingProvider>
+          <FightOverlayProvider>
+            <div />
+          </FightOverlayProvider>
+        </RecordingProvider>,
       );
       // Flush the async listen subscription.
       await act(() => vi.advanceTimersByTimeAsync(0));
@@ -203,9 +207,11 @@ describe("FightOverlayProvider — recording hooks (#1014)", () => {
       invokeMock.mockClear();
       mockInvoke({ pvp_profiles: () => ({ pilots: [], unresolved: [] }) });
       renderWithQuery(
-        <FightOverlayProvider>
-          <DisableRecording />
-        </FightOverlayProvider>,
+        <RecordingProvider>
+          <FightOverlayProvider>
+            <DisableRecording />
+          </FightOverlayProvider>
+        </RecordingProvider>,
       );
       await act(() => vi.advanceTimersByTimeAsync(0));
 
