@@ -1,6 +1,18 @@
 import { useState } from "react";
-import { errorMessage, obsTestConnection } from "../../lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import {
+  errorMessage,
+  obsTestConnection,
+  dpsListCharacters,
+} from "../../lib/api";
+import { useEveLogDir } from "../../lib/useEveLogDir";
 import { useRecording } from "./recordingContext";
+
+/** One-time external setup the app cannot do for the user — linked from the
+ *  OBS provider section. */
+const SETUP_GUIDE_URL =
+  "https://github.com/th-lange/eve-online-tooling/blob/main/docs/combat-recording.md";
 
 /** The complete "Record fights" configuration — master switch, post-roll,
  *  and the per-provider sections (OBS, command hooks) with their test
@@ -27,6 +39,15 @@ export function RecordingSettingsCard() {
       setObsStatus({ ok: false, text: errorMessage(e) });
     }
   }
+
+  // Known characters from the gamelogs folder, for the filter's datalist.
+  const [gamelogsDir] = useEveLogDir("gamelogs");
+  const characters = useQuery({
+    queryKey: ["dps", "characters", gamelogsDir],
+    queryFn: () => dpsListCharacters(gamelogsDir),
+    enabled: gamelogsDir !== "",
+    staleTime: 60_000,
+  });
 
   return (
     <div className="p-4">
@@ -76,6 +97,28 @@ export function RecordingSettingsCard() {
             />
             <span className="text-xs text-zinc-500">seconds</span>
           </label>
+          <label className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-zinc-500">Only for character</span>
+            <input
+              type="text"
+              list="recording-characters"
+              value={recording.character}
+              onChange={(e) =>
+                setRecording({ ...recording, character: e.currentTarget.value })
+              }
+              placeholder="any character"
+              className="w-56 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-200 placeholder:text-zinc-600"
+              aria-label="Only for character"
+            />
+            <datalist id="recording-characters">
+              {(characters.data ?? []).map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+            <span className="text-xs text-zinc-600">
+              record only this character's fights (multi-boxing); empty = any
+            </span>
+          </label>
           <div className="mt-1 border-t border-zinc-800 pt-3">
             <label className="flex items-center gap-2">
               <input
@@ -99,6 +142,22 @@ export function RecordingSettingsCard() {
                 fight start, stops on fight end
               </span>
             </label>
+            {recording.obs.enabled && (
+              <p className="mt-1.5 text-xs text-zinc-500">
+                OBS itself needs one-time setup — the app only starts and stops
+                what OBS is configured to record: enable the WebSocket server
+                (Tools → WebSocket Server Settings), add a scene capturing your
+                EVE window, and turn on the Replay Buffer for the seconds before
+                the fight.{" "}
+                <button
+                  type="button"
+                  onClick={() => void openUrl(SETUP_GUIDE_URL).catch(() => {})}
+                  className="text-indigo-400 underline hover:text-indigo-300"
+                >
+                  Setup guide
+                </button>
+              </p>
+            )}
             {recording.obs.enabled && (
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <input

@@ -97,16 +97,25 @@ export function useFightRecorder(fight: {
   startTs: number | null;
   endTs: number | null;
   buckets: DpsBucket[];
+  /** Character whose gamelog the capture follows (`dps://source`); null
+   *  while unknown. */
+  character: string | null;
 }): void {
   const { recording } = useRecording();
   const { live, startTs, endTs, buckets } = fight;
+  // Character filter: when set, only that character's fights record. An
+  // unknown capture character fails a set filter (conservative — better to
+  // miss a clip than record the wrong account's fight).
+  const wanted = recording.character.trim().toLowerCase();
+  const characterOk =
+    !wanted || (fight.character ?? "").trim().toLowerCase() === wanted;
   const recRef = useRef<{
     active: boolean;
     endTimer: number | null;
   }>({ active: false, endTimer: null });
   useEffect(() => {
     const rec = recRef.current;
-    if (recording.enabled && live) {
+    if (recording.enabled && live && characterOk) {
       if (rec.endTimer) {
         // Re-engaged within the post-roll: cancel the pending stop and keep
         // the running recording instead of restarting it.
@@ -134,5 +143,5 @@ export function useFightRecorder(fight: {
         }, recording.postRollSecs * 1000);
       }
     }
-  }, [live, recording, startTs, endTs, buckets]);
+  }, [live, characterOk, recording, startTs, endTs, buckets]);
 }

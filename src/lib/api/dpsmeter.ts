@@ -281,6 +281,23 @@ export function onDpsBuckets(
   );
 }
 
+/** `dps://source` payload: the gamelog the live capture currently follows,
+ *  with the character its `Listener:` header names (null when the header
+ *  isn't recognised). */
+export interface DpsSource {
+  path: string;
+  character: string | null;
+}
+
+/** Subscribe to capture-source changes — emitted when the live capture picks
+ *  its gamelog and on every hot-swap to a newer session log. The recording
+ *  character filter keys off this. */
+export function onDpsSource(
+  handler: (source: DpsSource) => void,
+): Promise<UnlistenFn> {
+  return listen<DpsSource>("dps://source", (event) => handler(event.payload));
+}
+
 /** Subscribe to natural playback-end notifications (loop support). */
 export function onDpsDone(handler: () => void): Promise<UnlistenFn> {
   return listen<void>("dps://done", () => handler());

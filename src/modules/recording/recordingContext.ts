@@ -28,6 +28,10 @@ export interface FightRecordingSettings {
   /** Seconds to keep recording after the fight goes quiet; re-engaging
    *  within the window keeps the same recording rolling. */
   postRollSecs: number;
+  /** Record only fights from this character's gamelog (multi-boxing filter);
+   *  empty = any character. Matched case-insensitively against the capture's
+   *  `Listener:` header. */
+  character: string;
   obs: ObsProviderSettings;
   hooks: HooksProviderSettings;
 }
@@ -35,6 +39,7 @@ export interface FightRecordingSettings {
 export const DEFAULT_FIGHT_RECORDING: FightRecordingSettings = {
   enabled: false,
   postRollSecs: 10,
+  character: "",
   obs: {
     enabled: false,
     url: "ws://127.0.0.1:4455",
@@ -65,6 +70,7 @@ export function migrateRecordingSettings(
       typeof s.postRollSecs === "number"
         ? s.postRollSecs
         : DEFAULT_FIGHT_RECORDING.postRollSecs,
+    character: typeof s.character === "string" ? s.character : "",
   };
   if (typeof s.obs === "object" || typeof s.hooks === "object") {
     // Current shape (possibly from a build with fewer per-provider fields).

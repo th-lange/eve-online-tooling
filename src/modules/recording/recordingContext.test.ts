@@ -19,6 +19,7 @@ describe("migrateRecordingSettings", () => {
     ).toEqual({
       enabled: true,
       postRollSecs: 30,
+      character: "",
       obs: { enabled: true, url: "ws://test:4455", password: "pw" },
       // Old builds had no hooks switch — a configured command meant active.
       hooks: {
