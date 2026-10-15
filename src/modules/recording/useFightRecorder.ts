@@ -55,14 +55,16 @@ export function useFightRecorder(fight: {
       }
       if (!rec.active) {
         rec.active = true;
-        const cmd = substituteHookVars(recording.startCommand, {
-          start: startTs,
-        });
-        if (cmd) void recordingRunHook(cmd).catch(() => {});
-        if (recording.obsEnabled)
+        if (recording.hooks.enabled) {
+          const cmd = substituteHookVars(recording.hooks.startCommand, {
+            start: startTs,
+          });
+          if (cmd) void recordingRunHook(cmd).catch(() => {});
+        }
+        if (recording.obs.enabled)
           void obsFightStarted({
-            url: recording.obsUrl,
-            password: recording.obsPassword || undefined,
+            url: recording.obs.url,
+            password: recording.obs.password || undefined,
           }).catch(() => {});
       }
     } else if (rec.active) {
@@ -71,15 +73,17 @@ export function useFightRecorder(fight: {
       // sidecar summarises exactly what the clip shows (#1016).
       const frozen = buckets;
       const runEnd = () => {
-        const cmd = substituteHookVars(recording.endCommand, {
-          start: startTs,
-          end: endTs,
-        });
-        if (cmd) void recordingRunHook(cmd).catch(() => {});
-        if (recording.obsEnabled)
+        if (recording.hooks.enabled) {
+          const cmd = substituteHookVars(recording.hooks.endCommand, {
+            start: startTs,
+            end: endTs,
+          });
+          if (cmd) void recordingRunHook(cmd).catch(() => {});
+        }
+        if (recording.obs.enabled)
           void obsFightEnded({
-            url: recording.obsUrl,
-            password: recording.obsPassword || undefined,
+            url: recording.obs.url,
+            password: recording.obs.password || undefined,
           })
             .then((clip) => {
               if (!clip) return;

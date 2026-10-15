@@ -124,12 +124,13 @@ describe("FightOverlayProvider — recording hooks (#1014)", () => {
         "pvp.fightRecording",
         JSON.stringify({
           enabled: true,
-          startCommand: "start-rec {start}",
-          endCommand: "stop-rec {start} {end}",
           postRollSecs: 10,
-          obsEnabled: true,
-          obsUrl: "ws://test:4455",
-          obsPassword: "pw",
+          hooks: {
+            enabled: true,
+            startCommand: "start-rec {start}",
+            endCommand: "stop-rec {start} {end}",
+          },
+          obs: { enabled: true, url: "ws://test:4455", password: "pw" },
         }),
       );
       bucketsHandler = undefined;
@@ -194,6 +195,8 @@ describe("FightOverlayProvider — recording hooks (#1014)", () => {
     try {
       localStorage.clear();
       localStorage.setItem("pvp.fightScan", "true");
+      // Deliberately the LEGACY flat shape (pre-provider releases): the
+      // provider migrates it, so old persisted settings keep working.
       localStorage.setItem(
         "pvp.fightRecording",
         JSON.stringify({

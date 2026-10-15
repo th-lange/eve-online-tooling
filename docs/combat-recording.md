@@ -3,8 +3,9 @@
 The app can start and stop a video recorder **automatically when a fight is
 detected** — the same detection the Combat Overview uses (a fight starts with
 the first combat line in your gamelog and ends after 5 seconds of silence).
-The app never captures video itself; it drives an external recorder. Both
-paths live in **Settings → Record fights** and can be used together.
+The app never captures video itself; it drives an external recorder through
+**providers**, configured in **Settings → Record fights**. Two exist — OBS
+and command hooks — and any combination can be enabled at once.
 
 ## Prerequisites
 
@@ -23,7 +24,7 @@ How a recording runs, whichever path you pick:
   re-erupts within the post-roll, the same recording keeps rolling.
 - Turning *Record fights* off mid-fight stops the recorder immediately.
 
-## Path A — OBS (recommended)
+## Provider: OBS (recommended)
 
 OBS brings hardware encoding and, crucially, the **replay buffer**: the
 seconds *before* the fight was detected — the alpha strike that started it —
@@ -40,7 +41,7 @@ end up in a clip too.
 4. Optional but recommended: **Settings → Output → Replay Buffer: on**, then
    start the buffer (Controls → *Start Replay Buffer*, or enable auto-start in
    OBS's general settings).
-5. In this app: **Settings → Record fights → Drive OBS: on**, URL
+5. In this app: **Settings → Record fights → Provider: OBS: on**, URL
    `ws://127.0.0.1:4455`, the password from step 2, then **Test connection** —
    it replies with the OBS version when everything is wired.
 
@@ -53,10 +54,11 @@ Per fight, the app then:
   fight's exact time span, damage totals, and the attackers (name + ship) —
   so external tooling can index clips by fight.
 
-## Path B — command hooks (any recorder)
+## Provider: command hooks (any recorder)
 
-For recorders without an API, two shell commands run through `sh -c`
-(`cmd /C` on Windows): one on fight start, one on fight end. `{start}` and
+For recorders without an API, enable **Provider: command hooks** and give it
+two shell commands, run through `sh -c` (`cmd /C` on Windows): one on fight
+start, one on fight end. `{start}` and
 `{end}` are replaced with the fight's epoch seconds, handy for file names.
 Exit codes are ignored by design — a recorder that is already running must not
 surface as an overlay error.
