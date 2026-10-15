@@ -103,14 +103,25 @@ export function migrateRecordingSettings(
 
 /** State lives in `RecordingProvider` so Settings and the fight overlay
  *  always agree (`usePersistentState` has no cross-instance sync). */
+/** Settings "Test recording" (#1013): phase of the synthetic fight currently
+ *  driving the enabled providers, or `null` when idle. */
+export type RecordingTestPhase = "recording" | "post-roll" | null;
+
 export interface RecordingCtx {
   recording: FightRecordingSettings;
   setRecording: (s: FightRecordingSettings) => void;
+  /** Drive the enabled providers through a short synthetic fight (start →
+   *  5 s "fight" → post-roll → stop) so the setup is verifiable without
+   *  undocking. No-op while a test is already running. */
+  runRecordingTest: () => void;
+  recordingTestPhase: RecordingTestPhase;
 }
 
 export const RecordingContext = createContext<RecordingCtx>({
   recording: DEFAULT_FIGHT_RECORDING,
   setRecording: () => {},
+  runRecordingTest: () => {},
+  recordingTestPhase: null,
 });
 
 export function useRecording(): RecordingCtx {

@@ -23,6 +23,9 @@ How a recording runs, whichever path you pick:
   **post-roll** (default 10 s), so the aftermath stays in the clip. If combat
   re-erupts within the post-roll, the same recording keeps rolling.
 - Turning *Record fights* off mid-fight stops the recorder immediately.
+- **Test recording** (bottom of the card) runs a 5-second synthetic fight
+  through whatever providers are enabled — same start/stop actions, same
+  post-roll — so you can verify the setup without undocking.
 
 ## Provider: OBS (recommended)
 

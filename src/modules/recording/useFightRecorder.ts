@@ -6,7 +6,7 @@ import {
   recordingWriteSidecar,
   type DpsBucket,
 } from "../../lib/api";
-import { useRecording } from "./recordingContext";
+import { useRecording, type FightRecordingSettings } from "./recordingContext";
 
 /** Fill a recording hook command's placeholders (#1014): `{start}`/`{end}`
  *  become the fight's epoch-second bounds (empty string while unknown).
@@ -23,13 +23,75 @@ export function substituteHookVars(
     .replaceAll("{end}", vars.end == null ? "" : String(vars.end));
 }
 
+/** Fire every enabled provider's fight-start action. Shared by the live
+ *  trigger below and the Settings "Test recording" run. Failures never
+ *  surface as overlay errors. */
+export function fireFightStart(
+  recording: FightRecordingSettings,
+  startTs: number | null,
+): void {
+  if (recording.hooks.enabled) {
+    const cmd = substituteHookVars(recording.hooks.startCommand, {
+      start: startTs,
+    });
+    if (cmd) void recordingRunHook(cmd).catch(() => {});
+  }
+  if (recording.obs.enabled)
+    void obsFightStarted({
+      url: recording.obs.url,
+      password: recording.obs.password || undefined,
+    }).catch(() => {});
+}
+
+/** Fire every enabled provider's fight-end action; when OBS reports the
+ *  finished clip's path, the fight sidecar summarising `buckets` is written
+ *  next to it (#1016). */
+export function fireFightEnd(
+  recording: FightRecordingSettings,
+  startTs: number | null,
+  endTs: number | null,
+  buckets: DpsBucket[],
+): void {
+  if (recording.hooks.enabled) {
+    const cmd = substituteHookVars(recording.hooks.endCommand, {
+      start: startTs,
+      end: endTs,
+    });
+    if (cmd) void recordingRunHook(cmd).catch(() => {});
+  }
+  if (recording.obs.enabled)
+    void obsFightEnded({
+      url: recording.obs.url,
+      password: recording.obs.password || undefined,
+    })
+      .then((clip) => {
+        if (!clip) return;
+        const attackers = new Map<string, string | undefined>();
+        let damageOut = 0;
+        let damageIn = 0;
+        for (const b of buckets) {
+          damageOut += b.damageOut;
+          damageIn += b.damageIn;
+          for (const p of b.byPilot) {
+            if (p.dpsIn > 0 && p.ship) attackers.set(p.name, p.ship);
+          }
+        }
+        return recordingWriteSidecar(clip, {
+          start: startTs,
+          end: endTs,
+          damageOut,
+          damageIn,
+          attackers: [...attackers].map(([name, ship]) => ({ name, ship })),
+        });
+      })
+      .catch(() => {});
+}
+
 /** The combat-recording trigger (#1013), fed by the fight overlay's
- *  detection: the start hook / OBS start fires on `fightLive`'s rising edge,
- *  the end hook / OBS stop after the post-roll — unless the fight re-engages
- *  within it, in which case the recording just keeps rolling. Turning the
- *  setting off mid-fight stops immediately. When OBS reports the finished
- *  clip's path, the fight sidecar is written next to it (#1016). Recorder
- *  failures never surface as overlay errors. */
+ *  detection: providers start on `fightLive`'s rising edge and stop after
+ *  the post-roll — unless the fight re-engages within it, in which case the
+ *  recording just keeps rolling. Turning the setting off mid-fight stops
+ *  immediately. */
 export function useFightRecorder(fight: {
   live: boolean;
   startTs: number | null;
@@ -55,61 +117,14 @@ export function useFightRecorder(fight: {
       }
       if (!rec.active) {
         rec.active = true;
-        if (recording.hooks.enabled) {
-          const cmd = substituteHookVars(recording.hooks.startCommand, {
-            start: startTs,
-          });
-          if (cmd) void recordingRunHook(cmd).catch(() => {});
-        }
-        if (recording.obs.enabled)
-          void obsFightStarted({
-            url: recording.obs.url,
-            password: recording.obs.password || undefined,
-          }).catch(() => {});
+        fireFightStart(recording, startTs);
       }
     } else if (rec.active) {
       rec.active = false;
       // The freeze render captured the final (frozen) fight buffer — the
       // sidecar summarises exactly what the clip shows (#1016).
       const frozen = buckets;
-      const runEnd = () => {
-        if (recording.hooks.enabled) {
-          const cmd = substituteHookVars(recording.hooks.endCommand, {
-            start: startTs,
-            end: endTs,
-          });
-          if (cmd) void recordingRunHook(cmd).catch(() => {});
-        }
-        if (recording.obs.enabled)
-          void obsFightEnded({
-            url: recording.obs.url,
-            password: recording.obs.password || undefined,
-          })
-            .then((clip) => {
-              if (!clip) return;
-              const attackers = new Map<string, string | undefined>();
-              let damageOut = 0;
-              let damageIn = 0;
-              for (const b of frozen) {
-                damageOut += b.damageOut;
-                damageIn += b.damageIn;
-                for (const p of b.byPilot) {
-                  if (p.dpsIn > 0 && p.ship) attackers.set(p.name, p.ship);
-                }
-              }
-              return recordingWriteSidecar(clip, {
-                start: startTs,
-                end: endTs,
-                damageOut,
-                damageIn,
-                attackers: [...attackers].map(([name, ship]) => ({
-                  name,
-                  ship,
-                })),
-              });
-            })
-            .catch(() => {});
-      };
+      const runEnd = () => fireFightEnd(recording, startTs, endTs, frozen);
       if (!recording.enabled) {
         runEnd(); // setting switched off mid-fight: stop right away
       } else {
