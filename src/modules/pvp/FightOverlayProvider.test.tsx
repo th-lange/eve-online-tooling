@@ -7,13 +7,17 @@ import { RecordingProvider } from "../recording/RecordingProvider";
 import { useRecording } from "../recording/recordingContext";
 import type { DpsBucket } from "../../lib/api";
 
-// The overlay subscribes to dps://buckets via `listen`; capture the callback
-// so tests can push fight buckets directly.
+// The overlay subscribes to dps://buckets and dps://source via `listen`;
+// capture the callbacks so tests can push fight data directly.
 let bucketsHandler: ((buckets: DpsBucket[]) => void) | undefined;
+let sourceHandler:
+  ((source: { path: string; character: string | null }) => void) | undefined;
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: (name: string, handler: (e: { payload: DpsBucket[] }) => void) => {
+  listen: (name: string, handler: (e: { payload: unknown }) => void) => {
     if (name === "dps://buckets")
       bucketsHandler = (buckets) => handler({ payload: buckets });
+    if (name === "dps://source")
+      sourceHandler = (source) => handler({ payload: source });
     return Promise.resolve(() => {});
   },
 }));
@@ -225,6 +229,51 @@ describe("FightOverlayProvider — recording hooks (#1014)", () => {
       // the 60 s post-roll.
       fireEvent.click(screen.getByRole("button", { name: "Disable rec" }));
       expect(hookCalls()).toEqual(["start-rec", "stop-rec"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("records only the configured character's fights (dps://source filter)", async () => {
+    vi.useFakeTimers();
+    try {
+      localStorage.clear();
+      localStorage.setItem("pvp.fightScan", "true");
+      localStorage.setItem(
+        "pvp.fightRecording",
+        JSON.stringify({
+          enabled: true,
+          postRollSecs: 10,
+          character: "Main Dude",
+          hooks: { enabled: true, startCommand: "rec {start}", endCommand: "" },
+          obs: { enabled: false, url: "", password: "" },
+        }),
+      );
+      bucketsHandler = undefined;
+      sourceHandler = undefined;
+      invokeMock.mockClear();
+      mockInvoke({ pvp_profiles: () => ({ pilots: [], unresolved: [] }) });
+      renderWithQuery(
+        <RecordingProvider>
+          <FightOverlayProvider>
+            <div />
+          </FightOverlayProvider>
+        </RecordingProvider>,
+      );
+      await act(() => vi.advanceTimersByTimeAsync(0));
+
+      // Capture follows another character's log: combat must NOT record.
+      act(() => sourceHandler!({ path: "/l/alt.txt", character: "Alt Guy" }));
+      act(() => bucketsHandler!([bucket(1000, 50)]));
+      expect(hookCalls()).toEqual([]);
+
+      // The capture hot-swaps to the configured character mid-fight: the
+      // rising edge fires now (case-insensitive match).
+      act(() =>
+        sourceHandler!({ path: "/l/main.txt", character: "main dude" }),
+      );
+      act(() => bucketsHandler!([bucket(1005, 20)]));
+      expect(hookCalls()).toEqual(["rec 1000"]);
     } finally {
       vi.useRealTimers();
     }

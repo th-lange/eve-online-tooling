@@ -5,6 +5,7 @@ import {
   characterShip,
   pvpPilotFits,
   onDpsBuckets,
+  onDpsSource,
   dpsStart,
   fittingListLocal,
   fittingSimulate,
@@ -647,6 +648,31 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     };
   }, [enabled]);
 
+  // Whose gamelog the capture follows (dps://source) — the recording
+  // character filter keys off this. Same cancelled-pattern as above.
+  const [sourceCharacter, setSourceCharacter] = useState<string | null>(null);
+  const sourceUnlistenRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (!enabled) {
+      sourceUnlistenRef.current?.();
+      sourceUnlistenRef.current = null;
+      setSourceCharacter(null);
+      return;
+    }
+    let cancelled = false;
+    onDpsSource((source) => {
+      if (!cancelled) setSourceCharacter(source.character);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else sourceUnlistenRef.current = fn;
+    });
+    return () => {
+      cancelled = true;
+      sourceUnlistenRef.current?.();
+      sourceUnlistenRef.current = null;
+    };
+  }, [enabled]);
+
   // Auto-run a background live capture whenever the overlay is on, so combat
   // is always detected without opening the DPS meter first. `dps_start` seeks
   // to the current end of the newest gamelog and is generation-guarded, so
@@ -735,6 +761,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     startTs: fightStartTs,
     endTs: fightEndTs,
     buckets: fightBuckets,
+    character: sourceCharacter,
   });
 
   // Fit data for "my ranges" in the fight panel.

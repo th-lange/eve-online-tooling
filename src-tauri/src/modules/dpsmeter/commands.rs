@@ -128,6 +128,16 @@ pub struct PlaybackSettings {
     pub extraction_plan: Option<ExtractionPlan>,
 }
 
+/// `dps://source` payload: the gamelog the live capture currently follows,
+/// with the character its `Listener:` header names (`None` when the header
+/// isn't recognised).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DpsSource {
+    pub path: String,
+    pub character: Option<String>,
+}
+
 /// A gamelog file the UI can list (newest first) — used for status + playback.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -203,6 +213,19 @@ pub async fn dps_start(
         .ok()
         .map(|d| SdePaths::new(d).db);
 
+    // Tell the UI whose gamelog the capture follows — the fight overlay's
+    // recording character filter keys off this (#1013). Re-emitted on every
+    // hot-swap, so a multi-boxer's active character is always current.
+    fn emit_source(app: &AppHandle, path: &Path) {
+        let _ = app.emit(
+            "dps://source",
+            DpsSource {
+                path: path.display().to_string(),
+                character: super::parser::detect_character(&read_header_sync(path)),
+            },
+        );
+    }
+
     tauri::async_runtime::spawn(async move {
         // Fixed-grid 5 s buckets (#983): anchored at capture start so empty
         // buckets stream from the first poll on, combat or not.
@@ -226,6 +249,9 @@ pub async fn dps_start(
             Some(path) => detect_file_lang(path).await,
             None => Lang::En,
         };
+        if let Some(path) = &current {
+            emit_source(&app, path);
+        }
 
         let mut ticker = tokio::time::interval(POLL);
         loop {
@@ -249,6 +275,7 @@ pub async fn dps_start(
             if let Some(newest) = pick_newest_gamelog(&dir, settings.character.as_deref()) {
                 if current.as_deref() != Some(newest.as_path()) {
                     lang = detect_file_lang(&newest).await;
+                    emit_source(&app, &newest);
                     current = Some(newest);
                     offset = 0;
                 }

@@ -25,6 +25,10 @@ How a recording runs, whichever path you pick:
   **post-roll** (default 10 s), so the aftermath stays in the clip. If combat
   re-erupts within the post-roll, the same recording keeps rolling.
 - Turning *Record fights* off mid-fight stops the recorder immediately.
+- **Only for character** (multi-boxing): set a character name and only fights
+  from *that* character's gamelog record — the capture reports whose log it
+  follows and the recorder compares (case-insensitive). Empty = any
+  character.
 - **Test recording** (bottom of the card) runs a 5-second synthetic fight
   through whatever providers are enabled — same start/stop actions, same
   post-roll — so you can verify the setup without undocking.
