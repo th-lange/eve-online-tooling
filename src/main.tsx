@@ -16,6 +16,7 @@ import { resolveStartModule } from "./lib/startModule";
 import { ScriptsRunnerProvider } from "./modules/scripts/runner";
 import { InfoAlertsProvider } from "./modules/info/InfoAlertsProvider";
 import { FightOverlayProvider } from "./modules/pvp/FightOverlayProvider";
+import { RecordingProvider } from "./modules/recording/RecordingProvider";
 import { FwHomeDefenseProvider } from "./modules/faction-warfare/FwHomeDefenseProvider";
 import { ConfirmQuitProvider } from "./modules/settings/ConfirmQuitProvider";
 import "./index.css";
@@ -66,13 +67,15 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <QueryClientProvider client={queryClient}>
       <ScriptsRunnerProvider>
         <InfoAlertsProvider>
-          <FightOverlayProvider>
-            <FwHomeDefenseProvider>
-              <ConfirmQuitProvider>
-                <RouterProvider router={router} />
-              </ConfirmQuitProvider>
-            </FwHomeDefenseProvider>
-          </FightOverlayProvider>
+          <RecordingProvider>
+            <FightOverlayProvider>
+              <FwHomeDefenseProvider>
+                <ConfirmQuitProvider>
+                  <RouterProvider router={router} />
+                </ConfirmQuitProvider>
+              </FwHomeDefenseProvider>
+            </FightOverlayProvider>
+          </RecordingProvider>
         </InfoAlertsProvider>
       </ScriptsRunnerProvider>
     </QueryClientProvider>
