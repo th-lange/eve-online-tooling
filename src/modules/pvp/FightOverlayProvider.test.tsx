@@ -132,7 +132,10 @@ describe("FightOverlayProvider — recording hooks (#1014)", () => {
       );
       bucketsHandler = undefined;
       invokeMock.mockClear();
-      mockInvoke({ pvp_profiles: () => ({ pilots: [], unresolved: [] }) });
+      mockInvoke({
+        pvp_profiles: () => ({ pilots: [], unresolved: [] }),
+        obs_fight_ended: () => "/tmp/fight.mkv",
+      });
       renderWithQuery(
         <FightOverlayProvider>
           <div />
@@ -163,6 +166,20 @@ describe("FightOverlayProvider — recording hooks (#1014)", () => {
       expect(
         invokeMock.mock.calls.find((c) => c[0] === "obs_fight_started")?.[1],
       ).toEqual({ settings: { url: "ws://test:4455", password: "pw" } });
+
+      // OBS reported a clip path → the fight sidecar is written next to it
+      // with the span and totals from the frozen buffer (#1016).
+      await act(() => vi.advanceTimersByTimeAsync(0)); // flush the .then chain
+      const sidecar = invokeMock.mock.calls.find(
+        (c) => c[0] === "recording_write_sidecar",
+      )?.[1] as { clipPath: string; meta: Record<string, unknown> };
+      expect(sidecar.clipPath).toBe("/tmp/fight.mkv");
+      expect(sidecar.meta).toMatchObject({
+        start: 1000,
+        end: 1010,
+        damageIn: 50,
+        damageOut: 0,
+      });
     } finally {
       vi.useRealTimers();
     }

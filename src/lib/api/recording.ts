@@ -30,3 +30,22 @@ export function obsFightStarted(settings: ObsSettings): Promise<void> {
 export function obsFightEnded(settings: ObsSettings): Promise<string | null> {
   return invoke<string | null>("obs_fight_ended", { settings });
 }
+
+/** The sidecar written next to each clip (#1016) — one shared format for
+ *  external tooling and future chart→video deep links. */
+export interface FightClipMeta {
+  /** Fight bucket span, epoch seconds. */
+  start: number | null;
+  end: number | null;
+  damageOut: number;
+  damageIn: number;
+  attackers: { name: string; ship?: string }[];
+}
+
+/** Write `meta` as `<clipPath>.fight.json`; resolves to the sidecar path. */
+export function recordingWriteSidecar(
+  clipPath: string,
+  meta: FightClipMeta,
+): Promise<string> {
+  return invoke<string>("recording_write_sidecar", { clipPath, meta });
+}

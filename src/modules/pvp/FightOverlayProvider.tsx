@@ -9,6 +9,7 @@ import {
   recordingRunHook,
   obsFightStarted,
   obsFightEnded,
+  recordingWriteSidecar,
   fittingListLocal,
   fittingSimulate,
   type DpsBucket,
@@ -792,6 +793,9 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
       }
     } else if (rec.active) {
       rec.active = false;
+      // The freeze render captured the final (frozen) fight buffer — the
+      // sidecar summarises exactly what the clip shows (#1016).
+      const frozen = fightBuckets;
       const runEnd = () => {
         const cmd = substituteHookVars(recording.endCommand, {
           start: fightStartTs,
@@ -802,7 +806,31 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
           void obsFightEnded({
             url: recording.obsUrl,
             password: recording.obsPassword || undefined,
-          }).catch(() => {});
+          })
+            .then((clip) => {
+              if (!clip) return;
+              const attackers = new Map<string, string | undefined>();
+              let damageOut = 0;
+              let damageIn = 0;
+              for (const b of frozen) {
+                damageOut += b.damageOut;
+                damageIn += b.damageIn;
+                for (const p of b.byPilot) {
+                  if (p.dpsIn > 0 && p.ship) attackers.set(p.name, p.ship);
+                }
+              }
+              return recordingWriteSidecar(clip, {
+                start: fightStartTs,
+                end: fightEndTs,
+                damageOut,
+                damageIn,
+                attackers: [...attackers].map(([name, ship]) => ({
+                  name,
+                  ship,
+                })),
+              });
+            })
+            .catch(() => {});
       };
       if (!recording.enabled) {
         runEnd(); // setting switched off mid-fight: stop right away
@@ -813,7 +841,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
         }, recording.postRollSecs * 1000);
       }
     }
-  }, [fightLive, recording, fightStartTs, fightEndTs]);
+  }, [fightLive, recording, fightStartTs, fightEndTs, fightBuckets]);
 
   // Fit data for "my ranges" in the fight panel.
   const localFits = useQuery({
