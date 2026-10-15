@@ -13,8 +13,10 @@ and command hooks — and any combination can be enabled at once.
    fight detection; without it nothing triggers.
 2. A **Gamelogs folder** configured once in the DPS Meter module (the overlay
    tails the newest gamelog from there on its own).
-3. **Settings → Record fights: on.** Off by default — nothing runs until you
-   enable it.
+3. **Record fights: on.** Off by default — nothing runs until you enable it.
+   The configuration lives on the **Recording** page (its sidebar entry
+   starts in the sidebar's *Hidden* section — expand it and click the eye to
+   restore it) and is mirrored in **Settings**; both edit the same state.
 
 How a recording runs, whichever path you pick:
 

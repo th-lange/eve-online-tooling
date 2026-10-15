@@ -35,6 +35,7 @@ const ORDER_KEY = STORAGE_KEYS.sidebarOrder;
 const COLORS_KEY = STORAGE_KEYS.sidebarColors;
 const COLLAPSED_KEY = STORAGE_KEYS.sidebarCollapsed;
 const HIDDEN_KEY = STORAGE_KEYS.sidebarHidden;
+const HIDDEN_SEEDED_KEY = STORAGE_KEYS.sidebarHiddenSeeded;
 
 // Accent palette for tagging sidebar entries. Tailwind 400-level hues, spread
 // around the wheel so they stay distinct as small accents on the dark sidebar.
@@ -145,9 +146,34 @@ export function Layout() {
   const collapsed = sanitizeIds(collapsedRaw);
   // Modules the user has hidden from the nav; they collect in a "Hidden" section
   // at the bottom from which they can be restored. Hiding is nav-only — the
-  // route and command palette still reach the module.
-  const [hiddenRaw, setHidden] = usePersistentState<string[]>(HIDDEN_KEY, []);
+  // route and command palette still reach the module. `defaultHidden` modules
+  // start there until the user touches the hidden set (which then persists).
+  const [hiddenRaw, setHidden] = usePersistentState<string[]>(
+    HIDDEN_KEY,
+    modules.filter((m) => m.defaultHidden).map((m) => m.id),
+  );
   const hidden = sanitizeIds(hiddenRaw);
+  // One-shot per module: profiles from before a `defaultHidden` module
+  // shipped already persisted a hidden list (usePersistentState writes its
+  // default eagerly), so the initial value above can't hide it for them.
+  // Seed it once — remembering seeded ids is what makes a later restore
+  // stick instead of re-hiding on every launch. Idempotent re-runs no-op.
+  const [seededRaw, setSeeded] = usePersistentState<string[]>(
+    HIDDEN_SEEDED_KEY,
+    [],
+  );
+  useEffect(() => {
+    const seeded = sanitizeIds(seededRaw);
+    const unseeded = modules
+      .filter((m) => m.defaultHidden && !seeded.includes(m.id))
+      .map((m) => m.id);
+    if (unseeded.length === 0) return;
+    setHidden((prev) => [
+      ...prev,
+      ...unseeded.filter((id) => !prev.includes(id)),
+    ]);
+    setSeeded([...seeded, ...unseeded]);
+  }, [seededRaw, setHidden, setSeeded]);
   // A drag in progress, tagged with the section it started in — a pinned module
   // shows in both the Pinned section and its group, so reordering is scoped to
   // the section the row was dragged from.
