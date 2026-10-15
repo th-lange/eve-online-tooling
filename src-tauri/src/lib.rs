@@ -426,6 +426,7 @@ pub fn run() {
             modules::recording::obs::obs_test_connection,
             modules::recording::obs::obs_fight_started,
             modules::recording::obs::obs_fight_ended,
+            modules::recording::commands::recording_write_sidecar,
             modules::lpstore::commands::lp_balances,
             modules::lpstore::commands::lp_offers,
             modules::character::commands::character_skills,

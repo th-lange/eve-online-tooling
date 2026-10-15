@@ -27,6 +27,25 @@ pub fn recording_run_hook(command: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Write the fight's metadata next to a finished clip (#1016):
+/// `<clip>.fight.json`. `meta` is whatever the overlay knows about the fight
+/// (span, totals, attackers) — stored as-is, pretty-printed, so external
+/// tooling and the future chart→video deep links share one format.
+#[tauri::command]
+pub fn recording_write_sidecar(
+    clip_path: String,
+    meta: serde_json::Value,
+) -> Result<String, String> {
+    let clip = std::path::Path::new(&clip_path);
+    if !clip.is_absolute() {
+        return Err(format!("clip path is not absolute: {clip_path}"));
+    }
+    let sidecar = format!("{clip_path}.fight.json");
+    let body = serde_json::to_vec_pretty(&meta).map_err(|e| e.to_string())?;
+    std::fs::write(&sidecar, body).map_err(|e| format!("{sidecar}: {e}"))?;
+    Ok(sidecar)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -45,5 +64,22 @@ mod tests {
         // A failing hook is still a successful spawn — exit codes are the
         // user's business, not an overlay error.
         assert_eq!(recording_run_hook("false".into()), Ok(()));
+    }
+
+    #[test]
+    fn writes_the_sidecar_next_to_the_clip_and_rejects_relative_paths() {
+        let dir = std::env::temp_dir().join(format!("sidecar-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let clip = dir.join("fight.mkv");
+        let meta = serde_json::json!({ "start": 1000, "end": 1065 });
+
+        let sidecar = recording_write_sidecar(clip.to_string_lossy().into(), meta.clone()).unwrap();
+        assert_eq!(sidecar, format!("{}.fight.json", clip.to_string_lossy()));
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&sidecar).unwrap()).unwrap();
+        assert_eq!(written, meta);
+
+        assert!(recording_write_sidecar("relative/clip.mkv".into(), meta).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
