@@ -20,7 +20,9 @@ describe("Support my work", () => {
   it("shows the first-run modal until dismissed, then remembers", () => {
     render(<SupportModal />);
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+    // Creator code row explains the on-hold state instead of a copy field.
     expect(screen.getByText("Creator code")).toBeInTheDocument();
+    expect(screen.getByText(/On hold/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Got it" }));
 
@@ -34,7 +36,7 @@ describe("Support my work", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("clicking 'Support my corp' opens the corp's in-game info window", async () => {
+  it("clicking 'Support my corp' opens the corp's in-game info window and says where", async () => {
     invokeMock.mockResolvedValue(undefined);
     render(<CorpRow />);
     fireEvent.click(screen.getByRole("button", { name: "Support my corp" }));
@@ -42,6 +44,24 @@ describe("Support my work", () => {
       expect(invokeMock).toHaveBeenCalledWith("esi_open_info_window", {
         targetId: CORP_ID,
       }),
+    );
+    // The silent-no-op gotcha is spelled out: the window opens on the active
+    // character's client, and only while that character is in-game.
+    await waitFor(() =>
+      expect(
+        screen.getByText(/active character's game client/),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("surfaces an inline error when the open-window call fails", async () => {
+    invokeMock.mockRejectedValue("no scope");
+    render(<CorpRow />);
+    fireEvent.click(screen.getByRole("button", { name: "Support my corp" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Couldn't open it: no scope/),
+      ).toBeInTheDocument(),
     );
   });
 });

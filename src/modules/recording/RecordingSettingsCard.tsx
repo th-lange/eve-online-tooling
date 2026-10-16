@@ -99,24 +99,32 @@ export function RecordingSettingsCard() {
           </label>
           <label className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-zinc-500">Only for character</span>
-            <input
-              type="text"
-              list="recording-characters"
+            <select
               value={recording.character}
               onChange={(e) =>
                 setRecording({ ...recording, character: e.currentTarget.value })
               }
-              placeholder="any character"
-              className="w-56 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-200 placeholder:text-zinc-600"
+              className="w-56 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-200"
               aria-label="Only for character"
-            />
-            <datalist id="recording-characters">
+            >
+              <option value="">any character</option>
               {(characters.data ?? []).map((name) => (
-                <option key={name} value={name} />
+                <option key={name} value={name}>
+                  {name}
+                </option>
               ))}
-            </datalist>
+              {recording.character &&
+                !(characters.data ?? []).includes(recording.character) && (
+                  // A previously saved choice whose logs aged out of the
+                  // folder — keep it selectable instead of silently dropping.
+                  <option value={recording.character}>
+                    {recording.character} (no recent logs)
+                  </option>
+                )}
+            </select>
             <span className="text-xs text-zinc-600">
-              record only this character's fights (multi-boxing); empty = any
+              record only this character's fights (multi-boxing) — characters
+              read from your gamelogs folder
             </span>
           </label>
           <div className="mt-1 border-t border-zinc-800 pt-3">
