@@ -7,10 +7,8 @@ import { useCopyToClipboard } from "../lib/useCopyToClipboard";
 import { errorMessage, openInfoWindow } from "../lib/api";
 import { PrimaryButton } from "./page";
 
-// EVE content-creator code (placeholder until CCP finishes processing it) and
-// the buddy / referral sign-up link. Surfaced once on first launch and, after
+// EVE buddy / referral sign-up link. Surfaced once on first launch and, after
 // that, in the collapsible "Support my work" panel in the sidebar.
-export const CREATOR_CODE = "-----";
 export const REFERRAL_URL =
   "https://www.eveonline.com/signup?invc=c2926a85-e10f-4522-9245-0d8364eacb86";
 // Corp id for the in-game "Show Info" window, so players can send an ISK
@@ -21,40 +19,19 @@ function openExternal(url: string) {
   void openUrl(url).catch(() => {});
 }
 
-/** A labelled value with a copy button (creator code, etc.). */
-export function CopyRow({
-  label,
-  value,
-  note,
-}: {
-  label: string;
-  value: string;
-  note?: string;
-}) {
-  const { copied, copy } = useCopyToClipboard();
+/** Creator code: on hold — Fenris (who run CCP's creator program) didn't
+ *  grant one, so there's nothing to copy yet. The row stays so people know
+ *  it's deliberate, not broken. */
+export function CreatorCodeRow() {
   return (
     <div className="mt-2">
       <div className="text-[10px] uppercase tracking-wide text-zinc-500">
-        {label}
-        {note && <span className="ml-1 normal-case text-zinc-600">{note}</span>}
+        Creator code
       </div>
-      <div className="mt-1 flex items-center gap-1.5">
-        <code className="flex-1 truncate rounded bg-zinc-950/60 px-2 py-1 text-[11px] text-zinc-300">
-          {value}
-        </code>
-        <button
-          onClick={() => copy(value)}
-          title="Copy"
-          aria-label={`Copy ${label}`}
-          className="shrink-0 rounded p-1 text-zinc-500 hover:text-zinc-200"
-        >
-          {copied ? (
-            <Check size={13} className="text-emerald-400" />
-          ) : (
-            <Copy size={13} />
-          )}
-        </button>
-      </div>
+      <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">
+        On hold — the fucks at Fenris did not grant me one. The buddy link below
+        works regardless.
+      </p>
     </div>
   );
 }
@@ -93,23 +70,48 @@ export function LinkRow() {
 
 /** In-game donation: opens the corp's "Show Info" window (its "Give Money"
  *  action lets a player send ISK directly) — needs a logged-in character with
- *  the esi-ui.open_window scope. */
+ *  the esi-ui.open_window scope. ESI accepts the call even when that
+ *  character isn't in-game (nothing visibly happens), so the result line
+ *  spells out where the window opens instead of failing silently. */
 export function CorpRow() {
+  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(
+    null,
+  );
   return (
     <div className="mt-2">
       <div className="text-[10px] uppercase tracking-wide text-zinc-500">
         Donate ISK in-game
       </div>
       <button
-        onClick={() =>
-          openInfoWindow(CORP_ID).catch((e) =>
-            alert(`Couldn't open the corp's info window: ${errorMessage(e)}`),
-          )
-        }
+        onClick={() => {
+          setStatus(null);
+          openInfoWindow(CORP_ID)
+            .then(() =>
+              setStatus({
+                ok: true,
+                text: 'Sent. The Show Info window opens on your active character\'s game client — that character must be logged in-game. Donate via its "Give Money" action.',
+              }),
+            )
+            .catch((e) =>
+              setStatus({
+                ok: false,
+                text: `Couldn't open it: ${errorMessage(e)}. If this character logged in before the open-window permission existed, log them in again.`,
+              }),
+            );
+        }}
         className="mt-1 flex w-full items-center justify-center gap-1.5 truncate rounded bg-indigo-600 px-2 py-1.5 text-[11px] font-medium text-white hover:bg-indigo-500"
       >
         <ExternalLink size={12} className="shrink-0" /> Support my corp
       </button>
+      {status && (
+        <p
+          className={`mt-1 text-[11px] leading-relaxed ${
+            status.ok ? "text-zinc-500" : "text-rose-400"
+          }`}
+        >
+          {status.text}
+        </p>
+      )}
     </div>
   );
 }
@@ -166,7 +168,7 @@ export function SupportModal() {
           creator code below throws a few coins my way — at no cost to you. o7
         </p>
 
-        <CopyRow label="Creator code" value={CREATOR_CODE} note="(pending)" />
+        <CreatorCodeRow />
         <LinkRow />
         <CorpRow />
 

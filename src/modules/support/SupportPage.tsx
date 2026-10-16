@@ -1,9 +1,8 @@
 import { Heart } from "lucide-react";
 import {
-  CopyRow,
+  CreatorCodeRow,
   LinkRow,
   CorpRow,
-  CREATOR_CODE,
 } from "../../components/SupportMyWork";
 import { Page, PageHeader } from "../../components/page";
 
@@ -27,7 +26,7 @@ export function SupportPage() {
       </p>
 
       <div className="mt-6 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-        <CopyRow label="Creator code" value={CREATOR_CODE} note="(pending)" />
+        <CreatorCodeRow />
         <LinkRow />
         <CorpRow />
       </div>
