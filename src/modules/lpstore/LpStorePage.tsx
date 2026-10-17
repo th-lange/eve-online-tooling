@@ -226,6 +226,21 @@ function CorpOffers({ tabs }: { tabs: ReactNode }) {
         </Field>
       </div>
 
+      {(() => {
+        // Roster breakdown: who holds the selected corp's LP ("All
+        // characters" active) — offers are redeemed per character, so the
+        // summed picker total alone would mislead.
+        const selected = balances.data?.find((b) => b.corporationId === corpId);
+        if (!selected || selected.holders.length < 2) return null;
+        return (
+          <div className="mt-1 text-xs text-zinc-500">
+            {selected.holders
+              .map((h) => `${h.character}: ${formatInt(h.points)} LP`)
+              .join(" · ")}
+          </div>
+        );
+      })()}
+
       {run.isError && (
         <div className="mt-3 text-sm text-rose-400">
           Failed: {errorMessage(run.error)}

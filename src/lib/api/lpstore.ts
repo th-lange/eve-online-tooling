@@ -1,9 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
 
+/** One character's LP held with a corp — the roster breakdown. */
+export interface LpHolder {
+  character: string;
+  points: number;
+}
 export interface LpBalance {
   corporationId: number;
   corporation: string;
+  /** Total across the selected characters. */
   points: number;
+  /** Per-character amounts, largest first (one entry for a single char). */
+  holders: LpHolder[];
 }
 export function lpBalances(): Promise<LpBalance[]> {
   return invoke<LpBalance[]>("lp_balances");

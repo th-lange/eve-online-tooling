@@ -1,14 +1,14 @@
 //! LP-store browser + calculator — rank an NPC corp's loyalty-store offers by
-//! ISK/LP yield. Offers are public; the character's LP balances need a scope.
+//! ISK/LP yield. Offers are public; the characters' LP balances need a scope.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-use crate::esi::{authed_get, resolve_names, AuthState, EsiClient, EsiError};
+use crate::esi::{authed_get_or_none_on_403, resolve_names, AuthState, EsiClient, EsiError};
 use crate::market::{jita_location, MarketService};
 use crate::model::AppError;
 use crate::storage;
@@ -21,43 +21,109 @@ struct EsiLoyalty {
     loyalty_points: i64,
 }
 
+/// One character's LP held with a corp — the roster breakdown of a balance.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LpHolder {
+    pub character: String,
+    pub points: i64,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LpBalance {
     pub corporation_id: i64,
     pub corporation: String,
+    /// Total across the selected characters.
     pub points: i64,
+    /// Per-character amounts, largest first (a single entry when one
+    /// character is active).
+    pub holders: Vec<LpHolder>,
 }
 
-/// The character's loyalty-point balance per NPC corporation.
+/// Loyalty-point balances per NPC corporation across the active selection —
+/// the whole roster when "All characters" is active, else just the active
+/// character (the fan-out convention every aggregating command follows).
+/// Characters missing the loyalty scope are skipped, not fatal.
 #[tauri::command]
 pub async fn lp_balances(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<Vec<LpBalance>, AppError> {
-    let (_, character_id) = storage::dir_and_primary_character(&app)?;
-    let points: Vec<EsiLoyalty> = authed_get(
-        &auth_state,
-        character_id,
-        &format!("/latest/characters/{character_id}/loyalty/points/"),
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-    let ids: Vec<i64> = points.iter().map(|p| p.corporation_id).collect();
-    let names = resolve_names(&auth_state, &ids).await;
-    let mut out: Vec<LpBalance> = points
+    let dir = storage::app_data_dir(&app)?;
+    let targets = storage::target_characters(&dir);
+    if targets.is_empty() {
+        return Err(AppError::auth_required());
+    }
+    let char_names = storage::character_names(&dir);
+
+    let mut per_char: Vec<(i64, Vec<EsiLoyalty>)> = Vec::new();
+    for character_id in targets {
+        // `Ok(None)` is a 403: this character's grant predates the loyalty
+        // scope — show the rest of the roster instead of failing the page.
+        let points: Option<Vec<EsiLoyalty>> = authed_get_or_none_on_403(
+            &auth_state,
+            character_id,
+            &format!("/latest/characters/{character_id}/loyalty/points/"),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        per_char.push((character_id, points.unwrap_or_default()));
+    }
+
+    let ids: Vec<i64> = per_char
+        .iter()
+        .flat_map(|(_, points)| points.iter().map(|p| p.corporation_id))
+        .collect();
+    let corp_names = resolve_names(&auth_state, &ids).await;
+    Ok(merge_balances(per_char, &char_names, &corp_names))
+}
+
+/// Fold per-character loyalty rows into one balance per corp: totals summed,
+/// holders largest-first, corps sorted by total. Pure — the testable half of
+/// [`lp_balances`].
+fn merge_balances(
+    per_char: Vec<(i64, Vec<EsiLoyalty>)>,
+    char_names: &HashMap<i64, String>,
+    corp_names: &HashMap<i64, String>,
+) -> Vec<LpBalance> {
+    let mut per_corp: HashMap<i64, Vec<LpHolder>> = HashMap::new();
+    for (character_id, points) in per_char {
+        for p in points {
+            // ESI lists corps a character has *interacted* with, including
+            // fully-spent 0-LP rows — noise in a balance picker; drop them.
+            if p.loyalty_points == 0 {
+                continue;
+            }
+            per_corp
+                .entry(p.corporation_id)
+                .or_default()
+                .push(LpHolder {
+                    character: char_names
+                        .get(&character_id)
+                        .cloned()
+                        .unwrap_or_else(|| format!("#{character_id}")),
+                    points: p.loyalty_points,
+                });
+        }
+    }
+    let mut out: Vec<LpBalance> = per_corp
         .into_iter()
-        .map(|p| LpBalance {
-            corporation: names
-                .get(&p.corporation_id)
-                .cloned()
-                .unwrap_or_else(|| format!("#{}", p.corporation_id)),
-            corporation_id: p.corporation_id,
-            points: p.loyalty_points,
+        .map(|(corporation_id, mut holders)| {
+            holders.sort_by_key(|h| std::cmp::Reverse(h.points));
+            LpBalance {
+                corporation: corp_names
+                    .get(&corporation_id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("#{corporation_id}")),
+                corporation_id,
+                points: holders.iter().map(|h| h.points).sum(),
+                holders,
+            }
         })
         .collect();
     out.sort_by_key(|o| std::cmp::Reverse(o.points));
-    Ok(out)
+    out
 }
 
 // --- Offers (valued + ranked) ---
@@ -432,7 +498,9 @@ fn value_offer(
 
 #[cfg(test)]
 mod tests {
-    use super::{offer_row, value_offer, EsiOffer, EsiRequired};
+    use std::collections::HashMap;
+
+    use super::{merge_balances, offer_row, value_offer, EsiLoyalty, EsiOffer, EsiRequired};
 
     #[test]
     fn profit_nets_sell_value_against_lp_isk_and_item_costs() {
@@ -474,5 +542,58 @@ mod tests {
         // cost = 100 LP × 1.0 + 50 ISK + 3 × 10 turn-ins = 180.
         assert!((row.cost - 180.0).abs() < 1e-6);
         assert!((row.profit - 1720.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn merge_balances_sums_the_roster_per_corp_with_a_holder_breakdown() {
+        let char_names = HashMap::from([(1, "Alice".to_string()), (2, "Bob".to_string())]);
+        let corp_names = HashMap::from([(900, "Caldari Navy".to_string())]);
+        let per_char = vec![
+            (
+                1,
+                vec![
+                    EsiLoyalty {
+                        corporation_id: 900,
+                        loyalty_points: 100,
+                    },
+                    EsiLoyalty {
+                        corporation_id: 901,
+                        loyalty_points: 5,
+                    },
+                ],
+            ),
+            (
+                2,
+                vec![
+                    EsiLoyalty {
+                        corporation_id: 900,
+                        loyalty_points: 250,
+                    },
+                    // Fully spent — ESI still lists it; must be dropped.
+                    EsiLoyalty {
+                        corporation_id: 901,
+                        loyalty_points: 0,
+                    },
+                ],
+            ),
+        ];
+        let out = merge_balances(per_char, &char_names, &corp_names);
+
+        // Corps sorted by total, largest first; shared corp sums both chars.
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].corporation, "Caldari Navy");
+        assert_eq!(out[0].points, 350);
+        // Holders largest-first: Bob's 250 before Alice's 100.
+        let holders: Vec<(&str, i64)> = out[0]
+            .holders
+            .iter()
+            .map(|h| (h.character.as_str(), h.points))
+            .collect();
+        assert_eq!(holders, vec![("Bob", 250), ("Alice", 100)]);
+        // Unknown corp name falls back to #id; Bob's 0-LP row is dropped,
+        // leaving Alice as the only holder.
+        assert_eq!(out[1].corporation, "#901");
+        assert_eq!(out[1].holders.len(), 1);
+        assert_eq!(out[1].holders[0].character, "Alice");
     }
 }
