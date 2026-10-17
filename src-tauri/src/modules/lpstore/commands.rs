@@ -2,11 +2,13 @@
 //! ISK/LP yield. Offers are public; the character's LP balances need a scope.
 
 use std::collections::HashSet;
+use std::path::Path;
 
+use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-use crate::esi::{authed_get, resolve_names, AuthState, EsiClient};
+use crate::esi::{authed_get, resolve_names, AuthState, EsiClient, EsiError};
 use crate::market::{jita_location, MarketService};
 use crate::model::AppError;
 use crate::storage;
@@ -134,33 +136,9 @@ pub async fn lp_offers(
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
 
     // Offers change rarely — serve them from the local cache unless refreshing.
-    let key = format!("lp_offers_{}", params.corporation_id);
-    let (offers, fetched_at) = match if params.refresh {
-        None
-    } else {
-        storage::load_data::<CachedOffers>(&dir, &key)
-    } {
-        Some(c) => (c.offers, c.fetched_at),
-        None => {
-            let offers: Vec<EsiOffer> = esi
-                .get_paged(
-                    &format!("/latest/loyalty/stores/{}/offers/", params.corporation_id),
-                    &[],
-                )
-                .await
-                .map_err(|e| e.to_string())?;
-            let fetched_at = crate::util::time::now_secs();
-            let _ = storage::save_data(
-                &dir,
-                &key,
-                &CachedOffers {
-                    fetched_at,
-                    offers: offers.clone(),
-                },
-            );
-            (offers, fetched_at)
-        }
-    };
+    let (offers, fetched_at) = corp_offers(&esi, &dir, params.corporation_id, params.refresh)
+        .await
+        .map_err(|e| e.to_string())?;
 
     // Price every product + required item at Jita.
     let mut ids: HashSet<i64> = HashSet::new();
@@ -181,31 +159,7 @@ pub async fn lp_offers(
     let mut rows: Vec<OfferRow> = offers
         .into_iter()
         .filter(|o| o.lp_cost > 0)
-        .map(|o| {
-            let required_cost: f64 = o
-                .required_items
-                .iter()
-                .map(|r| r.quantity as f64 * sell(r.type_id))
-                .sum();
-            let v = value_offer(
-                o.quantity,
-                sell(o.type_id),
-                o.lp_cost,
-                o.isk_cost,
-                required_cost,
-                params.isk_per_lp,
-            );
-            OfferRow {
-                name: names.get(o.type_id),
-                quantity: o.quantity,
-                lp_cost: o.lp_cost,
-                isk_cost: o.isk_cost,
-                sell_value: v.sell_value,
-                cost: v.cost,
-                profit: v.profit,
-                isk_per_lp: v.isk_per_lp,
-            }
-        })
+        .map(|o| offer_row(&o, names.get(o.type_id), &sell, params.isk_per_lp))
         .collect();
     rows.sort_by(|a, b| {
         b.isk_per_lp
@@ -213,6 +167,236 @@ pub async fn lp_offers(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     Ok(OffersResult { fetched_at, rows })
+}
+
+/// Offers for one corp — the local cache first (unless `refresh`), else ESI,
+/// persisting the pull. Returns the offers with their pull time (Unix secs).
+async fn corp_offers(
+    esi: &EsiClient,
+    dir: &Path,
+    corporation_id: i64,
+    refresh: bool,
+) -> Result<(Vec<EsiOffer>, u64), EsiError> {
+    let key = format!("lp_offers_{corporation_id}");
+    if !refresh {
+        if let Some(c) = storage::load_data::<CachedOffers>(dir, &key) {
+            return Ok((c.offers, c.fetched_at));
+        }
+    }
+    let offers: Vec<EsiOffer> = esi
+        .get_paged(
+            &format!("/latest/loyalty/stores/{corporation_id}/offers/"),
+            &[],
+        )
+        .await?;
+    let fetched_at = crate::util::time::now_secs();
+    let _ = storage::save_data(
+        dir,
+        &key,
+        &CachedOffers {
+            fetched_at,
+            offers: offers.clone(),
+        },
+    );
+    Ok((offers, fetched_at))
+}
+
+/// One valued [`OfferRow`] for an offer (caller filters `lp_cost > 0` first).
+fn offer_row(o: &EsiOffer, name: String, sell: &impl Fn(i64) -> f64, isk_per_lp: f64) -> OfferRow {
+    let required_cost: f64 = o
+        .required_items
+        .iter()
+        .map(|r| r.quantity as f64 * sell(r.type_id))
+        .sum();
+    let v = value_offer(
+        o.quantity,
+        sell(o.type_id),
+        o.lp_cost,
+        o.isk_cost,
+        required_cost,
+        isk_per_lp,
+    );
+    OfferRow {
+        name,
+        quantity: o.quantity,
+        lp_cost: o.lp_cost,
+        isk_cost: o.isk_cost,
+        sell_value: v.sell_value,
+        cost: v.cost,
+        profit: v.profit,
+        isk_per_lp: v.isk_per_lp,
+    }
+}
+
+// --- Item search (which corps offer it) ---
+
+/// Corps scanned concurrently; payloads are small (a cold scan of all ~283
+/// corps measured ~2s at this width), well under the ESI error budget.
+const SCAN_CONCURRENCY: usize = 8;
+/// Cap on SDE name matches a search expands to — keeps "Scourge" bounded.
+const SEARCH_TYPE_CAP: i64 = 50;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LpSearchParams {
+    /// Item-name query, matched like every other type picker (each term a
+    /// case-insensitive substring).
+    pub query: String,
+    #[serde(default = "default_isk_per_lp")]
+    pub isk_per_lp: f64,
+    /// Re-pull every corp's offers from ESI (ignore the local caches).
+    #[serde(default)]
+    pub refresh: bool,
+}
+
+/// One LP-store offer for a matching item, tagged with the corp selling it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LpSearchRow {
+    pub corporation_id: i64,
+    pub corporation: String,
+    #[serde(flatten)]
+    pub offer: OfferRow,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LpSearchResult {
+    /// Unix secs of the oldest per-corp pull used — the staleness bound.
+    pub oldest_fetched_at: u64,
+    /// Corps skipped this scan because their offers couldn't be fetched
+    /// (transient ESI errors) — the result may be missing their offers.
+    pub failed_corporations: usize,
+    pub rows: Vec<LpSearchRow>,
+}
+
+/// Search every NPC corp's LP store for offers of an item: which corps sell
+/// it, for how much LP/ISK/turn-ins, valued at Jita like [`lp_offers`].
+/// Offers are public — no login needed. Per-corp pulls are cached on disk
+/// (shared with [`lp_offers`]), so only the first scan hits every corp.
+#[tauri::command]
+pub async fn lp_search(
+    app: AppHandle,
+    market: State<'_, MarketService>,
+    esi: State<'_, EsiClient>,
+    params: LpSearchParams,
+) -> Result<LpSearchResult, String> {
+    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
+    if params.query.trim().is_empty() {
+        return Err("Enter an item name to search for.".into());
+    }
+    let matches = sde
+        .search_types(&params.query, SEARCH_TYPE_CAP)
+        .map_err(|e| e.to_string())?;
+    if matches.is_empty() {
+        return Err(format!("No item matches \"{}\".", params.query.trim()));
+    }
+    let matching: HashSet<i64> = matches.into_iter().map(|(id, _)| id).collect();
+
+    /// One corp's scan: `(corp_id, corp_name, offers, fetched_at)`; `None`
+    /// when the pull failed transiently.
+    type CorpScan = Option<(i64, String, Vec<EsiOffer>, u64)>;
+
+    // Walk every NPC corp's store, serving cached pulls where possible. A 404
+    // means "this corp has no loyalty store" — cache that as an empty store so
+    // re-scans skip it; other errors are transient, so count and retry next time.
+    let corps = sde.npc_corporations().map_err(|e| e.to_string())?;
+    let scans: Vec<CorpScan> = stream::iter(corps)
+        .map(|(corp_id, corp_name)| {
+            let esi = esi.inner().clone();
+            let dir = dir.clone();
+            let refresh = params.refresh;
+            async move {
+                match corp_offers(&esi, &dir, corp_id, refresh).await {
+                    Ok((offers, fetched_at)) => Some((corp_id, corp_name, offers, fetched_at)),
+                    Err(EsiError::Http(e))
+                        if e.status() == Some(reqwest::StatusCode::NOT_FOUND) =>
+                    {
+                        let fetched_at = crate::util::time::now_secs();
+                        let _ = storage::save_data(
+                            &dir,
+                            &format!("lp_offers_{corp_id}"),
+                            &CachedOffers {
+                                fetched_at,
+                                offers: Vec::new(),
+                            },
+                        );
+                        Some((corp_id, corp_name, Vec::new(), fetched_at))
+                    }
+                    Err(_) => None,
+                }
+            }
+        })
+        .buffer_unordered(SCAN_CONCURRENCY)
+        .collect()
+        .await;
+    let failed_corporations = scans.iter().filter(|s| s.is_none()).count();
+
+    // Keep only matching offers, then price their products + turn-ins at Jita.
+    let hits: Vec<(i64, String, Vec<EsiOffer>)> = scans
+        .iter()
+        .flatten()
+        .map(|(id, name, offers, _)| {
+            let offers: Vec<EsiOffer> = offers
+                .iter()
+                .filter(|o| o.lp_cost > 0 && matching.contains(&o.type_id))
+                .cloned()
+                .collect();
+            (*id, name.clone(), offers)
+        })
+        .filter(|(_, _, offers)| !offers.is_empty())
+        .collect();
+    let oldest_fetched_at = scans
+        .iter()
+        .flatten()
+        .map(|(_, _, _, fetched_at)| *fetched_at)
+        .min()
+        .unwrap_or_else(crate::util::time::now_secs);
+
+    let mut ids: HashSet<i64> = HashSet::new();
+    for (_, _, offers) in &hits {
+        for o in offers {
+            ids.insert(o.type_id);
+            for r in &o.required_items {
+                ids.insert(r.type_id);
+            }
+        }
+    }
+    let ids: Vec<i64> = ids.into_iter().collect();
+    let prices = market
+        .price_map_at(jita_location(), &ids)
+        .await
+        .map_err(|e| e.to_string())?;
+    let sell = |id: i64| prices.sell_or_zero(id);
+    let names = sde.type_name_map(&ids).map_err(|e| e.to_string())?;
+
+    let mut rows: Vec<LpSearchRow> = hits
+        .into_iter()
+        .flat_map(|(corp_id, corp_name, offers)| {
+            offers
+                .into_iter()
+                .map(|o| LpSearchRow {
+                    corporation_id: corp_id,
+                    corporation: corp_name.clone(),
+                    offer: offer_row(&o, names.get(o.type_id), &sell, params.isk_per_lp),
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    // Cheapest LP cost first — "who offers it for how much"; ties by best net.
+    rows.sort_by(|a, b| {
+        a.offer.lp_cost.cmp(&b.offer.lp_cost).then(
+            b.offer
+                .isk_per_lp
+                .partial_cmp(&a.offer.isk_per_lp)
+                .unwrap_or(std::cmp::Ordering::Equal),
+        )
+    });
+    Ok(LpSearchResult {
+        oldest_fetched_at,
+        failed_corporations,
+        rows,
+    })
 }
 
 /// Valued components of one LP-store offer.
@@ -248,7 +432,7 @@ fn value_offer(
 
 #[cfg(test)]
 mod tests {
-    use super::value_offer;
+    use super::{offer_row, value_offer, EsiOffer, EsiRequired};
 
     #[test]
     fn profit_nets_sell_value_against_lp_isk_and_item_costs() {
@@ -268,5 +452,27 @@ mod tests {
         let cheap = value_offer(10, 100.0, 500, 0, 0.0, 0.0);
         let dear = value_offer(10, 100.0, 500, 0, 0.0, 1.0);
         assert!(dear.profit < cheap.profit);
+    }
+
+    #[test]
+    fn offer_row_prices_turn_in_items_into_the_cost() {
+        let o = EsiOffer {
+            type_id: 1,
+            quantity: 2,
+            lp_cost: 100,
+            isk_cost: 50,
+            required_items: vec![EsiRequired {
+                type_id: 7,
+                quantity: 3,
+            }],
+        };
+        let sell = |id: i64| if id == 1 { 1000.0 } else { 10.0 };
+        let row = offer_row(&o, "Thing".into(), &sell, 1.0);
+        assert_eq!(row.name, "Thing");
+        // sell_value = 2 × 1000 × 0.95 = 1900.
+        assert!((row.sell_value - 1900.0).abs() < 1e-6);
+        // cost = 100 LP × 1.0 + 50 ISK + 3 × 10 turn-ins = 180.
+        assert!((row.cost - 180.0).abs() < 1e-6);
+        assert!((row.profit - 1720.0).abs() < 1e-6);
     }
 }

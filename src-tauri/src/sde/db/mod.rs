@@ -114,6 +114,17 @@ impl Sde {
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
+    /// Every NPC corporation as `(corporation_id, name)` — the candidate set
+    /// for an LP-store scan (only NPC corps run loyalty stores; ~283 rows).
+    pub fn npc_corporations(&self) -> Result<Vec<(i64, String)>, SdeError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT corporationID, corporationName FROM crpNPCCorporations
+             ORDER BY corporationID",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
     /// Names for the given type ids (bulk), as `(type_id, name)`. For showing
     /// fitted-item names instead of ids.
     pub fn type_names(&self, type_ids: &[i64]) -> Result<Vec<(i64, String)>, SdeError> {
@@ -524,6 +535,23 @@ mod tests {
         // A single term still works as a plain substring.
         let one = sde.search_types("shield", 10).unwrap();
         assert_eq!(one.len(), 2); // Hardener + Booster (published)
+    }
+
+    #[test]
+    fn npc_corporations_lists_id_and_name() {
+        let sde = test_sde(
+            "CREATE TABLE crpNPCCorporations(corporationID INT PRIMARY KEY, corporationName TEXT);
+             INSERT INTO crpNPCCorporations VALUES
+               (1000182, 'Tribal Liberation Force'),
+               (1000035, 'Caldari Navy');",
+        );
+        assert_eq!(
+            sde.npc_corporations().unwrap(),
+            vec![
+                (1000035, "Caldari Navy".to_string()),
+                (1000182, "Tribal Liberation Force".to_string()),
+            ]
+        );
     }
 
     #[test]

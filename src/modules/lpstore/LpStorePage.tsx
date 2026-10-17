@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   errorMessage,
@@ -17,6 +17,7 @@ import {
 import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { Field } from "../../components/forms";
 import { SdeGate } from "../../components/SdeGate";
+import { ItemSearch } from "./ItemSearch";
 
 type OfferSortKey =
   "name" | "lpCost" | "iskCost" | "sellValue" | "profit" | "iskPerLp";
@@ -71,7 +72,61 @@ export function LpStorePage() {
   );
 }
 
+type Tab = "corp" | "find";
+
 function Workbench() {
+  const [tab, setTab] = useState<Tab>("corp");
+  const tabs = (
+    <div className="mt-4 flex gap-1 border-b border-zinc-800 text-sm">
+      <TabButton active={tab === "corp"} onClick={() => setTab("corp")}>
+        Corp offers
+      </TabButton>
+      <TabButton active={tab === "find"} onClick={() => setTab("find")}>
+        Find item
+      </TabButton>
+    </div>
+  );
+  return tab === "corp" ? <CorpOffers tabs={tabs} /> : <FindItem tabs={tabs} />;
+}
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`-mb-px border-b-2 px-3 py-1.5 ${
+        active
+          ? "border-emerald-400 text-zinc-100"
+          : "border-transparent text-zinc-400 hover:text-zinc-200"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** "Find item" tab: who offers an item across every NPC corp's LP store. */
+function FindItem({ tabs }: { tabs: ReactNode }) {
+  return (
+    <Page>
+      <PageHeader
+        title={TITLE}
+        subtitle="Search every NPC corp's loyalty store for an item — who offers it, for how much."
+      />
+      {tabs}
+      <ItemSearch />
+    </Page>
+  );
+}
+
+function CorpOffers({ tabs }: { tabs: ReactNode }) {
   const [corpId, setCorpId] = useState<number | null>(null);
   const [iskPerLp, setIskPerLp] = useState(1000);
   const [rows, setRows] = useState<OfferRow[]>([]);
@@ -138,6 +193,8 @@ function Workbench() {
           </>
         }
       />
+
+      {tabs}
 
       <QueryErrorNotice
         error={balances.error}

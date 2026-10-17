@@ -429,6 +429,7 @@ pub fn run() {
             modules::recording::commands::recording_write_sidecar,
             modules::lpstore::commands::lp_balances,
             modules::lpstore::commands::lp_offers,
+            modules::lpstore::commands::lp_search,
             modules::character::commands::character_skills,
             modules::character::commands::character_standings,
             modules::character::commands::character_trade_fees,
