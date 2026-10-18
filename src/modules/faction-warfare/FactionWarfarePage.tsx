@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import {
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Navigation } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -34,6 +41,7 @@ import { InlineError } from "../../components/InlineError";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { usePersistentState } from "../../lib/usePersistentState";
 import { FACTION_WARFARE_JUMP_DISTANCE_REFRESH_MS } from "../../lib/refreshIntervals";
+import { ModuleActiveContext } from "../../components/moduleActiveContext";
 import {
   enemyFaction,
   isMilitiaFaction,
@@ -494,10 +502,11 @@ export function FactionWarfarePage() {
   // on, re-polls every 60s and forces a fresh fetch on mount instead of
   // only refetching once staleTime lapses, for every FW query on the page
   // (militia stats, the warzone map, and — passed down to `Warzone` —
-  // kill hotspots). `useQuery`'s own lifecycle confines this to "while the
-  // page is open": the interval stops the moment the component unmounts,
-  // and React Query additionally pauses it while the window isn't
-  // focused, so there's no separate "is the module active" check needed.
+  // kill hotspots). Gated on ModuleActiveContext as well: ModuleHost keeps
+  // visited pages mounted (hidden), so "while the page is open" must mean
+  // "while it's the active view" — window-focus pausing alone doesn't
+  // cover switching to another module inside the still-focused app.
+  const active = useContext(ModuleActiveContext);
   const [autoRefresh, setAutoRefresh] = usePersistentState(
     "fw.autoRefresh",
     false,
@@ -506,14 +515,14 @@ export function FactionWarfarePage() {
     queryKey: ["intel", "fw"],
     queryFn: intelFwStats,
     staleTime: 10 * 60_000,
-    refetchInterval: autoRefresh ? 60_000 : false,
+    refetchInterval: active && autoRefresh ? 60_000 : false,
     refetchOnMount: autoRefresh ? "always" : true,
   });
   const map = useQuery({
     queryKey: ["intel", "fwSystems"],
     queryFn: fwSystems,
     staleTime: 5 * 60_000,
-    refetchInterval: autoRefresh ? 60_000 : false,
+    refetchInterval: active && autoRefresh ? 60_000 : false,
     refetchOnMount: autoRefresh ? "always" : true,
   });
 
@@ -850,15 +859,20 @@ function Warzone({
     queryFn: activeCharacter,
     enabled: hasCharacter,
   });
-  // Jump distances from the active character's location to every system in this
-  // warzone. Polled every 90 s so the map updates as the character moves.
+  // Jump distances from the active character's location to every system in
+  // this warzone. Polled every 90 s so the map updates as the character
+  // moves — but only while this module is the visible view (ModuleHost keeps
+  // hidden pages mounted, and nobody needs jump counts they can't see).
+  const moduleActive = useContext(ModuleActiveContext);
   const systemIds = useMemo(() => systems.map((s) => s.systemId), [systems]);
   const jumpResult = useQuery<FwJumpResult>({
     queryKey: ["intel", "fw-jumps", systemIds],
     queryFn: () => intelFwJumps(systemIds),
     enabled: !!activeChar.data,
     staleTime: FACTION_WARFARE_JUMP_DISTANCE_REFRESH_MS,
-    refetchInterval: FACTION_WARFARE_JUMP_DISTANCE_REFRESH_MS,
+    refetchInterval: moduleActive
+      ? FACTION_WARFARE_JUMP_DISTANCE_REFRESH_MS
+      : false,
   });
   const dist = useMemo(() => jumpResult.data?.jumps ?? {}, [jumpResult.data]);
   const characterSystemId = jumpResult.data?.characterSystemId ?? null;
@@ -930,7 +944,7 @@ function Warzone({
       intelFwHotspots(perspective!.myFaction, perspective!.enemyFaction),
     enabled: !!perspective,
     staleTime: 5 * 60_000,
-    refetchInterval: autoRefresh ? 60_000 : false,
+    refetchInterval: moduleActive && autoRefresh ? 60_000 : false,
     refetchOnMount: autoRefresh ? "always" : true,
   });
   const hotspotCounts = useMemo(

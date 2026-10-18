@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ModuleActiveContext } from "../../components/moduleActiveContext";
 import {
   errorMessage,
   routeBreadcrumb,
@@ -78,10 +79,14 @@ function Workbench() {
   const [auto, setAuto] = usePersistentState("route.auto", false);
   const [locError, setLocError] = useState<string | null>(null);
 
+  // Auto-refresh polls only while this page is the visible view: ModuleHost
+  // keeps visited pages mounted (hidden), so an ungated interval with Auto
+  // left on would poll every 30s for the rest of the session.
+  const active = useContext(ModuleActiveContext);
   const activity = useQuery({
     queryKey: ["route", "systemActivity"],
     queryFn: () => systemActivity(false),
-    refetchInterval: auto ? ROUTE_AUTO_REFRESH_INTERVAL_MS : false,
+    refetchInterval: active && auto ? ROUTE_AUTO_REFRESH_INTERVAL_MS : false,
   });
   const trail = useQuery({
     queryKey: ["route", "breadcrumb"],
@@ -97,7 +102,7 @@ function Workbench() {
     queryFn: () => systemNeighbourhood(centre!.id, depth),
     enabled: mode === "neighbouring" && !!centre,
     refetchInterval:
-      auto && !fromMe && mode === "neighbouring" && !!centre
+      active && auto && !fromMe && mode === "neighbouring" && !!centre
         ? ROUTE_AUTO_REFRESH_INTERVAL_MS
         : false,
   });
@@ -165,8 +170,9 @@ function Workbench() {
   const liveLocation = useQuery({
     queryKey: ["route", "liveLocation"],
     queryFn: routeLocation,
-    enabled: auto && fromMe,
-    refetchInterval: auto && fromMe ? ROUTE_AUTO_REFRESH_INTERVAL_MS : false,
+    enabled: active && auto && fromMe,
+    refetchInterval:
+      active && auto && fromMe ? ROUTE_AUTO_REFRESH_INTERVAL_MS : false,
   });
   useEffect(() => {
     if (liveLocation.data) applyLocation(liveLocation.data, depth);
