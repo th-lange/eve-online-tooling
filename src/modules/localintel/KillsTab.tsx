@@ -8,6 +8,7 @@ import {
   type SystemKill,
 } from "../../lib/api";
 import { formatIsk } from "../../lib/format";
+import { useZkillStreamLease } from "../../lib/useZkillStream";
 import { matchesScannedSystem, shouldNotifyLiveWatch } from "./liveWatch";
 
 /** Live-triggered refetches are cheap (just today's kill list for one
@@ -169,6 +170,7 @@ export function KillsTab({
   // immediately rather than waiting for the next 30s auto-refresh tick (or,
   // with auto-refresh off, waiting for the user to switch tabs and back).
   const lastLiveTopupAtRef = useRef(-Infinity);
+  useZkillStreamLease(systemId != null && active);
   useEffect(() => {
     if (systemId == null || !active) return;
     let unlisten: (() => void) | undefined;
