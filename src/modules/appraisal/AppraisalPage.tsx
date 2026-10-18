@@ -26,8 +26,7 @@ import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { Field } from "../../components/forms";
 import { SdeGate } from "../../components/SdeGate";
 
-const FORGE = 10000002;
-const JITA = 60003760;
+import { FORGE, JITA } from "../../lib/eveConstants";
 
 const TITLE = "Appraisal";
 const SUBTITLE =

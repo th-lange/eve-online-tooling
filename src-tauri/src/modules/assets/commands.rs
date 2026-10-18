@@ -600,7 +600,7 @@ mod tests {
     #[test]
     fn resolves_npc_station_from_sde() {
         let station_infos: HashMap<i64, (String, i64)> = HashMap::from([(
-            60003760,
+            JITA_STATION_ID,
             (
                 "Jita IV - Moon 4 - Caldari Navy Assembly Plant".into(),
                 30000142,
@@ -609,7 +609,7 @@ mod tests {
         let system_names: NameMap = HashMap::from([(30000142, "Jita".into())]);
         let empty = HashMap::new();
         let (name, system) =
-            resolve_location_label(60003760, &station_infos, &empty, &system_names);
+            resolve_location_label(JITA_STATION_ID, &station_infos, &empty, &system_names);
         assert_eq!(name, "Jita IV - Moon 4 - Caldari Navy Assembly Plant");
         assert_eq!(system.as_deref(), Some("Jita"));
     }
@@ -649,7 +649,7 @@ mod tests {
 
     #[test]
     fn sde_station_takes_priority_over_esi_structure() {
-        let id = 60003760;
+        let id = JITA_STATION_ID;
         let station_infos: HashMap<i64, (String, i64)> =
             HashMap::from([(id, ("Station via SDE".into(), 30000142))]);
         let structure_info: HashMap<i64, (String, i64)> =
