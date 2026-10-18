@@ -21,7 +21,6 @@ import {
 import { toggle, uniqueSorted } from "../../lib/sets";
 import { parseItems } from "../../lib/parseItems";
 import {
-  FORGE,
   IMPORTED_BP_KEY,
   loadImported,
   type ImportedBlueprint,
@@ -29,6 +28,7 @@ import {
   type StructureKey,
   type Tab,
 } from "./types";
+import { FORGE } from "../../lib/eveConstants";
 import type { ActiveFilter, WorkbenchState } from "./workbenchTypes";
 
 export function useWorkbench(): WorkbenchState {

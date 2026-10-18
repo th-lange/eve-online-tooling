@@ -34,8 +34,7 @@ import {
   type ListTab,
 } from "../../components/typeIdLists";
 
-const FORGE = 10000002;
-const JITA = 60003760;
+import { FORGE, JITA } from "../../lib/eveConstants";
 type Tab = ListTab;
 
 const TITLE = "Reprocessing";
