@@ -1,7 +1,7 @@
 import { createContext, useContext } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { infoList } from "../../lib/api";
-import { INFO_FEED_REFRESH_INTERVAL_MS } from "../../lib/refreshIntervals";
+// (interval constants live in ../../lib/refreshIntervals; callers pass one in)
 
 /** Unseen-alarm state for the Info Panel nav badge. */
 export interface InfoAlerts {
@@ -25,12 +25,14 @@ export function useInfoAlerts(): InfoAlerts {
 
 /** The info feed (plugin-posted alarms/messages), polled since entries don't
  * always emit a live event. Shared by `InfoPanel` and `InfoAlertsProvider` —
- * both mount their own observer on the same `["info"]` query, so this hook
- * keeps them on one interval instead of two independently-drifting ones. */
-export function useInfoFeed() {
+ * both mount their own observer on the same `["info"]` query, and TanStack
+ * polls at the smallest interval any observer asks for: the always-mounted
+ * root badge provider asks for a slow heartbeat, and the panel asks for the
+ * fast interval only while it's actually on screen. */
+export function useInfoFeed(intervalMs: number | false) {
   return useQuery({
     queryKey: ["info"],
     queryFn: infoList,
-    refetchInterval: INFO_FEED_REFRESH_INTERVAL_MS,
+    refetchInterval: intervalMs,
   });
 }

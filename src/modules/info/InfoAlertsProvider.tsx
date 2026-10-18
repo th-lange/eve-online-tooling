@@ -2,6 +2,7 @@ import { useCallback, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { InfoEntry } from "../../lib/api";
 import { InfoAlertsContext, useInfoFeed } from "./infoContext";
+import { INFO_ALARM_BADGE_REFRESH_INTERVAL_MS } from "../../lib/refreshIntervals";
 
 const SEEN_KEY = "eve.info.seenAlarmId";
 
@@ -14,7 +15,7 @@ const SEEN_KEY = "eve.info.seenAlarmId";
  */
 export function InfoAlertsProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
-  const feed = useInfoFeed();
+  const feed = useInfoFeed(INFO_ALARM_BADGE_REFRESH_INTERVAL_MS);
   const [seenId, setSeenId] = useState<string | null>(() =>
     localStorage.getItem(SEEN_KEY),
   );
