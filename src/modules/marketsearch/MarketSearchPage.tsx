@@ -53,7 +53,7 @@ import {
   type SortColumn,
 } from "../../components/SortHeaderCell";
 
-const FORGE = 10000002;
+import { FORGE } from "../../lib/eveConstants";
 
 type Tab = "search" | "history";
 type Picked = { id: number; name: string } | null;

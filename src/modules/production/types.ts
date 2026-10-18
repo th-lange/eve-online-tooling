@@ -34,6 +34,4 @@ export function loadImported(): ImportedBlueprint[] {
   }
 }
 
-export const FORGE = 10000002;
-
 export type Tab = "item" | "market" | "industry" | "thresholds" | "paste";
