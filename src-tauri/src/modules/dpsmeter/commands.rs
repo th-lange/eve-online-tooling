@@ -52,6 +52,14 @@ const LIVE_BUCKET_GRACE_SECS: i64 = 1;
 /// is generously above what a long real session's gamelog reaches (#816).
 const MAX_PLAYBACK_LOG_BYTES: u64 = 50 * 1024 * 1024;
 
+/// The live loop rescans the gamelogs folder for a newer session log every
+/// this many 500ms ticks (= every 5s), not every tick: EVE appends to the
+/// *active* log constantly, but a *new* file only appears on relog — and the
+/// directory can hold months of accumulated logs, making a per-tick
+/// enumeration + header reads needless disk churn (#1061). A ≤5s hot-swap
+/// delay after a relog is invisible next to the login itself.
+const RESCAN_TICKS: u32 = 10;
+
 /// Shared run-state. The active loop runs while its generation == `generation`;
 /// `dps_start`/`dps_playback`/`dps_stop` bump it. `paused` freezes the active
 /// loop's virtual clock in place (true pause/continue) without tearing it down.
@@ -237,7 +245,9 @@ pub async fn dps_start(
         let mut weapon_kinds: HashMap<String, (Option<String>, Option<String>)> = HashMap::new();
         // Start at the *current* end of the active log: only new combat counts,
         // never a replay of the whole session as one burst.
-        let mut current = pick_newest_gamelog(&dir, settings.character.as_deref());
+        let mut header_cache: HashMap<PathBuf, String> = HashMap::new();
+        let mut current =
+            pick_newest_gamelog(&dir, settings.character.as_deref(), &mut header_cache);
         let mut offset = current
             .as_ref()
             .and_then(|p| std::fs::metadata(p).ok())
@@ -254,6 +264,7 @@ pub async fn dps_start(
         }
 
         let mut ticker = tokio::time::interval(POLL);
+        let mut tick: u32 = 0;
         loop {
             ticker.tick().await;
             if generation.load(Ordering::SeqCst) != my_gen {
@@ -262,6 +273,7 @@ pub async fn dps_start(
             if paused.load(Ordering::SeqCst) {
                 continue; // frozen: don't read new lines or emit while paused.
             }
+            tick = tick.wrapping_add(1);
 
             // Buckets finalized this poll — by events rolling past a boundary
             // and/or by wall time passing one (collected below, emitted once).
@@ -271,13 +283,18 @@ pub async fn dps_start(
             // and re-detect its language. When a character is selected this
             // re-check is also the hot-swap: a livelier other character's
             // file (newer by mtime) never wins over this character's own
-            // newest session log (#870).
-            if let Some(newest) = pick_newest_gamelog(&dir, settings.character.as_deref()) {
-                if current.as_deref() != Some(newest.as_path()) {
-                    lang = detect_file_lang(&newest).await;
-                    emit_source(&app, &newest);
-                    current = Some(newest);
-                    offset = 0;
+            // newest session log (#870). Throttled to every RESCAN_TICKS
+            // (and whenever there's no file yet) — see the const's comment.
+            if current.is_none() || tick.is_multiple_of(RESCAN_TICKS) {
+                if let Some(newest) =
+                    pick_newest_gamelog(&dir, settings.character.as_deref(), &mut header_cache)
+                {
+                    if current.as_deref() != Some(newest.as_path()) {
+                        lang = detect_file_lang(&newest).await;
+                        emit_source(&app, &newest);
+                        current = Some(newest);
+                        offset = 0;
+                    }
                 }
             }
 
@@ -774,9 +791,13 @@ fn newest_gamelog(dir: &Path) -> Option<PathBuf> {
 /// [`newest_gamelog`] when `character` is `None` (unchanged single-boxer
 /// behavior); otherwise [`newest_gamelog_for_character`] — the dispatch
 /// [`dps_start`]'s loop re-runs every poll tick (#870).
-fn pick_newest_gamelog(dir: &Path, character: Option<&str>) -> Option<PathBuf> {
+fn pick_newest_gamelog(
+    dir: &Path,
+    character: Option<&str>,
+    header_cache: &mut HashMap<PathBuf, String>,
+) -> Option<PathBuf> {
     match character {
-        Some(c) => newest_gamelog_for_character(dir, c),
+        Some(c) => newest_gamelog_for_character(dir, c, header_cache),
         None => newest_gamelog(dir),
     }
 }
@@ -785,13 +806,34 @@ fn pick_newest_gamelog(dir: &Path, character: Option<&str>) -> Option<PathBuf> {
 /// (#870). Scans newest-first and reads each header until one matches, so a
 /// livelier other character's file — newer by mtime — never wins over this
 /// character's own session: the multiboxing bug this issue fixes.
-fn newest_gamelog_for_character(dir: &Path, character: &str) -> Option<PathBuf> {
+///
+/// `header_cache` maps path → detected character across calls: a gamelog's
+/// `Listener:` header is written at session start and never changes, so each
+/// file's header is read from disk at most once per capture session instead
+/// of on every rescan (#1061). Files whose header doesn't resolve yet (just
+/// created, header not flushed) are deliberately NOT cached, so they're
+/// re-read on the next rescan.
+fn newest_gamelog_for_character(
+    dir: &Path,
+    character: &str,
+    header_cache: &mut HashMap<PathBuf, String>,
+) -> Option<PathBuf> {
     let mut files = crate::util::fs::list_files_by_mtime(dir, is_gamelog).ok()?;
     files.sort_by_key(|(_, mtime)| std::cmp::Reverse(*mtime));
     files
         .into_iter()
         .find(|(path, _)| {
-            super::parser::detect_character(&read_header_sync(path)).as_deref() == Some(character)
+            if let Some(cached) = header_cache.get(path) {
+                return cached == character;
+            }
+            match super::parser::detect_character(&read_header_sync(path)) {
+                Some(detected) => {
+                    let hit = detected == character;
+                    header_cache.insert(path.clone(), detected);
+                    hit
+                }
+                None => false,
+            }
         })
         .map(|(path, _)| path)
 }
@@ -1065,15 +1107,16 @@ mod tests {
         let alice = touch_with_header(&tmp.0, "alice.txt", 30, "Alice");
         let bob = touch_with_header(&tmp.0, "bob.txt", 5, "Bob");
 
+        let mut cache = HashMap::new();
         assert_eq!(
-            newest_gamelog_for_character(&tmp.0, "Alice").expect("alice log"),
+            newest_gamelog_for_character(&tmp.0, "Alice", &mut cache).expect("alice log"),
             alice
         );
         assert_eq!(
-            newest_gamelog_for_character(&tmp.0, "Bob").expect("bob log"),
+            newest_gamelog_for_character(&tmp.0, "Bob", &mut cache).expect("bob log"),
             bob
         );
-        assert!(newest_gamelog_for_character(&tmp.0, "Carol").is_none());
+        assert!(newest_gamelog_for_character(&tmp.0, "Carol", &mut cache).is_none());
     }
 
     #[test]
@@ -1085,9 +1128,39 @@ mod tests {
         let newer = touch_with_header(&tmp.0, "alice-new.txt", 1, "Alice");
 
         assert_eq!(
-            newest_gamelog_for_character(&tmp.0, "Alice").expect("alice log"),
+            newest_gamelog_for_character(&tmp.0, "Alice", &mut HashMap::new()).expect("alice log"),
             newer
         );
+    }
+
+    #[test]
+    fn newest_gamelog_for_character_serves_headers_from_the_cache() {
+        // #1061: a populated cache answers without touching the file — prove
+        // it by caching a mapping that contradicts the on-disk header and
+        // checking the cached answer wins. Headerless files are NOT cached,
+        // so a just-created log is re-read once its header lands.
+        let tmp = TmpDir::new("header-cache");
+        let alice = touch_with_header(&tmp.0, "alice.txt", 5, "Alice");
+
+        let mut cache = HashMap::new();
+        cache.insert(alice.clone(), "Bob".to_string());
+        assert_eq!(
+            newest_gamelog_for_character(&tmp.0, "Bob", &mut cache).expect("cached hit"),
+            alice
+        );
+        assert!(newest_gamelog_for_character(&tmp.0, "Alice", &mut cache).is_none());
+
+        // A fresh cache populates itself from the real header…
+        let mut fresh = HashMap::new();
+        assert_eq!(
+            newest_gamelog_for_character(&tmp.0, "Alice", &mut fresh).expect("alice"),
+            alice
+        );
+        assert_eq!(fresh.get(&alice).map(String::as_str), Some("Alice"));
+        // …but a headerless file stays uncached for a later re-read.
+        let raw = touch(&tmp.0, "fresh.txt", 1);
+        assert!(newest_gamelog_for_character(&tmp.0, "Carol", &mut fresh).is_none());
+        assert!(!fresh.contains_key(&raw));
     }
 
     #[test]
@@ -1096,9 +1169,12 @@ mod tests {
         touch_with_header(&tmp.0, "alice.txt", 30, "Alice");
         let newer = touch_with_header(&tmp.0, "bob.txt", 5, "Bob");
 
-        assert_eq!(pick_newest_gamelog(&tmp.0, None).unwrap(), newer);
         assert_eq!(
-            pick_newest_gamelog(&tmp.0, Some("Alice")).unwrap(),
+            pick_newest_gamelog(&tmp.0, None, &mut HashMap::new()).unwrap(),
+            newer
+        );
+        assert_eq!(
+            pick_newest_gamelog(&tmp.0, Some("Alice"), &mut HashMap::new()).unwrap(),
             tmp.0.join("alice.txt")
         );
     }
