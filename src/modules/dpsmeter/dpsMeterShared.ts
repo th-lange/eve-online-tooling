@@ -180,14 +180,29 @@ export const BUCKET_SERIES_COMBINED: BucketSeries[] = [
   ...BUCKET_SERIES_IN,
 ];
 
+/** Hard backstop on kept session buckets (~28h at 12/min). Normal sessions
+ *  never get near it — this exists so a multi-day marathon client can't grow
+ *  React state (and reconciliation work) forever (#1064). Oldest buckets are
+ *  dropped first; the chart loses scrollback it realistically never shows. */
+export const MAX_SESSION_BUCKETS = 20_000;
+
+/** Backstop on raw combat-log events retained across kept buckets (#1064).
+ *  The page log deliberately covers the same span as the chart (#1001), but
+ *  a heavy-fleet marathon can bank hundreds of thousands of event objects —
+ *  past this budget the OLDEST buckets are compacted to their aggregate sums
+ *  (events emptied), so the chart keeps its full span and only the log's
+ *  deep history is shed. ~50k lines is far beyond what anyone scrolls. */
+export const MAX_SESSION_EVENTS = 50_000;
+
 /** Append a batch of finalized buckets. The whole session is kept (12/min —
- *  trivial), so the detail chart can scroll over all of it; no ring buffer.
- *  Upserts by bucket id (the start): a newer start appends, a re-delivered
- *  start **replaces** the kept bucket — that's how backend amendments land
- *  (late-flushed gamelog lines re-open a recent bucket, which is re-emitted
- *  with updated sums + events). Duplicated delivery therefore still can't
- *  double the time axis or the log groups, and anything older than the kept
- *  range is dropped. */
+ *  trivial) up to [`MAX_SESSION_BUCKETS`], so the detail chart can scroll
+ *  over all of it. Upserts by bucket id (the start): a newer start appends,
+ *  a re-delivered start **replaces** the kept bucket — that's how backend
+ *  amendments land (late-flushed gamelog lines re-open a recent bucket,
+ *  which is re-emitted with updated sums + events). Duplicated delivery
+ *  therefore still can't double the time axis or the log groups, and
+ *  anything older than the kept range is dropped. Past the backstops,
+ *  oldest buckets fall off / are compacted — see the two consts above. */
 export function appendBuckets(
   prev: DpsBucket[],
   batch: DpsBucket[],
@@ -213,7 +228,21 @@ export function appendBuckets(
       if (next[i].start < b.start) break; // not kept → drop
     }
   }
-  return changed ? next : prev;
+  if (!changed) return prev;
+  // Backstop 1: bound the bucket count itself (oldest first).
+  if (next.length > MAX_SESSION_BUCKETS) {
+    next.splice(0, next.length - MAX_SESSION_BUCKETS);
+  }
+  // Backstop 2: bound retained raw events — compact oldest buckets to their
+  // aggregate sums (chart span intact, deep log history shed).
+  let events = 0;
+  for (const b of next) events += b.events.length;
+  for (let i = 0; events > MAX_SESSION_EVENTS && i < next.length; i++) {
+    if (next[i].events.length === 0) continue;
+    events -= next[i].events.length;
+    next[i] = { ...next[i], events: [] };
+  }
+  return next;
 }
 
 // Palette for per-source (by-pilot) lines — distinct hues, assigned to each
@@ -234,8 +263,8 @@ export const SOURCE_COLORS = [
 
 // Combat-log line cap for the PVP fight overlay's footer — a fight is
 // bounded (the bucket buffer freezes at 10 min), so a rolling window is
-// plenty there. The DPS meter page keeps the whole session uncapped so the
-// log always covers the same span as the bucket chart (#1001).
+// plenty there. The DPS meter page keeps the whole session (up to the #1064
+// backstops) so the log covers the same span as the bucket chart (#1001).
 export const LOG_BUFFER = 500;
 
 /** Append a batch of combat-log events (one `dps://events` payload is
