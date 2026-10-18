@@ -166,12 +166,21 @@ fn is_sig_id(s: &str) -> bool {
         && b[4..7].iter().all(|c| c.is_ascii_digit())
 }
 
+/// Hard cap on signatures stored per system from a single paste. A real
+/// Tripwire export or in-game probe-scanner clipboard is well under ~100
+/// sigs (EVE systems rarely carry more than a few dozen live signatures at
+/// once); this just bounds storage against a malformed or wildly oversized
+/// paste. Truncated, not rejected — going over the cap isn't malicious, just
+/// large, so the first `SIG_CAP` rows are kept rather than failing the paste.
+const SIG_CAP: usize = 500;
+
 /// Parse the in-game probe-scanner clipboard (tab-separated:
 /// `id  group  type  name  signal  distance`). Keeps only real signature rows,
-/// deduped by id. Pure (testable).
+/// deduped by id, capped at [`SIG_CAP`]. Pure (testable).
 fn parse_signatures(text: &str) -> Vec<Signature> {
     let mut seen = HashSet::new();
-    text.lines()
+    let mut sigs: Vec<Signature> = text
+        .lines()
         .filter_map(|line| {
             let cols: Vec<&str> = line.split('\t').collect();
             let id = cols.first()?.trim();
@@ -185,7 +194,9 @@ fn parse_signatures(text: &str) -> Vec<Signature> {
                 name: cols.get(3).unwrap_or(&"").trim().to_string(),
             })
         })
-        .collect()
+        .collect();
+    sigs.truncate(SIG_CAP);
+    sigs
 }
 
 fn sig_key(system_id: i64) -> String {
@@ -1395,6 +1406,17 @@ mod tests {
         assert_eq!(sigs[1].id, "XYZ-789");
         assert!(!is_sig_id("nope"));
         assert!(is_sig_id("ABC-123"));
+    }
+
+    #[test]
+    fn parse_signatures_caps_at_sig_cap() {
+        // More than SIG_CAP unique, well-formed rows in one paste — the shape
+        // of a corrupted/duplicated clipboard, not a real scanner export.
+        let text: String = (0..SIG_CAP + 100)
+            .map(|i| format!("SIG-{i:03}\tCosmic Signature\tWormhole\tTest\t100.0%\t1 AU\n"))
+            .collect();
+        let sigs = parse_signatures(&text);
+        assert_eq!(sigs.len(), SIG_CAP);
     }
 
     #[test]
