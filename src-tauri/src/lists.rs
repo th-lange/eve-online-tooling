@@ -78,3 +78,83 @@ pub fn load_filter_sets(
         .collect();
     (blacklist, favorites)
 }
+
+// --- Slug ids -----------------------------------------------------------
+
+/// Turn a user-supplied display `name` into a URL/filename-safe id: lowercase
+/// the name, replace every non-alphanumeric character with `-`, then trim
+/// leading/trailing `-`. If that leaves nothing (e.g. the name was all
+/// symbols/whitespace), fall back to `fallback` as the base instead of an
+/// empty string. Finally de-duplicate against `existing` by appending `-2`,
+/// `-3`, ... until the id is unique — shared by every feature module that
+/// lets a user name a new list/setup/entry (shopping lists, PI planner
+/// setups, mass-production build lists) so the scheme only has one copy.
+pub fn slug_id(name: &str, existing: &[String], fallback: &str) -> String {
+    let base: String = name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect();
+    let base = base.trim_matches('-').to_string();
+    let base = if base.is_empty() {
+        fallback.to_string()
+    } else {
+        base
+    };
+    let mut id = base.clone();
+    let mut n = 2;
+    while existing.contains(&id) {
+        id = format!("{base}-{n}");
+        n += 1;
+    }
+    id
+}
+
+#[cfg(test)]
+mod slug_id_tests {
+    use super::slug_id;
+
+    #[test]
+    fn lowercases_and_dashes_non_alphanumerics() {
+        assert_eq!(
+            slug_id("Jita Industry!", &[], "list"),
+            "jita-industry".to_string()
+        );
+    }
+
+    #[test]
+    fn trims_leading_and_trailing_dashes() {
+        assert_eq!(
+            slug_id("  -- Mining Ops -- ", &[], "list"),
+            "mining-ops".to_string()
+        );
+    }
+
+    #[test]
+    fn falls_back_when_name_has_no_alphanumeric_characters() {
+        assert_eq!(slug_id("!!!", &[], "list"), "list".to_string());
+        assert_eq!(slug_id("", &[], "setup"), "setup".to_string());
+    }
+
+    #[test]
+    fn appends_a_numeric_suffix_on_collision() {
+        let existing = vec!["mining-ops".to_string()];
+        assert_eq!(slug_id("Mining Ops", &existing, "list"), "mining-ops-2");
+    }
+
+    #[test]
+    fn keeps_incrementing_the_suffix_past_multiple_collisions() {
+        let existing = vec![
+            "mining-ops".to_string(),
+            "mining-ops-2".to_string(),
+            "mining-ops-3".to_string(),
+        ];
+        assert_eq!(slug_id("Mining Ops", &existing, "list"), "mining-ops-4");
+    }
+
+    #[test]
+    fn fallback_base_also_dedupes_on_repeated_symbol_only_names() {
+        let existing = vec!["list".to_string()];
+        assert_eq!(slug_id("###", &existing, "list"), "list-2");
+    }
+}
