@@ -10,6 +10,7 @@ import {
 import { Page, PageHeader, Centered } from "../../components/page";
 import { ModuleActiveContext } from "../../components/moduleActiveContext";
 import { useInfoAlerts, useInfoFeed } from "./infoContext";
+import { INFO_FEED_REFRESH_INTERVAL_MS } from "../../lib/refreshIntervals";
 
 const SUBTITLE =
   "Alarms and messages posted by your scripts and plugins (via send_alarm / write_message). Each source gets its own segment, newest first.";
@@ -28,8 +29,12 @@ function groupBySource(rows: InfoEntry[]): [string, InfoEntry[]][] {
 
 export function InfoPanel() {
   const qc = useQueryClient();
-  // Poll so plugin-posted entries (which don't emit an event) still surface.
-  const entries = useInfoFeed();
+  // Clear the nav badge while this panel is the active view (it stays mounted
+  // but hidden otherwise via ModuleHost's keep-alive — so also only poll the
+  // fast cadence while actually on screen; the root badge provider keeps a
+  // slow heartbeat running the rest of the time).
+  const active = useContext(ModuleActiveContext);
+  const entries = useInfoFeed(active ? INFO_FEED_REFRESH_INTERVAL_MS : false);
 
   // Script-posted entries arrive live — prepend them for a snappy feel.
   useEffect(() => {
@@ -43,9 +48,6 @@ export function InfoPanel() {
     return () => unlisten?.();
   }, [qc]);
 
-  // Clear the nav badge while this panel is the active view (it stays mounted
-  // but hidden otherwise, so only mark seen when actually on screen).
-  const active = useContext(ModuleActiveContext);
   const { markSeen } = useInfoAlerts();
   useEffect(() => {
     if (active) markSeen();
