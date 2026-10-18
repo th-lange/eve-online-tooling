@@ -91,7 +91,7 @@ describe("appendBuckets", () => {
   it("compacts oldest buckets' events past the event budget (#1064)", () => {
     const ev: DpsBucket["events"][number] = {
       ts: 0,
-      kind: "damage_out",
+      kind: "damageOut",
       amount: 1,
       pilot: null,
       ship: null,
