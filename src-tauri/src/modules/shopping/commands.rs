@@ -218,23 +218,8 @@ pub fn shopping_create_list(app: AppHandle, name: String) -> Result<ShoppingList
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     let mut store = load(&dir);
 
-    let base: String = name
-        .to_lowercase()
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '-' })
-        .collect();
-    let base = base.trim_matches('-').to_string();
-    let base = if base.is_empty() {
-        "list".to_string()
-    } else {
-        base
-    };
-    let mut id = base.clone();
-    let mut n = 2;
-    while store.lists.iter().any(|l| l.id == id) {
-        id = format!("{base}-{n}");
-        n += 1;
-    }
+    let existing: Vec<String> = store.lists.iter().map(|l| l.id.clone()).collect();
+    let id = crate::lists::slug_id(&name, &existing, "list");
 
     let list = StoredList {
         id,
