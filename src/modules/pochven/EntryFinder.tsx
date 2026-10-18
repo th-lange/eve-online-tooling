@@ -10,6 +10,10 @@ import {
 } from "../../lib/api";
 import { Combo } from "../../components/Combo";
 import { EntryResults } from "./EntryResults";
+import {
+  POCHVEN_CURRENT_LOCATION_STALE_TIME_MS,
+  POCHVEN_ROUTE_RESULT_STALE_TIME_MS,
+} from "../../lib/refreshIntervals";
 
 // Active entry search: from your current system, route to the nearest C729
 // candidate and list the systems to jump & scan.
@@ -20,14 +24,14 @@ export function EntryFinder() {
   const location = useQuery({
     queryKey: ["market", "currentLocation"],
     queryFn: marketCurrentLocation,
-    staleTime: 60_000,
+    staleTime: POCHVEN_CURRENT_LOCATION_STALE_TIME_MS,
     enabled: false,
   });
   const result = useQuery({
     queryKey: ["pochven", "search", system?.id ?? null, maxJumps],
     queryFn: system ? () => pochvenSearch(system.id, maxJumps) : undefined,
     enabled: system != null,
-    staleTime: 5 * 60_000,
+    staleTime: POCHVEN_ROUTE_RESULT_STALE_TIME_MS,
   });
 
   return (

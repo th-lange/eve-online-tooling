@@ -7,7 +7,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * use {@link useCopyToClipboard} when you do.
  */
 export function copyToClipboard(text: string): void {
-  void navigator.clipboard?.writeText(text).catch(() => {});
+  void navigator.clipboard
+    ?.writeText(text)
+    .catch((e) => console.error("Clipboard write failed", e));
 }
 
 /**

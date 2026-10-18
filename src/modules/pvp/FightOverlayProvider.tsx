@@ -9,6 +9,7 @@ import {
   dpsStart,
   fittingListLocal,
   fittingSimulate,
+  errorMessage,
   type DpsBucket,
   type DpsEvent,
   type Fit,
@@ -18,7 +19,12 @@ import {
 import { usePersistentState } from "../../lib/usePersistentState";
 import { useEveLogDir } from "../../lib/useEveLogDir";
 import { playCue, type CueSound } from "../../lib/sound";
-import { FIGHT_OVERLAY_SHIP_POLL_INTERVAL_MS } from "../../lib/refreshIntervals";
+import {
+  FIGHT_OVERLAY_SHIP_POLL_INTERVAL_MS,
+  FIGHT_OVERLAY_PROFILE_STALE_TIME_MS,
+  FIGHT_OVERLAY_FIT_LIST_STALE_TIME_MS,
+  FIGHT_OVERLAY_SHIP_STALE_TIME_MS,
+} from "../../lib/refreshIntervals";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { Modal } from "../../components/Modal";
 import { CombatLogPanel } from "../dpsmeter/CombatLogPanel";
@@ -155,7 +161,7 @@ function AttackerCard({
   const profile = useQuery({
     queryKey: ["pvp", "profile-name", name],
     queryFn: () => pvpProfiles(name),
-    staleTime: 5 * 60_000,
+    staleTime: FIGHT_OVERLAY_PROFILE_STALE_TIME_MS,
   });
   const charId = profile.data?.pilots[0]?.characterId;
   const fits = useQuery({
@@ -621,6 +627,9 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
   );
   const [fightOpen, setFightOpen] = useState(false);
   const [selectedFitId, setSelectedFitId] = useState<string | null>(null);
+  // Most recent failure starting the background live capture (`dps_start`)
+  // that backs the overlay — surfaced next to the Settings toggle (#1041).
+  const [captureError, setCaptureError] = useState<string | null>(null);
   // Settings "Test" preview: sample data, rebuilt each time the button is hit.
   const [testFight, setTestFight] = useState<TestFight | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
@@ -687,7 +696,12 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     }
     if (!gamelogsDir || startedDirRef.current === gamelogsDir) return;
     startedDirRef.current = gamelogsDir;
-    void dpsStart({ gamelogsDir }).catch(() => {});
+    setCaptureError(null);
+    void dpsStart({ gamelogsDir }).catch((e) =>
+      setCaptureError(
+        `Fight overlay capture failed to start: ${errorMessage(e)}`,
+      ),
+    );
   }, [enabled, gamelogsDir]);
 
   const latestBucket = fightBuckets[fightBuckets.length - 1];
@@ -768,7 +782,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
   const localFits = useQuery({
     queryKey: ["fitting", "local"],
     queryFn: fittingListLocal,
-    staleTime: 30_000,
+    staleTime: FIGHT_OVERLAY_FIT_LIST_STALE_TIME_MS,
     enabled,
   });
 
@@ -779,7 +793,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     queryKey: ["esi", "character-ship"],
     queryFn: characterShip,
     enabled,
-    staleTime: 15_000,
+    staleTime: FIGHT_OVERLAY_SHIP_STALE_TIME_MS,
     refetchInterval: enabled ? FIGHT_OVERLAY_SHIP_POLL_INTERVAL_MS : false,
   });
   const ship = myShip.data ?? null;
@@ -844,7 +858,9 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <FightOverlayContext.Provider value={{ enabled, setEnabled, runTest }}>
+    <FightOverlayContext.Provider
+      value={{ enabled, setEnabled, runTest, captureError }}
+    >
       {children}
       {/* Test preview takes precedence over a live fight so the button always
           shows the sample; both are the same fixed panel. */}
