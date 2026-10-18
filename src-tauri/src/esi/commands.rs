@@ -223,10 +223,10 @@ pub async fn esi_owned_blueprints(
 pub async fn esi_roster_stock(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
-) -> Result<std::collections::HashMap<i64, i64>, crate::model::AppError> {
+) -> Result<std::collections::HashMap<String, i64>, crate::model::AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
     if let Some(cached) =
-        storage::cache_get::<std::collections::HashMap<i64, i64>>(&dir, "roster_stock")
+        storage::cache_get::<std::collections::HashMap<String, i64>>(&dir, "roster_stock")
     {
         return Ok(cached);
     }
@@ -251,6 +251,15 @@ pub async fn esi_roster_stock(
             Err(_) => complete = false,
         }
     }
+    // JSON object keys (and tauri-specta's generated TS) are strings, not
+    // numbers — keying by `i64` forced the frontend binding into an
+    // untypeable `Partial<{ [key in number]: number }>`, hence the cast at
+    // the call site (#1045). Stringify here so specta emits a clean
+    // `Record<string, number>` instead.
+    let stock: std::collections::HashMap<String, i64> = stock
+        .into_iter()
+        .map(|(type_id, qty)| (type_id.to_string(), qty))
+        .collect();
     cache_stock_if_complete(&dir, &stock, complete);
     Ok(stock)
 }
@@ -265,7 +274,7 @@ pub async fn esi_roster_stock(
 /// without a network or a Tauri `AppHandle`.
 fn cache_stock_if_complete(
     dir: &std::path::Path,
-    stock: &std::collections::HashMap<i64, i64>,
+    stock: &std::collections::HashMap<String, i64>,
     complete: bool,
 ) {
     if complete {
@@ -381,18 +390,18 @@ mod tests {
         // wrong for the full 10-minute TTL.
         let dir = std::env::temp_dir().join(format!("roster-stock-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let stock = HashMap::from([(34_i64, 1_000_i64)]);
+        let stock = HashMap::from([("34".to_string(), 1_000_i64)]);
         // Partial snapshot (complete = false): nothing is written, so the
         // next roster_stock call misses the cache and retries.
         cache_stock_if_complete(&dir, &stock, false);
         assert_eq!(
-            storage::cache_get::<HashMap<i64, i64>>(&dir, "roster_stock"),
+            storage::cache_get::<HashMap<String, i64>>(&dir, "roster_stock"),
             None
         );
         // Complete snapshot: cached as before.
         cache_stock_if_complete(&dir, &stock, true);
         assert_eq!(
-            storage::cache_get::<HashMap<i64, i64>>(&dir, "roster_stock"),
+            storage::cache_get::<HashMap<String, i64>>(&dir, "roster_stock"),
             Some(stock)
         );
         let _ = std::fs::remove_dir_all(&dir);

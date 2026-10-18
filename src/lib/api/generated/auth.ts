@@ -89,7 +89,7 @@ export const commands = {
    * next call retries instead of serving wrong stock counts for the full TTL.
    */
   async esiRosterStock(): Promise<
-    Result<Partial<{ [key in number]: number }>, AppError>
+    Result<Partial<{ [key in string]: number }>, AppError>
   > {
     try {
       return { status: "ok", data: await TAURI_INVOKE("esi_roster_stock") };
