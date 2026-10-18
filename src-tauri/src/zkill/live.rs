@@ -35,6 +35,18 @@ const MAX_BACKOFF_SECS: u64 = 300;
 /// window (#905) so it can serve as a live top-up over that same baseline.
 pub const KILL_INDEX_WINDOW_SECS: u64 = 6 * 60 * 60;
 
+/// Hard cap on retained live-kill events, enforced on every [`KillIndex::push`]
+/// *in addition to* [`KILL_INDEX_WINDOW_SECS`]'s age-based pruning. Age-based
+/// pruning alone trusts every event's self-reported `time_secs` to keep
+/// advancing: `KillIndex::prune` only pops from the front while it's older
+/// than the cutoff and stops at the first one that isn't, so a single
+/// malformed or far-future timestamp from the feed would wedge at the front
+/// forever and silently defeat the TTL, growing the index without bound.
+/// 20k events is generous headroom over real killstream volume within the
+/// 6h window, so this cap should never bind in normal operation — it's a
+/// backstop, not the primary eviction policy.
+pub const MAX_KILL_INDEX_EVENTS: usize = 20_000;
+
 /// One parsed kill event, reduced to what our consumers need: where it
 /// happened and which factions were involved. Deliberately lean — no
 /// ship/pod split or entity names, since nothing needs them yet and every
@@ -132,9 +144,14 @@ pub struct KillIndex {
 }
 
 impl KillIndex {
-    pub fn push(&mut self, event: KillEvent, now: u64, window_secs: u64) {
+    pub fn push(&mut self, event: KillEvent, now: u64, window_secs: u64, max_events: usize) {
         self.events.push_back(event);
         self.prune(now, window_secs);
+        // Backstop against a stuck/defeated age-based prune (see
+        // `MAX_KILL_INDEX_EVENTS`) — unconditional, independent of `now`.
+        while self.events.len() > max_events {
+            self.events.pop_front();
+        }
     }
 
     fn prune(&mut self, now: u64, window_secs: u64) {
@@ -248,10 +265,12 @@ async fn run_once(app: &AppHandle) -> Result<(), String> {
         };
         if let Some(state) = app.try_state::<ZkillStreamState>() {
             let now = crate::util::time::now_secs();
-            state
-                .index
-                .lock()
-                .push(event.clone(), now, KILL_INDEX_WINDOW_SECS);
+            state.index.lock().push(
+                event.clone(),
+                now,
+                KILL_INDEX_WINDOW_SECS,
+                MAX_KILL_INDEX_EVENTS,
+            );
         }
         let _ = app.emit("zkill://kill", &event);
     }
@@ -393,16 +412,19 @@ mod tests {
             parse_kill_event(&km_json(1, "2026-01-01T00:00:00Z", None, &[])).unwrap(),
             86_400,
             KILL_INDEX_WINDOW_SECS,
+            MAX_KILL_INDEX_EVENTS,
         );
         idx.push(
             parse_kill_event(&km_json(1, "2026-01-01T00:00:01Z", None, &[])).unwrap(),
             86_400,
             KILL_INDEX_WINDOW_SECS,
+            MAX_KILL_INDEX_EVENTS,
         );
         idx.push(
             parse_kill_event(&km_json(2, "2026-01-01T00:00:02Z", None, &[])).unwrap(),
             86_400,
             KILL_INDEX_WINDOW_SECS,
+            MAX_KILL_INDEX_EVENTS,
         );
         let counts = idx.counts_by_system();
         assert_eq!(counts[&1], 2);
@@ -417,12 +439,14 @@ mod tests {
             parse_kill_event(&km_json(1, "1970-01-01T00:00:00Z", None, &[])).unwrap(),
             0,
             10,
+            MAX_KILL_INDEX_EVENTS,
         );
         assert_eq!(idx.len(), 1);
         idx.push(
             parse_kill_event(&km_json(2, "1970-01-01T00:00:00Z", None, &[])).unwrap(),
             100_000,
             10,
+            MAX_KILL_INDEX_EVENTS,
         );
         // The push itself re-prunes against `now = 100_000` — both the old
         // event (t=0) and this new one (also t=0, same fixture) fall outside
@@ -438,12 +462,14 @@ mod tests {
             parse_kill_event(&km_json(1, "2026-01-01T00:00:00Z", Some(500003), &[500002])).unwrap(),
             86_400,
             KILL_INDEX_WINDOW_SECS,
+            MAX_KILL_INDEX_EVENTS,
         );
         // ...and gets a kill on this one (attacker).
         idx.push(
             parse_kill_event(&km_json(2, "2026-01-01T00:00:01Z", Some(500002), &[500003])).unwrap(),
             86_400,
             KILL_INDEX_WINDOW_SECS,
+            MAX_KILL_INDEX_EVENTS,
         );
         let (kills, losses) = idx.faction_counts(500003);
         assert_eq!(kills, 1);
@@ -456,5 +482,29 @@ mod tests {
         assert_eq!(idx.len(), 0);
         assert!(idx.counts_by_system().is_empty());
         assert_eq!(idx.faction_counts(500001), (0, 0));
+    }
+
+    #[test]
+    fn index_stays_bounded_by_the_max_events_cap_even_when_age_pruning_cannot_help() {
+        let mut idx = KillIndex::default();
+        // Every event shares the same `now`/`time_secs`, so age-based pruning
+        // (`window_secs`) never kicks in — this isolates the hard size cap as
+        // the only thing keeping the index bounded, mirroring the real-world
+        // failure mode of a feed event wedged at the front with a timestamp
+        // that never ages out.
+        let cap = 5;
+        for i in 1..=(cap as i64 * 3) {
+            idx.push(
+                parse_kill_event(&km_json(i, "2026-01-01T00:00:00Z", None, &[])).unwrap(),
+                86_400,
+                KILL_INDEX_WINDOW_SECS,
+                cap,
+            );
+        }
+        assert_eq!(
+            idx.len(),
+            cap,
+            "index must never exceed the configured max_events cap"
+        );
     }
 }

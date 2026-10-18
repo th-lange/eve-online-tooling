@@ -124,6 +124,14 @@ impl AuthState {
             })
     }
 
+    /// Number of per-character refresh locks currently held in memory.
+    /// Test-only — exists so tests can assert [`AuthState::forget`] actually
+    /// shrinks `refresh_locks` instead of just the token cache.
+    #[cfg(test)]
+    pub fn refresh_lock_count(&self) -> usize {
+        recover_lock(self.refresh_locks.lock()).len()
+    }
+
     fn cache_token(&self, character_id: i64, access_token: String, expires_in: u64) {
         // Refresh a minute early to avoid using a just-expired token.
         let ttl = Duration::from_secs(expires_in.saturating_sub(60));
@@ -197,8 +205,17 @@ impl AuthState {
         Ok(tokens.access_token)
     }
 
+    /// Drop a character's cached access token *and* refresh lock. Called on
+    /// logout/roster removal (see [`crate::esi::commands::auth_logout`]) so a
+    /// departed character's entries don't linger forever: `refresh_locks`
+    /// only ever grows on first use ([`AuthState::refresh_lock`]) and nothing
+    /// else ever removed from it, so without this every character who ever
+    /// logged in — including ones long gone from the roster — would keep a
+    /// permanent `Arc<tokio::sync::Mutex<()>>` entry in memory for the life
+    /// of the process.
     pub fn forget(&self, character_id: i64) {
         recover_lock(self.tokens.lock()).remove(&character_id);
+        recover_lock(self.refresh_locks.lock()).remove(&character_id);
     }
 
     pub fn http(&self) -> &reqwest::Client {
@@ -259,6 +276,30 @@ mod tests {
             .block_on(state.access_token_for(910_003))
             .expect("valid cached token should be served without a refresh");
         assert_eq!(token, "cached-access-token");
+    }
+
+    #[test]
+    fn forget_drops_both_the_cached_token_and_the_refresh_lock() {
+        let state = AuthState::new();
+        state.cache_token(910_005, "cached-access-token".to_string(), 3600);
+        // Touch the refresh lock the same way `access_token_for` would, so a
+        // real entry exists in `refresh_locks` to be cleaned up.
+        let _ = state.refresh_lock(910_005);
+        assert!(state.cached_token(910_005).is_some());
+        assert_eq!(state.refresh_lock_count(), 1);
+
+        state.forget(910_005);
+
+        assert!(
+            state.cached_token(910_005).is_none(),
+            "forget must drop the cached token"
+        );
+        assert_eq!(
+            state.refresh_lock_count(),
+            0,
+            "forget must also drop the character's refresh lock, or a removed \
+             character's lock leaks for the life of the process"
+        );
     }
 
     /// A `keyring` credential store that (a) actually persists across
