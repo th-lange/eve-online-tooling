@@ -138,20 +138,26 @@ impl FuzzworkClient {
             .collect();
         let http = self.http.clone();
 
+        // Each batch goes through `send_retrying` (#1063): Fuzzwork gives no
+        // ESI error-budget headers (observe() just no-ops), but the transient
+        // retry — 429/5xx with Retry-After/backoff, plus connect/timeout
+        // hiccups — means one flaky batch no longer fails a whole pricing
+        // scan that the user would then manually re-run.
         let results: Vec<Result<HashMap<String, RawAggregate>, reqwest::Error>> =
             stream::iter(type_lists)
                 .map(|types| {
                     let client = http.clone();
                     let id = id.clone();
                     async move {
-                        client
-                            .get(BASE)
-                            .query(&[(param, id), ("types", types)])
-                            .send()
-                            .await?
-                            .error_for_status()?
-                            .json::<HashMap<String, RawAggregate>>()
-                            .await
+                        esi::send_retrying(|| {
+                            client
+                                .get(BASE)
+                                .query(&[(param, id.clone()), ("types", types.clone())])
+                        })
+                        .await?
+                        .error_for_status()?
+                        .json::<HashMap<String, RawAggregate>>()
+                        .await
                     }
                 })
                 .buffer_unordered(CONCURRENCY)
