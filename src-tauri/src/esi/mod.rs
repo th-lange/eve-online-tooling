@@ -28,7 +28,7 @@ pub use character::{
 };
 pub use client::EsiClient;
 pub use error::EsiError;
-pub use net::fetch_json_url;
+pub use net::{fetch_json_url, send_retrying};
 pub use universe::{system_kills, SystemKills};
 
 /// ESI base URL. Endpoint paths include the version segment (e.g. `/latest`).
