@@ -4,6 +4,7 @@ import {
   obsFightStarted,
   obsFightEnded,
   recordingWriteSidecar,
+  errorMessage,
   type DpsBucket,
 } from "../../lib/api";
 import { useRecording, type FightRecordingSettings } from "./recordingContext";
@@ -24,40 +25,58 @@ export function substituteHookVars(
 }
 
 /** Fire every enabled provider's fight-start action. Shared by the live
- *  trigger below and the Settings "Test recording" run. Failures never
- *  surface as overlay errors. */
+ *  trigger below and the Settings "Test recording" run. A provider failure
+ *  never blocks the others — it's logged with context and, when `onError`
+ *  is given, surfaced to the recording status so a silently-unrecorded
+ *  fight isn't discovered only after the fact. */
 export function fireFightStart(
   recording: FightRecordingSettings,
   startTs: number | null,
+  onError?: (message: string) => void,
 ): void {
   if (recording.hooks.enabled) {
     const cmd = substituteHookVars(recording.hooks.startCommand, {
       start: startTs,
     });
-    if (cmd) void recordingRunHook(cmd).catch(() => {});
+    if (cmd)
+      void recordingRunHook(cmd).catch((e) => {
+        const message = `Recording start hook failed: ${errorMessage(e)}`;
+        console.error(message, e);
+        onError?.(message);
+      });
   }
   if (recording.obs.enabled)
     void obsFightStarted({
       url: recording.obs.url,
       password: recording.obs.password || undefined,
-    }).catch(() => {});
+    }).catch((e) => {
+      const message = `OBS recording start failed: ${errorMessage(e)}`;
+      console.error(message, e);
+      onError?.(message);
+    });
 }
 
 /** Fire every enabled provider's fight-end action; when OBS reports the
  *  finished clip's path, the fight sidecar summarising `buckets` is written
- *  next to it (#1016). */
+ *  next to it (#1016). Same failure handling as {@link fireFightStart}. */
 export function fireFightEnd(
   recording: FightRecordingSettings,
   startTs: number | null,
   endTs: number | null,
   buckets: DpsBucket[],
+  onError?: (message: string) => void,
 ): void {
   if (recording.hooks.enabled) {
     const cmd = substituteHookVars(recording.hooks.endCommand, {
       start: startTs,
       end: endTs,
     });
-    if (cmd) void recordingRunHook(cmd).catch(() => {});
+    if (cmd)
+      void recordingRunHook(cmd).catch((e) => {
+        const message = `Recording end hook failed: ${errorMessage(e)}`;
+        console.error(message, e);
+        onError?.(message);
+      });
   }
   if (recording.obs.enabled)
     void obsFightEnded({
@@ -84,7 +103,11 @@ export function fireFightEnd(
           attackers: [...attackers].map(([name, ship]) => ({ name, ship })),
         });
       })
-      .catch(() => {});
+      .catch((e) => {
+        const message = `OBS recording stop failed: ${errorMessage(e)}`;
+        console.error(message, e);
+        onError?.(message);
+      });
 }
 
 /** The combat-recording trigger (#1013), fed by the fight overlay's
@@ -101,7 +124,7 @@ export function useFightRecorder(fight: {
    *  while unknown. */
   character: string | null;
 }): void {
-  const { recording } = useRecording();
+  const { recording, setRecordingError } = useRecording();
   const { live, startTs, endTs, buckets } = fight;
   // Character filter: when set, only that character's fights record. An
   // unknown capture character fails a set filter (conservative — better to
@@ -126,14 +149,18 @@ export function useFightRecorder(fight: {
       }
       if (!rec.active) {
         rec.active = true;
-        fireFightStart(recording, startTs);
+        setRecordingError(null);
+        fireFightStart(recording, startTs, setRecordingError);
       }
     } else if (rec.active) {
       rec.active = false;
       // The freeze render captured the final (frozen) fight buffer — the
       // sidecar summarises exactly what the clip shows (#1016).
       const frozen = buckets;
-      const runEnd = () => fireFightEnd(recording, startTs, endTs, frozen);
+      const runEnd = () => {
+        setRecordingError(null);
+        fireFightEnd(recording, startTs, endTs, frozen, setRecordingError);
+      };
       if (!recording.enabled) {
         runEnd(); // setting switched off mid-fight: stop right away
       } else {
@@ -143,5 +170,13 @@ export function useFightRecorder(fight: {
         }, recording.postRollSecs * 1000);
       }
     }
-  }, [live, characterOk, recording, startTs, endTs, buckets]);
+  }, [
+    live,
+    characterOk,
+    recording,
+    startTs,
+    endTs,
+    buckets,
+    setRecordingError,
+  ]);
 }

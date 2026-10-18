@@ -29,6 +29,7 @@ export function SettingsPage() {
     enabled: combatOverviewOn,
     setEnabled: setCombatOverviewOn,
     runTest,
+    captureError,
   } = useFightOverlay();
   const {
     vulnerableAlertOn,
@@ -57,6 +58,11 @@ export function SettingsPage() {
               the moment your gamelog shows you in a fight. Shown over every
               module, not just PVP.
             </span>
+            {captureError && (
+              <span className="mt-1 block text-xs text-rose-400">
+                {captureError}
+              </span>
+            )}
           </span>
           <div className="mt-1 flex shrink-0 items-center gap-3">
             <button
@@ -164,7 +170,9 @@ export function SettingsPage() {
                 <button
                   type="button"
                   onClick={() =>
-                    void openUrl(release.data!.htmlUrl).catch(() => {})
+                    void openUrl(release.data!.htmlUrl).catch((e) =>
+                      console.error("Opening release page failed", e),
+                    )
                   }
                   className="ml-2 rounded border border-zinc-700 px-1.5 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100"
                 >

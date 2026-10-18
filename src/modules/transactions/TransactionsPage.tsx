@@ -7,8 +7,9 @@ import {
 } from "../../lib/api";
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { formatEveDateTime, formatInt, formatIsk } from "../../lib/format";
-import { Page, PageHeader } from "../../components/page";
 import { Stat } from "../../components/Stat";
+import { Page, PageHeader } from "../../components/page";
+import { TRANSACTIONS_LEDGER_STALE_TIME_MS } from "../../lib/refreshIntervals";
 
 type Side = "all" | "buy" | "sell";
 
@@ -27,7 +28,7 @@ export function TransactionsPage() {
   const q = useQuery({
     queryKey: ["transactions", "ledger", active.data ?? null],
     queryFn: transactionLedger,
-    staleTime: 5 * 60_000,
+    staleTime: TRANSACTIONS_LEDGER_STALE_TIME_MS,
   });
   const [side, setSide] = useState<Side>("all");
   const [search, setSearch] = useState("");

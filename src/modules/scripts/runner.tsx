@@ -25,7 +25,9 @@ export function ScriptsRunnerProvider({ children }: { children: ReactNode }) {
     let unlisten: (() => void) | undefined;
     onScriptSound(({ mime, data }) => {
       const audio = new Audio(`data:${mime};base64,${data}`);
-      void audio.play().catch(() => {});
+      void audio
+        .play()
+        .catch((e) => console.error("Script sound playback failed", e));
     }).then((u) => (unlisten = u));
     return () => unlisten?.();
   }, []);
