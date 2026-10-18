@@ -214,8 +214,9 @@ export function useDpsPlaybackState() {
 
   // Fixed-grid 5 s buckets (#983): the page's single data feed — charts,
   // readouts, peaks, tackle, and mining all derive from these (#984). Same
-  // hidden-page buffering as events; no cap — the whole session is kept
-  // (12 buckets/minute) so the chart can scroll over all of it.
+  // hidden-page buffering as events; the whole session is kept (12
+  // buckets/minute, bounded by the #1064 backstops in appendBuckets) so
+  // the chart can scroll over all of it.
   useEffect(() => {
     // `cancelled` guards the async-subscribe race: StrictMode/HMR re-runs
     // this effect, and cleanup can fire BEFORE `onDpsBuckets` resolves — a

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   appendBuckets,
+  MAX_SESSION_BUCKETS,
+  MAX_SESSION_EVENTS,
   minuteStartOf,
   SMOOTH_WINDOW_BUCKETS,
   smoothSeries,
@@ -73,6 +75,47 @@ describe("appendBuckets", () => {
     const prev = [bkt(0)];
     expect(appendBuckets(prev, [])).toBe(prev);
     expect(appendBuckets(prev, [bkt(5)]).map((b) => b.start)).toEqual([0, 5]);
+  });
+
+  it("drops the oldest buckets past the session backstop (#1064)", () => {
+    const full = Array.from({ length: MAX_SESSION_BUCKETS }, (_, i) =>
+      bkt(i * 5),
+    );
+    const next = appendBuckets(full, [bkt(MAX_SESSION_BUCKETS * 5)]);
+    expect(next).toHaveLength(MAX_SESSION_BUCKETS);
+    // Oldest fell off, newest kept.
+    expect(next[0].start).toBe(5);
+    expect(next[next.length - 1].start).toBe(MAX_SESSION_BUCKETS * 5);
+  });
+
+  it("compacts oldest buckets' events past the event budget (#1064)", () => {
+    const ev: DpsBucket["events"][number] = {
+      ts: 0,
+      kind: "damage_out",
+      amount: 1,
+      pilot: null,
+      ship: null,
+      weapon: null,
+      quality: null,
+      ore: null,
+      volume: 0,
+    };
+    const heavy = (start: number, n: number) => ({
+      ...bkt(start),
+      events: Array.from({ length: n }, () => ev),
+    });
+    // Two kept buckets at the budget, then one more event arrives: the
+    // OLDEST bucket is compacted to aggregates-only; the chart span (bucket
+    // count and sums) is untouched.
+    const prev = appendBuckets(
+      [],
+      [heavy(0, MAX_SESSION_EVENTS / 2), heavy(5, MAX_SESSION_EVENTS / 2)],
+    );
+    const next = appendBuckets(prev, [heavy(10, 1)]);
+    expect(next.map((b) => b.start)).toEqual([0, 5, 10]);
+    expect(next[0].events).toHaveLength(0);
+    expect(next[1].events).toHaveLength(MAX_SESSION_EVENTS / 2);
+    expect(next[2].events).toHaveLength(1);
   });
 });
 
