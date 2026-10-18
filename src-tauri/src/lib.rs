@@ -244,9 +244,11 @@ pub fn run() {
             // Run-state script on its minute interval (see scripts::scheduler).
             modules::scripts::scheduler::spawn(app.handle().clone());
 
-            // Live zKillboard killstream (#924): one persistent connection,
-            // shared app-wide, feeding every feature that wants "who's dying
-            // where right now" instead of each polling zKill separately.
+            // Live zKillboard killstream (#924): one shared connection feeding
+            // every feature that wants "who's dying where right now" instead
+            // of each polling zKill separately. Lazy (#1060): the loop parks
+            // until a frontend consumer subscribes and winds down again when
+            // the last one leaves.
             zkill::live::spawn(app.handle().clone());
             Ok(())
         })
@@ -415,6 +417,8 @@ pub fn run() {
             zkill::live::zkill_stream_status,
             zkill::live::zkill_stream_system_counts,
             zkill::live::zkill_stream_faction_counts,
+            zkill::live::zkill_stream_subscribe,
+            zkill::live::zkill_stream_unsubscribe,
             modules::localintel::commands::localintel_get_watchlist,
             modules::localintel::commands::localintel_set_watchlist,
             modules::localintel::commands::localintel_system_kills,

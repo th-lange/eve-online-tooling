@@ -28,6 +28,18 @@ export function onZkillKill(
   return listen<KillEvent>("zkill://kill", (event) => handler(event.payload));
 }
 
+/** Take a lease on the shared killstream (#1060): the backend websocket only
+ *  runs while at least one lease is held. Pair with
+ *  `zkillStreamUnsubscribe` on unmount — `useZkillStreamLease` does both. */
+export function zkillStreamSubscribe(): Promise<void> {
+  return invoke<void>("zkill_stream_subscribe");
+}
+
+/** Release a killstream lease (floored at zero backend-side). */
+export function zkillStreamUnsubscribe(): Promise<void> {
+  return invoke<void>("zkill_stream_unsubscribe");
+}
+
 export interface ZkillStreamStatus {
   connected: boolean;
   eventCount: number;
