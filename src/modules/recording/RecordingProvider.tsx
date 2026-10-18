@@ -36,18 +36,22 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
   const testRunning = useRef(false);
   const recordingRef = useRef(recording);
   recordingRef.current = recording;
+  // Most recent provider failure, from either a real fight or this test —
+  // surfaced in `RecordingSettingsCard` (#1041).
+  const [recordingError, setRecordingError] = useState<string | null>(null);
   const runRecordingTest = useCallback(() => {
     if (testRunning.current) return;
     testRunning.current = true;
     const settings = recordingRef.current;
     const start = Math.floor(Date.now() / 1000);
-    fireFightStart(settings, start);
+    setRecordingError(null);
+    fireFightStart(settings, start, setRecordingError);
     setRecordingTestPhase("recording");
     window.setTimeout(() => {
       const end = Math.floor(Date.now() / 1000);
       setRecordingTestPhase("post-roll");
       window.setTimeout(() => {
-        fireFightEnd(settings, start, end, []);
+        fireFightEnd(settings, start, end, [], setRecordingError);
         setRecordingTestPhase(null);
         testRunning.current = false;
       }, settings.postRollSecs * 1000);
@@ -55,9 +59,23 @@ export function RecordingProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ recording, setRecording, runRecordingTest, recordingTestPhase }),
-    [recording, setRecording, runRecordingTest, recordingTestPhase],
+    () => ({
+      recording,
+      setRecording,
+      runRecordingTest,
+      recordingTestPhase,
+      recordingError,
+      setRecordingError,
+    }),
+    [
+      recording,
+      setRecording,
+      runRecordingTest,
+      recordingTestPhase,
+      recordingError,
+    ],
   );
+
   return (
     <RecordingContext.Provider value={value}>
       {children}

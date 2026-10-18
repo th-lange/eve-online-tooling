@@ -46,3 +46,54 @@ export const FIGHT_OVERLAY_SHIP_POLL_INTERVAL_MS = 30_000;
  * this, so a shorter value here just saves an IPC round-trip, not a network
  * call — releases are infrequent, so there's no reason to re-ask hourly. */
 export const RELEASE_CHECK_STALE_TIME_MS = 6 * 60 * 60 * 1000;
+
+/** Notifications feed list: plugin-posted notifications don't change
+ *  faster than a few minutes, so the query is left alone for a while
+ *  before TanStack Query considers it worth a background refetch. */
+export const NOTIFICATIONS_FEED_STALE_TIME_MS = 5 * 60_000;
+
+/** Fight overlay's PVP profile lookup (pilots for a tracked name): profile
+ *  membership rarely changes within a session, so this is cached for
+ *  several minutes rather than re-fetched on every overlay render. */
+export const FIGHT_OVERLAY_PROFILE_STALE_TIME_MS = 5 * 60_000;
+
+/** Fight overlay's local fit list (used for "my ranges" + auto-fit pick):
+ *  fits are edited rarely compared to how often the overlay re-renders
+ *  during a fight, so a short cache avoids re-reading the fit store on
+ *  every bucket update. */
+export const FIGHT_OVERLAY_FIT_LIST_STALE_TIME_MS = 30_000;
+
+/** Fight overlay's "my current ship" cache window: shorter than its own
+ *  {@link FIGHT_OVERLAY_SHIP_POLL_INTERVAL_MS} refetch cadence so a manual
+ *  invalidation (e.g. right after a ship swap) isn't immediately discarded
+ *  as still-fresh. */
+export const FIGHT_OVERLAY_SHIP_STALE_TIME_MS = 15_000;
+
+/** Recording settings' character dropdown (distinct characters seen in the
+ *  gamelogs folder): the list only grows as new logs appear, so there's no
+ *  need to re-scan the folder on every render of the settings card. */
+export const RECORDING_CHARACTERS_STALE_TIME_MS = 60_000;
+
+/** Pochven market "current location" lookup (manual trigger, EntryFinder):
+ *  your system doesn't change without an explicit jump, so the result is
+ *  kept for a minute rather than re-resolved on every interaction. */
+export const POCHVEN_CURRENT_LOCATION_STALE_TIME_MS = 60_000;
+
+/** Pochven entry/exit route search result: the route graph between hubs is
+ *  effectively static within a session, so a found route is kept for
+ *  several minutes instead of being recomputed on every re-render. */
+export const POCHVEN_ROUTE_RESULT_STALE_TIME_MS = 5 * 60_000;
+
+/** Pochven logistics route table: built from static system/route data that
+ *  never changes mid-session, so an hour-long cache avoids redundant work
+ *  for a page that's opened repeatedly but rarely needs fresh data. */
+export const POCHVEN_ROUTES_STALE_TIME_MS = 60 * 60_000;
+
+/** Pochven systems map popover: static universe data, cached for a full day
+ *  since it never changes without an app update. */
+export const POCHVEN_SYSTEMS_MAP_STALE_TIME_MS = 24 * 60 * 60_000;
+
+/** Wallet transaction ledger: transactions land in bursts, not continuously,
+ *  so the page re-fetches at most every few minutes instead of on every
+ *  render. */
+export const TRANSACTIONS_LEDGER_STALE_TIME_MS = 5 * 60_000;
