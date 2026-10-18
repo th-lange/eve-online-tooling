@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { errorMessage, pochvenRoutes, type PochvenStat } from "../../lib/api";
+import { POCHVEN_ROUTES_STALE_TIME_MS } from "../../lib/refreshIntervals";
 import { POCHVEN_META } from "./data";
 
 type Pref = "shortest" | "secure" | "insecure";
@@ -11,7 +12,7 @@ export function Logistics() {
   const q = useQuery({
     queryKey: ["pochven", "routes"],
     queryFn: pochvenRoutes,
-    staleTime: 60 * 60_000,
+    staleTime: POCHVEN_ROUTES_STALE_TIME_MS,
   });
   const [pref, setPref] = useState<Pref>("shortest");
   const [sortHub, setSortHub] = useState<string | null>(null);

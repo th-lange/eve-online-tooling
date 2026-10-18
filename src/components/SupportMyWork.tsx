@@ -16,7 +16,9 @@ export const REFERRAL_URL =
 export const CORP_ID = 98_463_993;
 
 function openExternal(url: string) {
-  void openUrl(url).catch(() => {});
+  void openUrl(url).catch((e) =>
+    console.error("Opening external link failed", e),
+  );
 }
 
 /** Creator code: on hold — Fenris (who run CCP's creator program) didn't

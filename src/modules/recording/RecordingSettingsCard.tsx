@@ -7,6 +7,7 @@ import {
   dpsListCharacters,
 } from "../../lib/api";
 import { useEveLogDir } from "../../lib/useEveLogDir";
+import { RECORDING_CHARACTERS_STALE_TIME_MS } from "../../lib/refreshIntervals";
 import { useRecording } from "./recordingContext";
 
 /** One-time external setup the app cannot do for the user — linked from the
@@ -20,8 +21,13 @@ const SETUP_GUIDE_URL =
  *  the Settings page; state lives in `RecordingProvider`, so the two mounts
  *  can never disagree. */
 export function RecordingSettingsCard() {
-  const { recording, setRecording, runRecordingTest, recordingTestPhase } =
-    useRecording();
+  const {
+    recording,
+    setRecording,
+    runRecordingTest,
+    recordingTestPhase,
+    recordingError,
+  } = useRecording();
   // OBS "Test connection" result — version string on success, error otherwise.
   const [obsStatus, setObsStatus] = useState<{
     ok: boolean;
@@ -46,7 +52,7 @@ export function RecordingSettingsCard() {
     queryKey: ["dps", "characters", gamelogsDir],
     queryFn: () => dpsListCharacters(gamelogsDir),
     enabled: gamelogsDir !== "",
-    staleTime: 60_000,
+    staleTime: RECORDING_CHARACTERS_STALE_TIME_MS,
   });
 
   return (
@@ -159,7 +165,11 @@ export function RecordingSettingsCard() {
                 the fight.{" "}
                 <button
                   type="button"
-                  onClick={() => void openUrl(SETUP_GUIDE_URL).catch(() => {})}
+                  onClick={() =>
+                    void openUrl(SETUP_GUIDE_URL).catch((e) =>
+                      console.error("Opening setup guide failed", e),
+                    )
+                  }
                   className="text-indigo-400 underline hover:text-indigo-300"
                 >
                   Setup guide
@@ -312,6 +322,9 @@ export function RecordingSettingsCard() {
                 "runs a 5 s synthetic fight through the enabled providers"}
             </span>
           </div>
+          {recordingError && (
+            <p className="mt-1 text-xs text-rose-400">{recordingError}</p>
+          )}
         </div>
       )}
     </div>

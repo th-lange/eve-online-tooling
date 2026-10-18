@@ -104,10 +104,23 @@ pub async fn contracts_scan(
                 let r: Result<Vec<EsiContractItem>, _> = esi
                     .get_json(&format!("/latest/contracts/public/items/{id}/"), &[])
                     .await;
-                (id, r.unwrap_or_default())
+                match r {
+                    Ok(list) => Some((id, list)),
+                    Err(e) => {
+                        // Don't value this contract on missing data — a failed
+                        // item fetch (404/500/timeout) would otherwise collapse
+                        // to an empty Vec and show as a (wrong) zero-content
+                        // contract rather than being excluded (#1031).
+                        eprintln!(
+                            "contracts_scan: item fetch failed for contract {id}: {e} — excluding it from results"
+                        );
+                        None
+                    }
+                }
             }
         })
         .buffer_unordered(ITEM_FETCH_CONCURRENCY)
+        .filter_map(|x| async move { x })
         .collect::<HashMap<i64, Vec<EsiContractItem>>>()
         .await;
 
@@ -125,6 +138,30 @@ pub async fn contracts_scan(
         .map_err(|e| e.to_string())?;
     let sell = |type_id: i64| prices.sell_or_zero(type_id);
 
+    let rows = build_rows(
+        candidates,
+        &items,
+        &sell,
+        params.sales_tax,
+        params.broker_fee,
+        params.min_roi,
+    );
+    Ok(rows)
+}
+
+/// Value and rank priced `candidates` by ROI, highest first. Contracts whose
+/// item fetch failed (absent from `items`, see #1031) are excluded entirely
+/// rather than valued at zero content — a missing item list is incomplete
+/// data, not an empty contract, and showing a plausible-looking profit for it
+/// would be actively misleading.
+fn build_rows(
+    candidates: Vec<EsiContract>,
+    items: &HashMap<i64, Vec<EsiContractItem>>,
+    sell: &impl Fn(i64) -> f64,
+    sales_tax: f64,
+    broker_fee: f64,
+    min_roi: f64,
+) -> Vec<ContractRow> {
     let mut rows: Vec<ContractRow> = candidates
         .into_iter()
         .filter_map(|c| {
@@ -146,10 +183,10 @@ pub async fn contracts_scan(
             }
             // Net the resale: you pay sales tax + broker fee to sell the items
             // you receive, so the realistic proceeds are below raw Jita sell.
-            let fee_factor = (1.0 - params.sales_tax - params.broker_fee).max(0.0);
+            let fee_factor = (1.0 - sales_tax - broker_fee).max(0.0);
             let cost = c.price + requested;
             let (profit, roi) = flip_return(contents_value, fee_factor, cost);
-            if roi < params.min_roi {
+            if roi < min_roi {
                 return None;
             }
             Some(ContractRow {
@@ -173,7 +210,7 @@ pub async fn contracts_scan(
             .partial_cmp(&a.roi)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    Ok(rows)
+    rows
 }
 
 /// Resale return on a contract flip. Proceeds are the contents' market value
@@ -188,7 +225,8 @@ fn flip_return(contents_value: f64, fee_factor: f64, cost: f64) -> (f64, f64) {
 
 #[cfg(test)]
 mod tests {
-    use super::flip_return;
+    use super::{build_rows, flip_return, EsiContract, EsiContractItem};
+    use std::collections::HashMap;
 
     #[test]
     fn profit_is_fee_adjusted_contents_minus_cost() {
@@ -203,6 +241,44 @@ mod tests {
         let (profit, roi) = flip_return(500.0, 1.0, 0.0);
         assert!((profit - 500.0).abs() < 1e-6);
         assert_eq!(roi, 0.0);
+    }
+
+    #[test]
+    fn a_contract_with_a_failed_item_fetch_is_excluded_not_zero_valued() {
+        // Contract 1's item fetch succeeded; contract 2's failed (absent from
+        // `items` — simulating a 404/500/timeout during the concurrent fetch).
+        let candidates = vec![
+            EsiContract {
+                contract_id: 1,
+                kind: "item_exchange".into(),
+                price: 100.0,
+                title: "Good".into(),
+            },
+            EsiContract {
+                contract_id: 2,
+                kind: "item_exchange".into(),
+                price: 100.0,
+                title: "Broken".into(),
+            },
+        ];
+        let mut items = HashMap::new();
+        items.insert(
+            1,
+            vec![EsiContractItem {
+                type_id: 34,
+                quantity: 1000,
+                is_included: true,
+                is_blueprint_copy: false,
+            }],
+        );
+        // Contract 2 intentionally has no entry in `items`.
+        let sell = |_: i64| 1.0;
+        let rows = build_rows(candidates, &items, &sell, 0.0, 0.0, 0.0);
+        // Only the contract with a successful item fetch is valued/returned —
+        // contract 2 is excluded entirely rather than shown as a zero-content,
+        // misleadingly-profitable flip.
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].contract_id, 1);
     }
 
     #[test]
