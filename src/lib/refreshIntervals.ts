@@ -17,12 +17,18 @@ export const ROUTE_AUTO_REFRESH_INTERVAL_MS = 30_000;
  * show up promptly), not an ESI cache timer — no network call is involved. */
 export const SHOPPING_CHAT_POLL_INTERVAL_MS = 4_000;
 
-/** Info feed (`InfoPanel` + `InfoAlertsProvider`, both keyed on `["info"]`):
- * plugin-posted alarms/messages don't emit a live event, so both the panel
- * and the nav-badge provider poll this feed themselves. Shared here so the
- * two observers of the same query use one cadence instead of drifting into
- * a 3s/4s double-poll of the same data. */
+/** Info feed, fast cadence: used by `InfoPanel` ONLY while it's the active
+ * view — plugin-posted alarms/messages don't emit a live event, so the open
+ * panel polls snappily. */
 export const INFO_FEED_REFRESH_INTERVAL_MS = 3_000;
+
+/** Info feed, badge heartbeat: `InfoAlertsProvider` is mounted at the app
+ * root for the whole session, so its observer deliberately polls slowly —
+ * it only feeds the nav badge's unseen-alarm count, where half a minute of
+ * staleness is invisible. Both observers share the `["info"]` query;
+ * TanStack polls at the smallest interval any active observer requests, so
+ * the open panel's 3s wins while it's on screen. */
+export const INFO_ALARM_BADGE_REFRESH_INTERVAL_MS = 30_000;
 
 /** Logs page backend tail: the tightest interval in the app, deliberately —
  * logs are watched live while debugging, and staleness there is directly

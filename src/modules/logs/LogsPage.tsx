@@ -1,4 +1,5 @@
 import {
+  useContext,
   useMemo,
   useRef,
   useEffect,
@@ -9,6 +10,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { logStore, type LogEntry } from "../../lib/logStore";
 import { logsList, logsClear } from "../../lib/api";
 import { LOGS_POLL_INTERVAL_MS } from "../../lib/refreshIntervals";
+import { ModuleActiveContext } from "../../components/moduleActiveContext";
 
 type Level = "all" | "error" | "warn";
 type Source = "all" | "frontend" | "backend";
@@ -40,11 +42,14 @@ export function LogsPage() {
     logStore.getSnapshot,
   );
 
-  // Backend entries, polled while the page is mounted.
+  // Backend entries, polled only while this page is the active view —
+  // ModuleHost keeps visited pages mounted (hidden), so an ungated interval
+  // would keep polling the backend every 2s for the rest of the session.
+  const active = useContext(ModuleActiveContext);
   const { data: backendRaw = [] } = useQuery({
     queryKey: ["logs_list"],
     queryFn: logsList,
-    refetchInterval: LOGS_POLL_INTERVAL_MS,
+    refetchInterval: active ? LOGS_POLL_INTERVAL_MS : false,
   });
 
   // Merge and sort by timestamp.
