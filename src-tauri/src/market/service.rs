@@ -570,6 +570,7 @@ mod tests {
     use crate::esi::ConditionalCache;
 
     use super::*;
+    use crate::market::default_region_id;
 
     fn day(volume: i64) -> HistoryDay {
         HistoryDay {
@@ -704,7 +705,7 @@ mod tests {
             let (base, orders_hits, history_hits, prices_hits) = start_test_server();
             let esi = EsiClient::with_base(base, ConditionalCache::disabled());
             let service = MarketService::with_client(esi);
-            let location = Location::Region(10000002);
+            let location = Location::Region(default_region_id());
 
             // (a) 404-is-no-data: orders/history 404 → `price_model` is Ok
             // with an empty-derived model, not Err.
@@ -803,7 +804,7 @@ mod tests {
                 Duration::from_millis(1),
                 Duration::from_secs(3600),
             );
-            let region_id = 10000002;
+            let region_id = default_region_id();
             let type_id = 987;
             let seeded = vec![day(5)];
             service.history.put((region_id, type_id), seeded.clone());
