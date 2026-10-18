@@ -182,15 +182,29 @@ impl AuthState {
             return Ok(token);
         }
 
-        let refresh_token = crate::storage::load_refresh_token(character_id)
-            .map_err(AuthError::Storage)?
-            .ok_or(AuthError::NotLoggedIn)?;
+        // Keychain access (`keyring`) is synchronous OS I/O — on Linux a
+        // D-Bus round-trip to secret-service that can take tens of ms (or
+        // block on an unlock prompt). Run it on the blocking pool so it
+        // never stalls a tokio worker; the per-character single-flight lock
+        // stays held across it on purpose (rotation requires serialization).
+        let refresh_token =
+            tokio::task::spawn_blocking(move || crate::storage::load_refresh_token(character_id))
+                .await
+                .map_err(|e| AuthError::Storage(format!("keychain task panicked: {e}")))?
+                .map_err(AuthError::Storage)?
+                .ok_or(AuthError::NotLoggedIn)?;
         let tokens = refresh(&self.http, &refresh_token, &self.token_url).await?;
         // ESI rotates refresh tokens: persist the new one so the old (now
         // invalidated) token isn't reused on the next refresh.
         if tokens.refresh_token != refresh_token {
-            if let Err(e) = crate::storage::store_refresh_token(character_id, &tokens.refresh_token)
-            {
+            let rotated = tokens.refresh_token.clone();
+            let persisted = tokio::task::spawn_blocking(move || {
+                crate::storage::store_refresh_token(character_id, &rotated)
+            })
+            .await
+            .map_err(|e| format!("keychain task panicked: {e}"))
+            .and_then(|r| r);
+            if let Err(e) = persisted {
                 // Not fatal to this refresh (the access token we just got is
                 // still good), but silently swallowing it here means the
                 // *next* refresh reuses the now-rotated-away token and the
