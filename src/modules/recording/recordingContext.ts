@@ -121,6 +121,13 @@ export interface RecordingCtx {
    *  undocking. No-op while a test is already running. */
   runRecordingTest: () => void;
   recordingTestPhase: RecordingTestPhase;
+  /** Most recent provider failure (OBS or command hook, start or stop),
+   *  from either a real detected fight or the Settings test — `null` once
+   *  cleared or after a run that had none. Surfaced in
+   *  `RecordingSettingsCard` so a fight that silently failed to record is
+   *  never discovered only after the fact. */
+  recordingError: string | null;
+  setRecordingError: (message: string | null) => void;
 }
 
 export const RecordingContext = createContext<RecordingCtx>({
@@ -128,6 +135,8 @@ export const RecordingContext = createContext<RecordingCtx>({
   setRecording: () => {},
   runRecordingTest: () => {},
   recordingTestPhase: null,
+  recordingError: null,
+  setRecordingError: () => {},
 });
 
 export function useRecording(): RecordingCtx {

@@ -11,6 +11,7 @@ import {
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { formatAgo } from "../../lib/format";
 import { Page, PageHeader } from "../../components/page";
+import { NOTIFICATIONS_FEED_STALE_TIME_MS } from "../../lib/refreshIntervals";
 
 const CATEGORY_STYLE: Record<string, string> = {
   War: "bg-rose-500/15 text-rose-300",
@@ -37,7 +38,7 @@ export function NotificationsPage() {
   const q = useQuery({
     queryKey: ["notifications", active.data ?? null],
     queryFn: notifications,
-    staleTime: 5 * 60_000,
+    staleTime: NOTIFICATIONS_FEED_STALE_TIME_MS,
   });
   const [cat, setCat] = useState<string>("All");
 

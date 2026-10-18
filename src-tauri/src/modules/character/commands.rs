@@ -197,6 +197,23 @@ fn sales_tax_pct(accounting: i64) -> f64 {
     (4.5 * (1.0 - 0.11 * accounting as f64)).max(0.0)
 }
 
+/// The active character's real sales-tax fraction (e.g. `0.036` for 3.6%),
+/// from their Accounting skill level — standings don't affect sales tax, so
+/// this avoids [`character_trade_fees`]'s extra standings pull. `None` on any
+/// failure (no primary character set, ESI error, missing scope); callers
+/// should fall back to a conservative default rather than fail outright
+/// (#1033).
+pub async fn active_character_sales_tax_fraction(
+    app: &AppHandle,
+    auth_state: &AuthState,
+) -> Option<f64> {
+    let (_, character_id) = storage::dir_and_primary_character(app).ok()?;
+    let skills = character_skill_levels(auth_state, character_id)
+        .await
+        .ok()?;
+    Some(sales_tax_pct(skills.level(16622)) / 100.0)
+}
+
 /// Broker fee %: 3% base, −0.3%/Broker Relations level, −0.03%/point of faction
 /// standing and −0.02%/point of corp standing (effective standings), floored at
 /// 1%. Pure. (#broker)

@@ -18,6 +18,7 @@ import {
 import { SEC_HEX, secBand } from "../../lib/security";
 import { CLADE_HEX, CLADE_KRAI, ROLE_HEX, systemVisual } from "./visual";
 import { homeTriangleLayout } from "./graph";
+import { POCHVEN_SYSTEMS_MAP_STALE_TIME_MS } from "../../lib/refreshIntervals";
 
 /** Proximity 'Extraction' filament exit targets for one system — shared by
  *  the table's expanded row and the map's click popover. */
@@ -80,7 +81,7 @@ export function PochvenSystemsPopover() {
   const topo = useQuery({
     queryKey: ["pochven", "map"],
     queryFn: pochvenMap,
-    staleTime: 24 * 60 * 60_000,
+    staleTime: POCHVEN_SYSTEMS_MAP_STALE_TIME_MS,
     enabled: open,
   });
 
