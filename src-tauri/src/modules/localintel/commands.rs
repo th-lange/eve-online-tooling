@@ -8,6 +8,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use futures_util::stream::{self, StreamExt};
+
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
@@ -681,24 +683,35 @@ pub async fn localintel_system_kills(
     }
 
     // Fetch each killmail from ESI (permanent cache; killmails never change).
-    let mut kms: Vec<(FullKillmail, f64)> = Vec::new();
-    for r in refs {
-        let total_value = r.zkb.total_value;
-        let key = format!("localintel_km_{}", r.killmail_id);
-        let km: Option<FullKillmail> = if let Some(cached) = storage::cache_get(&dir, &key) {
-            Some(cached)
-        } else {
-            let fetched: Option<FullKillmail> =
-                crate::esi::fetch_killmail(http, r.killmail_id, &r.zkb.hash).await;
-            if let Some(ref k) = fetched {
-                let _ = storage::cache_put(&dir, &key, k, SYSTEM_KILL_TTL_SECS);
+    // Uncached mails are fetched concurrently — serially, a cold busy system
+    // cost ~25 × round-trip before anything rendered (#1062). `buffered`
+    // (not `buffer_unordered`) keeps zKill's newest-first ordering.
+    const KILLMAIL_FETCH_CONCURRENCY: usize = 6;
+    let mut kms: Vec<(FullKillmail, f64)> = stream::iter(refs)
+        .map(|r| {
+            let http = http.clone();
+            let dir = dir.clone();
+            async move {
+                let total_value = r.zkb.total_value;
+                let key = format!("localintel_km_{}", r.killmail_id);
+                let km: Option<FullKillmail> = if let Some(cached) = storage::cache_get(&dir, &key)
+                {
+                    Some(cached)
+                } else {
+                    let fetched: Option<FullKillmail> =
+                        crate::esi::fetch_killmail(&http, r.killmail_id, &r.zkb.hash).await;
+                    if let Some(k) = &fetched {
+                        let _ = storage::cache_put(&dir, &key, k, SYSTEM_KILL_TTL_SECS);
+                    }
+                    fetched
+                };
+                km.map(|km| (km, total_value))
             }
-            fetched
-        };
-        if let Some(km) = km {
-            kms.push((km, total_value));
-        }
-    }
+        })
+        .buffered(KILLMAIL_FETCH_CONCURRENCY)
+        .filter_map(|x| async move { x })
+        .collect()
+        .await;
 
     // Filter to combat-ship victims only: category 6 (Ship), not group 29 (Capsule),
     // not deployables/structures. Also strip capsule-riding attackers.
