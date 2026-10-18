@@ -84,12 +84,38 @@ fn roster_path(app_data_dir: &Path) -> std::path::PathBuf {
     app_data_dir.join("characters.json")
 }
 
-/// Load the character roster (empty if none/unreadable).
+/// Load and parse a JSON file, falling back to `T::default()` when the file
+/// is absent/unreadable (the normal "nothing persisted yet" case — stays
+/// silent) or when it's present but fails to parse (a real data problem —
+/// hand-edited, truncated write, format drift between app versions) rather
+/// than conflating the two outcomes. The corrupt case is logged via
+/// `eprintln!` naming the path and the parse error, so corruption doesn't
+/// silently masquerade as "feature never used" (#1035). Shared by
+/// [`load_roster`] and [`load_id_list`], which previously duplicated this
+/// exact "read → parse → unwrap_or_default" pattern.
+fn load_json_or_default<T: DeserializeOwned + Default>(path: &Path) -> T {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        // Absent/unreadable file: normal default path, nothing to log.
+        Err(_) => return T::default(),
+    };
+    match serde_json::from_slice(&bytes) {
+        Ok(value) => value,
+        Err(e) => {
+            eprintln!(
+                "storage: failed to parse {}: {e} — falling back to an empty default; \
+                 the file on disk is left untouched until the next save",
+                path.display()
+            );
+            T::default()
+        }
+    }
+}
+
+/// Load the character roster (empty if none/unreadable; logs a warning if
+/// the file is present but corrupt — see [`load_json_or_default`]).
 pub fn load_roster(app_data_dir: &Path) -> Vec<Character> {
-    std::fs::read(roster_path(app_data_dir))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+    load_json_or_default(&roster_path(app_data_dir))
 }
 
 /// Persist the character roster.
@@ -183,12 +209,10 @@ pub fn character_names(app_data_dir: &Path) -> std::collections::HashMap<i64, St
         .collect()
 }
 
-/// Load a persisted list of type ids (e.g. `blacklist`, `favorites`).
+/// Load a persisted list of type ids (e.g. `blacklist`, `favorites`); logs a
+/// warning if the file is present but corrupt — see [`load_json_or_default`].
 pub fn load_id_list(app_data_dir: &Path, name: &str) -> Vec<i64> {
-    std::fs::read(app_data_dir.join(format!("{name}.json")))
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+    load_json_or_default(&app_data_dir.join(format!("{name}.json")))
 }
 
 /// Persist a list of type ids.
@@ -569,6 +593,42 @@ mod tests {
         ];
         save_roster(&dir, &roster).unwrap();
         assert_eq!(load_roster(&dir), roster);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn corrupt_roster_file_falls_back_to_empty_default_without_panicking() {
+        // #1035: a roster file that's present but fails to parse (hand-edited,
+        // truncated write, format drift) must not be conflated with "never
+        // used this feature" — it still falls back to an empty roster so the
+        // app doesn't crash on startup, but (verified manually below via
+        // `cargo test corrupt_roster_file -- --nocapture`) it logs a warning
+        // naming the path and parse error instead of staying silent like the
+        // absent-file case.
+        let dir =
+            std::env::temp_dir().join(format!("eve-roster-corrupt-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(roster_path(&dir), b"{ not valid json ").unwrap();
+
+        assert_eq!(load_roster(&dir), Vec::new());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn corrupt_id_list_file_falls_back_to_empty_default_without_panicking() {
+        // Same corrupt-vs-absent distinction as above, for the sibling
+        // `load_id_list` helper (verify the warning manually with
+        // `cargo test corrupt_id_list_file -- --nocapture`).
+        let dir =
+            std::env::temp_dir().join(format!("eve-list-corrupt-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("blacklist.json"), b"not json at all").unwrap();
+
+        assert_eq!(load_id_list(&dir, "blacklist"), Vec::<i64>::new());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
