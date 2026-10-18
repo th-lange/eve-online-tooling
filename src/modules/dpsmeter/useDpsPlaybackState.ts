@@ -105,7 +105,7 @@ export function useDpsPlaybackState() {
   function changeSpeed(next: number) {
     setSpeed(next);
     if (mode === "playback" && (running || paused)) {
-      void dpsSetPlaybackSpeed(next).catch(() => {});
+      void dpsSetPlaybackSpeed(next).catch((e) => setError(errorMessage(e)));
     }
   }
   const [looping, setLooping] = usePersistentState<boolean>(
@@ -513,7 +513,7 @@ export function useDpsPlaybackState() {
       .then((n) => {
         lastSize = n;
       })
-      .catch(() => {});
+      .catch((e) => setError(errorMessage(e)));
     const poll = setInterval(() => {
       void dpsLogStat(file)
         .then((n) => {
@@ -522,7 +522,7 @@ export function useDpsPlaybackState() {
             void load();
           }
         })
-        .catch(() => {});
+        .catch((e) => setError(errorMessage(e)));
     }, 30_000);
     return () => {
       cancelled = true;
