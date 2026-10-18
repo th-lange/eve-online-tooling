@@ -39,7 +39,7 @@ import {
   type ListTab,
 } from "../../components/typeIdLists";
 
-const FORGE = 10000002;
+import { FORGE } from "../../lib/eveConstants";
 type Tab = ListTab;
 
 const TITLE = "Station Trading";

@@ -30,7 +30,7 @@ import { useFitPageMutations } from "./useFitPageMutations";
 import { useAmmoLoadout } from "./useAmmoLoadout";
 import { useFitLibrary } from "./useFitLibrary";
 
-const FORGE = 10000002;
+import { FORGE } from "../../lib/eveConstants";
 
 const TITLE = "Fitting";
 const SUBTITLE =

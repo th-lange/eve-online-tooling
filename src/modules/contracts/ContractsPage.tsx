@@ -24,7 +24,7 @@ import { Field } from "../../components/forms";
 import { SdeGate } from "../../components/SdeGate";
 import { RegionSelect } from "../../components/RegionStationPicker";
 
-const FORGE = 10000002;
+import { FORGE } from "../../lib/eveConstants";
 
 const TITLE = "Public contracts";
 const SUBTITLE =
