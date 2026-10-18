@@ -29,6 +29,7 @@ import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { usePersistentState } from "../../lib/usePersistentState";
 import { useEveLogDir } from "../../lib/useEveLogDir";
 import { ModuleActiveContext } from "../../components/moduleActiveContext";
+import { useZkillStreamLease } from "../../lib/useZkillStream";
 import { classifyArrivals } from "./classifyArrivals";
 import { matchesWatchlist, shouldNotifyLiveWatch } from "./liveWatch";
 
@@ -231,6 +232,7 @@ export function useLocalIntelData() {
   // the next paste/scan. Complements (doesn't replace) the scan-diff
   // watchlist/red/neutral alerting below, which is about who's *in local*.
   const lastLiveWatchNotifyRef = useRef(-Infinity);
+  useZkillStreamLease(watchIds.size > 0);
   useEffect(() => {
     if (watchIds.size === 0) return;
     let unlisten: (() => void) | undefined;

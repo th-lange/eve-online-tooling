@@ -14,6 +14,7 @@ import {
 } from "../../lib/api";
 import { usePersistentState } from "../../lib/usePersistentState";
 import { FACTION_WARFARE_JUMP_DISTANCE_REFRESH_MS } from "../../lib/refreshIntervals";
+import { useZkillStreamLease } from "../../lib/useZkillStream";
 import {
   isMilitiaFaction,
   warzoneForFaction,
@@ -174,6 +175,10 @@ export function FwHomeDefenseProvider({ children }: { children: ReactNode }) {
     () => new Set(myWarzoneSystems.map((s) => s.systemId)),
     [myWarzoneSystems],
   );
+  // The kill listener below only matters while home-defense rules are armed
+  // with systems to watch — hold the killstream lease under that same
+  // condition (#1060), so an idle app doesn't keep the websocket up.
+  useZkillStreamLease(rulesEnabled && watchedSystemIds.size > 0);
   useEffect(() => {
     if (!rulesEnabled || watchedSystemIds.size === 0) return;
     let unlisten: (() => void) | undefined;
