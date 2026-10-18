@@ -74,7 +74,7 @@ export async function setWaypoint(systemId: number): Promise<void> {
  * Keys are type ids (as strings, per JSON object keys).
  */
 export async function rosterStock(): Promise<Record<string, number>> {
-  return unwrapCommand(await commands.esiRosterStock()) as unknown as Record<
+  return unwrapCommand(await commands.esiRosterStock()) as Record<
     string,
     number
   >;
