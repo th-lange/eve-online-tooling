@@ -45,7 +45,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 flate2 = "1"
 futures-util = "0.3"
-tokio = { version = "1", features = ["fs", "io-util", "net", "rt", "time", "sync"] }
+tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt", "time", "sync"] }
 # Live zKillboard killstream websocket (#924) — rustls to match reqwest's TLS
 # backend above, so no openssl enters the dependency tree.
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
