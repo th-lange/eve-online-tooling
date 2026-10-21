@@ -228,8 +228,61 @@ describe("MassProductionPage", () => {
       },
     );
 
+    // The table shows the full accounting: need 5,010, have 5,000, buy 10.
     expect(await screen.findByText("10")).toBeInTheDocument();
-    expect(screen.queryByText("5,010")).not.toBeInTheDocument();
+    expect(screen.getByText("5,010")).toBeInTheDocument();
+    expect(screen.getByText("5,000")).toBeInTheDocument();
+    expect(
+      screen.getByRole("columnheader", { name: "To buy" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps a fully covered material listed at 0 to buy instead of dropping it", async () => {
+    mockInvoke({
+      sde_status: () => SDE_OK,
+      massprod_plan: () => PLAN,
+      assets_load: () => ({
+        rows: [
+          {
+            typeId: 11399,
+            name: "Morphite",
+            quantity: 6000,
+            sellPrice: 1000,
+            buyPrice: 900,
+            sellValue: 6_000_000,
+            buyValue: 5_400_000,
+            volume: 6000,
+            category: "Material",
+            group: "Mineral",
+            owner: "Alt One",
+            isCorp: false,
+            locationId: 60003760,
+            station: "Jita IV - Moon 4 - Caldari Navy Assembly Plant",
+            solarSystem: "Jita",
+          },
+        ],
+        roots: [],
+        sellTotal: 6_000_000,
+        buyTotal: 5_400_000,
+        volumeTotal: 6000,
+      }),
+    });
+    renderWithQuery(<MassProductionPage />);
+
+    await pasteAndImport("5MN Microwarpdrive II Blueprint");
+    await screen.findByText("Mineral");
+    fireEvent.click(screen.getByRole("button", { name: "Load owned stock" }));
+    await screen.findByRole("button", { name: "Reload stock" });
+    fireEvent.change(
+      screen.getByTitle(
+        "Subtract what the roster already has stocked at a location",
+      ),
+      { target: { value: "60003760" } },
+    );
+
+    expect(await screen.findByText("6,000")).toBeInTheDocument();
+    expect(screen.getByText("5,010")).toBeInTheDocument();
+    expect(screen.getByText("0")).toBeInTheDocument();
   });
 
   it("loads stock in the background with a wait signal when the location picker is focused", async () => {
