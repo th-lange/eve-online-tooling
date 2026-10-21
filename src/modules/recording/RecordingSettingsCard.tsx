@@ -8,6 +8,7 @@ import {
 } from "../../lib/api";
 import { useEveLogDir } from "../../lib/useEveLogDir";
 import { RECORDING_CHARACTERS_STALE_TIME_MS } from "../../lib/refreshIntervals";
+import { dpsKeys } from "../../lib/queryKeys";
 import { useRecording } from "./recordingContext";
 
 /** One-time external setup the app cannot do for the user — linked from the
@@ -49,7 +50,7 @@ export function RecordingSettingsCard() {
   // Known characters from the gamelogs folder, for the filter's datalist.
   const [gamelogsDir] = useEveLogDir("gamelogs");
   const characters = useQuery({
-    queryKey: ["dps", "characters", gamelogsDir],
+    queryKey: dpsKeys.characters(gamelogsDir),
     queryFn: () => dpsListCharacters(gamelogsDir),
     enabled: gamelogsDir !== "",
     staleTime: RECORDING_CHARACTERS_STALE_TIME_MS,

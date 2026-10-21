@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { errorMessage, sdeStatus } from "../lib/api";
+import { sdeKeys } from "../lib/queryKeys";
 import { Page, PageHeader, Centered } from "./page";
 import { SdeSetup } from "./SdeSetup";
 
@@ -20,7 +21,7 @@ export function SdeGate({
   subtitle: string;
   children: ReactNode;
 }) {
-  const status = useQuery({ queryKey: ["sde", "status"], queryFn: sdeStatus });
+  const status = useQuery({ queryKey: sdeKeys.status, queryFn: sdeStatus });
 
   if (status.isLoading) {
     return (

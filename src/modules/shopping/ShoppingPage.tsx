@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 
-import { SHOPPING_LISTS_KEY, sdeKeys } from "../../lib/queryKeys";
+import { SHOPPING_LISTS_KEY, sdeKeys, shoppingKeys } from "../../lib/queryKeys";
 import { useCopyToClipboard } from "../../lib/useCopyToClipboard";
 import { useEveLogDir } from "../../lib/useEveLogDir";
 import { parseItems, parseLine } from "../../lib/parseItems";
@@ -250,7 +250,7 @@ function ChatCapture({
   // `setInterval`.
   const listenEnabled = listening && !!channel.trim() && !!logsDir.trim();
   const sync = useQuery({
-    queryKey: ["shopping", "chatSync", logsDir, channel.trim()],
+    queryKey: shoppingKeys.chatSync(logsDir, channel.trim()),
     queryFn: () => {
       const first = fromNow.current;
       fromNow.current = false;

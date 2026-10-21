@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { authCharacters } from "../lib/api";
+import { authKeys } from "../lib/queryKeys";
 import { modules, type ModuleDef } from "./registry";
 import { usePluginModules } from "./plugins/pluginModules";
 
@@ -22,7 +23,7 @@ import { usePluginModules } from "./plugins/pluginModules";
 export function useAvailableModules(): ModuleDef[] {
   const pluginModules = usePluginModules();
   const characters = useQuery({
-    queryKey: ["auth", "characters"],
+    queryKey: authKeys.characters,
     queryFn: authCharacters,
   });
   const hasCharacter = (characters.data?.length ?? 0) > 0;

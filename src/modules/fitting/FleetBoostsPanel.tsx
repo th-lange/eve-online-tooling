@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Trash2, X } from "lucide-react";
 import { fittingCompatibleCharges } from "../../lib/api";
-import { sdeKeys } from "../../lib/queryKeys";
+import { fittingKeys, sdeKeys } from "../../lib/queryKeys";
 import { useFitState, useFitStats } from "./useFitEditorContext";
 
 /**
@@ -34,7 +34,7 @@ export function FleetBoostsPanel() {
     enabled: pickedModule == null && q.trim().length >= 2,
   });
   const charges = useQuery({
-    queryKey: ["fitting", "compatible-charges", pickedModule?.id],
+    queryKey: fittingKeys.compatibleCharges(pickedModule?.id),
     queryFn: pickedModule
       ? () => fittingCompatibleCharges(pickedModule.id)
       : undefined,

@@ -11,6 +11,7 @@ import { Page, PageHeader, Centered } from "../../components/page";
 import { ModuleActiveContext } from "../../components/moduleActiveContext";
 import { useInfoAlerts, useInfoFeed } from "./infoContext";
 import { INFO_FEED_REFRESH_INTERVAL_MS } from "../../lib/refreshIntervals";
+import { infoKeys } from "../../lib/queryKeys";
 
 const SUBTITLE =
   "Alarms and messages posted by your scripts and plugins (via send_alarm / write_message). Each source gets its own segment, newest first.";
@@ -40,7 +41,7 @@ export function InfoPanel() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     onInfoEntry((entry) => {
-      qc.setQueryData<InfoEntry[]>(["info"], (prev) => [
+      qc.setQueryData<InfoEntry[]>(infoKeys.all, (prev) => [
         entry,
         ...(prev ?? []),
       ]);
@@ -55,13 +56,13 @@ export function InfoPanel() {
 
   const clear = useMutation({
     mutationFn: infoClear,
-    onSuccess: () => qc.setQueryData<InfoEntry[]>(["info"], []),
+    onSuccess: () => qc.setQueryData<InfoEntry[]>(infoKeys.all, []),
   });
 
   const clearSource = useMutation({
     mutationFn: infoClearSource,
     onSuccess: (_void, source) =>
-      qc.setQueryData<InfoEntry[]>(["info"], (prev) =>
+      qc.setQueryData<InfoEntry[]>(infoKeys.all, (prev) =>
         (prev ?? []).filter((e) => e.source !== source),
       ),
   });

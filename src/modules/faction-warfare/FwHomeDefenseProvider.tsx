@@ -12,6 +12,7 @@ import {
   intelFwJumps,
   onZkillKill,
 } from "../../lib/api";
+import { authKeys, intelKeys } from "../../lib/queryKeys";
 import { usePersistentState } from "../../lib/usePersistentState";
 import { FACTION_WARFARE_JUMP_DISTANCE_REFRESH_MS } from "../../lib/refreshIntervals";
 import { useZkillStreamLease } from "../../lib/useZkillStream";
@@ -86,13 +87,13 @@ export function FwHomeDefenseProvider({ children }: { children: ReactNode }) {
     null,
   );
   const characters = useQuery({
-    queryKey: ["auth", "characters"],
+    queryKey: authKeys.characters,
     queryFn: authCharacters,
   });
   const hasCharacter = (characters.data?.length ?? 0) > 0;
   const rulesEnabled = vulnerableAlertOn || nearbyFlipRadius !== "off";
   const enlistment = useQuery({
-    queryKey: ["intel", "fw-enlistment"],
+    queryKey: intelKeys.fwEnlistment,
     queryFn: intelFwEnlistment,
     enabled: hasCharacter && rulesEnabled,
     staleTime: 10 * 60_000,
@@ -105,7 +106,7 @@ export function FwHomeDefenseProvider({ children }: { children: ReactNode }) {
     override != null && override !== "observer" ? override : autoMilitia;
 
   const map = useQuery({
-    queryKey: ["intel", "fwSystems"],
+    queryKey: intelKeys.fwSystems,
     queryFn: fwSystems,
     staleTime: 5 * 60_000,
     enabled: myFaction != null && rulesEnabled,
@@ -125,7 +126,7 @@ export function FwHomeDefenseProvider({ children }: { children: ReactNode }) {
   const jumpsEnabled =
     hasCharacter && nearbyFlipRadius !== "off" && systemIds.length > 0;
   const jumpResult = useQuery({
-    queryKey: ["intel", "fw-jumps", systemIds],
+    queryKey: intelKeys.fwJumps(systemIds),
     queryFn: () => intelFwJumps(systemIds),
     enabled: jumpsEnabled,
     staleTime: FACTION_WARFARE_JUMP_DISTANCE_REFRESH_MS,

@@ -12,6 +12,7 @@ import {
   type WeaponLine,
   type AmmoLine,
 } from "../../lib/api";
+import { pvpKeys } from "../../lib/queryKeys";
 import { formatInt, iskShort } from "../../lib/format";
 import { useFightOverlay } from "./fightOverlayContext";
 import { Page, PageHeader } from "../../components/page";
@@ -247,7 +248,7 @@ function WeaponRow({
 }) {
   const [open, setOpen] = useState(false);
   const ammo = useQuery({
-    queryKey: ["pvp", "ammo", weapon.typeId, shipTypeId],
+    queryKey: pvpKeys.ammo(weapon.typeId, shipTypeId),
     queryFn: () => pvpWeaponAmmo(weapon.typeId, shipTypeId),
     enabled: open,
     staleTime: Infinity,
@@ -341,7 +342,7 @@ function WeaponRow({
 function TypicalFit({ hull }: { hull: HullUsage }) {
   const [open, setOpen] = useState(false);
   const q = useQuery({
-    queryKey: ["pvp", "typical", hull.typeId],
+    queryKey: pvpKeys.typical(hull.typeId),
     queryFn: () => pvpTypicalFit(hull.typeId),
     enabled: open,
     staleTime: Infinity,
@@ -372,7 +373,7 @@ function TypicalFit({ hull }: { hull: HullUsage }) {
 function LostFits({ p, fitLimit }: { p: PvpStats; fitLimit: number }) {
   const [open, setOpen] = useState(false);
   const fits = useQuery({
-    queryKey: ["pvp", "fits", p.characterId],
+    queryKey: pvpKeys.fits(p.characterId),
     queryFn: () => pvpPilotFits(p.characterId),
     enabled: open,
     staleTime: Infinity,

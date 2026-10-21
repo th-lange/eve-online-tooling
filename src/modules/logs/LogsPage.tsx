@@ -11,6 +11,7 @@ import { logStore, type LogEntry } from "../../lib/logStore";
 import { logsList, logsClear } from "../../lib/api";
 import { LOGS_POLL_INTERVAL_MS } from "../../lib/refreshIntervals";
 import { ModuleActiveContext } from "../../components/moduleActiveContext";
+import { logsKeys } from "../../lib/queryKeys";
 
 type Level = "all" | "error" | "warn";
 type Source = "all" | "frontend" | "backend";
@@ -47,7 +48,7 @@ export function LogsPage() {
   // would keep polling the backend every 2s for the rest of the session.
   const active = useContext(ModuleActiveContext);
   const { data: backendRaw = [] } = useQuery({
-    queryKey: ["logs_list"],
+    queryKey: logsKeys.list,
     queryFn: logsList,
     refetchInterval: active ? LOGS_POLL_INTERVAL_MS : false,
   });
@@ -88,7 +89,7 @@ export function LogsPage() {
   async function handleClearAll() {
     logStore.clear();
     await logsClear();
-    qc.setQueryData(["logs_list"], []);
+    qc.setQueryData(logsKeys.list, []);
   }
 
   return (

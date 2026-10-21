@@ -7,12 +7,13 @@ import {
 } from "../../lib/api";
 import { fmtHours, fmtMkg } from "./helpers";
 import { maxShipLabel } from "./whTypes";
+import { whKeys } from "../../lib/queryKeys";
 
 /** Class / effect / statics for a selected system (Anoik.is snapshot + SDE
  * physics). Renders only when the system is classified or in the snapshot. */
 export function SystemReferencePanel({ system }: { system: SystemMatch }) {
   const ref = useQuery({
-    queryKey: ["wh", "systemRef", system.id],
+    queryKey: whKeys.systemRef(system.id),
     queryFn: () => whSystemReference(system.id),
     staleTime: Infinity,
   });

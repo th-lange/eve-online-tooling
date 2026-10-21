@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { invokeMock, mockInvoke } from "../../test/harness";
 import { FwHomeDefenseProvider } from "./FwHomeDefenseProvider";
 import type { FwSystemNode } from "../../lib/api";
+import { intelKeys } from "../../lib/queryKeys";
 
 const sendNotificationMock = vi.fn();
 vi.mock("@tauri-apps/plugin-notification", () => ({
@@ -112,7 +113,7 @@ describe("FwHomeDefenseProvider", () => {
 
     // System flips to vulnerable; force a refetch (no interval on this query).
     systems = [node(1, "vulnerable", 500003)];
-    await qc.invalidateQueries({ queryKey: ["intel", "fwSystems"] });
+    await qc.invalidateQueries({ queryKey: intelKeys.fwSystems });
     await waitFor(() =>
       expect(sendNotificationMock).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -123,7 +124,7 @@ describe("FwHomeDefenseProvider", () => {
     expect(sendNotificationMock).toHaveBeenCalledTimes(1);
 
     // Same state again on the next poll — no repeat alert.
-    await qc.invalidateQueries({ queryKey: ["intel", "fwSystems"] });
+    await qc.invalidateQueries({ queryKey: intelKeys.fwSystems });
     await waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("intel_fw_systems"),
     );

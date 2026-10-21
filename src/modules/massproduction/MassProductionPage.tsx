@@ -29,7 +29,11 @@ import {
   type MaterialGroup,
   type PlanMode,
 } from "../../lib/api";
-import { assetsKeys, SHOPPING_LISTS_KEY } from "../../lib/queryKeys";
+import {
+  assetsKeys,
+  massprodKeys,
+  SHOPPING_LISTS_KEY,
+} from "../../lib/queryKeys";
 import { formatInt } from "../../lib/format";
 import { useCopyToClipboard } from "../../lib/useCopyToClipboard";
 import { Page, PageHeader } from "../../components/page";
@@ -45,10 +49,6 @@ import {
 const TITLE = "Mass Production";
 const SUBTITLE =
   "Paste blueprints and get a categorized shopping list to run all of them — matched against what the roster/corp actually own, or a rule-derived assumption in Hypothetical mode.";
-
-/** Query key for saved build lists — scoped to this file; nothing else in
- *  the app reads or invalidates it. */
-const MASSPROD_LISTS_KEY = ["massprod", "lists"] as const;
 
 export function MassProductionPage() {
   return (
@@ -382,7 +382,7 @@ function BuildListsPanel({
   const { copied: copiedList, copy: copyList } = useCopyToClipboard(1500);
 
   const listsQuery = useQuery({
-    queryKey: MASSPROD_LISTS_KEY,
+    queryKey: massprodKeys.lists,
     queryFn: massprodLists,
     enabled: browseOpen,
   });
@@ -400,7 +400,7 @@ function BuildListsPanel({
       setSaveOpen(false);
       setName("");
       setSaveError(null);
-      void qc.invalidateQueries({ queryKey: MASSPROD_LISTS_KEY });
+      void qc.invalidateQueries({ queryKey: massprodKeys.lists });
     },
     onError: (e) => setSaveError(errorMessage(e)),
   });
@@ -408,7 +408,7 @@ function BuildListsPanel({
   const remove = useMutation({
     mutationFn: (id: string) => massprodDeleteList(id),
     onSuccess: () =>
-      void qc.invalidateQueries({ queryKey: MASSPROD_LISTS_KEY }),
+      void qc.invalidateQueries({ queryKey: massprodKeys.lists }),
   });
 
   const canSave = plan != null && plan.matchedBlueprints.length > 0;

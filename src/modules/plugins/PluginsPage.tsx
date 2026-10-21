@@ -30,6 +30,7 @@ import {
 import { useCopyToClipboard } from "../../lib/useCopyToClipboard";
 import { usePersistentState } from "../../lib/usePersistentState";
 import { Page, PageHeader, Centered } from "../../components/page";
+import { pluginsKeys, mcpKeys } from "../../lib/queryKeys";
 
 const SUBTITLE = (
   <>
@@ -47,19 +48,19 @@ const SUBTITLE = (
 );
 
 export function PluginsPage() {
-  const plugins = useQuery({ queryKey: ["plugins"], queryFn: pluginsList });
+  const plugins = useQuery({ queryKey: pluginsKeys.all, queryFn: pluginsList });
   const qc = useQueryClient();
-  const dir = useQuery({ queryKey: ["plugins", "dir"], queryFn: pluginsDir });
+  const dir = useQuery({ queryKey: pluginsKeys.dir, queryFn: pluginsDir });
   const rescan = useMutation({
     mutationFn: pluginsRescan,
-    onSuccess: (list) => qc.setQueryData(["plugins"], list),
+    onSuccess: (list) => qc.setQueryData(pluginsKeys.all, list),
   });
   const [isDragOver, setIsDragOver] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
   const install = useMutation({
     mutationFn: pluginsInstall,
     onSuccess: (list) => {
-      qc.setQueryData(["plugins"], list);
+      qc.setQueryData(pluginsKeys.all, list);
       setInstallError(null);
     },
     onError: (err) => setInstallError(errorMessage(err)),
@@ -198,11 +199,11 @@ function PluginCard({ entry }: { entry: PluginEntry }) {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const toggle = useMutation({
     mutationFn: (next: boolean) => pluginSetActive(manifest.id, next),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["plugins"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: pluginsKeys.all }),
   });
   const remove = useMutation({
     mutationFn: () => pluginsRemove(manifest.id),
-    onSuccess: (list) => qc.setQueryData(["plugins"], list),
+    onSuccess: (list) => qc.setQueryData(pluginsKeys.all, list),
   });
 
   return (
@@ -297,8 +298,8 @@ function PluginCard({ entry }: { entry: PluginEntry }) {
 function McpBridgeCard() {
   const qc = useQueryClient();
   const { copied, copy } = useCopyToClipboard();
-  const status = useQuery({ queryKey: ["mcp"], queryFn: mcpStatus });
-  const config = useQuery({ queryKey: ["mcp", "config"], queryFn: mcpConfig });
+  const status = useQuery({ queryKey: mcpKeys.all, queryFn: mcpStatus });
+  const config = useQuery({ queryKey: mcpKeys.config, queryFn: mcpConfig });
   const [portInput, setPortInput] = useState("");
   const [collapsed, setCollapsed] = usePersistentState(
     "eve.plugins.mcpCollapsed",
@@ -306,19 +307,19 @@ function McpBridgeCard() {
   );
   const toggle = useMutation({
     mutationFn: (next: boolean) => (next ? mcpStart() : mcpStop()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["mcp"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: mcpKeys.all }),
   });
   const setPort = useMutation({
     mutationFn: (port: number) => mcpSetPort(port),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["mcp"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: mcpKeys.all }),
   });
   const setAutostart = useMutation({
     mutationFn: (autostart: boolean) => mcpSetAutostart(autostart),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["mcp", "config"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: mcpKeys.config }),
   });
   const setDevTier = useMutation({
     mutationFn: (devTier: boolean) => mcpSetDevTier(devTier),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["mcp", "config"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: mcpKeys.config }),
   });
   const data = status.data;
   const running = data?.running ?? false;

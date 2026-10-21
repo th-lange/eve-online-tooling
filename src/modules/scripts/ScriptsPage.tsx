@@ -20,6 +20,7 @@ import {
   type ScriptRun,
 } from "../../lib/api";
 import { Page, PageHeader, Centered } from "../../components/page";
+import { scriptsKeys } from "../../lib/queryKeys";
 import { useScriptRuns, type ScriptRunState } from "./runnerContext";
 import { CodeEditor } from "./CodeEditor";
 
@@ -50,10 +51,13 @@ function blankDraft(): Script {
 
 export function ScriptsPage() {
   const qc = useQueryClient();
-  const scriptsQ = useQuery({ queryKey: ["scripts"], queryFn: scriptsList });
+  const scriptsQ = useQuery({
+    queryKey: scriptsKeys.all,
+    queryFn: scriptsList,
+  });
   const runs = useScriptRuns();
   const examplesQ = useQuery({
-    queryKey: ["scripts", "examples"],
+    queryKey: scriptsKeys.examples,
     queryFn: scriptsExamples,
   });
   const [draft, setDraft] = useState<Script | null>(null);
@@ -63,7 +67,7 @@ export function ScriptsPage() {
   const save = useMutation({
     mutationFn: (s: Script) => scriptsSave(s),
     onSuccess: (list, saved) => {
-      qc.setQueryData(["scripts"], list);
+      qc.setQueryData(scriptsKeys.all, list);
       const picked = saved.id
         ? list.find((s) => s.id === saved.id)
         : [...list]
@@ -75,7 +79,7 @@ export function ScriptsPage() {
   const remove = useMutation({
     mutationFn: (id: string) => scriptsDelete(id),
     onSuccess: (list) => {
-      qc.setQueryData(["scripts"], list);
+      qc.setQueryData(scriptsKeys.all, list);
       setDraft(null);
       setOutput(null);
     },
@@ -91,7 +95,7 @@ export function ScriptsPage() {
   const toggle = useMutation({
     mutationFn: (next: Script) => scriptsSave(next),
     onSuccess: (list, next) => {
-      qc.setQueryData(["scripts"], list);
+      qc.setQueryData(scriptsKeys.all, list);
       setDraft((prev) => (prev && prev.id === next.id ? next : prev));
     },
   });

@@ -5,6 +5,7 @@ import {
   transactionLedger,
   type LedgerRow,
 } from "../../lib/api";
+import { authKeys, transactionsKeys } from "../../lib/queryKeys";
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { formatEveDateTime, formatInt, formatIsk } from "../../lib/format";
 import { Stat } from "../../components/Stat";
@@ -22,11 +23,11 @@ export function TransactionsPage() {
   // switching characters naturally refetches (loading state) instead of
   // rendering the previous character's ledger from cache.
   const active = useQuery({
-    queryKey: ["auth", "active"],
+    queryKey: authKeys.active,
     queryFn: activeCharacter,
   });
   const q = useQuery({
-    queryKey: ["transactions", "ledger", active.data ?? null],
+    queryKey: transactionsKeys.ledger(active.data ?? null),
     queryFn: transactionLedger,
     staleTime: TRANSACTIONS_LEDGER_STALE_TIME_MS,
   });

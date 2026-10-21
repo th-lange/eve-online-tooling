@@ -8,6 +8,7 @@ import {
   type Fit,
   type FitStats,
 } from "../../lib/api";
+import { fittingKeys } from "../../lib/queryKeys";
 import { formatInt } from "../../lib/format";
 import { FIT_EPS, km } from "./fitHelpers";
 import { useFitLibrary } from "./useFitLibrary";
@@ -63,7 +64,7 @@ export function ComparisonPanel({
 
   const ammoQueries = useQueries({
     queries: slots.map((fit) => ({
-      queryKey: ["fitting", "ammoTable-compare", fit, skillSource],
+      queryKey: fittingKeys.ammoTableCompare(fit, skillSource),
       queryFn: () => fittingAmmoTable(fit!, skillSource),
       enabled: fit != null,
     })),

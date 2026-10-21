@@ -12,6 +12,7 @@ import {
 import { formatInt, formatIsk } from "../../lib/format";
 import { Page, PageHeader } from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
+import { uniKeys } from "../../lib/queryKeys";
 
 const TITLE = "Universe browser";
 const SUBTITLE =
@@ -32,7 +33,7 @@ function Workbench() {
   const [selected, setSelected] = useState<number | null>(null);
 
   const categories = useQuery({
-    queryKey: ["uni", "cats"],
+    queryKey: uniKeys.cats,
     queryFn: sdeCategories,
   });
 
@@ -110,7 +111,7 @@ function Groups({
   setSelected: (t: number) => void;
 }) {
   const groups = useQuery({
-    queryKey: ["uni", "groups", categoryId, publishedOnly],
+    queryKey: uniKeys.groups(categoryId, publishedOnly),
     queryFn: () => sdeGroups(categoryId, publishedOnly),
   });
   return (
@@ -153,7 +154,7 @@ function Types({
   setSelected: (t: number) => void;
 }) {
   const types = useQuery({
-    queryKey: ["uni", "types", groupId, publishedOnly],
+    queryKey: uniKeys.types(groupId, publishedOnly),
     queryFn: () => sdeTypes(groupId, publishedOnly),
   });
   return (
@@ -175,11 +176,11 @@ function Types({
 
 function Detail({ typeId }: { typeId: number }) {
   const detail = useQuery({
-    queryKey: ["uni", "detail", typeId],
+    queryKey: uniKeys.detail(typeId),
     queryFn: () => sdeTypeDetail(typeId),
   });
   const attrs = useQuery({
-    queryKey: ["uni", "attrs", typeId],
+    queryKey: uniKeys.attrs(typeId),
     queryFn: () => sdeTypeAttributes(typeId),
   });
   const d = detail.data;

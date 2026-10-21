@@ -16,6 +16,7 @@ import {
   type WeaponRange,
   type CharacterShip,
 } from "../../lib/api";
+import { pvpKeys, fittingKeys, esiKeys } from "../../lib/queryKeys";
 import { usePersistentState } from "../../lib/usePersistentState";
 import { useEveLogDir } from "../../lib/useEveLogDir";
 import { playCue, type CueSound } from "../../lib/sound";
@@ -159,13 +160,13 @@ function AttackerCard({
   liveWeapons?: string[];
 }) {
   const profile = useQuery({
-    queryKey: ["pvp", "profile-name", name],
+    queryKey: pvpKeys.profileName(name),
     queryFn: () => pvpProfiles(name),
     staleTime: FIGHT_OVERLAY_PROFILE_STALE_TIME_MS,
   });
   const charId = profile.data?.pilots[0]?.characterId;
   const fits = useQuery({
-    queryKey: ["pvp", "fits", charId],
+    queryKey: pvpKeys.fits(charId),
     queryFn: () => pvpPilotFits(charId!),
     enabled: charId != null,
     staleTime: Infinity,
@@ -780,7 +781,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
 
   // Fit data for "my ranges" in the fight panel.
   const localFits = useQuery({
-    queryKey: ["fitting", "local"],
+    queryKey: fittingKeys.local,
     queryFn: fittingListLocal,
     staleTime: FIGHT_OVERLAY_FIT_LIST_STALE_TIME_MS,
     enabled,
@@ -790,7 +791,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
   // do we auto-load optimals + drone reminders. Polls so swapping ships mid-
   // session is picked up; `null` when logged out or the scope isn't granted.
   const myShip = useQuery<CharacterShip | null>({
-    queryKey: ["esi", "character-ship"],
+    queryKey: esiKeys.characterShip,
     queryFn: characterShip,
     enabled,
     staleTime: FIGHT_OVERLAY_SHIP_STALE_TIME_MS,
@@ -808,7 +809,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
   const effectiveFit =
     localFits.data?.find((f) => f.id === effectiveFitId) ?? null;
   const fitStats = useQuery({
-    queryKey: ["pvp", "fight-fit-stats", effectiveFitId],
+    queryKey: pvpKeys.fightFitStats(effectiveFitId),
     queryFn: () => fittingSimulate(effectiveFit!),
     enabled: effectiveFit != null,
     staleTime: Infinity,

@@ -10,7 +10,12 @@ import {
   type ProfitBreakdown,
   type ProfitParams,
 } from "../../lib/api";
-import { marketKeys } from "../../lib/queryKeys";
+import {
+  marketKeys,
+  ownedKeys,
+  productionKeys,
+  rosterKeys,
+} from "../../lib/queryKeys";
 import { useTypeIdLists } from "../../lib/useSavedLists";
 import { classifyPaste, dedupNames, isExcludedMetaGroup } from "./helpers";
 import {
@@ -81,15 +86,15 @@ export function useWorkbench(): WorkbenchState {
 
   const regions = useQuery(marketKeys.regions());
   const owned = useQuery({
-    queryKey: ["owned", "blueprints"],
+    queryKey: ownedKeys.blueprints,
     queryFn: ownedBlueprints,
   });
   const decryptors = useQuery({
-    queryKey: ["production", "decryptors"],
+    queryKey: productionKeys.decryptors,
     queryFn: productionDecryptors,
   });
   const stock = useQuery({
-    queryKey: ["roster", "stock"],
+    queryKey: rosterKeys.stock,
     queryFn: rosterStock,
     enabled: useStock,
   });

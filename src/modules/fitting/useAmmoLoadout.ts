@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { fittingAmmoTable, fittingLoadAmmo, type AmmoRow } from "../../lib/api";
+import { fittingKeys } from "../../lib/queryKeys";
 import { useFitState } from "./useFitEditorContext";
 
 /**
@@ -13,7 +14,7 @@ import { useFitState } from "./useFitEditorContext";
 export function useAmmoLoadout() {
   const { fit, skillSource, setFit } = useFitState();
   const ammoTable = useQuery({
-    queryKey: ["fitting", "ammoTable", fit, skillSource],
+    queryKey: fittingKeys.ammoTable(fit, skillSource),
     queryFn: () => fittingAmmoTable(fit!, skillSource),
     enabled: fit != null,
   });

@@ -6,6 +6,7 @@ import {
   type ListModule,
   type ListName,
 } from "./api/common";
+import { savedListKeys } from "./queryKeys";
 
 /**
  * Favorites/blacklist state for a module's saved lists (trading, daytrading,
@@ -17,18 +18,19 @@ export function useSavedLists(module: ListModule) {
   const qc = useQueryClient();
 
   const favorites = useQuery({
-    queryKey: [module, "favorites"],
+    queryKey: savedListKeys.favorites(module),
     queryFn: () => getList(module, "favorites"),
   });
   const blacklist = useQuery({
-    queryKey: [module, "blacklist"],
+    queryKey: savedListKeys.blacklist(module),
     queryFn: () => getList(module, "blacklist"),
   });
 
   const setList = useMutation({
     mutationFn: (v: { list: ListName; typeId: number; add: boolean }) =>
       setListApi(module, v.list, v.typeId, v.add),
-    onSuccess: (_d, v) => qc.invalidateQueries({ queryKey: [module, v.list] }),
+    onSuccess: (_d, v) =>
+      qc.invalidateQueries({ queryKey: savedListKeys.forList(module, v.list) }),
   });
 
   return { favorites, blacklist, setList };

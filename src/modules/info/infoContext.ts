@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { infoList } from "../../lib/api";
+import { infoKeys } from "../../lib/queryKeys";
 // (interval constants live in ../../lib/refreshIntervals; callers pass one in)
 
 /** Unseen-alarm state for the Info Panel nav badge. */
@@ -31,7 +32,7 @@ export function useInfoAlerts(): InfoAlerts {
  * fast interval only while it's actually on screen. */
 export function useInfoFeed(intervalMs: number | false) {
   return useQuery({
-    queryKey: ["info"],
+    queryKey: infoKeys.all,
     queryFn: infoList,
     refetchInterval: intervalMs,
   });

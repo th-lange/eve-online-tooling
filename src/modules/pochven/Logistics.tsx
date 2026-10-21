@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { errorMessage, pochvenRoutes, type PochvenStat } from "../../lib/api";
+import { pochvenKeys } from "../../lib/queryKeys";
 import { POCHVEN_ROUTES_STALE_TIME_MS } from "../../lib/refreshIntervals";
 import { POCHVEN_META } from "./data";
 
@@ -10,7 +11,7 @@ type Pref = "shortest" | "secure" | "insecure";
 // (#414). Pick a route preference; sort by any hub's average.
 export function Logistics() {
   const q = useQuery({
-    queryKey: ["pochven", "routes"],
+    queryKey: pochvenKeys.routes,
     queryFn: pochvenRoutes,
     staleTime: POCHVEN_ROUTES_STALE_TIME_MS,
   });

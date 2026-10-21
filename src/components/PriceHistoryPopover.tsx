@@ -39,7 +39,7 @@ export function PriceHistoryPopover({
     enabled: open,
   });
   const orderBook = useQuery({
-    queryKey: ["market", "order-book", regionId, typeId],
+    queryKey: marketKeys.orderBook(regionId, typeId),
     queryFn: () => marketOrderBook({ typeId, regionId }),
     enabled: open,
     staleTime: 5 * 60 * 1000,

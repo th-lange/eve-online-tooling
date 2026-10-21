@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { ping } from "../lib/api";
+import { pingKeys } from "../lib/queryKeys";
 
 // Tiny footer indicator that exercises the frontend ↔ Rust `invoke` bridge.
 // Outside a Tauri window (e.g. plain `vite dev`) `invoke` is unavailable, so a
 // failure here just means "not running in the desktop shell".
 export function BridgeStatus() {
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["ping"],
+    queryKey: pingKeys.all,
     queryFn: ping,
   });
 

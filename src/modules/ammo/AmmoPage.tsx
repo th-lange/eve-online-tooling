@@ -6,6 +6,7 @@ import {
   type AmmoChargeRow,
   type AmmoTier,
 } from "../../lib/api";
+import { ammoKeys } from "../../lib/queryKeys";
 import { QueryResult } from "../../components/QueryResult";
 import { formatSignedPercent } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
@@ -230,7 +231,7 @@ function Workbench() {
   const [tracking, setTracking] = useState<TrackingProfile>("all");
 
   const query = useQuery({
-    queryKey: ["ammo", "reference", family],
+    queryKey: ammoKeys.reference(family),
     queryFn: () => ammoReference(family),
   });
 

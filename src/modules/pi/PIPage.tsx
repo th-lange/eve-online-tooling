@@ -27,6 +27,7 @@ import {
   type PlannerSetupItem,
   type StorageView,
 } from "../../lib/api";
+import { authKeys, piKeys } from "../../lib/queryKeys";
 import { InlineError } from "../../components/InlineError";
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { Combo } from "../../components/Combo";
@@ -69,19 +70,19 @@ function Workbench() {
   // selection into the query key means switching characters refetches
   // instead of rendering the previous character's colonies from cache.
   const active = useQuery({
-    queryKey: ["auth", "active"],
+    queryKey: authKeys.active,
     queryFn: activeCharacter,
   });
   const colonies = useQuery({
-    queryKey: ["pi", "overview", active.data ?? null],
+    queryKey: piKeys.overview(active.data ?? null),
     queryFn: piOverview,
   });
-  const locked = useQuery({ queryKey: ["pi", "locked"], queryFn: piLockedGet });
+  const locked = useQuery({ queryKey: piKeys.locked, queryFn: piLockedGet });
   const lockedSet = new Set(locked.data ?? []);
 
   const setLock = useMutation({
     mutationFn: (ids: number[]) => piLockedSet(ids),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["pi", "locked"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: piKeys.locked }),
   });
   const toggleLock = (typeId: number) => {
     const next = new Set(lockedSet);
@@ -106,7 +107,7 @@ function Workbench() {
       ),
     onSuccess: (view) => {
       qc.setQueryData<ColonyView[]>(
-        ["pi", "overview", active.data ?? null],
+        piKeys.overview(active.data ?? null),
         (old) =>
           old?.map((c) =>
             c.characterId === view.characterId && c.planetId === view.planetId
@@ -240,10 +241,6 @@ function Workbench() {
   );
 }
 
-/** Query key for saved planner setups — scoped to this file; nothing else
- *  in the app reads or invalidates it. */
-const PI_SETUPS_KEY = ["pi", "planner-setups"] as const;
-
 /** One commodity planned on the Planner tab: the pick itself, free-text
  * notes, and the (optional) solar system/planet it's assigned to build on.
  * Persisted as-is (see `picks` below) and is exactly the shape a setup is
@@ -351,7 +348,7 @@ function Planner() {
 
   const chains = useQueries({
     queries: picks.map((p) => ({
-      queryKey: ["pi", "production-chain", p.id],
+      queryKey: piKeys.productionChain(p.id),
       queryFn: () => piProductionChain(p.id),
     })),
   });
@@ -426,7 +423,7 @@ function PlanCard({
   // auto-derived "System · Planet · Product" default).
   const [labelDraft, setLabelDraft] = useState<string | null>(null);
   const planets = useQuery({
-    queryKey: ["pi", "planets-in-system", pick.systemId],
+    queryKey: piKeys.planetsInSystem(pick.systemId),
     queryFn: () => piPlanetsInSystem(pick.systemId!),
     enabled: pick.systemId != null,
   });
@@ -609,7 +606,7 @@ function SetupsPanel({
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const setupsQuery = useQuery({
-    queryKey: PI_SETUPS_KEY,
+    queryKey: piKeys.setups,
     queryFn: piPlannerSetups,
     enabled: browseOpen,
   });
@@ -633,14 +630,14 @@ function SetupsPanel({
       setSaveOpen(false);
       setName("");
       setSaveError(null);
-      void qc.invalidateQueries({ queryKey: PI_SETUPS_KEY });
+      void qc.invalidateQueries({ queryKey: piKeys.setups });
     },
     onError: (e) => setSaveError(errorMessage(e)),
   });
 
   const remove = useMutation({
     mutationFn: (id: string) => piPlannerSetupDelete(id),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: PI_SETUPS_KEY }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: piKeys.setups }),
   });
 
   const canSave = picks.length > 0;

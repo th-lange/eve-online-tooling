@@ -25,6 +25,7 @@ import {
   type LocalPilot,
   type ZkillStats,
 } from "../../lib/api";
+import { localintelKeys } from "../../lib/queryKeys";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { usePersistentState } from "../../lib/usePersistentState";
 import { useEveLogDir } from "../../lib/useEveLogDir";
@@ -219,7 +220,7 @@ export function useLocalIntelData() {
   });
 
   const watchlist = useQuery({
-    queryKey: ["localintel", "watchlist"],
+    queryKey: localintelKeys.watchlist,
     queryFn: localintelGetWatchlist,
   });
   const watchIds = useMemo(
@@ -321,7 +322,7 @@ export function useLocalIntelData() {
     mutationFn: (v: { id: number; name: string; add: boolean }) =>
       localintelSetWatchlist(v.id, v.name, v.add),
     onSuccess: () =>
-      qc.invalidateQueries({ queryKey: ["localintel", "watchlist"] }),
+      qc.invalidateQueries({ queryKey: localintelKeys.watchlist }),
   });
 
   const result = scan.data;
@@ -385,7 +386,7 @@ export function useLocalIntelData() {
     2,
   );
   const location = useQuery({
-    queryKey: ["localintel", "location"],
+    queryKey: localintelKeys.location,
     queryFn: routeLocation,
     // Only while the page is on screen: a stale location then refreshes
     // immediately on return (staleTime) instead of waiting a full interval.
@@ -395,7 +396,7 @@ export function useLocalIntelData() {
   });
   const here = location.data?.[location.data.length - 1];
   const hood = useQuery({
-    queryKey: ["localintel", "hood", here?.systemId ?? null, hoodDepth],
+    queryKey: localintelKeys.hood(here?.systemId ?? null, hoodDepth),
     queryFn: () => systemNeighbourhood(here!.systemId, hoodDepth),
     enabled: here != null,
     // Keep neighbourhood kills/jumps live (CCP aggregates update ~hourly) —
