@@ -8,6 +8,7 @@ import {
   systemSearch,
   type SystemMatch,
 } from "../../lib/api";
+import { marketKeys, pochvenKeys } from "../../lib/queryKeys";
 import { Combo } from "../../components/Combo";
 import { EntryResults } from "./EntryResults";
 import {
@@ -22,13 +23,13 @@ export function EntryFinder() {
   const [maxJumps, setMaxJumps] = useState(10);
 
   const location = useQuery({
-    queryKey: ["market", "currentLocation"],
+    queryKey: marketKeys.currentLocationCamel,
     queryFn: marketCurrentLocation,
     staleTime: POCHVEN_CURRENT_LOCATION_STALE_TIME_MS,
     enabled: false,
   });
   const result = useQuery({
-    queryKey: ["pochven", "search", system?.id ?? null, maxJumps],
+    queryKey: pochvenKeys.search(system?.id ?? null, maxJumps),
     queryFn: system ? () => pochvenSearch(system.id, maxJumps) : undefined,
     enabled: system != null,
     staleTime: POCHVEN_ROUTE_RESULT_STALE_TIME_MS,

@@ -10,6 +10,7 @@ import {
 import { useEveLogDir } from "../../lib/useEveLogDir";
 import { mergeListenerCharacters } from "../../lib/listenerCharacters";
 import { RECORDING_CHARACTERS_STALE_TIME_MS } from "../../lib/refreshIntervals";
+import { authKeys, dpsKeys } from "../../lib/queryKeys";
 import { useRecording } from "./recordingContext";
 
 /** One-time external setup the app cannot do for the user — linked from the
@@ -53,13 +54,13 @@ export function RecordingSettingsCard() {
   // the list isn't empty when no recent logs exist (#1047).
   const [gamelogsDir] = useEveLogDir("gamelogs");
   const gamelogCharacters = useQuery({
-    queryKey: ["dps", "characters", gamelogsDir],
+    queryKey: dpsKeys.characters(gamelogsDir),
     queryFn: () => dpsListCharacters(gamelogsDir),
     enabled: gamelogsDir !== "",
     staleTime: RECORDING_CHARACTERS_STALE_TIME_MS,
   });
   const roster = useQuery({
-    queryKey: ["auth", "characters"],
+    queryKey: authKeys.characters,
     queryFn: authCharacters,
   });
   const characterNames = useMemo(

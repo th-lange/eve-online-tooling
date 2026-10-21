@@ -2,6 +2,7 @@ import { useContext, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ModuleActiveContext } from "../../components/moduleActiveContext";
+import { routeKeys } from "../../lib/queryKeys";
 import {
   errorMessage,
   routeBreadcrumb,
@@ -84,12 +85,12 @@ function Workbench() {
   // left on would poll every 30s for the rest of the session.
   const active = useContext(ModuleActiveContext);
   const activity = useQuery({
-    queryKey: ["route", "systemActivity"],
+    queryKey: routeKeys.systemActivity,
     queryFn: () => systemActivity(false),
     refetchInterval: active && auto ? ROUTE_AUTO_REFRESH_INTERVAL_MS : false,
   });
   const trail = useQuery({
-    queryKey: ["route", "breadcrumb"],
+    queryKey: routeKeys.breadcrumb,
     queryFn: routeBreadcrumb,
   });
   // Neighbourhood graph as a cached query keyed on (centre, depth): it survives
@@ -98,7 +99,7 @@ function Workbench() {
   // (not "my location", which polls via `liveLocation` below) it also
   // self-refreshes.
   const hood = useQuery({
-    queryKey: ["route", "neighbourhood", centre?.id ?? null, depth],
+    queryKey: routeKeys.neighbourhood(centre?.id ?? null, depth),
     queryFn: () => systemNeighbourhood(centre!.id, depth),
     enabled: mode === "neighbouring" && !!centre,
     refetchInterval:
@@ -130,7 +131,7 @@ function Workbench() {
   // action and the auto-refresh poll below.
   function applyLocation(t: BreadcrumbEntry[], d: number) {
     setLocError(null);
-    qc.setQueryData(["route", "breadcrumb"], t);
+    qc.setQueryData(routeKeys.breadcrumb, t);
     const last = t[t.length - 1];
     if (last) {
       setFromMe(true);
@@ -168,7 +169,7 @@ function Workbench() {
   // query lifecycle (start/stop/cleanup) is owned by `enabled` +
   // `refetchInterval`.
   const liveLocation = useQuery({
-    queryKey: ["route", "liveLocation"],
+    queryKey: routeKeys.liveLocation,
     queryFn: routeLocation,
     enabled: active && auto && fromMe,
     refetchInterval:
@@ -304,7 +305,7 @@ function Workbench() {
             <button
               onClick={async () => {
                 await routeClearBreadcrumb();
-                qc.setQueryData(["route", "breadcrumb"], []);
+                qc.setQueryData(routeKeys.breadcrumb, []);
               }}
               className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
             >

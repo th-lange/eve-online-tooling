@@ -24,6 +24,7 @@ import {
   type SlotKind,
   type WeaponRange,
 } from "../../lib/api";
+import { fittingKeys } from "../../lib/queryKeys";
 import { SLOT_BADGE, burnoutLabel, km } from "./fitHelpers";
 import {
   useFitMutations,
@@ -91,7 +92,7 @@ export function ChargeControl({
     else setQ("");
   }, [open]);
   const charges = useQuery({
-    queryKey: ["fitting", "charges", typeId],
+    queryKey: fittingKeys.charges(typeId),
     queryFn: () => fittingCompatibleCharges(typeId),
   });
   const allCharges = charges.data ?? [];
@@ -208,7 +209,7 @@ function MutateControl({
 }) {
   const [open, setOpen] = useState(false);
   const options = useQuery({
-    queryKey: ["fitting", "mutaplasmids", typeId],
+    queryKey: fittingKeys.mutaplasmids(typeId),
     queryFn: () => sdeMutaplasmidsForType(typeId),
   });
   const list = options.data ?? [];
@@ -222,7 +223,7 @@ function MutateControl({
       );
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const ranges = useQuery({
-    queryKey: ["fitting", "mutationRanges", typeId, selectedId],
+    queryKey: fittingKeys.mutationRanges(typeId, selectedId),
     queryFn: () => fittingMutationRanges(typeId, selectedId as number),
     enabled: open && selectedId != null,
   });

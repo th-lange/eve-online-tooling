@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, X } from "lucide-react";
 import { fittingEnvironmentEffects, type AbyssalWeather } from "../../lib/api";
+import { fittingKeys } from "../../lib/queryKeys";
 import { useFitState } from "./useFitEditorContext";
 
 /** Split a beacon's raw SDE name into a display group + short label:
@@ -68,7 +69,7 @@ export function EnvironmentEffectSelector() {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const options = useQuery({
-    queryKey: ["fitting", "environmentEffects"],
+    queryKey: fittingKeys.environmentEffects,
     queryFn: fittingEnvironmentEffects,
   });
   const all = options.data ?? [];

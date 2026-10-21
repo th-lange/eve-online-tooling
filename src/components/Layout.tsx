@@ -21,6 +21,7 @@ import { CommandPalette } from "./CommandPalette";
 import { SupportModal } from "./SupportMyWork";
 import { STORAGE_KEYS } from "../lib/storageKeys";
 import { usePersistentState } from "../lib/usePersistentState";
+import { scriptsKeys } from "../lib/queryKeys";
 import { useInfoAlerts } from "../modules/info/infoContext";
 import { useFightOverlay } from "../modules/pvp/fightOverlayContext";
 import { scriptsList } from "../lib/api";
@@ -632,7 +633,10 @@ function NavRow({
  * stays live the moment a script is armed/disarmed/saved there — no polling.
  */
 function ScriptsBadge() {
-  const scriptsQ = useQuery({ queryKey: ["scripts"], queryFn: scriptsList });
+  const scriptsQ = useQuery({
+    queryKey: scriptsKeys.all,
+    queryFn: scriptsList,
+  });
   const runningScripts = (scriptsQ.data ?? []).filter(
     (s) => s.enabled && s.intervalMin != null,
   ).length;

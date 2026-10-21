@@ -18,14 +18,15 @@ import {
   type OrderBook,
 } from "../../lib/api";
 import {
+  SDE_SEARCH_STALE_TIME,
+  marketKeys,
+  marketSearchKeys,
+  sdeKeys,
+} from "../../lib/queryKeys";
+import {
   subscribeMarketSearchItem,
   takePendingMarketSearchItem,
 } from "../../lib/deepLink";
-import {
-  SDE_SEARCH_STALE_TIME,
-  marketKeys,
-  sdeKeys,
-} from "../../lib/queryKeys";
 import { SEC_HEX, secBand } from "../../lib/security";
 import { AddToListButton } from "../../components/AddToListButton";
 import { Combo } from "../../components/Combo";
@@ -89,11 +90,11 @@ function Workbench() {
   const [excludeScams, setExcludeScams] = useState(true);
 
   const regions = useQuery({
-    queryKey: ["market", "all-regions"],
+    queryKey: marketKeys.allRegions,
     queryFn: marketAllRegions,
   });
   const current = useQuery({
-    queryKey: ["market", "current-location"],
+    queryKey: marketKeys.currentLocation,
     queryFn: marketCurrentLocation,
   });
 
@@ -130,14 +131,13 @@ function Workbench() {
     combine: (results) => results.map((q) => q.data ?? []),
   });
   const price = useQuery({
-    queryKey: ["price", historyRegionId, picked?.id],
+    queryKey: marketSearchKeys.price(historyRegionId, picked?.id),
     queryFn: picked ? () => marketPrice(historyRegionId, picked.id) : undefined,
     enabled: tab === "history" && picked != null,
   });
 
   const orders = useQuery({
-    queryKey: [
-      "sell-orders",
+    queryKey: marketSearchKeys.sellOrders(
       picked?.id,
       regionId,
       system?.id ?? null,
@@ -145,7 +145,7 @@ function Workbench() {
       origin?.id ?? null,
       highSecOnly,
       excludeScams,
-    ],
+    ),
     queryFn: picked
       ? () =>
           marketSellOrders({
@@ -162,14 +162,13 @@ function Workbench() {
   });
 
   const orderBook = useQuery({
-    queryKey: [
-      "order-book",
+    queryKey: marketSearchKeys.orderBook(
       picked?.id,
       regionId,
       system?.id ?? null,
       station?.id ?? null,
       excludeScams,
-    ],
+    ),
     queryFn: picked
       ? () =>
           marketOrderBook({

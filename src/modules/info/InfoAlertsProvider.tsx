@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { InfoEntry } from "../../lib/api";
 import { InfoAlertsContext, useInfoFeed } from "./infoContext";
 import { INFO_ALARM_BADGE_REFRESH_INTERVAL_MS } from "../../lib/refreshIntervals";
+import { infoKeys } from "../../lib/queryKeys";
 
 const SEEN_KEY = "eve.info.seenAlarmId";
 
@@ -29,7 +30,7 @@ export function InfoAlertsProvider({ children }: { children: ReactNode }) {
   const hasEntries = (feed.data ?? []).length > 0;
 
   const markSeen = useCallback(() => {
-    const data = qc.getQueryData<InfoEntry[]>(["info"]) ?? [];
+    const data = qc.getQueryData<InfoEntry[]>(infoKeys.all) ?? [];
     const newest = data.find((e) => e.kind === "alarm")?.id ?? null;
     setSeenId(newest);
     if (newest) localStorage.setItem(SEEN_KEY, newest);

@@ -12,6 +12,7 @@ import {
   type SystemMatch,
   type WormholeType,
 } from "../../lib/api";
+import { whKeys } from "../../lib/queryKeys";
 import { maxShipLabel, whTypeByCode } from "./whTypes";
 import { ChainGraph } from "./ChainGraph";
 import { JumpPlanner } from "./JumpPlanner";
@@ -43,14 +44,14 @@ export function WormholesPage() {
 function Workbench() {
   const qc = useQueryClient();
   const conns = useQuery({
-    queryKey: ["wh", "connections"],
+    queryKey: whKeys.connections,
     queryFn: whConnections,
   });
   const set = (data: ConnectionView[]) =>
-    qc.setQueryData(["wh", "connections"], data);
+    qc.setQueryData(whKeys.connections, data);
   // WH type physics are constant per SDE — fetch once and reuse everywhere.
   const whTypes = useQuery({
-    queryKey: ["wh", "typeReference"],
+    queryKey: whKeys.typeReference,
     queryFn: whTypeReference,
     staleTime: Infinity,
   });

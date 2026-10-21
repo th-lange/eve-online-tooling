@@ -8,6 +8,7 @@ import {
   notificationsReset,
   type NotifRow,
 } from "../../lib/api";
+import { authKeys, notificationsKeys } from "../../lib/queryKeys";
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { formatAgo } from "../../lib/format";
 import { Page, PageHeader } from "../../components/page";
@@ -32,11 +33,11 @@ export function NotificationsPage() {
   // selection into the query key means switching characters refetches
   // instead of rendering the previous character's notifications from cache.
   const active = useQuery({
-    queryKey: ["auth", "active"],
+    queryKey: authKeys.active,
     queryFn: activeCharacter,
   });
   const q = useQuery({
-    queryKey: ["notifications", active.data ?? null],
+    queryKey: notificationsKeys.forCharacter(active.data ?? null),
     queryFn: notifications,
     staleTime: NOTIFICATIONS_FEED_STALE_TIME_MS,
   });
@@ -46,11 +47,11 @@ export function NotificationsPage() {
     // Dismissed sets are per character, so a row is hidden for its own owner.
     mutationFn: (n: { id: number; characterId: number }) =>
       notificationDismiss(n.id, n.characterId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: notificationsKeys.all }),
   });
   const reset = useMutation({
     mutationFn: notificationsReset,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: notificationsKeys.all }),
   });
 
   const categories = useMemo(() => {

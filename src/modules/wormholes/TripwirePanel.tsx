@@ -10,6 +10,7 @@ import {
   type TripwireStatus,
 } from "../../lib/api";
 import { Field } from "../../components/forms";
+import { whKeys } from "../../lib/queryKeys";
 
 /** Opt-in Tripwire import. Inert until connected: shows a connect form, then an
  * import + disconnect control. Credentials live in the OS keychain. */
@@ -20,11 +21,11 @@ export function TripwirePanel({
 }) {
   const qc = useQueryClient();
   const status = useQuery({
-    queryKey: ["wh", "tripwireStatus"],
+    queryKey: whKeys.tripwireStatus,
     queryFn: whTripwireStatus,
   });
   const setStatus = (s: TripwireStatus) =>
-    qc.setQueryData(["wh", "tripwireStatus"], s);
+    qc.setQueryData(whKeys.tripwireStatus, s);
 
   const [baseUrl, setBaseUrl] = useState("https://tripwire.eve-apps.com");
   const [username, setUsername] = useState("");

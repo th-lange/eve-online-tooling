@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { UserCog } from "lucide-react";
 import { activeCharacter, characterTradeFees } from "../lib/api";
+import { authKeys, characterKeys } from "../lib/queryKeys";
 import { queryErrorText } from "./QueryErrorNotice";
 
 const round2 = (x: number) => Math.round(x * 100) / 100;
@@ -22,11 +23,11 @@ export function FeesFromCharacter({
   // folding that selection into the query key means switching characters
   // refetches instead of showing the previous character's fees.
   const active = useQuery({
-    queryKey: ["auth", "active"],
+    queryKey: authKeys.active,
     queryFn: activeCharacter,
   });
   const q = useQuery({
-    queryKey: ["character", "tradeFees", active.data ?? null],
+    queryKey: characterKeys.tradeFees(active.data ?? null),
     queryFn: characterTradeFees,
     staleTime: 10 * 60_000,
     retry: false,

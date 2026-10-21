@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Puzzle } from "lucide-react";
 import { pluginsList } from "../../lib/api";
+import { pluginsKeys } from "../../lib/queryKeys";
 import { modules, type ModuleDef } from "../registry";
 import { PluginPage } from "./PluginPage";
 
@@ -16,7 +17,10 @@ import { PluginPage } from "./PluginPage";
  * win), so a drop-in can never shadow a first-party page.
  */
 export function usePluginModules(): ModuleDef[] {
-  const { data } = useQuery({ queryKey: ["plugins"], queryFn: pluginsList });
+  const { data } = useQuery({
+    queryKey: pluginsKeys.all,
+    queryFn: pluginsList,
+  });
   return useMemo(() => {
     const builtinIds = new Set(modules.map((m) => m.id));
     return (data ?? [])

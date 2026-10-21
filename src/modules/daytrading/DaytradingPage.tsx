@@ -18,7 +18,7 @@ import {
   type DayTradeRow,
 } from "../../lib/api";
 import { tripMetrics } from "./tripMetrics";
-import { marketKeys } from "../../lib/queryKeys";
+import { marketKeys, rosterKeys, sdeKeys } from "../../lib/queryKeys";
 import {
   formatInt,
   formatIsk,
@@ -90,11 +90,11 @@ function Workbench() {
 
   const regions = useQuery(marketKeys.regions());
   const categories = useQuery({
-    queryKey: ["sde", "marketCategories"],
+    queryKey: sdeKeys.marketCategories,
     queryFn: sdeMarketCategories,
   });
   const stock = useQuery({
-    queryKey: ["roster", "stock"],
+    queryKey: rosterKeys.stock,
     queryFn: rosterStock,
     enabled: subtractStock,
   });

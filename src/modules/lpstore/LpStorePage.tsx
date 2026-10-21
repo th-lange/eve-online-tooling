@@ -18,6 +18,7 @@ import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { Field } from "../../components/forms";
 import { SdeGate } from "../../components/SdeGate";
 import { ItemSearch } from "./ItemSearch";
+import { lpKeys } from "../../lib/queryKeys";
 
 type OfferSortKey =
   "name" | "lpCost" | "iskCost" | "sellValue" | "profit" | "iskPerLp";
@@ -133,7 +134,7 @@ function CorpOffers({ tabs }: { tabs: ReactNode }) {
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
 
   const balances = useQuery({
-    queryKey: ["lp", "balances"],
+    queryKey: lpKeys.balances,
     queryFn: lpBalances,
   });
   const run = useMutation({

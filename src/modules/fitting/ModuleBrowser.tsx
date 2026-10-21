@@ -8,7 +8,7 @@ import {
   type SkillSource,
   type SlotKind,
 } from "../../lib/api";
-import { sdeKeys } from "../../lib/queryKeys";
+import { fittingKeys, sdeKeys } from "../../lib/queryKeys";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import {
   SLOT_BADGE,
@@ -69,7 +69,7 @@ export function ModuleBrowser({
   // Slot + fitting cost of each result, to badge the slot and rank by what fits.
   const ids = useMemo(() => matches.map((r) => r.id), [matches]);
   const info = useQuery({
-    queryKey: ["fitting", "module-info", shipTypeId, skillSource, ids],
+    queryKey: fittingKeys.moduleInfo(shipTypeId, skillSource, ids),
     queryFn: () => fittingModuleInfo(shipTypeId!, skillSource, ids),
     enabled: ids.length > 0 && shipTypeId != null,
   });
@@ -233,13 +233,13 @@ export function BrowseTree({
   const [showAll, setShowAll] = useState(false);
   const parentId = path.length ? path[path.length - 1].id : null;
   const level = useQuery({
-    queryKey: ["fitting", "mg-tree", parentId],
+    queryKey: fittingKeys.mgTree(parentId),
     queryFn: () => sdeMarketGroupChildren(parentId),
   });
   const items = useMemo(() => level.data?.items ?? [], [level.data]);
   const ids = useMemo(() => items.map((i) => i.id), [items]);
   const info = useQuery({
-    queryKey: ["fitting", "module-info", shipTypeId, skillSource, ids],
+    queryKey: fittingKeys.moduleInfo(shipTypeId, skillSource, ids),
     queryFn: () => fittingModuleInfo(shipTypeId, skillSource, ids),
     enabled: ids.length > 0,
   });

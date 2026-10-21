@@ -10,6 +10,7 @@ import {
   type OrderRow,
   type ProfitBreakdown,
 } from "../../lib/api";
+import { authKeys, ordersKeys, productionKeys } from "../../lib/queryKeys";
 import { QueryResult } from "../../components/QueryResult";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
 import { formatInt, formatIsk } from "../../lib/format";
@@ -25,11 +26,11 @@ export function OrdersPage() {
   // the query key means switching characters refetches instead of rendering
   // the previous character's orders from cache.
   const active = useQuery({
-    queryKey: ["auth", "active"],
+    queryKey: authKeys.active,
     queryFn: activeCharacter,
   });
   const orders = useQuery({
-    queryKey: ["orders", "market", active.data ?? null],
+    queryKey: ordersKeys.market(active.data ?? null),
     queryFn: marketOrders,
   });
   const rows = useMemo(() => orders.data?.data ?? [], [orders.data]);
@@ -45,7 +46,7 @@ export function OrdersPage() {
   // Build cost per product from the Production engine — pulled only when the
   // user asks (it computes the whole manufacturable set). Cached for the session.
   const costs = useQuery({
-    queryKey: ["production", "buildCosts"],
+    queryKey: productionKeys.buildCosts,
     queryFn: async (): Promise<BuildCosts> => {
       // Price each order's build cost at *its own station* when that station has
       // a full market, else the order's region average (a Jita order → Jita, an

@@ -15,6 +15,7 @@ import {
   type ItemMutation,
   type ModuleState,
 } from "../../lib/api";
+import { fittingKeys } from "../../lib/queryKeys";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
 import type { FitStateSlice } from "./useFitCoreState";
 import { useState } from "react";
@@ -76,7 +77,7 @@ export function useFitCoreMutations(state: FitStateSlice): FitMutationsSlice {
     mutationFn: () => fittingSaveLocal(fit!),
     onSuccess: (id) => {
       setFit((f) => (f ? { ...f, id } : f));
-      qc.invalidateQueries({ queryKey: ["fitting", "saved"] });
+      qc.invalidateQueries({ queryKey: fittingKeys.saved });
     },
   });
   const exportEft = useMutation({

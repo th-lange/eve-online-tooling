@@ -9,6 +9,7 @@ import {
   type SlotKind,
   type WeaponRange,
 } from "../../lib/api";
+import { fittingKeys } from "../../lib/queryKeys";
 import type { FitStateSlice } from "./useFitCoreState";
 import type { FitContext } from "./fitHelpers";
 
@@ -44,7 +45,7 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
   } = state;
 
   const layout = useQuery({
-    queryKey: ["fitting", "layout", fit?.shipTypeId],
+    queryKey: fittingKeys.layout(fit?.shipTypeId),
     queryFn: fit ? () => fittingShipLayout(fit.shipTypeId) : undefined,
     enabled: fit != null,
   });
@@ -65,7 +66,7 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
     return [...s];
   }, [fit, fleetBoosts]);
   const names = useQuery({
-    queryKey: ["fitting", "names", itemIds],
+    queryKey: fittingKeys.names(itemIds),
     queryFn: () => sdeTypeNames(itemIds),
     enabled: itemIds.length > 0,
   });
@@ -77,9 +78,7 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
 
   const fitKey = useMemo(() => (fit ? JSON.stringify(fit) : ""), [fit]);
   const stats = useQuery({
-    queryKey: [
-      "fitting",
-      "simulate",
+    queryKey: fittingKeys.simulate(
       fitKey,
       skillSource,
       neutGjs,
@@ -89,7 +88,7 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
       abyssalWeather,
       spoolPct,
       factorReload,
-    ],
+    ),
     queryFn: fit
       ? () =>
           fittingSimulate(

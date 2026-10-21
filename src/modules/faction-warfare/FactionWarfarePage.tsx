@@ -25,6 +25,7 @@ import {
   type FwSystemNode,
   type HotspotSystemCounts,
 } from "../../lib/api";
+import { authKeys, intelKeys } from "../../lib/queryKeys";
 import { formatEveDateTime, formatInt, sortRows } from "../../lib/format";
 import {
   SystemGraph,
@@ -512,14 +513,14 @@ export function FactionWarfarePage() {
     false,
   );
   const stats = useQuery({
-    queryKey: ["intel", "fw"],
+    queryKey: intelKeys.fw,
     queryFn: intelFwStats,
     staleTime: 10 * 60_000,
     refetchInterval: active && autoRefresh ? 60_000 : false,
     refetchOnMount: autoRefresh ? "always" : true,
   });
   const map = useQuery({
-    queryKey: ["intel", "fwSystems"],
+    queryKey: intelKeys.fwSystems,
     queryFn: fwSystems,
     staleTime: 5 * 60_000,
     refetchInterval: active && autoRefresh ? 60_000 : false,
@@ -555,12 +556,12 @@ export function FactionWarfarePage() {
     null,
   );
   const characters = useQuery({
-    queryKey: ["auth", "characters"],
+    queryKey: authKeys.characters,
     queryFn: authCharacters,
   });
   const hasCharacter = (characters.data?.length ?? 0) > 0;
   const enlistment = useQuery({
-    queryKey: ["intel", "fw-enlistment"],
+    queryKey: intelKeys.fwEnlistment,
     queryFn: intelFwEnlistment,
     enabled: hasCharacter,
     staleTime: 10 * 60_000,
@@ -584,7 +585,7 @@ export function FactionWarfarePage() {
   // Personal FW stats card (#903): only fetched/shown once a militia is
   // actively selected — Observer mode has no "me" to report on.
   const personalStats = useQuery({
-    queryKey: ["intel", "fw-personal-stats"],
+    queryKey: intelKeys.fwPersonalStats,
     queryFn: intelFwPersonalStats,
     enabled: hasCharacter && perspective != null,
     staleTime: 10 * 60_000,
@@ -850,12 +851,12 @@ function Warzone({
 
   // Auth: needed for jump distances + waypoint button in the table.
   const characters = useQuery({
-    queryKey: ["auth", "characters"],
+    queryKey: authKeys.characters,
     queryFn: authCharacters,
   });
   const hasCharacter = (characters.data?.length ?? 0) > 0;
   const activeChar = useQuery({
-    queryKey: ["auth", "active"],
+    queryKey: authKeys.active,
     queryFn: activeCharacter,
     enabled: hasCharacter,
   });
@@ -866,7 +867,7 @@ function Warzone({
   const moduleActive = useContext(ModuleActiveContext);
   const systemIds = useMemo(() => systems.map((s) => s.systemId), [systems]);
   const jumpResult = useQuery<FwJumpResult>({
-    queryKey: ["intel", "fw-jumps", systemIds],
+    queryKey: intelKeys.fwJumps(systemIds),
     queryFn: () => intelFwJumps(systemIds),
     enabled: !!activeChar.data,
     staleTime: FACTION_WARFARE_JUMP_DISTANCE_REFRESH_MS,
@@ -934,12 +935,10 @@ function Warzone({
   // Refresh cadence follows the page-level `autoRefresh` toggle — same
   // lifecycle reasoning as the stats/map queries above it.
   const hotspots = useQuery({
-    queryKey: [
-      "intel",
-      "fw-hotspots",
+    queryKey: intelKeys.fwHotspots(
       perspective?.myFaction,
       perspective?.enemyFaction,
-    ],
+    ),
     queryFn: () =>
       intelFwHotspots(perspective!.myFaction, perspective!.enemyFaction),
     enabled: !!perspective,

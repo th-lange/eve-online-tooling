@@ -5,6 +5,7 @@ import {
   systemSearch,
   type SystemMatch,
 } from "../../lib/api";
+import { productionKeys } from "../../lib/queryKeys";
 import { Combo } from "../../components/Combo";
 import { Field } from "../../components/forms";
 
@@ -19,7 +20,7 @@ export function CostIndexField({
 }) {
   const [picked, setPicked] = useState<SystemMatch | null>(null);
   const idx = useQuery({
-    queryKey: ["production", "costIndex", picked?.id],
+    queryKey: productionKeys.costIndex(picked?.id),
     queryFn: picked ? () => productionSystemCostIndex(picked.id) : undefined,
     enabled: picked != null,
     staleTime: 60 * 60 * 1000,

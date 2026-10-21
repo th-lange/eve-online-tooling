@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
+import { comboKeys } from "../lib/queryKeys";
 
 /** A searchable combobox over an SDE/region/system search command, clearable.
  * The typed query is debounced before it reaches the search call, so fast
@@ -36,7 +37,9 @@ export function Combo<T extends { id: number; name: string }>({
   const [text, setText] = useState("");
   const debouncedText = useDebouncedValue(text, 200);
   const results = useQuery({
-    queryKey: (queryKey ?? ((t) => ["combo", label ?? "", t]))(debouncedText),
+    queryKey: (queryKey ?? ((t) => comboKeys.default(label ?? "", t)))(
+      debouncedText,
+    ),
     queryFn: () => search(debouncedText),
     enabled: debouncedText.trim().length >= 2 && value == null,
     staleTime,

@@ -8,7 +8,7 @@ import {
   type AssetNode,
   type AssetRow,
 } from "../../lib/api";
-import { assetsKeys } from "../../lib/queryKeys";
+import { assetsKeys, authKeys } from "../../lib/queryKeys";
 import { formatInt, formatIsk, sortRows } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import {
@@ -65,7 +65,7 @@ function Workbench() {
   // character changes. Guard on the previous value so unrelated re-renders
   // don't trigger a reload.
   const active = useQuery({
-    queryKey: ["auth", "active"],
+    queryKey: authKeys.active,
     queryFn: activeCharacter,
   });
   const prevActive = useRef<number | null | undefined>(undefined);
@@ -80,12 +80,12 @@ function Workbench() {
   }, [active.data, assetsQuery]);
 
   const chars = useQuery({
-    queryKey: ["auth", "characters"],
+    queryKey: authKeys.characters,
     queryFn: authCharacters,
   });
   const login = useMutation({
     mutationFn: authLogin,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["auth"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: authKeys.all }),
   });
 
   // ── Flat view ────────────────────────────────────────────────────────────

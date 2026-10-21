@@ -8,6 +8,7 @@ import {
   type SystemGraphNode,
 } from "../../components/SystemGraph";
 import { pochvenMap, type ExitTarget } from "../../lib/api";
+import { pochvenKeys } from "../../lib/queryKeys";
 import {
   POCHVEN_INTERNAL_LINKS,
   POCHVEN_META,
@@ -79,7 +80,7 @@ export function PochvenSystemsPopover() {
   // nearest to, evenly spaced along that line. Falls back to a schematic
   // triangle while the SDE data loads.
   const topo = useQuery({
-    queryKey: ["pochven", "map"],
+    queryKey: pochvenKeys.map,
     queryFn: pochvenMap,
     staleTime: POCHVEN_SYSTEMS_MAP_STALE_TIME_MS,
     enabled: open,

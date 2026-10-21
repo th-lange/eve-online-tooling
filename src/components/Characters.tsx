@@ -9,6 +9,18 @@ import {
   errorMessage,
   setActiveCharacter,
 } from "../lib/api";
+import {
+  authKeys,
+  ownedKeys,
+  transactionsKeys,
+  ordersKeys,
+  notificationsKeys,
+  piKeys,
+  charKeys,
+  characterKeys,
+  industryKeys,
+  esiKeys,
+} from "../lib/queryKeys";
 
 // Logged-in EVE characters. The active character (the default used by every
 // per-character feature) is picked from a dropdown selector; Add opens the
@@ -27,16 +39,16 @@ import {
 // sweep is the safety net for the rest (and for anything added later
 // without a character id in its key).
 const PER_CHARACTER_QUERY_ROOTS = [
-  ["auth"], // characters, active
-  ["owned"], // roster-wide Owned filter
-  ["transactions"], // wallet transaction ledger
-  ["orders"], // personal market orders
-  ["notifications"],
-  ["pi"], // PI colonies overview
-  ["char"], // skills, standings, research, mining, fleet
-  ["character"], // trade fees (broker/sales tax)
-  ["industry"], // industry jobs
-  ["esi"], // active character's current ship
+  authKeys.all, // characters, active
+  ownedKeys.all, // roster-wide Owned filter
+  transactionsKeys.all, // wallet transaction ledger
+  ordersKeys.all, // personal market orders
+  notificationsKeys.all,
+  piKeys.all, // PI colonies overview
+  charKeys.all, // skills, standings, research, mining, fleet
+  characterKeys.all, // trade fees (broker/sales tax)
+  industryKeys.all, // industry jobs
+  esiKeys.all, // active character's current ship
 ];
 
 export function Characters() {
@@ -48,11 +60,11 @@ export function Characters() {
   };
 
   const chars = useQuery({
-    queryKey: ["auth", "characters"],
+    queryKey: authKeys.characters,
     queryFn: authCharacters,
   });
   const active = useQuery({
-    queryKey: ["auth", "active"],
+    queryKey: authKeys.active,
     queryFn: activeCharacter,
   });
   const login = useMutation({ mutationFn: authLogin, onSuccess: invalidate });

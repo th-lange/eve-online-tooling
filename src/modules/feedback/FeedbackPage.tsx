@@ -24,6 +24,7 @@ import {
   type FeedbackKind,
 } from "../../lib/api";
 import { Page, PageHeader } from "../../components/page";
+import { authKeys, feedbackKeys } from "../../lib/queryKeys";
 import { MODULE_METADATA } from "../registry-data";
 
 const GENERAL = "general";
@@ -133,15 +134,15 @@ export function FeedbackPage() {
   const [sent, setSent] = useState<FeedbackEntry | null>(null);
 
   const status = useQuery({
-    queryKey: ["feedback", "status"],
+    queryKey: feedbackKeys.status,
     queryFn: feedbackStatus,
   });
   const characters = useQuery({
-    queryKey: ["auth", "characters"],
+    queryKey: authKeys.characters,
     queryFn: authCharacters,
   });
   const activeChar = useQuery({
-    queryKey: ["auth", "active"],
+    queryKey: authKeys.active,
     queryFn: activeCharacter,
   });
 
@@ -161,7 +162,7 @@ export function FeedbackPage() {
   };
 
   const history = useQuery({
-    queryKey: ["feedback", "history"],
+    queryKey: feedbackKeys.history,
     queryFn: feedbackHistory,
     enabled: status.isSuccess,
   });
@@ -173,7 +174,7 @@ export function FeedbackPage() {
   // #951). Fires once per mount, only on a build that can send at all.
   const retryPending = useMutation({
     mutationFn: feedbackRetryPending,
-    onSuccess: (entries) => qc.setQueryData(["feedback", "history"], entries),
+    onSuccess: (entries) => qc.setQueryData(feedbackKeys.history, entries),
   });
   const retriedRef = useRef(false);
   useEffect(() => {
@@ -188,7 +189,7 @@ export function FeedbackPage() {
   // backend rather than being reassembled here, so it can't drift from what is
   // actually sent.
   const preview = useQuery({
-    queryKey: ["feedback", "preview", draft],
+    queryKey: feedbackKeys.preview(draft),
     queryFn: () => feedbackPreview(draft),
     enabled: showPayload,
   });
@@ -201,7 +202,7 @@ export function FeedbackPage() {
       setBody("");
       setSubject("");
       setRating(0);
-      qc.invalidateQueries({ queryKey: ["feedback"] });
+      qc.invalidateQueries({ queryKey: feedbackKeys.all });
     },
     onError: (e) => {
       setSent(null);
@@ -211,7 +212,7 @@ export function FeedbackPage() {
 
   const forget = useMutation({
     mutationFn: feedbackForget,
-    onSuccess: (entries) => qc.setQueryData(["feedback", "history"], entries),
+    onSuccess: (entries) => qc.setQueryData(feedbackKeys.history, entries),
   });
 
   const activeKind = KINDS.find((k) => k.id === kind)!;

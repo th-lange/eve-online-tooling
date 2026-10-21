@@ -9,6 +9,7 @@ import {
   type JobRow,
   type Slot,
 } from "../../lib/api";
+import { authKeys, industryKeys } from "../../lib/queryKeys";
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { formatEveDateTime, formatInt, formatIsk } from "../../lib/format";
 import { DataAge } from "../../components/DataAge";
@@ -51,15 +52,15 @@ function withinPeriod(endDate: string, period: Period, now: number): boolean {
 export function IndustryJobsPage() {
   const [characterId, setCharacterId] = useState<number | undefined>(undefined);
   const characters = useQuery({
-    queryKey: ["auth", "characters"],
+    queryKey: authKeys.characters,
     queryFn: authCharacters,
   });
   const activeChar = useQuery({
-    queryKey: ["auth", "active"],
+    queryKey: authKeys.active,
     queryFn: activeCharacter,
   });
   const jobs = useQuery({
-    queryKey: ["industry", "jobs", characterId ?? "first"],
+    queryKey: industryKeys.jobs(characterId ?? "first"),
     queryFn: () => industryJobs(characterId),
   });
   // Memoised so downstream useMemo deps stay referentially stable while loading.

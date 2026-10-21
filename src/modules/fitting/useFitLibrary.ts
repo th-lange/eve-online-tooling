@@ -6,6 +6,7 @@ import {
   sdeTypeInfos,
   type Fit,
 } from "../../lib/api";
+import { fittingKeys } from "../../lib/queryKeys";
 
 /**
  * The data layer behind the fit picker: merges saved (local) + in-game (ESI)
@@ -15,19 +16,19 @@ import {
 export function useFitLibrary() {
   const qc = useQueryClient();
   const saved = useQuery({
-    queryKey: ["fitting", "saved"],
+    queryKey: fittingKeys.saved,
     queryFn: fittingListLocal,
   });
   // In-game (ESI) fittings — fetched on demand (cached server-side), not on mount.
   // Auto-load in-game fits (cached server-side 30m); "Refresh" forces a fetch.
   const esiFits = useQuery({
-    queryKey: ["fitting", "esi"],
+    queryKey: fittingKeys.esi,
     queryFn: () => fittingEsiList(),
   });
   // Force-refresh in-game fits past the server cache and update the query.
   const refreshEsi = useMutation({
     mutationFn: () => fittingEsiList(true),
-    onSuccess: (fits) => qc.setQueryData(["fitting", "esi"], fits),
+    onSuccess: (fits) => qc.setQueryData(fittingKeys.esi, fits),
   });
 
   // All fits (local + in-game), each tagged with its source.
@@ -49,7 +50,7 @@ export function useFitLibrary() {
     [allFits],
   );
   const hulls = useQuery({
-    queryKey: ["fitting", "hullInfos", hullIds],
+    queryKey: fittingKeys.hullInfos(hullIds),
     queryFn: () => sdeTypeInfos(hullIds),
     enabled: hullIds.length > 0,
   });

@@ -4,6 +4,7 @@ import {
   fittingEsiPush,
   fittingPrice,
 } from "../../lib/api";
+import { fittingKeys } from "../../lib/queryKeys";
 import { useFitState } from "./useFitEditorContext";
 
 /**
@@ -22,12 +23,12 @@ export function useFitPageMutations(regionId: number) {
   });
   const del = useMutation({
     mutationFn: (id: string) => fittingDeleteLocal(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["fitting", "saved"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: fittingKeys.saved }),
   });
   // Save the current fit to the active character's in-game fittings via ESI.
   const pushEsi = useMutation({
     mutationFn: () => fittingEsiPush(fit!),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["fitting", "esi"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: fittingKeys.esi }),
     onError: (e) => console.error("Couldn't save to EVE", e),
   });
 

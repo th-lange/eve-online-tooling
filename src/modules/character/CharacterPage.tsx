@@ -8,6 +8,7 @@ import {
   characterSkills,
   characterStandings,
 } from "../../lib/api";
+import { authKeys, charKeys } from "../../lib/queryKeys";
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { DataAge } from "../../components/DataAge";
 import { formatInt, formatIsk } from "../../lib/format";
@@ -28,7 +29,7 @@ export function CharacterPage() {
   // characters refetches (loading state) instead of rendering the previous
   // character's data from cache.
   const active = useQuery({
-    queryKey: ["auth", "active"],
+    queryKey: authKeys.active,
     queryFn: activeCharacter,
   });
   const activeId = active.data ?? null;
@@ -49,7 +50,7 @@ export function CharacterPage() {
 
 function Skills({ activeId }: { activeId: number | null }) {
   const q = useQuery({
-    queryKey: ["char", "skills", activeId],
+    queryKey: charKeys.skills(activeId),
     queryFn: characterSkills,
   });
   if (q.isError)
@@ -115,7 +116,7 @@ function Skills({ activeId }: { activeId: number | null }) {
 
 function Standings({ activeId }: { activeId: number | null }) {
   const q = useQuery({
-    queryKey: ["char", "standings", activeId],
+    queryKey: charKeys.standings(activeId),
     queryFn: characterStandings,
   });
   if (q.isError)
@@ -173,7 +174,7 @@ function Standings({ activeId }: { activeId: number | null }) {
 
 function Research({ activeId }: { activeId: number | null }) {
   const q = useQuery({
-    queryKey: ["char", "research", activeId],
+    queryKey: charKeys.research(activeId),
     queryFn: characterResearch,
   });
   if (q.isError)
@@ -232,7 +233,7 @@ function Research({ activeId }: { activeId: number | null }) {
 
 function Mining({ activeId }: { activeId: number | null }) {
   const q = useQuery({
-    queryKey: ["char", "mining", activeId],
+    queryKey: charKeys.mining(activeId),
     queryFn: characterMining,
   });
   if (q.isError)
@@ -297,7 +298,7 @@ function Mining({ activeId }: { activeId: number | null }) {
 
 function Fleet({ activeId }: { activeId: number | null }) {
   const q = useQuery({
-    queryKey: ["char", "fleet", activeId],
+    queryKey: charKeys.fleet(activeId),
     queryFn: characterFleet,
   });
   if (q.isError)

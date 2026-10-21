@@ -7,7 +7,7 @@ import {
   type ReprocessParams,
   type ReprocessRow,
 } from "../../lib/api";
-import { marketKeys } from "../../lib/queryKeys";
+import { marketKeys, reprocessingKeys } from "../../lib/queryKeys";
 import {
   RegionSelect,
   StationSelect,
@@ -77,9 +77,7 @@ function Workbench() {
 
   const regions = useQuery(marketKeys.regions());
   const eff = useQuery({
-    queryKey: [
-      "reprocessing",
-      "eff",
+    queryKey: reprocessingKeys.eff(
       reproc,
       reprocEff,
       oreProc,
@@ -87,7 +85,7 @@ function Workbench() {
       rigBonusPct,
       structureMult,
       securityMult,
-    ],
+    ),
     queryFn: () => reprocessingEfficiency(params),
   });
   const { favorites, blacklist, toggleFavorite, blacklistRow, remove } =

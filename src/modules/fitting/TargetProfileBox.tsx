@@ -8,6 +8,7 @@ import {
   type NpcProfile,
   type TargetProfile,
 } from "../../lib/api";
+import { fittingKeys } from "../../lib/queryKeys";
 import { useFitState } from "./useFitEditorContext";
 
 /** Generic hull-class presets: a starting point for a target with no
@@ -93,7 +94,7 @@ export function TargetProfileBox() {
   const { targetProfile: value, setTargetProfile: onChange } = useFitState();
   const queryClient = useQueryClient();
   const library = useQuery({
-    queryKey: ["fitting", "targetProfiles"],
+    queryKey: fittingKeys.targetProfiles,
     queryFn: fittingTargetProfiles,
   });
   const [open, setOpen] = useState(false);
@@ -144,7 +145,7 @@ export function TargetProfileBox() {
   async function removeCustom(id: string) {
     await fittingDeleteTargetProfile(id);
     await queryClient.invalidateQueries({
-      queryKey: ["fitting", "targetProfiles"],
+      queryKey: fittingKeys.targetProfiles,
     });
   }
   async function saveCurrent() {
@@ -161,7 +162,7 @@ export function TargetProfileBox() {
     });
     setSaveName(null);
     await queryClient.invalidateQueries({
-      queryKey: ["fitting", "targetProfiles"],
+      queryKey: fittingKeys.targetProfiles,
     });
   }
 

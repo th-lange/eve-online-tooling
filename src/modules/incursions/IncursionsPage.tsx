@@ -5,6 +5,7 @@ import {
   type IncursionRow,
 } from "../../lib/api";
 import { Page, PageHeader } from "../../components/page";
+import { intelKeys } from "../../lib/queryKeys";
 
 const STATE_STYLE: Record<string, string> = {
   established: "bg-emerald-500/15 text-emerald-300",
@@ -15,7 +16,7 @@ const STATE_STYLE: Record<string, string> = {
 // Active Sansha incursions — public data, no login required.
 export function IncursionsPage() {
   const q = useQuery({
-    queryKey: ["intel", "incursions"],
+    queryKey: intelKeys.incursions,
     queryFn: intelIncursions,
     staleTime: 5 * 60_000,
   });

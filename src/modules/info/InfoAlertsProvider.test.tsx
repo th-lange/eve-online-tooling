@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { InfoAlertsProvider } from "./InfoAlertsProvider";
 import { useInfoAlerts } from "./infoContext";
 import type { InfoEntry } from "../../lib/api";
+import { infoKeys } from "../../lib/queryKeys";
 
 const invokeMock = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
@@ -50,7 +51,7 @@ describe("InfoAlertsProvider", () => {
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     });
     // Newest first: one alarm + one message -> unseen alarms = 1.
-    qc.setQueryData<InfoEntry[]>(["info"], [MESSAGE, ALARM]);
+    qc.setQueryData<InfoEntry[]>(infoKeys.all, [MESSAGE, ALARM]);
 
     render(
       <QueryClientProvider client={qc}>
@@ -75,7 +76,7 @@ describe("InfoAlertsProvider", () => {
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     });
-    qc.setQueryData<InfoEntry[]>(["info"], []);
+    qc.setQueryData<InfoEntry[]>(infoKeys.all, []);
 
     render(
       <QueryClientProvider client={qc}>

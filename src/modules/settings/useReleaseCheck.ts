@@ -3,6 +3,7 @@ import { releaseCheckLatest } from "../../lib/api/release";
 import { usePersistentState } from "../../lib/usePersistentState";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { RELEASE_CHECK_STALE_TIME_MS } from "../../lib/refreshIntervals";
+import { releaseCheckKeys } from "../../lib/queryKeys";
 
 /**
  * Whether to check for a newer release on startup. Default **on** — this is
@@ -25,7 +26,7 @@ export function useCheckForUpdatesEnabled() {
  */
 export function useReleaseCheck(enabled: boolean) {
   return useQuery({
-    queryKey: ["release-check"],
+    queryKey: releaseCheckKeys.all,
     queryFn: releaseCheckLatest,
     enabled,
     staleTime: RELEASE_CHECK_STALE_TIME_MS,

@@ -10,6 +10,7 @@ import {
 } from "../../lib/api";
 import { Field } from "../../components/forms";
 import { SystemPicker } from "./shared";
+import { whKeys } from "../../lib/queryKeys";
 
 /** Stored signatures for the selected system (loaded on selection, so a
  * chain-node click shows previous scans immediately), plus the paste flow:
@@ -36,7 +37,7 @@ export function Signatures({
   } | null>(null);
 
   const stored = useQuery({
-    queryKey: ["wh", "signatures", system?.id ?? null],
+    queryKey: whKeys.signatures(system?.id ?? null),
     queryFn: () => whSignatures(system!.id),
     enabled: !!system,
   });
@@ -49,7 +50,7 @@ export function Signatures({
       setText("");
       setLastScan({ systemId: system!.id, scan });
       // The paste response *is* the new stored set — no refetch needed.
-      qc.setQueryData(["wh", "signatures", system!.id], scan.signatures);
+      qc.setQueryData(whKeys.signatures(system!.id), scan.signatures);
     },
   });
 

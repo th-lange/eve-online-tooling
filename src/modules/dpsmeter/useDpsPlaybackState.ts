@@ -25,6 +25,7 @@ import {
   type DpsLogSummary,
 } from "../../lib/api";
 import { mergeListenerCharacters } from "../../lib/listenerCharacters";
+import { authKeys } from "../../lib/queryKeys";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { useEveLogDir } from "../../lib/useEveLogDir";
 import { usePersistentState } from "../../lib/usePersistentState";
@@ -63,7 +64,7 @@ export function useDpsPlaybackState() {
   );
   const [logCharacters, setCharacters] = useState<string[]>([]);
   const roster = useQuery({
-    queryKey: ["auth", "characters"],
+    queryKey: authKeys.characters,
     queryFn: authCharacters,
   });
   const characters = useMemo(

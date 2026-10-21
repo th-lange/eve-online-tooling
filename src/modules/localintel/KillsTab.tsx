@@ -7,6 +7,7 @@ import {
   onZkillKill,
   type SystemKill,
 } from "../../lib/api";
+import { localintelKeys } from "../../lib/queryKeys";
 import { formatIsk } from "../../lib/format";
 import { useZkillStreamLease } from "../../lib/useZkillStream";
 import { matchesScannedSystem, shouldNotifyLiveWatch } from "./liveWatch";
@@ -159,7 +160,7 @@ export function KillsTab({
   const [autoRefresh, setAutoRefresh] = useState(false);
 
   const kills = useQuery({
-    queryKey: ["localintel", "system-kills", systemId],
+    queryKey: localintelKeys.systemKills(systemId),
     queryFn: () => localintelSystemKills(systemId!),
     enabled: systemId != null && active,
     staleTime: 30_000,
