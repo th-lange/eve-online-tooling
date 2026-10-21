@@ -898,12 +898,19 @@ function GroupSection({
 
   // Blank location (default): the full needed quantity, unchanged. A picked
   // location subtracts what the roster already has stocked there, so the
-  // table and the Multibuy/save actions below only reflect what's still
-  // actually needed.
+  // Multibuy/save actions below only reflect what's still actually needed.
+  // `required`/`owned` stay on each row so the table can show the full
+  // accounting — a fully covered material reads "have ≥ need", not as a
+  // silently vanished row.
   const items = group.items.map((it) => {
-    if (locationId === "") return it;
+    if (locationId === "") return { ...it, required: it.quantity, owned: 0 };
     const owned = ownedIndex.get(`${it.typeId}:${locationId}`) ?? 0;
-    return { ...it, quantity: Math.max(0, it.quantity - owned) };
+    return {
+      ...it,
+      required: it.quantity,
+      owned,
+      quantity: Math.max(0, it.quantity - owned),
+    };
   });
   const stillNeeded = items.filter((it) => it.quantity > 0);
   const multibuy = stillNeeded
@@ -971,13 +978,31 @@ function GroupSection({
           <thead className="text-zinc-500">
             <tr>
               <th className="px-3 py-1 text-left font-normal">Item</th>
-              <th className="px-3 py-1 text-right font-normal">Quantity</th>
+              {locationId === "" ? (
+                <th className="px-3 py-1 text-right font-normal">Quantity</th>
+              ) : (
+                <>
+                  <th className="px-3 py-1 text-right font-normal">Need</th>
+                  <th className="px-3 py-1 text-right font-normal">Have</th>
+                  <th className="px-3 py-1 text-right font-normal">To buy</th>
+                </>
+              )}
             </tr>
           </thead>
           <tbody>
             {items.map((it) => (
               <tr key={it.typeId} className="border-t border-zinc-800/60">
                 <td className="px-3 py-1 text-zinc-200">{it.name}</td>
+                {locationId !== "" && (
+                  <>
+                    <td className="px-3 py-1 text-right text-zinc-300">
+                      {formatInt(it.required)}
+                    </td>
+                    <td className="px-3 py-1 text-right text-zinc-300">
+                      {formatInt(it.owned)}
+                    </td>
+                  </>
+                )}
                 <td
                   className={`px-3 py-1 text-right ${
                     it.quantity === 0 && locationId !== ""

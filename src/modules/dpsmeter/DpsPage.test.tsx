@@ -105,6 +105,7 @@ const SUMMARY: DpsLogSummary = {
 
 function renderInPlayback() {
   mockInvoke({
+    auth_characters: () => [],
     dps_list_logs: () => LOGS,
     dps_log_summary: () => SUMMARY,
     dps_playback: () => undefined,
@@ -234,6 +235,7 @@ describe("DpsPage — playback timeline", () => {
     try {
       let size = 100;
       mockInvoke({
+        auth_characters: () => [],
         dps_list_logs: () => LOGS,
         dps_log_summary: () => SUMMARY,
         dps_log_stat: () => size,
@@ -267,7 +269,7 @@ describe("DpsPage — playback timeline", () => {
 
 describe("DpsPage — combat log", () => {
   it("renders the log lines carried inside a dps://buckets payload", async () => {
-    mockInvoke({});
+    mockInvoke({ auth_characters: () => [] });
     renderWithQuery(<DpsPage />);
 
     // The subscription is live as soon as the page mounts — no Start needed.
@@ -307,7 +309,7 @@ describe("DpsPage — combat log", () => {
 
 describe("DpsPage — 5s bucket time grid (#983)", () => {
   it("renders buckets pushed over dps://buckets on the fixed time grid", async () => {
-    mockInvoke({});
+    mockInvoke({ auth_characters: () => [] });
     renderWithQuery(<DpsPage />);
 
     await waitFor(() => expect(bucketsHandler).toBeDefined());
@@ -327,5 +329,31 @@ describe("DpsPage — 5s bucket time grid (#983)", () => {
     // and the out chart's peak reads the bucket rate (100 hp / 5 s = 20/s).
     expect(screen.getAllByText(/5s grid/).length).toBe(2);
     expect(screen.getByText("peak 20")).toBeInTheDocument();
+  });
+});
+
+describe("DpsPage — character picker (#1047)", () => {
+  it("lists logged-in roster names when no gamelog is recent, plus gamelog-only alts", async () => {
+    mockInvoke({
+      auth_characters: () => [{ characterId: 1, name: "Alpha", scopes: [] }],
+      dps_list_characters: () => ["Unlogged Alt"],
+      eve_default_log_dir: () => "",
+    });
+    localStorage.setItem("eveGamelogsDir", "/EVE/logs/Gamelogs");
+    renderWithQuery(<DpsPage />);
+
+    expect(await screen.findByRole("option", { name: "Alpha" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "Unlogged Alt" })).toBeVisible();
+  });
+
+  it("still offers the roster when the gamelogs folder has no logs", async () => {
+    mockInvoke({
+      auth_characters: () => [{ characterId: 1, name: "Alpha", scopes: [] }],
+      dps_list_characters: () => [],
+      eve_default_log_dir: () => "",
+    });
+    renderWithQuery(<DpsPage />);
+
+    expect(await screen.findByRole("option", { name: "Alpha" })).toBeVisible();
   });
 });

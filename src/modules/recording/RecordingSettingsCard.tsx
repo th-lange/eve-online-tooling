@@ -1,14 +1,16 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   errorMessage,
   obsTestConnection,
+  authCharacters,
   dpsListCharacters,
 } from "../../lib/api";
 import { useEveLogDir } from "../../lib/useEveLogDir";
+import { mergeListenerCharacters } from "../../lib/listenerCharacters";
 import { RECORDING_CHARACTERS_STALE_TIME_MS } from "../../lib/refreshIntervals";
-import { dpsKeys } from "../../lib/queryKeys";
+import { authKeys, dpsKeys } from "../../lib/queryKeys";
 import { useRecording } from "./recordingContext";
 
 /** One-time external setup the app cannot do for the user — linked from the
@@ -47,14 +49,24 @@ export function RecordingSettingsCard() {
     }
   }
 
-  // Known characters from the gamelogs folder, for the filter's datalist.
+  // Characters for the filter's dropdown: gamelog `Listener:` names (last
+  // 24h, covers alts never logged into the app) plus the logged-in roster, so
+  // the list isn't empty when no recent logs exist (#1047).
   const [gamelogsDir] = useEveLogDir("gamelogs");
-  const characters = useQuery({
+  const gamelogCharacters = useQuery({
     queryKey: dpsKeys.characters(gamelogsDir),
     queryFn: () => dpsListCharacters(gamelogsDir),
     enabled: gamelogsDir !== "",
     staleTime: RECORDING_CHARACTERS_STALE_TIME_MS,
   });
+  const roster = useQuery({
+    queryKey: authKeys.characters,
+    queryFn: authCharacters,
+  });
+  const characterNames = useMemo(
+    () => mergeListenerCharacters(gamelogCharacters.data, roster.data),
+    [gamelogCharacters.data, roster.data],
+  );
 
   return (
     <div className="p-4">
@@ -115,13 +127,13 @@ export function RecordingSettingsCard() {
               aria-label="Only for character"
             >
               <option value="">any character</option>
-              {(characters.data ?? []).map((name) => (
+              {characterNames.map((name) => (
                 <option key={name} value={name}>
                   {name}
                 </option>
               ))}
               {recording.character &&
-                !(characters.data ?? []).includes(recording.character) && (
+                !characterNames.includes(recording.character) && (
                   // A previously saved choice whose logs aged out of the
                   // folder — keep it selectable instead of silently dropping.
                   <option value={recording.character}>
@@ -131,7 +143,7 @@ export function RecordingSettingsCard() {
             </select>
             <span className="text-xs text-zinc-600">
               record only this character's fights (multi-boxing) — characters
-              read from your gamelogs folder
+              read from the logged-in roster and your gamelogs folder
             </span>
           </label>
           <div className="mt-1 border-t border-zinc-800 pt-3">

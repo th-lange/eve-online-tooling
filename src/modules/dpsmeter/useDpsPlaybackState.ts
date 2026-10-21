@@ -1,6 +1,8 @@
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ModuleActiveContext } from "../../components/moduleActiveContext";
 import {
+  authCharacters,
   dpsListCharacters,
   dpsListLogs,
   dpsLogSummary,
@@ -22,6 +24,8 @@ import {
   type DpsLogFile,
   type DpsLogSummary,
 } from "../../lib/api";
+import { mergeListenerCharacters } from "../../lib/listenerCharacters";
+import { authKeys } from "../../lib/queryKeys";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { useEveLogDir } from "../../lib/useEveLogDir";
 import { usePersistentState } from "../../lib/usePersistentState";
@@ -50,13 +54,23 @@ export function useDpsPlaybackState() {
   );
   // Selected character to follow (#870): persisted like the gamelogs
   // folder/overview export. Empty string = no selection, the unchanged
-  // newest-file behavior. `characters` is the last-fetched distinct-character
-  // listing (last 24h) the dropdown renders from.
+  // newest-file behavior. `logCharacters` is the last-fetched distinct
+  // listing from recent gamelogs (last 24h); the dropdown renders that merged
+  // with the logged-in roster (#1047) so it is never empty for a logged-in
+  // user just because no log is recent.
   const [character, setCharacter] = usePersistentState<string>(
     STORAGE_KEYS.dpsCharacter,
     "",
   );
-  const [characters, setCharacters] = useState<string[]>([]);
+  const [logCharacters, setCharacters] = useState<string[]>([]);
+  const roster = useQuery({
+    queryKey: authKeys.characters,
+    queryFn: authCharacters,
+  });
+  const characters = useMemo(
+    () => mergeListenerCharacters(logCharacters, roster.data),
+    [logCharacters, roster.data],
+  );
   const [extractionPlan, setExtractionPlan] =
     useState<DpsExtractionPlan | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
