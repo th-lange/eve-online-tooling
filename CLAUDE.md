@@ -160,9 +160,9 @@ code comments, and docs — never use one where another is meant:
 - Sortable tables use `components/DataTable.tsx` (`SortColumn<K>` type + sticky, tooltip'd header
   + generic row rendering + `EmptyState` slot, extracted in #839 from Production/Orders/Trading).
   New sortable tables MUST build on `DataTable`, not a bespoke `<table>`/`<thead>` shell; every
-  column needs a `description` (rendered as both a tooltip and an inline info marker). Remaining
-  pre-#839 tables (Accounting, Assets, Appraisal, Market Search, Exploration, Contracts, …) still
-  use the lower-level `SortHeaderCell` directly — migrate them to `DataTable` opportunistically.
+  column needs a `description` (rendered as both a tooltip and an inline info marker). All
+  pre-#839 tables have since migrated (#1046) — every sortable table in the app goes through
+  `DataTable`; `SortHeaderCell` is now an internal implementation detail of `DataTable` itself.
 - Never signal state (profit/loss, stability, danger level) with color alone — pair it with an
   explicit sign (`+`/`−`), icon, or text label so the meaning survives grayscale rendering and
   reaches screen readers (#848). `lib/format.ts` has `formatSignedIsk`/`formatSignedPercent` for

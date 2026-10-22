@@ -15,10 +15,9 @@ import {
   sortRows,
 } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
-import {
-  SortHeaderCell,
-  type SortColumn,
-} from "../../components/SortHeaderCell";
+import { DataTable } from "../../components/DataTable";
+import { EmptyState } from "../../components/EmptyState";
+import type { SortColumn } from "../../components/SortHeaderCell";
 import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { Field } from "../../components/forms";
 import { SdeGate } from "../../components/SdeGate";
@@ -180,72 +179,57 @@ function ContractTable({ rows }: { rows: ContractRow[] }) {
   );
   const sorted = sortRows(rows, sortKey, sortDir);
   return (
-    <div className="mt-4 overflow-auto rounded border border-zinc-800">
-      <table className="w-full border-collapse text-sm">
-        <thead className="bg-zinc-900 text-zinc-400">
-          <tr>
-            {CONTRACT_COLUMNS.map((c) => (
-              <SortHeaderCell
-                key={c.key}
-                column={c}
-                active={sortKey === c.key}
-                dir={sortDir}
-                onClick={toggleSort}
-              />
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((r) => (
-            <tr
-              key={r.contractId}
-              className="border-t border-zinc-800 text-zinc-300"
-            >
-              <td className="px-3 py-1.5">
-                {r.title}
-                <span className="ml-1 text-xs text-zinc-500">
-                  · {r.itemCount} item(s)
-                </span>
-                {r.hasBpc && (
-                  <span
-                    className="ml-1 text-amber-400"
-                    title="Contains a BPC — value understated"
-                  >
-                    ⚠
-                  </span>
-                )}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {formatIsk(r.price)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
-                {formatIsk(r.contentsValue)}
-              </td>
-              <td
-                className={`px-3 py-1.5 text-right tabular-nums ${
-                  r.profit >= 0 ? "text-emerald-400" : "text-rose-400"
-                }`}
+    <DataTable
+      className="mt-4 overflow-auto rounded border border-zinc-800"
+      columns={CONTRACT_COLUMNS}
+      sortKey={sortKey}
+      sortDir={sortDir}
+      onSort={toggleSort}
+      rows={sorted}
+      emptyState={
+        <EmptyState title="Scan a region for profitable contracts." />
+      }
+      renderRow={(r) => (
+        <tr
+          key={r.contractId}
+          className="border-t border-zinc-800 text-zinc-300"
+        >
+          <td className="px-3 py-1.5">
+            {r.title}
+            <span className="ml-1 text-xs text-zinc-500">
+              · {r.itemCount} item(s)
+            </span>
+            {r.hasBpc && (
+              <span
+                className="ml-1 text-amber-400"
+                title="Contains a BPC — value understated"
               >
-                {formatIsk(r.profit)}
-              </td>
-              <td
-                className={`px-3 py-1.5 text-right tabular-nums ${
-                  r.roi >= 0 ? "text-emerald-400" : "text-rose-400"
-                }`}
-              >
-                {formatPercent(r.roi)}
-              </td>
-            </tr>
-          ))}
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={5} className="px-3 py-6 text-center text-zinc-500">
-                Scan a region for profitable contracts.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
+                ⚠
+              </span>
+            )}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            {formatIsk(r.price)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+            {formatIsk(r.contentsValue)}
+          </td>
+          <td
+            className={`px-3 py-1.5 text-right tabular-nums ${
+              r.profit >= 0 ? "text-emerald-400" : "text-rose-400"
+            }`}
+          >
+            {formatIsk(r.profit)}
+          </td>
+          <td
+            className={`px-3 py-1.5 text-right tabular-nums ${
+              r.roi >= 0 ? "text-emerald-400" : "text-rose-400"
+            }`}
+          >
+            {formatPercent(r.roi)}
+          </td>
+        </tr>
+      )}
+    />
   );
 }
