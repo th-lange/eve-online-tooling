@@ -14,6 +14,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockResolvedValue(undefined),
 }));
+// Characters subscribes to backend events; no desktop host to deliver any.
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
+}));
 
 import { invoke } from "@tauri-apps/api/core";
 

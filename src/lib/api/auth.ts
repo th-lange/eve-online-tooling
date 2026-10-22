@@ -1,3 +1,4 @@
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   commands,
   type Character,
@@ -21,6 +22,19 @@ export async function authCharacters(): Promise<Character[]> {
 /** Remove a character; returns the updated roster. */
 export async function authLogout(characterId: number): Promise<Character[]> {
   return unwrapCommand(await commands.authLogout(characterId));
+}
+
+/** Characters whose rotated refresh token could not be saved to the OS
+ *  keychain: their session works now, but the next token refresh will fail and
+ *  force a re-login. Re-read on {@link onAuthPersistFailed}. */
+export async function authPersistFailures(): Promise<number[]> {
+  return commands.authPersistFailures();
+}
+
+/** Fires whenever the set of {@link authPersistFailures} changes (a failure
+ *  was recorded, or cleared by a re-login/logout/successful save). */
+export function onAuthPersistFailed(handler: () => void): Promise<UnlistenFn> {
+  return listen("auth://persist-failed", () => handler());
 }
 
 /** Bookmark the "active" character used by per-character features. */
