@@ -124,8 +124,19 @@ const WATCHDOG_GRACE: Duration = Duration::from_millis(200);
 /// outcome plus captured logs into a [`ScriptRun`]. Never panics on script
 /// error.
 pub fn run(host: Arc<dyn Host>, language: Language, code: &str, limits: &Limits) -> ScriptRun {
+    run_with_sampler(host, language, code, limits, &resident_memory_mb)
+}
+
+/// [`run`] with an explicit RSS sampler — see [`execute_watched`].
+fn run_with_sampler(
+    host: Arc<dyn Host>,
+    language: Language,
+    code: &str,
+    limits: &Limits,
+    sample_rss: &dyn Fn() -> Option<u64>,
+) -> ScriptRun {
     let start = Instant::now();
-    let outcome = execute_watched(host.clone(), language, code, limits);
+    let outcome = execute_watched(host.clone(), language, code, limits, sample_rss);
     let duration_ms = start.elapsed().as_millis() as u64;
     let logs = host.take_logs();
     match outcome {
@@ -150,12 +161,15 @@ pub fn run(host: Arc<dyn Host>, language: Language, code: &str, limits: &Limits)
 /// the calling thread. Whichever finishes first wins; on a memory trip the
 /// losing worker thread is detached (not joined), so this call never blocks
 /// more than [`WATCHDOG_GRACE`] past the point of exceeding
-/// `limits.max_memory_mb`.
+/// `limits.max_memory_mb`. `sample_rss` is the process-RSS source (MiB) —
+/// [`resident_memory_mb`] in production, injectable so tests can drive the
+/// watchdog deterministically instead of depending on real process memory.
 fn execute_watched(
     host: Arc<dyn Host>,
     language: Language,
     code: &str,
     limits: &Limits,
+    sample_rss: &dyn Fn() -> Option<u64>,
 ) -> Result<Value, String> {
     let interrupt = Interrupt::default();
     let (tx, rx) = mpsc::channel();
@@ -176,7 +190,7 @@ fn execute_watched(
         })
         .expect("spawn script-eval thread");
 
-    let baseline_rss = resident_memory_mb();
+    let baseline_rss = sample_rss();
     let max_growth = limits.max_memory_mb;
     loop {
         match rx.recv_timeout(WATCHDOG_POLL) {
@@ -188,7 +202,7 @@ fn execute_watched(
                 return Err("script worker terminated unexpectedly".to_string());
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                let (Some(baseline), Some(current)) = (baseline_rss, resident_memory_mb()) else {
+                let (Some(baseline), Some(current)) = (baseline_rss, sample_rss()) else {
                     // No RSS sampling on this platform: fall back to the
                     // pre-#815 behavior (time/iteration limits only).
                     continue;
@@ -242,13 +256,14 @@ fn resident_memory_mb() -> Option<u64> {
 mod tests {
     use crate::modules::scripts::examples;
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
 
     use parking_lot::Mutex;
     use serde_json::json;
 
-    use super::{run, Limits};
+    use super::{run, run_with_sampler, Limits};
     use crate::modules::scripts::host::Host;
     use crate::modules::scripts::types::Language;
 
@@ -511,21 +526,29 @@ mod tests {
     fn rhai_allocation_bomb_is_stopped_by_the_memory_watchdog() {
         // #815: an unbounded loop that allocates every iteration and never
         // calls back into host code — nothing but the memory watchdog can
-        // catch this. `max_memory_mb` is measured as *growth* since the run
-        // started, so a tiny cap here reliably trips regardless of whatever
-        // the test process's baseline RSS already is. Timeout/op-count are
-        // set generously so the memory trip — not those — is what fires.
+        // catch this. The RSS source is faked (#1025): real process RSS is
+        // shared with every concurrently running test, whose own frees can
+        // mask the bomb's growth for the whole 10s timeout on a loaded
+        // machine. The fake reports a flat baseline on the first sample,
+        // then growth past the cap, so the trip → interrupt → Rhai unwind
+        // path is exercised without depending on scheduling or other tests.
         let limits = Limits {
             max_memory_mb: 1,
             timeout: Duration::from_secs(10),
             max_ops: u64::MAX,
             ..Limits::default()
         };
-        let out = run(
+        let samples = AtomicU64::new(0);
+        let fake_rss = || {
+            let n = samples.fetch_add(1, Ordering::Relaxed);
+            Some(if n == 0 { 100 } else { 100 + 2 })
+        };
+        let out = run_with_sampler(
             host(),
             Language::Rhai,
             "let a = []; loop { a.push(#{}); }",
             &limits,
+            &fake_rss,
         );
         assert!(!out.ok);
         assert!(
