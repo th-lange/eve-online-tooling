@@ -18,10 +18,9 @@ import {
   sortRows,
 } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
-import {
-  SortHeaderCell,
-  type SortColumn,
-} from "../../components/SortHeaderCell";
+import { DataTable } from "../../components/DataTable";
+import { EmptyState } from "../../components/EmptyState";
+import type { SortColumn } from "../../components/SortHeaderCell";
 import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { Stat } from "../../components/Stat";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
@@ -146,23 +145,29 @@ type PivotSortKey = "refType" | "income" | "expense" | "net";
 const PIVOT_COLUMNS: SortColumn<PivotSortKey>[] = [
   {
     key: "refType",
-    label: "Type",
+    label: "Category",
     numeric: false,
-    description: "Transaction category.",
+    description:
+      "The wallet journal reference type (ESI's transaction category).",
   },
   {
     key: "income",
     label: "Income",
     numeric: true,
-    description: "Total credited.",
+    description: "Total ISK received in this category.",
   },
   {
     key: "expense",
     label: "Expense",
     numeric: true,
-    description: "Total debited.",
+    description: "Total ISK spent in this category.",
   },
-  { key: "net", label: "Net", numeric: true, description: "Income − expense." },
+  {
+    key: "net",
+    label: "Net",
+    numeric: true,
+    description: "Income minus expense for this category.",
+  },
 ];
 const PIVOT_KEYS = PIVOT_COLUMNS.map((c) => c.key);
 
@@ -170,27 +175,27 @@ type RecentSortKey = "date" | "refType" | "amount" | "balance";
 const RECENT_COLUMNS: SortColumn<RecentSortKey>[] = [
   {
     key: "date",
-    label: "Date / time",
+    label: "Date",
     numeric: false,
-    description: "When the entry posted (UTC).",
+    description: "When the journal entry occurred (UTC).",
   },
   {
     key: "refType",
-    label: "Type",
+    label: "Category",
     numeric: false,
-    description: "Transaction category.",
+    description: "The wallet journal reference type.",
   },
   {
     key: "amount",
     label: "Amount",
     numeric: true,
-    description: "Signed ISK movement.",
+    description: "Signed ISK amount for this entry.",
   },
   {
     key: "balance",
     label: "Balance",
     numeric: true,
-    description: "Wallet balance after the entry.",
+    description: "Wallet balance after this entry.",
   },
 ];
 const RECENT_KEYS = RECENT_COLUMNS.map((c) => c.key);
@@ -230,59 +235,64 @@ function Wallet({ d }: { d: WalletView }) {
         <Stat label="Transactions" value={formatInt(d.transactionCount)} />
       </div>
       <h3 className="text-sm font-medium text-zinc-300">By category</h3>
-      <div className="mt-1 overflow-auto rounded border border-zinc-800">
-        <table className="w-full text-sm">
-          <Head columns={PIVOT_COLUMNS} sort={pivotSort} />
-          <tbody>
-            {pivots.map((p, i) => (
-              <tr key={i} className="border-t border-zinc-800 text-zinc-300">
-                <td className="px-3 py-1.5">{p.refType.replace(/_/g, " ")}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
-                  {p.income > 0 ? formatIsk(p.income) : "—"}
-                </td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-rose-400">
-                  {p.expense > 0 ? formatIsk(p.expense) : "—"}
-                </td>
-                <td className="px-3 py-1.5 text-right tabular-nums">
-                  {formatIsk(p.net)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="mt-1">
+        <DataTable
+          columns={PIVOT_COLUMNS}
+          sortKey={pivotSort.sortKey}
+          sortDir={pivotSort.sortDir}
+          onSort={pivotSort.toggleSort}
+          rows={pivots}
+          emptyState={<EmptyState title="No category activity yet." />}
+          renderRow={(p) => (
+            <tr
+              key={p.refType}
+              className="border-t border-zinc-800 text-zinc-300"
+            >
+              <td className="px-3 py-1.5">{p.refType.replace(/_/g, " ")}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
+                {p.income > 0 ? formatIsk(p.income) : "—"}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-rose-400">
+                {p.expense > 0 ? formatIsk(p.expense) : "—"}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums">
+                {formatIsk(p.net)}
+              </td>
+            </tr>
+          )}
+        />
       </div>
       <h3 className="mt-4 text-sm font-medium text-zinc-300">Recent entries</h3>
-      <div className="mt-1 max-h-96 overflow-auto rounded border border-zinc-800">
-        <table className="w-full text-sm">
-          <Head columns={RECENT_COLUMNS} sort={recentSort} />
-          <tbody>
-            {recent.map((e, i) => (
-              <tr key={i} className="border-t border-zinc-800 text-zinc-300">
-                <td className="px-3 py-1 whitespace-nowrap text-zinc-400">
-                  {formatEveDateTime(e.date)}
-                </td>
-                <td className="px-3 py-1">{e.refType.replace(/_/g, " ")}</td>
-                <td
-                  className={`px-3 py-1 text-right tabular-nums ${
-                    e.amount >= 0 ? "text-emerald-400" : "text-rose-400"
-                  }`}
-                >
-                  {formatSignedIsk(e.amount)}
-                </td>
-                <td className="px-3 py-1 text-right tabular-nums text-zinc-400">
-                  {formatIsk(e.balance)}
-                </td>
-              </tr>
-            ))}
-            {recent.length === 0 && (
-              <tr>
-                <td colSpan={4} className="px-3 py-4 text-center text-zinc-500">
-                  No journal entries yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      <div className="mt-1 max-h-96 overflow-auto">
+        <DataTable
+          columns={RECENT_COLUMNS}
+          sortKey={recentSort.sortKey}
+          sortDir={recentSort.sortDir}
+          onSort={recentSort.toggleSort}
+          rows={recent}
+          emptyState={<EmptyState title="No journal entries yet." />}
+          renderRow={(e) => (
+            <tr
+              key={`${e.date}-${e.refType}-${e.amount}-${e.balance}`}
+              className="border-t border-zinc-800 text-zinc-300"
+            >
+              <td className="px-3 py-1 whitespace-nowrap text-zinc-400">
+                {formatEveDateTime(e.date)}
+              </td>
+              <td className="px-3 py-1">{e.refType.replace(/_/g, " ")}</td>
+              <td
+                className={`px-3 py-1 text-right tabular-nums ${
+                  e.amount >= 0 ? "text-emerald-400" : "text-rose-400"
+                }`}
+              >
+                {formatSignedIsk(e.amount)}
+              </td>
+              <td className="px-3 py-1 text-right tabular-nums text-zinc-400">
+                {formatIsk(e.balance)}
+              </td>
+            </tr>
+          )}
+        />
       </div>
     </div>
   );
@@ -343,80 +353,51 @@ function Profit({ d }: { d: ProfitView }) {
           accent={d.totalProfit >= 0 ? "text-emerald-400" : "text-rose-400"}
         />
       </div>
-      <div className="overflow-auto rounded border border-zinc-800">
-        <table className="w-full text-sm">
-          <Head columns={PROFIT_COLUMNS} sort={sort} />
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i} className="border-t border-zinc-800 text-zinc-300">
-                <td className="px-3 py-1.5">
-                  {r.name}
-                  {r.unmatchedUnits > 0 && (
-                    <span
-                      className="ml-1 text-amber-400"
-                      title={`${r.unmatchedUnits} units sold with no matching buy (cost basis 0)`}
-                    >
-                      ⚠
-                    </span>
-                  )}
-                </td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                  {formatInt(r.unitsSold)}
-                </td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                  {formatIsk(r.revenue)}
-                </td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                  {formatIsk(r.cost)}
-                </td>
-                <td
-                  className={`px-3 py-1.5 text-right tabular-nums ${
-                    r.profit >= 0 ? "text-emerald-400" : "text-rose-400"
-                  }`}
+      <DataTable
+        columns={PROFIT_COLUMNS}
+        sortKey={sort.sortKey}
+        sortDir={sort.sortDir}
+        onSort={sort.toggleSort}
+        rows={rows}
+        emptyState={
+          <EmptyState title="No sales in your transaction history yet." />
+        }
+        renderRow={(r) => (
+          <tr key={r.name} className="border-t border-zinc-800 text-zinc-300">
+            <td className="px-3 py-1.5">
+              {r.name}
+              {r.unmatchedUnits > 0 && (
+                <span
+                  className="ml-1 text-amber-400"
+                  title={`${r.unmatchedUnits} units sold with no matching buy (cost basis 0)`}
                 >
-                  {formatSignedIsk(r.profit)}
-                </td>
-                <td className="px-3 py-1.5 text-zinc-500">
-                  {formatEveDateTime(r.lastSold)}
-                </td>
-              </tr>
-            ))}
-            {d.rows.length === 0 && (
-              <tr>
-                <td colSpan={6} className="px-3 py-4 text-center text-zinc-500">
-                  No sales in your transaction history yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+                  ⚠
+                </span>
+              )}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+              {formatInt(r.unitsSold)}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+              {formatIsk(r.revenue)}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+              {formatIsk(r.cost)}
+            </td>
+            <td
+              className={`px-3 py-1.5 text-right tabular-nums ${
+                r.profit >= 0 ? "text-emerald-400" : "text-rose-400"
+              }`}
+            >
+              {formatSignedIsk(r.profit)}
+            </td>
+            <td className="px-3 py-1.5 text-zinc-500">
+              {formatEveDateTime(r.lastSold)}
+            </td>
+          </tr>
+        )}
+      />
     </div>
-  );
-}
-
-/** A sortable header row driven by a usePersistentSort result. */
-function Head<K extends string>({
-  columns,
-  sort,
-}: {
-  columns: SortColumn<K>[];
-  sort: { sortKey: K; sortDir: "asc" | "desc"; toggleSort: (k: K) => void };
-}) {
-  return (
-    <thead className="bg-zinc-900 text-zinc-400">
-      <tr>
-        {columns.map((c) => (
-          <SortHeaderCell
-            key={c.key}
-            column={c}
-            active={sort.sortKey === c.key}
-            dir={sort.sortDir}
-            onClick={sort.toggleSort}
-          />
-        ))}
-      </tr>
-    </thead>
   );
 }
 
@@ -571,52 +552,51 @@ function Transactions({ d }: { d: LedgerView }) {
       </div>
 
       {/* Table */}
-      <div className="overflow-auto rounded border border-zinc-800">
-        <table className="w-full text-sm">
-          <Head columns={LEDGER_COLUMNS} sort={sort} />
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i} className="border-t border-zinc-800 text-zinc-300">
-                <td className="whitespace-nowrap px-3 py-1.5 text-zinc-400">
-                  {formatEveDateTime(r.date)}
-                </td>
-                <td className="px-3 py-1.5">
-                  <span
-                    className={`mr-1.5 rounded px-1 py-0.5 text-[10px] font-medium uppercase ${
-                      r.isBuy
-                        ? "bg-rose-900/40 text-rose-300"
-                        : "bg-emerald-900/40 text-emerald-300"
-                    }`}
-                  >
-                    {r.isBuy ? "buy" : "sell"}
-                  </span>
-                  {r.name}
-                </td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                  {formatInt(r.quantity)}
-                </td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                  {formatIsk(r.unitPrice)}
-                </td>
-                <td
-                  className={`px-3 py-1.5 text-right tabular-nums ${
-                    r.isBuy ? "text-rose-300" : "text-emerald-300"
-                  }`}
-                >
-                  {formatIsk(r.total)}
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-3 py-8 text-center text-zinc-500">
-                  No transactions match the current filters.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={LEDGER_COLUMNS}
+        sortKey={sort.sortKey}
+        sortDir={sort.sortDir}
+        onSort={sort.toggleSort}
+        rows={rows}
+        emptyState={
+          <EmptyState title="No transactions match the current filters." />
+        }
+        renderRow={(r) => (
+          <tr
+            key={`${r.date}-${r.typeId}-${r.isBuy}-${r.quantity}-${r.unitPrice}`}
+            className="border-t border-zinc-800 text-zinc-300"
+          >
+            <td className="whitespace-nowrap px-3 py-1.5 text-zinc-400">
+              {formatEveDateTime(r.date)}
+            </td>
+            <td className="px-3 py-1.5">
+              <span
+                className={`mr-1.5 rounded px-1 py-0.5 text-[10px] font-medium uppercase ${
+                  r.isBuy
+                    ? "bg-rose-900/40 text-rose-300"
+                    : "bg-emerald-900/40 text-emerald-300"
+                }`}
+              >
+                {r.isBuy ? "buy" : "sell"}
+              </span>
+              {r.name}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+              {formatInt(r.quantity)}
+            </td>
+            <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+              {formatIsk(r.unitPrice)}
+            </td>
+            <td
+              className={`px-3 py-1.5 text-right tabular-nums ${
+                r.isBuy ? "text-rose-300" : "text-emerald-300"
+              }`}
+            >
+              {formatIsk(r.total)}
+            </td>
+          </tr>
+        )}
+      />
     </div>
   );
 }
