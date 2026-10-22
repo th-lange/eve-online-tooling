@@ -14,10 +14,9 @@ import {
 } from "../../components/RegionStationPicker";
 import { formatIsk, formatPercent } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
-import {
-  SortHeaderCell,
-  type SortColumn,
-} from "../../components/SortHeaderCell";
+import { DataTable } from "../../components/DataTable";
+import { EmptyState } from "../../components/EmptyState";
+import type { SortColumn } from "../../components/SortHeaderCell";
 import {
   Page,
   PageHeader,
@@ -341,127 +340,111 @@ function ReprocessTable({
   }, [rows, sortKey, sortDir]);
 
   return (
-    <div className="overflow-auto rounded border border-zinc-800">
-      <table className="w-full border-collapse text-sm">
-        <thead className="bg-zinc-900 text-zinc-400">
-          <tr>
-            <th className="w-6" />
-            <th className="w-16" />
-            {REPRO_COLUMNS.map((c) => (
-              <SortHeaderCell
-                key={c.key}
-                column={c}
-                active={sortKey === c.key}
-                dir={sortDir}
-                onClick={toggleSort}
+    <DataTable
+      columns={REPRO_COLUMNS}
+      sortKey={sortKey}
+      sortDir={sortDir}
+      onSort={toggleSort}
+      rows={sorted}
+      leadingHeader={
+        <>
+          <th className="w-6" />
+          <th className="w-16" />
+        </>
+      }
+      emptyState={<EmptyState title="Hit Calculate to rank ores." />}
+      renderRow={(r) => {
+        const open = expanded === r.typeId;
+        return (
+          <Fragment key={r.typeId}>
+            <tr
+              onClick={() => setExpanded(open ? null : r.typeId)}
+              className="cursor-pointer border-t border-zinc-800 hover:bg-zinc-800/40"
+            >
+              <td className="px-2 text-center text-zinc-500">
+                {open ? "▾" : "▸"}
+              </td>
+              <RowActionsCell
+                row={r}
+                onFavorite={onFavorite}
+                onBlacklist={onBlacklist}
+                className="px-2 whitespace-nowrap"
               />
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((r) => {
-            const open = expanded === r.typeId;
-            return (
-              <Fragment key={r.typeId}>
-                <tr
-                  onClick={() => setExpanded(open ? null : r.typeId)}
-                  className="cursor-pointer border-t border-zinc-800 hover:bg-zinc-800/40"
-                >
-                  <td className="px-2 text-center text-zinc-500">
-                    {open ? "▾" : "▸"}
-                  </td>
-                  <RowActionsCell
-                    row={r}
-                    onFavorite={onFavorite}
-                    onBlacklist={onBlacklist}
-                    className="px-2 whitespace-nowrap"
-                  />
-                  <td className="px-3 py-1.5">
-                    <div className="text-zinc-200">
-                      {r.name}
-                      {r.missingPrices.length > 0 && (
-                        <span
-                          className="ml-1 text-amber-400"
-                          title="Some outputs unpriced"
-                        >
-                          ⚠
-                        </span>
-                      )}
-                    </div>
-                    {r.group && (
-                      <div className="text-xs text-zinc-500">{r.group}</div>
-                    )}
-                  </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                    {formatIsk(r.sellPrice)}
-                  </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
-                    {formatIsk(r.reprocessValue)}
-                  </td>
-                  <td
-                    className={`px-3 py-1.5 text-right tabular-nums ${
-                      r.delta >= 0 ? "text-emerald-400" : "text-rose-400"
-                    }`}
-                  >
-                    {formatIsk(r.delta)}
-                  </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
-                    {formatPercent(r.uplift)}
-                  </td>
-                </tr>
-                {open && (
-                  <tr className="border-t border-zinc-800 bg-zinc-900/40">
-                    <td />
-                    <td />
-                    <td colSpan={4} className="px-3 py-3">
-                      <table className="w-full text-xs">
-                        <thead className="text-zinc-500">
-                          <tr>
-                            <th className="text-left font-medium">
-                              Output (per unit ore)
-                            </th>
-                            <th className="text-right font-medium">
-                              Yield/unit
-                            </th>
-                            <th className="text-right font-medium">Unit</th>
-                            <th className="text-right font-medium">Value</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {r.outputs.map((o) => (
-                            <tr key={o.typeId} className="text-zinc-300">
-                              <td className="py-0.5">{o.name}</td>
-                              <td className="text-right tabular-nums">
-                                {o.perUnit.toLocaleString(undefined, {
-                                  maximumFractionDigits: 4,
-                                })}
-                              </td>
-                              <td className="text-right tabular-nums">
-                                {formatIsk(o.unitPrice)}
-                              </td>
-                              <td className="text-right tabular-nums">
-                                {formatIsk(o.value)}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </td>
-                  </tr>
+              <td className="px-3 py-1.5">
+                <div className="text-zinc-200">
+                  {r.name}
+                  {r.missingPrices.length > 0 && (
+                    <span
+                      className="ml-1 text-amber-400"
+                      title="Some outputs unpriced"
+                    >
+                      ⚠
+                    </span>
+                  )}
+                </div>
+                {r.group && (
+                  <div className="text-xs text-zinc-500">{r.group}</div>
                 )}
-              </Fragment>
-            );
-          })}
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={7} className="px-3 py-6 text-center text-zinc-500">
-                Hit Calculate to rank ores.
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+                {formatIsk(r.sellPrice)}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+                {formatIsk(r.reprocessValue)}
+              </td>
+              <td
+                className={`px-3 py-1.5 text-right tabular-nums ${
+                  r.delta >= 0 ? "text-emerald-400" : "text-rose-400"
+                }`}
+              >
+                {formatIsk(r.delta)}
+              </td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+                {formatPercent(r.uplift)}
               </td>
             </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
+            {open && (
+              <tr className="border-t border-zinc-800 bg-zinc-900/40">
+                <td />
+                <td />
+                <td colSpan={4} className="px-3 py-3">
+                  <table className="w-full text-xs">
+                    <thead className="text-zinc-500">
+                      <tr>
+                        <th className="text-left font-medium">
+                          Output (per unit ore)
+                        </th>
+                        <th className="text-right font-medium">Yield/unit</th>
+                        <th className="text-right font-medium">Unit</th>
+                        <th className="text-right font-medium">Value</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {r.outputs.map((o) => (
+                        <tr key={o.typeId} className="text-zinc-300">
+                          <td className="py-0.5">{o.name}</td>
+                          <td className="text-right tabular-nums">
+                            {o.perUnit.toLocaleString(undefined, {
+                              maximumFractionDigits: 4,
+                            })}
+                          </td>
+                          <td className="text-right tabular-nums">
+                            {formatIsk(o.unitPrice)}
+                          </td>
+                          <td className="text-right tabular-nums">
+                            {formatIsk(o.value)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </td>
+              </tr>
+            )}
+          </Fragment>
+        );
+      }}
+    />
   );
 }
 

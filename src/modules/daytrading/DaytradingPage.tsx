@@ -27,10 +27,9 @@ import {
 } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { FeesFromCharacter } from "../../components/FeesFromCharacter";
-import {
-  SortHeaderCell,
-  type SortColumn,
-} from "../../components/SortHeaderCell";
+import { DataTable } from "../../components/DataTable";
+import { EmptyState } from "../../components/EmptyState";
+import type { SortColumn } from "../../components/SortHeaderCell";
 import {
   Page,
   PageHeader,
@@ -606,105 +605,86 @@ function DayTradeTable({
   );
 
   return (
-    <div className="overflow-auto rounded border border-zinc-800">
-      <table className="w-full border-collapse text-sm">
-        <thead className="bg-zinc-900 text-zinc-400">
-          <tr>
-            <th className="w-16" />
-            {columns.map((c) => (
-              <SortHeaderCell
-                key={c.key}
-                column={c}
-                active={sortKey === c.key}
-                dir={sortDir}
-                onClick={toggleSort}
-              />
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((r) => (
-            <tr
-              key={r.typeId}
-              className="border-t border-zinc-800 hover:bg-zinc-800/40"
-            >
-              <RowActionsCell
-                row={r}
-                onFavorite={onFavorite}
-                onBlacklist={onBlacklist}
-                showAddToList
-              />
-              <td className="px-3 py-1.5">
-                <div className="text-zinc-200">{r.name}</div>
-                <div className="text-xs text-zinc-500">
-                  <span className="text-sky-400/80">
-                    {r.buyHub} → {r.sellHub}
-                  </span>
-                  {(r.category || r.group) &&
-                    ` · ${[r.category, r.group].filter(Boolean).join(" · ")}`}
-                </div>
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {formatIsk(r.buyPrice)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {formatIsk(r.sellPrice)}
-              </td>
+    <DataTable
+      columns={columns}
+      sortKey={sortKey}
+      sortDir={sortDir}
+      onSort={toggleSort}
+      rows={sorted}
+      leadingHeader={<th className="w-16" />}
+      emptyState={
+        <EmptyState title="Hit Calculate to scan for cross-region flips." />
+      }
+      renderRow={(r) => (
+        <tr
+          key={r.typeId}
+          className="border-t border-zinc-800 hover:bg-zinc-800/40"
+        >
+          <RowActionsCell
+            row={r}
+            onFavorite={onFavorite}
+            onBlacklist={onBlacklist}
+            showAddToList
+          />
+          <td className="px-3 py-1.5">
+            <div className="text-zinc-200">{r.name}</div>
+            <div className="text-xs text-zinc-500">
+              <span className="text-sky-400/80">
+                {r.buyHub} → {r.sellHub}
+              </span>
+              {(r.category || r.group) &&
+                ` · ${[r.category, r.group].filter(Boolean).join(" · ")}`}
+            </div>
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            {formatIsk(r.buyPrice)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            {formatIsk(r.sellPrice)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
+            {formatIsk(r.profitPerUnit)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+            {formatPercent(r.margin)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-emerald-300">
+            {formatIsk(r.iskPerM3)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
+            {formatIsk(r.totalProfit)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            {formatInt(r.suggestedQty)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            {r.volumeM3.toLocaleString(undefined, {
+              maximumFractionDigits: 2,
+            })}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            {formatInt(r.destVolume)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+            {r.destVolume > 0 ? formatIsk(r.destVolume * r.sellPrice) : "—"}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            {r.daysOfSupply.toLocaleString(undefined, {
+              maximumFractionDigits: 1,
+            })}
+          </td>
+          {cargoM3 > 0 && (
+            <>
               <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
-                {formatIsk(r.profitPerUnit)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
-                {formatPercent(r.margin)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-emerald-300">
-                {formatIsk(r.iskPerM3)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
-                {formatIsk(r.totalProfit)}
+                {formatIsk(r.profitPerTrip)}
               </td>
               <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {formatInt(r.suggestedQty)}
+                {formatInt(r.trips)}
               </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {r.volumeM3.toLocaleString(undefined, {
-                  maximumFractionDigits: 2,
-                })}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {formatInt(r.destVolume)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
-                {r.destVolume > 0 ? formatIsk(r.destVolume * r.sellPrice) : "—"}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {r.daysOfSupply.toLocaleString(undefined, {
-                  maximumFractionDigits: 1,
-                })}
-              </td>
-              {cargoM3 > 0 && (
-                <>
-                  <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
-                    {formatIsk(r.profitPerTrip)}
-                  </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                    {formatInt(r.trips)}
-                  </td>
-                </>
-              )}
-            </tr>
-          ))}
-          {rows.length === 0 && (
-            <tr>
-              <td
-                colSpan={cargoM3 > 0 ? 15 : 13}
-                className="px-3 py-6 text-center text-zinc-500"
-              >
-                Hit Calculate to scan for cross-region flips.
-              </td>
-            </tr>
+            </>
           )}
-        </tbody>
-      </table>
-    </div>
+        </tr>
+      )}
+    />
   );
 }

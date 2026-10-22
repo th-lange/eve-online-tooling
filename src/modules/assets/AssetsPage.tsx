@@ -11,10 +11,9 @@ import {
 import { assetsKeys, authKeys } from "../../lib/queryKeys";
 import { formatInt, formatIsk, sortRows } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
-import {
-  SortHeaderCell,
-  type SortColumn,
-} from "../../components/SortHeaderCell";
+import { DataTable } from "../../components/DataTable";
+import { EmptyState } from "../../components/EmptyState";
+import type { SortColumn } from "../../components/SortHeaderCell";
 import { Page, PageHeader } from "../../components/page";
 import { QueryResult } from "../../components/QueryResult";
 import { InlineError } from "../../components/InlineError";
@@ -466,28 +465,18 @@ const AssetTable = memo(function AssetTable({ rows }: { rows: AssetRow[] }) {
     [rows, sortKey, sortDir],
   );
   return (
-    <div className="mt-2 overflow-auto rounded border border-zinc-800">
-      <table className="w-full border-collapse text-sm">
-        <thead className="bg-zinc-900 text-zinc-400">
-          <tr>
-            {ASSET_COLUMNS.map((c) => (
-              <SortHeaderCell
-                key={c.key}
-                column={c}
-                active={sortKey === c.key}
-                dir={sortDir}
-                onClick={toggleSort}
-              />
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((r) => (
-            <Row key={`${r.typeId}-${r.owner}-${r.station}`} r={r} />
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      className="mt-2 overflow-auto rounded border border-zinc-800"
+      columns={ASSET_COLUMNS}
+      sortKey={sortKey}
+      sortDir={sortDir}
+      onSort={toggleSort}
+      rows={sorted}
+      emptyState={<EmptyState title="No assets found." />}
+      renderRow={(r) => (
+        <Row key={`${r.typeId}-${r.owner}-${r.station}`} r={r} />
+      )}
+    />
   );
 });
 

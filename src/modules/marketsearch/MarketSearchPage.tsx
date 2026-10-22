@@ -49,10 +49,9 @@ import { Page, PageHeader, Centered } from "../../components/page";
 import { InlineError } from "../../components/InlineError";
 import { SdeGate } from "../../components/SdeGate";
 import { REGION_STATION_TOOLTIP } from "../../lib/copy";
-import {
-  SortHeaderCell,
-  type SortColumn,
-} from "../../components/SortHeaderCell";
+import { DataTable } from "../../components/DataTable";
+import { EmptyState } from "../../components/EmptyState";
+import type { SortColumn } from "../../components/SortHeaderCell";
 
 import { FORGE } from "../../lib/eveConstants";
 
@@ -534,43 +533,36 @@ function OrderTable({
   }, [orders, sortKey, sortDir]);
 
   return (
-    <div className="max-h-[28rem] overflow-auto rounded border border-zinc-800">
-      <table className="w-full border-collapse text-xs">
-        <thead className="bg-zinc-900 text-zinc-400">
-          <tr>
-            {ORDER_COLUMNS.map((c) => (
-              <SortHeaderCell
-                key={c.key}
-                column={c}
-                active={sortKey === c.key}
-                dir={sortDir}
-                onClick={toggleSort}
-              />
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((o, i) => (
-            <tr key={i} className="border-t border-zinc-800/60 text-zinc-300">
-              <td className="px-3 py-0.5 text-right tabular-nums text-rose-300">
-                {formatIsk(o.price)}
-              </td>
-              <td className="px-3 py-0.5 text-right tabular-nums">
-                {formatInt(o.volumeRemain)}
-              </td>
-              <td className="px-3 py-0.5">{o.stationName}</td>
-              <td className="px-3 py-0.5">
-                <SecDot security={o.security} /> {o.systemName}
-              </td>
-              <td className="px-3 py-0.5 text-zinc-400">{o.regionName}</td>
-              <td className="px-3 py-0.5 text-right tabular-nums">
-                {!hasOrigin ? "—" : o.jumps == null ? "∞" : o.jumps}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      className="max-h-[28rem] overflow-auto rounded border border-zinc-800"
+      columns={ORDER_COLUMNS}
+      sortKey={sortKey}
+      sortDir={sortDir}
+      onSort={toggleSort}
+      rows={sorted}
+      emptyState={<EmptyState title="No sell orders found." />}
+      renderRow={(o) => (
+        <tr
+          key={`${o.stationId}-${o.price}-${o.volumeRemain}`}
+          className="border-t border-zinc-800/60 text-xs text-zinc-300"
+        >
+          <td className="px-3 py-0.5 text-right tabular-nums text-rose-300">
+            {formatIsk(o.price)}
+          </td>
+          <td className="px-3 py-0.5 text-right tabular-nums">
+            {formatInt(o.volumeRemain)}
+          </td>
+          <td className="px-3 py-0.5">{o.stationName}</td>
+          <td className="px-3 py-0.5">
+            <SecDot security={o.security} /> {o.systemName}
+          </td>
+          <td className="px-3 py-0.5 text-zinc-400">{o.regionName}</td>
+          <td className="px-3 py-0.5 text-right tabular-nums">
+            {!hasOrigin ? "—" : o.jumps == null ? "∞" : o.jumps}
+          </td>
+        </tr>
+      )}
+    />
   );
 }
 
