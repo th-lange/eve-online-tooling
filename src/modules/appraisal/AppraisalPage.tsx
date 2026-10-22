@@ -18,10 +18,9 @@ import {
 import { formatInt, formatIsk, sortRows } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { parseItems } from "../../lib/parseItems";
-import {
-  SortHeaderCell,
-  type SortColumn,
-} from "../../components/SortHeaderCell";
+import { DataTable } from "../../components/DataTable";
+import { EmptyState } from "../../components/EmptyState";
+import type { SortColumn } from "../../components/SortHeaderCell";
 import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { Field } from "../../components/forms";
 import { SdeGate } from "../../components/SdeGate";
@@ -235,63 +234,55 @@ function LineTable({ lines }: { lines: AppraisalLine[] }) {
   );
   const sorted = sortRows(lines, sortKey, sortDir);
   return (
-    <div className="mt-4 overflow-auto rounded border border-zinc-800">
-      <table className="w-full border-collapse text-sm">
-        <thead className="bg-zinc-900 text-zinc-400">
-          <tr>
-            {LINE_COLUMNS.map((c) => (
-              <SortHeaderCell
-                key={c.key}
-                column={c}
-                active={sortKey === c.key}
-                dir={sortDir}
-                onClick={toggleSort}
-              />
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((l, i) => (
-            <tr key={i} className="border-t border-zinc-800">
-              <td className="px-3 py-1.5 text-zinc-200">
-                {l.name}
-                {!l.resolved && (
-                  <span
-                    className="ml-1 text-amber-400"
-                    title="Unknown item name"
-                  >
-                    ⚠
-                  </span>
-                )}
-                {l.sellHub && (
-                  <span className="ml-1 text-[10px] text-emerald-400">
-                    ↗ {l.sellHub}
-                  </span>
-                )}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {formatInt(l.quantity)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {formatIsk(l.buyPrice)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {formatIsk(l.sellPrice)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
-                {formatIsk(l.buyValue)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
-                {formatIsk(l.sellValue)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-500">
-                {formatInt(Math.round(l.volume))}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      columns={LINE_COLUMNS}
+      sortKey={sortKey}
+      sortDir={sortDir}
+      onSort={toggleSort}
+      rows={sorted}
+      className="mt-4 overflow-auto rounded border border-zinc-800"
+      emptyState={
+        <EmptyState title="Paste an inventory or Multibuy list to appraise." />
+      }
+      renderRow={(l) => (
+        <tr
+          key={`${l.name}-${l.quantity}`}
+          className="border-t border-zinc-800"
+        >
+          <td className="px-3 py-1.5 text-zinc-200">
+            {l.name}
+            {!l.resolved && (
+              <span className="ml-1 text-amber-400" title="Unknown item name">
+                ⚠
+              </span>
+            )}
+            {l.sellHub && (
+              <span className="ml-1 text-[10px] text-emerald-400">
+                ↗ {l.sellHub}
+              </span>
+            )}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            {formatInt(l.quantity)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            {formatIsk(l.buyPrice)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            {formatIsk(l.sellPrice)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+            {formatIsk(l.buyValue)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
+            {formatIsk(l.sellValue)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-500">
+            {formatInt(Math.round(l.volume))}
+          </td>
+        </tr>
+      )}
+    />
   );
 }
 

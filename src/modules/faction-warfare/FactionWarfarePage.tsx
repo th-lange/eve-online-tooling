@@ -34,10 +34,9 @@ import {
 } from "../../components/SystemGraph";
 import { Page, PageHeader } from "../../components/page";
 import { SearchFilterRow } from "../../components/forms";
-import {
-  SortHeaderCell,
-  type SortColumn,
-} from "../../components/SortHeaderCell";
+import { DataTable } from "../../components/DataTable";
+import { EmptyState } from "../../components/EmptyState";
+import type { SortColumn } from "../../components/SortHeaderCell";
 import { InlineError } from "../../components/InlineError";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { usePersistentState } from "../../lib/usePersistentState";
@@ -1436,150 +1435,132 @@ function SystemTable({
   ]);
 
   return (
-    <div className="overflow-auto rounded-lg border border-zinc-800">
-      <table className="w-full border-collapse text-sm">
-        <thead className="bg-zinc-900">
-          <tr>
-            {columns.map((col) => (
-              <SortHeaderCell
-                key={col.key}
-                column={col}
-                active={sortKey === col.key}
-                dir={sortDir}
-                onClick={toggleSort}
+    <DataTable
+      className="overflow-auto rounded-lg border border-zinc-800"
+      columns={columns}
+      sortKey={sortKey}
+      sortDir={sortDir}
+      onSort={toggleSort}
+      rows={rows}
+      emptyState={<EmptyState title="No systems match the current filters." />}
+      renderRow={(s) => (
+        <tr key={s.systemId} className="border-t border-zinc-800 text-zinc-300">
+          <SystemNameCell s={s} hasCharacter={hasCharacter} />
+          <td className="px-3 py-1.5 text-zinc-500">{s.region}</td>
+          <td className="px-3 py-1.5">
+            <span className="flex items-center gap-1.5">
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{
+                  backgroundColor: perspective
+                    ? RELATIONSHIP_HEX[
+                        relationshipFor(s.occupierId, perspective.myFaction)
+                      ]
+                    : (FACTION_HEX[s.occupierId] ?? "#a1a1aa"),
+                }}
               />
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((s) => (
-            <tr
-              key={s.systemId}
-              className="border-t border-zinc-800 text-zinc-300"
+              {s.occupier}
+            </span>
+          </td>
+          <td className="px-3 py-1.5">
+            <span
+              className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${
+                BATTLEFIELD_STYLE[s.battlefield] ?? BATTLEFIELD_STYLE.rearguard
+              }`}
             >
-              <SystemNameCell s={s} hasCharacter={hasCharacter} />
-              <td className="px-3 py-1.5 text-zinc-500">{s.region}</td>
-              <td className="px-3 py-1.5">
-                <span className="flex items-center gap-1.5">
-                  <span
-                    className="h-2 w-2 rounded-full"
-                    style={{
-                      backgroundColor: perspective
-                        ? RELATIONSHIP_HEX[
-                            relationshipFor(s.occupierId, perspective.myFaction)
-                          ]
-                        : (FACTION_HEX[s.occupierId] ?? "#a1a1aa"),
-                    }}
-                  />
-                  {s.occupier}
-                </span>
-              </td>
-              <td className="px-3 py-1.5">
+              {BATTLEFIELD_LABEL[s.battlefield] ?? s.battlefield}
+            </span>
+          </td>
+          {perspective && (
+            <td className="px-3 py-1.5">
+              {s.perspective ? (
                 <span
                   className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${
-                    BATTLEFIELD_STYLE[s.battlefield] ??
-                    BATTLEFIELD_STYLE.rearguard
+                    s.perspective === "defend"
+                      ? "bg-emerald-500/15 text-emerald-300"
+                      : "bg-rose-500/15 text-rose-300"
                   }`}
                 >
-                  {BATTLEFIELD_LABEL[s.battlefield] ?? s.battlefield}
+                  {s.perspective}
                 </span>
-              </td>
-              {perspective && (
-                <td className="px-3 py-1.5">
-                  {s.perspective ? (
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${
-                        s.perspective === "defend"
-                          ? "bg-emerald-500/15 text-emerald-300"
-                          : "bg-rose-500/15 text-rose-300"
-                      }`}
-                    >
-                      {s.perspective}
-                    </span>
-                  ) : (
-                    <span className="text-zinc-600">—</span>
-                  )}
-                </td>
+              ) : (
+                <span className="text-zinc-600">—</span>
               )}
-              <td className="px-3 py-1.5">
-                <span
-                  className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${
-                    CONTEST_STYLE[s.contested] ?? CONTEST_STYLE.uncontested
-                  }`}
-                >
-                  {s.contested}
-                </span>
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {s.contested === "uncontested"
-                  ? "—"
-                  : `${Math.round(s.vpPct * 100)}%`}
-              </td>
-              <td
-                className="px-3 py-1.5 text-center tabular-nums text-zinc-400"
-                title={trendTooltip(s.vpPct, s.vpVelocity)}
-              >
-                {(() => {
-                  const tier = trendTier(
-                    perspective ? s.vpVelocitySigned : s.vpVelocity,
-                  );
-                  return tier ? TREND_ARROW[tier] : "—";
-                })()}
-              </td>
-              {perspective && (
-                <td
-                  className={`px-3 py-1.5 text-right tabular-nums ${vpDeltaClass(s.vpDelta30mSigned)}`}
-                  title="VP% change in roughly the last 30 min, signed for your militia: positive is progress for you, negative is progress for the enemy"
-                >
-                  {formatVpDeltaPct(s.vpDelta30mSigned)}
-                </td>
-              )}
-              {perspective && (
-                <td
-                  className={`px-3 py-1.5 text-right tabular-nums ${vpDeltaClass(s.vpDeltaLoginSigned)}`}
-                  title="VP% change since you opened this session, signed for your militia: positive is progress for you, negative is progress for the enemy"
-                >
-                  {formatVpDeltaPct(s.vpDeltaLoginSigned)}
-                </td>
-              )}
-              <td
-                className={`px-3 py-1.5 text-right tabular-nums ${
-                  s.kills > 0 ? "text-rose-300" : "text-zinc-600"
-                }`}
-              >
-                {s.kills > 0 ? formatInt(s.kills) : "—"}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-500">
-                {s.npcKills > 0 ? formatInt(s.npcKills) : "—"}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {s.jumps > 0 ? formatInt(s.jumps) : "—"}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {s.hops != null
-                  ? s.hops === 0
-                    ? "here"
-                    : formatInt(s.hops)
-                  : "—"}
-              </td>
-              {showHotspots && (
-                <td
-                  className="px-3 py-1.5 text-zinc-400"
-                  title={`${s.hotspot.friendlyLosses} friendly losses · ${s.hotspot.enemyLosses} enemy losses · ${s.hotspot.cartelActivity} cartel kills, last ~6h`}
-                >
-                  {hotspotDescription(s.hotspot)}
-                </td>
-              )}
-              {showFarmScore && (
-                <td className="px-3 py-1.5 text-right tabular-nums text-emerald-300">
-                  {s.farmScore.toFixed(2)}
-                </td>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+            </td>
+          )}
+          <td className="px-3 py-1.5">
+            <span
+              className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${
+                CONTEST_STYLE[s.contested] ?? CONTEST_STYLE.uncontested
+              }`}
+            >
+              {s.contested}
+            </span>
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            {s.contested === "uncontested"
+              ? "—"
+              : `${Math.round(s.vpPct * 100)}%`}
+          </td>
+          <td
+            className="px-3 py-1.5 text-center tabular-nums text-zinc-400"
+            title={trendTooltip(s.vpPct, s.vpVelocity)}
+          >
+            {(() => {
+              const tier = trendTier(
+                perspective ? s.vpVelocitySigned : s.vpVelocity,
+              );
+              return tier ? TREND_ARROW[tier] : "—";
+            })()}
+          </td>
+          {perspective && (
+            <td
+              className={`px-3 py-1.5 text-right tabular-nums ${vpDeltaClass(s.vpDelta30mSigned)}`}
+              title="VP% change in roughly the last 30 min, signed for your militia: positive is progress for you, negative is progress for the enemy"
+            >
+              {formatVpDeltaPct(s.vpDelta30mSigned)}
+            </td>
+          )}
+          {perspective && (
+            <td
+              className={`px-3 py-1.5 text-right tabular-nums ${vpDeltaClass(s.vpDeltaLoginSigned)}`}
+              title="VP% change since you opened this session, signed for your militia: positive is progress for you, negative is progress for the enemy"
+            >
+              {formatVpDeltaPct(s.vpDeltaLoginSigned)}
+            </td>
+          )}
+          <td
+            className={`px-3 py-1.5 text-right tabular-nums ${
+              s.kills > 0 ? "text-rose-300" : "text-zinc-600"
+            }`}
+          >
+            {s.kills > 0 ? formatInt(s.kills) : "—"}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-500">
+            {s.npcKills > 0 ? formatInt(s.npcKills) : "—"}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            {s.jumps > 0 ? formatInt(s.jumps) : "—"}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            {s.hops != null ? (s.hops === 0 ? "here" : formatInt(s.hops)) : "—"}
+          </td>
+          {showHotspots && (
+            <td
+              className="px-3 py-1.5 text-zinc-400"
+              title={`${s.hotspot.friendlyLosses} friendly losses · ${s.hotspot.enemyLosses} enemy losses · ${s.hotspot.cartelActivity} cartel kills, last ~6h`}
+            >
+              {hotspotDescription(s.hotspot)}
+            </td>
+          )}
+          {showFarmScore && (
+            <td className="px-3 py-1.5 text-right tabular-nums text-emerald-300">
+              {s.farmScore.toFixed(2)}
+            </td>
+          )}
+        </tr>
+      )}
+    />
   );
 }
 
