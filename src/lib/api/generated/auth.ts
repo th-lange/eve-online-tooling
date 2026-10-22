@@ -165,6 +165,15 @@ export const commands = {
       else return { status: "error", error: e as AppError };
     }
   },
+  /**
+   * Characters whose most recent rotated refresh token could not be saved to
+   * the OS keychain. Their current session still works, but the next token
+   * refresh will fail and force a re-login — the UI warns about it. Re-read on
+   * the `auth://persist-failed` event, which fires whenever this set changes.
+   */
+  async authPersistFailures(): Promise<number[]> {
+    return await TAURI_INVOKE("auth_persist_failures");
+  },
 };
 
 /** user-defined events **/
