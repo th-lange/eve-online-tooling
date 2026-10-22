@@ -23,10 +23,9 @@ import { formatInt } from "../../lib/format";
 import { ROUTE_AUTO_REFRESH_INTERVAL_MS } from "../../lib/refreshIntervals";
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { usePersistentState } from "../../lib/usePersistentState";
-import {
-  SortHeaderCell,
-  type SortColumn,
-} from "../../components/SortHeaderCell";
+import { DataTable } from "../../components/DataTable";
+import { EmptyState } from "../../components/EmptyState";
+import type { SortColumn } from "../../components/SortHeaderCell";
 import { DataAge } from "../../components/DataAge";
 import { Combo } from "../../components/Combo";
 import {
@@ -704,73 +703,55 @@ function ActivityTable({
   }, [rows, sortKey, sortDir]);
 
   return (
-    <div className="mt-4 overflow-auto rounded border border-zinc-800">
-      <table className="w-full border-collapse text-sm">
-        <thead className="bg-zinc-900 text-zinc-400">
-          <tr>
-            {columns.map((c) => (
-              <SortHeaderCell
-                key={c.key}
-                column={c}
-                active={sortKey === c.key}
-                dir={sortDir}
-                onClick={toggleSort}
-              />
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((r) => (
-            <tr
-              key={r.systemId}
-              className="border-t border-zinc-800 text-zinc-300 hover:bg-zinc-800/40"
-            >
-              {withDistance && (
-                <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                  {r.distance ?? "—"}
-                </td>
-              )}
-              <td className="px-3 py-1.5 text-zinc-200">{r.name}</td>
-              <td className="px-3 py-1.5 text-zinc-400">{r.region}</td>
-              <td
-                className={`px-3 py-1.5 text-right tabular-nums ${SEC_TEXT_CLASS[secBand(r.security)]}`}
-              >
-                {r.security.toFixed(1)}
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
-                {formatInt(r.jumps)}
-              </td>
-              <td
-                className={`px-3 py-1.5 text-right tabular-nums ${r.shipKills > 0 ? "text-rose-400" : "text-zinc-500"}`}
-              >
-                <ZkillSystemLink systemId={r.systemId}>
-                  {formatInt(r.shipKills)}
-                </ZkillSystemLink>
-              </td>
-              <td
-                className={`px-3 py-1.5 text-right tabular-nums ${r.podKills > 0 ? "text-rose-300" : "text-zinc-500"}`}
-              >
-                <ZkillSystemLink systemId={r.systemId}>
-                  {formatInt(r.podKills)}
-                </ZkillSystemLink>
-              </td>
-              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
-                {formatInt(r.npcKills)}
-              </td>
-            </tr>
-          ))}
-          {rows.length === 0 && (
-            <tr>
-              <td
-                colSpan={columns.length}
-                className="px-3 py-6 text-center text-zinc-500"
-              >
-                No system activity (load may be in progress).
-              </td>
-            </tr>
+    <DataTable
+      className="mt-4 overflow-auto rounded border border-zinc-800"
+      columns={columns}
+      sortKey={sortKey}
+      sortDir={sortDir}
+      onSort={toggleSort}
+      rows={sorted}
+      emptyState={
+        <EmptyState title="No system activity (load may be in progress)." />
+      }
+      renderRow={(r) => (
+        <tr
+          key={r.systemId}
+          className="border-t border-zinc-800 text-zinc-300 hover:bg-zinc-800/40"
+        >
+          {withDistance && (
+            <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+              {r.distance ?? "—"}
+            </td>
           )}
-        </tbody>
-      </table>
-    </div>
+          <td className="px-3 py-1.5 text-zinc-200">{r.name}</td>
+          <td className="px-3 py-1.5 text-zinc-400">{r.region}</td>
+          <td
+            className={`px-3 py-1.5 text-right tabular-nums ${SEC_TEXT_CLASS[secBand(r.security)]}`}
+          >
+            {r.security.toFixed(1)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-300">
+            {formatInt(r.jumps)}
+          </td>
+          <td
+            className={`px-3 py-1.5 text-right tabular-nums ${r.shipKills > 0 ? "text-rose-400" : "text-zinc-500"}`}
+          >
+            <ZkillSystemLink systemId={r.systemId}>
+              {formatInt(r.shipKills)}
+            </ZkillSystemLink>
+          </td>
+          <td
+            className={`px-3 py-1.5 text-right tabular-nums ${r.podKills > 0 ? "text-rose-300" : "text-zinc-500"}`}
+          >
+            <ZkillSystemLink systemId={r.systemId}>
+              {formatInt(r.podKills)}
+            </ZkillSystemLink>
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
+            {formatInt(r.npcKills)}
+          </td>
+        </tr>
+      )}
+    />
   );
 }
