@@ -5,9 +5,9 @@
 //! and single-flights concurrent refreshes so EVE SSO's refresh-token
 //! rotation can't strand a character logged out.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use super::auth::AuthError;
@@ -48,6 +48,12 @@ pub struct AuthState {
     /// invalidate the other's token and the loser's write would strand the
     /// character — see [`AuthState::access_token_for`].
     refresh_locks: Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>,
+    /// Characters whose rotated refresh token failed to persist to the
+    /// keychain — see [`AuthState::persist_failures`].
+    persist_failures: Mutex<BTreeSet<i64>>,
+    /// Fired when `persist_failures` changes — see
+    /// [`AuthState::set_persist_failure_notifier`].
+    persist_notifier: OnceLock<Box<dyn Fn() + Send + Sync>>,
     cache: Arc<ConditionalCache>,
     /// SSO token endpoint. Always [`TOKEN_URL`] outside tests; overridable via
     /// [`AuthState::with_token_url`] so tests can point it at a local stub.
@@ -85,6 +91,8 @@ impl AuthState {
             http,
             tokens: Mutex::new(HashMap::new()),
             refresh_locks: Mutex::new(HashMap::new()),
+            persist_failures: Mutex::new(BTreeSet::new()),
+            persist_notifier: OnceLock::new(),
             cache: Arc::new(cache),
             token_url: TOKEN_URL.to_string(),
         }
@@ -204,15 +212,19 @@ impl AuthState {
             .await
             .map_err(|e| format!("keychain task panicked: {e}"))
             .and_then(|r| r);
-            if let Err(e) = persisted {
-                // Not fatal to this refresh (the access token we just got is
-                // still good), but silently swallowing it here means the
-                // *next* refresh reuses the now-rotated-away token and the
-                // character gets logged out with no clue why — log it.
-                eprintln!(
-                    "esi::auth: failed to persist rotated refresh token for character \
-                     {character_id}: {e} — next refresh may use a stale token and force a re-login"
-                );
+            match persisted {
+                Ok(()) => self.mark_persist_failed(character_id, false),
+                Err(e) => {
+                    // Not fatal to this refresh (the access token we just got
+                    // is still good), but the *next* refresh reuses the
+                    // now-rotated-away token and the character gets logged
+                    // out — so log it and flag it for the UI to warn about.
+                    eprintln!(
+                        "esi::auth: failed to persist rotated refresh token for character \
+                         {character_id}: {e} — next refresh may use a stale token and force a re-login"
+                    );
+                    self.mark_persist_failed(character_id, true);
+                }
             }
         }
         self.cache_token(character_id, tokens.access_token.clone(), tokens.expires_in);
@@ -230,6 +242,50 @@ impl AuthState {
     pub fn forget(&self, character_id: i64) {
         recover_lock(self.tokens.lock()).remove(&character_id);
         recover_lock(self.refresh_locks.lock()).remove(&character_id);
+        self.clear_persist_failure(character_id);
+    }
+
+    /// Install the callback fired whenever the set of characters with an
+    /// unpersisted rotated refresh token changes, so the app can tell the
+    /// frontend (which then re-reads [`AuthState::persist_failures`]). Set
+    /// once at startup; later calls are ignored.
+    pub fn set_persist_failure_notifier(&self, notify: impl Fn() + Send + Sync + 'static) {
+        let _ = self.persist_notifier.set(Box::new(notify));
+    }
+
+    /// Characters whose most recent rotated refresh token could not be saved to
+    /// the keychain. Their current session works, but the next refresh will
+    /// reuse the rotated-away token and force a re-login — the UI warns about
+    /// it. Ascending by character id.
+    pub fn persist_failures(&self) -> Vec<i64> {
+        recover_lock(self.persist_failures.lock())
+            .iter()
+            .copied()
+            .collect()
+    }
+
+    /// Drop a character's persist-failure warning: a fresh login stored a new
+    /// refresh token, or the character was removed.
+    pub fn clear_persist_failure(&self, character_id: i64) {
+        self.mark_persist_failed(character_id, false);
+    }
+
+    /// Record (or clear) a character's persist-failure flag; the notifier
+    /// fires only when the flag actually changed.
+    fn mark_persist_failed(&self, character_id: i64, failed: bool) {
+        let changed = {
+            let mut set = recover_lock(self.persist_failures.lock());
+            if failed {
+                set.insert(character_id)
+            } else {
+                set.remove(&character_id)
+            }
+        };
+        if changed {
+            if let Some(notify) = self.persist_notifier.get() {
+                notify();
+            }
+        }
     }
 
     pub fn http(&self) -> &reqwest::Client {
@@ -326,7 +382,7 @@ mod tests {
     mod counting_credential {
         use std::any::Any;
         use std::collections::HashMap;
-        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
         use std::sync::{Arc, LazyLock};
 
         use keyring::credential::{
@@ -338,6 +394,7 @@ mod tests {
         struct Inner {
             secret: Mutex<Option<Vec<u8>>>,
             set_calls: AtomicUsize,
+            fail_sets: AtomicBool,
         }
 
         #[derive(Clone, Default)]
@@ -348,11 +405,22 @@ mod tests {
             pub fn set_calls(&self) -> usize {
                 self.0.set_calls.load(Ordering::SeqCst)
             }
+
+            /// Make every subsequent write fail (or succeed again), to
+            /// simulate a locked/unavailable keychain.
+            pub fn fail_sets(&self, fail: bool) {
+                self.0.fail_sets.store(fail, Ordering::SeqCst);
+            }
         }
 
         impl CredentialApi for CountingCredential {
             fn set_secret(&self, secret: &[u8]) -> keyring::Result<()> {
                 self.0.set_calls.fetch_add(1, Ordering::SeqCst);
+                if self.0.fail_sets.load(Ordering::SeqCst) {
+                    return Err(keyring::Error::NoStorageAccess(Box::new(
+                        std::io::Error::other("keychain locked"),
+                    )));
+                }
                 *self.0.secret.lock() = Some(secret.to_vec());
                 Ok(())
             }
@@ -595,5 +663,82 @@ mod tests {
         );
 
         server_thread.join().expect("server thread");
+    }
+
+    #[test]
+    fn a_failed_rotated_token_write_is_flagged_and_notified_then_cleared_on_recovery() {
+        counting_credential::install();
+        let character_id = 910_105;
+        crate::storage::store_refresh_token(character_id, "old-refresh-token")
+            .expect("seed initial refresh token");
+        let credential = counting_credential::credential_for(character_id);
+        credential.fail_sets(true);
+
+        let body = serde_json::json!({
+            "access_token": "fresh-access-token",
+            "refresh_token": "rotated-refresh-token",
+            "expires_in": 1200,
+        })
+        .to_string();
+        let (url, _hits, _server) = start_counting_token_stub(body);
+        let state = AuthState::new().with_token_url(url);
+        let notified = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = notified.clone();
+        state.set_persist_failure_notifier(move || {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+
+        // The keychain write fails, but the call itself must still succeed —
+        // the access token we just got is good — and the failure is surfaced.
+        let token = rt
+            .block_on(state.access_token_for(character_id))
+            .expect("a failed write-back must not fail the refresh");
+        assert_eq!(token, "fresh-access-token");
+        assert_eq!(state.persist_failures(), vec![character_id]);
+        assert_eq!(notified.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        // Keychain recovers; the next refresh (token expired) persists the
+        // rotated token and the warning clears.
+        credential.fail_sets(false);
+        state.cache_token(character_id, "expired".to_string(), 0);
+        rt.block_on(state.access_token_for(character_id))
+            .expect("refresh should succeed");
+        assert!(state.persist_failures().is_empty());
+        assert_eq!(notified.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert_eq!(
+            crate::storage::load_refresh_token(character_id).unwrap(),
+            Some("rotated-refresh-token".to_string())
+        );
+    }
+
+    #[test]
+    fn persist_failures_clear_on_relogin_or_logout_and_notify_only_on_change() {
+        let state = AuthState::new();
+        let notified = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = notified.clone();
+        state.set_persist_failure_notifier(move || {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        let seen = || notified.load(std::sync::atomic::Ordering::SeqCst);
+
+        state.mark_persist_failed(910_106, true);
+        state.mark_persist_failed(910_106, true); // already flagged: no event
+        assert_eq!(state.persist_failures(), vec![910_106]);
+        assert_eq!(seen(), 1);
+
+        state.clear_persist_failure(910_106); // a fresh login stores a new token
+        assert!(state.persist_failures().is_empty());
+        assert_eq!(seen(), 2);
+        state.clear_persist_failure(910_106); // nothing to clear: no event
+        assert_eq!(seen(), 2);
+
+        state.mark_persist_failed(910_107, true);
+        state.forget(910_107); // logout drops the warning with the character
+        assert!(state.persist_failures().is_empty());
+        assert_eq!(seen(), 4);
     }
 }

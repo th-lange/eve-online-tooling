@@ -158,6 +158,8 @@ export const authKeys = {
   all: ["auth"] as const,
   characters: ["auth", "characters"] as const,
   active: ["auth", "active"] as const,
+  /** Character ids whose rotated refresh token couldn't be saved. */
+  persistFailures: ["auth", "persistFailures"] as const,
 };
 
 // --- Ammo ---
