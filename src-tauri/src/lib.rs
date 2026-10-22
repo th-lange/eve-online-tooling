@@ -207,6 +207,16 @@ pub fn run() {
             app.manage(std::sync::Arc::new(plugins::PluginRegistry::load(&dir)));
             app.manage(std::sync::Arc::new(plugins::PluginManager::new()));
             app.manage(esi::AuthState::with_cache(dir.clone()));
+            // Tell the frontend when a rotated refresh token couldn't be saved
+            // to the keychain (or the problem cleared), so it can warn instead
+            // of the character silently logging out on the next refresh.
+            {
+                let handle = app.handle().clone();
+                app.state::<esi::AuthState>()
+                    .set_persist_failure_notifier(move || {
+                        let _ = tauri::Emitter::emit(&handle, "auth://persist-failed", ());
+                    });
+            }
             app.manage(modules::production::commands::CostIndexLocks::default());
             app.manage(zkill::live::ZkillStreamState::default());
             modules::dpsmeter::init(app);
@@ -272,6 +282,7 @@ pub fn run() {
             esi::commands::auth_login,
             esi::commands::auth_characters,
             esi::commands::auth_logout,
+            esi::commands::auth_persist_failures,
             esi::commands::auth_set_active_character,
             esi::commands::auth_active_character,
             esi::commands::esi_character_ship,
