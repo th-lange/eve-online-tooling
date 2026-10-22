@@ -145,16 +145,24 @@ pub fn host_functions(granted: &HashSet<Permission>, ctx: Arc<BrokerCtx>) -> Vec
                 // speak `extism::Error`, so map at this boundary. Delegates to
                 // the capability registry (cap_sde_type_info) instead of
                 // re-implementing the SDE lookup here, so the two callers
-                // can't drift.
+                // can't drift. `invoke` is async-first (#1030); Extism host
+                // functions are synchronous by contract, and every path that
+                // reaches this closure runs it off the Tauri main thread and
+                // off any tokio worker (see the `host_call` threading note
+                // below), so `block_on` here only blocks that dedicated thread.
                 let hctx = capabilities::HostCtx {
                     app_data_dir: &sde_ctx.app_data_dir,
                     market: &sde_ctx.market,
                     auth: Some(&sde_ctx.auth),
                 };
                 let args = serde_json::json!({ "typeId": type_id });
-                let json = capabilities::invoke(&hctx, "sde_type_info", &args)
-                    .map_err(Error::msg)?
-                    .to_string();
+                let json = tauri::async_runtime::block_on(capabilities::invoke(
+                    &hctx,
+                    "sde_type_info",
+                    &args,
+                ))
+                .map_err(Error::msg)?
+                .to_string();
                 plugin.memory_set_val(&mut outputs[0], json)?;
                 Ok(())
             },
@@ -214,15 +222,17 @@ pub fn host_functions(granted: &HashSet<Permission>, ctx: Arc<BrokerCtx>) -> Vec
     // capability registry. Always linked; each call is gated at runtime against
     // the plugin's grants (a generic dispatcher can't be gated at load time).
     //
-    // Threading: Extism host functions are synchronous by contract, and some
-    // capability handlers `block_on` real network I/O (ESI/Fuzzwork). That is
-    // only acceptable because every path into plugin wasm keeps this closure
-    // off async runtime workers and off the main thread: the `plugins_invoke`
-    // command wraps the call in `tokio::task::spawn_blocking` (see
-    // `manager::plugins_invoke`), and the MCP bridge runs on its own dedicated
-    // OS thread. Do not call plugin wasm inline from a sync command or from an
-    // async task — a slow capability would stall the UI (or panic on
-    // re-entrant `block_on`).
+    // Threading: Extism host functions are synchronous by contract, and
+    // `capabilities::invoke` is async-first (#1030) so a handler that needs
+    // real network I/O (ESI/Fuzzwork) `.await`s it directly instead of
+    // blocking deep inside a handler. That leaves exactly one `block_on`
+    // here, driving the whole future to completion — acceptable only because
+    // every path into plugin wasm keeps this closure off async runtime
+    // workers and off the main thread: the `plugins_invoke` command wraps
+    // the call in `tokio::task::spawn_blocking` (see `manager::plugins_invoke`),
+    // and the MCP bridge runs on its own dedicated OS thread. Do not call
+    // plugin wasm inline from a sync command or from an async task — a slow
+    // capability would stall the UI (or panic on re-entrant `block_on`).
     let call_granted = granted.clone();
     let call_ctx = ctx.clone();
     functions.push(Function::new(
@@ -255,7 +265,8 @@ pub fn host_functions(granted: &HashSet<Permission>, ctx: Arc<BrokerCtx>) -> Vec
                 market: &call_ctx.market,
                 auth: Some(&call_ctx.auth),
             };
-            let result = capabilities::invoke(&hctx, &name, &args).map_err(Error::msg)?;
+            let result = tauri::async_runtime::block_on(capabilities::invoke(&hctx, &name, &args))
+                .map_err(Error::msg)?;
             let out = serde_json::to_string(&result).map_err(|e| Error::msg(e.to_string()))?;
             plugin.memory_set_val(&mut outputs[0], out)?;
             Ok(())

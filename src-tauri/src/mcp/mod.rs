@@ -356,7 +356,13 @@ fn call_tool(params: Option<&Value>, ctx: &ToolCtx) -> Result<Value, (i64, Strin
                 market: &ctx.market,
                 auth: None,
             };
-            let value = capabilities::invoke(&hctx, other, args).map_err(|e| (-32602, e))?;
+            // `invoke` is async-first (#1030); this request-handling fn runs
+            // synchronously on `serve`'s dedicated `std::thread::spawn` loop
+            // (never a tokio worker or the Tauri main thread — see `McpState::start`),
+            // so blocking that one thread for the duration of a slow capability
+            // is safe: it only delays this request, same as before.
+            let value = tauri::async_runtime::block_on(capabilities::invoke(&hctx, other, args))
+                .map_err(|e| (-32602, e))?;
             json_content(&value)
         }
         // Namespaced `<pluginId>.<tool>` -> a plugin-contributed tool.

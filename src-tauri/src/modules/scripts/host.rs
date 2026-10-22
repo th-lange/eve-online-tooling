@@ -6,11 +6,12 @@
 //! private key/value store, and `log()`. There is deliberately **no** access to
 //! the filesystem, keychain, or raw ESI tokens.
 //!
-//! Every method is synchronous so both engines can call it inline; the ones
-//! that reach async services (`market`, ESI) drive them to completion with
-//! [`tauri::async_runtime::block_on`], exactly like the MCP bridge does. Because
+//! Every method is synchronous so both engines can call it inline; `cap()`
+//! drives the capability registry's async-first [`crate::capabilities::invoke`]
+//! (#1030) to completion with [`tauri::async_runtime::block_on`]. Because
 //! that blocks, a run is only ever executed on a blocking thread (see
-//! [`super::commands::scripts_run`]).
+//! [`super::commands::scripts_run`]) — never the Tauri main thread or a
+//! tokio worker, so the block is confined to that dedicated thread.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -112,7 +113,11 @@ impl HostCtx {
         Ok(())
     }
 
-    /// Run a registry capability with the app's managed services (warm caches).
+    /// Run a registry capability with the app's managed services (warm
+    /// caches). `invoke` is async-first (#1030); this is always called from
+    /// the `scripts_run`/scheduler blocking thread (never the Tauri main
+    /// thread or a tokio worker — see this module's doc comment), so driving
+    /// it with `block_on` here only blocks that dedicated thread.
     fn cap(&self, name: &str, args: &serde_json::Value) -> Result<Value, String> {
         let market = self.app.state::<MarketService>();
         let auth = self.app.state::<AuthState>();
@@ -121,7 +126,7 @@ impl HostCtx {
             market: &market,
             auth: Some(&auth),
         };
-        crate::capabilities::invoke(&ctx, name, args)
+        tauri::async_runtime::block_on(crate::capabilities::invoke(&ctx, name, args))
     }
 }
 
