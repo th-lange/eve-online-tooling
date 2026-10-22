@@ -56,3 +56,33 @@ export interface AssetsPayload {
 export function assetsLoad(): Promise<AssetsPayload> {
   return invoke<AssetsPayload>("assets_load");
 }
+
+/** One station/structure the roster has assets at (see `assetsLocations`). */
+export interface AssetLocation {
+  /** Root station/structure id — matches `AssetRow.locationId`. */
+  id: number;
+  name: string;
+  solarSystem: string | null;
+}
+
+/** How many of one item type sit at a location (see `assetsStockAtLocation`). */
+export interface StockEntry {
+  typeId: number;
+  quantity: number;
+}
+
+/** Every station/structure the roster has assets at, sorted by name. A cheap
+ *  read of the same cached item data as `assetsLoad` — no Jita pricing — for
+ *  populating location pickers. */
+export function assetsLocations(): Promise<AssetLocation[]> {
+  return invoke<AssetLocation[]>("assets_locations");
+}
+
+/** Stock of each item type at one station/structure (including items nested
+ *  in containers/ships there), summed across the whole roster's personal and
+ *  corp hangars. No pricing. */
+export function assetsStockAtLocation(
+  locationId: number,
+): Promise<StockEntry[]> {
+  return invoke<StockEntry[]>("assets_stock_at_location", { locationId });
+}

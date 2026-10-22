@@ -4,8 +4,15 @@ import type { MassProductionPlan } from "../../lib/api";
 import { invokeMock, mockInvoke, renderWithQuery } from "../../test/harness";
 
 import { MassProductionPage } from "./MassProductionPage";
-import { AssetsPage } from "../assets/AssetsPage";
 
+const JITA_ID = 60003760;
+const JITA_LOCATIONS = [
+  {
+    id: JITA_ID,
+    name: "Jita IV - Moon 4 - Caldari Navy Assembly Plant",
+    solarSystem: "Jita",
+  },
+];
 const SDE_OK = { installed: true, path: "/sde", sizeBytes: 1, updated: false };
 
 const PLAN: MassProductionPlan = {
@@ -182,31 +189,8 @@ describe("MassProductionPage", () => {
     mockInvoke({
       sde_status: () => SDE_OK,
       massprod_plan: () => PLAN,
-      assets_load: () => ({
-        rows: [
-          {
-            typeId: 11399,
-            name: "Morphite",
-            quantity: 5000,
-            sellPrice: 1000,
-            buyPrice: 900,
-            sellValue: 5_000_000,
-            buyValue: 4_500_000,
-            volume: 5000,
-            category: "Material",
-            group: "Mineral",
-            owner: "Alt One",
-            isCorp: false,
-            locationId: 60003760,
-            station: "Jita IV - Moon 4 - Caldari Navy Assembly Plant",
-            solarSystem: "Jita",
-          },
-        ],
-        roots: [],
-        sellTotal: 5_000_000,
-        buyTotal: 4_500_000,
-        volumeTotal: 5000,
-      }),
+      assets_locations: () => JITA_LOCATIONS,
+      assets_stock_at_location: () => [{ typeId: 11399, quantity: 5000 }],
     });
     renderWithQuery(<MassProductionPage />);
 
@@ -214,18 +198,16 @@ describe("MassProductionPage", () => {
     await screen.findByText("Mineral");
     expect(screen.getByText("5,010")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Load owned stock" }));
-    await screen.findByRole("button", { name: "Reload stock" });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Load stock locations" }),
+    );
+    await screen.findByRole("button", { name: "Reload locations" });
 
     fireEvent.change(
       screen.getByTitle(
         "Subtract what the roster already has stocked at a location",
       ),
-      {
-        target: {
-          value: "60003760",
-        },
-      },
+      { target: { value: String(JITA_ID) } },
     );
 
     // The table shows the full accounting: need 5,010, have 5,000, buy 10.
@@ -235,49 +217,33 @@ describe("MassProductionPage", () => {
     expect(
       screen.getByRole("columnheader", { name: "To buy" }),
     ).toBeInTheDocument();
+    expect(invokeMock).toHaveBeenCalledWith("assets_stock_at_location", {
+      locationId: JITA_ID,
+    });
+    // The picker and netting never pull the priced Assets payload.
+    expect(invokeMock).not.toHaveBeenCalledWith("assets_load");
   });
 
   it("keeps a fully covered material listed at 0 to buy instead of dropping it", async () => {
     mockInvoke({
       sde_status: () => SDE_OK,
       massprod_plan: () => PLAN,
-      assets_load: () => ({
-        rows: [
-          {
-            typeId: 11399,
-            name: "Morphite",
-            quantity: 6000,
-            sellPrice: 1000,
-            buyPrice: 900,
-            sellValue: 6_000_000,
-            buyValue: 5_400_000,
-            volume: 6000,
-            category: "Material",
-            group: "Mineral",
-            owner: "Alt One",
-            isCorp: false,
-            locationId: 60003760,
-            station: "Jita IV - Moon 4 - Caldari Navy Assembly Plant",
-            solarSystem: "Jita",
-          },
-        ],
-        roots: [],
-        sellTotal: 6_000_000,
-        buyTotal: 5_400_000,
-        volumeTotal: 6000,
-      }),
+      assets_locations: () => JITA_LOCATIONS,
+      assets_stock_at_location: () => [{ typeId: 11399, quantity: 6000 }],
     });
     renderWithQuery(<MassProductionPage />);
 
     await pasteAndImport("5MN Microwarpdrive II Blueprint");
     await screen.findByText("Mineral");
-    fireEvent.click(screen.getByRole("button", { name: "Load owned stock" }));
-    await screen.findByRole("button", { name: "Reload stock" });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Load stock locations" }),
+    );
+    await screen.findByRole("button", { name: "Reload locations" });
     fireEvent.change(
       screen.getByTitle(
         "Subtract what the roster already has stocked at a location",
       ),
-      { target: { value: "60003760" } },
+      { target: { value: String(JITA_ID) } },
     );
 
     expect(await screen.findByText("6,000")).toBeInTheDocument();
@@ -285,13 +251,55 @@ describe("MassProductionPage", () => {
     expect(screen.getByText("0")).toBeInTheDocument();
   });
 
-  it("loads stock in the background with a wait signal when the location picker is focused", async () => {
-    const { promise: assetsPromise, resolve: resolveAssets } =
+  it("shows full quantities, not a bogus 'have 0', until the location's stock arrives", async () => {
+    const { promise: stockPromise, resolve: resolveStock } =
       Promise.withResolvers<unknown>();
     mockInvoke({
       sde_status: () => SDE_OK,
       massprod_plan: () => PLAN,
-      assets_load: () => assetsPromise,
+      assets_locations: () => JITA_LOCATIONS,
+      assets_stock_at_location: () => stockPromise,
+    });
+    renderWithQuery(<MassProductionPage />);
+
+    await pasteAndImport("5MN Microwarpdrive II Blueprint");
+    await screen.findByText("Mineral");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Load stock locations" }),
+    );
+    await screen.findByRole("button", { name: "Reload locations" });
+    fireEvent.change(
+      screen.getByTitle(
+        "Subtract what the roster already has stocked at a location",
+      ),
+      { target: { value: String(JITA_ID) } },
+    );
+
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("assets_stock_at_location", {
+        locationId: JITA_ID,
+      }),
+    );
+    expect(
+      screen.getByRole("columnheader", { name: "Quantity" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("columnheader", { name: "Have" })).toBeNull();
+    expect(screen.getByText("5,010")).toBeInTheDocument();
+
+    resolveStock([{ typeId: 11399, quantity: 5000 }]);
+    expect(
+      await screen.findByRole("columnheader", { name: "Have" }),
+    ).toBeVisible();
+    expect(screen.getByText("10")).toBeInTheDocument();
+  });
+
+  it("loads locations in the background with a wait signal when the location picker is focused", async () => {
+    const { promise: locationsPromise, resolve: resolveLocations } =
+      Promise.withResolvers<unknown>();
+    mockInvoke({
+      sde_status: () => SDE_OK,
+      massprod_plan: () => PLAN,
+      assets_locations: () => locationsPromise,
     });
     renderWithQuery(<MassProductionPage />);
 
@@ -301,108 +309,28 @@ describe("MassProductionPage", () => {
     const select = screen.getByTitle(
       "Subtract what the roster already has stocked at a location",
     ) as HTMLSelectElement;
-    expect(invokeMock).not.toHaveBeenCalledWith("assets_load");
+    expect(invokeMock).not.toHaveBeenCalledWith("assets_locations");
 
     fireEvent.focus(select);
 
-    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("assets_load"));
-    expect(select.options[0].textContent).toBe("Loading stock…");
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("assets_locations"),
+    );
+    expect(select.options[0].textContent).toBe("Loading locations…");
     expect(
-      screen.getByRole("button", { name: "Loading stock…" }),
+      screen.getByRole("button", { name: "Loading locations…" }),
     ).toBeInTheDocument();
 
-    resolveAssets({
-      rows: [
-        {
-          typeId: 11399,
-          name: "Morphite",
-          quantity: 5000,
-          sellPrice: 1000,
-          buyPrice: 900,
-          sellValue: 5_000_000,
-          buyValue: 4_500_000,
-          volume: 5000,
-          category: "Material",
-          group: "Mineral",
-          owner: "Alt One",
-          isCorp: false,
-          locationId: 60003760,
-          station: "Jita IV - Moon 4 - Caldari Navy Assembly Plant",
-          solarSystem: "Jita",
-        },
-      ],
-      roots: [],
-      sellTotal: 5_000_000,
-      buyTotal: 4_500_000,
-      volumeTotal: 5000,
-    });
+    resolveLocations(JITA_LOCATIONS);
 
     await screen.findByRole("option", {
       name: "Jita IV - Moon 4 - Caldari Navy Assembly Plant",
     });
     expect(select.options[0].textContent).toBe("All locations — full quantity");
     expect(
-      screen.queryByRole("button", { name: "Loading stock…" }),
+      screen.queryByRole("button", { name: "Loading locations…" }),
     ).not.toBeInTheDocument();
-  });
-
-  it("sees locations the Assets page already loaded, without a separate fetch", async () => {
-    mockInvoke({
-      sde_status: () => SDE_OK,
-      massprod_plan: () => PLAN,
-      auth_characters: () => [],
-      auth_active_character: () => null,
-      assets_load: () => ({
-        rows: [
-          {
-            typeId: 11399,
-            name: "Morphite",
-            quantity: 5000,
-            sellPrice: 1000,
-            buyPrice: 900,
-            sellValue: 5_000_000,
-            buyValue: 4_500_000,
-            volume: 5000,
-            category: "Material",
-            group: "Mineral",
-            owner: "Alt One",
-            isCorp: false,
-            locationId: 60003760,
-            station: "Jita IV - Moon 4 - Caldari Navy Assembly Plant",
-            solarSystem: "Jita",
-          },
-        ],
-        roots: [],
-        sellTotal: 5_000_000,
-        buyTotal: 4_500_000,
-        volumeTotal: 5000,
-      }),
-    });
-    renderWithQuery(
-      <>
-        <AssetsPage />
-        <MassProductionPage />
-      </>,
-    );
-
-    // The Assets page auto-loads on mount (no click needed there either) —
-    // wait for its own "Refresh" button to confirm the shared query landed.
-    await screen.findByRole("button", { name: "Refresh" });
-    await waitFor(() => expect(invokeMock).toHaveBeenCalledWith("assets_load"));
-
-    await pasteAndImport("5MN Microwarpdrive II Blueprint");
-    await screen.findByText("Mineral");
-
-    // Never clicked "Load owned stock" here — the picker is already
-    // populated from the Assets page's load, sharing one cache entry.
-    fireEvent.change(
-      screen.getByTitle(
-        "Subtract what the roster already has stocked at a location",
-      ),
-      { target: { value: "60003760" } },
-    );
-
-    expect(await screen.findByText("10")).toBeInTheDocument();
+    expect(invokeMock).not.toHaveBeenCalledWith("assets_load");
   });
 
   it("groups the matched blueprints by tech tier", async () => {

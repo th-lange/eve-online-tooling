@@ -9,6 +9,8 @@
 import { queryOptions } from "@tanstack/react-query";
 import {
   assetsLoad,
+  assetsLocations,
+  assetsStockAtLocation,
   marketHistory,
   marketRegions,
   sdeSearch,
@@ -22,17 +24,32 @@ import type { Fresh } from "./api/common";
  *  the Shopping page from anywhere. */
 export const SHOPPING_LISTS_KEY = ["shopping", "lists"] as const;
 
-/** The roster's ESI assets — one shared cache entry so the Assets page and
- *  Mass Production's "still needed" stock picker see the same load without
- *  either having to re-fetch what the other already has. `staleTime`
- *  mirrors the backend's own 600s per-character cache (`assets_load`), so a
- *  second mount within that window reuses the cached payload instead of
- *  round-tripping through Tauri again. */
+/** The roster's ESI assets. `load` is the priced flat+tree payload the Assets
+ *  page renders; `staleTime` mirrors the backend's own 600s per-character
+ *  cache (`assets_load`), so a second mount within that window reuses the
+ *  cached payload instead of round-tripping through Tauri again.
+ *
+ *  `locations` / `stockAt` are the pricing-free reads Mass Production's
+ *  stock-location picker uses — same 600s backend cache, no Jita valuation.
+ *  `stockAll` is the prefix that sweeps every per-location stock entry. */
 export const assetsKeys = {
   load: () =>
     queryOptions({
       queryKey: ["assets", "load"] as const,
       queryFn: assetsLoad,
+      staleTime: 600_000,
+    }),
+  locations: () =>
+    queryOptions({
+      queryKey: ["assets", "locations"] as const,
+      queryFn: assetsLocations,
+      staleTime: 600_000,
+    }),
+  stockAll: ["assets", "stock"] as const,
+  stockAt: (locationId: number) =>
+    queryOptions({
+      queryKey: ["assets", "stock", locationId] as const,
+      queryFn: () => assetsStockAtLocation(locationId),
       staleTime: 600_000,
     }),
 };
