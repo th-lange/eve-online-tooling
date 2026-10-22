@@ -54,6 +54,9 @@ pub async fn auth_login(
     roster.retain(|c| c.character_id != character.character_id);
     roster.push(character.clone());
     storage::save_roster(&dir, &roster)?;
+    // A fresh login stored a new refresh token: any earlier "couldn't save
+    // your login" warning for this character no longer applies.
+    auth_state.clear_persist_failure(character.character_id);
 
     auth::cache_login_token(&auth_state, &character, &tokens);
     Ok(character)
@@ -65,6 +68,16 @@ pub async fn auth_login(
 pub fn auth_characters(app: AppHandle) -> Result<Vec<Character>, crate::model::AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
     Ok(storage::load_roster(&dir))
+}
+
+/// Characters whose most recent rotated refresh token could not be saved to
+/// the OS keychain. Their current session still works, but the next token
+/// refresh will fail and force a re-login — the UI warns about it. Re-read on
+/// the `auth://persist-failed` event, which fires whenever this set changes.
+#[tauri::command]
+#[specta::specta]
+pub fn auth_persist_failures(auth_state: State<'_, AuthState>) -> Vec<i64> {
+    auth_state.persist_failures()
 }
 
 /// Bookmark the "active" character used by per-character features (industry
@@ -375,6 +388,7 @@ pub fn specta_commands() -> tauri_specta::Commands<tauri::Wry> {
         esi_open_info_window,
         esi_set_waypoint,
         auth_logout,
+        auth_persist_failures,
     ]
 }
 
