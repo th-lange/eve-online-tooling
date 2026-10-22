@@ -333,6 +333,224 @@ fn resolve_location_label(
     }
 }
 
+// --- Shared raw-asset plumbing (used by `assets_load` and the light reads) ---
+
+/// The roster's item-level assets — served from the 600s on-disk cache when
+/// fresh, else gathered from ESI and cached. One entry per active-character
+/// selection, so the flat rows, the tree and the lightweight location/stock
+/// reads below all derive from the same single ESI fetch.
+async fn load_raw_assets(auth_state: &AuthState, dir: &std::path::Path) -> Vec<CachedRawAsset> {
+    let sel = storage::active_character(dir).unwrap_or(0);
+    let cache_key = format!("assets_raw_v1_{sel}");
+    if let Some(cached) = storage::cache_get(dir, &cache_key) {
+        return cached;
+    }
+    let roster = gather_roster_assets(auth_state, dir).await;
+    let raw: Vec<CachedRawAsset> = roster
+        .into_iter()
+        .map(|row| CachedRawAsset {
+            item_id: row.asset.item_id,
+            location_id: row.asset.location_id,
+            type_id: row.asset.type_id,
+            quantity: row.asset.quantity,
+            owner: row.owner,
+            is_corp: row.is_corp,
+        })
+        .collect();
+    let _ = storage::cache_put(dir, &cache_key, &raw, 600);
+    raw
+}
+
+/// Item → direct-parent index, for resolving any item to the station or
+/// structure it ultimately sits in (items nest inside containers and ships).
+struct RootIndex {
+    item_to_loc: HashMap<i64, i64>,
+}
+
+impl RootIndex {
+    fn new(raw: &[CachedRawAsset]) -> Self {
+        Self {
+            item_to_loc: raw.iter().map(|r| (r.item_id, r.location_id)).collect(),
+        }
+    }
+
+    /// Walk `item_id → location_id` links until reaching an id that is not
+    /// itself an item — a station/structure. Capped at 20 hops so a malformed
+    /// cycle can't loop forever.
+    fn root_of(&self, start: i64) -> i64 {
+        let mut loc = start;
+        for _ in 0..20 {
+            match self.item_to_loc.get(&loc) {
+                Some(&parent) => loc = parent,
+                None => break,
+            }
+        }
+        loc
+    }
+}
+
+/// Distinct root station/structure ids across all assets, ascending.
+fn root_location_ids(raw: &[CachedRawAsset], index: &RootIndex) -> Vec<i64> {
+    let mut ids: Vec<i64> = raw
+        .iter()
+        .map(|r| index.root_of(r.location_id))
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    ids.sort_unstable();
+    ids
+}
+
+/// Quantity of each item type sitting at root location `location_id` (inside
+/// containers/ships there included), summed across every owner — personal and
+/// corp hangars alike.
+fn stock_at_location(raw: &[CachedRawAsset], location_id: i64) -> HashMap<i64, i64> {
+    let index = RootIndex::new(raw);
+    let mut stock: HashMap<i64, i64> = HashMap::new();
+    for r in raw {
+        if index.root_of(r.location_id) == location_id {
+            *stock.entry(r.type_id).or_insert(0) += r.quantity;
+        }
+    }
+    stock
+}
+
+/// Display names for root locations: SDE stations, ESI player structures and
+/// the solar-system names both resolve through.
+struct LocationLabels {
+    station_infos: HashMap<i64, (String, i64)>,
+    structure_info: HashMap<i64, (String, i64)>,
+    system_names: std::sync::Arc<NameMap>,
+}
+
+impl LocationLabels {
+    /// `(station/structure name, solar-system name)` for a root location id.
+    fn label(&self, id: i64) -> (String, Option<String>) {
+        resolve_location_label(
+            id,
+            &self.station_infos,
+            &self.structure_info,
+            &self.system_names,
+        )
+    }
+}
+
+/// Resolve names for `root_ids`. NPC stations come from the SDE; player
+/// structures (citadels / upwellers, id ≥ 1 trillion) aren't in the SDE, so
+/// their names + home system come from authenticated ESI — one request per
+/// structure, issued concurrently. A 403 (structure not accessible to the
+/// character) or a not-logged-in character leaves the entry absent and the
+/// caller falls through to the generic fallback label. ESI is skipped
+/// entirely when the character's token lacks the esi-universe.read_structures
+/// scope — no point hitting it just to get 403s.
+async fn resolve_location_labels(
+    auth_state: &AuthState,
+    dir: &std::path::Path,
+    root_ids: &[i64],
+) -> Result<LocationLabels, String> {
+    let system_names = crate::sde::cached_system_names(dir)?;
+    let sde = crate::sde::open_from_dir(dir)?;
+    let station_infos = sde.station_infos(root_ids).map_err(|e| e.to_string())?;
+
+    let structure_ids: Vec<i64> = root_ids
+        .iter()
+        .copied()
+        .filter(|&id| id >= STRUCTURE_ID_MIN)
+        .collect();
+    let structure_info = if structure_ids.is_empty() {
+        HashMap::new()
+    } else {
+        match storage::primary_character(dir) {
+            Some(char_id) => {
+                // Check the roster's stored scopes (extracted from the login
+                // JWT) to avoid round-tripping through ESI when the scope
+                // isn't granted — the user just needs to enable it + re-login.
+                let has_scope = storage::load_roster(dir).iter().any(|c| {
+                    c.character_id == char_id && c.scopes.iter().any(|s| s == STRUCTURES_SCOPE)
+                });
+                if has_scope {
+                    fetch_structure_info(auth_state, char_id, &structure_ids).await
+                } else {
+                    HashMap::new()
+                }
+            }
+            None => HashMap::new(),
+        }
+    };
+
+    Ok(LocationLabels {
+        station_infos,
+        structure_info,
+        system_names,
+    })
+}
+
+// --- Lightweight reads (no pricing) ---
+
+/// One station/structure the roster has assets at.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetLocation {
+    pub id: i64,
+    pub name: String,
+    pub solar_system: Option<String>,
+}
+
+/// How many of one item type sit at a location.
+#[derive(Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StockEntry {
+    pub type_id: i64,
+    pub quantity: i64,
+}
+
+/// Every station/structure the roster has assets at, named and sorted by
+/// name. Reads the same cached item-level assets as [`assets_load`] but skips
+/// the Jita price fetch + valuation, so it is cheap enough to populate a
+/// dropdown (Mass Production's stock-location picker).
+#[tauri::command]
+pub async fn assets_locations(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+) -> Result<Vec<AssetLocation>, String> {
+    let dir = storage::app_data_dir(&app)?;
+    let raw = load_raw_assets(&auth_state, &dir).await;
+    let index = RootIndex::new(&raw);
+    let root_ids = root_location_ids(&raw, &index);
+    let labels = resolve_location_labels(&auth_state, &dir, &root_ids).await?;
+    let mut out: Vec<AssetLocation> = root_ids
+        .into_iter()
+        .map(|id| {
+            let (name, solar_system) = labels.label(id);
+            AssetLocation {
+                id,
+                name,
+                solar_system,
+            }
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+/// Stock of each item type at one root location (see [`stock_at_location`]),
+/// ascending by type id. Like [`assets_locations`], no pricing involved.
+#[tauri::command]
+pub async fn assets_stock_at_location(
+    app: AppHandle,
+    auth_state: State<'_, AuthState>,
+    location_id: i64,
+) -> Result<Vec<StockEntry>, String> {
+    let dir = storage::app_data_dir(&app)?;
+    let raw = load_raw_assets(&auth_state, &dir).await;
+    let mut out: Vec<StockEntry> = stock_at_location(&raw, location_id)
+        .into_iter()
+        .map(|(type_id, quantity)| StockEntry { type_id, quantity })
+        .collect();
+    out.sort_by_key(|e| e.type_id);
+    Ok(out)
+}
+
 // --- Single unified command ---
 
 /// Load the roster's assets once — ESI fetch (or cache hit), price at Jita,
@@ -345,30 +563,7 @@ pub async fn assets_load(
     market: State<'_, MarketService>,
 ) -> Result<AssetsPayload, String> {
     let dir = storage::app_data_dir(&app)?;
-    let sel = storage::active_character(&dir).unwrap_or(0);
-    let cache_key = format!("assets_raw_v1_{sel}");
-
-    // Item-level cache — from this we derive both the flat rows (aggregate by
-    // type × owner × root location) and the tree (re-nest by location_id chain).
-    let raw: Vec<CachedRawAsset> = match storage::cache_get(&dir, &cache_key) {
-        Some(r) => r,
-        None => {
-            let roster = gather_roster_assets(&auth_state, &dir).await;
-            let r: Vec<CachedRawAsset> = roster
-                .into_iter()
-                .map(|row| CachedRawAsset {
-                    item_id: row.asset.item_id,
-                    location_id: row.asset.location_id,
-                    type_id: row.asset.type_id,
-                    quantity: row.asset.quantity,
-                    owner: row.owner,
-                    is_corp: row.is_corp,
-                })
-                .collect();
-            let _ = storage::cache_put(&dir, &cache_key, &r, 600);
-            r
-        }
-    };
+    let raw = load_raw_assets(&auth_state, &dir).await;
 
     if raw.is_empty() {
         return Ok(AssetsPayload {
@@ -381,22 +576,7 @@ pub async fn assets_load(
     }
 
     // ── Root-location resolution (needed for flat aggregation) ──────────────
-    // Walk item_id → location_id chains until we reach a station/structure.
-    let item_to_loc: HashMap<i64, i64> = raw.iter().map(|r| (r.item_id, r.location_id)).collect();
-    let item_ids: HashSet<i64> = item_to_loc.keys().copied().collect();
-    let root_of = |start: i64| -> i64 {
-        let mut loc = start;
-        for _ in 0..20 {
-            if !item_ids.contains(&loc) {
-                break;
-            }
-            match item_to_loc.get(&loc) {
-                Some(&parent) => loc = parent,
-                None => break,
-            }
-        }
-        loc
-    };
+    let index = RootIndex::new(&raw);
 
     // ── Prices ──────────────────────────────────────────────────────────────
     let type_ids: Vec<i64> = raw
@@ -419,62 +599,18 @@ pub async fn assets_load(
 
     // ── SDE ─────────────────────────────────────────────────────────────────
     let item_meta = crate::sde::cached_item_meta(&dir)?;
-    let system_names = crate::sde::cached_system_names(&dir)?;
-    let sde = crate::sde::open_from_dir(&dir)?;
-    let root_ids: Vec<i64> = raw
-        .iter()
-        .map(|r| root_of(r.location_id))
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-    let station_infos = sde.station_infos(&root_ids).map_err(|e| e.to_string())?;
+    let root_ids = root_location_ids(&raw, &index);
+    let labels = resolve_location_labels(&auth_state, &dir, &root_ids).await?;
 
-    // Player structures (citadels / upwellers, id ≥ 1 trillion) aren't in the
-    // SDE — resolve their names + home system via authenticated ESI so the UI
-    // can show "My Fortizar" instead of "Structure 1035000000001". One request
-    // per structure, issued concurrently. A 403 (structure not accessible to
-    // the character) or a not-logged-in character leaves the entry absent and
-    // the caller falls through to the generic fallback label.
-    // Skip entirely when the character's token lacks the
-    // esi-universe.read_structures scope — no point hitting ESI just to get 403s.
-    let structure_ids: Vec<i64> = root_ids
-        .iter()
-        .copied()
-        .filter(|&id| id >= STRUCTURE_ID_MIN)
-        .collect();
-    let structure_info = if structure_ids.is_empty() {
-        HashMap::new()
-    } else {
-        match storage::primary_character(&dir) {
-            Some(char_id) => {
-                // Check the roster's stored scopes (extracted from the login
-                // JWT) to avoid round-tripping through ESI when the scope
-                // isn't granted — the user just needs to enable it + re-login.
-                let has_scope = storage::load_roster(&dir).iter().any(|c| {
-                    c.character_id == char_id && c.scopes.iter().any(|s| s == STRUCTURES_SCOPE)
-                });
-                if has_scope {
-                    fetch_structure_info(&auth_state, char_id, &structure_ids).await
-                } else {
-                    HashMap::new()
-                }
-            }
-            None => HashMap::new(),
-        }
-    };
-
-    // Two closures that share the same station_infos / structure_info /
-    // system_names refs: one for the flat view (needs solar system too), one
-    // for the tree (name only).
-    let loc_info = |id: i64| -> (String, Option<String>) {
-        resolve_location_label(id, &station_infos, &structure_info, &system_names)
-    };
-    let loc_name = |id: i64| -> String { loc_info(id).0 };
+    // Two closures over the same resolved labels: one for the flat view
+    // (needs the solar system too), one for the tree (name only).
+    let loc_info = |id: i64| -> (String, Option<String>) { labels.label(id) };
+    let loc_name = |id: i64| -> String { labels.label(id).0 };
 
     // ── Flat view: aggregate by (type_id, owner, root_location) ────────────
     let mut agg: HashMap<(i64, String, i64), (bool, i64)> = HashMap::new();
     for r in &raw {
-        let root = root_of(r.location_id);
+        let root = index.root_of(r.location_id);
         agg.entry((r.type_id, r.owner.clone(), root))
             .or_insert((r.is_corp, 0))
             .1 += r.quantity;
@@ -675,5 +811,65 @@ mod tests {
             resolve_location_label(structure_id, &empty, &structure_info, &system_names);
         assert_eq!(name, "Deep Space Annex");
         assert!(system.is_none()); // system not in the SDE cache yet
+    }
+
+    fn raw(item_id: i64, location_id: i64, type_id: i64, quantity: i64) -> CachedRawAsset {
+        CachedRawAsset {
+            item_id,
+            location_id,
+            type_id,
+            quantity,
+            owner: "Alice".into(),
+            is_corp: false,
+        }
+    }
+
+    #[test]
+    fn stock_at_location_counts_items_nested_in_containers_and_sums_owners() {
+        let station = 60000;
+        let mut corp_stack = raw(4, station, 34, 700);
+        corp_stack.owner = "Corp".into();
+        corp_stack.is_corp = true;
+        let assets = vec![
+            raw(1, station, 34, 1000), // loose in the hangar
+            raw(2, station, 500, 1),   // a container …
+            raw(3, 2, 34, 250),        // … holding more of the same type
+            corp_stack,                // another owner's stack
+            raw(5, 61000, 34, 9999),   // a different station
+            raw(6, 2, 35, 40),         // another type inside the container
+        ];
+        let stock = stock_at_location(&assets, station);
+        assert_eq!(stock.get(&34), Some(&1950));
+        assert_eq!(stock.get(&35), Some(&40));
+        assert_eq!(stock.get(&500), Some(&1));
+        assert_eq!(stock.len(), 3);
+    }
+
+    #[test]
+    fn stock_at_unknown_location_is_empty() {
+        let assets = vec![raw(1, 60000, 34, 10)];
+        assert!(stock_at_location(&assets, 99999).is_empty());
+    }
+
+    #[test]
+    fn root_location_ids_are_distinct_sorted_and_skip_containers() {
+        let assets = vec![
+            raw(1, 61000, 500, 1),
+            raw(2, 1, 34, 5), // nested under item 1, root is 61000
+            raw(3, 60000, 34, 5),
+            raw(4, 60000, 35, 5),
+        ];
+        let index = RootIndex::new(&assets);
+        assert_eq!(index.root_of(1), 61000);
+        assert_eq!(root_location_ids(&assets, &index), vec![60000, 61000]);
+    }
+
+    #[test]
+    fn root_of_terminates_on_a_parent_cycle() {
+        // Malformed data: 1 → 2 → 1. Must stop at the hop cap, not hang.
+        let assets = vec![raw(1, 2, 34, 1), raw(2, 1, 34, 1)];
+        let index = RootIndex::new(&assets);
+        let root = index.root_of(1);
+        assert!(root == 1 || root == 2);
     }
 }

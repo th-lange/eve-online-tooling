@@ -359,6 +359,8 @@ pub fn run() {
             modules::appraisal::commands::appraisal_run,
             modules::appraisal::commands::appraisal_reprocess,
             modules::assets::commands::assets_load,
+            modules::assets::commands::assets_locations,
+            modules::assets::commands::assets_stock_at_location,
             modules::accounting::commands::accounting_wallet_sync,
             modules::accounting::commands::accounting_profit_fifo,
             modules::accounting::commands::accounting_transaction_ledger,

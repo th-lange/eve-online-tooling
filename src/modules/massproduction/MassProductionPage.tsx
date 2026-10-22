@@ -20,7 +20,7 @@ import {
   shoppingAddItem,
   shoppingCreateList,
   DEFAULT_HYPOTHETICAL_CONFIG,
-  type AssetRow,
+  type AssetLocation,
   type BlueprintLine,
   type BuildList,
   type HypotheticalConfig,
@@ -580,35 +580,6 @@ function groupByTier(
     });
 }
 
-/** One station/structure the roster has assets at — the selector's option
- *  list, derived from a loaded `AssetRow[]` rather than a dedicated
- *  "locations I have access to" lookup (none exists yet): if the roster has
- *  stock sitting there, it has hangar access there. */
-interface AssetLocation {
-  id: number;
-  label: string;
-}
-
-function assetLocations(rows: AssetRow[]): AssetLocation[] {
-  const byId = new Map<number, string>();
-  for (const r of rows) byId.set(r.locationId, r.station);
-  return [...byId.entries()]
-    .map(([id, label]) => ({ id, label }))
-    .sort((a, b) => a.label.localeCompare(b.label));
-}
-
-/** Owned quantity per `typeId:locationId`, summed across every owner
- *  (personal + corp hangar) — the "still needed" subtraction doesn't care
- *  which roster member's hangar it's sitting in, only that it's there. */
-function ownedQuantityIndex(rows: AssetRow[]): Map<string, number> {
-  const idx = new Map<string, number>();
-  for (const r of rows) {
-    const key = `${r.typeId}:${r.locationId}`;
-    idx.set(key, (idx.get(key) ?? 0) + r.quantity);
-  }
-  return idx;
-}
-
 function PlanResult({
   plan,
   mode,
@@ -624,30 +595,32 @@ function PlanResult({
 }) {
   const copiesHeader = mode === "hypothetical" ? "Assumed ME" : "Owned copies";
 
-  // Shares a cache entry with the Assets page (`assetsKeys.load()`): if the
-  // roster's assets were already loaded there this session, the location
-  // picker below sees them immediately with no extra fetch. `enabled:
-  // false` only turns off *this* query's own auto-fetch-on-mount — pulling
-  // the whole roster's ESI assets on every Planner visit would be wasteful
-  // for anyone not using the "still needed" picker — "Load owned stock"
-  // below triggers an explicit `refetch()` for whoever hasn't visited
-  // Assets yet.
-  const assetsQuery = useQuery({ ...assetsKeys.load(), enabled: false });
-  const assetRows = useMemo(
-    () => assetsQuery.data?.rows ?? [],
-    [assetsQuery.data],
-  );
-  const locations = useMemo(() => assetLocations(assetRows), [assetRows]);
-  const ownedIndex = useMemo(() => ownedQuantityIndex(assetRows), [assetRows]);
+  // The picker's option list: a lightweight, pricing-free read of where the
+  // roster has assets (`assets_locations`) — unlike `assets_load` it doesn't
+  // force a Jita valuation fetch just to populate a dropdown. `enabled:
+  // false` only turns off this query's own auto-fetch-on-mount; the first
+  // picker focus (or the button below) triggers the fetch.
+  const qc = useQueryClient();
+  const locationsQuery = useQuery({
+    ...assetsKeys.locations(),
+    enabled: false,
+  });
+  const locations = locationsQuery.data ?? [];
 
   // A group's location <select> calls this on focus: if nothing's loaded
   // yet and there's no fetch already in flight, kick one off silently —
   // the select stays usable and shows a "Loading…" placeholder while it
   // resolves, so opening the picker is enough to populate it without a
-  // separate "Load owned stock" click first.
-  const hasAssets = assetsQuery.data != null;
-  const requestAssets = () => {
-    if (!hasAssets && !assetsQuery.isFetching) void assetsQuery.refetch();
+  // separate button click first.
+  const requestLocations = () => {
+    if (locationsQuery.data == null && !locationsQuery.isFetching) {
+      void locationsQuery.refetch();
+    }
+  };
+  // Reload also drops cached per-location stock so a re-pick sees fresh data.
+  const reloadLocations = () => {
+    void qc.invalidateQueries({ queryKey: assetsKeys.stockAll });
+    void locationsQuery.refetch();
   };
 
   return (
@@ -690,17 +663,17 @@ function PlanResult({
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2 text-xs text-zinc-500">
             <button
-              onClick={() => void assetsQuery.refetch()}
-              disabled={assetsQuery.isFetching}
+              onClick={reloadLocations}
+              disabled={locationsQuery.isFetching}
               className="rounded border border-zinc-700 px-2 py-1 text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
             >
-              {assetsQuery.isFetching
-                ? "Loading stock…"
-                : assetsQuery.isSuccess
-                  ? "Reload stock"
-                  : "Load owned stock"}
+              {locationsQuery.isFetching
+                ? "Loading locations…"
+                : locationsQuery.isSuccess
+                  ? "Reload locations"
+                  : "Load stock locations"}
             </button>
-            {assetsQuery.isSuccess && (
+            {locationsQuery.isSuccess && (
               <span>
                 Pick a location per group below to subtract what the roster
                 already has there.
@@ -708,7 +681,9 @@ function PlanResult({
             )}
             <InlineError
               message={
-                assetsQuery.isError ? errorMessage(assetsQuery.error) : null
+                locationsQuery.isError
+                  ? errorMessage(locationsQuery.error)
+                  : null
               }
             />
           </div>
@@ -717,9 +692,8 @@ function PlanResult({
               key={g.categoryName}
               group={g}
               locations={locations}
-              ownedIndex={ownedIndex}
-              assetsFetching={assetsQuery.isFetching}
-              onRequestAssets={requestAssets}
+              locationsFetching={locationsQuery.isFetching}
+              onRequestLocations={requestLocations}
             />
           ))}
         </div>
@@ -882,19 +856,31 @@ function BuildRunsCell({
 function GroupSection({
   group,
   locations,
-  ownedIndex,
-  assetsFetching,
-  onRequestAssets,
+  locationsFetching,
+  onRequestLocations,
 }: {
   group: MaterialGroup;
   locations: AssetLocation[];
-  ownedIndex: Map<string, number>;
-  assetsFetching: boolean;
-  onRequestAssets: () => void;
+  locationsFetching: boolean;
+  onRequestLocations: () => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [locationId, setLocationId] = useState<number | "">("");
   const { copied, copy } = useCopyToClipboard(1500);
+
+  // Stock at the picked location, fetched on demand and cached per location
+  // (no pricing involved — see `assets_stock_at_location`). Until it arrives
+  // the table keeps showing the full quantity rather than a misleading
+  // "have 0".
+  const stockQuery = useQuery({
+    ...assetsKeys.stockAt(locationId === "" ? 0 : locationId),
+    enabled: locationId !== "",
+  });
+  const stockByType = useMemo(
+    () => new Map((stockQuery.data ?? []).map((s) => [s.typeId, s.quantity])),
+    [stockQuery.data],
+  );
+  const netted = locationId !== "" && stockQuery.data != null;
 
   // Blank location (default): the full needed quantity, unchanged. A picked
   // location subtracts what the roster already has stocked there, so the
@@ -903,8 +889,8 @@ function GroupSection({
   // accounting — a fully covered material reads "have ≥ need", not as a
   // silently vanished row.
   const items = group.items.map((it) => {
-    if (locationId === "") return { ...it, required: it.quantity, owned: 0 };
-    const owned = ownedIndex.get(`${it.typeId}:${locationId}`) ?? 0;
+    if (!netted) return { ...it, required: it.quantity, owned: 0 };
+    const owned = stockByType.get(it.typeId) ?? 0;
     return {
       ...it,
       required: it.quantity,
@@ -938,22 +924,22 @@ function GroupSection({
                 e.currentTarget.value ? Number(e.currentTarget.value) : "",
               )
             }
-            onFocus={onRequestAssets}
+            onFocus={onRequestLocations}
             title="Subtract what the roster already has stocked at a location"
             className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 outline-none"
           >
             <option value="">
-              {assetsFetching && locations.length === 0
-                ? "Loading stock…"
+              {locationsFetching && locations.length === 0
+                ? "Loading locations…"
                 : "All locations — full quantity"}
             </option>
             {locations.map((loc) => (
               <option key={loc.id} value={loc.id}>
-                {loc.label}
+                {loc.name}
               </option>
             ))}
           </select>
-          {assetsFetching && (
+          {(locationsFetching || stockQuery.isFetching) && (
             <Loader2
               size={13}
               className="animate-spin text-zinc-500"
@@ -962,8 +948,9 @@ function GroupSection({
           )}
           <button
             onClick={() => copy(multibuy)}
+            disabled={stockQuery.isFetching}
             title="Copy this group as a Multibuy-pasteable item list"
-            className="flex items-center gap-1.5 rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
+            className="flex items-center gap-1.5 rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
           >
             <ClipboardCopy size={13} />
             {copied ? "Copied ✓" : "Copy Multibuy"}
@@ -973,12 +960,17 @@ function GroupSection({
           />
         </div>
       </div>
+      {stockQuery.isError && (
+        <div className="px-3 py-1.5">
+          <InlineError message={errorMessage(stockQuery.error)} />
+        </div>
+      )}
       {!collapsed && (
         <table className="w-full border-collapse text-sm">
           <thead className="text-zinc-500">
             <tr>
               <th className="px-3 py-1 text-left font-normal">Item</th>
-              {locationId === "" ? (
+              {!netted ? (
                 <th className="px-3 py-1 text-right font-normal">Quantity</th>
               ) : (
                 <>
@@ -993,7 +985,7 @@ function GroupSection({
             {items.map((it) => (
               <tr key={it.typeId} className="border-t border-zinc-800/60">
                 <td className="px-3 py-1 text-zinc-200">{it.name}</td>
-                {locationId !== "" && (
+                {netted && (
                   <>
                     <td className="px-3 py-1 text-right text-zinc-300">
                       {formatInt(it.required)}
@@ -1005,7 +997,7 @@ function GroupSection({
                 )}
                 <td
                   className={`px-3 py-1 text-right ${
-                    it.quantity === 0 && locationId !== ""
+                    it.quantity === 0 && netted
                       ? "text-zinc-600"
                       : "text-zinc-300"
                   }`}
