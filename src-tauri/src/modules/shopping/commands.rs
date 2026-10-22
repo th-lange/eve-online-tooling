@@ -8,8 +8,8 @@
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
+use crate::lists::{self, Identified};
 use crate::sde::Sde;
-use crate::storage;
 
 /// Storage document name (a JSON file in `<app data>/data/`).
 const STORE_KEY: &str = "shopping_lists";
@@ -56,6 +56,12 @@ struct StoredList {
     name: String,
     #[serde(default)]
     items: Vec<StoredEntry>,
+}
+
+impl Identified for StoredList {
+    fn id(&self) -> &str {
+        &self.id
+    }
 }
 
 impl StoredList {
@@ -125,7 +131,7 @@ fn is_builtin(id: &str) -> bool {
 /// Load the store, guaranteeing the two built-in lists exist (prepended in a
 /// stable order) so a fresh install / corrupt file still yields them.
 fn load(dir: &std::path::Path) -> Store {
-    let mut store: Store = storage::load_data(dir, STORE_KEY).unwrap_or_default();
+    let mut store: Store = lists::load_store(dir, STORE_KEY);
     for (idx, (id, name)) in BUILTIN.iter().enumerate() {
         if !store.lists.iter().any(|l| l.id == *id) {
             store.lists.insert(
@@ -142,15 +148,11 @@ fn load(dir: &std::path::Path) -> Store {
 }
 
 fn save(dir: &std::path::Path, store: &Store) -> Result<(), String> {
-    storage::save_data(dir, STORE_KEY, store)
+    lists::save_store(dir, STORE_KEY, store)
 }
 
 fn list_mut<'a>(store: &'a mut Store, id: &str) -> Result<&'a mut StoredList, String> {
-    store
-        .lists
-        .iter_mut()
-        .find(|l| l.id == id)
-        .ok_or_else(|| format!("no such list: {id}"))
+    lists::find_mut(&mut store.lists, id)
 }
 
 /// Move every listed `type_id`'s whole available quantity from `src` to `dst`,
@@ -239,7 +241,7 @@ pub fn shopping_delete_list(app: AppHandle, id: String) -> Result<(), String> {
     }
     let (dir, _sde) = crate::sde::dir_and_sde(&app)?;
     let mut store = load(&dir);
-    store.lists.retain(|l| l.id != id);
+    lists::delete_by_id(&mut store.lists, &id);
     save(&dir, &store)
 }
 
@@ -804,6 +806,61 @@ pub fn shopping_chat_sync(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pins the on-disk JSON shape of the `shopping_lists` store document.
+    /// This is a fixed JSON literal written by a prior version of the app —
+    /// it MUST keep parsing (so existing users' saved lists still load) and
+    /// MUST serialize back to exactly the same shape (so a refactor of the
+    /// in-memory types never silently changes the storage format).
+    #[test]
+    fn store_round_trips_through_its_on_disk_json_shape() {
+        let json = r#"{
+            "lists": [
+                {
+                    "id": "default",
+                    "name": "Default",
+                    "items": [{"typeId": 34, "quantity": 10}]
+                },
+                {
+                    "id": "mining-ops",
+                    "name": "Mining Ops",
+                    "items": []
+                }
+            ],
+            "chat": {
+                "channel": "Corp",
+                "seen": ["[100] Bob"],
+                "cooldown": {"Bob\u001f34": 100}
+            }
+        }"#;
+
+        let store: Store =
+            serde_json::from_str(json).expect("existing on-disk shape must still parse");
+        assert_eq!(store.lists[0].id, "default");
+        assert_eq!(store.lists[0].items[0].type_id, 34);
+        assert_eq!(store.lists[0].items[0].quantity, 10);
+        assert_eq!(store.chat.channel, "Corp");
+        assert!(store.chat.seen.contains("[100] Bob"));
+        assert_eq!(store.chat.cooldown.get("Bob\u{1f}34"), Some(&100));
+
+        let round_tripped = serde_json::to_value(&store).unwrap();
+        let original: serde_json::Value = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            round_tripped, original,
+            "serialized shape must match the on-disk format exactly"
+        );
+    }
+
+    /// The pre-existing `type_id` key (before items switched to camelCase
+    /// for the frontend) must still deserialize via the `alias` — old saved
+    /// lists aren't silently dropped.
+    #[test]
+    fn stored_entry_accepts_the_legacy_snake_case_key() {
+        let entry: StoredEntry = serde_json::from_str(r#"{"type_id": 34, "quantity": 5}"#)
+            .expect("legacy type_id key must still parse");
+        assert_eq!(entry.type_id, 34);
+        assert_eq!(entry.quantity, 5);
+    }
 
     #[test]
     fn parses_name_only_lines_as_quantity_one() {
