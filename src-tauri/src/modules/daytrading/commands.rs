@@ -24,11 +24,7 @@ const DAYTRADING_FAVORITES_KEY: &str = "daytrading_favorites";
 
 /// Map the UI's logical list name to its (module-scoped) storage key.
 fn list_key(list: &str) -> Result<&'static str, String> {
-    match list {
-        "blacklist" => Ok(DAYTRADING_BLACKLIST_KEY),
-        "favorites" => Ok(DAYTRADING_FAVORITES_KEY),
-        _ => Err(format!("unknown list: {list}")),
-    }
+    lists::list_key(list, DAYTRADING_BLACKLIST_KEY, DAYTRADING_FAVORITES_KEY)
 }
 
 #[derive(Debug, Deserialize)]
