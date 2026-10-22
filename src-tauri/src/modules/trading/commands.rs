@@ -10,13 +10,14 @@ use super::engine::{enrich, evaluate, TradeConfig, TradeRow, TRADED_VOLUME_DAYS}
 
 const RESULT_CAP: usize = 500;
 
+/// Storage keys for trading's saved lists — plain (not module-prefixed)
+/// since trading was the first consumer of blacklist/favorites lists.
+const TRADING_BLACKLIST_KEY: &str = "blacklist";
+const TRADING_FAVORITES_KEY: &str = "favorites";
+
 /// Only these named lists are persisted (guards the filename).
 fn list_key(list: &str) -> Result<&'static str, String> {
-    match list {
-        "blacklist" => Ok("blacklist"),
-        "favorites" => Ok("favorites"),
-        _ => Err(format!("unknown list: {list}")),
-    }
+    lists::list_key(list, TRADING_BLACKLIST_KEY, TRADING_FAVORITES_KEY)
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,7 +53,8 @@ pub async fn trading_scan(
         .await
         .map_err(|e| e.to_string())?;
 
-    let (blacklist, favorites) = lists::load_filter_sets(&dir, "blacklist", "favorites");
+    let (blacklist, favorites) =
+        lists::load_filter_sets(&dir, TRADING_BLACKLIST_KEY, TRADING_FAVORITES_KEY);
     let categories = crate::sde::cached_category_names(&dir)?;
     let groups = crate::sde::cached_group_names(&dir)?;
     let meta = crate::sde::cached_meta_group_names(&dir)?;

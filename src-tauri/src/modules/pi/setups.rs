@@ -5,7 +5,8 @@
 //! every commodity and re-typing every note (#965).
 //!
 //! Mirrors Mass Production's "build lists" / Shopping Lists' single-JSON-
-//! document-per-feature approach (`crate::storage::load_data`/`save_data`):
+//! document-per-feature approach (`crate::lists::load_store`/`save_store`,
+//! themselves thin wrappers around `crate::storage::load_data`/`save_data`):
 //! one `pi_planner_setups` document holding every saved setup. Commodity
 //! display names are resolved from the SDE only when read out (same as
 //! `massprod::lists`), so they stay correct across SDE updates; notes and
@@ -16,8 +17,8 @@
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
+use crate::lists::{self, Identified};
 use crate::sde::Sde;
-use crate::storage;
 
 /// Storage document name (a JSON file in `<app data>/data/`).
 const STORE_KEY: &str = "pi_planner_setups";
@@ -35,6 +36,12 @@ struct StoredSetup {
     name: String,
     #[serde(default)]
     items: Vec<StoredItem>,
+}
+
+impl Identified for StoredSetup {
+    fn id(&self) -> &str {
+        &self.id
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,11 +73,11 @@ struct StoredItem {
 }
 
 fn load(dir: &std::path::Path) -> Store {
-    storage::load_data(dir, STORE_KEY).unwrap_or_default()
+    lists::load_store(dir, STORE_KEY)
 }
 
 fn save(dir: &std::path::Path, store: &Store) -> Result<(), String> {
-    storage::save_data(dir, STORE_KEY, store)
+    lists::save_store(dir, STORE_KEY, store)
 }
 
 // --- Resolved shape returned to the frontend --------------------------------
@@ -203,7 +210,7 @@ pub fn pi_planner_setup_save(
 pub fn pi_planner_setup_delete(app: AppHandle, id: String) -> Result<(), String> {
     let (dir, _sde) = crate::sde::dir_and_sde(&app)?;
     let mut store = load(&dir);
-    store.setups.retain(|s| s.id != id);
+    lists::delete_by_id(&mut store.setups, &id);
     save(&dir, &store)
 }
 
@@ -211,6 +218,66 @@ pub fn pi_planner_setup_delete(app: AppHandle, id: String) -> Result<(), String>
 mod tests {
     use super::*;
     use crate::sde::test_sde;
+
+    /// Pins the on-disk JSON shape of the `pi_planner_setups` store
+    /// document. This is a fixed JSON literal written by a prior version of
+    /// the app — it MUST keep parsing (so existing users' saved setups still
+    /// load) and MUST serialize back to exactly the same shape (so a
+    /// refactor of the in-memory types never silently changes the storage
+    /// format).
+    #[test]
+    fn store_round_trips_through_its_on_disk_json_shape() {
+        let json = r#"{
+            "setups": [
+                {
+                    "id": "jita-industry",
+                    "name": "Jita industry",
+                    "items": [
+                        {
+                            "typeId": 9848,
+                            "notes": "stage 2: Robotics run",
+                            "systemId": 30000142,
+                            "systemName": "Jita",
+                            "planetId": 40009082,
+                            "planetName": "Jita IV",
+                            "imports": [9838],
+                            "label": "Mechanical Parts factory"
+                        },
+                        {
+                            "typeId": 999999,
+                            "notes": "",
+                            "systemId": null,
+                            "systemName": null,
+                            "planetId": null,
+                            "planetName": null,
+                            "imports": [],
+                            "label": null
+                        }
+                    ]
+                }
+            ]
+        }"#;
+
+        let store: Store =
+            serde_json::from_str(json).expect("existing on-disk shape must still parse");
+        assert_eq!(store.setups[0].id, "jita-industry");
+        assert_eq!(store.setups[0].items[0].type_id, 9848);
+        assert_eq!(store.setups[0].items[0].notes, "stage 2: Robotics run");
+        assert_eq!(store.setups[0].items[0].system_id, Some(30000142));
+        assert_eq!(store.setups[0].items[0].imports, vec![9838]);
+        assert_eq!(
+            store.setups[0].items[0].label.as_deref(),
+            Some("Mechanical Parts factory")
+        );
+        assert_eq!(store.setups[0].items[1].system_id, None);
+
+        let round_tripped = serde_json::to_value(&store).unwrap();
+        let original: serde_json::Value = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            round_tripped, original,
+            "serialized shape must match the on-disk format exactly"
+        );
+    }
 
     fn fixture() -> Sde {
         test_sde(

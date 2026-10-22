@@ -18,11 +18,7 @@ const REPROCESSING_BLACKLIST_KEY: &str = "reprocessing_blacklist";
 const REPROCESSING_FAVORITES_KEY: &str = "reprocessing_favorites";
 
 fn list_key(list: &str) -> Result<&'static str, String> {
-    match list {
-        "blacklist" => Ok(REPROCESSING_BLACKLIST_KEY),
-        "favorites" => Ok(REPROCESSING_FAVORITES_KEY),
-        _ => Err(format!("unknown list: {list}")),
-    }
+    lists::list_key(list, REPROCESSING_BLACKLIST_KEY, REPROCESSING_FAVORITES_KEY)
 }
 
 #[derive(Debug, Deserialize)]
