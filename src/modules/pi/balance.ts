@@ -3,6 +3,7 @@
 //! so this logic stays unit-testable without a DOM.
 
 import type { ColonyView } from "../../lib/api";
+import { formatInt } from "../../lib/format";
 
 /** Treat rates within this of zero as break-even (float noise guard). */
 export const EPS = 0.0001;
@@ -153,4 +154,48 @@ function formatRunway(hours: number): string {
   const d = Math.floor(rh / 24);
   const h = rh % 24;
   return h > 0 ? `${d}d ${h}h` : `${d}d`;
+}
+
+/** Round a per-hour rate for display (keeps one decimal for small rates). */
+export function fmt(n: number): string {
+  if (n === 0) return "0";
+  return Math.abs(n) >= 10 ? formatInt(Math.round(n)) : n.toFixed(1);
+}
+
+/** Remaining time to an ISO expiry, as a label + colour tone. */
+export function countdown(
+  expiry: string | null,
+  now: number,
+): { label: string; tone: string } {
+  if (!expiry) return { label: "no program", tone: "text-zinc-500" };
+  const ms = Date.parse(expiry) - now;
+  if (Number.isNaN(ms)) return { label: "—", tone: "text-zinc-500" };
+  if (ms <= 0) return { label: "restart now", tone: "text-rose-400" };
+  const h = Math.floor(ms / 3_600_000);
+  const m = Math.floor((ms % 3_600_000) / 60_000);
+  const label =
+    h >= 24
+      ? `${Math.floor(h / 24)}d ${h % 24}h`
+      : h > 0
+        ? `${h}h ${m}m`
+        : `${m}m`;
+  return {
+    label: `in ${label}`,
+    tone: ms < 3_600_000 ? "text-amber-300" : "text-zinc-300",
+  };
+}
+
+/** Fraction of an extraction program still remaining (0–100), or null if the
+ * start/end aren't both known. Drives the green-remaining / red-elapsed bar. */
+export function programRemainingPct(
+  install: string | null,
+  expiry: string | null,
+  now: number,
+): number | null {
+  if (!install || !expiry) return null;
+  const start = Date.parse(install);
+  const end = Date.parse(expiry);
+  if (Number.isNaN(start) || Number.isNaN(end) || end <= start) return null;
+  const pct = ((end - now) / (end - start)) * 100;
+  return Math.max(0, Math.min(100, pct));
 }
