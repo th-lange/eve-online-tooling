@@ -13,7 +13,9 @@
 //! first.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::Path;
+use std::pin::Pin;
 
 use serde_json::{json, Value};
 
@@ -65,6 +67,18 @@ pub struct Param {
 }
 
 /// One registered operation.
+///
+/// `run` is async-first: a handler that needs real I/O (market/ESI network
+/// calls with retry/backoff) `.await`s it directly instead of blocking its
+/// caller's thread with `tauri::async_runtime::block_on` (#1030). The
+/// surfaces that invoke the registry are sync contexts (Rhai/boa script host
+/// calls, Extism host-function callbacks) that run on their own dedicated,
+/// non-runtime thread — never the Tauri main thread or a tokio worker — so
+/// *they* perform the one `block_on` needed to drive the future to
+/// completion (see `modules::scripts::host::HostCtx::cap`,
+/// `plugins::broker::host_functions`, and `mcp::call_tool`). An async caller
+/// (a `tauri::command(async)`, or any future `.await`-based consumer) just
+/// awaits [`invoke`] like any other future — no blocking at all.
 pub struct Capability {
     pub name: &'static str,
     /// Permission a plugin must be granted to call this (scripts/MCP are trusted).
@@ -79,8 +93,13 @@ pub struct Capability {
     pub mcp_dev: bool,
     pub description: &'static str,
     pub params: &'static [Param],
-    pub run: fn(&HostCtx, &Value) -> Result<Value, String>,
+    pub run: for<'a> fn(&'a HostCtx<'a>, &'a Value) -> CapFuture<'a>,
 }
+
+/// A capability handler's return type: boxed so heterogeneous `async fn`
+/// bodies (each a distinct, unnameable generator type) can share one `fn`
+/// pointer shape in [`Capability::run`].
+pub type CapFuture<'a> = Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>>;
 
 /// The full registry.
 pub fn registry() -> &'static [Capability] {
@@ -93,9 +112,9 @@ pub fn find(name: &str) -> Option<&'static Capability> {
 }
 
 /// Run a capability by name (no permission check — the caller gates).
-pub fn invoke(ctx: &HostCtx, name: &str, args: &Value) -> Result<Value, String> {
+pub async fn invoke(ctx: &HostCtx<'_>, name: &str, args: &Value) -> Result<Value, String> {
     let cap = find(name).ok_or_else(|| format!("unknown capability {name:?}"))?;
-    (cap.run)(ctx, args)
+    (cap.run)(ctx, args).await
 }
 
 /// A JSON-Schema object for a capability's arguments (for MCP `inputSchema`).
@@ -286,211 +305,227 @@ fn req_i64(args: &Value, key: &str) -> Result<i64, String> {
         .ok_or_else(|| format!("{key:?} (integer) is required"))
 }
 
-fn cap_market_price(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
-    let type_id = req_i64(args, "typeId")?;
-    let region = args
-        .get("regionId")
-        .and_then(Value::as_i64)
-        .unwrap_or_else(default_region_id);
-    let location = resolve_location(region, None);
-    let model = tauri::async_runtime::block_on(ctx.market.price_model(location, type_id))
-        .map_err(|e| e.to_string())?;
-    serde_json::to_value(model).map_err(|e| e.to_string())
+fn cap_market_price<'a>(ctx: &'a HostCtx, args: &'a Value) -> CapFuture<'a> {
+    Box::pin(async move {
+        let type_id = req_i64(args, "typeId")?;
+        let region = args
+            .get("regionId")
+            .and_then(Value::as_i64)
+            .unwrap_or_else(default_region_id);
+        let location = resolve_location(region, None);
+        let model = ctx
+            .market
+            .price_model(location, type_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        serde_json::to_value(model).map_err(|e| e.to_string())
+    })
 }
 
-fn cap_sde_type_info(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
-    let type_id = req_i64(args, "typeId")?;
-    let sde = open_from_dir(ctx.app_data_dir)?;
-    let info = sde.type_info(type_id).map_err(|e| e.to_string())?;
-    serde_json::to_value(info).map_err(|e| e.to_string())
+fn cap_sde_type_info<'a>(ctx: &'a HostCtx, args: &'a Value) -> CapFuture<'a> {
+    Box::pin(async move {
+        let type_id = req_i64(args, "typeId")?;
+        let sde = open_from_dir(ctx.app_data_dir)?;
+        let info = sde.type_info(type_id).map_err(|e| e.to_string())?;
+        serde_json::to_value(info).map_err(|e| e.to_string())
+    })
 }
 
-fn cap_sde_search(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
-    let query = args
-        .get("query")
-        .and_then(Value::as_str)
-        .ok_or("\"query\" (string) is required")?;
-    if query.trim().is_empty() || query.len() > QUERY_MAX_LEN {
-        return Err("query must be 1..=200 chars".to_string());
-    }
-    let limit = args
-        .get("limit")
-        .and_then(Value::as_i64)
-        .unwrap_or(SEARCH_LIMIT_MAX)
-        .clamp(1, SEARCH_LIMIT_MAX);
-    let sde = open_from_dir(ctx.app_data_dir)?;
-    let hits = sde.search_types(query, limit).map_err(|e| e.to_string())?;
-    let results: Vec<Value> = hits
-        .into_iter()
-        .map(|(type_id, name)| json!({ "typeId": type_id, "name": name }))
-        .collect();
-    Ok(json!({ "results": results }))
-}
-
-fn cap_appraise(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
-    let items = args
-        .get("items")
-        .and_then(Value::as_array)
-        .ok_or("appraise requires an \"items\" array")?;
-    if items.is_empty() || items.len() > APPRAISE_MAX_ITEMS {
-        return Err("items must be 1..=500 entries".to_string());
-    }
-    let region_id = args
-        .get("regionId")
-        .and_then(Value::as_i64)
-        .unwrap_or_else(default_region_id);
-    let sde = open_from_dir(ctx.app_data_dir)?;
-
-    // Parse the JSON items, then delegate resolution + pricing + valuation to
-    // the appraisal module's pure core (same functions `appraisal_run` uses),
-    // so the rules — trim before lookup, qty clamped to >= 0, missing price
-    // counts as 0 — live in exactly one place. Only the JSON shape is adapted
-    // here; the capability has no best-hub path (empty best map).
-    let mut parsed = Vec::with_capacity(items.len());
-    for it in items {
-        let name = it
-            .get("name")
+fn cap_sde_search<'a>(ctx: &'a HostCtx, args: &'a Value) -> CapFuture<'a> {
+    Box::pin(async move {
+        let query = args
+            .get("query")
             .and_then(Value::as_str)
-            .ok_or("each item needs a string \"name\"")?;
-        let quantity = it.get("quantity").and_then(Value::as_i64).unwrap_or(1);
-        parsed.push(appraisal::AppraisalItem {
-            name: name.to_string(),
-            quantity,
-        });
-    }
-    let resolved = appraisal::resolve_items(&sde, &parsed)?;
+            .ok_or("\"query\" (string) is required")?;
+        if query.trim().is_empty() || query.len() > QUERY_MAX_LEN {
+            return Err("query must be 1..=200 chars".to_string());
+        }
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_i64)
+            .unwrap_or(SEARCH_LIMIT_MAX)
+            .clamp(1, SEARCH_LIMIT_MAX);
+        let sde = open_from_dir(ctx.app_data_dir)?;
+        let hits = sde.search_types(query, limit).map_err(|e| e.to_string())?;
+        let results: Vec<Value> = hits
+            .into_iter()
+            .map(|(type_id, name)| json!({ "typeId": type_id, "name": name }))
+            .collect();
+        Ok(json!({ "results": results }))
+    })
+}
 
-    let ids: Vec<i64> = resolved.iter().filter_map(|r| r.type_id).collect();
-    let location = resolve_location(region_id, None);
-    let prices = tauri::async_runtime::block_on(ctx.market.price_map_at(location, &ids))
-        .map_err(|e| e.to_string())?;
+fn cap_appraise<'a>(ctx: &'a HostCtx, args: &'a Value) -> CapFuture<'a> {
+    Box::pin(async move {
+        let items = args
+            .get("items")
+            .and_then(Value::as_array)
+            .ok_or("appraise requires an \"items\" array")?;
+        if items.is_empty() || items.len() > APPRAISE_MAX_ITEMS {
+            return Err("items must be 1..=500 entries".to_string());
+        }
+        let region_id = args
+            .get("regionId")
+            .and_then(Value::as_i64)
+            .unwrap_or_else(default_region_id);
+        let sde = open_from_dir(ctx.app_data_dir)?;
 
-    let result = appraisal::appraise(appraisal::price_items(resolved, &prices, &HashMap::new()));
+        // Parse the JSON items, then delegate resolution + pricing + valuation to
+        // the appraisal module's pure core (same functions `appraisal_run` uses),
+        // so the rules — trim before lookup, qty clamped to >= 0, missing price
+        // counts as 0 — live in exactly one place. Only the JSON shape is adapted
+        // here; the capability has no best-hub path (empty best map).
+        let mut parsed = Vec::with_capacity(items.len());
+        for it in items {
+            let name = it
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or("each item needs a string \"name\"")?;
+            let quantity = it.get("quantity").and_then(Value::as_i64).unwrap_or(1);
+            parsed.push(appraisal::AppraisalItem {
+                name: name.to_string(),
+                quantity,
+            });
+        }
+        let resolved = appraisal::resolve_items(&sde, &parsed)?;
 
-    let out_lines: Vec<Value> = result
-        .lines
-        .iter()
-        .map(|l| {
-            json!({
-                "name": l.name, "quantity": l.quantity, "typeId": l.type_id,
-                "buyPrice": l.buy_price, "sellPrice": l.sell_price,
+        let ids: Vec<i64> = resolved.iter().filter_map(|r| r.type_id).collect();
+        let location = resolve_location(region_id, None);
+        let prices = ctx
+            .market
+            .price_map_at(location, &ids)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        let result =
+            appraisal::appraise(appraisal::price_items(resolved, &prices, &HashMap::new()));
+
+        let out_lines: Vec<Value> = result
+            .lines
+            .iter()
+            .map(|l| {
+                json!({
+                    "name": l.name, "quantity": l.quantity, "typeId": l.type_id,
+                    "buyPrice": l.buy_price, "sellPrice": l.sell_price,
+                })
             })
-        })
-        .collect();
+            .collect();
 
-    Ok(json!({
-        "buyTotal": result.buy_total, "sellTotal": result.sell_total,
-        "volume": result.volume_total,
-        "lines": out_lines,
-    }))
+        Ok(json!({
+            "buyTotal": result.buy_total, "sellTotal": result.sell_total,
+            "volume": result.volume_total,
+            "lines": out_lines,
+        }))
+    })
 }
 
-fn cap_route(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
-    let from_name = args
-        .get("from")
-        .and_then(Value::as_str)
-        .ok_or("route requires a \"from\" system name")?;
-    let to_name = args
-        .get("to")
-        .and_then(Value::as_str)
-        .ok_or("route requires a \"to\" system name")?;
-    let sde = open_from_dir(ctx.app_data_dir)?;
-    let from = resolve_system(&sde, from_name)?;
-    let to = resolve_system(&sde, to_name)?;
-    let adj = crate::sde::cached_adjacency(ctx.app_data_dir)?;
-    let jumps = shortest_path(&adj, from.0, to.0);
-    Ok(json!({
-        "from": from.1, "to": to.1,
-        "jumps": jumps, "reachable": jumps.is_some(),
-    }))
+fn cap_route<'a>(ctx: &'a HostCtx, args: &'a Value) -> CapFuture<'a> {
+    Box::pin(async move {
+        let from_name = args
+            .get("from")
+            .and_then(Value::as_str)
+            .ok_or("route requires a \"from\" system name")?;
+        let to_name = args
+            .get("to")
+            .and_then(Value::as_str)
+            .ok_or("route requires a \"to\" system name")?;
+        let sde = open_from_dir(ctx.app_data_dir)?;
+        let from = resolve_system(&sde, from_name)?;
+        let to = resolve_system(&sde, to_name)?;
+        let adj = crate::sde::cached_adjacency(ctx.app_data_dir)?;
+        let jumps = shortest_path(&adj, from.0, to.0);
+        Ok(json!({
+            "from": from.1, "to": to.1,
+            "jumps": jumps, "reachable": jumps.is_some(),
+        }))
+    })
 }
 
-fn cap_assets(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
-    let character_id =
-        storage::primary_character(ctx.app_data_dir).ok_or("no character logged in")?;
-    let assets =
-        tauri::async_runtime::block_on(esi::fetch_assets(ctx.require_auth(), character_id))
+fn cap_assets<'a>(ctx: &'a HostCtx, _args: &'a Value) -> CapFuture<'a> {
+    Box::pin(async move {
+        let character_id =
+            storage::primary_character(ctx.app_data_dir).ok_or("no character logged in")?;
+        let assets = esi::fetch_assets(ctx.require_auth(), character_id)
+            .await
             .map_err(|e| e.to_string())?;
-    serde_json::to_value(assets).map_err(|e| e.to_string())
+        serde_json::to_value(assets).map_err(|e| e.to_string())
+    })
 }
 
-fn cap_corp_assets(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
-    let character_id =
-        storage::primary_character(ctx.app_data_dir).ok_or("no character logged in")?;
-    let corporation_id =
-        tauri::async_runtime::block_on(esi::corporation_id(ctx.require_auth(), character_id))
+fn cap_corp_assets<'a>(ctx: &'a HostCtx, _args: &'a Value) -> CapFuture<'a> {
+    Box::pin(async move {
+        let character_id =
+            storage::primary_character(ctx.app_data_dir).ok_or("no character logged in")?;
+        let corporation_id = esi::corporation_id(ctx.require_auth(), character_id)
+            .await
             .map_err(|e| e.to_string())?;
-    let assets = tauri::async_runtime::block_on(esi::fetch_corp_assets(
-        ctx.require_auth(),
-        character_id,
-        corporation_id,
-    ))
-    .map_err(|e| e.to_string())?;
-    serde_json::to_value(assets).map_err(|e| e.to_string())
+        let assets = esi::fetch_corp_assets(ctx.require_auth(), character_id, corporation_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        serde_json::to_value(assets).map_err(|e| e.to_string())
+    })
 }
 
-fn cap_my_orders(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
-    let rows = tauri::async_runtime::block_on(crate::market::orders::collect_orders(
-        ctx.app_data_dir,
-        ctx.require_auth(),
-        ctx.market,
-    ))
-    .map_err(|e| e.to_string())?;
-    serde_json::to_value(rows).map_err(|e| e.to_string())
+fn cap_my_orders<'a>(ctx: &'a HostCtx, _args: &'a Value) -> CapFuture<'a> {
+    Box::pin(async move {
+        let rows =
+            crate::market::orders::collect_orders(ctx.app_data_dir, ctx.require_auth(), ctx.market)
+                .await
+                .map_err(|e| e.to_string())?;
+        serde_json::to_value(rows).map_err(|e| e.to_string())
+    })
 }
 
 /// Colonies overview (extractor timers, storage, commodity balance) for
 /// every target character. Touches `auth` (per-character ESI) — never
 /// exposed on the MCP bridge.
-fn cap_pi_overview(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
-    let sde = open_from_dir(ctx.app_data_dir)?;
-    let views = tauri::async_runtime::block_on(pi::commands::pi_overview_core(
-        ctx.app_data_dir,
-        sde,
-        ctx.require_auth(),
-    ))
-    .map_err(|e| e.to_string())?;
-    serde_json::to_value(views).map_err(|e| e.to_string())
+fn cap_pi_overview<'a>(ctx: &'a HostCtx, _args: &'a Value) -> CapFuture<'a> {
+    Box::pin(async move {
+        let sde = open_from_dir(ctx.app_data_dir)?;
+        let views = pi::commands::pi_overview_core(ctx.app_data_dir, sde, ctx.require_auth())
+            .await
+            .map_err(|e| e.to_string())?;
+        serde_json::to_value(views).map_err(|e| e.to_string())
+    })
 }
 
 /// Running + recently-delivered industry jobs and job-slot usage for every
 /// target character (`None` defaults to the app's active selection — the
 /// whole roster when "All characters" is active). Touches `auth` — never
 /// exposed on the MCP bridge.
-fn cap_industry_jobs(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
-    let result = tauri::async_runtime::block_on(industry::commands::industry_jobs_core(
-        ctx.app_data_dir,
-        ctx.require_auth(),
-        None,
-    ))
-    .map_err(|e| e.to_string())?;
-    serde_json::to_value(result).map_err(|e| e.to_string())
+fn cap_industry_jobs<'a>(ctx: &'a HostCtx, _args: &'a Value) -> CapFuture<'a> {
+    Box::pin(async move {
+        let result =
+            industry::commands::industry_jobs_core(ctx.app_data_dir, ctx.require_auth(), None)
+                .await
+                .map_err(|e| e.to_string())?;
+        serde_json::to_value(result).map_err(|e| e.to_string())
+    })
 }
 
 /// PI colonies flagged "needs attention", trimmed to just enough to name
 /// them — a small summary, not the full colony detail `pi_overview` ships.
-fn cap_pi_idle_colonies(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
-    let sde = open_from_dir(ctx.app_data_dir)?;
-    let views = tauri::async_runtime::block_on(pi::commands::pi_overview_core(
-        ctx.app_data_dir,
-        sde,
-        ctx.require_auth(),
-    ))
-    .map_err(|e| e.to_string())?;
-    serde_json::to_value(pi::commands::idle_colonies(&views)).map_err(|e| e.to_string())
+fn cap_pi_idle_colonies<'a>(ctx: &'a HostCtx, _args: &'a Value) -> CapFuture<'a> {
+    Box::pin(async move {
+        let sde = open_from_dir(ctx.app_data_dir)?;
+        let views = pi::commands::pi_overview_core(ctx.app_data_dir, sde, ctx.require_auth())
+            .await
+            .map_err(|e| e.to_string())?;
+        serde_json::to_value(pi::commands::idle_colonies(&views)).map_err(|e| e.to_string())
+    })
 }
 
 /// Per-character idle/busy status for manufacturing/invention/reactions — a
 /// small summary, not the full job list and slot totals `industry_jobs`
 /// ships.
-fn cap_industry_line_status(ctx: &HostCtx, _args: &Value) -> Result<Value, String> {
-    let result = tauri::async_runtime::block_on(industry::commands::industry_jobs_core(
-        ctx.app_data_dir,
-        ctx.require_auth(),
-        None,
-    ))
-    .map_err(|e| e.to_string())?;
-    serde_json::to_value(industry::commands::line_status(&result)).map_err(|e| e.to_string())
+fn cap_industry_line_status<'a>(ctx: &'a HostCtx, _args: &'a Value) -> CapFuture<'a> {
+    Box::pin(async move {
+        let result =
+            industry::commands::industry_jobs_core(ctx.app_data_dir, ctx.require_auth(), None)
+                .await
+                .map_err(|e| e.to_string())?;
+        serde_json::to_value(industry::commands::line_status(&result)).map_err(|e| e.to_string())
+    })
 }
 
 /// Dev-tier: build-vs-buy manufacturing profit for one blueprint (flat —
@@ -498,113 +533,125 @@ fn cap_industry_line_status(ctx: &HostCtx, _args: &Value) -> Result<Value, Strin
 /// the result reproducible from the SDE + a price vector alone, per
 /// CLAUDE.md's "Profit / EIV" formulas). Touches only SDE + market, never
 /// `auth` — pinned by `mcp_never_reaches_auth_gated_data`.
-fn cap_production_profit(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
-    let blueprint_type_id = req_i64(args, "blueprintTypeId")?;
-    let runs = args.get("runs").and_then(Value::as_i64).unwrap_or(1).max(1);
-    let me = args.get("me").and_then(Value::as_i64).unwrap_or(0).max(0);
-    let region_id = args
-        .get("regionId")
-        .and_then(Value::as_i64)
-        .unwrap_or_else(default_region_id);
-    let system_cost_index = args
-        .get("systemCostIndex")
-        .and_then(Value::as_f64)
-        .unwrap_or(0.0);
-    let facility_tax = args
-        .get("facilityTax")
-        .and_then(Value::as_f64)
-        .unwrap_or(0.0);
+fn cap_production_profit<'a>(ctx: &'a HostCtx, args: &'a Value) -> CapFuture<'a> {
+    Box::pin(async move {
+        let blueprint_type_id = req_i64(args, "blueprintTypeId")?;
+        let runs = args.get("runs").and_then(Value::as_i64).unwrap_or(1).max(1);
+        let me = args.get("me").and_then(Value::as_i64).unwrap_or(0).max(0);
+        let region_id = args
+            .get("regionId")
+            .and_then(Value::as_i64)
+            .unwrap_or_else(default_region_id);
+        let system_cost_index = args
+            .get("systemCostIndex")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        let facility_tax = args
+            .get("facilityTax")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
 
-    let sde = open_from_dir(ctx.app_data_dir)?;
-    let product = sde
-        .blueprint_product(blueprint_type_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("blueprint {blueprint_type_id} has no manufacturing product"))?;
-    let materials = sde
-        .blueprint_materials(blueprint_type_id)
-        .map_err(|e| e.to_string())?;
-    let step = production::manufacturing_step(blueprint_type_id, &product, &materials);
+        let sde = open_from_dir(ctx.app_data_dir)?;
+        let product = sde
+            .blueprint_product(blueprint_type_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("blueprint {blueprint_type_id} has no manufacturing product"))?;
+        let materials = sde
+            .blueprint_materials(blueprint_type_id)
+            .map_err(|e| e.to_string())?;
+        let step = production::manufacturing_step(blueprint_type_id, &product, &materials);
 
-    let mut ids: Vec<i64> = materials.iter().map(|m| m.material_type_id).collect();
-    ids.push(product.product_type_id);
-    let location = resolve_location(region_id, None);
-    let prices = tauri::async_runtime::block_on(ctx.market.price_map_at(location, &ids))
-        .map_err(|e| e.to_string())?;
+        let mut ids: Vec<i64> = materials.iter().map(|m| m.material_type_id).collect();
+        ids.push(product.product_type_id);
+        let location = resolve_location(region_id, None);
+        let prices = ctx
+            .market
+            .price_map_at(location, &ids)
+            .await
+            .map_err(|e| e.to_string())?;
 
-    let config = production::ProfitConfig {
-        system_cost_index,
-        facility_tax,
-        ..Default::default()
-    };
-    let breakdown = production::evaluate(&step, runs, me, prices.as_map(), &config);
-    serde_json::to_value(breakdown).map_err(|e| e.to_string())
+        let config = production::ProfitConfig {
+            system_cost_index,
+            facility_tax,
+            ..Default::default()
+        };
+        let breakdown = production::evaluate(&step, runs, me, prices.as_map(), &config);
+        serde_json::to_value(breakdown).map_err(|e| e.to_string())
+    })
 }
 
 /// Dev-tier: dogma stats (resources, validation, DPS, tank, capacitor) for a
 /// fit given as EFT text, at all-V skills. Touches only SDE — no ESI, no
 /// `auth` — so the result is deterministic from the SDE alone.
-fn cap_fitting_stats(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
-    let eft_text = args
-        .get("eft")
-        .and_then(Value::as_str)
-        .ok_or("\"eft\" (string) is required")?;
-    let sde = open_from_dir(ctx.app_data_dir)?;
-    let fit: Fit = fitting::commands::import_eft_to_fit(&sde, eft_text)?;
-    let stats: FitStats = fitting::simulate_fit(
-        &sde,
-        ctx.app_data_dir,
-        &fit,
-        &|_skill_id| 5.0,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None, // factor_reload (#871)
-    )?;
-    serde_json::to_value(stats).map_err(|e| e.to_string())
+fn cap_fitting_stats<'a>(ctx: &'a HostCtx, args: &'a Value) -> CapFuture<'a> {
+    Box::pin(async move {
+        let eft_text = args
+            .get("eft")
+            .and_then(Value::as_str)
+            .ok_or("\"eft\" (string) is required")?;
+        let sde = open_from_dir(ctx.app_data_dir)?;
+        let fit: Fit = fitting::commands::import_eft_to_fit(&sde, eft_text)?;
+        let stats: FitStats = fitting::simulate_fit(
+            &sde,
+            ctx.app_data_dir,
+            &fit,
+            &|_skill_id| 5.0,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None, // factor_reload (#871)
+        )?;
+        serde_json::to_value(stats).map_err(|e| e.to_string())
+    })
 }
 
 /// Dev-tier: reprocess-vs-sell value for one item at a given refine
 /// efficiency. Touches only SDE + market, never `auth`.
-fn cap_reprocessing_yield(ctx: &HostCtx, args: &Value) -> Result<Value, String> {
-    let type_id = req_i64(args, "typeId")?;
-    let region_id = args
-        .get("regionId")
-        .and_then(Value::as_i64)
-        .unwrap_or_else(default_region_id);
-    let f64_arg =
-        |key: &str, default: f64| args.get(key).and_then(Value::as_f64).unwrap_or(default);
-    let i64_arg = |key: &str| args.get(key).and_then(Value::as_i64).unwrap_or(0);
+fn cap_reprocessing_yield<'a>(ctx: &'a HostCtx, args: &'a Value) -> CapFuture<'a> {
+    Box::pin(async move {
+        let type_id = req_i64(args, "typeId")?;
+        let region_id = args
+            .get("regionId")
+            .and_then(Value::as_i64)
+            .unwrap_or_else(default_region_id);
+        let f64_arg =
+            |key: &str, default: f64| args.get(key).and_then(Value::as_f64).unwrap_or(default);
+        let i64_arg = |key: &str| args.get(key).and_then(Value::as_i64).unwrap_or(0);
 
-    let sde = open_from_dir(ctx.app_data_dir)?;
-    let recipe = sde
-        .reprocess_recipe(type_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("type {type_id} has no reprocessing recipe"))?;
+        let sde = open_from_dir(ctx.app_data_dir)?;
+        let recipe = sde
+            .reprocess_recipe(type_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("type {type_id} has no reprocessing recipe"))?;
 
-    let mut ids: Vec<i64> = recipe.outputs.iter().map(|o| o.material_type_id).collect();
-    ids.push(type_id);
-    let location = resolve_location(region_id, None);
-    let prices = tauri::async_runtime::block_on(ctx.market.price_map_at(location, &ids))
-        .map_err(|e| e.to_string())?;
-    let sell = |tid: i64| prices.sell(tid);
+        let mut ids: Vec<i64> = recipe.outputs.iter().map(|o| o.material_type_id).collect();
+        ids.push(type_id);
+        let location = resolve_location(region_id, None);
+        let prices = ctx
+            .market
+            .price_map_at(location, &ids)
+            .await
+            .map_err(|e| e.to_string())?;
+        let sell = |tid: i64| prices.sell(tid);
 
-    let efficiency = reprocessing::ore_efficiency(&reprocessing::EfficiencyConfig {
-        reprocessing: i64_arg("reprocessing"),
-        reprocessing_efficiency: i64_arg("reprocessingEfficiency"),
-        ore_processing: i64_arg("oreProcessing"),
-        implant_pct: f64_arg("implantPct", 0.0),
-        rig_bonus_pct: f64_arg("rigBonusPct", 0.0),
-        structure_mult: f64_arg("structureMult", 1.0),
-        security_mult: f64_arg("securityMult", 1.0),
-    });
+        let efficiency = reprocessing::ore_efficiency(&reprocessing::EfficiencyConfig {
+            reprocessing: i64_arg("reprocessing"),
+            reprocessing_efficiency: i64_arg("reprocessingEfficiency"),
+            ore_processing: i64_arg("oreProcessing"),
+            implant_pct: f64_arg("implantPct", 0.0),
+            rig_bonus_pct: f64_arg("rigBonusPct", 0.0),
+            structure_mult: f64_arg("structureMult", 1.0),
+            security_mult: f64_arg("securityMult", 1.0),
+        });
 
-    let row = reprocessing::evaluate(&recipe, efficiency, sell(type_id), sell, false)
-        .ok_or("recipe has no portion size")?;
-    serde_json::to_value(row).map_err(|e| e.to_string())
+        let row = reprocessing::evaluate(&recipe, efficiency, sell(type_id), sell, false)
+            .ok_or("recipe has no portion size")?;
+        serde_json::to_value(row).map_err(|e| e.to_string())
+    })
 }
 
 /// Resolve a solar-system name to `(id, canonical name)`, requiring an exact
@@ -627,6 +674,57 @@ fn shortest_path(adj: &HashMap<i64, Vec<i64>>, from: i64, to: i64) -> Option<i64
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression guard for #1030: pre-fix, every capability handler that
+    /// touched market/ESI drove its future with `tauri::async_runtime::block_on`
+    /// deep inside the handler. Calling such a handler from code that's
+    /// already running inside an async runtime (exactly what this
+    /// `#[tokio::test]` is) would panic with "Cannot start a runtime from
+    /// within a runtime" — a nested `block_on`. Now `run`/`invoke` are
+    /// async-first: the handler `.await`s the market call directly, so an
+    /// async caller just `.await`s `invoke` like any other future, with no
+    /// blocking anywhere on this path.
+    #[tokio::test]
+    async fn invoke_from_async_context_does_not_panic_or_deadlock() {
+        // A loopback ESI stand-in: `/orders/` and `/history/` 404 (the "type
+        // isn't traded" case, which `price_model` treats as no data, not an
+        // error), the global adjusted-prices document 200s with an empty
+        // array — same shape as `market::service`'s own test harness. No
+        // real network, fast and deterministic.
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("bind loopback");
+        let addr = server.server_addr().to_ip().expect("ip addr");
+        std::thread::spawn(move || {
+            for request in server.incoming_requests() {
+                let url = request.url().to_string();
+                let response = if url.contains("/orders/") || url.contains("/history/") {
+                    tiny_http::Response::from_string("not found").with_status_code(404)
+                } else {
+                    tiny_http::Response::from_string("[]").with_status_code(200)
+                };
+                let _ = request.respond(response);
+            }
+        });
+
+        let client =
+            esi::EsiClient::with_base(format!("http://{addr}"), esi::ConditionalCache::disabled());
+        let market = MarketService::with_client(client);
+        let app_data_dir = std::env::temp_dir();
+        let ctx = HostCtx {
+            app_data_dir: app_data_dir.as_path(),
+            market: &market,
+            auth: None,
+        };
+
+        // The call itself is the assertion: if `invoke` (or a handler it
+        // reaches) still blocked the runtime, this `.await` would panic
+        // before ever returning a `Result`.
+        let result = invoke(&ctx, "market_price", &json!({ "typeId": 34 })).await;
+        assert!(
+            result.is_ok(),
+            "market_price on a 404-everything stand-in should resolve to an \
+             empty-data model, not error: {result:?}"
+        );
+    }
 
     #[test]
     fn registry_names_are_unique() {
