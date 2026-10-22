@@ -5,7 +5,8 @@
 //! re-pasting every blueprint name.
 //!
 //! Mirrors the Shopping Lists module's single-JSON-document-per-feature
-//! approach (`crate::storage::load_data`/`save_data`): one
+//! approach (`crate::lists::load_store`/`save_store`, themselves thin
+//! wrappers around `crate::storage::load_data`/`save_data`): one
 //! `massprod_build_lists` document holding every saved list; display names
 //! are resolved from the SDE only when read out, so they stay correct across
 //! SDE updates (same approach as `crate::lists`/`shopping`).
@@ -13,8 +14,8 @@
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
+use crate::lists::{self, Identified};
 use crate::sde::Sde;
-use crate::storage;
 
 /// Storage document name (a JSON file in `<app data>/data/`).
 const STORE_KEY: &str = "massprod_build_lists";
@@ -34,6 +35,12 @@ struct StoredList {
     items: Vec<StoredLine>,
 }
 
+impl Identified for StoredList {
+    fn id(&self) -> &str {
+        &self.id
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredLine {
     #[serde(rename = "typeId", alias = "type_id")]
@@ -45,11 +52,11 @@ struct StoredLine {
 }
 
 fn load(dir: &std::path::Path) -> Store {
-    storage::load_data(dir, STORE_KEY).unwrap_or_default()
+    lists::load_store(dir, STORE_KEY)
 }
 
 fn save(dir: &std::path::Path, store: &Store) -> Result<(), String> {
-    storage::save_data(dir, STORE_KEY, store)
+    lists::save_store(dir, STORE_KEY, store)
 }
 
 // --- Resolved shape returned to the frontend --------------------------------
@@ -182,7 +189,7 @@ pub fn massprod_save_list(
 pub fn massprod_delete_list(app: AppHandle, id: String) -> Result<(), String> {
     let (dir, _sde) = crate::sde::dir_and_sde(&app)?;
     let mut store = load(&dir);
-    store.lists.retain(|l| l.id != id);
+    lists::delete_by_id(&mut store.lists, &id);
     save(&dir, &store)
 }
 

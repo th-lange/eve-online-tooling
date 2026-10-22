@@ -495,11 +495,7 @@ const PRODUCTION_FAVORITES_KEY: &str = "production_favorites";
 
 /// Map the UI's logical list name to its (module-scoped) storage key.
 fn list_key(list: &str) -> Result<&'static str, String> {
-    match list {
-        "blacklist" => Ok(PRODUCTION_BLACKLIST_KEY),
-        "favorites" => Ok(PRODUCTION_FAVORITES_KEY),
-        _ => Err(format!("unknown list: {list}")),
-    }
+    lists::list_key(list, PRODUCTION_BLACKLIST_KEY, PRODUCTION_FAVORITES_KEY)
 }
 
 /// The contents of a production saved list (`blacklist` or `favorites`), with

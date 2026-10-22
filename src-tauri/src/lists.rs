@@ -9,6 +9,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tauri::AppHandle;
 
@@ -77,6 +78,73 @@ pub fn load_filter_sets(
         .into_iter()
         .collect();
     (blacklist, favorites)
+}
+
+/// Maps the UI's logical list name (`"blacklist"` / `"favorites"`) to a
+/// module's own storage key, rejecting anything else. Every blacklist/
+/// favorites module (trading, reprocessing, daytrading, production) exposed
+/// an identical `match` for this — only the two key constants it closes
+/// over differ — so the match itself lives here once and each module just
+/// supplies its own keys.
+pub fn list_key<'a>(
+    list: &str,
+    blacklist_key: &'a str,
+    favorites_key: &'a str,
+) -> Result<&'a str, String> {
+    match list {
+        "blacklist" => Ok(blacklist_key),
+        "favorites" => Ok(favorites_key),
+        _ => Err(format!("unknown list: {list}")),
+    }
+}
+
+// --- Generic "one JSON document holds a list of named things" store -----
+//
+// Shopping Lists, PI Planner setups, and Mass Production's build lists all
+// persist one JSON document (via `storage::load_data`/`save_data`) holding a
+// `Vec` of named, id-keyed things, and all three re-implemented the same
+// load/save wrappers and (where they mutate an existing entry) the same
+// find-or-delete-by-id lookup. Display-name resolution from the SDE stays
+// module-specific (each module's "thing" has different fields to resolve),
+// so only the id-keyed storage plumbing is shared here.
+
+/// Load a module's store document, defaulting (e.g. to an empty list) if the
+/// file is missing or fails to parse. Thin generic wrapper around
+/// [`storage::load_data`] so modules don't each repeat the
+/// `.unwrap_or_default()`.
+pub fn load_store<T: Default + DeserializeOwned>(dir: &Path, key: &str) -> T {
+    storage::load_data(dir, key).unwrap_or_default()
+}
+
+/// Persist a module's store document. Companion to [`load_store`].
+pub fn save_store<T: Serialize>(dir: &Path, key: &str, store: &T) -> Result<(), String> {
+    storage::save_data(dir, key, store)
+}
+
+/// An entry in a module's store `Vec` that's looked up by a stable, user- (or
+/// slug-) assigned `id` — a saved shopping list, PI planner setup, or
+/// mass-production build list. Lets [`find_mut`]/[`delete_by_id`] work for
+/// any of them without knowing their other fields.
+pub trait Identified {
+    fn id(&self) -> &str;
+}
+
+/// Find the entry with the given `id` for in-place mutation; the caller
+/// saves the whole store back afterwards. Shared "load, find the thing the
+/// caller named, mutate it" lookup used by every store above that supports
+/// editing an existing entry (currently just Shopping Lists).
+pub fn find_mut<'a, T: Identified>(items: &'a mut [T], id: &str) -> Result<&'a mut T, String> {
+    items
+        .iter_mut()
+        .find(|item| item.id() == id)
+        .ok_or_else(|| format!("no such list: {id}"))
+}
+
+/// Remove the entry with the given `id` (no-op if already absent). Companion
+/// to [`find_mut`] for the "delete by id" half of the same pattern, shared by
+/// Shopping Lists, PI Planner setups, and Mass Production's build lists.
+pub fn delete_by_id<T: Identified>(items: &mut Vec<T>, id: &str) {
+    items.retain(|item| item.id() != id);
 }
 
 // --- Slug ids -----------------------------------------------------------
