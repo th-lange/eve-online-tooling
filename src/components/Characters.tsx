@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import {
@@ -6,7 +7,9 @@ import {
   authCharacters,
   authLogin,
   authLogout,
+  authPersistFailures,
   errorMessage,
+  onAuthPersistFailed,
   setActiveCharacter,
 } from "../lib/api";
 import {
@@ -68,6 +71,32 @@ export function Characters() {
     queryFn: activeCharacter,
   });
   const login = useMutation({ mutationFn: authLogin, onSuccess: invalidate });
+  const persistFailures = useQuery({
+    queryKey: authKeys.persistFailures,
+    queryFn: authPersistFailures,
+  });
+  // The backend flags a character when a rotated refresh token couldn't be
+  // saved to the keychain and fires this event on every change to that set.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    onAuthPersistFailed(() => {
+      void qc.invalidateQueries({ queryKey: authKeys.persistFailures });
+    })
+      .then((u) => {
+        if (cancelled) u();
+        else unlisten = u;
+      })
+      .catch((e) => console.error("Subscribing to auth events failed", e));
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [qc]);
+  const warnedNames = (persistFailures.data ?? []).flatMap((id) => {
+    const name = chars.data?.find((c) => c.characterId === id)?.name;
+    return name ? [name] : [];
+  });
   const logout = useMutation({
     mutationFn: (id: number) => authLogout(id),
     onSuccess: invalidate,
@@ -119,6 +148,16 @@ export function Characters() {
         </div>
       ) : (
         <p className="px-1 py-1 text-xs text-zinc-400">No characters yet.</p>
+      )}
+
+      {warnedNames.length > 0 && (
+        <p
+          role="alert"
+          className="mt-2 rounded border border-amber-800 bg-amber-950/40 px-2 py-1 text-xs text-amber-300"
+        >
+          Couldn't save the login for {warnedNames.join(", ")} — you may need to
+          log in again.
+        </p>
       )}
 
       <button
