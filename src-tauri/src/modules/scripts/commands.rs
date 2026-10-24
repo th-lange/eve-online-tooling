@@ -6,12 +6,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::Deserialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, State};
 
 use crate::model::AppError;
 
 use super::engine::{self, Limits};
 use super::host::{Host, HostCtx};
+use super::scheduler::{self, SchedulerState};
 use super::store;
 use super::types::{Language, Script, ScriptRun};
 
@@ -34,7 +35,11 @@ pub fn scripts_examples() -> Vec<super::examples::ExampleScript> {
 /// Create or update a script (upsert by id), returning the full updated set.
 /// A blank id means "new": one is minted from the name.
 #[tauri::command]
-pub fn scripts_save(app: AppHandle, script: Script) -> Result<Vec<Script>, AppError> {
+pub fn scripts_save(
+    app: AppHandle,
+    state: State<'_, SchedulerState>,
+    script: Script,
+) -> Result<Vec<Script>, AppError> {
     let dir = data_dir(&app)?;
     let mut scripts = store::load(&dir);
     let mut script = script;
@@ -47,17 +52,23 @@ pub fn scripts_save(app: AppHandle, script: Script) -> Result<Vec<Script>, AppEr
         None => scripts.push(script),
     }
     store::save(&dir, &scripts)?;
+    state.set_armed(scripts.iter().any(scheduler::is_armed));
     Ok(scripts)
 }
 
 /// Delete a script (and its private key/value store), returning what remains.
 #[tauri::command]
-pub fn scripts_delete(app: AppHandle, id: String) -> Result<Vec<Script>, AppError> {
+pub fn scripts_delete(
+    app: AppHandle,
+    state: State<'_, SchedulerState>,
+    id: String,
+) -> Result<Vec<Script>, AppError> {
     let dir = data_dir(&app)?;
     let mut scripts = store::load(&dir);
     scripts.retain(|s| s.id != id);
     store::save(&dir, &scripts)?;
     store::clear_kv(&dir, &id);
+    state.set_armed(scripts.iter().any(scheduler::is_armed));
     Ok(scripts)
 }
 
