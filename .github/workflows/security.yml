@@ -8,9 +8,17 @@ name: Security
 # findings (tracked separately) are triaged.
 on:
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
   push:
     branches:
       - main
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
   schedule:
     - cron: "0 6 * * 1" # Mondays, 06:00 UTC
   workflow_dispatch:
@@ -26,6 +34,7 @@ jobs:
   codeql:
     name: CodeQL (${{ matrix.language }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       security-events: write
@@ -51,6 +60,7 @@ jobs:
   npm-audit:
     name: npm audit
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -74,6 +84,7 @@ jobs:
   cargo-audit:
     name: cargo audit
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
