@@ -220,6 +220,7 @@ pub fn run() {
             }
             app.manage(modules::production::commands::CostIndexLocks::default());
             app.manage(zkill::live::ZkillStreamState::default());
+            app.manage(modules::scripts::scheduler::SchedulerState::default());
             modules::dpsmeter::init(app);
             mcp::init(app);
 
