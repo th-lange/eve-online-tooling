@@ -1,6 +1,7 @@
 import type { UseMutationResult } from "@tanstack/react-query";
 import { BatteryCharging, BatteryWarning, Info } from "lucide-react";
 import {
+  errorMessage,
   type ArchetypeDps,
   type CapStats,
   type DpsBreakdown,
@@ -12,6 +13,7 @@ import {
   type ResourceUsage,
   type TankStats,
 } from "../../lib/api";
+import { InlineError } from "../../components/InlineError";
 import { formatDuration, formatInt, formatIsk } from "../../lib/format";
 import { DAMAGE_TYPES, effectiveHp, km, resistClass } from "./fitHelpers";
 import {
@@ -892,6 +894,13 @@ export function PricePanel({
           <div>Sell: {formatIsk(price.data.sellTotal)}</div>
         </div>
       )}
+      <InlineError
+        message={
+          price.isError
+            ? `Couldn't price fit: ${errorMessage(price.error)}`
+            : null
+        }
+      />
     </div>
   );
 }

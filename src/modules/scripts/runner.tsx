@@ -14,22 +14,40 @@ export function ScriptsRunnerProvider({ children }: { children: ReactNode }) {
   const [runs, setRuns] = useState<Record<string, ScriptRunState>>({});
 
   useEffect(() => {
+    // `cancelled` guards the async-subscribe race: cleanup can fire BEFORE
+    // `onScriptRun` resolves — a bare `unlisten?.()` would then be a no-op
+    // and the old listener leaks (#1100).
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     onScriptRun(({ id, run }) =>
       setRuns((prev) => ({ ...prev, [id]: { at: Date.now(), run } })),
-    ).then((u) => (unlisten = u));
-    return () => unlisten?.();
+    ).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   useEffect(() => {
+    // Same cancelled-guard race as above, for `onScriptSound` (#1100).
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     onScriptSound(({ mime, data }) => {
       const audio = new Audio(`data:${mime};base64,${data}`);
       void audio
         .play()
         .catch((e) => console.error("Script sound playback failed", e));
-    }).then((u) => (unlisten = u));
-    return () => unlisten?.();
+    }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   return (
