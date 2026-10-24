@@ -1,7 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { CapGauge, TankResists, TankResistsPanel } from "./StatsPanels";
-import type { CapStats, TankStats } from "../../lib/api";
+import type { UseMutationResult } from "@tanstack/react-query";
+import {
+  CapGauge,
+  PricePanel,
+  TankResists,
+  TankResistsPanel,
+} from "./StatsPanels";
+import type { CapStats, FitPrice, TankStats } from "../../lib/api";
 
 function cap(overrides: Partial<CapStats>): CapStats {
   return {
@@ -100,5 +106,39 @@ describe("TankResistsPanel", () => {
     const box = screen.getByText("Tank (all V)").closest("div");
     expect(box?.className).toContain("rounded-lg");
     expect(box?.className).toContain("border");
+  });
+});
+
+function priceMutation(
+  overrides: Partial<UseMutationResult<FitPrice, Error, void, unknown>>,
+): UseMutationResult<FitPrice, Error, void, unknown> {
+  return {
+    data: undefined,
+    error: null,
+    isPending: false,
+    isError: false,
+    mutate: vi.fn(),
+    ...overrides,
+  } as unknown as UseMutationResult<FitPrice, Error, void, unknown>;
+}
+
+describe("PricePanel", () => {
+  it("renders nothing extra when idle with no result yet", () => {
+    render(<PricePanel price={priceMutation({})} />);
+    expect(screen.queryByText(/Couldn't price fit/)).not.toBeInTheDocument();
+  });
+
+  it("surfaces the error instead of silently reverting to the idle button (#1101)", () => {
+    render(
+      <PricePanel
+        price={priceMutation({
+          isError: true,
+          error: new Error("no market data for region"),
+        })}
+      />,
+    );
+    expect(
+      screen.getByText(/Couldn't price fit:.*no market data for region/),
+    ).toBeInTheDocument();
   });
 });
