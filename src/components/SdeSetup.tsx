@@ -14,9 +14,20 @@ export function SdeSetup({ onInstalled }: { onInstalled: () => void }) {
   const [progress, setProgress] = useState<SdeProgress | null>(null);
 
   useEffect(() => {
+    // `cancelled` guards the async-subscribe race: cleanup (e.g. this gate
+    // unmounting via `onInstalled` right after the SDE finishes downloading)
+    // can fire BEFORE `onSdeProgress` resolves — a bare `unlisten?.()` would
+    // then be a no-op and the old listener leaks (#1100).
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
-    onSdeProgress(setProgress).then((u) => (unlisten = u));
-    return () => unlisten?.();
+    onSdeProgress(setProgress).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, []);
 
   const download = useMutation({
