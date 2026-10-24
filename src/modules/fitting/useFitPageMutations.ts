@@ -20,6 +20,7 @@ export function useFitPageMutations(regionId: number) {
 
   const price = useMutation({
     mutationFn: () => fittingPrice(fit!, regionId, null),
+    onError: (e) => console.error("Couldn't price fit", e),
   });
   const del = useMutation({
     mutationFn: (id: string) => fittingDeleteLocal(id),
