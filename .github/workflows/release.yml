@@ -11,10 +11,17 @@ on:
       - "v*"
   workflow_dispatch:
 
+# Queue (don't cancel) a second run against the same tag — a manual re-run
+# while the original is still in flight (e.g. recovering from a stalled
+# platform leg) must not race the original publish. See #1096.
+concurrency:
+  group: release-${{ github.ref_name }}
+
 jobs:
   release:
     permissions:
       contents: write
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -66,8 +73,8 @@ jobs:
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 update
+          sudo apt-get install -y --fix-missing \
             libwebkit2gtk-4.1-dev build-essential curl wget file \
             libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
             pkg-config patchelf
@@ -77,7 +84,7 @@ jobs:
           node-version: 26
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 (2026-10-16)
         with:
           toolchain: 1.98.1
           targets: ${{ matrix.rust-targets }}
@@ -98,7 +105,7 @@ jobs:
       # No code signing: see the "Why builds are unsigned" note in the notes
       # job below and in the README. Not revisiting this without a sane-cost
       # path for non-US/CA/EU/UK developers.
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EVE_TOOLING_FIREBASE_PROJECT_ID: ${{ secrets.EVE_TOOLING_FIREBASE_PROJECT_ID }}
@@ -112,7 +119,10 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "EVE Online Tooling ${{ github.ref_name }}"
           releaseBody: "Download the installer for your platform below. The builds are **unsigned** — see the README for how to open them on macOS/Windows."
-          releaseDraft: false
+          # Published as a draft here; the notes job undrafts it only once
+          # every matrix leg has succeeded (needs: release), so a partial
+          # release (e.g. a hung/failed Linux leg) never goes live. See #1091.
+          releaseDraft: true
           # Pre-release tags (anything with a `-`, e.g. v0.75.0-beta.1) become
           # GitHub prereleases: excluded from /releases/latest, so the in-app
           # update check never offers a beta to stable users.
@@ -126,10 +136,10 @@ jobs:
   # the previous tag); on top of that we explain why the installers are
   # unsigned so people aren't left guessing at the SmartScreen/Gatekeeper
   # prompt. Replaces the old fixed-text-only body that had to be hand-edited
-  # after every release.
   notes:
     needs: release
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
@@ -157,3 +167,12 @@ jobs:
             echo "Code signing is not available to developers outside North America at a reasonable price. Microsoft's Authenticode (with enough reputation to skip SmartScreen) and Apple's notarization both gate their cert/identity requirements behind verification and fees that effectively exclude non-North-American independent developers. This is a free hobby project — it ships unsigned rather than pay a screening tollbooth that isn't offered on fair terms outside the US/Canada. Build from source if you'd rather not click through the warning."
           } > notes.md
           gh release edit "$TAG" --repo "$REPO" --notes-file notes.md
+
+      # Only run once every matrix leg has succeeded (needs: release above),
+      # so a partial release never leaves draft state. See #1091.
+      - name: Publish release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: gh release edit "$TAG" --repo "$REPO" --draft=false
