@@ -115,12 +115,11 @@ export const marketKeys = {
   /** MarketSearchPage's full region list (distinct cache entry from
    *  `regions()` above — kept byte-identical to the pre-refactor literal). */
   allRegions: ["market", "all-regions"] as const,
-  /** MarketSearchPage's "current location" region lookup. */
+  /** "Current location" region lookup — shared by MarketSearchPage and
+   *  Pochven's EntryFinder (#1090: previously two separately spelled keys,
+   *  `current-location`/`currentLocation`, caching the same
+   *  `market_current_location` read twice). */
   currentLocation: ["market", "current-location"] as const,
-  /** Pochven EntryFinder's own "current location" lookup — a separately
-   *  spelled (and thus separately cached) key from `currentLocation` above;
-   *  kept as two keys since this is a pure refactor, not a behavior fix. */
-  currentLocationCamel: ["market", "currentLocation"] as const,
   orderBook: <R, T>(regionId: R, typeId: T) =>
     ["market", "order-book", regionId, typeId] as const,
 };
@@ -472,11 +471,13 @@ export const shoppingKeys = {
     ["shopping", "chatSync", logsDir, channel] as const,
 };
 
-// --- Market search (MarketSearchPage-local root keys — unprefixed by
-//     "market", kept byte-identical to their pre-refactor values) ---
+// --- Market search (MarketSearchPage-local keys, under the shared "market"
+//     prefix so they're reachable by any future `["market"]`-wide
+//     invalidation sweep — #1090) ---
 
 export const marketSearchKeys = {
-  price: <R, T>(regionId: R, typeId: T) => ["price", regionId, typeId] as const,
+  price: <R, T>(regionId: R, typeId: T) =>
+    ["market", "search", "price", regionId, typeId] as const,
   sellOrders: <T, R, S, St, O, H, E>(
     typeId: T,
     regionId: R,
@@ -487,6 +488,8 @@ export const marketSearchKeys = {
     excludeScams: E,
   ) =>
     [
+      "market",
+      "search",
       "sell-orders",
       typeId,
       regionId,
@@ -504,6 +507,8 @@ export const marketSearchKeys = {
     excludeScams: E,
   ) =>
     [
+      "market",
+      "search",
       "order-book",
       typeId,
       regionId,

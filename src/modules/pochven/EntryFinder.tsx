@@ -23,7 +23,7 @@ export function EntryFinder() {
   const [maxJumps, setMaxJumps] = useState(10);
 
   const location = useQuery({
-    queryKey: marketKeys.currentLocationCamel,
+    queryKey: marketKeys.currentLocation,
     queryFn: marketCurrentLocation,
     staleTime: POCHVEN_CURRENT_LOCATION_STALE_TIME_MS,
     enabled: false,
