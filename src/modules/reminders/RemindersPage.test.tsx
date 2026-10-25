@@ -9,7 +9,7 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
 }));
 
 import { ReminderProvider } from "./ReminderProvider";
-import { RemindersCard } from "./RemindersCard";
+import { RemindersPage } from "./RemindersPage";
 import type { Reminder } from "./reminders";
 
 const KEY = "settings.reminders";
@@ -21,7 +21,7 @@ function seed(reminders: Reminder[]) {
 function renderApp() {
   return render(
     <ReminderProvider>
-      <RemindersCard />
+      <RemindersPage />
     </ReminderProvider>,
   );
 }
