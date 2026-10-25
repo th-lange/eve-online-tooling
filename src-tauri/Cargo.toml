@@ -71,6 +71,11 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 # rustls matches the rest of the project; avoids pulling in native-tls.
 sentry = { version = "0.34", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Native WebKitCache clearing (#1114) — same libwebkit2gtk already linked
+# transitively by tauri/wry; pinned to the exact version/features tauri's
+# dependency tree already resolves to, so this doesn't pull in a second copy.
+webkit2gtk = { version = "2.0.2", features = ["v2_16"] }
 
 [dev-dependencies]
 http = "1"
