@@ -112,6 +112,7 @@ const COMPONENTS: Record<string, LazyExoticComponent<ComponentType>> = {
   logs: page(() => import("./logs/LogsPage"), "LogsPage"),
   feedback: page(() => import("./feedback/FeedbackPage"), "FeedbackPage"),
   settings: page(() => import("./settings/SettingsPage"), "SettingsPage"),
+  reminders: page(() => import("./reminders/RemindersPage"), "RemindersPage"),
   support: page(() => import("./support/SupportPage"), "SupportPage"),
 };
 
