@@ -190,6 +190,7 @@ pub fn run() {
             // activate out of the box (no-op once `plugins/` exists).
             plugins::seed_example_plugin(&dir);
             esi::prune_cache_startup(&dir);
+            storage::prune_cache_startup(&dir);
             // Install the in-process log subscriber (WARN/ERROR → LogStore + logs://entry event).
             let log_store = modules::logs::LogStore::new();
             {
@@ -219,6 +220,7 @@ pub fn run() {
             }
             app.manage(modules::production::commands::CostIndexLocks::default());
             app.manage(zkill::live::ZkillStreamState::default());
+            app.manage(modules::scripts::scheduler::SchedulerState::default());
             modules::dpsmeter::init(app);
             mcp::init(app);
 

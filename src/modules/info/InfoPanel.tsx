@@ -39,14 +39,24 @@ export function InfoPanel() {
 
   // Script-posted entries arrive live — prepend them for a snappy feel.
   useEffect(() => {
+    // `cancelled` guards the async-subscribe race: cleanup can fire BEFORE
+    // `onInfoEntry` resolves — a bare `unlisten?.()` would then be a no-op
+    // and the old listener leaks (#1100).
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     onInfoEntry((entry) => {
       qc.setQueryData<InfoEntry[]>(infoKeys.all, (prev) => [
         entry,
         ...(prev ?? []),
       ]);
-    }).then((u) => (unlisten = u));
-    return () => unlisten?.();
+    }).then((u) => {
+      if (cancelled) u();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
   }, [qc]);
 
   const { markSeen } = useInfoAlerts();

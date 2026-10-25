@@ -530,6 +530,10 @@ export function useDpsPlaybackState() {
       })
       .catch((e) => setError(errorMessage(e)));
     const poll = setInterval(() => {
+      // The page stays mounted while backgrounded (ModuleHost) — skip the
+      // IPC + disk-stat round trip entirely while invisible, matching the
+      // live tick feed above (#1099).
+      if (!activeRef.current) return;
       void dpsLogStat(file)
         .then((n) => {
           if (!cancelled && n !== lastSize) {

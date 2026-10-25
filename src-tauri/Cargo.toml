@@ -1,6 +1,6 @@
 [package]
 name = "eve-online-tooling"
-version = "0.77.0"
+version = "0.77.1"
 description = "EVE Online tooling — production, trading and more"
 authors = ["Thomas Lange"]
 license = "MIT"
@@ -75,3 +75,11 @@ sentry = { version = "0.34", default-features = false, features = ["backtrace", 
 [dev-dependencies]
 http = "1"
 tokio = { version = "1", features = ["macros", "rt"] }
+
+# Shipped binaries carry full debug symbols by default (cargo's release
+# profile only sets opt-level = 3; strip defaults to "none"). Stripping cuts
+# tens of percent off every bundle format without changing codegen or
+# behavior — Sentry (above) doesn't need local debug symbols present in the
+# binary users download. See #1094.
+[profile.release]
+strip = true

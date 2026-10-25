@@ -300,6 +300,50 @@ pub fn cache_invalidate(app_data_dir: &Path, key: &str) {
     let _ = std::fs::remove_file(cache_path(app_data_dir, key));
 }
 
+/// Entries expired by more than this are considered abandoned and purged by
+/// [`prune_cache_startup`] — generous on purpose: several callers (killmail
+/// lookups in the FW hotspots, PvP, and local-intel modules) intentionally
+/// use multi-year TTLs, so this isn't about shortening legitimate caching,
+/// only reclaiming space for keys nobody has looked at in a long time.
+const CACHE_STALE_RETENTION_SECS: u64 = 60 * 24 * 60 * 60; // 60 days
+
+/// Just the `expires` field, for a pruning pass that doesn't need (or know)
+/// the entry's value type `T`. Serde ignores the other `CacheEnvelope`
+/// fields it doesn't declare.
+#[derive(serde::Deserialize)]
+struct CacheExpiry {
+    expires: u64,
+}
+
+/// Startup maintenance: delete on-disk `cache_get`/`cache_put` entries whose
+/// TTL has been expired for longer than [`CACHE_STALE_RETENTION_SECS`].
+/// Mirrors [`crate::net::conditional_cache::ConditionalCache::prune_disk_startup`]
+/// for this generic disk cache, which previously had no pruning path at all
+/// and grew forever (#1102). Synchronous — call once, early, in the Tauri
+/// `setup` closure, next to the sibling `esi::prune_cache_startup`.
+pub fn prune_cache_startup(app_data_dir: &Path) {
+    let cache_dir = app_data_dir.join("cache");
+    let Ok(entries) = std::fs::read_dir(&cache_dir) else {
+        return;
+    };
+    let cutoff = crate::util::time::now_secs().saturating_sub(CACHE_STALE_RETENTION_SECS);
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        let Ok(env) = serde_json::from_slice::<CacheExpiry>(&bytes) else {
+            continue;
+        };
+        if env.expires < cutoff {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
 /// Load a durable (non-expiring) JSON document by name, or `None` if absent.
 /// For accumulated history (wallet journal, transactions) that must survive
 /// restarts and grow beyond ESI's window.
@@ -460,6 +504,38 @@ mod tests {
         // Fresh entry round-trips.
         cache_put(&dir, "k", &vec![1_i64, 2, 3], 3600).unwrap();
         assert_eq!(cache_get::<Vec<i64>>(&dir, "k"), Some(vec![1, 2, 3]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prune_cache_startup_removes_only_long_stale_entries() {
+        let dir = std::env::temp_dir().join(format!("eve-cache-prune-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cache_dir = dir.join("cache");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+
+        let now = crate::util::time::now_secs();
+        let write = |key: &str, expires: u64| {
+            let env = CacheEnvelope {
+                expires,
+                sde_generation: None,
+                value: 1_i64,
+            };
+            std::fs::write(cache_path(&dir, key), serde_json::to_vec(&env).unwrap()).unwrap();
+        };
+        // Expired well beyond the retention window: pruned.
+        write("stale", now - CACHE_STALE_RETENTION_SECS - 3600);
+        // Expired, but only recently: kept.
+        write("recent", now - 60);
+        // Still fresh: kept.
+        write("fresh", now + 3600);
+
+        prune_cache_startup(&dir);
+
+        assert!(!cache_path(&dir, "stale").exists());
+        assert!(cache_path(&dir, "recent").exists());
+        assert!(cache_path(&dir, "fresh").exists());
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 
