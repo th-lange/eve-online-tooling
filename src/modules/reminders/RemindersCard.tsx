@@ -3,16 +3,15 @@ import { Trash2, Pencil } from "lucide-react";
 import { useReminders } from "./reminderContext";
 import {
   categoryLabel,
-  fromDatetimeLocal,
   REMINDER_CATEGORIES,
   sortByDue,
-  toDatetimeLocal,
   type ReminderCategory,
 } from "./reminders";
+import { WhenField } from "./WhenField";
 
-/** Default a new reminder to one hour out, rounded to the minute. */
-function defaultWhen(): string {
-  return toDatetimeLocal(Date.now() + 60 * 60_000);
+/** Default a new reminder to one hour out. */
+function defaultWhen(): number {
+  return Date.now() + 60 * 60_000;
 }
 
 /**
@@ -30,7 +29,7 @@ export function RemindersCard() {
   const [category, setCategory] = useState<ReminderCategory>("pi");
   const [what, setWhat] = useState("");
   const [note, setNote] = useState("");
-  const [when, setWhen] = useState(defaultWhen);
+  const [dueAt, setDueAt] = useState(defaultWhen);
   const [error, setError] = useState<string | null>(null);
 
   // When "Edit" is clicked, load that reminder into the form.
@@ -44,7 +43,7 @@ export function RemindersCard() {
     setCategory(r.category);
     setWhat(r.what);
     setNote(r.note);
-    setWhen(toDatetimeLocal(r.dueAt));
+    setDueAt(r.dueAt);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId]);
 
@@ -53,7 +52,7 @@ export function RemindersCard() {
     setCategory("pi");
     setWhat("");
     setNote("");
-    setWhen(defaultWhen());
+    setDueAt(defaultWhen());
     setError(null);
   };
 
@@ -63,7 +62,6 @@ export function RemindersCard() {
       setError("Give the reminder a short description.");
       return;
     }
-    const dueAt = fromDatetimeLocal(when);
     if (Number.isNaN(dueAt)) {
       setError("Pick a valid date and time.");
       return;
@@ -183,17 +181,11 @@ export function RemindersCard() {
               className="rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-200 placeholder:text-zinc-600"
             />
           </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-zinc-500">When</span>
-            <input
-              type="datetime-local"
-              value={when}
-              onChange={(e) => setWhen(e.currentTarget.value)}
-              aria-label="When to be reminded"
-              className="rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-200"
-            />
-          </label>
         </div>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-zinc-500">When</span>
+          <WhenField value={dueAt} onChange={setDueAt} />
+        </label>
         <label className="flex flex-col gap-1">
           <span className="text-xs text-zinc-500">Note (optional)</span>
           <textarea
