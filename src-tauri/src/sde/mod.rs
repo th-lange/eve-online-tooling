@@ -30,6 +30,9 @@ pub use types::{
 };
 
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
+
+use rusqlite::{Connection, OpenFlags};
 
 use crate::storage;
 
@@ -65,6 +68,70 @@ impl SdePaths {
     }
 }
 
+// --- Shared read-only connection pool (#1113) ---
+//
+// `open_from_dir`/`open_from_app` used to call `Connection::open` (+ pragma
+// setup) on every single call — 33+ call sites, 14 of them in fitting's
+// per-module/charge/mutaplasmid lookups that fire repeatedly as a fit is
+// edited. A benchmark showed that reopen/teardown cost, not the point
+// queries themselves, dominated CPU. Instead, keep a small pool of idle
+// read-only connections per database identity (path + [`Generation`]):
+// `open_from_dir` pops one if available or opens a fresh one otherwise, and
+// [`Sde`]'s `Drop` impl returns it to the pool. A `download_sde` swap
+// changes the generation, so the next check-out discards the stale pool
+// (including any idle connections still pointing at the old generation) and
+// starts a fresh one — mirroring the generation-keyed caches below. Pooling
+// (rather than one shared `Mutex<Connection>`) means concurrent callers
+// never block each other: a check-out just pops/opens, a check-in just
+// pushes, and the pool self-sizes to whatever concurrency actually happens.
+
+/// Identity a pooled connection must match to be returned to the pool
+/// instead of just being closed (e.g. after an SDE swap changed the
+/// generation while the connection was checked out).
+pub(crate) struct PoolKey {
+    db_path: PathBuf,
+    generation: Generation,
+}
+
+struct ConnPool {
+    db_path: PathBuf,
+    generation: Generation,
+    idle: Vec<Connection>,
+}
+
+static SDE_CONN_POOL: LazyLock<Mutex<Option<ConnPool>>> = LazyLock::new(|| Mutex::new(None));
+
+/// Pop an idle connection for `(db_path, generation)` if the pool currently
+/// holds one; resets (and so drops/closes) the pool's idle connections if
+/// its identity doesn't match, exactly like [`get_or_build`] does for the
+/// whole-table caches.
+fn checkout_pooled_connection(db_path: &Path, generation: Generation) -> Option<Connection> {
+    let mut guard = SDE_CONN_POOL.lock().expect("sde conn pool lock");
+    match guard.as_mut() {
+        Some(p) if p.db_path == db_path && p.generation == generation => p.idle.pop(),
+        _ => {
+            *guard = Some(ConnPool {
+                db_path: db_path.to_path_buf(),
+                generation,
+                idle: Vec::new(),
+            });
+            None
+        }
+    }
+}
+
+/// Return a checked-out connection to its pool, unless the pool has since
+/// moved on to a newer generation — in which case it's just dropped here,
+/// closing it.
+pub(crate) fn return_pooled_connection(key: PoolKey, conn: Connection) {
+    let mut guard = SDE_CONN_POOL.lock().expect("sde conn pool lock");
+    if let Some(p) = guard.as_mut() {
+        if p.db_path == key.db_path && p.generation == key.generation {
+            p.idle.push(conn);
+        }
+    }
+}
+
 /// Open the SDE for the app's data dir. The dir/SDE-open plumbing was
 /// otherwise copy-pasted identically across every command module.
 ///
@@ -80,8 +147,30 @@ pub fn open_from_app(app: &tauri::AppHandle) -> Result<Sde, String> {
 /// dir (or have no `AppHandle` at all, e.g. the plugin broker). This is the
 /// one place that knows "an app data dir + [`SdePaths`] = an openable SDE",
 /// so call sites don't each rebuild that plumbing by hand.
+///
+/// Hands back a connection checked out of the process-wide pool (#1113)
+/// instead of opening a fresh one on every call — same observable behavior
+/// (same errors, same data), just without the reopen/teardown cost on SDE
+/// hot paths like fitting's per-module lookups.
 pub fn open_from_dir(dir: &Path) -> Result<Sde, String> {
-    Sde::open(&SdePaths::new(dir.to_path_buf()).db).map_err(|e| e.to_string())
+    let db = SdePaths::new(dir.to_path_buf()).db;
+    if !db.exists() {
+        return Err(SdeError::NotInstalled.to_string());
+    }
+    let gen = generation(&db)?;
+    let conn = match checkout_pooled_connection(&db, gen) {
+        Some(conn) => conn,
+        None => Connection::open_with_flags(&db, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(SdeError::from)
+            .map_err(|e| e.to_string())?,
+    };
+    Ok(Sde::from_pooled(
+        conn,
+        PoolKey {
+            db_path: db,
+            generation: gen,
+        },
+    ))
 }
 
 /// Like [`open_from_app`], but also returns the resolved app data dir for
@@ -386,5 +475,55 @@ mod cache_tests {
         .unwrap();
         assert_eq!(v, 7);
         assert_eq!(builds, 2);
+    }
+}
+
+#[cfg(test)]
+mod pool_tests {
+    use super::*;
+
+    /// Mirrors [`cache_tests::get_or_build_serves_cache_until_the_generation_changes`]:
+    /// exercises the pool primitives directly (pure over their inputs, no
+    /// SDE file on disk needed) rather than through `open_from_dir`, so it
+    /// can't collide with other tests sharing the process-wide pool static.
+    #[test]
+    fn pooled_connection_is_reused_within_a_generation_and_rebuilt_across_one() {
+        let db_path = PathBuf::from("/fake/sde-pool-test/sde.sqlite");
+        let gen_a: Generation = (1, 100);
+        let gen_b: Generation = (2, 100);
+
+        // Nothing checked in yet.
+        assert!(checkout_pooled_connection(&db_path, gen_a).is_none());
+
+        // Check a connection in under generation A...
+        return_pooled_connection(
+            PoolKey {
+                db_path: db_path.clone(),
+                generation: gen_a,
+            },
+            Connection::open_in_memory().unwrap(),
+        );
+
+        // ...it's served back out for the same generation (reused, no
+        // rebuild) — and the pool is empty again afterwards, proving it was
+        // actually the same checked-in connection, not a fresh one.
+        assert!(checkout_pooled_connection(&db_path, gen_a).is_some());
+        assert!(checkout_pooled_connection(&db_path, gen_a).is_none());
+
+        // Check another in under generation A, then ask for generation B
+        // (simulating a `download_sde` swap bumping the generation): the
+        // stale connection must not be served...
+        return_pooled_connection(
+            PoolKey {
+                db_path: db_path.clone(),
+                generation: gen_a,
+            },
+            Connection::open_in_memory().unwrap(),
+        );
+        assert!(checkout_pooled_connection(&db_path, gen_b).is_none());
+
+        // ...and the stale generation-A pool was discarded rather than left
+        // around to resurrect later.
+        assert!(checkout_pooled_connection(&db_path, gen_a).is_none());
     }
 }
