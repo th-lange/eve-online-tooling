@@ -2,6 +2,7 @@
 
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use std::collections::HashMap;
+use std::mem::ManuallyDrop;
 use std::path::Path;
 
 use super::types::{ItemMeta, TypeDetail, TypeInfo, TypeNameMap};
@@ -19,21 +20,40 @@ mod wormholes;
 pub use map::SystemGeo;
 pub use wormholes::wormhole_class_label;
 
-/// A read-only handle to the SDE database. Opening is cheap, so callers may
-/// open one per request; this also means an SDE update (which swaps the file)
-/// is picked up on the next open.
+/// A read-only handle to the SDE database. Callers get one per request from
+/// [`super::open_from_dir`]/[`super::open_from_app`], which hand back a
+/// connection checked out of a process-wide pool keyed by SDE generation
+/// (#1113) instead of opening a fresh one every time; [`Drop`] returns it to
+/// that pool (or just closes it, for one-off/test connections that never
+/// joined a pool).
 pub struct Sde {
-    conn: Connection,
+    conn: ManuallyDrop<Connection>,
+    pool_key: Option<super::PoolKey>,
 }
 
 impl Sde {
-    /// Open the SDE database read-only.
+    /// Open the SDE database read-only, outside the connection pool. Used by
+    /// [`super::open_from_dir`] as the fallback when the pool has no idle
+    /// connection for the current generation, and directly by callers (e.g.
+    /// tests) that want a one-off connection.
     pub fn open(db_path: &Path) -> Result<Self, SdeError> {
         if !db_path.exists() {
             return Err(SdeError::NotInstalled);
         }
         let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-        Ok(Self { conn })
+        Ok(Self {
+            conn: ManuallyDrop::new(conn),
+            pool_key: None,
+        })
+    }
+
+    /// Wrap a connection checked out of (or newly opened for) the
+    /// process-wide pool, tagged so [`Drop`] returns it there (#1113).
+    pub(crate) fn from_pooled(conn: Connection, pool_key: super::PoolKey) -> Self {
+        Self {
+            conn: ManuallyDrop::new(conn),
+            pool_key: Some(pool_key),
+        }
     }
 
     /// Type name + group + volume for a type id, if it exists.
@@ -412,7 +432,23 @@ impl Sde {
 
     #[cfg(test)]
     fn from_connection(conn: Connection) -> Self {
-        Self { conn }
+        Self {
+            conn: ManuallyDrop::new(conn),
+            pool_key: None,
+        }
+    }
+}
+
+impl Drop for Sde {
+    fn drop(&mut self) {
+        // Safety: `conn` is never read again after this point — `drop` runs
+        // exactly once and `self` is discarded immediately after.
+        let conn = unsafe { ManuallyDrop::take(&mut self.conn) };
+        if let Some(key) = self.pool_key.take() {
+            super::return_pooled_connection(key, conn);
+        }
+        // else: a one-off connection (direct `Sde::open`/`from_connection`
+        // caller, e.g. tests) — `conn` just closes normally here.
     }
 }
 
