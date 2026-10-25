@@ -15,12 +15,21 @@ import { useConfirmBeforeQuit } from "./useConfirmBeforeQuit";
  * (not the state directly) so the listener — registered once on mount —
  * always sees the latest value instead of whatever was current when it was
  * first attached.
+ *
+ * Pressing the window's close button a second time while the prompt is
+ * already up is treated as confirmation: the second `onCloseRequested`
+ * quits immediately (`destroy()`), so an impatient double-press on close
+ * does the obvious thing instead of silently doing nothing.
  */
 export function ConfirmQuitProvider({ children }: { children: ReactNode }) {
   const [confirmBeforeQuit] = useConfirmBeforeQuit();
   const confirmBeforeQuitRef = useRef(confirmBeforeQuit);
   confirmBeforeQuitRef.current = confirmBeforeQuit;
   const [showConfirm, setShowConfirm] = useState(false);
+  // The close listener is registered once on mount and reads live state
+  // through refs; this one lets a repeat close-request short-circuit to quit.
+  const showConfirmRef = useRef(showConfirm);
+  showConfirmRef.current = showConfirm;
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -29,6 +38,11 @@ export function ConfirmQuitProvider({ children }: { children: ReactNode }) {
       .onCloseRequested((event) => {
         if (!confirmBeforeQuitRef.current) return;
         event.preventDefault();
+        // Already asking → a second close press means "yes, quit".
+        if (showConfirmRef.current) {
+          void getCurrentWindow().destroy();
+          return;
+        }
         setShowConfirm(true);
       })
       .then((fn) => {
