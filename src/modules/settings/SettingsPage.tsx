@@ -7,6 +7,7 @@ import { useFwHomeDefense } from "../faction-warfare/fwHomeDefenseContext";
 import type { NearbyFlipRadius } from "../faction-warfare/homeDefenseAlerts";
 import { useCheckForUpdatesEnabled, useReleaseCheck } from "./useReleaseCheck";
 import { useConfirmBeforeQuit } from "./useConfirmBeforeQuit";
+import { RemindersCard } from "../reminders/RemindersCard";
 
 const NEARBY_FLIP_OPTIONS: readonly { key: NearbyFlipRadius; label: string }[] =
   [
@@ -218,6 +219,7 @@ export function SettingsPage() {
           />
         </div>
       </div>
+      <RemindersCard />
     </Page>
   );
 }

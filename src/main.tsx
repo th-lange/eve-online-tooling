@@ -19,6 +19,7 @@ import { FightOverlayProvider } from "./modules/pvp/FightOverlayProvider";
 import { RecordingProvider } from "./modules/recording/RecordingProvider";
 import { FwHomeDefenseProvider } from "./modules/faction-warfare/FwHomeDefenseProvider";
 import { ConfirmQuitProvider } from "./modules/settings/ConfirmQuitProvider";
+import { ReminderProvider } from "./modules/reminders/ReminderProvider";
 import "./index.css";
 
 // Sentry: DSN is baked in at build time via VITE_SENTRY_DSN; absent = disabled.
@@ -71,7 +72,9 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
             <FightOverlayProvider>
               <FwHomeDefenseProvider>
                 <ConfirmQuitProvider>
-                  <RouterProvider router={router} />
+                  <ReminderProvider>
+                    <RouterProvider router={router} />
+                  </ReminderProvider>
                 </ConfirmQuitProvider>
               </FwHomeDefenseProvider>
             </FightOverlayProvider>

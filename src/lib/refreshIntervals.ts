@@ -80,6 +80,12 @@ export const FIGHT_OVERLAY_SHIP_STALE_TIME_MS = 15_000;
  *  need to re-scan the folder on every render of the settings card. */
 export const RECORDING_CHARACTERS_STALE_TIME_MS = 60_000;
 
+/** How often the root reminder watcher re-checks for reminders that have come
+ *  due (see ReminderProvider). Reminders don't need second precision, so a
+ *  coarse tick keeps the cost negligible while the app is open; the first
+ *  check runs immediately on launch to catch anything already past due. */
+export const REMINDER_CHECK_INTERVAL_MS = 20_000;
+
 /** Pochven market "current location" lookup (manual trigger, EntryFinder):
  *  your system doesn't change without an explicit jump, so the result is
  *  kept for a minute rather than re-resolved on every interaction. */

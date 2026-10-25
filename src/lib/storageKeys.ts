@@ -48,4 +48,7 @@ export const STORAGE_KEYS = {
   confirmBeforeQuit: "settings.confirmBeforeQuit",
   // PI Planner: the commodities currently being planned, kept across visits
   piPlannerPicks: "pi.plannerPicks",
+  // Settings: user-registered reminders (what/when/note), fired only while
+  // the app is open (see ReminderProvider)
+  reminders: "settings.reminders",
 } as const;
