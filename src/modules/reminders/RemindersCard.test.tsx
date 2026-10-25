@@ -47,13 +47,18 @@ describe("Reminders — editor", () => {
     fireEvent.change(screen.getByLabelText("What to be reminded about"), {
       target: { value: "Invention batch done" },
     });
-    fireEvent.change(screen.getByLabelText("When to be reminded"), {
-      target: { value: "2099-01-01T12:00" },
+    fireEvent.change(screen.getByLabelText("Reminder date (YYYY-MM-DD)"), {
+      target: { value: "2099-01-01" },
+    });
+    fireEvent.change(screen.getByLabelText("Reminder time (HH:MM)"), {
+      target: { value: "12:00" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Add reminder" }));
 
     expect(screen.getByText("Invention batch done")).toBeInTheDocument();
-    expect(JSON.parse(localStorage.getItem(KEY)!)).toHaveLength(1);
+    const stored = JSON.parse(localStorage.getItem(KEY)!);
+    expect(stored).toHaveLength(1);
+    expect(stored[0].dueAt).toBe(new Date("2099-01-01T12:00").getTime());
   });
 
   it("rejects an empty description", () => {

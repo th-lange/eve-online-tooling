@@ -3,7 +3,7 @@ import { Bell } from "lucide-react";
 import { Modal } from "../../components/Modal";
 import type { ColonyView } from "../../lib/api";
 import { useReminders } from "../reminders/reminderContext";
-import { fromDatetimeLocal, toDatetimeLocal } from "../reminders/reminders";
+import { WhenField } from "../reminders/WhenField";
 
 /** Earliest extractor-program end across this colony's extractors, as epoch
  *  ms — the obvious "restart me" moment. `null` when the colony has no running
@@ -29,19 +29,16 @@ export function ColonyReminderButton({ colony }: { colony: ColonyView }) {
   const [saved, setSaved] = useState(false);
   const [what, setWhat] = useState("");
   const [note, setNote] = useState("");
-  const [when, setWhen] = useState("");
+  const [dueAt, setDueAt] = useState(() => Date.now() + 60 * 60_000);
 
   const openForm = () => {
     setWhat(`${colony.systemName} ${colony.planetType} extraction`);
     setNote("");
-    setWhen(
-      toDatetimeLocal(earliestExpiry(colony) ?? Date.now() + 60 * 60_000),
-    );
+    setDueAt(earliestExpiry(colony) ?? Date.now() + 60 * 60_000);
     setOpen(true);
   };
 
   const submit = () => {
-    const dueAt = fromDatetimeLocal(when);
     if (what.trim() === "" || Number.isNaN(dueAt)) return;
     add({ category: "pi", what: what.trim(), note: note.trim(), dueAt });
     setOpen(false);
@@ -89,13 +86,7 @@ export function ColonyReminderButton({ colony }: { colony: ColonyView }) {
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs text-zinc-500">When</span>
-            <input
-              type="datetime-local"
-              value={when}
-              onChange={(e) => setWhen(e.currentTarget.value)}
-              aria-label="When to be reminded"
-              className="rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-200"
-            />
+            <WhenField value={dueAt} onChange={setDueAt} />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs text-zinc-500">Note (optional)</span>

@@ -56,11 +56,11 @@ describe("ColonyReminderButton", () => {
       "What to be reminded about",
     ) as HTMLInputElement;
     expect(what.value).toBe("Pator Barren extraction");
-    const when = screen.getByLabelText(
-      "When to be reminded",
+    const date = screen.getByLabelText(
+      "Reminder date (YYYY-MM-DD)",
     ) as HTMLInputElement;
-    // Pre-filled from the extractor's expiry (local-tz datetime-local value).
-    expect(when.value).not.toBe("");
+    // Pre-filled from the extractor's expiry.
+    expect(date.value).not.toBe("");
 
     fireEvent.click(screen.getByRole("button", { name: "Add reminder" }));
 
