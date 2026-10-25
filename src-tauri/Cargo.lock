@@ -1712,6 +1712,7 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
+ "webkit2gtk",
  "zip",
 ]
 

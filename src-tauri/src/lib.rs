@@ -39,6 +39,7 @@ mod release_check;
 mod sde;
 mod storage;
 mod util;
+mod webview_cache;
 mod zkill;
 
 /// A snap-packaged terminal (e.g. Alacritty) exports GStreamer paths into the
@@ -191,6 +192,7 @@ pub fn run() {
             plugins::seed_example_plugin(&dir);
             esi::prune_cache_startup(&dir);
             storage::prune_cache_startup(&dir);
+            webview_cache::prune_startup(app.handle(), &dir);
             // Install the in-process log subscriber (WARN/ERROR → LogStore + logs://entry event).
             let log_store = modules::logs::LogStore::new();
             {
