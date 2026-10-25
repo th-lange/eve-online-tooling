@@ -19,6 +19,7 @@ import {
   stockMaps,
 } from "./balance";
 import { ColonyNotes } from "./ColonyNotes";
+import { ColonyReminderButton } from "./ColonyReminderButton";
 import { Section } from "./Section";
 
 function Extractor({ ex, now }: { ex: ExtractorView; now: number }) {
@@ -234,20 +235,23 @@ function Colony({
             needs attention
           </span>
         )}
-        <button
-          onClick={() =>
-            piShowInGame(colony.systemId)
-              .then(() => setRouteError(null))
-              .catch((e) => {
-                console.error("Failed to set route to colony system", e);
-                setRouteError(`Couldn't set route: ${errorMessage(e)}`);
-              })
-          }
-          title="Set autopilot to this colony's system — ESI can't open a planet/system Show Info window directly"
-          className="ml-auto rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
-        >
-          Route here ↗
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <ColonyReminderButton colony={colony} />
+          <button
+            onClick={() =>
+              piShowInGame(colony.systemId)
+                .then(() => setRouteError(null))
+                .catch((e) => {
+                  console.error("Failed to set route to colony system", e);
+                  setRouteError(`Couldn't set route: ${errorMessage(e)}`);
+                })
+            }
+            title="Set autopilot to this colony's system — ESI can't open a planet/system Show Info window directly"
+            className="rounded border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
+          >
+            Route here ↗
+          </button>
+        </div>
       </div>
       <InlineError
         message={routeError}
