@@ -1,112 +1,71 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import {
-  render,
-  screen,
-  fireEvent,
-  waitFor,
-  act,
-} from "@testing-library/react";
-import { ConfirmQuitProvider } from "./ConfirmQuitProvider";
+import { act, render, screen } from "@testing-library/react";
 
-// `onCloseRequested`'s registered handler is captured here so a test can
-// fire it directly (simulating the OS close button), same shape as the real
-// `CloseRequestedEvent` (`preventDefault`/`isPreventDefault`).
+// Capture the registered close-request handler + spy on destroy() so a test
+// can drive onCloseRequested without a real Tauri window.
 let closeHandler: ((event: { preventDefault: () => void }) => void) | undefined;
-const destroy = vi.fn();
-const preventDefault = vi.fn();
-
+const destroyMock = vi.fn();
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
-    onCloseRequested: (
-      handler: (event: { preventDefault: () => void }) => void,
-    ) => {
-      closeHandler = handler;
-      return Promise.resolve(() => {
-        closeHandler = undefined;
-      });
+    onCloseRequested: (cb: (event: { preventDefault: () => void }) => void) => {
+      closeHandler = cb;
+      return Promise.resolve(() => {});
     },
-    destroy,
+    destroy: destroyMock,
   }),
 }));
 
-beforeEach(() => {
-  localStorage.clear();
-  closeHandler = undefined;
-  destroy.mockReset();
-  preventDefault.mockReset();
-});
+import { ConfirmQuitProvider } from "./ConfirmQuitProvider";
 
 function fireClose() {
-  act(() => {
-    closeHandler?.({ preventDefault });
-  });
+  const event = { preventDefault: vi.fn() };
+  act(() => closeHandler!(event));
+  return event;
 }
 
-describe("ConfirmQuitProvider", () => {
-  it("shows the confirm dialog and prevents the default close when the setting is on", async () => {
+beforeEach(() => {
+  closeHandler = undefined;
+  destroyMock.mockReset();
+  localStorage.clear();
+});
+
+describe("ConfirmQuitProvider — double-close to quit", () => {
+  it("first close press shows the prompt, a second press quits", async () => {
     render(
       <ConfirmQuitProvider>
-        <div>content</div>
+        <div>app</div>
       </ConfirmQuitProvider>,
     );
-    await waitFor(() => expect(closeHandler).toBeDefined());
+    await vi.waitFor(() => expect(closeHandler).toBeDefined());
 
-    fireClose();
-
-    expect(preventDefault).toHaveBeenCalled();
+    // First press: prompt appears, nothing quits yet.
+    const first = fireClose();
+    expect(first.preventDefault).toHaveBeenCalled();
     expect(
-      await screen.findByText("Quit EVE Online Tooling?"),
+      screen.getByRole("alertdialog", { name: "Confirm quit" }),
     ).toBeInTheDocument();
+    expect(destroyMock).not.toHaveBeenCalled();
+
+    // Second press while the prompt is up: treated as confirmation → quit.
+    const second = fireClose();
+    expect(second.preventDefault).toHaveBeenCalled();
+    expect(destroyMock).toHaveBeenCalledTimes(1);
   });
 
-  it("lets the close through untouched when the setting is off", async () => {
-    localStorage.setItem("settings.confirmBeforeQuit", "false");
+  it("does not intercept the close when the setting is off", async () => {
+    localStorage.setItem("settings.confirmBeforeQuit", JSON.stringify(false));
     render(
       <ConfirmQuitProvider>
-        <div>content</div>
+        <div>app</div>
       </ConfirmQuitProvider>,
     );
-    await waitFor(() => expect(closeHandler).toBeDefined());
+    await vi.waitFor(() => expect(closeHandler).toBeDefined());
 
-    fireClose();
-
-    expect(preventDefault).not.toHaveBeenCalled();
-    expect(
-      screen.queryByText("Quit EVE Online Tooling?"),
-    ).not.toBeInTheDocument();
-  });
-
-  it("destroys the window when Quit is clicked", async () => {
-    render(
-      <ConfirmQuitProvider>
-        <div>content</div>
-      </ConfirmQuitProvider>,
-    );
-    await waitFor(() => expect(closeHandler).toBeDefined());
-    fireClose();
-
-    fireEvent.click(await screen.findByRole("button", { name: "Quit" }));
-
-    expect(destroy).toHaveBeenCalled();
-  });
-
-  it("dismisses the dialog without closing when Cancel is clicked", async () => {
-    render(
-      <ConfirmQuitProvider>
-        <div>content</div>
-      </ConfirmQuitProvider>,
-    );
-    await waitFor(() => expect(closeHandler).toBeDefined());
-    fireClose();
-    await screen.findByText("Quit EVE Online Tooling?");
-
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-
-    expect(destroy).not.toHaveBeenCalled();
-    await waitFor(() =>
-      expect(
-        screen.queryByText("Quit EVE Online Tooling?"),
-      ).not.toBeInTheDocument(),
-    );
+    const event = fireClose();
+    // Setting off → handler returns early: no preventDefault, no prompt, the
+    // OS close proceeds normally.
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(destroyMock).not.toHaveBeenCalled();
   });
 });
