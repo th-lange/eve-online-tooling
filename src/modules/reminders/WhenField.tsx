@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatWhen, fromDatetimeLocal, toDatetimeLocal } from "./reminders";
 
 /** Quick "remind me later" offsets, relative to now. */
@@ -41,21 +41,28 @@ export function WhenField({
   const [date, setDate] = useState(() => toDate(value));
   const [time, setTime] = useState(() => toTime(value));
 
-  // Resync the text fields when the value is changed from outside (a quick
-  // offset below, or the parent reseeding the form) — but not while the user
-  // is mid-edit, since then `combine(date, time)` already equals `value`.
+  // Only resync the text fields on a *genuine external* value change — the
+  // parent reseeding the form, or a quick offset below. We must NOT resync in
+  // response to our own edits: while the user is mid-typing the value is
+  // briefly NaN (an incomplete time), and `NaN !== NaN` would otherwise make
+  // every keystroke look like an external change and wipe both fields.
+  // `Object.is` treats NaN as equal to NaN, so a mid-edit NaN compares equal
+  // to what we just emitted and is left alone.
+  const lastEmitted = useRef(value);
   useEffect(() => {
-    if (combine(date, time) !== value) {
+    if (!Object.is(value, lastEmitted.current)) {
+      lastEmitted.current = value;
       setDate(toDate(value));
       setTime(toTime(value));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
   const edit = (d: string, t: string) => {
     setDate(d);
     setTime(t);
-    onChange(combine(d, t));
+    const next = combine(d, t);
+    lastEmitted.current = next;
+    onChange(next);
   };
 
   const ms = combine(date, time);
