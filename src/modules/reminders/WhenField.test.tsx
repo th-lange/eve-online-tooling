@@ -65,18 +65,34 @@ describe("WhenField", () => {
     expect(screen.getByText(/Enter a date as YYYY-MM-DD/)).toBeInTheDocument();
   });
 
-  it("a quick offset sets a time roughly that far from now", () => {
+  it("offset buttons add to the current time and compound", () => {
+    const onChange = vi.fn();
+    const base = new Date("2099-01-01T08:00").getTime();
+    render(<Harness initial={base} onChange={onChange} />);
+
+    // +1h adds to the entered time, not "now".
+    fireEvent.click(screen.getByRole("button", { name: "+1h" }));
+    expect(onChange).toHaveBeenLastCalledWith(base + 60 * 60_000);
+    // Clicking again compounds on the new value (+1h then +6h = +7h).
+    fireEvent.click(screen.getByRole("button", { name: "+6h" }));
+    expect(onChange).toHaveBeenLastCalledWith(base + 7 * 60 * 60_000);
+    // The text fields reflect the new value.
+    expect(
+      (screen.getByLabelText("Reminder time (HH:MM)") as HTMLInputElement)
+        .value,
+    ).toBe("15:00");
+  });
+
+  it("an offset falls back to now when the field is empty", () => {
     const onChange = vi.fn();
     render(<Harness initial={Date.now()} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText("Reminder time (HH:MM)"), {
+      target: { value: "" },
+    });
     const before = Date.now();
-    fireEvent.click(screen.getByRole("button", { name: "+1h" }));
+    fireEvent.click(screen.getByRole("button", { name: "+1d" }));
     const got = onChange.mock.lastCall![0] as number;
-    expect(got).toBeGreaterThanOrEqual(before + 60 * 60_000 - 1000);
-    expect(got).toBeLessThanOrEqual(Date.now() + 60 * 60_000 + 1000);
-    // The text fields reflect the offset (resynced from the new value).
-    expect(
-      (screen.getByLabelText("Reminder date (YYYY-MM-DD)") as HTMLInputElement)
-        .value,
-    ).not.toBe("");
+    expect(got).toBeGreaterThanOrEqual(before + 24 * 60 * 60_000 - 1000);
+    expect(got).toBeLessThanOrEqual(Date.now() + 24 * 60 * 60_000 + 1000);
   });
 });

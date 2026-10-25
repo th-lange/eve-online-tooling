@@ -93,7 +93,11 @@ export function WhenField({
           <button
             key={o.label}
             type="button"
-            onClick={() => onChange(Date.now() + o.ms)}
+            // Add to the time currently entered (so they compound, and e.g.
+            // "+1h" nudges a pre-filled extraction end), falling back to now
+            // when the field is empty/invalid.
+            onClick={() => onChange((valid ? ms : Date.now()) + o.ms)}
+            title={`Add ${o.label.slice(1)} to the time above`}
             className="rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
           >
             {o.label}
