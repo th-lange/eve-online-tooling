@@ -7,6 +7,7 @@ import {
   Settings,
   Terminal,
   Bell,
+  AlarmClock,
   type LucideIcon,
 } from "lucide-react";
 
@@ -304,6 +305,14 @@ export const MODULE_METADATA: ModuleMeta[] = [
     description: "App-wide preferences, e.g. the global combat overview.",
     group: "support",
     icon: Settings,
+  },
+  {
+    id: "reminders",
+    title: "Reminders",
+    description:
+      "Set reminders for PI extractions, production or invention jobs, or anything else — they fire while the app is open.",
+    group: "support",
+    icon: AlarmClock,
   },
   {
     id: "support",
