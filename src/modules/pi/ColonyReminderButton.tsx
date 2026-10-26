@@ -4,6 +4,7 @@ import { Modal } from "../../components/Modal";
 import type { ColonyView } from "../../lib/api";
 import { useReminders } from "../reminders/reminderContext";
 import { WhenField } from "../reminders/WhenField";
+import { RepeatField } from "../reminders/RepeatField";
 
 /** Earliest extractor-program end across this colony's extractors, as epoch
  *  ms — the obvious "restart me" moment. `null` when the colony has no running
@@ -30,17 +31,25 @@ export function ColonyReminderButton({ colony }: { colony: ColonyView }) {
   const [what, setWhat] = useState("");
   const [note, setNote] = useState("");
   const [dueAt, setDueAt] = useState(() => Date.now() + 60 * 60_000);
+  const [repeatMs, setRepeatMs] = useState<number | null>(null);
 
   const openForm = () => {
     setWhat(`${colony.systemName} ${colony.planetType} extraction`);
     setNote("");
     setDueAt(earliestExpiry(colony) ?? Date.now() + 60 * 60_000);
+    setRepeatMs(null);
     setOpen(true);
   };
 
   const submit = () => {
     if (what.trim() === "" || Number.isNaN(dueAt)) return;
-    add({ category: "pi", what: what.trim(), note: note.trim(), dueAt });
+    add({
+      category: "pi",
+      what: what.trim(),
+      note: note.trim(),
+      dueAt,
+      repeatMs,
+    });
     setOpen(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
@@ -87,6 +96,10 @@ export function ColonyReminderButton({ colony }: { colony: ColonyView }) {
           <label className="flex flex-col gap-1">
             <span className="text-xs text-zinc-500">When</span>
             <WhenField value={dueAt} onChange={setDueAt} />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-zinc-500">Repeat</span>
+            <RepeatField value={repeatMs} onChange={setRepeatMs} />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs text-zinc-500">Note (optional)</span>

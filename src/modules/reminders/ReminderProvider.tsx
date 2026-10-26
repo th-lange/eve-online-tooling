@@ -16,10 +16,13 @@ import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { REMINDER_CHECK_INTERVAL_MS } from "../../lib/refreshIntervals";
 import { ReminderContext, type ReminderCtx } from "./reminderContext";
 import {
+  advance,
   categoryLabel,
   dueReminders,
+  formatRepeat,
   formatWhen,
   SNOOZE_OPTIONS,
+  SNOOZE_UNITS,
   type Reminder,
   type ReminderDraft,
 } from "./reminders";
@@ -90,8 +93,23 @@ export function ReminderProvider({ children }: { children: ReactNode }) {
       ),
     [setReminders],
   );
+  // "Done": a repeating reminder rolls forward to its next occurrence; a
+  // one-shot one is removed.
+  const complete = useCallback(
+    (id: string) =>
+      setReminders((prev) =>
+        prev.flatMap((r) => {
+          if (r.id !== id) return [r];
+          if (r.repeatMs && r.repeatMs > 0) {
+            return [{ ...r, dueAt: advance(r.dueAt, r.repeatMs, Date.now()) }];
+          }
+          return [];
+        }),
+      ),
+    [setReminders],
+  );
 
-  const ctx: ReminderCtx = { reminders, add, update, remove, snooze };
+  const ctx: ReminderCtx = { reminders, add, update, remove, snooze, complete };
 
   // --- Firing ---
   const [now, setNow] = useState(() => Date.now());
@@ -151,46 +169,13 @@ export function ReminderProvider({ children }: { children: ReactNode }) {
         </h2>
         <ul className="mt-3 flex flex-col gap-3">
           {due.map((r) => (
-            <li
+            <DueReminderCard
               key={r.id}
-              className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3"
-            >
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="text-sm font-medium text-zinc-100">
-                  {r.what}
-                </span>
-                <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400">
-                  {categoryLabel(r.category)}
-                </span>
-              </div>
-              <div className="mt-0.5 text-xs text-amber-400">
-                Due {formatWhen(r.dueAt, now)}
-              </div>
-              {r.note && (
-                <p className="mt-1 whitespace-pre-wrap text-xs text-zinc-400">
-                  {r.note}
-                </p>
-              )}
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                {SNOOZE_OPTIONS.map((o) => (
-                  <button
-                    key={o.ms}
-                    type="button"
-                    onClick={() => snooze(r.id, o.ms)}
-                    className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
-                  >
-                    Snooze {o.label}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => remove(r.id)}
-                  className="ml-auto rounded bg-emerald-700 px-2.5 py-0.5 text-xs text-white hover:bg-emerald-600"
-                >
-                  Done
-                </button>
-              </div>
-            </li>
+              reminder={r}
+              now={now}
+              onSnooze={snooze}
+              onComplete={complete}
+            />
           ))}
         </ul>
         <div className="mt-4 flex justify-end">
@@ -204,5 +189,112 @@ export function ReminderProvider({ children }: { children: ReactNode }) {
         </div>
       </Modal>
     </ReminderContext.Provider>
+  );
+}
+
+/** One row in the "due" modal: the reminder, a "Remind me again in …" snooze
+ *  (quick presets + a custom amount/unit), and Done — which reschedules a
+ *  repeating reminder or removes a one-shot one. Its own local state for the
+ *  custom-snooze fields keeps the list render simple. */
+function DueReminderCard({
+  reminder: r,
+  now,
+  onSnooze,
+  onComplete,
+}: {
+  reminder: Reminder;
+  now: number;
+  onSnooze: (id: string, ms: number) => void;
+  onComplete: (id: string) => void;
+}) {
+  const [n, setN] = useState(10);
+  const [unit, setUnit] = useState(SNOOZE_UNITS[0].key);
+  const unitMs = SNOOZE_UNITS.find((u) => u.key === unit)?.ms ?? 60_000;
+  const repeating = r.repeatMs != null && r.repeatMs > 0;
+  return (
+    <li className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-sm font-medium text-zinc-100">{r.what}</span>
+        <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400">
+          {categoryLabel(r.category)}
+        </span>
+      </div>
+      <div className="mt-0.5 text-xs text-amber-400">
+        Due {formatWhen(r.dueAt, now)}
+        {repeating && (
+          <span className="text-zinc-500">
+            {" "}
+            · repeats {formatRepeat(r.repeatMs!)}
+          </span>
+        )}
+      </div>
+      {r.note && (
+        <p className="mt-1 whitespace-pre-wrap text-xs text-zinc-400">
+          {r.note}
+        </p>
+      )}
+      <div className="mt-2">
+        <span className="text-[11px] text-zinc-500">Remind me again in</span>
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          {SNOOZE_OPTIONS.map((o) => (
+            <button
+              key={o.ms}
+              type="button"
+              onClick={() => onSnooze(r.id, o.ms)}
+              className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            >
+              {o.label}
+            </button>
+          ))}
+          <span className="flex items-center gap-1">
+            <input
+              type="number"
+              min={1}
+              value={n}
+              onChange={(e) =>
+                setN(Math.max(1, Number(e.currentTarget.value) || 1))
+              }
+              aria-label="Snooze amount"
+              className="w-14 rounded border border-zinc-700 bg-zinc-950 px-2 py-0.5 text-xs text-zinc-200"
+            />
+            <select
+              value={unit}
+              onChange={(e) => setUnit(e.currentTarget.value)}
+              aria-label="Snooze unit"
+              className="rounded border border-zinc-700 bg-zinc-950 px-1 py-0.5 text-xs text-zinc-200"
+            >
+              {SNOOZE_UNITS.map((u) => (
+                <option key={u.key} value={u.key}>
+                  {u.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => onSnooze(r.id, n * unitMs)}
+              className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
+            >
+              Snooze
+            </button>
+          </span>
+        </div>
+      </div>
+      <div className="mt-2 flex justify-end">
+        <button
+          type="button"
+          onClick={() => onComplete(r.id)}
+          title={
+            repeating
+              ? "Mark done and schedule the next one"
+              : "Mark done and remove"
+          }
+          className="rounded bg-emerald-700 px-2.5 py-0.5 text-xs text-white hover:bg-emerald-600"
+        >
+          {repeating
+            ? `Done · next ${formatWhen(advance(r.dueAt, r.repeatMs!, now), now)}`
+            : "Done"}
+        </button>
+      </div>
+    </li>
   );
 }
