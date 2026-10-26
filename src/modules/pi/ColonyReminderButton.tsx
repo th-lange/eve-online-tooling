@@ -49,6 +49,7 @@ export function ColonyReminderButton({ colony }: { colony: ColonyView }) {
       note: note.trim(),
       dueAt,
       repeatMs,
+      link: { moduleId: "pi", planetId: colony.planetId },
     });
     setOpen(false);
     setSaved(true);

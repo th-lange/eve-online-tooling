@@ -2,12 +2,12 @@ import { useEffect, useState } from "react";
 import { Trash2, Pencil } from "lucide-react";
 import { useReminders } from "./reminderContext";
 import {
-  categoryLabel,
   formatRepeat,
   REMINDER_CATEGORIES,
   sortByDue,
   type ReminderCategory,
 } from "./reminders";
+import { ModuleBadge } from "./ModuleBadge";
 import { WhenField } from "./WhenField";
 import { RepeatField } from "./RepeatField";
 import { Page, PageHeader } from "../../components/page";
@@ -109,9 +109,7 @@ export function RemindersPage() {
                       <span className="truncate text-sm text-zinc-100">
                         {r.what}
                       </span>
-                      <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400">
-                        {categoryLabel(r.category)}
-                      </span>
+                      <ModuleBadge reminder={r} />
                     </div>
                     <div
                       className={`mt-0.5 text-xs ${

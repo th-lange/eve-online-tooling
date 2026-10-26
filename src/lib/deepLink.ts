@@ -56,3 +56,44 @@ export function takePendingFitImport(): string | null {
   pendingFit = null;
   return p;
 }
+
+// Imperative route navigation for callers that live *outside* the router (e.g.
+// the app-root reminders "due" modal): they can't use `useNavigate`, so they
+// publish a route here and a tiny `NavBridge` mounted inside the Layout (which
+// has router context) performs the navigation. A no-op if nothing is mounted.
+const routeSubscribers = new Set<(route: string) => void>();
+
+/** Navigate to `route` (e.g. "/pi") from anywhere, router context or not. */
+export function goToRoute(route: string): void {
+  for (const fn of routeSubscribers) fn(route);
+}
+
+/** Subscribe to route-navigation requests (returns an unsubscribe fn). */
+export function subscribeRoute(fn: (route: string) => void): () => void {
+  routeSubscribers.add(fn);
+  return () => void routeSubscribers.delete(fn);
+}
+
+// Focus one PI colony after navigating to the PI module — same mount/already-
+// mounted dual delivery as the market/fitting links above.
+let pendingColony: number | null = null;
+const colonySubscribers = new Set<(planetId: number) => void>();
+
+/** Ask the PI module to scroll to + highlight the colony on `planetId`. */
+export function openColonyInPi(planetId: number): void {
+  pendingColony = planetId;
+  for (const fn of colonySubscribers) fn(planetId);
+}
+
+/** Subscribe to PI colony-focus requests (returns an unsubscribe fn). */
+export function subscribePiColony(fn: (planetId: number) => void): () => void {
+  colonySubscribers.add(fn);
+  return () => void colonySubscribers.delete(fn);
+}
+
+/** Consume any colony stashed before the PI page first mounted. */
+export function takePendingPiColony(): number | null {
+  const p = pendingColony;
+  pendingColony = null;
+  return p;
+}

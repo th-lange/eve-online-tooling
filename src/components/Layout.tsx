@@ -2,7 +2,7 @@ import { Suspense, useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ModuleActiveContext } from "./moduleActiveContext";
 import { ModuleChromeContext } from "./moduleChromeContext";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   ChevronDown,
   ChevronRight,
@@ -25,6 +25,7 @@ import { scriptsKeys } from "../lib/queryKeys";
 import { useInfoAlerts } from "../modules/info/infoContext";
 import { useFightOverlay } from "../modules/pvp/fightOverlayContext";
 import { scriptsList } from "../lib/api";
+import { subscribeRoute } from "../lib/deepLink";
 import {
   useCheckForUpdatesEnabled,
   useReleaseCheck,
@@ -363,9 +364,19 @@ export function Layout() {
         <ModuleHost onHide={toggleHidden} mods={allModules} />
       </main>
       <CommandPalette />
+      <NavBridge />
       <SupportModal />
     </div>
   );
+}
+
+/** Performs imperative route navigation requested from outside the router
+ *  (e.g. the app-root reminders "due" modal) via `deepLink.goToRoute`. Mounted
+ *  inside the router so it has `useNavigate`; renders nothing. */
+function NavBridge() {
+  const navigate = useNavigate();
+  useEffect(() => subscribeRoute((route) => navigate(route)), [navigate]);
+  return null;
 }
 
 /**

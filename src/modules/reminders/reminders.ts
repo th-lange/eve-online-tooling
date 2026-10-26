@@ -37,6 +37,36 @@ export interface Reminder {
   /** Repeat interval in ms; `null`/absent = one-shot. On completion a
    *  repeating reminder is rescheduled by this amount instead of deleted. */
   repeatMs?: number | null;
+  /** Optional deep link: the module to open (and an optional PI colony to
+   *  focus) when the reminder's type badge is clicked. Absent → the badge
+   *  routes to the category's default module. */
+  link?: ReminderLink | null;
+}
+
+/** Where a reminder's type badge navigates. */
+export interface ReminderLink {
+  /** Module id (registry) to open, e.g. "pi". */
+  moduleId: string;
+  /** When set, the PI colony (planet id) to scroll to + highlight. */
+  planetId?: number;
+}
+
+/** Category → default module for a reminder with no explicit {@link link}:
+ *  PI → the PI module, production → Production, invention → Industry Jobs
+ *  (where invention jobs show). "other" has no sensible target. */
+const CATEGORY_MODULE: Record<ReminderCategory, string | null> = {
+  pi: "pi",
+  production: "production",
+  invention: "industry-jobs",
+  other: null,
+};
+
+/** The navigation target for a reminder's type badge, or `null` when there's
+ *  nowhere sensible to go (an "Other" reminder with no explicit link). */
+export function reminderTarget(r: Reminder): ReminderLink | null {
+  if (r.link) return r.link;
+  const moduleId = CATEGORY_MODULE[r.category];
+  return moduleId ? { moduleId } : null;
 }
 
 /** The editable fields of a reminder (everything but its generated id). */
