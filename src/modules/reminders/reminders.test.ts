@@ -5,6 +5,7 @@ import {
   formatRepeat,
   formatWhen,
   fromDatetimeLocal,
+  reminderTarget,
   sortByDue,
   toDatetimeLocal,
   toRepeat,
@@ -91,5 +92,35 @@ describe("toRepeat / formatRepeat", () => {
   it("renders a compact label", () => {
     expect(formatRepeat(6 * DAY)).toBe("every 6d");
     expect(formatRepeat(2 * WEEK)).toBe("every 2w");
+  });
+});
+
+describe("reminderTarget", () => {
+  const base = (over: Partial<Reminder>): Reminder => ({
+    id: "x",
+    category: "other",
+    what: "w",
+    note: "",
+    dueAt: 0,
+    ...over,
+  });
+  it("maps categories to their default module", () => {
+    expect(reminderTarget(base({ category: "pi" }))).toEqual({
+      moduleId: "pi",
+    });
+    expect(reminderTarget(base({ category: "production" }))).toEqual({
+      moduleId: "production",
+    });
+    expect(reminderTarget(base({ category: "invention" }))).toEqual({
+      moduleId: "industry-jobs",
+    });
+    expect(reminderTarget(base({ category: "other" }))).toBeNull();
+  });
+  it("prefers an explicit link (e.g. a PI colony)", () => {
+    expect(
+      reminderTarget(
+        base({ category: "pi", link: { moduleId: "pi", planetId: 42 } }),
+      ),
+    ).toEqual({ moduleId: "pi", planetId: 42 });
   });
 });

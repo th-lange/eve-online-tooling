@@ -13,6 +13,7 @@ import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
 import { ColoniesTab } from "./ColoniesTab";
 import { PlannerTab } from "./PlannerTab";
+import { subscribePiColony, takePendingPiColony } from "../../lib/deepLink";
 
 type Tab = "colonies" | "planner";
 
@@ -93,6 +94,20 @@ function Workbench() {
   const [now, setNow] = useState(() => Date.now());
   const [sort, setSort] = useState<"default" | "restart">("default");
   const [tab, setTab] = useState<Tab>("colonies");
+  // A reminder's type badge can deep-link to a specific colony (see
+  // deepLink.openColonyInPi): switch to the Colonies tab and tell ColoniesTab
+  // which planet to scroll to + highlight. Handles both an already-open PI
+  // page (subscription) and a cold navigation (pending value taken on mount).
+  const [focusPlanet, setFocusPlanet] = useState<number | null>(null);
+  useEffect(() => {
+    const focus = (planetId: number) => {
+      setTab("colonies");
+      setFocusPlanet(planetId);
+    };
+    const pending = takePendingPiColony();
+    if (pending != null) focus(pending);
+    return subscribePiColony(focus);
+  }, []);
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(id);
@@ -176,6 +191,8 @@ function Workbench() {
           onToggleLock={toggleLock}
           multiCharacter={multiCharacter}
           onSaveNotes={onSaveNotes}
+          focusPlanetId={focusPlanet}
+          onFocused={() => setFocusPlanet(null)}
         />
       ) : (
         <PlannerTab />

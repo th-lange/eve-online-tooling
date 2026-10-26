@@ -26,6 +26,7 @@ import {
   type Reminder,
   type ReminderDraft,
 } from "./reminders";
+import { ModuleBadge } from "./ModuleBadge";
 
 /** Best-effort desktop notification — same permission-gated idiom as the FW
  *  home-defense / local-intel alerts. Silent on any failure (not running under
@@ -175,6 +176,7 @@ export function ReminderProvider({ children }: { children: ReactNode }) {
               now={now}
               onSnooze={snooze}
               onComplete={complete}
+              onNavigate={() => setModalOpen(false)}
             />
           ))}
         </ul>
@@ -201,11 +203,13 @@ function DueReminderCard({
   now,
   onSnooze,
   onComplete,
+  onNavigate,
 }: {
   reminder: Reminder;
   now: number;
   onSnooze: (id: string, ms: number) => void;
   onComplete: (id: string) => void;
+  onNavigate: () => void;
 }) {
   const [n, setN] = useState(10);
   const [unit, setUnit] = useState(SNOOZE_UNITS[0].key);
@@ -215,9 +219,7 @@ function DueReminderCard({
     <li className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-sm font-medium text-zinc-100">{r.what}</span>
-        <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400">
-          {categoryLabel(r.category)}
-        </span>
+        <ModuleBadge reminder={r} onNavigate={onNavigate} />
       </div>
       <div className="mt-0.5 text-xs text-amber-400">
         Due {formatWhen(r.dueAt, now)}
