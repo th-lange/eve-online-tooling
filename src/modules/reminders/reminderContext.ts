@@ -11,10 +11,13 @@ export interface ReminderCtx {
   add: (draft: ReminderDraft) => void;
   /** Patch an existing reminder's editable fields. */
   update: (id: string, patch: Partial<ReminderDraft>) => void;
-  /** Delete a reminder (also how a surfaced one is "done"/dismissed). */
+  /** Delete a reminder (hard delete, regardless of repeat). */
   remove: (id: string) => void;
-  /** Push a reminder's due time `ms` into the future from now. */
+  /** Push a reminder's due time `ms` into the future from now (snooze). */
   snooze: (id: string, ms: number) => void;
+  /** Mark a due reminder done: a repeating one is rescheduled to its next
+   *  occurrence, a one-shot one is deleted. */
+  complete: (id: string) => void;
 }
 
 export const ReminderContext = createContext<ReminderCtx>({
@@ -23,6 +26,7 @@ export const ReminderContext = createContext<ReminderCtx>({
   update: () => {},
   remove: () => {},
   snooze: () => {},
+  complete: () => {},
 });
 
 export function useReminders(): ReminderCtx {

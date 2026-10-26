@@ -34,6 +34,9 @@ export interface Reminder {
   note: string;
   /** The "when" — epoch milliseconds. */
   dueAt: number;
+  /** Repeat interval in ms; `null`/absent = one-shot. On completion a
+   *  repeating reminder is rescheduled by this amount instead of deleted. */
+  repeatMs?: number | null;
 }
 
 /** The editable fields of a reminder (everything but its generated id). */
@@ -58,10 +61,61 @@ const DAY = 24 * HOUR;
 
 /** Snooze presets offered when a due reminder is surfaced. */
 export const SNOOZE_OPTIONS: readonly { label: string; ms: number }[] = [
-  { label: "10 min", ms: 10 * MINUTE },
-  { label: "1 hour", ms: HOUR },
-  { label: "1 day", ms: DAY },
+  { label: "10m", ms: 10 * MINUTE },
+  { label: "1h", ms: HOUR },
+  { label: "1d", ms: DAY },
 ];
+
+const WEEK = 7 * DAY;
+
+/** Units for a custom "remind me again in N …" snooze. */
+export const SNOOZE_UNITS: readonly {
+  key: string;
+  label: string;
+  ms: number;
+}[] = [
+  { key: "minutes", label: "minutes", ms: MINUTE },
+  { key: "hours", label: "hours", ms: HOUR },
+  { key: "days", label: "days", ms: DAY },
+];
+
+/** Units for a repeat interval, largest last — the repeat picker's options. */
+export const REPEAT_UNITS: readonly {
+  key: string;
+  label: string;
+  ms: number;
+}[] = [
+  { key: "hours", label: "hours", ms: HOUR },
+  { key: "days", label: "days", ms: DAY },
+  { key: "weeks", label: "weeks", ms: WEEK },
+];
+
+/** An interval in ms → a `{ n, unit }` pair using the largest unit that
+ *  divides it exactly (so 6 days reads as "6 days", not "144 hours"). */
+export function toRepeat(ms: number): { n: number; unit: string } {
+  for (const u of [...REPEAT_UNITS].reverse()) {
+    if (ms % u.ms === 0) return { n: ms / u.ms, unit: u.key };
+  }
+  return { n: Math.max(1, Math.round(ms / HOUR)), unit: "hours" };
+}
+
+/** Compact repeat label, e.g. "every 6d" / "every 2w". */
+export function formatRepeat(ms: number): string {
+  const { n, unit } = toRepeat(ms);
+  const short = unit === "weeks" ? "w" : unit === "days" ? "d" : "h";
+  return `every ${n}${short}`;
+}
+
+/** The next occurrence of a repeating reminder strictly after `now`: advance
+ *  `dueAt` by whole `repeatMs` periods, skipping any that elapsed while the
+ *  app was closed, so completing it never lands back in the past. */
+export function advance(dueAt: number, repeatMs: number, now: number): number {
+  if (repeatMs <= 0) return dueAt;
+  const periods = Math.max(1, Math.ceil((now - dueAt) / repeatMs));
+  let next = dueAt + periods * repeatMs;
+  if (next <= now) next += repeatMs;
+  return next;
+}
 
 /** Human-readable relative time, e.g. "in 5m", "2h ago", "now". Coarse on
  *  purpose — reminders don't need second precision. */

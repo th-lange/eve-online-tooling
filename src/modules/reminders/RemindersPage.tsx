@@ -3,11 +3,13 @@ import { Trash2, Pencil } from "lucide-react";
 import { useReminders } from "./reminderContext";
 import {
   categoryLabel,
+  formatRepeat,
   REMINDER_CATEGORIES,
   sortByDue,
   type ReminderCategory,
 } from "./reminders";
 import { WhenField } from "./WhenField";
+import { RepeatField } from "./RepeatField";
 import { Page, PageHeader } from "../../components/page";
 
 /** Default a new reminder to one hour out. */
@@ -31,6 +33,7 @@ export function RemindersPage() {
   const [what, setWhat] = useState("");
   const [note, setNote] = useState("");
   const [dueAt, setDueAt] = useState(defaultWhen);
+  const [repeatMs, setRepeatMs] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // When "Edit" is clicked, load that reminder into the form.
@@ -45,6 +48,7 @@ export function RemindersPage() {
     setWhat(r.what);
     setNote(r.note);
     setDueAt(r.dueAt);
+    setRepeatMs(r.repeatMs ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingId]);
 
@@ -54,6 +58,7 @@ export function RemindersPage() {
     setWhat("");
     setNote("");
     setDueAt(defaultWhen());
+    setRepeatMs(null);
     setError(null);
   };
 
@@ -67,7 +72,13 @@ export function RemindersPage() {
       setError("Pick a valid date and time.");
       return;
     }
-    const draft = { category, what: trimmed, note: note.trim(), dueAt };
+    const draft = {
+      category,
+      what: trimmed,
+      note: note.trim(),
+      dueAt,
+      repeatMs,
+    };
     if (editingId != null) update(editingId, draft);
     else add(draft);
     resetForm();
@@ -109,6 +120,7 @@ export function RemindersPage() {
                     >
                       {new Date(r.dueAt).toLocaleString()}
                       {overdue ? " · overdue" : ""}
+                      {r.repeatMs ? ` · ${formatRepeat(r.repeatMs)}` : ""}
                     </div>
                     {r.note && (
                       <p className="mt-0.5 whitespace-pre-wrap text-xs text-zinc-400">
@@ -184,6 +196,10 @@ export function RemindersPage() {
           <label className="flex flex-col gap-1">
             <span className="text-xs text-zinc-500">When</span>
             <WhenField value={dueAt} onChange={setDueAt} />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-zinc-500">Repeat</span>
+            <RepeatField value={repeatMs} onChange={setRepeatMs} />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs text-zinc-500">Note (optional)</span>

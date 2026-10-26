@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  advance,
   dueReminders,
+  formatRepeat,
   formatWhen,
   fromDatetimeLocal,
   sortByDue,
   toDatetimeLocal,
+  toRepeat,
   type Reminder,
 } from "./reminders";
 
@@ -61,5 +64,32 @@ describe("datetime-local round trip", () => {
 
   it("flags an unparseable value as NaN", () => {
     expect(Number.isNaN(fromDatetimeLocal("not a date"))).toBe(true);
+  });
+});
+
+const DAY = 24 * 60 * 60_000;
+const WEEK = 7 * DAY;
+
+describe("advance (repeating reminders)", () => {
+  it("rolls forward one period when the due time just passed", () => {
+    expect(advance(1000, 100, 1050)).toBe(1100);
+  });
+  it("skips periods missed while the app was closed, landing in the future", () => {
+    expect(advance(0, 100, 350)).toBe(400);
+  });
+  it("advances by a period even from a still-future due time", () => {
+    expect(advance(1000, 100, 500)).toBe(1100);
+  });
+});
+
+describe("toRepeat / formatRepeat", () => {
+  it("picks the largest exact unit", () => {
+    expect(toRepeat(6 * DAY)).toEqual({ n: 6, unit: "days" });
+    expect(toRepeat(2 * WEEK)).toEqual({ n: 2, unit: "weeks" });
+    expect(toRepeat(3 * 60 * 60_000)).toEqual({ n: 3, unit: "hours" });
+  });
+  it("renders a compact label", () => {
+    expect(formatRepeat(6 * DAY)).toBe("every 6d");
+    expect(formatRepeat(2 * WEEK)).toBe("every 2w");
   });
 });

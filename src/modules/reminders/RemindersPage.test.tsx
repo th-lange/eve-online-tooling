@@ -69,6 +69,27 @@ describe("Reminders — editor", () => {
     ).toBeInTheDocument();
     expect(JSON.parse(localStorage.getItem(KEY)!)).toHaveLength(0);
   });
+
+  it("creates a repeating reminder", () => {
+    renderApp();
+    fireEvent.change(screen.getByLabelText("What to be reminded about"), {
+      target: { value: "Pator extraction" },
+    });
+    fireEvent.change(screen.getByLabelText("Reminder date (YYYY-MM-DD)"), {
+      target: { value: "2099-01-01" },
+    });
+    fireEvent.change(screen.getByLabelText("Reminder time (HH:MM)"), {
+      target: { value: "12:00" },
+    });
+    fireEvent.click(screen.getByLabelText("Repeat this reminder"));
+    fireEvent.change(screen.getByLabelText("Repeat interval"), {
+      target: { value: "6" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add reminder" }));
+
+    const stored = JSON.parse(localStorage.getItem(KEY)!);
+    expect(stored[0].repeatMs).toBe(6 * 24 * 60 * 60_000);
+  });
 });
 
 describe("Reminders — firing", () => {
@@ -109,5 +130,41 @@ describe("Reminders — firing", () => {
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument(),
     );
     expect(JSON.parse(localStorage.getItem(KEY)!)).toHaveLength(0);
+  });
+
+  it("a repeating reminder reschedules instead of deleting on Done", async () => {
+    const repeat = 24 * 60 * 60_000;
+    seed([reminder({ dueAt: Date.now() - 60_000, repeatMs: repeat })]);
+    renderApp();
+
+    const dialog = await screen.findByRole("alertdialog", {
+      name: "Reminders due",
+    });
+    expect(dialog).toHaveTextContent("repeats every 1d");
+    fireEvent.click(screen.getByRole("button", { name: /^Done/ }));
+
+    const stored = JSON.parse(localStorage.getItem(KEY)!);
+    expect(stored).toHaveLength(1);
+    expect(stored[0].dueAt).toBeGreaterThan(Date.now());
+  });
+
+  it("a custom 'remind me again in' pushes the due time out", async () => {
+    seed([reminder({ dueAt: Date.now() - 60_000 })]);
+    renderApp();
+
+    await screen.findByRole("alertdialog", { name: "Reminders due" });
+    fireEvent.change(screen.getByLabelText("Snooze amount"), {
+      target: { value: "2" },
+    });
+    fireEvent.change(screen.getByLabelText("Snooze unit"), {
+      target: { value: "hours" },
+    });
+    const before = Date.now();
+    fireEvent.click(screen.getByRole("button", { name: "Snooze" }));
+
+    const stored = JSON.parse(localStorage.getItem(KEY)!);
+    expect(stored[0].dueAt).toBeGreaterThanOrEqual(
+      before + 2 * 60 * 60_000 - 2000,
+    );
   });
 });
