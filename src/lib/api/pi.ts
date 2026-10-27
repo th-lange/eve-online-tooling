@@ -217,3 +217,19 @@ export function piPlannerSetupSave(
 export function piPlannerSetupDelete(id: string): Promise<void> {
   return invoke<void>("pi_planner_setup_delete", { id });
 }
+
+// --- Sync (#1128) ---
+//
+// The *raw* stored setups (unresolved — no SDE names), the sync payload for
+// the `pi` module. See `lib/sync/stores.ts`.
+
+/** The raw stored planner setups, serialized to JSON (`"[]"` when none). */
+export function piPlannerSetupsExport(): Promise<string> {
+  return invoke<string>("pi_planner_setups_export");
+}
+
+/** Overwrite the stored planner setups from JSON previously produced by
+ *  `piPlannerSetupsExport`. */
+export function piPlannerSetupsImport(content: string): Promise<void> {
+  return invoke<void>("pi_planner_setups_import", { content });
+}

@@ -412,6 +412,8 @@ pub fn run() {
             modules::pi::setups::pi_planner_setups,
             modules::pi::setups::pi_planner_setup_save,
             modules::pi::setups::pi_planner_setup_delete,
+            modules::pi::setups::pi_planner_setups_export,
+            modules::pi::setups::pi_planner_setups_import,
             modules::wormholes::commands::wh_connections,
             modules::wormholes::commands::wh_add_connection,
             modules::wormholes::commands::wh_update_connection,
@@ -489,6 +491,8 @@ pub fn run() {
             modules::feedback::commands::feedback_forget,
             modules::logs::commands::logs_list,
             modules::logs::commands::logs_clear,
+            modules::sync::commands::sync_folder_read,
+            modules::sync::commands::sync_folder_write,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
