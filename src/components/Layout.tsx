@@ -30,6 +30,7 @@ import {
   useCheckForUpdatesEnabled,
   useReleaseCheck,
 } from "../modules/settings/useReleaseCheck";
+import { SyncOnStartup } from "../modules/settings/SyncOnStartup";
 import appIcon from "../assets/app-icon.png";
 
 const PINS_KEY = STORAGE_KEYS.sidebarPins;
@@ -365,6 +366,7 @@ export function Layout() {
       </main>
       <CommandPalette />
       <NavBridge />
+      <SyncOnStartup />
       <SupportModal />
     </div>
   );

@@ -28,5 +28,6 @@ pub mod reprocessing;
 pub mod route;
 pub mod scripts;
 pub mod shopping;
+pub mod sync;
 pub mod trading;
 pub mod wormholes;

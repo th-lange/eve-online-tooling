@@ -30,7 +30,7 @@ struct Store {
     setups: Vec<StoredSetup>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct StoredSetup {
     id: String,
     name: String,
@@ -44,7 +44,7 @@ impl Identified for StoredSetup {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StoredItem {
     type_id: i64,
@@ -214,6 +214,42 @@ pub fn pi_planner_setup_delete(app: AppHandle, id: String) -> Result<(), String>
     save(&dir, &store)
 }
 
+// --- Sync (#1128) ------------------------------------------------------
+//
+// Folder sync (`src/lib/sync/`) syncs the PI planner store's *raw* (stored,
+// unresolved) shape, not `pi_planner_setups`' SDE-resolved one — a resolved
+// setup is derivable from the stored one plus whatever SDE the receiving
+// device has, so shipping the raw `StoredSetup` list keeps the synced
+// payload small and SDE-version-agnostic.
+
+/// The raw stored planner setups, serialized to JSON (`"[]"` when none) —
+/// the sync payload for the `pi` module.
+#[tauri::command]
+pub fn pi_planner_setups_export(app: AppHandle) -> Result<String, String> {
+    let dir = crate::storage::app_data_dir(&app)?;
+    export_json(&dir)
+}
+
+/// Overwrite the stored planner setups from a JSON array previously produced
+/// by [`pi_planner_setups_export`]. Parses fully before writing anything, so
+/// a malformed `content` never leaves a partial store on disk.
+#[tauri::command]
+pub fn pi_planner_setups_import(app: AppHandle, content: String) -> Result<(), String> {
+    let dir = crate::storage::app_data_dir(&app)?;
+    import_json(&dir, &content)
+}
+
+fn export_json(dir: &std::path::Path) -> Result<String, String> {
+    let store = load(dir);
+    serde_json::to_string(&store.setups).map_err(|e| e.to_string())
+}
+
+fn import_json(dir: &std::path::Path, content: &str) -> Result<(), String> {
+    let setups: Vec<StoredSetup> =
+        serde_json::from_str(content).map_err(|e| format!("invalid planner setups JSON: {e}"))?;
+    save(dir, &Store { setups })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -378,5 +414,71 @@ mod tests {
             resolved.items[0].label.as_deref(),
             Some("Mechanical Parts factory")
         );
+    }
+
+    fn sync_test_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "eve-pi-setups-sync-test-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn export_json_is_empty_array_when_nothing_saved() {
+        let dir = sync_test_dir("empty");
+        assert_eq!(export_json(&dir).unwrap(), "[]");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn export_then_import_round_trips_the_raw_store() {
+        let dir = sync_test_dir("roundtrip");
+        let setup = StoredSetup {
+            id: "jita-industry".into(),
+            name: "Jita industry".into(),
+            items: vec![StoredItem {
+                type_id: 9848,
+                notes: "stage 2".into(),
+                system_id: Some(30000142),
+                system_name: Some("Jita".into()),
+                planet_id: None,
+                planet_name: None,
+                imports: vec![9838],
+                label: None,
+            }],
+        };
+        save(
+            &dir,
+            &Store {
+                setups: vec![setup],
+            },
+        )
+        .unwrap();
+
+        let exported = export_json(&dir).unwrap();
+
+        // Importing into a fresh dir reproduces the same store.
+        let other_dir = sync_test_dir("roundtrip-other");
+        import_json(&other_dir, &exported).unwrap();
+        assert_eq!(load(&other_dir).setups, load(&dir).setups);
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&other_dir);
+    }
+
+    #[test]
+    fn import_json_rejects_invalid_json_without_writing() {
+        let dir = sync_test_dir("invalid");
+        let err = import_json(&dir, "not json").expect_err("invalid JSON must error");
+        assert!(err.contains("invalid planner setups JSON"));
+        // No partial write: the store still loads as empty.
+        assert!(load(&dir).setups.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

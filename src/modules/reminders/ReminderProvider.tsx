@@ -13,6 +13,7 @@ import {
 import { Modal } from "../../components/Modal";
 import { usePersistentState } from "../../lib/usePersistentState";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
+import { touch } from "../../lib/sync/manifest";
 import { REMINDER_CHECK_INTERVAL_MS } from "../../lib/refreshIntervals";
 import { ReminderContext, type ReminderCtx } from "./reminderContext";
 import {
@@ -72,32 +73,41 @@ export function ReminderProvider({ children }: { children: ReactNode }) {
   );
 
   const add = useCallback(
-    (draft: ReminderDraft) =>
-      setReminders((prev) => [...prev, { ...draft, id: newId() }]),
+    (draft: ReminderDraft) => {
+      setReminders((prev) => [...prev, { ...draft, id: newId() }]);
+      touch("reminders");
+    },
     [setReminders],
   );
   const update = useCallback(
-    (id: string, patch: Partial<ReminderDraft>) =>
+    (id: string, patch: Partial<ReminderDraft>) => {
       setReminders((prev) =>
         prev.map((r) => (r.id === id ? { ...r, ...patch } : r)),
-      ),
+      );
+      touch("reminders");
+    },
     [setReminders],
   );
   const remove = useCallback(
-    (id: string) => setReminders((prev) => prev.filter((r) => r.id !== id)),
+    (id: string) => {
+      setReminders((prev) => prev.filter((r) => r.id !== id));
+      touch("reminders");
+    },
     [setReminders],
   );
   const snooze = useCallback(
-    (id: string, ms: number) =>
+    (id: string, ms: number) => {
       setReminders((prev) =>
         prev.map((r) => (r.id === id ? { ...r, dueAt: Date.now() + ms } : r)),
-      ),
+      );
+      touch("reminders");
+    },
     [setReminders],
   );
   // "Done": a repeating reminder rolls forward to its next occurrence; a
   // one-shot one is removed.
   const complete = useCallback(
-    (id: string) =>
+    (id: string) => {
       setReminders((prev) =>
         prev.flatMap((r) => {
           if (r.id !== id) return [r];
@@ -106,7 +116,9 @@ export function ReminderProvider({ children }: { children: ReactNode }) {
           }
           return [];
         }),
-      ),
+      );
+      touch("reminders");
+    },
     [setReminders],
   );
 

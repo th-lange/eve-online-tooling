@@ -9,6 +9,7 @@ import {
   type PlannerSetupItem,
 } from "../../lib/api";
 import { piKeys } from "../../lib/queryKeys";
+import { touch } from "../../lib/sync/manifest";
 import { InlineError } from "../../components/InlineError";
 import { type PlannerPick } from "./plannerTypes";
 
@@ -54,6 +55,7 @@ function SetupsPanel({
       setSaveOpen(false);
       setName("");
       setSaveError(null);
+      touch("pi");
       void qc.invalidateQueries({ queryKey: piKeys.setups });
     },
     onError: (e) => setSaveError(errorMessage(e)),
@@ -61,7 +63,10 @@ function SetupsPanel({
 
   const remove = useMutation({
     mutationFn: (id: string) => piPlannerSetupDelete(id),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: piKeys.setups }),
+    onSuccess: () => {
+      touch("pi");
+      void qc.invalidateQueries({ queryKey: piKeys.setups });
+    },
   });
 
   const canSave = picks.length > 0;
