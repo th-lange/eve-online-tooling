@@ -22,6 +22,15 @@ export interface SyncableStore {
   apply(data: unknown): Promise<void>;
 }
 
+// Character scoping: every store here is **global** — its data carries no EVE
+// character id (reminders and PI planner setups reference only universal
+// type/system/planet ids), so one sync file per module is correct and sharing
+// across devices with different logged-in characters is safe. If a future
+// per-character store is added, DON'T put it in one shared file: namespace its
+// sync `module`/file by the active character id (e.g. `watchlist-<charId>`) and
+// key its manifest entry the same way, so one character's data never clobbers
+// another's across devices.
+
 const remindersStore: SyncableStore = {
   module: "reminders",
   schema: 1,
