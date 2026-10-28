@@ -47,10 +47,12 @@ const WEBKIT_CACHE_CAP_BYTES: u64 = 200 * 1024 * 1024;
 /// [`WEBKIT_CACHE_CAP_BYTES`], clear it through the webview's own
 /// `WebsiteDataManager`. No-op if the directory doesn't exist, is under the
 /// cap, the main window isn't available, or (see module docs) the target
-/// platform doesn't have a wired-up native clear path yet. Call once, early,
-/// in the Tauri `setup` closure — after the configured windows are built
-/// (`get_webview_window` needs the webview to already exist), next to the
-/// sibling `esi::prune_cache_startup`/`storage::prune_cache_startup`.
+/// platform doesn't have a wired-up native clear path yet.
+///
+/// Called off the main thread (from the `setup` closure's maintenance thread),
+/// since the size walk below can take seconds over a large cache. The native
+/// clear must touch the webview, so it hops back to the main thread; by the
+/// time the walk finishes the configured window exists.
 pub fn prune_startup(app: &tauri::AppHandle, app_data_dir: &Path) {
     let dir = app_data_dir.join("WebKitCache");
     let Ok(size) = dir_size(&dir) else {
@@ -59,7 +61,8 @@ pub fn prune_startup(app: &tauri::AppHandle, app_data_dir: &Path) {
     if size <= WEBKIT_CACHE_CAP_BYTES {
         return;
     }
-    clear_native(app);
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || clear_native(&handle));
 }
 
 /// Recursive on-disk size of `dir`, in bytes. Entries that vanish or whose

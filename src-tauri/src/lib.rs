@@ -191,9 +191,22 @@ pub fn run() {
             // First run: seed the bundled example plugin so there's something to
             // activate out of the box (no-op once `plugins/` exists).
             plugins::seed_example_plugin(&dir);
-            esi::prune_cache_startup(&dir);
-            storage::prune_cache_startup(&dir);
-            webview_cache::prune_startup(app.handle(), &dir);
+            // Best-effort cache maintenance walks/reads large cache dirs (the
+            // WebKitCache alone can reach hundreds of MB — #1114), so it runs
+            // on a background thread, never the main one: doing it inline here
+            // froze the window ("not responding") for seconds at every launch,
+            // and the hang grew as the caches did. Nothing at launch depends on
+            // it; the webview clear, which must touch the webview, hops back to
+            // the main thread itself (see `webview_cache::prune_startup`).
+            {
+                let dir = dir.clone();
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    esi::prune_cache_startup(&dir);
+                    storage::prune_cache_startup(&dir);
+                    webview_cache::prune_startup(&handle, &dir);
+                });
+            }
             // Install the in-process log subscriber (WARN/ERROR → LogStore + logs://entry event).
             let log_store = modules::logs::LogStore::new();
             {
