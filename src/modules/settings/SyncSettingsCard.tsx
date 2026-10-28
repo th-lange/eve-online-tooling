@@ -60,10 +60,6 @@ export function SyncSettingsCard() {
     STORAGE_KEYS.syncEnabled,
     false,
   );
-  const [onStartup, setOnStartup] = usePersistentState<boolean>(
-    STORAGE_KEYS.syncOnStartup,
-    false,
-  );
   const [busy, setBusy] = useState<Kind | null>(null);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(
     null,
@@ -192,17 +188,11 @@ export function SyncSettingsCard() {
           >
             {busy === "pull" ? BUSY_LABEL.pull : IDLE_LABEL.pull}
           </button>
-          <label className="ml-2 flex items-center gap-1.5 text-xs text-zinc-400">
-            <input
-              type="checkbox"
-              checked={onStartup}
-              disabled={!enabled}
-              onChange={(e) => setOnStartup(e.currentTarget.checked)}
-              className="h-4 w-4 cursor-pointer accent-indigo-500 disabled:opacity-50"
-              aria-label="Sync on startup"
-            />
-            Sync on startup
-          </label>
+          {enabled && (
+            <span className="ml-1 text-xs text-zinc-500">
+              Auto-syncs on change & every few minutes
+            </span>
+          )}
         </div>
         {!enabled && hasFolder && (
           <span className="text-xs text-zinc-500">

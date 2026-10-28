@@ -86,6 +86,16 @@ export const RECORDING_CHARACTERS_STALE_TIME_MS = 60_000;
  *  check runs immediately on launch to catch anything already past due. */
 export const REMINDER_CHECK_INTERVAL_MS = 20_000;
 
+/** Auto-sync (#1128 follow-up): how often the background scheduler runs a
+ *  full sync while sync is Active — mostly to pull in other devices' changes
+ *  (local edits are pushed sooner via the debounce below). A few minutes is
+ *  plenty; the folder read is a handful of small JSON files. */
+export const SYNC_POLL_INTERVAL_MS = 3 * 60_000;
+
+/** Auto-sync: how long after the last local change before the scheduler
+ *  pushes it, so a burst of edits coalesces into one sync. */
+export const SYNC_CHANGE_DEBOUNCE_MS = 5_000;
+
 /** Pochven market "current location" lookup (manual trigger, EntryFinder):
  *  your system doesn't change without an explicit jump, so the result is
  *  kept for a minute rather than re-resolved on every interaction. */

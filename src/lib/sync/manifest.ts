@@ -40,10 +40,22 @@ export function setMeta(module: string, updatedAt: number): void {
   writeMeta(meta);
 }
 
+// Listeners notified whenever a synced module is `touch`ed — the auto-sync
+// scheduler debounces off this to push local changes without the user
+// clicking "Sync now".
+const changeListeners = new Set<() => void>();
+
+/** Subscribe to "a synced module changed locally" (returns an unsubscribe). */
+export function subscribeSyncChange(fn: () => void): () => void {
+  changeListeners.add(fn);
+  return () => void changeListeners.delete(fn);
+}
+
 /** Mark `module` as locally changed *now* — call this everywhere a synced
  *  module's data changes (reminders add/update/remove/snooze/complete, PI
- *  setup save/delete), so the next sync knows this device has the newer
- *  copy. */
+ *  setup save/delete), so the next sync knows this device has the newer copy
+ *  and the auto-sync scheduler can react. */
 export function touch(module: string): void {
   setMeta(module, Date.now());
+  for (const fn of changeListeners) fn();
 }
