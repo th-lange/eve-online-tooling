@@ -51,10 +51,10 @@ export const STORAGE_KEYS = {
   // Settings: user-registered reminders (what/when/note), fired only while
   // the app is open (see ReminderProvider)
   reminders: "settings.reminders",
-  // Folder sync (#1128): the chosen sync folder, whether to sync on launch,
-  // and the local per-module manifest (`{ [module]: updatedAt }`)
+  // Folder sync (#1128): the chosen sync folder, whether it's active, and the
+  // local per-module manifest (`{ [module]: updatedAt }`). Sync runs
+  // automatically (startup / debounced on change / periodic) while active.
   syncFolder: "sync.folder",
-  syncOnStartup: "sync.onStartup",
   syncEnabled: "sync.enabled",
   syncMeta: "sync.meta",
 } as const;
