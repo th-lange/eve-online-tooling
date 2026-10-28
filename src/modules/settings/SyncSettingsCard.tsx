@@ -114,8 +114,11 @@ export function SyncSettingsCard() {
   return (
     <div className="p-4">
       <p className="text-xs text-zinc-500">
-        Newer wins per module; only PI planner setups and reminders for now.
-        SDE, caches and logins are never synced.
+        Keep the same plans and reminders across your devices — point each at a
+        shared folder (Dropbox, Syncthing, Drive, …). Newer wins per module;
+        SDE, caches and logins are never synced. What's synced is shared across
+        all your characters (personal plans and reminders — not tied to a
+        logged-in character).
       </p>
       <div className="mt-3 grid gap-2">
         <label className="flex flex-col gap-1">
@@ -158,6 +161,12 @@ export function SyncSettingsCard() {
             </button>
           </div>
         </label>
+        <p className="rounded border border-amber-800/60 bg-amber-950/30 px-2 py-1.5 text-xs text-amber-300/90">
+          This folder will hold one small JSON file per synced item
+          (reminders.json, pi.json, …). Point your other devices at this same
+          folder — don't rename, move or hand-edit the files, or sync may
+          misbehave.
+        </p>
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
