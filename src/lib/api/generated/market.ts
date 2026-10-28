@@ -7,110 +7,142 @@
 
 /** user-defined commands **/
 
-
 export const commands = {
-/**
- * Daily market history for a type in a region (ascending by date), wrapped
- * with the server's real ESI cache deadline (#885) so the frontend can
- * derive its `staleTime`/`DataAge` cue from `expiresAt` instead of a
- * hand-set constant.
- */
-async marketHistory(regionId: number, typeId: number) : Promise<Result<Fresh<HistoryPoint[]>, AppError>> {
+  /**
+   * Daily market history for a type in a region (ascending by date), wrapped
+   * with the server's real ESI cache deadline (#885) so the frontend can
+   * derive its `staleTime`/`DataAge` cue from `expiresAt` instead of a
+   * hand-set constant.
+   */
+  async marketHistory(
+    regionId: number,
+    typeId: number,
+  ): Promise<Result<Fresh<HistoryPoint[]>, AppError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("market_history", { regionId, typeId }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as AppError };
-}
-},
-/**
- * The selectable regions, each with its hub station.
- */
-async marketRegions() : Promise<Region[]> {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("market_history", { regionId, typeId }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as AppError };
+    }
+  },
+  /**
+   * The selectable regions, each with its hub station.
+   */
+  async marketRegions(): Promise<Region[]> {
     return await TAURI_INVOKE("market_regions");
-},
-/**
- * Price model for a single type at a region (and optional station), via live
- * ESI orders + history.
- */
-async marketPrice(regionId: number, stationId: number | null, typeId: number) : Promise<Result<PriceModel, AppError>> {
+  },
+  /**
+   * Price model for a single type at a region (and optional station), via live
+   * ESI orders + history.
+   */
+  async marketPrice(
+    regionId: number,
+    stationId: number | null,
+    typeId: number,
+  ): Promise<Result<PriceModel, AppError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("market_price", { regionId, stationId, typeId }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as AppError };
-}
-},
-/**
- * Every known-space region, for the region picker. Backed by the SDE, so it
- * covers all of k-space — not just the five trade hubs in [`regions`].
- */
-async marketAllRegions() : Promise<Result<IdName[], AppError>> {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("market_price", {
+          regionId,
+          stationId,
+          typeId,
+        }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as AppError };
+    }
+  },
+  /**
+   * Every known-space region, for the region picker. Backed by the SDE, so it
+   * covers all of k-space — not just the five trade hubs in [`regions`].
+   */
+  async marketAllRegions(): Promise<Result<IdName[], AppError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("market_all_regions") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as AppError };
-}
-},
-/**
- * Search NPC stations by name (for the optional station filter). Capped.
- */
-async marketSearchStations(query: string) : Promise<Result<IdName[], AppError>> {
+      return { status: "ok", data: await TAURI_INVOKE("market_all_regions") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as AppError };
+    }
+  },
+  /**
+   * Search NPC stations by name (for the optional station filter). Capped.
+   */
+  async marketSearchStations(
+    query: string,
+  ): Promise<Result<IdName[], AppError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("market_search_stations", { query }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as AppError };
-}
-},
-/**
- * Resolve the active character's current location (system + region). Returns
- * `None` when nobody is logged in (or the location scope is missing) so the UI
- * can fall back to a default region and a pickable jumps origin.
- */
-async marketCurrentLocation() : Promise<Result<CurrentLocation | null, AppError>> {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("market_search_stations", { query }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as AppError };
+    }
+  },
+  /**
+   * Resolve the active character's current location (system + region). Returns
+   * `None` when nobody is logged in (or the location scope is missing) so the UI
+   * can fall back to a default region and a pickable jumps origin.
+   */
+  async marketCurrentLocation(): Promise<
+    Result<CurrentLocation | null, AppError>
+  > {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("market_current_location") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as AppError };
-}
-},
-/**
- * Sell orders for a type across the chosen scope, cheapest first, each row
- * carrying its station/system/region and jumps from the origin system. Honours
- * the high-sec-only routing toggle.
- */
-async marketSellOrders(params: SellOrdersParams) : Promise<Result<SellOrder[], AppError>> {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("market_current_location"),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as AppError };
+    }
+  },
+  /**
+   * Sell orders for a type across the chosen scope, cheapest first, each row
+   * carrying its station/system/region and jumps from the origin system. Honours
+   * the high-sec-only routing toggle.
+   */
+  async marketSellOrders(
+    params: SellOrdersParams,
+  ): Promise<Result<SellOrder[], AppError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("market_sell_orders", { params }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as AppError };
-}
-},
-/**
- * Aggregated buy + sell order book for a type across the chosen scope, for the
- * depth chart. Honours the same scope + scam-guard as [`market_sell_orders`].
- */
-async marketOrderBook(params: SellOrdersParams) : Promise<Result<OrderBook, AppError>> {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("market_sell_orders", { params }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as AppError };
+    }
+  },
+  /**
+   * Aggregated buy + sell order book for a type across the chosen scope, for the
+   * depth chart. Honours the same scope + scam-guard as [`market_sell_orders`].
+   */
+  async marketOrderBook(
+    params: SellOrdersParams,
+  ): Promise<Result<OrderBook, AppError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("market_order_book", { params }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as AppError };
-}
-}
-}
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("market_order_book", { params }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as AppError };
+    }
+  },
+};
 
 /** user-defined events **/
 
-
-
 /** user-defined constants **/
-
-
 
 /** user-defined types **/
 
@@ -119,29 +151,35 @@ async marketOrderBook(params: SellOrdersParams) : Promise<Result<OrderBook, AppE
  * `{ "kind": …, "message": … }` so the frontend can tell an auth-required
  * state apart from a generic failure and show a clearer message, rather than
  * pattern-matching on a raw error string.
- * 
+ *
  * Commands return `Result<T, AppError>`; because `AppError: From<String>`, an
  * existing `.map_err(|e| e.to_string())?` inside such a command still works —
  * `?` wraps the string as [`AppError::Message`].
  */
-export type AppError = 
-/**
- * No character is logged in, or a required ESI scope isn't granted.
- */
-{ kind: "authRequired"; message: string } | 
-/**
- * Any other failure, carrying a human-readable message.
- */
-{ kind: "message"; message: string }
+export type AppError =
+  /**
+   * No character is logged in, or a required ESI scope isn't granted.
+   */
+  | { kind: "authRequired"; message: string }
+  /**
+   * Any other failure, carrying a human-readable message.
+   */
+  | { kind: "message"; message: string };
 /**
  * The logged-in character's current system + region, used to default the
  * search to "current region" and to anchor the jumps-to-station column.
  */
-export type CurrentLocation = { systemId: number; systemName: string; security: number; regionId: number; regionName: string }
+export type CurrentLocation = {
+  systemId: number;
+  systemName: string;
+  security: number;
+  regionId: number;
+  regionName: string;
+};
 /**
  * One price level in the order book: total remaining units at that price.
  */
-export type DepthLevel = { price: number; volume: number }
+export type DepthLevel = { price: number; volume: number };
 /**
  * Server-derived cache-freshness envelope (#885). Wraps command data with
  * the same `fetchedAt`/`expiresAt` deadline the backend's conditional
@@ -150,172 +188,193 @@ export type DepthLevel = { price: number; volume: number }
  * upstream `Cache-Control`/`Expires` headers, instead of the frontend
  * re-guessing a per-endpoint `staleTime` constant that drifts as those
  * headers change server-side.
- * 
+ *
  * Both timestamps are Unix epoch **milliseconds** (matching JS
  * `Date.now()`), so `DataAge` and `queryKeys.ts` can compare directly with
  * no unit conversion. `expires_at` is `None` when the underlying cache has
  * no persisted entry for this call (cache disabled, or nothing cached
  * yet) — callers fall back to their existing hand-set `staleTime`.
  */
-export type Fresh<T> = { data: T; fetchedAt: number; expiresAt: number | null }
+export type Fresh<T> = { data: T; fetchedAt: number; expiresAt: number | null };
 /**
  * One day of market history, for the history explorer (camelCase for the UI).
  */
-export type HistoryPoint = { date: string; average: number; highest: number; lowest: number; volume: number; orderCount: number }
+export type HistoryPoint = {
+  date: string;
+  average: number;
+  highest: number;
+  lowest: number;
+  volume: number;
+  orderCount: number;
+};
 /**
  * An (id, name) pair used across the SDE and market command surfaces
  * (camelCase for the UI).
  */
-export type IdName = { id: number; name: string }
+export type IdName = { id: number; name: string };
 /**
  * Aggregated order book for the depth chart: sell levels ascending by price,
  * buy levels descending. Cumulative curves are built on the client.
  */
-export type OrderBook = { sell: DepthLevel[]; buy: DepthLevel[] }
+export type OrderBook = { sell: DepthLevel[]; buy: DepthLevel[] };
 /**
  * All price vectors for one type. Every vector is optional so "no data" is
  * represented explicitly rather than as a misleading zero.
  */
-export type PriceModel = { typeId: number; 
-/**
- * Lowest sell order (what you pay to buy now).
- */
-sellMin: number | null; 
-/**
- * Highest buy order (what you get selling now).
- */
-buyMax: number | null; 
-/**
- * "Realistic" sell price (percentile) — ignores outlier orders.
- */
-sellPercentile: number | null; 
-/**
- * "Realistic" buy price (percentile).
- */
-buyPercentile: number | null; 
-/**
- * Global adjusted price (industry job-fee / EIV basis).
- */
-adjustedPrice: number | null; 
-/**
- * Global average price (ESI `/markets/prices/`), identical semantics on
- * both pricing paths (#776).
- */
-averagePrice: number | null; 
-/**
- * Location-local sell-side weighted average of the current order book.
- * Bulk (Fuzzwork) path only — the per-item ESI path has no depth data.
- */
-weightedAverage: number | null; 
-/**
- * Most recent daily average from market history.
- */
-dailyAverage: number | null; 
-/**
- * Sell-side order-book volume — units currently listed in sell orders. (In
- * the per-item ESI path this instead holds the latest daily traded volume.)
- */
-dailyVolume: number | null; 
-/**
- * Buy-side order-book volume — units currently listed in buy orders.
- */
-buyVolume: number | null; 
-/**
- * Most recent daily distinct-order count.
- */
-orderCount: number | null; 
-/**
- * N-day moving average of the daily average.
- */
-movingAverage: number | null }
-export type Region = { id: number; name: string; stations: Station[] }
+export type PriceModel = {
+  typeId: number;
+  /**
+   * Lowest sell order (what you pay to buy now).
+   */
+  sellMin: number | null;
+  /**
+   * Highest buy order (what you get selling now).
+   */
+  buyMax: number | null;
+  /**
+   * "Realistic" sell price (percentile) — ignores outlier orders.
+   */
+  sellPercentile: number | null;
+  /**
+   * "Realistic" buy price (percentile).
+   */
+  buyPercentile: number | null;
+  /**
+   * Global adjusted price (industry job-fee / EIV basis).
+   */
+  adjustedPrice: number | null;
+  /**
+   * Global average price (ESI `/markets/prices/`), identical semantics on
+   * both pricing paths (#776).
+   */
+  averagePrice: number | null;
+  /**
+   * Location-local sell-side weighted average of the current order book.
+   * Bulk (Fuzzwork) path only — the per-item ESI path has no depth data.
+   */
+  weightedAverage: number | null;
+  /**
+   * Most recent daily average from market history.
+   */
+  dailyAverage: number | null;
+  /**
+   * Sell-side order-book volume — units currently listed in sell orders. (In
+   * the per-item ESI path this instead holds the latest daily traded volume.)
+   */
+  dailyVolume: number | null;
+  /**
+   * Buy-side order-book volume — units currently listed in buy orders.
+   */
+  buyVolume: number | null;
+  /**
+   * Most recent daily distinct-order count.
+   */
+  orderCount: number | null;
+  /**
+   * N-day moving average of the daily average.
+   */
+  movingAverage: number | null;
+};
+export type Region = { id: number; name: string; stations: Station[] };
 /**
  * One sell order in the order list, enriched with location + jumps.
  */
-export type SellOrder = { price: number; volumeRemain: number; stationId: number; stationName: string; systemId: number; systemName: string; regionName: string; 
-/**
- * Raw SDE security of the system (−1.0 … 1.0).
- */
-security: number; 
-/**
- * Jumps from the origin system; null = no origin or unreachable.
- */
-jumps: number | null }
+export type SellOrder = {
+  price: number;
+  volumeRemain: number;
+  stationId: number;
+  stationName: string;
+  systemId: number;
+  systemName: string;
+  regionName: string;
+  /**
+   * Raw SDE security of the system (−1.0 … 1.0).
+   */
+  security: number;
+  /**
+   * Jumps from the origin system; null = no origin or unreachable.
+   */
+  jumps: number | null;
+};
 /**
  * Filters for a market-search order query. All location fields are optional;
  * precedence is station → system → region → everywhere (every k-space region).
  */
-export type SellOrdersParams = { typeId: number; regionId?: number | null; systemId?: number | null; stationId?: number | null; 
-/**
- * Where the jumps column is measured from. None → no jumps computed.
- */
-originSystemId?: number | null; 
-/**
- * Route only through high-sec (≥ 0.45) systems for the jumps count.
- */
-highSecOnly?: boolean; 
-/**
- * Drop outlier orders (scam guard) before listing. Default on.
- */
-excludeScams?: boolean }
-export type Station = { id: number; name: string }
+export type SellOrdersParams = {
+  typeId: number;
+  regionId?: number | null;
+  systemId?: number | null;
+  stationId?: number | null;
+  /**
+   * Where the jumps column is measured from. None → no jumps computed.
+   */
+  originSystemId?: number | null;
+  /**
+   * Route only through high-sec (≥ 0.45) systems for the jumps count.
+   */
+  highSecOnly?: boolean;
+  /**
+   * Drop outlier orders (scam guard) before listing. Default on.
+   */
+  excludeScams?: boolean;
+};
+export type Station = { id: number; name: string };
 
 /** tauri-specta globals **/
 
 import {
-	invoke as TAURI_INVOKE,
-	Channel as TAURI_CHANNEL,
+  invoke as TAURI_INVOKE,
+  Channel as TAURI_CHANNEL,
 } from "@tauri-apps/api/core";
 import * as TAURI_API_EVENT from "@tauri-apps/api/event";
 import { type WebviewWindow as __WebviewWindow__ } from "@tauri-apps/api/webviewWindow";
 
 type __EventObj__<T> = {
-	listen: (
-		cb: TAURI_API_EVENT.EventCallback<T>,
-	) => ReturnType<typeof TAURI_API_EVENT.listen<T>>;
-	once: (
-		cb: TAURI_API_EVENT.EventCallback<T>,
-	) => ReturnType<typeof TAURI_API_EVENT.once<T>>;
-	emit: null extends T
-		? (payload?: T) => ReturnType<typeof TAURI_API_EVENT.emit>
-		: (payload: T) => ReturnType<typeof TAURI_API_EVENT.emit>;
+  listen: (
+    cb: TAURI_API_EVENT.EventCallback<T>,
+  ) => ReturnType<typeof TAURI_API_EVENT.listen<T>>;
+  once: (
+    cb: TAURI_API_EVENT.EventCallback<T>,
+  ) => ReturnType<typeof TAURI_API_EVENT.once<T>>;
+  emit: null extends T
+    ? (payload?: T) => ReturnType<typeof TAURI_API_EVENT.emit>
+    : (payload: T) => ReturnType<typeof TAURI_API_EVENT.emit>;
 };
 
 export type Result<T, E> =
-	| { status: "ok"; data: T }
-	| { status: "error"; error: E };
+  { status: "ok"; data: T } | { status: "error"; error: E };
 
 function __makeEvents__<T extends Record<string, any>>(
-	mappings: Record<keyof T, string>,
+  mappings: Record<keyof T, string>,
 ) {
-	return new Proxy(
-		{} as unknown as {
-			[K in keyof T]: __EventObj__<T[K]> & {
-				(handle: __WebviewWindow__): __EventObj__<T[K]>;
-			};
-		},
-		{
-			get: (_, event) => {
-				const name = mappings[event as keyof T];
+  return new Proxy(
+    {} as unknown as {
+      [K in keyof T]: __EventObj__<T[K]> & {
+        (handle: __WebviewWindow__): __EventObj__<T[K]>;
+      };
+    },
+    {
+      get: (_, event) => {
+        const name = mappings[event as keyof T];
 
-				return new Proxy((() => {}) as any, {
-					apply: (_, __, [window]: [__WebviewWindow__]) => ({
-						listen: (arg: any) => window.listen(name, arg),
-						once: (arg: any) => window.once(name, arg),
-						emit: (arg: any) => window.emit(name, arg),
-					}),
-					get: (_, command: keyof __EventObj__<any>) => {
-						switch (command) {
-							case "listen":
-								return (arg: any) => TAURI_API_EVENT.listen(name, arg);
-							case "once":
-								return (arg: any) => TAURI_API_EVENT.once(name, arg);
-							case "emit":
-								return (arg: any) => TAURI_API_EVENT.emit(name, arg);
-						}
-					},
-				});
-			},
-		},
-	);
+        return new Proxy((() => {}) as any, {
+          apply: (_, __, [window]: [__WebviewWindow__]) => ({
+            listen: (arg: any) => window.listen(name, arg),
+            once: (arg: any) => window.once(name, arg),
+            emit: (arg: any) => window.emit(name, arg),
+          }),
+          get: (_, command: keyof __EventObj__<any>) => {
+            switch (command) {
+              case "listen":
+                return (arg: any) => TAURI_API_EVENT.listen(name, arg);
+              case "once":
+                return (arg: any) => TAURI_API_EVENT.once(name, arg);
+              case "emit":
+                return (arg: any) => TAURI_API_EVENT.emit(name, arg);
+            }
+          },
+        });
+      },
+    },
+  );
 }
