@@ -55,5 +55,6 @@ export const STORAGE_KEYS = {
   // and the local per-module manifest (`{ [module]: updatedAt }`)
   syncFolder: "sync.folder",
   syncOnStartup: "sync.onStartup",
+  syncEnabled: "sync.enabled",
   syncMeta: "sync.meta",
 } as const;

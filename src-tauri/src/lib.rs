@@ -124,6 +124,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         // Serve plugin UIs from a distinct, sandboxed `plugin://` origin so their
         // code can never reach the app document or `invoke` (issue #500). Assets
         // resolve under `app_data_dir/plugins/<id>/`, traversal-guarded, and are

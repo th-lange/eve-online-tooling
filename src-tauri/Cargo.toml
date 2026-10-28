@@ -28,6 +28,8 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
+# Native folder picker for the sync-folder setting (#1128 follow-up).
+tauri-plugin-dialog = "2"
 # Type-safe TS binding generation for Tauri commands (pilot: orders module only, #589).
 # Pinned with `=` per upstream guidance — tauri-specta v2 is still pre-1.0 and each
 # rc can introduce breaking changes.
