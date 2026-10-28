@@ -18,13 +18,17 @@ export function SyncOnStartup() {
     STORAGE_KEYS.syncOnStartup,
     false,
   );
+  const [enabled] = usePersistentState<boolean>(
+    STORAGE_KEYS.syncEnabled,
+    false,
+  );
   const ran = useRef(false);
 
   useEffect(() => {
     if (ran.current) return;
     ran.current = true;
     const dir = folder.trim();
-    if (!onStartup || !dir) return;
+    if (!enabled || !onStartup || !dir) return;
     void syncNow(dir).catch((e: unknown) => {
       console.error("Sync on startup failed", e);
     });

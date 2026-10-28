@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 
 // --- Folder sync (#1128) ---
 //
@@ -25,4 +26,16 @@ export function syncFolderWrite(
   content: string,
 ): Promise<void> {
   return invoke<void>("sync_folder_write", { dir, name, content });
+}
+
+/** Open the native folder picker, returning the chosen absolute path, or
+ *  `null` if cancelled. `current` seeds the dialog's starting location.
+ *  Only works under Tauri; callers guard for the browser-dev case. */
+export async function pickSyncFolder(current?: string): Promise<string | null> {
+  const picked = await open({
+    directory: true,
+    multiple: false,
+    defaultPath: current || undefined,
+  });
+  return typeof picked === "string" ? picked : null;
 }

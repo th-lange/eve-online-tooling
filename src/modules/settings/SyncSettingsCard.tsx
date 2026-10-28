@@ -1,7 +1,8 @@
 import { useState } from "react";
+import { FolderOpen } from "lucide-react";
 import { usePersistentState } from "../../lib/usePersistentState";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
-import { errorMessage } from "../../lib/api";
+import { errorMessage, pickSyncFolder } from "../../lib/api";
 import {
   pullAll,
   pushAll,
@@ -55,6 +56,10 @@ export function SyncSettingsCard() {
     STORAGE_KEYS.syncFolder,
     "",
   );
+  const [enabled, setEnabled] = usePersistentState<boolean>(
+    STORAGE_KEYS.syncEnabled,
+    false,
+  );
   const [onStartup, setOnStartup] = usePersistentState<boolean>(
     STORAGE_KEYS.syncOnStartup,
     false,
@@ -65,10 +70,25 @@ export function SyncSettingsCard() {
   );
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
 
+  const hasFolder = folder.trim() !== "";
+  const canRun = enabled && hasFolder && busy === null;
+
+  async function choose() {
+    try {
+      const picked = await pickSyncFolder(folder.trim() || undefined);
+      if (picked) {
+        setFolder(picked);
+        setStatus(null);
+      }
+    } catch (e) {
+      setStatus({ ok: false, text: errorMessage(e) });
+    }
+  }
+
   async function run(kind: Kind) {
     const dir = folder.trim();
-    if (!dir) {
-      setStatus({ ok: false, text: "Set a sync folder first." });
+    if (!enabled || !dir) {
+      setStatus({ ok: false, text: "Activate sync (with a folder) first." });
       return;
     }
     if (kind === "pull") {
@@ -100,20 +120,49 @@ export function SyncSettingsCard() {
       <div className="mt-3 grid gap-2">
         <label className="flex flex-col gap-1">
           <span className="text-xs text-zinc-500">Sync folder</span>
-          <input
-            type="text"
-            value={folder}
-            onChange={(e) => setFolder(e.currentTarget.value)}
-            placeholder="/path/to/a/shared/folder"
-            className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 font-mono text-xs text-zinc-200 placeholder:text-zinc-600"
-            aria-label="Sync folder path"
-          />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void choose()}
+              aria-label="Choose sync folder"
+              title="Choose a folder your other devices also sync (Dropbox, Syncthing, Drive, …)"
+              className="flex min-w-0 flex-1 items-center gap-2 rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-left font-mono text-xs text-zinc-200 hover:bg-zinc-900"
+            >
+              <FolderOpen size={13} className="shrink-0 text-zinc-500" />
+              <span className="truncate">
+                {hasFolder ? (
+                  folder
+                ) : (
+                  <span className="text-zinc-600">Choose a folder…</span>
+                )}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!enabled && !hasFolder) {
+                  setStatus({ ok: false, text: "Choose a folder first." });
+                  return;
+                }
+                setEnabled(!enabled);
+                setStatus(null);
+              }}
+              aria-pressed={enabled}
+              className={`shrink-0 rounded px-2.5 py-1.5 text-xs ${
+                enabled
+                  ? "bg-emerald-700 text-white hover:bg-emerald-600"
+                  : "bg-indigo-600 text-white hover:bg-indigo-500"
+              }`}
+            >
+              {enabled ? "Active ✓" : "Activate"}
+            </button>
+          </div>
         </label>
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => void run("sync")}
-            disabled={busy !== null}
+            disabled={!canRun}
             className="rounded border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50"
           >
             {busy === "sync" ? BUSY_LABEL.sync : IDLE_LABEL.sync}
@@ -121,7 +170,7 @@ export function SyncSettingsCard() {
           <button
             type="button"
             onClick={() => void run("push")}
-            disabled={busy !== null}
+            disabled={!canRun}
             className="rounded border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50"
           >
             {busy === "push" ? BUSY_LABEL.push : IDLE_LABEL.push}
@@ -129,7 +178,7 @@ export function SyncSettingsCard() {
           <button
             type="button"
             onClick={() => void run("pull")}
-            disabled={busy !== null}
+            disabled={!canRun}
             className="rounded border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 disabled:opacity-50"
           >
             {busy === "pull" ? BUSY_LABEL.pull : IDLE_LABEL.pull}
@@ -138,13 +187,19 @@ export function SyncSettingsCard() {
             <input
               type="checkbox"
               checked={onStartup}
+              disabled={!enabled}
               onChange={(e) => setOnStartup(e.currentTarget.checked)}
-              className="h-4 w-4 cursor-pointer accent-indigo-500"
+              className="h-4 w-4 cursor-pointer accent-indigo-500 disabled:opacity-50"
               aria-label="Sync on startup"
             />
             Sync on startup
           </label>
         </div>
+        {!enabled && hasFolder && (
+          <span className="text-xs text-zinc-500">
+            Folder chosen — click Activate to turn sync on.
+          </span>
+        )}
         {status && (
           <span
             className={`text-xs ${status.ok ? "text-emerald-400" : "text-rose-400"}`}
