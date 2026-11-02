@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isCombatBucket, nextFightBuckets } from "./FightOverlayProvider";
+import { isCombatBucket, nextFightBuckets } from "./fightBuckets";
 import type { DpsBucket, PilotRate } from "../../lib/api";
 
 const hq = {

@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { DpsEvent } from "../../lib/api";
 import {
   appendEvents,
+  eventToneClass,
+  formatEventLine,
   groupEventsByBucket,
   LOG_BUFFER,
   pendingGhostBucket,
 } from "./dpsMeterShared";
-import { eventToneClass, formatEventLine } from "./CombatLogPanel";
 
 function ev(partial: Partial<DpsEvent>): DpsEvent {
   return {
