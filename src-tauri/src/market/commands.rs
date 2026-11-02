@@ -165,11 +165,12 @@ pub async fn market_current_location(
     }))
 }
 
-/// Filters for a market-search order query. All location fields are optional;
-/// precedence is station → system → region → everywhere (every k-space region).
+/// Filters for a market-search order query (sell list, buy list, order book).
+/// All location fields are optional; precedence is
+/// station → system → region → everywhere (every k-space region).
 #[derive(Debug, Clone, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct SellOrdersParams {
+pub struct OrderSearchParams {
     pub type_id: i64,
     #[serde(default)]
     pub region_id: Option<i64>,
@@ -192,10 +193,10 @@ fn default_true() -> bool {
     true
 }
 
-/// One sell order in the order list, enriched with location + jumps.
+/// One order in the order list (sell or buy side), enriched with location + jumps.
 #[derive(Debug, Clone, Serialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct SellOrder {
+pub struct MarketOrder {
     pub price: f64,
     pub volume_remain: i64,
     pub station_id: i64,
@@ -209,7 +210,7 @@ pub struct SellOrder {
     pub jumps: Option<i64>,
 }
 
-/// Cap on rows returned to the UI (cheapest first) — an "everywhere" scan can
+/// Cap on rows returned to the UI (best price first) — an "everywhere" scan can
 /// turn up thousands of orders.
 const MAX_ORDERS: usize = 500;
 
@@ -221,9 +222,33 @@ const MAX_ORDERS: usize = 500;
 pub async fn market_sell_orders(
     app: AppHandle,
     service: State<'_, MarketService>,
-    params: SellOrdersParams,
-) -> Result<Vec<SellOrder>, AppError> {
-    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
+    params: OrderSearchParams,
+) -> Result<Vec<MarketOrder>, AppError> {
+    scoped_order_list(&app, &service, params, false).await
+}
+
+/// Buy orders for a type across the chosen scope, highest bid first (i.e. what
+/// you can sell into), enriched the same way as [`market_sell_orders`].
+#[tauri::command]
+#[specta::specta]
+pub async fn market_buy_orders(
+    app: AppHandle,
+    service: State<'_, MarketService>,
+    params: OrderSearchParams,
+) -> Result<Vec<MarketOrder>, AppError> {
+    scoped_order_list(&app, &service, params, true).await
+}
+
+/// Shared body of [`market_sell_orders`] / [`market_buy_orders`]: fetch the
+/// scope's orders, keep one side, apply the scam guard, rank best-price-first
+/// (cheapest sell / highest buy), cap, and attach station names + jumps.
+async fn scoped_order_list(
+    app: &AppHandle,
+    service: &MarketService,
+    params: OrderSearchParams,
+    buy_side: bool,
+) -> Result<Vec<MarketOrder>, AppError> {
+    let (dir, sde) = crate::sde::dir_and_sde(app)?;
 
     // Resolve the region set + any narrower (system/station) filter, then fetch.
     let Scope {
@@ -231,24 +256,24 @@ pub async fn market_sell_orders(
         system_filter,
         station_filter,
     } = resolve_scope(&sde, params.region_id, params.system_id, params.station_id)?;
-    let fetched = fetch_region_orders(&service, region_ids, params.type_id).await;
+    let fetched = fetch_region_orders(service, region_ids, params.type_id).await;
 
-    // Keep sell orders matching the (optional) station / system filter.
-    let sells: Vec<Order> = fetched
+    // Keep the requested side, matching the (optional) station / system filter.
+    let side: Vec<Order> = fetched
         .into_iter()
-        .filter(|o| !o.is_buy_order)
+        .filter(|o| o.is_buy_order == buy_side)
         .filter(|o| station_filter.is_none_or(|s| o.location_id == s))
         .filter(|o| system_filter.is_none_or(|s| o.system_id == s))
         .collect();
-    // Scam guard: drop overpriced sell outliers within the scope
-    // before ranking/truncating (on by default).
-    let mut sells = if params.exclude_scams {
-        filter_outliers(&sells)
+    // Scam guard: drop outliers (overpriced sells / lowball buys) within the
+    // scope before ranking/truncating (on by default).
+    let mut orders = if params.exclude_scams {
+        filter_outliers(&side)
     } else {
-        sells
+        side
     };
-    sells.sort_by(|a, b| a.price.total_cmp(&b.price));
-    sells.truncate(MAX_ORDERS);
+    rank_best_first(&mut orders, buy_side);
+    orders.truncate(MAX_ORDERS);
 
     // Jumps from the origin system over the stargate graph (optionally hi-sec).
     let info = crate::sde::cached_system_info(&dir)?;
@@ -261,10 +286,10 @@ pub async fn market_sell_orders(
     };
 
     // NPC station names in bulk; structures (not in the SDE) fall back to a label.
-    let station_ids: Vec<i64> = sells.iter().map(|o| o.location_id).collect();
+    let station_ids: Vec<i64> = orders.iter().map(|o| o.location_id).collect();
     let names = sde.station_names(&station_ids).map_err(|e| e.to_string())?;
 
-    let rows = sells
+    let rows = orders
         .into_iter()
         .map(|o| {
             let (system_name, security, region_name) = info
@@ -278,7 +303,7 @@ pub async fn market_sell_orders(
                     format!("{system_name} — structure")
                 }
             });
-            SellOrder {
+            MarketOrder {
                 price: o.price,
                 volume_remain: o.volume_remain,
                 station_id: o.location_id,
@@ -408,6 +433,16 @@ fn depth_levels(orders: impl Iterator<Item = Order>, ascending: bool) -> Vec<Dep
     levels
 }
 
+/// Sort one side of the book best price first: cheapest for sells, highest bid
+/// for buys.
+fn rank_best_first(orders: &mut [Order], buy_side: bool) {
+    if buy_side {
+        orders.sort_by(|a, b| b.price.total_cmp(&a.price));
+    } else {
+        orders.sort_by(|a, b| a.price.total_cmp(&b.price));
+    }
+}
+
 /// Aggregated buy + sell order book for a type across the chosen scope, for the
 /// depth chart. Honours the same scope + scam-guard as [`market_sell_orders`].
 #[tauri::command]
@@ -415,7 +450,7 @@ fn depth_levels(orders: impl Iterator<Item = Order>, ascending: bool) -> Vec<Dep
 pub async fn market_order_book(
     app: AppHandle,
     service: State<'_, MarketService>,
-    params: SellOrdersParams,
+    params: OrderSearchParams,
 ) -> Result<OrderBook, AppError> {
     let sde = crate::sde::open_from_app(&app)?;
     let Scope {
@@ -479,6 +514,7 @@ pub fn specta_commands() -> tauri_specta::Commands<tauri::Wry> {
         market_search_stations,
         market_current_location,
         market_sell_orders,
+        market_buy_orders,
         market_order_book,
     ]
 }
@@ -566,5 +602,16 @@ mod tests {
         let buy = depth_levels(buys.into_iter(), false);
         assert_eq!(buy[0].price, 9.0);
         assert_eq!(buy[1].price, 8.0);
+    }
+
+    #[test]
+    fn rank_best_first_puts_cheapest_sell_and_highest_buy_on_top() {
+        let mut sells = vec![order(12.0, false, 1), order(10.0, false, 1)];
+        rank_best_first(&mut sells, false);
+        assert_eq!(sells[0].price, 10.0);
+
+        let mut buys = vec![order(8.0, true, 1), order(9.0, true, 1)];
+        rank_best_first(&mut buys, true);
+        assert_eq!(buys[0].price, 9.0);
     }
 }

@@ -6,8 +6,8 @@ import {
   type OrderBook,
   type PriceModel,
   type Region,
-  type SellOrder,
-  type SellOrdersParams,
+  type MarketOrder,
+  type OrderSearchParams,
   type Station,
 } from "./generated/market";
 import { unwrapCommand, type Fresh, type IdName } from "./common";
@@ -19,8 +19,8 @@ export type {
   OrderBook,
   PriceModel,
   Region,
-  SellOrder,
-  SellOrdersParams,
+  MarketOrder,
+  OrderSearchParams,
   Station,
 };
 
@@ -68,14 +68,21 @@ export async function marketCurrentLocation(): Promise<CurrentLocation | null> {
 
 /** Sell orders for a type across the chosen scope, cheapest first. */
 export async function marketSellOrders(
-  params: SellOrdersParams,
-): Promise<SellOrder[]> {
+  params: OrderSearchParams,
+): Promise<MarketOrder[]> {
   return unwrapCommand(await commands.marketSellOrders(params));
+}
+
+/** Buy orders for a type across the chosen scope, highest bid first. */
+export async function marketBuyOrders(
+  params: OrderSearchParams,
+): Promise<MarketOrder[]> {
+  return unwrapCommand(await commands.marketBuyOrders(params));
 }
 
 /** Aggregated buy + sell order book for a type across the chosen scope. */
 export async function marketOrderBook(
-  params: SellOrdersParams,
+  params: OrderSearchParams,
 ): Promise<OrderBook> {
   return unwrapCommand(await commands.marketOrderBook(params));
 }

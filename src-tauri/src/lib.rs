@@ -333,6 +333,7 @@ pub fn run() {
             market::commands::market_search_stations,
             market::commands::market_current_location,
             market::commands::market_sell_orders,
+            market::commands::market_buy_orders,
             market::commands::market_order_book,
             modules::production::commands::production_profit,
             modules::production::commands::production_decryptors,

@@ -478,7 +478,8 @@ export const shoppingKeys = {
 export const marketSearchKeys = {
   price: <R, T>(regionId: R, typeId: T) =>
     ["market", "search", "price", regionId, typeId] as const,
-  sellOrders: <T, R, S, St, O, H, E>(
+  orders: <T, R, S, St, O, H, E>(
+    side: "sell" | "buy",
     typeId: T,
     regionId: R,
     systemId: S,
@@ -490,7 +491,7 @@ export const marketSearchKeys = {
     [
       "market",
       "search",
-      "sell-orders",
+      `${side}-orders`,
       typeId,
       regionId,
       systemId,
