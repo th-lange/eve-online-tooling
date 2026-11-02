@@ -44,7 +44,7 @@ character and intel tools over one shared data layer. Built with **Tauri 2**
   re-list helper, and an opt-in **build-cost guard** (flags sell orders whose
   undercut price would drop below build cost, priced at the order's own station).
 - **Market Search** · **Appraisal** · **Public Contracts** · **LP Store** —
-  find sell orders + price/volume history, value pasted items, find under-priced
+  find sell + buy orders and price/volume history, value pasted items, find under-priced
   contracts, rank loyalty offers by ISK/LP.
 
 **Character**

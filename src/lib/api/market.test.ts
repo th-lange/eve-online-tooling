@@ -16,7 +16,7 @@ import {
   marketRegions,
   marketSearchStations,
   marketSellOrders,
-  type SellOrdersParams,
+  type OrderSearchParams,
 } from "./market";
 
 describe("market api wrapper", () => {
@@ -79,14 +79,14 @@ describe("market api wrapper", () => {
 
   it("forwards the whole params object to market_sell_orders under a params key", async () => {
     invokeMock.mockResolvedValue([]);
-    const params: SellOrdersParams = { typeId: 34, regionId: 10000002 };
+    const params: OrderSearchParams = { typeId: 34, regionId: 10000002 };
     await marketSellOrders(params);
     expect(invokeMock).toHaveBeenCalledWith("market_sell_orders", { params });
   });
 
   it("forwards the whole params object to market_order_book under a params key", async () => {
     invokeMock.mockResolvedValue({ sell: [], buy: [] });
-    const params: SellOrdersParams = { typeId: 34, highSecOnly: true };
+    const params: OrderSearchParams = { typeId: 34, highSecOnly: true };
     await marketOrderBook(params);
     expect(invokeMock).toHaveBeenCalledWith("market_order_book", { params });
   });

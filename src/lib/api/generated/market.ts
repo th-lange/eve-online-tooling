@@ -109,8 +109,8 @@ export const commands = {
    * the high-sec-only routing toggle.
    */
   async marketSellOrders(
-    params: SellOrdersParams,
-  ): Promise<Result<SellOrder[], AppError>> {
+    params: OrderSearchParams,
+  ): Promise<Result<MarketOrder[], AppError>> {
     try {
       return {
         status: "ok",
@@ -122,11 +122,28 @@ export const commands = {
     }
   },
   /**
+   * Buy orders for a type across the chosen scope, highest bid first (i.e. what
+   * you can sell into), enriched the same way as [`market_sell_orders`].
+   */
+  async marketBuyOrders(
+    params: OrderSearchParams,
+  ): Promise<Result<MarketOrder[], AppError>> {
+    try {
+      return {
+        status: "ok",
+        data: await TAURI_INVOKE("market_buy_orders", { params }),
+      };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as AppError };
+    }
+  },
+  /**
    * Aggregated buy + sell order book for a type across the chosen scope, for the
    * depth chart. Honours the same scope + scam-guard as [`market_sell_orders`].
    */
   async marketOrderBook(
-    params: SellOrdersParams,
+    params: OrderSearchParams,
   ): Promise<Result<OrderBook, AppError>> {
     try {
       return {
@@ -213,10 +230,53 @@ export type HistoryPoint = {
  */
 export type IdName = { id: number; name: string };
 /**
+ * One order in the order list (sell or buy side), enriched with location + jumps.
+ */
+export type MarketOrder = {
+  price: number;
+  volumeRemain: number;
+  stationId: number;
+  stationName: string;
+  systemId: number;
+  systemName: string;
+  regionName: string;
+  /**
+   * Raw SDE security of the system (−1.0 … 1.0).
+   */
+  security: number;
+  /**
+   * Jumps from the origin system; null = no origin or unreachable.
+   */
+  jumps: number | null;
+};
+/**
  * Aggregated order book for the depth chart: sell levels ascending by price,
  * buy levels descending. Cumulative curves are built on the client.
  */
 export type OrderBook = { sell: DepthLevel[]; buy: DepthLevel[] };
+/**
+ * Filters for a market-search order query (sell list, buy list, order book).
+ * All location fields are optional; precedence is
+ * station → system → region → everywhere (every k-space region).
+ */
+export type OrderSearchParams = {
+  typeId: number;
+  regionId?: number | null;
+  systemId?: number | null;
+  stationId?: number | null;
+  /**
+   * Where the jumps column is measured from. None → no jumps computed.
+   */
+  originSystemId?: number | null;
+  /**
+   * Route only through high-sec (≥ 0.45) systems for the jumps count.
+   */
+  highSecOnly?: boolean;
+  /**
+   * Drop outlier orders (scam guard) before listing. Default on.
+   */
+  excludeScams?: boolean;
+};
 /**
  * All price vectors for one type. Every vector is optional so "no data" is
  * represented explicitly rather than as a misleading zero.
@@ -276,48 +336,6 @@ export type PriceModel = {
   movingAverage: number | null;
 };
 export type Region = { id: number; name: string; stations: Station[] };
-/**
- * One sell order in the order list, enriched with location + jumps.
- */
-export type SellOrder = {
-  price: number;
-  volumeRemain: number;
-  stationId: number;
-  stationName: string;
-  systemId: number;
-  systemName: string;
-  regionName: string;
-  /**
-   * Raw SDE security of the system (−1.0 … 1.0).
-   */
-  security: number;
-  /**
-   * Jumps from the origin system; null = no origin or unreachable.
-   */
-  jumps: number | null;
-};
-/**
- * Filters for a market-search order query. All location fields are optional;
- * precedence is station → system → region → everywhere (every k-space region).
- */
-export type SellOrdersParams = {
-  typeId: number;
-  regionId?: number | null;
-  systemId?: number | null;
-  stationId?: number | null;
-  /**
-   * Where the jumps column is measured from. None → no jumps computed.
-   */
-  originSystemId?: number | null;
-  /**
-   * Route only through high-sec (≥ 0.45) systems for the jumps count.
-   */
-  highSecOnly?: boolean;
-  /**
-   * Drop outlier orders (scam guard) before listing. Default on.
-   */
-  excludeScams?: boolean;
-};
 export type Station = { id: number; name: string };
 
 /** tauri-specta globals **/

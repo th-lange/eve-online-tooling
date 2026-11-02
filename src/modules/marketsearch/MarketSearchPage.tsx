@@ -6,6 +6,7 @@ import {
   marketCurrentLocation,
   marketPrice,
   marketSearchStations,
+  marketBuyOrders,
   marketSellOrders,
   marketOrderBook,
   openMarketWindow,
@@ -14,7 +15,7 @@ import {
   type HistoryPoint,
   type IdName,
   type PriceModel,
-  type SellOrder,
+  type MarketOrder,
   type OrderBook,
 } from "../../lib/api";
 import {
@@ -60,7 +61,7 @@ type Picked = { id: number; name: string } | null;
 
 const TITLE = "Market Search";
 const SUBTITLE =
-  "Find an item's sell orders across the market, or chart its price & volume history.";
+  "Find an item's sell and buy orders across the market, or chart its price & volume history.";
 
 export function MarketSearchPage() {
   return (
@@ -135,8 +136,19 @@ function Workbench() {
     enabled: tab === "history" && picked != null,
   });
 
-  const orders = useQuery({
-    queryKey: marketSearchKeys.sellOrders(
+  // Same filters for both sides of the book; only the command differs.
+  const orderParams = (typeId: number) => ({
+    typeId,
+    regionId,
+    systemId: system?.id ?? null,
+    stationId: station?.id ?? null,
+    originSystemId: origin?.id ?? null,
+    highSecOnly,
+    excludeScams,
+  });
+  const orderKey = (side: "sell" | "buy") =>
+    marketSearchKeys.orders(
+      side,
       picked?.id,
       regionId,
       system?.id ?? null,
@@ -144,19 +156,17 @@ function Workbench() {
       origin?.id ?? null,
       highSecOnly,
       excludeScams,
-    ),
+    );
+  const orders = useQuery({
+    queryKey: orderKey("sell"),
     queryFn: picked
-      ? () =>
-          marketSellOrders({
-            typeId: picked.id,
-            regionId,
-            systemId: system?.id ?? null,
-            stationId: station?.id ?? null,
-            originSystemId: origin?.id ?? null,
-            highSecOnly,
-            excludeScams,
-          })
+      ? () => marketSellOrders(orderParams(picked.id))
       : undefined,
+    enabled: tab === "search" && picked != null,
+  });
+  const buyOrders = useQuery({
+    queryKey: orderKey("buy"),
+    queryFn: picked ? () => marketBuyOrders(orderParams(picked.id)) : undefined,
     enabled: tab === "search" && picked != null,
   });
 
@@ -255,10 +265,14 @@ function Workbench() {
           excludeScams={excludeScams}
           setExcludeScams={setExcludeScams}
           orders={orders.data ?? []}
+          buyOrders={buyOrders.data ?? []}
           orderBook={orderBook.data}
-          loading={orders.isFetching}
-          error={orders.error}
-          dataUpdatedAt={orders.dataUpdatedAt}
+          loading={orders.isFetching || buyOrders.isFetching}
+          error={orders.error ?? buyOrders.error}
+          dataUpdatedAt={Math.min(
+            orders.dataUpdatedAt,
+            buyOrders.dataUpdatedAt,
+          )}
         />
       ) : (
         <HistoryTab
@@ -298,6 +312,7 @@ function SearchTab({
   excludeScams,
   setExcludeScams,
   orders,
+  buyOrders,
   orderBook,
   loading,
   error,
@@ -317,7 +332,8 @@ function SearchTab({
   setHighSecOnly: (v: boolean) => void;
   excludeScams: boolean;
   setExcludeScams: (v: boolean) => void;
-  orders: SellOrder[];
+  orders: MarketOrder[];
+  buyOrders: MarketOrder[];
   orderBook: OrderBook | undefined;
   loading: boolean;
   error: unknown;
@@ -388,7 +404,7 @@ function SearchTab({
           High-sec only
         </label>
         <label
-          title="Hide sell orders priced above 10× the median (rough scam guard)"
+          title="Hide sell orders priced above 10× the median and buy orders priced below a tenth of the median (rough scam guard)"
           className="flex items-center gap-2 pb-1 text-xs text-zinc-300"
         >
           <input
@@ -408,20 +424,22 @@ function SearchTab({
 
       <div className="mt-4">
         {!picked ? (
-          <Centered>Search for an item to see its sell orders.</Centered>
+          <Centered>
+            Search for an item to see its sell and buy orders.
+          </Centered>
         ) : (
           <QueryResult
             result={{
               isError: !!error,
               error,
               isPending: loading,
-              data: orders,
+              data: { sell: orders, buy: buyOrders },
             }}
             pendingLabel="Loading…"
             loginMessage="Log in a character first to see live orders."
-            isEmpty={(d) => d.length === 0}
-            emptyTitle="No sell orders here."
-            emptyHint="No sell orders for this item in the selected area — try widening the region or clearing the station filter."
+            isEmpty={(d) => d.sell.length === 0 && d.buy.length === 0}
+            emptyTitle="No orders here."
+            emptyHint="No sell or buy orders for this item in the selected area — try widening the region or clearing the station filter."
             updatedAt={dataUpdatedAt}
           >
             {(d) => (
@@ -430,7 +448,26 @@ function SearchTab({
                   (orderBook.sell.length > 0 || orderBook.buy.length > 0) && (
                     <DepthChart sell={orderBook.sell} buy={orderBook.buy} />
                   )}
-                <OrderTable orders={d} hasOrigin={origin != null} />
+                <section>
+                  <h3 className="mb-1 text-xs font-medium text-zinc-400">
+                    Sell orders — cheapest first
+                  </h3>
+                  <OrderTable
+                    side="sell"
+                    orders={d.sell}
+                    hasOrigin={origin != null}
+                  />
+                </section>
+                <section>
+                  <h3 className="mb-1 text-xs font-medium text-zinc-400">
+                    Buy orders — highest bid first
+                  </h3>
+                  <OrderTable
+                    side="buy"
+                    orders={d.buy}
+                    hasOrigin={origin != null}
+                  />
+                </section>
               </div>
             )}
           </QueryResult>
@@ -439,6 +476,8 @@ function SearchTab({
     </div>
   );
 }
+
+type OrderSide = "sell" | "buy";
 
 type OrderSortKey =
   | "price"
@@ -463,58 +502,75 @@ const ORDER_TEXT_KEYS: OrderSortKey[] = [
   "regionName",
 ];
 
-const ORDER_COLUMNS: SortColumn<OrderSortKey>[] = [
-  {
-    key: "price",
-    label: "Price",
-    numeric: true,
-    description: "Sell price per unit.",
-  },
-  {
-    key: "volumeRemain",
-    label: "Qty",
-    numeric: true,
-    description: "Units still on offer in this order.",
-  },
-  {
-    key: "stationName",
-    label: "Station",
-    numeric: false,
-    description: "Station (or structure) the order sits at.",
-  },
-  {
-    key: "systemName",
-    label: "System",
-    numeric: false,
-    description: "Solar system, with its security status.",
-  },
-  {
-    key: "regionName",
-    label: "Region",
-    numeric: false,
-    description: "Region the order is in.",
-  },
-  {
-    key: "jumps",
-    label: "Jumps",
-    numeric: true,
-    description:
-      "Jumps from your origin to the station (∞ = unreachable with current routing).",
-  },
-];
+/** Table columns for one side of the book; only the price/qty wording differs. */
+function orderColumns(side: OrderSide): SortColumn<OrderSortKey>[] {
+  return [
+    {
+      key: "price",
+      label: "Price",
+      numeric: true,
+      description:
+        side === "sell" ? "Sell price per unit." : "Bid price per unit.",
+    },
+    {
+      key: "volumeRemain",
+      label: "Qty",
+      numeric: true,
+      description:
+        side === "sell"
+          ? "Units still on offer in this order."
+          : "Units still wanted by this order.",
+    },
+    {
+      key: "stationName",
+      label: "Station",
+      numeric: false,
+      description: "Station (or structure) the order sits at.",
+    },
+    {
+      key: "systemName",
+      label: "System",
+      numeric: false,
+      description: "Solar system, with its security status.",
+    },
+    {
+      key: "regionName",
+      label: "Region",
+      numeric: false,
+      description: "Region the order is in.",
+    },
+    {
+      key: "jumps",
+      label: "Jumps",
+      numeric: true,
+      description:
+        "Jumps from your origin to the station (∞ = unreachable with current routing).",
+    },
+  ];
+}
+
+const ORDER_COLUMNS: Record<OrderSide, SortColumn<OrderSortKey>[]> = {
+  sell: orderColumns("sell"),
+  buy: orderColumns("buy"),
+};
 
 function OrderTable({
+  side,
   orders,
   hasOrigin,
 }: {
-  orders: SellOrder[];
+  side: OrderSide;
+  orders: MarketOrder[];
   hasOrigin: boolean;
 }) {
+  // Sell keeps its original storage key so existing persisted sorts survive.
   const { sortKey, sortDir, toggleSort } = usePersistentSort<OrderSortKey>(
-    "sort.market-search-orders",
+    side === "sell"
+      ? "sort.market-search-orders"
+      : "sort.market-search-buy-orders",
     ORDER_SORT_KEYS,
     "price",
-    "asc",
+    side === "sell" ? "asc" : "desc",
     ORDER_TEXT_KEYS,
   );
 
@@ -535,18 +591,22 @@ function OrderTable({
   return (
     <DataTable
       className="max-h-[28rem] overflow-auto rounded border border-zinc-800"
-      columns={ORDER_COLUMNS}
+      columns={ORDER_COLUMNS[side]}
       sortKey={sortKey}
       sortDir={sortDir}
       onSort={toggleSort}
       rows={sorted}
-      emptyState={<EmptyState title="No sell orders found." />}
+      emptyState={<EmptyState title={`No ${side} orders found.`} />}
       renderRow={(o) => (
         <tr
           key={`${o.stationId}-${o.price}-${o.volumeRemain}`}
           className="border-t border-zinc-800/60 text-xs text-zinc-300"
         >
-          <td className="px-3 py-0.5 text-right tabular-nums text-rose-300">
+          <td
+            className={`px-3 py-0.5 text-right tabular-nums ${
+              side === "sell" ? "text-rose-300" : "text-emerald-300"
+            }`}
+          >
             {formatIsk(o.price)}
           </td>
           <td className="px-3 py-0.5 text-right tabular-nums">
