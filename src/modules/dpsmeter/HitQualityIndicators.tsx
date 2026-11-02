@@ -1,21 +1,6 @@
 import type { HitQuality } from "../../lib/api";
 import { formatInt } from "../../lib/format";
-
-/** Hit-quality tiers worst→best, with the colour each segment gets in the
- *  per-combatant distribution bar. Keys match {@link HitQuality}. */
-export const QUALITY_TIERS = [
-  { key: "misses", label: "Miss", color: "#6b7280" },
-  { key: "glances", label: "Glance", color: "#94a3b8" },
-  { key: "grazes", label: "Graze", color: "#38bdf8" },
-  { key: "hits", label: "Hit", color: "#22d3ee" },
-  { key: "penetrates", label: "Pen", color: "#34d399" },
-  { key: "smashes", label: "Smash", color: "#a3e635" },
-  { key: "wrecks", label: "Wreck", color: "#f472b6" },
-] as const satisfies readonly {
-  key: keyof HitQuality;
-  label: string;
-  color: string;
-}[];
+import { QUALITY_TIERS } from "./dpsMeterShared";
 
 /** Compact stacked bar of a combatant's hit-quality distribution, worst
  *  (left) → best (right), with a labelled legend of the present tiers below

@@ -1,11 +1,12 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { DpsBucket, DpsEvent } from "../../lib/api";
 import { formatInt } from "../../lib/format";
-import { eventToneClass, formatEventLine } from "./CombatLogPanel";
 import {
   BUCKET_SECS,
   CURSOR_SECS,
+  eventToneClass,
   formatClock,
+  formatEventLine,
   SMOOTH_WINDOW_BUCKETS,
   smoothSeries,
   type BucketSeries,

@@ -1,4 +1,9 @@
-import type { DpsBucket, DpsEvent, DpsOverviewSegment } from "../../lib/api";
+import type {
+  DpsBucket,
+  DpsEvent,
+  DpsOverviewSegment,
+  HitQuality,
+} from "../../lib/api";
 import { formatInt } from "../../lib/format";
 
 export type Mode = "live" | "playback";
@@ -412,3 +417,68 @@ export function groupOverview(
   }
   return groups;
 }
+
+/** Render one parsed combat-log line as plain English, e.g.
+ *  "450 dmg → Some Pilot (Caracal) — Heavy Missile Launcher II [Wrecks]".
+ *  Exported for unit testing. */
+export function formatEventLine(e: DpsEvent): string {
+  const who = `${e.pilot ?? "?"}${e.ship ? ` (${e.ship})` : ""}`;
+  const via = e.weapon ? ` — ${e.weapon}` : "";
+  switch (e.kind) {
+    case "damageOut":
+    case "damageIn": {
+      const arrow = e.kind === "damageOut" ? "→" : "←";
+      if (e.quality === "Misses") return `Misses ${arrow} ${who}${via}`;
+      const q = e.quality ? ` [${e.quality}]` : "";
+      return `${e.amount} dmg ${arrow} ${who}${via}${q}`;
+    }
+    case "repOut":
+      return `${e.amount} repaired → ${who}`;
+    case "repIn":
+      return `${e.amount} repaired ← ${who}`;
+    case "capTransferOut":
+      return `${e.amount} GJ cap sent → ${who}`;
+    case "capTransferIn":
+      return `${e.amount} GJ cap received ← ${who}`;
+    case "capWarfareOut":
+      return `${e.amount} GJ cap neut'd → ${who}`;
+    case "capWarfareIn":
+      return `${e.amount} GJ cap neut'd ← ${who}`;
+    case "scramOut":
+      return `Scrambled → ${who}`;
+    case "scramIn":
+      return `Scrambled ← ${who}`;
+    case "pointOut":
+      return `Pointed → ${who}`;
+    case "pointIn":
+      return `Pointed ← ${who}`;
+    case "mining":
+      return `Mined ${e.amount} ${e.ore ?? "ore"}${e.volume > 0 ? ` (${e.volume.toFixed(0)} m³)` : ""}`;
+  }
+}
+
+/** Text color by rough direction — outgoing (you did it) warm sky, incoming
+ *  (done to you) cool rose, mining amber: the same warm/cool-out/in + amber
+ *  convention as the rate charts (see `SERIES`/`TIMELINE_COLORS`). Misses are
+ *  dimmed regardless of direction — noise, not signal. */
+export function eventToneClass(e: DpsEvent): string {
+  if (e.quality === "Misses") return "text-zinc-600";
+  if (e.kind === "mining") return "text-amber-400";
+  return e.kind.endsWith("Out") ? "text-sky-400" : "text-rose-400";
+}
+
+/** Hit-quality tiers worst→best, with the colour each segment gets in the
+ *  per-combatant distribution bar. Keys match {@link HitQuality}. */
+export const QUALITY_TIERS = [
+  { key: "misses", label: "Miss", color: "#6b7280" },
+  { key: "glances", label: "Glance", color: "#94a3b8" },
+  { key: "grazes", label: "Graze", color: "#38bdf8" },
+  { key: "hits", label: "Hit", color: "#22d3ee" },
+  { key: "penetrates", label: "Pen", color: "#34d399" },
+  { key: "smashes", label: "Smash", color: "#a3e635" },
+  { key: "wrecks", label: "Wreck", color: "#f472b6" },
+] as const satisfies readonly {
+  key: keyof HitQuality;
+  label: string;
+  color: string;
+}[];
