@@ -123,6 +123,14 @@ and **Linux** join in on minor releases (`vX.Y.0`) or a manual run with
 then fills in the release notes with the changelog and the unsigned-build note
 (see [`SIGNING.md`](https://github.com/th-lange/eve-online-tooling/blob/main/SIGNING.md)).
 
+**Keep `@tauri-apps/cli` at ≥ 2.12** (bundler ≥ 2.10): older bundlers copy the
+build host's `/usr/bin/xdg-open` into the AppImage whenever
+`tauri-plugin-opener` is a dependency. On the `ubuntu-22.04` runner that is
+xdg-utils 1.1.3, `AppRun` puts it ahead of the system one on `PATH`, and its
+`open_kde()` only handles `KDE_SESSION_VERSION` 4 and 5 — on KDE Plasma 6 it
+exits 0 without doing anything, so EVE SSO (and every other external link)
+silently never opened a browser ([#1140](https://github.com/th-lange/eve-online-tooling/issues/1140)).
+
 ## Status & tracking
 
 Work is tracked as
