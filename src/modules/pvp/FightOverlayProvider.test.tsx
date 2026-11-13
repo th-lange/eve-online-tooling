@@ -11,15 +11,14 @@ import { STORAGE_KEYS } from "../../lib/storageKeys";
 // The overlay subscribes to dps://buckets and dps://source via `listen`;
 // capture the callbacks so tests can push fight data directly.
 let bucketsHandler: ((buckets: DpsBucket[]) => void) | undefined;
-let modeHandler: ((mode: string) => void) | undefined;
+const listened: string[] = [];
 let sourceHandler:
   ((source: { path: string; character: string | null }) => void) | undefined;
 vi.mock("@tauri-apps/api/event", () => ({
   listen: (name: string, handler: (e: { payload: unknown }) => void) => {
+    listened.push(name);
     if (name === "dps://buckets")
       bucketsHandler = (buckets) => handler({ payload: buckets });
-    if (name === "dps://mode")
-      modeHandler = (mode) => handler({ payload: mode });
     if (name === "dps://source")
       sourceHandler = (source) => handler({ payload: source });
     return Promise.resolve(() => {});
@@ -300,7 +299,7 @@ describe("FightOverlayProvider — shared capture loop (#1175)", () => {
       }),
     );
     bucketsHandler = undefined;
-    modeHandler = undefined;
+    listened.length = 0;
     invokeMock.mockClear();
     mockInvoke({
       pvp_profiles: () => ({ pilots: [], unresolved: [] }),
@@ -317,41 +316,17 @@ describe("FightOverlayProvider — shared capture loop (#1175)", () => {
   const startCalls = () =>
     invokeMock.mock.calls.filter((c) => c[0] === "dps_start").length;
 
-  it("ignores replayed buckets so an old log never starts a recording", async () => {
+  it("claims live capture once and never listens to the replay channels (#1175)", async () => {
     vi.useFakeTimers();
     try {
       setup();
-      await act(() => vi.advanceTimersByTimeAsync(0));
-      act(() => modeHandler!("playback"));
-      act(() => bucketsHandler!([bucket(1000, 50)]));
-      expect(hookCalls()).toEqual([]);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("re-claims live capture after the loop stops, unless a replay follows", async () => {
-    vi.useFakeTimers();
-    try {
-      setup();
-      await act(() => vi.advanceTimersByTimeAsync(0));
-      expect(startCalls()).toBe(1); // initial claim
-
-      // Stop → playback in quick succession (the meter's scrub): no re-claim.
-      act(() => modeHandler!("stopped"));
-      await act(() => vi.advanceTimersByTimeAsync(500));
-      act(() => modeHandler!("playback"));
       await act(() => vi.advanceTimersByTimeAsync(5_000));
+      // Replays run on dps://playback-* in their own backend lane: the overlay
+      // can neither be fed by them nor lose its capture to the meter's
+      // Stop/Play, so it claims once and never re-claims.
       expect(startCalls()).toBe(1);
-
-      // Replay finishes: the loop is gone, so the overlay takes it back and
-      // live buckets count again.
-      act(() => modeHandler!("stopped"));
-      await act(() => vi.advanceTimersByTimeAsync(2_000));
-      expect(startCalls()).toBe(2);
-      act(() => modeHandler!("live"));
-      act(() => bucketsHandler!([bucket(2000, 50)]));
-      expect(hookCalls()).toEqual(["rec 2000"]);
+      expect(listened).toContain("dps://buckets");
+      expect(listened.filter((n) => n.includes("playback"))).toEqual([]);
     } finally {
       vi.useRealTimers();
     }
