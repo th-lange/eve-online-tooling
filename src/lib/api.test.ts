@@ -160,9 +160,10 @@ describe("api.pi", () => {
   beforeEach(() => invokeMock.mockReset());
 
   it("invokes pi_overview and pi_locked_set", async () => {
-    invokeMock.mockResolvedValue([
-      { planetId: 1, extractors: [], balance: [] },
-    ]);
+    invokeMock.mockResolvedValue({
+      colonies: [{ planetId: 1, extractors: [], balance: [] }],
+      failedCharacters: [],
+    });
     await piOverview();
     expect(invokeMock).toHaveBeenCalledWith("pi_overview");
 

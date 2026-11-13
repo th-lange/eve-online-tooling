@@ -6,7 +6,7 @@ import {
   piLockedGet,
   piLockedSet,
   piOverview,
-  type ColonyView,
+  type PiOverview,
 } from "../../lib/api";
 import { authKeys, piKeys } from "../../lib/queryKeys";
 import { Page, PageHeader, PrimaryButton } from "../../components/page";
@@ -72,14 +72,21 @@ function Workbench() {
         vars.targetProductTypeIds,
       ),
     onSuccess: (view) => {
-      qc.setQueryData<ColonyView[]>(
+      qc.setQueryData<PiOverview>(
         piKeys.overview(active.data ?? null),
         (old) =>
-          old?.map((c) =>
-            c.characterId === view.characterId && c.planetId === view.planetId
-              ? { ...c, notes: view.notes, targetProducts: view.targetProducts }
-              : c,
-          ),
+          old && {
+            ...old,
+            colonies: old.colonies.map((c) =>
+              c.characterId === view.characterId && c.planetId === view.planetId
+                ? {
+                    ...c,
+                    notes: view.notes,
+                    targetProducts: view.targetProducts,
+                  }
+                : c,
+            ),
+          },
       );
     },
   });
@@ -116,7 +123,7 @@ function Workbench() {
   // "restart" floats colonies whose extractor program has ended to the top;
   // stable within each group so it otherwise keeps ESI's default order.
   const rows = useMemo(() => {
-    const base = colonies.data ?? [];
+    const base = colonies.data?.colonies ?? [];
     if (sort === "default") return base;
     return [...base].sort(
       (a, b) => Number(b.needsAttention) - Number(a.needsAttention),
@@ -185,6 +192,7 @@ function Workbench() {
       {tab === "colonies" ? (
         <ColoniesTab
           colonies={colonies}
+          failedCharacters={colonies.data?.failedCharacters ?? []}
           rows={rows}
           now={now}
           lockedSet={lockedSet}

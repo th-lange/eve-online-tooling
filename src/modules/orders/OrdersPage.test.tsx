@@ -89,7 +89,7 @@ describe("OrdersPage build-cost check", () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "orders_list")
         return Promise.resolve({
-          data: ORDERS,
+          data: { rows: ORDERS, failedCharacters: [] },
           fetchedAt: Date.now(),
           expiresAt: null,
         });
@@ -118,5 +118,46 @@ describe("OrdersPage build-cost check", () => {
     // Only Widget (899.99 < 1000) is flagged; Gadget (4999.99) is fine.
     expect(await screen.findByText(/1 below build cost/)).toBeInTheDocument();
     expect(screen.getByText("below cost")).toBeInTheDocument();
+  });
+});
+
+describe("OrdersPage partial aggregation (#1169)", () => {
+  function mockOrders(failedCharacters: string[], rows = ORDERS) {
+    invokeMock.mockImplementation((cmd: string) =>
+      Promise.resolve(
+        cmd === "orders_list"
+          ? {
+              data: { rows, failedCharacters },
+              fetchedAt: Date.now(),
+              expiresAt: null,
+            }
+          : undefined,
+      ),
+    );
+  }
+
+  it("names the characters whose orders couldn't be loaded", async () => {
+    mockOrders(["Alt One", "Alt Two"]);
+    renderPage();
+    await screen.findByText("Widget");
+    expect(
+      screen.getByText("Couldn't load Alt One, Alt Two — showing the rest."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the notice instead of 'No open orders' when the only fetch failed", async () => {
+    mockOrders(["Alt One"], []);
+    renderPage();
+    expect(
+      await screen.findByText(/Couldn't load Alt One/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No open orders.")).toBeNull();
+  });
+
+  it("shows no notice when nothing failed", async () => {
+    mockOrders([]);
+    renderPage();
+    await screen.findByText("Widget");
+    expect(screen.queryByText(/Couldn't load/)).toBeNull();
   });
 });

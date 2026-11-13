@@ -468,11 +468,11 @@ fn cap_corp_assets<'a>(ctx: &'a HostCtx, _args: &'a Value) -> CapFuture<'a> {
 
 fn cap_my_orders<'a>(ctx: &'a HostCtx, _args: &'a Value) -> CapFuture<'a> {
     Box::pin(async move {
-        let rows =
+        let payload =
             crate::market::orders::collect_orders(ctx.app_data_dir, ctx.require_auth(), ctx.market)
                 .await
                 .map_err(|e| e.to_string())?;
-        serde_json::to_value(rows).map_err(|e| e.to_string())
+        serde_json::to_value(payload.rows).map_err(|e| e.to_string())
     })
 }
 
@@ -482,10 +482,10 @@ fn cap_my_orders<'a>(ctx: &'a HostCtx, _args: &'a Value) -> CapFuture<'a> {
 fn cap_pi_overview<'a>(ctx: &'a HostCtx, _args: &'a Value) -> CapFuture<'a> {
     Box::pin(async move {
         let sde = open_from_dir(ctx.app_data_dir)?;
-        let views = pi::commands::pi_overview_core(ctx.app_data_dir, sde, ctx.require_auth())
+        let overview = pi::commands::pi_overview_core(ctx.app_data_dir, sde, ctx.require_auth())
             .await
             .map_err(|e| e.to_string())?;
-        serde_json::to_value(views).map_err(|e| e.to_string())
+        serde_json::to_value(overview.colonies).map_err(|e| e.to_string())
     })
 }
 
@@ -508,10 +508,11 @@ fn cap_industry_jobs<'a>(ctx: &'a HostCtx, _args: &'a Value) -> CapFuture<'a> {
 fn cap_pi_idle_colonies<'a>(ctx: &'a HostCtx, _args: &'a Value) -> CapFuture<'a> {
     Box::pin(async move {
         let sde = open_from_dir(ctx.app_data_dir)?;
-        let views = pi::commands::pi_overview_core(ctx.app_data_dir, sde, ctx.require_auth())
+        let overview = pi::commands::pi_overview_core(ctx.app_data_dir, sde, ctx.require_auth())
             .await
             .map_err(|e| e.to_string())?;
-        serde_json::to_value(pi::commands::idle_colonies(&views)).map_err(|e| e.to_string())
+        serde_json::to_value(pi::commands::idle_colonies(&overview.colonies))
+            .map_err(|e| e.to_string())
     })
 }
 

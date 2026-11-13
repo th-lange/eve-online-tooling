@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::esi::{authed_get, resolve_names, AuthState};
 use crate::market::{resolve_location, MarketService, PriceModel};
-use crate::model::AppError;
+use crate::model::{settle_character_fetch, AppError};
 use crate::sde::open_from_dir;
 use crate::storage;
 
@@ -55,13 +55,22 @@ pub struct OrderRow {
     pub issued: String,
 }
 
+/// Open orders plus the characters whose fetch failed and were skipped while
+/// aggregating several (#1169) — empty unless "All characters" is active.
+#[derive(Debug, Clone, Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OrdersPayload {
+    pub rows: Vec<OrderRow>,
+    pub failed_characters: Vec<String>,
+}
+
 /// Open orders across the target characters — the app-free core, shared by the
 /// command and the capability registry.
 pub async fn collect_orders(
     dir: &Path,
     auth: &AuthState,
     market: &MarketService,
-) -> Result<Vec<OrderRow>, AppError> {
+) -> Result<OrdersPayload, AppError> {
     let character_ids = storage::target_characters(dir);
     if character_ids.is_empty() {
         return Err(AppError::auth_required());
@@ -69,6 +78,7 @@ pub async fn collect_orders(
     let names = storage::character_names(dir);
 
     let mut rows = Vec::new();
+    let mut failed_characters = Vec::new();
     // With several targets one failing character is skipped so the rest still
     // show; with a single target the failure is the answer — returning an empty
     // list would render "No open orders" and hide a missing scope / outage
@@ -76,17 +86,27 @@ pub async fn collect_orders(
     let aggregating = character_ids.len() > 1;
     for character_id in character_ids {
         let character_name = names.get(&character_id).cloned().unwrap_or_default();
-        match fetch_character_orders(auth, market, dir, character_id, &character_name).await {
-            Ok(mut character_rows) => rows.append(&mut character_rows),
-            // Not silent: the skipped character is logged so an expired token /
-            // missing scope on one alt is at least diagnosable (#1169).
-            Err(e) if aggregating => {
-                tracing::warn!("orders: skipping character {character_id}: {e}");
-            }
-            Err(e) => return Err(e),
+        let result = fetch_character_orders(auth, market, dir, character_id, &character_name).await;
+        // Not silent: the skipped character is logged and reported to the UI so
+        // an expired token / missing scope on one alt is visible (#1169).
+        if let Err(e) = &result {
+            tracing::warn!("orders: character {character_id} failed: {e}");
+        }
+        let label = if character_name.is_empty() {
+            format!("Character {character_id}")
+        } else {
+            character_name
+        };
+        if let Some(mut character_rows) =
+            settle_character_fetch(result, aggregating, &label, &mut failed_characters)?
+        {
+            rows.append(&mut character_rows);
         }
     }
-    Ok(rows)
+    Ok(OrdersPayload {
+        rows,
+        failed_characters,
+    })
 }
 
 /// The earliest ESI-derived freshness deadline (Unix epoch secs) across the

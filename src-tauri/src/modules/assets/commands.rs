@@ -43,17 +43,26 @@ struct RosterAssetRow {
     is_corp: bool,
 }
 
+/// The roster's raw asset rows plus how complete the gather was.
+struct RosterAssets {
+    rows: Vec<RosterAssetRow>,
+    /// Characters whose *personal* asset (or corporation lookup) fetch failed —
+    /// reported to the UI (#1169). A corp hangar fetch failing is deliberately
+    /// not listed: it is the normal 403 for members without hangar roles, and
+    /// naming it on every "All characters" load would be noise.
+    failed_characters: Vec<String>,
+    /// `false` when any owner failed (including a corp hangar), so callers
+    /// don't cache a partial result as if it were complete (#612 rule).
+    complete: bool,
+}
+
 /// Walk the active selection's roster, gathering each character's personal
 /// assets plus their corp hangar — each corp fetched once, so alts in the same
 /// corp don't double up. A character's or corp's asset fetch failing skips just
-/// that owner; the rest of the roster is unaffected. The returned flag is
-/// `false` when any owner failed, so callers don't cache a partial result as if
-/// it were complete (#1169, the #612 rule).
-async fn gather_roster_assets(
-    auth_state: &AuthState,
-    dir: &std::path::Path,
-) -> (Vec<RosterAssetRow>, bool) {
+/// that owner; the rest of the roster is unaffected (#1169).
+async fn gather_roster_assets(auth_state: &AuthState, dir: &std::path::Path) -> RosterAssets {
     let mut complete = true;
+    let mut failed_characters: Vec<String> = Vec::new();
     let names = storage::character_names(dir);
     let mut out = Vec::new();
     let mut seen_corps: HashSet<i64> = HashSet::new();
@@ -68,10 +77,14 @@ async fn gather_roster_assets(
                 owner: cname.clone(),
                 is_corp: false,
             })),
-            Err(_) => complete = false,
+            Err(_) => {
+                complete = false;
+                crate::model::note_failed_character(&mut failed_characters, &cname);
+            }
         }
         let Ok(corp_id) = corporation_id(auth_state, cid).await else {
             complete = false;
+            crate::model::note_failed_character(&mut failed_characters, &cname);
             continue;
         };
         if !seen_corps.insert(corp_id) {
@@ -96,7 +109,11 @@ async fn gather_roster_assets(
             is_corp: true,
         }));
     }
-    (out, complete)
+    RosterAssets {
+        rows: out,
+        failed_characters,
+        complete,
+    }
 }
 
 // --- Shared cache entry (item-level, not aggregated) ---
@@ -186,6 +203,9 @@ pub struct AssetsPayload {
     pub sell_total: f64,
     pub buy_total: f64,
     pub volume_total: f64,
+    /// Characters whose assets couldn't be loaded and are missing from this
+    /// payload (#1169). Empty on a cache hit (only complete loads are cached).
+    pub failed_characters: Vec<String>,
 }
 
 // --- Tree internals (unchanged from original) ---
@@ -363,13 +383,20 @@ fn resolve_location_label(
 /// fresh, else gathered from ESI and cached. One entry per active-character
 /// selection, so the flat rows, the tree and the lightweight location/stock
 /// reads below all derive from the same single ESI fetch.
-async fn load_raw_assets(auth_state: &AuthState, dir: &std::path::Path) -> Vec<CachedRawAsset> {
+async fn load_raw_assets(
+    auth_state: &AuthState,
+    dir: &std::path::Path,
+) -> (Vec<CachedRawAsset>, Vec<String>) {
     let sel = storage::active_character(dir).unwrap_or(0);
     let cache_key = format!("assets_raw_v2_{sel}");
     if let Some(cached) = storage::cache_get(dir, &cache_key) {
-        return cached;
+        return (cached, Vec::new());
     }
-    let (roster, complete) = gather_roster_assets(auth_state, dir).await;
+    let RosterAssets {
+        rows: roster,
+        failed_characters,
+        complete,
+    } = gather_roster_assets(auth_state, dir).await;
     let raw: Vec<CachedRawAsset> = roster
         .into_iter()
         .map(|row| CachedRawAsset {
@@ -385,7 +412,7 @@ async fn load_raw_assets(auth_state: &AuthState, dir: &std::path::Path) -> Vec<C
     if complete {
         let _ = storage::cache_put(dir, &cache_key, &raw, 600);
     }
-    raw
+    (raw, failed_characters)
 }
 
 /// Item → direct-parent index, for resolving any item to the station or
@@ -541,7 +568,7 @@ pub async fn assets_locations(
     auth_state: State<'_, AuthState>,
 ) -> Result<Vec<AssetLocation>, String> {
     let dir = storage::app_data_dir(&app)?;
-    let raw = load_raw_assets(&auth_state, &dir).await;
+    let (raw, _) = load_raw_assets(&auth_state, &dir).await;
     let index = RootIndex::new(&raw);
     let root_ids = root_location_ids(&raw, &index);
     let labels = resolve_location_labels(&auth_state, &dir, &root_ids).await?;
@@ -569,7 +596,7 @@ pub async fn assets_stock_at_location(
     location_id: i64,
 ) -> Result<Vec<StockEntry>, String> {
     let dir = storage::app_data_dir(&app)?;
-    let raw = load_raw_assets(&auth_state, &dir).await;
+    let (raw, _) = load_raw_assets(&auth_state, &dir).await;
     let mut out: Vec<StockEntry> = stock_at_location(&raw, location_id)
         .into_iter()
         .map(|(type_id, quantity)| StockEntry { type_id, quantity })
@@ -590,7 +617,7 @@ pub async fn assets_load(
     market: State<'_, MarketService>,
 ) -> Result<AssetsPayload, String> {
     let dir = storage::app_data_dir(&app)?;
-    let raw = load_raw_assets(&auth_state, &dir).await;
+    let (raw, failed_characters) = load_raw_assets(&auth_state, &dir).await;
 
     if raw.is_empty() {
         return Ok(AssetsPayload {
@@ -599,6 +626,7 @@ pub async fn assets_load(
             sell_total: 0.0,
             buy_total: 0.0,
             volume_total: 0.0,
+            failed_characters,
         });
     }
 
@@ -721,6 +749,7 @@ pub async fn assets_load(
         sell_total,
         buy_total,
         volume_total,
+        failed_characters,
     })
 }
 

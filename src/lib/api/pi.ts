@@ -63,13 +63,19 @@ export interface ColonyView {
   needsAttention: boolean;
 }
 
+/** Colonies plus the characters whose colonies couldn't be (fully) loaded. */
+export interface PiOverview {
+  colonies: ColonyView[];
+  failedCharacters: string[];
+}
+
 /**
  * The character's planetary colonies: extraction/production, extractor restart
  * timers, storage usage, and the required-vs-available balance. Requires
  * `esi-planets.manage_planets.v1` (re-login if just enabled).
  */
-export function piOverview(): Promise<ColonyView[]> {
-  return invoke<ColonyView[]>("pi_overview");
+export function piOverview(): Promise<PiOverview> {
+  return invoke<PiOverview>("pi_overview");
 }
 /**
  * Set autopilot to the colony's system in-game. ESI's "open info window"

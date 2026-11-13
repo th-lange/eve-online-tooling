@@ -13,11 +13,12 @@ export const commands = {
    * "All characters" is active, else just the active one), each flagged as
    * undercut or top-of-book against the current best price **at the order's
    * own station**. A character whose orders can't be fetched is skipped
-   * rather than failing the whole call. Wrapped with the server's real ESI
+   * rather than failing the whole call; its name is listed in
+   * `failedCharacters` so the UI can say the result is partial (#1169). Wrapped with the server's real ESI
    * cache deadline (#885) so the frontend can derive its `staleTime`/
    * `DataAge` cue from `expiresAt` instead of a hand-set constant.
    */
-  async ordersList(): Promise<Result<Fresh<OrderRow[]>, AppError>> {
+  async ordersList(): Promise<Result<Fresh<OrdersPayload>, AppError>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("orders_list") };
     } catch (e) {
@@ -99,6 +100,11 @@ export type OrderRow = {
   undercut: boolean;
   issued: string;
 };
+/**
+ * Open orders plus the characters whose fetch failed and were skipped while
+ * aggregating several (#1169) — empty unless "All characters" is active.
+ */
+export type OrdersPayload = { rows: OrderRow[]; failedCharacters: string[] };
 
 /** tauri-specta globals **/
 
