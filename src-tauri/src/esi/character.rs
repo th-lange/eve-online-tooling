@@ -40,6 +40,41 @@ pub struct RawAsset {
     pub is_blueprint_copy: bool,
 }
 
+/// Run an authed ESI call with the character's access token, retrying **once**
+/// with a freshly refreshed token if ESI rejects it with 401/403.
+///
+/// The cached token can be dead even though its recorded expiry hasn't passed
+/// (laptop suspend, revocation elsewhere). Without this every authed call
+/// keeps failing — or reads as "empty"/"re-login to enable scope" — until the
+/// cache entry lapses (#1146). The refresh goes through
+/// [`AuthState::access_token_for`], so it stays single-flighted per character;
+/// [`AuthState::invalidate_rejected`] declines the retry when the rejected
+/// token is brand new, i.e. the 403 is a genuine missing scope/role.
+/// `op` gets the token and must build and send the request itself.
+pub(super) async fn with_token_retry<T, F, Fut>(
+    auth: &AuthState,
+    character_id: i64,
+    op: F,
+) -> Result<T, AuthError>
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = Result<T, EsiError>>,
+{
+    let token = auth.access_token_for(character_id).await?;
+    match op(token.clone()).await {
+        Err(EsiError::Http(e))
+            if matches!(
+                e.status(),
+                Some(reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN)
+            ) && auth.invalidate_rejected(character_id, &token) =>
+        {
+            let fresh = auth.access_token_for(character_id).await?;
+            Ok(op(fresh).await?)
+        }
+        other => Ok(other?),
+    }
+}
+
 /// Authenticated, paginated ESI GET for the given character. Conditionally
 /// cached per (character, path) — see [`super::cache::ConditionalCache`].
 async fn authed_get_paged<T: DeserializeOwned>(
@@ -47,19 +82,20 @@ async fn authed_get_paged<T: DeserializeOwned>(
     character_id: i64,
     path: &str,
 ) -> Result<Vec<T>, AuthError> {
-    let token = auth.access_token_for(character_id).await?;
     let url = format!("{ESI_BASE}{path}");
     let key = format!("c{character_id}:{path}");
-    let out = auth
-        .cache()
-        .get_paged(&key, |page| {
-            auth.http()
-                .get(&url)
-                .query(&[("page", page.to_string())])
-                .bearer_auth(&token)
-        })
-        .await?;
-    Ok(out)
+    let (url, key) = (&url, &key);
+    with_token_retry(auth, character_id, |token| async move {
+        auth.cache()
+            .get_paged(key, |page| {
+                auth.http()
+                    .get(url)
+                    .query(&[("page", page.to_string())])
+                    .bearer_auth(&token)
+            })
+            .await
+    })
+    .await
 }
 
 /// Like [`authed_get_paged`], but a 403 (a corp endpoint hit by a character
@@ -89,14 +125,15 @@ pub async fn authed_get<T: DeserializeOwned>(
     character_id: i64,
     path: &str,
 ) -> Result<T, AuthError> {
-    let token = auth.access_token_for(character_id).await?;
     let url = format!("{ESI_BASE}{path}");
     let key = format!("c{character_id}:{path}");
-    let val = auth
-        .cache()
-        .get_json(&key, || auth.http().get(&url).bearer_auth(&token))
-        .await?;
-    Ok(val)
+    let (url, key) = (&url, &key);
+    with_token_retry(auth, character_id, |token| async move {
+        auth.cache()
+            .get_json(key, || auth.http().get(url).bearer_auth(&token))
+            .await
+    })
+    .await
 }
 
 /// Like [`authed_get`], but distinguishes a 403 (missing scope, or a scope
@@ -141,15 +178,37 @@ pub async fn authed_get_paged_pub<T: DeserializeOwned>(
     authed_get_paged(auth, character_id, path).await
 }
 
+/// First id of the player-structure range (≥ 1 trillion). `/universe/names/`
+/// can never resolve these (they need the authed `/universe/structures/{id}/`),
+/// so they are dropped before a request is spent on them.
+pub(crate) const STRUCTURE_ID_MIN: i64 = 1_000_000_000_000;
+
 /// Public `/universe/names/` resolver: ids → names (characters, corps, factions,
 /// systems, types). Unauthenticated POST; unknown ids are simply absent.
 ///
 /// ESI **fails the whole batch with a 404 if any single id is unresolvable**, so
 /// a naive request would drop every name (this is why hostile corps showed as
-/// ids). We split-and-retry on failure to isolate the bad id, so one bad id only
-/// costs itself, not the rest of the batch.
+/// ids). On a 400/404 we split the batch and retry the halves to isolate the
+/// bad id, so one bad id only costs itself. Any *other* failure — transport
+/// error, 5xx, 420, 429 — says nothing about the ids, so the whole resolve
+/// stops there and returns what it has: bisecting an outage would only multiply
+/// failing (and error-budget-burning) requests (#1145).
 pub async fn resolve_names(
     auth: &AuthState,
+    ids: &[i64],
+) -> std::collections::HashMap<i64, String> {
+    resolve_names_at(
+        auth.http(),
+        &format!("{ESI_BASE}/latest/universe/names/"),
+        ids,
+    )
+    .await
+}
+
+/// [`resolve_names`] against an explicit endpoint URL (so tests can stub it).
+async fn resolve_names_at(
+    http: &reqwest::Client,
+    url: &str,
     ids: &[i64],
 ) -> std::collections::HashMap<i64, String> {
     #[derive(Deserialize)]
@@ -159,13 +218,15 @@ pub async fn resolve_names(
     }
 
     let mut out = std::collections::HashMap::new();
-    if ids.is_empty() {
-        return out;
-    }
 
-    // Dedup (callers pass many duplicate corp/alliance ids) and seed the work
-    // stack with ESI-sized batches (cap 1000 per call).
-    let mut unique: Vec<i64> = ids.iter().copied().filter(|&id| id > 0).collect();
+    // Dedup (callers pass many duplicate corp/alliance ids), drop ids this
+    // endpoint can't resolve, and seed the work stack with ESI-sized batches
+    // (cap 1000 per call).
+    let mut unique: Vec<i64> = ids
+        .iter()
+        .copied()
+        .filter(|&id| id > 0 && id < STRUCTURE_ID_MIN)
+        .collect();
     unique.sort_unstable();
     unique.dedup();
     let mut stack: Vec<Vec<i64>> = unique.chunks(1000).map(<[i64]>::to_vec).collect();
@@ -174,27 +235,29 @@ pub async fn resolve_names(
         if batch.is_empty() {
             continue;
         }
-        let result = post_json::<Vec<NameRow>, _>(
-            auth.http(),
-            &format!("{ESI_BASE}/latest/universe/names/"),
-            &batch,
-        )
-        .await;
-
-        match result {
-            Some(rows) => {
+        let Ok(resp) = send_retrying(|| http.post(url).json(&batch)).await else {
+            break; // transport failure: offline / ESI unreachable
+        };
+        let status = resp.status();
+        if status.is_success() {
+            if let Ok(rows) = resp.json::<Vec<NameRow>>().await {
                 for r in rows {
                     out.insert(r.id, r.name);
                 }
             }
-            // Failed — a single id can poison the whole batch. Split to isolate
-            // it; a lone id that still fails is simply unresolvable and dropped.
-            None if batch.len() > 1 => {
+        } else if matches!(
+            status,
+            reqwest::StatusCode::BAD_REQUEST | reqwest::StatusCode::NOT_FOUND
+        ) {
+            // A bad id poisoned the batch: split to isolate it; a lone id that
+            // still fails is simply unresolvable and dropped.
+            if batch.len() > 1 {
                 let mid = batch.len() / 2;
                 stack.push(batch[mid..].to_vec());
                 stack.push(batch[..mid].to_vec());
             }
-            None => {}
+        } else {
+            break; // 5xx / 420 / 429 / …: not about the ids — don't bisect
         }
     }
     out
@@ -575,13 +638,21 @@ pub struct StructureInfo {
     pub solar_system_id: i64,
 }
 
+/// Most structure lookups in flight at once. ESI's error budget is checked
+/// before a request goes out, not when its 403 comes back, so an unbounded
+/// burst of inaccessible structures sails past the guard together.
+const STRUCTURE_LOOKUP_CONCURRENCY: usize = 6;
+
 /// Resolve player-structure names + home system ids via authenticated
-/// `GET /universe/structures/{id}/`. One request per structure, issued
-/// concurrently — there is no batch endpoint that resolves arbitrary ids.
-/// A 403/404 on an individual structure (not owned by or accessible to the
-/// character) is swallowed as absent; the caller falls back to a generic
-/// label for anything not resolved. All requests flow through
-/// [`send_retrying`] so the ESI error budget is respected.
+/// `GET /universe/structures/{id}/`. One request per structure — there is no
+/// batch endpoint that resolves arbitrary ids — with bounded concurrency.
+/// Outcomes are remembered in [`AuthState`]: names for a day, and a 403/404
+/// (structure not accessible to the character) for a short while, so repeated
+/// Assets loads don't re-spend error budget on structures the character can no
+/// longer dock at. Other failures (5xx, transport) are not remembered. The
+/// caller falls back to a generic label for anything not resolved. All
+/// requests flow through [`send_retrying`] so the ESI error budget is
+/// respected.
 ///
 /// Returns `HashMap<structure_id, (name, solar_system_id)>`.
 pub async fn fetch_structure_info(
@@ -597,28 +668,64 @@ pub async fn fetch_structure_info(
         Ok(t) => t,
         Err(_) => return HashMap::new(),
     };
+    lookup_structures(auth, character_id, &token, ESI_BASE, structure_ids).await
+}
+
+/// [`fetch_structure_info`] with the token and API base supplied (testable).
+async fn lookup_structures(
+    auth: &AuthState,
+    character_id: i64,
+    token: &str,
+    base: &str,
+    structure_ids: &[i64],
+) -> HashMap<i64, (String, i64)> {
+    use super::token_cache::StructureLookup;
+    use futures_util::StreamExt;
+
+    let mut out = HashMap::new();
+    let mut todo = Vec::new();
+    for &id in structure_ids {
+        match auth.structure_cached(character_id, id) {
+            Some(StructureLookup::Found(name, system)) => {
+                out.insert(id, (name, system));
+            }
+            Some(StructureLookup::Denied) => {}
+            None if !todo.contains(&id) => todo.push(id),
+            None => {}
+        }
+    }
 
     let http = auth.http();
-    let fetches = structure_ids.iter().map(|&id| {
-        let url = format!("{ESI_BASE}/latest/universe/structures/{id}/");
-        let token = &token;
-        async move {
+    let lookups = futures_util::stream::iter(todo)
+        .map(|id| async move {
+            let url = format!("{base}/latest/universe/structures/{id}/");
             let resp = send_retrying(|| http.get(&url).bearer_auth(token))
                 .await
                 .ok()?;
-            if !resp.status().is_success() {
-                return None;
+            let status = resp.status();
+            if status.is_success() {
+                let info: StructureInfo = resp.json().await.ok()?;
+                Some((id, StructureLookup::Found(info.name, info.solar_system_id)))
+            } else if matches!(
+                status,
+                reqwest::StatusCode::FORBIDDEN | reqwest::StatusCode::NOT_FOUND
+            ) {
+                Some((id, StructureLookup::Denied))
+            } else {
+                None
             }
-            let info: StructureInfo = resp.json().await.ok()?;
-            Some((id, (info.name, info.solar_system_id)))
-        }
-    });
+        })
+        .buffer_unordered(STRUCTURE_LOOKUP_CONCURRENCY)
+        .collect::<Vec<_>>()
+        .await;
 
-    futures_util::future::join_all(fetches)
-        .await
-        .into_iter()
-        .flatten()
-        .collect()
+    for (id, lookup) in lookups.into_iter().flatten() {
+        if let StructureLookup::Found(name, system) = &lookup {
+            out.insert(id, (name.clone(), *system));
+        }
+        auth.remember_structure(character_id, id, lookup);
+    }
+    out
 }
 
 /// An in-game saved fitting from ESI (`/characters|corporations/{id}/fittings/`).
@@ -657,12 +764,15 @@ pub async fn fetch_character_fittings(
     auth: &AuthState,
     character_id: i64,
 ) -> Result<Vec<EsiFitting>, AuthError> {
-    let token = auth.access_token_for(character_id).await?;
     let url = format!("{ESI_BASE}/latest/characters/{character_id}/fittings/");
-    let resp = send_retrying(|| auth.http().get(&url).bearer_auth(&token))
-        .await?
-        .error_for_status()?;
-    Ok(resp.json().await?)
+    let url = &url;
+    with_token_retry(auth, character_id, |token| async move {
+        let resp = send_retrying(|| auth.http().get(url).bearer_auth(&token))
+            .await?
+            .error_for_status()?;
+        Ok(resp.json().await?)
+    })
+    .await
 }
 
 /// The character's current ship, from `/characters/{id}/ship/`. Requires the
@@ -737,13 +847,24 @@ pub async fn fetch_corp_fittings(
     character_id: i64,
     corporation_id: i64,
 ) -> Result<Vec<EsiFitting>, AuthError> {
-    let token = auth.access_token_for(character_id).await?;
     let url = format!("{ESI_BASE}/latest/corporations/{corporation_id}/fittings/");
-    let resp = send_retrying(|| auth.http().get(&url).bearer_auth(&token)).await?;
-    if resp.status() == reqwest::StatusCode::FORBIDDEN {
-        return Ok(Vec::new());
+    let url = &url;
+    let fetched = with_token_retry(auth, character_id, |token| async move {
+        let resp = send_retrying(|| auth.http().get(url).bearer_auth(&token))
+            .await?
+            .error_for_status()?;
+        Ok(resp.json().await?)
+    })
+    .await;
+    match fetched {
+        // Still 403 after the fresh-token retry: no scope or role — "none".
+        Err(AuthError::Esi(EsiError::Http(e)))
+            if e.status() == Some(reqwest::StatusCode::FORBIDDEN) =>
+        {
+            Ok(Vec::new())
+        }
+        other => other,
     }
-    Ok(resp.error_for_status()?.json().await?)
 }
 
 #[cfg(test)]
@@ -761,5 +882,164 @@ mod tests {
         assert_eq!(bps[0].type_id, 12345);
         assert_eq!(bps[0].material_efficiency, 10);
         assert_eq!(bps[1].runs, 30);
+    }
+
+    // ── stub HTTP server shared by the resolver/structure tests ─────────────
+
+    type Seen = std::sync::Arc<parking_lot::Mutex<Vec<(String, String)>>>;
+
+    /// A loopback server answering every request via `handler(url, body)` →
+    /// `(status, body)`, recording `(url, body)` of each. Stops when dropped.
+    struct Stub {
+        base: String,
+        seen: Seen,
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl Drop for Stub {
+        fn drop(&mut self) {
+            self.stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    fn stub(handler: impl Fn(&str, &str) -> (u16, String) + Send + 'static) -> Stub {
+        use std::sync::atomic::Ordering;
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("bind stub");
+        let addr = server.server_addr().to_ip().expect("addr");
+        let seen: Seen = Default::default();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (log, flag) = (seen.clone(), stop.clone());
+        std::thread::spawn(move || {
+            while !flag.load(Ordering::SeqCst) {
+                let Ok(Some(mut req)) = server.recv_timeout(std::time::Duration::from_millis(50))
+                else {
+                    continue;
+                };
+                let mut body = String::new();
+                let _ = std::io::Read::read_to_string(req.as_reader(), &mut body);
+                let url = req.url().to_string();
+                let (status, reply) = handler(&url, &body);
+                log.lock().push((url, body));
+                let _ =
+                    req.respond(tiny_http::Response::from_string(reply).with_status_code(status));
+            }
+        });
+        Stub {
+            base: format!("http://{addr}"),
+            seen,
+            stop,
+        }
+    }
+
+    fn run<F: std::future::Future>(f: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(f)
+    }
+
+    /// 404s a batch containing the poisoned id 13, like ESI; otherwise echoes
+    /// every id back as `name-<id>`.
+    fn names_handler(_url: &str, body: &str) -> (u16, String) {
+        let ids: Vec<i64> = serde_json::from_str(body).unwrap();
+        if ids.contains(&13) {
+            return (404, r#"{"error":"Invalid IDs"}"#.into());
+        }
+        let rows: Vec<_> = ids
+            .iter()
+            .map(|id| serde_json::json!({"id": id, "name": format!("name-{id}")}))
+            .collect();
+        (200, serde_json::Value::Array(rows).to_string())
+    }
+
+    #[test]
+    fn resolve_names_bisects_a_404_down_to_the_bad_id() {
+        let server = stub(names_handler);
+        let http = reqwest::Client::new();
+        let out = run(resolve_names_at(&http, &server.base, &[1, 2, 13, 4]));
+        let mut ids: Vec<_> = out.keys().copied().collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec![1, 2, 4], "only the poisoned id is lost");
+    }
+
+    #[test]
+    fn resolve_names_aborts_instead_of_bisecting_on_a_rate_limit() {
+        // 429 + a huge Retry-After is returned immediately by send_retrying;
+        // the resolver must stop there rather than split 100 ids into ~200
+        // more failing requests.
+        let server = {
+            let s = tiny_http::Server::http("127.0.0.1:0").expect("bind");
+            let addr = s.server_addr().to_ip().expect("addr");
+            let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let counter = hits.clone();
+            std::thread::spawn(move || {
+                while let Ok(req) = s.recv() {
+                    counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let h =
+                        tiny_http::Header::from_bytes(&b"Retry-After"[..], &b"3600"[..]).unwrap();
+                    let _ = req.respond(
+                        tiny_http::Response::from_string("")
+                            .with_status_code(429)
+                            .with_header(h),
+                    );
+                }
+            });
+            (format!("http://{addr}"), hits)
+        };
+        let ids: Vec<i64> = (1..=100).collect();
+        let out = run(resolve_names_at(&reqwest::Client::new(), &server.0, &ids));
+        assert!(out.is_empty());
+        assert_eq!(server.1.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn resolve_names_never_sends_structure_ids() {
+        let server = stub(names_handler);
+        let http = reqwest::Client::new();
+        let structure = STRUCTURE_ID_MIN + 5;
+        let out = run(resolve_names_at(&http, &server.base, &[structure, 7]));
+        assert_eq!(out.len(), 1);
+        let seen = server.seen.lock();
+        assert_eq!(seen.len(), 1);
+        assert!(!seen[0].1.contains(&structure.to_string()));
+    }
+
+    #[test]
+    fn structure_lookups_negative_cache_denied_ids_and_cache_names() {
+        let server = stub(|url, _| {
+            if url.contains("/777/") {
+                (403, r#"{"error":"forbidden"}"#.into())
+            } else {
+                (
+                    200,
+                    r#"{"name":"Fortizar","solar_system_id":30000142}"#.into(),
+                )
+            }
+        });
+        let auth = AuthState::new();
+        let ids = [888, 777];
+        let first = run(lookup_structures(&auth, 1, "tok", &server.base, &ids));
+        assert_eq!(first.get(&888), Some(&("Fortizar".to_string(), 30000142)));
+        assert!(!first.contains_key(&777));
+        assert_eq!(server.seen.lock().len(), 2);
+
+        // Second load: both outcomes come from memory, zero requests.
+        let second = run(lookup_structures(&auth, 1, "tok", &server.base, &ids));
+        assert_eq!(second, first);
+        assert_eq!(server.seen.lock().len(), 2, "no repeat requests");
+
+        // The denial is per character: another character still asks.
+        run(lookup_structures(&auth, 2, "tok", &server.base, &[777]));
+        assert_eq!(server.seen.lock().len(), 3);
+    }
+
+    #[test]
+    fn structure_lookup_does_not_cache_server_errors() {
+        let server = stub(|_, _| (400, "{}".into()));
+        let auth = AuthState::new();
+        run(lookup_structures(&auth, 1, "tok", &server.base, &[5]));
+        run(lookup_structures(&auth, 1, "tok", &server.base, &[5]));
+        assert_eq!(server.seen.lock().len(), 2, "a 400 is not remembered");
     }
 }

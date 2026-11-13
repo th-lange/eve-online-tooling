@@ -10,7 +10,8 @@
 export const commands = {
   /**
    * Log in (or re-authorize) a character via EVE SSO and add it to the roster.
-   * Opens the browser and waits for the loopback redirect.
+   * Opens the browser and waits for the loopback redirect. A login already
+   * waiting is cancelled (superseded); [`auth_login_cancel`] aborts this one.
    */
   async authLogin(): Promise<Result<Character, AppError>> {
     try {
@@ -19,6 +20,14 @@ export const commands = {
       if (e instanceof Error) throw e;
       else return { status: "error", error: e as AppError };
     }
+  },
+  /**
+   * Abort the login currently waiting for its browser redirect (no-op if none).
+   * The pending `auth_login` call resolves with a "login cancelled" error and
+   * the loopback port is freed.
+   */
+  async authLoginCancel(): Promise<void> {
+    await TAURI_INVOKE("auth_login_cancel");
   },
   /**
    * The current character roster.
@@ -149,8 +158,16 @@ export const commands = {
     }
   },
   /**
-   * Remove a character: drop it from the roster, delete its keychain entry, and
-   * forget any cached token. Returns the updated roster.
+   * Remove a character: revoke its refresh token at the SSO (best effort), delete
+   * it from the keychain, forget cached tokens/data, and drop the character from
+   * the roster. Returns the updated roster.
+   *
+   * Keychain access is blocking OS I/O (it can sit on an unlock prompt), so it
+   * runs on the blocking pool. If the keychain delete fails the character is
+   * *kept* in the roster so the user can retry — dropping it would orphan the
+   * token with no UI to remove it — and the error is returned; in-memory state
+   * and cached ESI data are purged regardless, and a failed roster save does
+   * not stop that either.
    */
   async authLogout(
     characterId: number,

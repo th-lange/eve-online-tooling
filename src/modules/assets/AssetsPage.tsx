@@ -1,5 +1,10 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useIsMutating,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import {
   ALL_CHARACTERS,
   activeCharacter,
@@ -83,9 +88,13 @@ function Workbench() {
     queryFn: authCharacters,
   });
   const login = useMutation({
+    mutationKey: authKeys.login,
     mutationFn: authLogin,
     onSuccess: () => qc.invalidateQueries({ queryKey: authKeys.all }),
   });
+  // Disabled while *any* login is pending (e.g. one started from the sidebar):
+  // there is a single loopback server, so a second attempt would supersede it.
+  const loginPending = useIsMutating({ mutationKey: authKeys.login }) > 0;
 
   // ── Flat view ────────────────────────────────────────────────────────────
 
@@ -219,10 +228,10 @@ function Workbench() {
           Corp hangar data requires re-login with the current scopes.{" "}
           <button
             onClick={() => login.mutate()}
-            disabled={login.isPending}
+            disabled={loginPending}
             className="underline disabled:opacity-50"
           >
-            {login.isPending ? "Opening browser…" : "Re-login"}
+            {loginPending ? "Waiting for login…" : "Re-login"}
           </button>
         </p>
       )}

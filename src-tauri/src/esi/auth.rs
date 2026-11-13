@@ -12,7 +12,7 @@
 
 pub use super::oauth_exchange::{
     authorize_url, bind_loopback, capture_code, character_from_token, exchange_code, generate_pkce,
-    random_state,
+    random_state, revoke_refresh_token,
 };
 pub use super::token_cache::{cache_login_token, AuthState};
 
@@ -24,8 +24,10 @@ pub enum AuthError {
     Http(#[from] reqwest::Error),
     #[error("login timed out")]
     Timeout,
-    #[error("state mismatch (possible CSRF) — login aborted")]
-    StateMismatch,
+    #[error("login cancelled")]
+    Cancelled,
+    #[error("login was not completed: {0}")]
+    Denied(String),
     #[error("could not parse the SSO token: {0}")]
     Jwt(String),
     #[error("loopback server error: {0}")]

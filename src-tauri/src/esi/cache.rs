@@ -21,7 +21,7 @@ use crate::net::conditional_cache::{
 
 use super::error::EsiError;
 use super::net::send_retrying;
-use super::pagination::{collect_remaining_pages, walk_pages};
+use super::pagination::{collect_remaining_pages, walk_pages, x_pages};
 
 pub use conditional_cache::cache_key;
 
@@ -56,6 +56,11 @@ impl ConditionalCache {
         self.0.expires_at(key).await
     }
 
+    /// Delete every cached response whose key starts with `key_prefix`.
+    pub(crate) async fn remove_prefix(&self, key_prefix: &str) {
+        self.0.remove_prefix(key_prefix).await;
+    }
+
     /// Startup maintenance: delete on-disk cache files whose TTL has been
     /// expired for longer than the retention window. Synchronous — this runs
     /// once, early, in the Tauri `setup` closure before the async runtime is
@@ -82,10 +87,13 @@ impl ConditionalCache {
             .await?)
     }
 
-    /// Conditional GET of a paginated collection. ETag/Expires apply to page 1
-    /// and gate the whole walk: a 304 on page 1 serves the cached concatenation;
-    /// a 200 re-walks every page. `build_page(page)` produces the request for one
-    /// page (the cache adds `If-None-Match` to page 1).
+    /// Conditional GET of a paginated collection. `Expires` gates the whole
+    /// walk. ESI ETags are per *page*, so a 304 on page 1 says nothing about
+    /// pages 2..N: only a single-page collection keeps its ETag and may be
+    /// revalidated with a cheap 304. A multi-page collection is stored without
+    /// one and re-walked in full once stale, so a change on page 2+ is never
+    /// served from cache (#1144). `build_page(page)` produces the request for
+    /// one page.
     pub async fn get_paged<T, F>(&self, key: &str, build_page: F) -> Result<Vec<T>, EsiError>
     where
         T: DeserializeOwned,
@@ -118,8 +126,14 @@ impl ConditionalCache {
             }
         }
         let resp = resp.error_for_status()?;
-        let etag = conditional_cache::etag_of(resp.headers());
         let ttl = conditional_cache::ttl_from(resp.headers());
+        // Page 1's ETag only validates page 1; keep it only when that is the
+        // whole collection.
+        let etag = if x_pages(resp.headers()) <= 1 {
+            conditional_cache::etag_of(resp.headers())
+        } else {
+            None
+        };
         let all = collect_remaining_pages(resp, &build_page).await?;
         let all = Value::Array(all);
         let body = serde_json::to_string(&all)?;
@@ -172,6 +186,67 @@ mod tests {
                 cache.get_json("bad-key", || client.get(&url)).await;
             assert!(result.is_err());
             assert!(cache.0.load("bad-key").await.is_none());
+
+            server_thread.join().expect("server thread");
+            let _ = std::fs::remove_dir_all(&dir);
+        });
+    }
+
+    /// #1144: page 1 is byte-identical (the stub would 304 it) but page 2
+    /// changed — the second read must return the new page-2 rows, not the
+    /// stale cached concatenation.
+    #[test]
+    fn multi_page_collection_is_not_served_stale_on_a_page_1_304() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let server = tiny_http::Server::http("127.0.0.1:0").expect("bind loopback");
+            let addr = server.server_addr().to_ip().expect("ip addr");
+            let server_thread = std::thread::spawn(move || {
+                let mut page2_gen = 0;
+                // Two full walks: 2 requests each when no 304 shortcut applies.
+                for _ in 0..4 {
+                    let request = server.recv().expect("request");
+                    let url = request.url().to_string();
+                    let revalidating = request
+                        .headers()
+                        .iter()
+                        .any(|h| h.field.equiv("If-None-Match"));
+                    let hdr = |k: &str, v: &str| {
+                        tiny_http::Header::from_bytes(k.as_bytes(), v.as_bytes()).unwrap()
+                    };
+                    let response = if url.contains("page=1") {
+                        let page1 = if revalidating {
+                            tiny_http::Response::from_string("").with_status_code(304)
+                        } else {
+                            tiny_http::Response::from_string("[1]")
+                        };
+                        page1
+                            .with_header(hdr("ETag", "\"p1\""))
+                            .with_header(hdr("X-Pages", "2"))
+                            .with_header(hdr("Cache-Control", "max-age=0"))
+                    } else {
+                        page2_gen += 1;
+                        tiny_http::Response::from_string(format!("[{}]", 10 + page2_gen))
+                            .with_header(hdr("Cache-Control", "max-age=0"))
+                    };
+                    let _ = request.respond(response);
+                }
+            });
+
+            let dir = std::env::temp_dir().join(format!("eve-esi-paged-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let cache = ConditionalCache::on_disk(dir.clone());
+            let client = reqwest::Client::new();
+            let url = format!("http://{addr}/");
+            let build = |page: u32| client.get(&url).query(&[("page", page.to_string())]);
+
+            let first: Vec<i64> = cache.get_paged("paged", build).await.expect("first");
+            assert_eq!(first, vec![1, 11]);
+            let second: Vec<i64> = cache.get_paged("paged", build).await.expect("second");
+            assert_eq!(second, vec![1, 12], "page 2's change must be visible");
 
             server_thread.join().expect("server thread");
             let _ = std::fs::remove_dir_all(&dir);

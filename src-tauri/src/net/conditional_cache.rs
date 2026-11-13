@@ -213,6 +213,31 @@ impl ConditionalCache {
         }
     }
 
+    /// Delete every entry whose key starts with `key_prefix`, from memory and
+    /// disk. Used when a character is removed so their private responses don't
+    /// outlive them. The prefix is matched on the sanitised on-disk name, which
+    /// is injective enough here: keys are `c{id}:…` and the sanitised `c{id}_`
+    /// prefix can't match another id's files.
+    pub(crate) async fn remove_prefix(&self, key_prefix: &str) {
+        self.mem.lock().retain(|k, _| !k.starts_with(key_prefix));
+        let Some(dir) = self.dir.as_ref().map(|d| d.join("esi-cache")) else {
+            return;
+        };
+        let file_prefix = sanitize(key_prefix);
+        let Ok(mut entries) = tokio::fs::read_dir(&dir).await else {
+            return;
+        };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(&file_prefix)
+            {
+                let _ = tokio::fs::remove_file(entry.path()).await;
+            }
+        }
+    }
+
     /// Push a cached entry's freshness deadline forward after a 304, keeping the
     /// body. No-op if the entry has since vanished.
     pub(crate) async fn touch(&self, key: &str, ttl: u64) {

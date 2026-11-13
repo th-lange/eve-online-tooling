@@ -161,6 +161,9 @@ export const authKeys = {
   active: ["auth", "active"] as const,
   /** Character ids whose rotated refresh token couldn't be saved. */
   persistFailures: ["auth", "persistFailures"] as const,
+  /** Mutation key shared by every "log in via SSO" button, so they all see
+   *  (and are disabled by) one pending login. */
+  login: ["auth", "login"] as const,
 };
 
 // --- Ammo ---

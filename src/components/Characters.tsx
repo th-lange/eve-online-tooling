@@ -1,14 +1,21 @@
-import { useEffect } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import {
+  useIsMutating,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { X } from "lucide-react";
 import {
   ALL_CHARACTERS,
   activeCharacter,
   authCharacters,
   authLogin,
+  authLoginCancel,
   authLogout,
   authPersistFailures,
   errorMessage,
+  onAuthLoginUrl,
   onAuthPersistFailed,
   setActiveCharacter,
 } from "../lib/api";
@@ -85,7 +92,51 @@ export function Characters() {
     queryKey: authKeys.active,
     queryFn: activeCharacter,
   });
-  const login = useMutation({ mutationFn: authLogin, onSuccess: invalidate });
+  const login = useMutation({
+    mutationKey: authKeys.login,
+    mutationFn: authLogin,
+    onSuccess: invalidate,
+  });
+  // Any login in flight — including one started from another page's button —
+  // since there is only one loopback server to wait on.
+  const loginPending = useIsMutating({ mutationKey: authKeys.login }) > 0;
+  // The authorize URL of the pending login, for the "browser didn't open"
+  // fallback. Only the URL (PKCE challenge + state) reaches the frontend.
+  const [loginUrl, setLoginUrl] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    onAuthLoginUrl((url) => {
+      setLoginUrl(url);
+      setLinkCopied(false);
+    })
+      .then((u) => {
+        if (cancelled) u();
+        else unlisten = u;
+      })
+      .catch((e) => console.error("Subscribing to login events failed", e));
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+  useEffect(() => {
+    if (!loginPending) setLoginUrl(null);
+  }, [loginPending]);
+  const cancelLogin = () => {
+    // Detach this button's mutation first so the "login cancelled" rejection
+    // doesn't surface as a failure.
+    login.reset();
+    authLoginCancel().catch((e) => console.error("Cancelling login failed", e));
+  };
+  const copyLoginLink = () => {
+    if (!loginUrl) return;
+    navigator.clipboard
+      .writeText(loginUrl)
+      .then(() => setLinkCopied(true))
+      .catch((e) => console.error("Copying the login link failed", e));
+  };
   const persistFailures = useQuery({
     queryKey: authKeys.persistFailures,
     queryFn: authPersistFailures,
@@ -177,11 +228,30 @@ export function Characters() {
 
       <button
         onClick={() => login.mutate()}
-        disabled={login.isPending}
+        disabled={loginPending}
         className="mt-2 w-full rounded border border-zinc-700 px-2 py-1 text-xs text-zinc-300 hover:bg-zinc-800 disabled:opacity-50"
       >
-        {login.isPending ? "Waiting for login…" : "+ Add character"}
+        {loginPending ? "Waiting for login…" : "+ Add character"}
       </button>
+
+      {loginPending && (
+        <div className="mt-1 flex items-center gap-2 text-xs text-zinc-400">
+          <span>Browser didn't open?</span>
+          <button
+            onClick={copyLoginLink}
+            disabled={!loginUrl}
+            className="underline hover:text-zinc-200 disabled:opacity-50"
+          >
+            {linkCopied ? "Link copied" : "Copy login link"}
+          </button>
+          <button
+            onClick={cancelLogin}
+            className="ml-auto underline hover:text-rose-400"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
 
       {login.isError && (
         <p className="mt-1 text-xs text-rose-400">
