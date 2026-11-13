@@ -1,0 +1,42 @@
+# Weekly dependency updates. Minor/patch bumps are grouped into one PR per
+# ecosystem; majors stay individual PRs for a deliberate review.
+#
+# The Tauri npm packages and Rust crates MUST move together: `tauri build`
+# aborts on a major.minor mismatch (v0.79.0, #1200), and CI's
+# scripts/check-tauri-versions.mjs fails a PR that skews them. So one group
+# per ecosystem collects them (any update type) into a single PR.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      tauri:
+        patterns:
+          - "@tauri-apps/*"
+      minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      tauri:
+        patterns:
+          - "tauri"
+          - "tauri-*"
+      minor-and-patch:
+        update-types: [minor, patch]

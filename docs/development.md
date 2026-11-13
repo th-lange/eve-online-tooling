@@ -12,7 +12,7 @@ character data come from EVE's **ESI** API; blueprint/material data from the
 
 ### 1. Install prerequisites
 
-- **Node.js** (18+) and npm.
+- **Node.js** `^20.19.0 || >=22.12.0` (the floor of the locked Vite 7; CI and releases use 26) and npm.
 - **Rust** via [rustup](https://rustup.rs/):
   ```bash
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -48,12 +48,17 @@ one-off.
 > still hit it (an unusual snap layout), launch from a non-snap terminal or run:
 > `env -u GST_PLUGIN_SYSTEM_PATH -u GST_PLUGIN_SCANNER -u GST_PLUGIN_PATH_1_0 -u LD_LIBRARY_PATH npm run tauri dev`.
 
-### 4. (Later) EVE SSO
+### 4. EVE SSO
 
-Reading character assets/blueprints needs a developer application from
-[developers.eveonline.com](https://developers.eveonline.com) — a **Client ID**
-and the loopback callback **`http://localhost:8765/callback`**. Not required for
-the market/production calculations, which use public data.
+Logging a character in works out of the box: the app ships with its own public
+EVE developer-application Client ID (`CLIENT_ID` in
+`src-tauri/src/esi/oauth_exchange.rs`, native PKCE, no secret) and the loopback
+callback `http://localhost:8765/callback`. The requested scopes are the `SCOPES`
+list in the same file. Only if you point a fork at your *own* application at
+[developers.eveonline.com](https://developers.eveonline.com) do you need to
+register your own Client ID, that callback, and enable every scope in `SCOPES`
+(SSO rejects the whole login otherwise). Not required for the market/production
+calculations, which use public data.
 
 ## Common commands
 
@@ -62,12 +67,19 @@ the market/production calculations, which use public data.
 | `npm run tauri dev` | Run the desktop app (hot reload) |
 | `npm run tauri build` | Build distributable bundles |
 | `npm run build` | Type-check + build the frontend |
+| `npm run generate:bindings` | Regenerate the tauri-specta TS bindings (CI fails if the committed files drift) |
+| `node scripts/check-tauri-versions.mjs` | Check Tauri crate/npm major.minor versions match in the lockfiles |
 | `npm run test` | Frontend unit tests (Vitest) |
 | `cd src-tauri && cargo test` | Rust unit tests |
 
 Every PR runs two GitHub Actions workflows: **CI**
-(`.github/workflows/ci.yml`) — the merge gate, running everything the table
-above lists plus lint/format/clippy/fmt — and **Security**
+(`.github/workflows/ci.yml`) — the merge gate: lint, format, tests,
+`npm run build`, the bindings drift check, the Tauri version-alignment check,
+`cargo fmt`/`clippy`/`test`. `npm run tauri build` is **not** part of every PR:
+a Linux `tauri build --bundles appimage,deb` job runs only for release PRs
+(`chore/v*`) and PRs/pushes that touch `Cargo.toml`, `Cargo.lock`,
+`package.json`, `package-lock.json` or `tauri.conf.json`. Windows/macOS-only code
+is compiled only by the post-merge cache warm and the Release workflow. And **Security**
 (`.github/workflows/security.yml`) — CodeQL (JS/TS + Rust) and dependency
 audits (`npm audit`, `cargo audit`). Security also runs weekly against
 `main`, so newly-disclosed advisories surface without a new PR. Its audit

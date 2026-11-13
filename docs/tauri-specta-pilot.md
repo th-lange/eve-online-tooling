@@ -18,15 +18,15 @@ each rc has broken the public API.
   `tauri::generate_handler!` list in `lib.rs`, which stays as the real
   runtime dispatch table for all 300+ commands. Wired into `setup()` under
   `#[cfg(debug_assertions)]` for live dev reloads, and exposed as a plain
-  `#[test]` (`export_orders_bindings`) so CI/build tooling can regenerate the
+  `#[test]` (`export_bindings_regenerate`, behind the `export-bindings` feature) so CI/build tooling can regenerate the
   file with `cargo test` alone, without booting the Tauri app or needing
   Node on the Rust side.
 - `npm run generate:bindings` chains that `cargo test` with a `prettier
   --write` pass (kept as a separate npm-side step, not a Rust-side
   `Typescript::formatter()` hook, so the Rust test itself has zero Node
   dependency and the plain `cargo test` job in CI is unaffected).
-  `npm run build` now runs `generate:bindings` before `tsc && vite build`,
-  so one command regenerates and typechecks.
+  `npm run build` does **not** run `generate:bindings`; CI runs it as its own
+  step and fails if the committed files drift.
 - `src/lib/api/orders.ts` shrank from a 22-line hand-mirrored interface +
   `invoke()` call to a 15-line re-export of the generated `OrderRow` type
   plus a thin `marketOrders()` wrapper that unwraps tauri-specta's

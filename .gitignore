@@ -33,3 +33,4 @@ dist-ssr
 # committed; copy .env.example to .env. A real env var overrides it, so CI
 # (which injects repository secrets) is unaffected.
 .env
+.mcp.json
