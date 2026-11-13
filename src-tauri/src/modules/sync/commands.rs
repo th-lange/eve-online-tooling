@@ -16,6 +16,11 @@ use serde::Serialize;
 pub struct SyncFile {
     pub name: String,
     pub content: String,
+    /// True when the file exists but couldn't be read (permissions, not UTF-8,
+    /// a sync client holding it). `content` is empty then. Reported rather than
+    /// dropped so the frontend treats it as "present but unusable" and doesn't
+    /// overwrite it as if it were absent (#1176).
+    pub unreadable: bool,
 }
 
 /// Every top-level `*.json` file directly inside `dir` (no recursion).
@@ -35,10 +40,15 @@ pub fn sync_folder_read(dir: String) -> Result<Vec<SyncFile>, String> {
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        // One unreadable file must not abort the whole read.
+        let (content, unreadable) = match fs::read_to_string(&path) {
+            Ok(content) => (content, false),
+            Err(_) => (String::new(), true),
+        };
         files.push(SyncFile {
             name: name.to_string(),
             content,
+            unreadable,
         });
     }
     Ok(files)
@@ -52,7 +62,16 @@ pub fn sync_folder_read(dir: String) -> Result<Vec<SyncFile>, String> {
 pub fn sync_folder_write(dir: String, name: String, content: String) -> Result<(), String> {
     fs::create_dir_all(&dir).map_err(|e| format!("creating {dir}: {e}"))?;
     let basename = sanitize_name(&name)?;
-    fs::write(Path::new(&dir).join(basename), content).map_err(|e| e.to_string())
+    let target = Path::new(&dir).join(&basename);
+    // Write a sibling temp file then rename over the target, so another device
+    // (or the sync client itself) never observes a truncated file (#1176). The
+    // temp name is `.json.tmp`, which `sync_folder_read` ignores.
+    let tmp = Path::new(&dir).join(format!(".{basename}.{}.tmp", std::process::id()));
+    fs::write(&tmp, content).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &target).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        e.to_string()
+    })
 }
 
 /// Reduce `name` to a bare, separator-free filename: just its final path
@@ -105,6 +124,36 @@ mod tests {
         assert_eq!(files[1].name, "reminders.json");
         assert_eq!(files[1].content, "{\"a\":1}");
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unreadable_file_is_flagged_not_fatal_and_write_leaves_no_temp() {
+        let dir = test_dir("unreadable");
+        sync_folder_write(dir.clone(), "pi.json".into(), "{}".into()).unwrap();
+        // Invalid UTF-8 can't be read_to_string'd.
+        fs::write(Path::new(&dir).join("reminders.json"), [0xff, 0xfe, 0x00]).unwrap();
+
+        let mut files = sync_folder_read(dir.clone()).expect("one bad file doesn't abort");
+        files.sort_by(|a, b| a.name.cmp(&b.name));
+
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].name, "pi.json");
+        assert!(!files[0].unreadable);
+        assert_eq!(files[1].name, "reminders.json");
+        assert!(files[1].unreadable);
+        // The atomic write's temp file is gone after the rename.
+        let leftovers = fs::read_dir(&dir)
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".tmp")
+            })
+            .count();
+        assert_eq!(leftovers, 0);
         let _ = fs::remove_dir_all(&dir);
     }
 

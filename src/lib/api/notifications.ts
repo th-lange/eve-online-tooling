@@ -16,12 +16,21 @@ export interface NotifRow {
   body: string;
 }
 
+/** The feed plus the characters whose fetch failed (partial failure only). */
+export interface NotifFeed {
+  rows: NotifRow[];
+  /** Names of characters that could not be fetched ("All characters" mode). */
+  failedCharacters: string[];
+}
+
 /**
  * The active character's notifications (newest first), dismissed ones removed.
- * Needs the `esi-characters.read_notifications.v1` scope.
+ * Rejects when every target character failed; a partial failure resolves with
+ * the loaded rows and the failed characters listed. Needs the
+ * `esi-characters.read_notifications.v1` scope.
  */
-export function notifications(): Promise<NotifRow[]> {
-  return invoke<NotifRow[]>("notifications_list");
+export function notifications(): Promise<NotifFeed> {
+  return invoke<NotifFeed>("notifications_list");
 }
 
 /**

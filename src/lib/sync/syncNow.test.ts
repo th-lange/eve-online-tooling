@@ -56,7 +56,10 @@ describe("syncNow", () => {
       sync_folder_read: () => [
         {
           name: "reminders.json",
-          content: envelope("reminders", 1, 9000, [{ id: "remote" }]),
+          content: envelope("reminders", 1, 9000, [
+            { id: "remote", what: "x", dueAt: 1 },
+          ]),
+          unreadable: false,
         },
       ],
       sync_folder_write: () => undefined,
@@ -68,7 +71,7 @@ describe("syncNow", () => {
 
     expect(result.imported).toContain("reminders");
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.reminders)!)).toEqual([
-      { id: "remote" },
+      { id: "remote", what: "x", dueAt: 1 },
     ]);
     expect(getMeta("reminders")).toBe(9000);
   });
@@ -80,6 +83,7 @@ describe("syncNow", () => {
         {
           name: "pi.json",
           content: envelope("pi", 1, 5000, [{ id: "setup1" }]),
+          unreadable: false,
         },
       ],
       sync_folder_write: () => undefined,
@@ -104,8 +108,16 @@ describe("syncNow", () => {
     setMeta("pi", 5000);
     mockInvoke({
       sync_folder_read: () => [
-        { name: "reminders.json", content: envelope("reminders", 1, 5000, []) },
-        { name: "pi.json", content: envelope("pi", 1, 5000, []) },
+        {
+          name: "reminders.json",
+          content: envelope("reminders", 1, 5000, []),
+          unreadable: false,
+        },
+        {
+          name: "pi.json",
+          content: envelope("pi", 1, 5000, []),
+          unreadable: false,
+        },
       ],
     });
 
@@ -116,14 +128,65 @@ describe("syncNow", () => {
     expect(result.exported).toEqual([]);
   });
 
-  it("ignores a remote file written by an incompatible schema version", async () => {
+  it("skips (never overwrites) a remote file written by an incompatible schema version", async () => {
+    setMeta("reminders", 1000);
+    localStorage.setItem(STORAGE_KEYS.reminders, JSON.stringify([]));
+    const writes: string[] = [];
+    mockInvoke({
+      sync_folder_read: () => [
+        {
+          name: "reminders.json",
+          content: envelope("reminders", 99, 9000, [{ id: "future-shape" }]),
+          unreadable: false,
+        },
+      ],
+      sync_folder_write: (args) => {
+        writes.push((args as { name: string }).name);
+        return undefined;
+      },
+      pi_planner_setups_export: () => "[]",
+    });
+
+    const result = await syncNow("/tmp/sync");
+
+    expect(result.skipped).toContain("reminders");
+    expect(result.exported).not.toContain("reminders");
+    expect(result.imported).not.toContain("reminders");
+    expect(writes).not.toContain("reminders.json");
+  });
+
+  it("skips a corrupt or unreadable remote file instead of clobbering it", async () => {
+    setMeta("reminders", 1000);
+    setMeta("pi", 1000);
+    localStorage.setItem(STORAGE_KEYS.reminders, JSON.stringify([]));
+    const writes: string[] = [];
+    mockInvoke({
+      sync_folder_read: () => [
+        { name: "reminders.json", content: "{ half-writ", unreadable: false },
+        { name: "pi.json", content: "", unreadable: true },
+      ],
+      sync_folder_write: (args) => {
+        writes.push((args as { name: string }).name);
+        return undefined;
+      },
+      pi_planner_setups_export: () => "[]",
+    });
+
+    const result = await syncNow("/tmp/sync");
+
+    expect(result.skipped).toEqual(["reminders", "pi"]);
+    expect(writes).toEqual([]);
+  });
+
+  it("does not apply a reminders payload that isn't a reminder list", async () => {
     setMeta("reminders", 1000);
     localStorage.setItem(STORAGE_KEYS.reminders, JSON.stringify([]));
     mockInvoke({
       sync_folder_read: () => [
         {
           name: "reminders.json",
-          content: envelope("reminders", 99, 9000, [{ id: "future-shape" }]),
+          content: envelope("reminders", 1, 9000, { not: "an array" }),
+          unreadable: false,
         },
       ],
       sync_folder_write: () => undefined,
@@ -132,9 +195,9 @@ describe("syncNow", () => {
 
     const result = await syncNow("/tmp/sync");
 
-    // Schema mismatch → treated as "no remote file": local (1000) beats the
-    // absent remote (-1) and exports instead of importing the unknown shape.
-    expect(result.exported).toContain("reminders");
-    expect(result.imported).not.toContain("reminders");
+    expect(result.skipped).toContain("reminders");
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.reminders)!)).toEqual(
+      [],
+    );
   });
 });

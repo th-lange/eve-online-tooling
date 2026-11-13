@@ -86,16 +86,28 @@ pub struct NotifRow {
     pub body: String,
 }
 
+/// The feed plus the characters whose fetch failed. `failed_characters` is
+/// non-empty only on a partial failure under "all characters" (a total failure
+/// is an `Err`), so the page can say the feed is incomplete (#1179).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotifFeed {
+    pub rows: Vec<NotifRow>,
+    pub failed_characters: Vec<String>,
+}
+
 /// The active character's notifications (every roster character's when "all
 /// characters" is active, each row tagged with its owner), newest first, with
 /// each character's own dismissed ids filtered out. Sender ids are resolved to
-/// names in one batch. A character whose fetch fails is skipped rather than
-/// failing the whole call.
+/// names in one batch. A failing character is reported in `failed_characters`
+/// while the others still show; if *every* target failed the first error is
+/// returned, so a missing scope / expired token surfaces its re-login hint
+/// instead of an empty feed.
 #[tauri::command]
 pub async fn notifications_list(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
-) -> Result<Vec<NotifRow>, AppError> {
+) -> Result<NotifFeed, AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
     let targets = storage::target_characters(&dir);
     if targets.is_empty() {
@@ -104,6 +116,9 @@ pub async fn notifications_list(
     let names_by_char = storage::character_names(&dir);
 
     let mut fetched: Vec<(i64, EsiNotification)> = Vec::new();
+    let mut failed_characters: Vec<String> = Vec::new();
+    let mut first_error: Option<AppError> = None;
+    let target_count = targets.len();
     for character_id in targets {
         let raw: Vec<EsiNotification> = match authed_get(
             &auth_state,
@@ -113,7 +128,16 @@ pub async fn notifications_list(
         .await
         {
             Ok(raw) => raw,
-            Err(_) => continue,
+            Err(e) => {
+                failed_characters.push(
+                    names_by_char
+                        .get(&character_id)
+                        .cloned()
+                        .unwrap_or_else(|| character_id.to_string()),
+                );
+                first_error.get_or_insert_with(|| AppError::from(e));
+                continue;
+            }
         };
 
         let dismissed: Vec<i64> =
@@ -125,6 +149,10 @@ pub async fn notifications_list(
                 .filter(|n| !dismissed.contains(&n.notification_id))
                 .map(|n| (character_id, n)),
         );
+    }
+
+    if let Some(e) = total_failure(target_count, failed_characters.len(), first_error) {
+        return Err(e);
     }
 
     let sender_ids: Vec<i64> = fetched.iter().map(|(_, n)| n.sender_id).collect();
@@ -152,7 +180,20 @@ pub async fn notifications_list(
         .collect();
     // Newest first (ISO-8601 timestamps sort lexically).
     rows.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    Ok(rows)
+    Ok(NotifFeed {
+        rows,
+        failed_characters,
+    })
+}
+
+/// The error to return when *every* target character's fetch failed, else
+/// `None` (some data, or nothing was attempted). Pure, so it's unit-tested.
+fn total_failure(targets: usize, failed: usize, first_error: Option<AppError>) -> Option<AppError> {
+    if targets > 0 && failed == targets {
+        first_error
+    } else {
+        None
+    }
 }
 
 /// Hide a notification from the feed (durable, per character). The dismissed
@@ -188,7 +229,18 @@ pub fn notifications_reset(app: AppHandle) -> Result<(), AppError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{category, humanize};
+    use super::{category, humanize, total_failure};
+    use crate::model::AppError;
+
+    #[test]
+    fn only_a_total_failure_is_an_error() {
+        let err = || Some(AppError::from("scope missing"));
+        assert!(total_failure(1, 1, err()).is_some());
+        assert!(total_failure(3, 3, err()).is_some());
+        // Partial failure keeps the rows that did load.
+        assert!(total_failure(3, 1, err()).is_none());
+        assert!(total_failure(2, 0, None).is_none());
+    }
 
     #[test]
     fn humanize_splits_pascal_case() {

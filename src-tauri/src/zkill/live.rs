@@ -41,6 +41,16 @@ const MAX_BACKOFF_SECS: u64 = 300;
 const IDLE_GRACE_SECS: u64 = 60;
 /// How often the read loop checks the subscriber count while connected.
 const IDLE_CHECK_SECS: u64 = 5;
+/// Give up on a connect attempt after this long (#1163): a dead network can
+/// otherwise leave the TCP handshake hanging for minutes.
+const CONNECT_TIMEOUT_SECS: u64 = 15;
+/// Reconnect when no frame at all (kill, ping, pong) arrived for this long.
+/// The killstream is chatty, so minutes of silence mean a half-open socket
+/// (laptop sleep, network change) rather than a quiet game (#1163).
+const READ_IDLE_SECS: u64 = 180;
+/// A connection that lived at least this long counts as healthy: the next
+/// reconnect starts from the initial backoff instead of the doubled one.
+const HEALTHY_CONNECTION_SECS: u64 = 60;
 /// How far back the in-memory index keeps events — matches the FW hotspots
 /// window (#905) so it can serve as a live top-up over that same baseline.
 pub const KILL_INDEX_WINDOW_SECS: u64 = 6 * 60 * 60;
@@ -279,6 +289,13 @@ enum StreamEnd {
     Idle,
 }
 
+/// Whether the reconnect backoff should restart from its initial value: after
+/// a clean disconnect / idle wind-down, or an abrupt drop that followed a long
+/// healthy run — earlier blips must not leave it pinned at the maximum (#1163).
+fn should_reset_backoff(ended_cleanly: bool, lived_secs: u64) -> bool {
+    ended_cleanly || lived_secs >= HEALTHY_CONNECTION_SECS
+}
+
 /// Spawn the background connection loop. Call once, from app setup — never
 /// fatal to launch. Parks while no consumer is subscribed (#1060); while
 /// subscribed, retries with capped exponential backoff on any
@@ -290,15 +307,12 @@ pub fn spawn(app: AppHandle) {
             if let Some(state) = app.try_state::<ZkillStreamState>() {
                 wait_for_consumers(&state).await;
             }
-            match run_once(&app).await {
-                // Clean disconnect or idle wind-down — reset the backoff.
-                Ok(StreamEnd::Disconnected) | Ok(StreamEnd::Idle) => {
-                    backoff = INITIAL_BACKOFF_SECS;
-                }
-                Err(_e) => {
-                    // Best-effort: no user-facing error surface, matches the
-                    // rest of the zkill module's `Option`-returning discipline.
-                }
+            let started = std::time::Instant::now();
+            // Best-effort: errors have no user-facing surface, matching the
+            // rest of the zkill module's `Option`-returning discipline.
+            let clean = run_once(&app).await.is_ok();
+            if should_reset_backoff(clean, started.elapsed().as_secs()) {
+                backoff = INITIAL_BACKOFF_SECS;
             }
             if let Some(state) = app.try_state::<ZkillStreamState>() {
                 state.connected.store(false, Ordering::Relaxed);
@@ -310,9 +324,13 @@ pub fn spawn(app: AppHandle) {
 }
 
 async fn run_once(app: &AppHandle) -> Result<StreamEnd, String> {
-    let (ws_stream, _) = tokio_tungstenite::connect_async(WS_URL)
-        .await
-        .map_err(|e| e.to_string())?;
+    let (ws_stream, _) = tokio::time::timeout(
+        std::time::Duration::from_secs(CONNECT_TIMEOUT_SECS),
+        tokio_tungstenite::connect_async(WS_URL),
+    )
+    .await
+    .map_err(|_| "zkill websocket connect timed out".to_string())?
+    .map_err(|e| e.to_string())?;
     let (mut write, mut read) = ws_stream.split();
     write
         .send(Message::Text(SUBSCRIBE_PAYLOAD.into()))
@@ -328,6 +346,8 @@ async fn run_once(app: &AppHandle) -> Result<StreamEnd, String> {
     // react to) still notices its consumers left.
     let mut idle_check = tokio::time::interval(std::time::Duration::from_secs(IDLE_CHECK_SECS));
     let mut idle_since: Option<std::time::Instant> = None;
+    // Last time any frame arrived; a stale value means the socket is dead.
+    let mut last_frame = std::time::Instant::now();
     loop {
         tokio::select! {
             msg = read.next() => {
@@ -335,6 +355,7 @@ async fn run_once(app: &AppHandle) -> Result<StreamEnd, String> {
                     return Ok(StreamEnd::Disconnected);
                 };
                 let msg = msg.map_err(|e| e.to_string())?;
+                last_frame = std::time::Instant::now();
                 let Message::Text(text) = msg else { continue };
                 let Some(event) = parse_kill_event(&text) else {
                     continue;
@@ -351,6 +372,9 @@ async fn run_once(app: &AppHandle) -> Result<StreamEnd, String> {
                 let _ = app.emit("zkill://kill", &event);
             }
             _ = idle_check.tick() => {
+                if last_frame.elapsed().as_secs() >= READ_IDLE_SECS {
+                    return Err("zkill websocket read-idle timeout".to_string());
+                }
                 let subscribed = app
                     .try_state::<ZkillStreamState>()
                     .is_some_and(|s| s.consumers.load(Ordering::SeqCst) > 0);
@@ -444,6 +468,13 @@ mod tests {
             r#"{{"killmail_id":1,"killmail_time":"{time}","solar_system_id":{system_id},"victim":{victim},"attackers":[{}]}}"#,
             attackers.join(",")
         )
+    }
+
+    #[test]
+    fn backoff_resets_after_a_healthy_connection_even_on_error() {
+        assert!(!should_reset_backoff(false, 1));
+        assert!(should_reset_backoff(false, HEALTHY_CONNECTION_SECS));
+        assert!(should_reset_backoff(true, 0));
     }
 
     #[test]

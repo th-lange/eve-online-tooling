@@ -43,6 +43,23 @@ export interface Reminder {
   link?: ReminderLink | null;
 }
 
+/** Whether `data` (untrusted: e.g. a synced file from another device) is an
+ *  array of reminder-shaped objects — the minimum the provider relies on
+ *  (`list.filter`, `dueAt` arithmetic, keyed rendering). */
+export function isReminderList(data: unknown): data is Reminder[] {
+  return (
+    Array.isArray(data) &&
+    data.every(
+      (r) =>
+        typeof r === "object" &&
+        r !== null &&
+        typeof (r as Reminder).id === "string" &&
+        typeof (r as Reminder).what === "string" &&
+        typeof (r as Reminder).dueAt === "number",
+    )
+  );
+}
+
 /** Where a reminder's type badge navigates. */
 export interface ReminderLink {
   /** Module id (registry) to open, e.g. "pi". */
