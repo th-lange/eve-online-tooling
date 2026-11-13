@@ -140,24 +140,31 @@ pub fn run() {
                 return deny(500);
             };
             let root = dir.join("plugins");
-            match plugins::protocol::resolve_asset(&root, request.uri().path()) {
-                Ok(file) => match std::fs::read(&file) {
-                    Ok(bytes) => tauri::http::Response::builder()
-                        .status(200)
-                        .header("Content-Type", plugins::protocol::content_type(&file))
-                        .header(
-                            "Content-Security-Policy",
-                            plugins::protocol::PLUGIN_FRAME_CSP,
-                        )
-                        // Let a sandboxed (opaque-origin) plugin UI ES-module
-                        // import its own assets over plugin://; the CSP already
-                        // pins the frame to this scheme and forbids network.
-                        .header("Access-Control-Allow-Origin", "*")
-                        .body(bytes)
-                        .unwrap(),
-                    Err(_) => deny(404),
-                },
-                Err(_) => deny(403),
+            let Ok(file) = plugins::protocol::resolve_asset(&root, request.uri().path()) else {
+                return deny(403);
+            };
+            // Resolve through symlinks and require the result to stay inside
+            // the plugin's own dir (#1151); read the canonical path.
+            let real = match plugins::protocol::confine_to_plugin(&root, &file) {
+                Ok(Some(real)) => real,
+                Ok(None) => return deny(404),
+                Err(_) => return deny(403),
+            };
+            match std::fs::read(&real) {
+                Ok(bytes) => tauri::http::Response::builder()
+                    .status(200)
+                    .header("Content-Type", plugins::protocol::content_type(&file))
+                    .header(
+                        "Content-Security-Policy",
+                        plugins::protocol::PLUGIN_FRAME_CSP,
+                    )
+                    // Let a sandboxed (opaque-origin) plugin UI ES-module
+                    // import its own assets over plugin://; the CSP already
+                    // pins the frame to this scheme and forbids network.
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(bytes)
+                    .unwrap(),
+                Err(_) => deny(404),
             }
         })
         .setup(|app| {
@@ -222,8 +229,15 @@ pub fn run() {
             app.manage(market::MarketService::with_cache(dir.clone()));
             app.manage(esi::EsiClient::with_cache(dir.clone()));
             app.manage(std::sync::Arc::new(plugins::PluginRegistry::load(&dir)));
-            app.manage(std::sync::Arc::new(plugins::PluginManager::new()));
-            app.manage(esi::AuthState::with_cache(dir.clone()));
+            // One AuthState for the whole app: `AuthState` clones share their
+            // token cache, refresh locks and persist-failure state, so the
+            // plugin manager gets a handle to the managed instance rather
+            // than building its own (#1148).
+            let auth_state = esi::AuthState::with_cache(dir.clone());
+            app.manage(std::sync::Arc::new(plugins::PluginManager::with_auth(
+                auth_state.clone(),
+            )));
+            app.manage(auth_state);
             // Tell the frontend when a rotated refresh token couldn't be saved
             // to the keychain (or the problem cleared), so it can warn instead
             // of the character silently logging out on the next refresh.

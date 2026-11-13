@@ -60,6 +60,10 @@ impl PluginRegistry {
         // now, at boot, when no install can possibly be in flight.
         sweep_staging(&plugins_dir);
         let manifests = discover(&plugins_dir);
+        // One-time move of pre-#1154 KV stores out of the install dirs.
+        for m in &manifests {
+            broker::migrate_legacy_kv(app_data_dir, &m.id);
+        }
         let installed: HashSet<&str> = manifests.iter().map(|m| m.id.as_str()).collect();
         let active: HashSet<String> = storage::load_data::<Vec<String>>(app_data_dir, ACTIVE_KEY)
             .unwrap_or_default()
@@ -209,6 +213,9 @@ impl PluginRegistry {
                 // Only now — with a fully validated, fully copied replacement
                 // in hand — is the previous install allowed to go away.
                 if dest.exists() {
+                    // A pre-#1154 install still keeps its KV store in `dest`;
+                    // move it to safety before the directory is replaced.
+                    broker::migrate_legacy_kv(&self.app_data_dir, &id);
                     std::fs::remove_dir_all(&dest).map_err(|e| e.to_string())?;
                 }
                 std::fs::rename(&staging, &dest).map_err(|e| e.to_string())
@@ -271,6 +278,9 @@ impl PluginRegistry {
             self.persist_active(&set)?;
         }
         let _ = std::fs::remove_dir_all(self.plugins_dir().join(id));
+        // Uninstall is the only thing that deletes a plugin's data (#1154);
+        // a reinstall/update leaves it alone.
+        let _ = std::fs::remove_dir_all(broker::plugin_data_dir(&self.app_data_dir, id));
         Ok(())
     }
 }
@@ -285,6 +295,13 @@ fn discover(plugins_dir: &Path) -> Vec<Manifest> {
     let mut manifests = Vec::new();
     for dirent in read.flatten() {
         let dir = dirent.path();
+        // A symlinked plugin dir (or manifest) could alias any directory on
+        // disk into the plugin root; never treat one as a plugin (#1151).
+        // `DirEntry::file_type` does not follow symlinks.
+        if dirent.file_type().is_ok_and(|t| t.is_symlink()) {
+            eprintln!("plugins: skipping symlinked entry {dir:?}");
+            continue;
+        }
         if !dir.is_dir() {
             continue;
         }
@@ -295,6 +312,12 @@ fn discover(plugins_dir: &Path) -> Vec<Manifest> {
         // a dot) — they're install staging dirs or hidden folders. Skip them
         // silently instead of logging a "skipping" error every boot.
         if dir_id.starts_with('.') {
+            continue;
+        }
+        if std::fs::symlink_metadata(dir.join("plugin.json"))
+            .is_ok_and(|m| m.file_type().is_symlink())
+        {
+            eprintln!("plugins: skipping {dir_id:?}: plugin.json is a symlink");
             continue;
         }
         let Ok(raw) = std::fs::read_to_string(dir.join("plugin.json")) else {
@@ -386,12 +409,18 @@ fn raw_manifest_id(raw: &str) -> Result<String, String> {
 }
 
 /// Recursively copy `source` into `dest` (which must not already exist).
+/// Symlinks are **skipped**, not followed: `std::fs::copy` would otherwise
+/// copy the *target's content* (e.g. `x -> ~/.ssh/id_ed25519`) into the
+/// plugin dir, and `git clone`/`tar`/`unzip` all preserve symlinks (#1151).
 fn copy_dir_all(source: &Path, dest: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dest)?;
     for entry in std::fs::read_dir(source)? {
         let entry = entry?;
         let to = dest.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
+        let kind = entry.file_type()?; // does not follow symlinks
+        if kind.is_symlink() {
+            eprintln!("plugins: not copying symlink {:?}", entry.path());
+        } else if kind.is_dir() {
             copy_dir_all(&entry.path(), &to)?;
         } else {
             std::fs::copy(entry.path(), &to)?;
@@ -1179,6 +1208,75 @@ mod tests {
         std::fs::create_dir_all(root.join("plugins")).unwrap();
         let reg = PluginRegistry::load(&root);
         assert!(reg.remove("nope").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn reinstall_keeps_plugin_kv_but_remove_deletes_it() {
+        let root = tmp("kv-survives");
+        std::fs::create_dir_all(root.join("plugins")).unwrap();
+        let source = root.join("src");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("plugin.json"), manifest_json("acme")).unwrap();
+        let reg = PluginRegistry::load(&root);
+        reg.install_dir(&source).unwrap();
+        let kv = root.join("plugin-data/acme/kv");
+        std::fs::create_dir_all(&kv).unwrap();
+        std::fs::write(kv.join("prefs"), "v1").unwrap();
+
+        reg.install_dir(&source).unwrap(); // update
+        assert_eq!(std::fs::read_to_string(kv.join("prefs")).unwrap(), "v1");
+
+        reg.remove("acme").unwrap();
+        assert!(!root.join("plugin-data/acme").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn update_migrates_a_legacy_in_dir_kv_store_instead_of_wiping_it() {
+        let root = tmp("kv-legacy-update");
+        write_plugin(&root, "acme", &manifest_json("acme"));
+        // Load first, so the boot-time migration has nothing to move; then
+        // create the pre-#1154 layout (store inside the install dir) to
+        // exercise the migration on the update path.
+        let reg = PluginRegistry::load(&root);
+        let legacy = root.join("plugins/acme/kv");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::write(legacy.join("prefs"), "old").unwrap();
+        let source = root.join("src");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("plugin.json"), manifest_json("acme")).unwrap();
+        reg.install_dir(&source).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("plugin-data/acme/kv/prefs")).unwrap(),
+            "old"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discover_and_copy_ignore_symlinks() {
+        let root = tmp("symlinks");
+        let plugins = root.join("plugins");
+        write_plugin(&root, "good", &manifest_json("good"));
+        // A symlinked plugin dir aliasing a valid plugin elsewhere.
+        write_plugin(&root, "real", &manifest_json("linked"));
+        std::os::unix::fs::symlink(plugins.join("real"), plugins.join("linked")).unwrap();
+        let ids: Vec<_> = discover(&plugins).iter().map(|m| m.id.clone()).collect();
+        assert!(!ids.contains(&"linked".to_string()), "got {ids:?}");
+
+        // copy_dir_all copies regular files but never a symlink's target.
+        let secret = root.join("secret.txt");
+        std::fs::write(&secret, "secret").unwrap();
+        let source = root.join("src");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("plugin.json"), manifest_json("acme")).unwrap();
+        std::os::unix::fs::symlink(&secret, source.join("x")).unwrap();
+        let dest = root.join("dest");
+        copy_dir_all(&source, &dest).unwrap();
+        assert!(dest.join("plugin.json").exists());
+        assert!(std::fs::symlink_metadata(dest.join("x")).is_err());
         let _ = std::fs::remove_dir_all(&root);
     }
 }

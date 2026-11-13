@@ -18,8 +18,8 @@
 //! of setup; a loop that never calls back into host code (e.g.
 //! `let a=[]; for(;;) a.push({})`) can't be stopped once it's running. The
 //! watchdog in `engine::execute_watched` compensates by bounding how long
-//! the *caller* waits rather than the script itself — see [`Limits`]'s doc
-//! comment and issue #815.
+//! the *caller* waits (for memory growth and for the wall-clock budget, #1156)
+//! rather than the script itself — see [`Limits`]'s doc comment and issue #815.
 
 use std::cell::RefCell;
 use std::sync::Arc;
