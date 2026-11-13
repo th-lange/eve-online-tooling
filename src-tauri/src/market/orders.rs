@@ -69,12 +69,17 @@ pub async fn collect_orders(
     let names = storage::character_names(dir);
 
     let mut rows = Vec::new();
+    // With several targets one failing character is skipped so the rest still
+    // show; with a single target the failure is the answer — returning an empty
+    // list would render "No open orders" and hide a missing scope / outage
+    // (#1169).
+    let aggregating = character_ids.len() > 1;
     for character_id in character_ids {
         let character_name = names.get(&character_id).cloned().unwrap_or_default();
-        if let Ok(mut character_rows) =
-            fetch_character_orders(auth, market, dir, character_id, &character_name).await
-        {
-            rows.append(&mut character_rows);
+        match fetch_character_orders(auth, market, dir, character_id, &character_name).await {
+            Ok(mut character_rows) => rows.append(&mut character_rows),
+            Err(_) if aggregating => {}
+            Err(e) => return Err(e),
         }
     }
     Ok(rows)

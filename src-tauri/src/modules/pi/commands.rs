@@ -221,6 +221,10 @@ pub async fn pi_overview_core(
     // only gets pruned when we positively know its colony is gone, not when
     // ESI merely hiccuped on that character this time (see notes.rs).
     let mut fetched: Vec<(i64, Vec<i64>)> = Vec::new();
+    // A failing character is skipped only when several are aggregated; a single
+    // target's failure is returned so the UI can show the re-login hint instead
+    // of "No colonies found" (#1169).
+    let aggregating = character_ids.len() > 1;
     for character_id in character_ids {
         let character_name = names
             .get(&character_id)
@@ -235,7 +239,8 @@ pub async fn pi_overview_core(
         .await
         {
             Ok(colonies) => colonies,
-            Err(_) => continue,
+            Err(_) if aggregating => continue,
+            Err(e) => return Err(e.to_string().into()),
         };
         fetched.push((character_id, colonies.iter().map(|c| c.planet_id).collect()));
 

@@ -1,6 +1,7 @@
 #[cfg(test)]
 use rusqlite::Connection;
 use rusqlite::{params, OptionalExtension};
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use super::super::types::{
@@ -337,16 +338,27 @@ impl Sde {
                 name: inventing_name,
                 quantity: 1,
             });
-            out.insert(
-                invented_blueprint_type_id,
-                InventionData {
-                    inventing_blueprint_type_id,
-                    runs_per_success,
-                    probability,
-                    datacores,
-                    relic,
-                },
-            );
+            let candidate = InventionData {
+                inventing_blueprint_type_id,
+                runs_per_success,
+                probability,
+                datacores,
+                relic,
+            };
+            // A T3 blueprint has several inventors (Intact / Malfunctioning /
+            // Wrecked relics). Keep the one yielding the most successful runs
+            // per attempt, ties broken by type id, so the choice no longer
+            // depends on row order (#1162).
+            match out.entry(invented_blueprint_type_id) {
+                Entry::Vacant(e) => {
+                    e.insert(candidate);
+                }
+                Entry::Occupied(mut e) => {
+                    if invention_better(&candidate, e.get()) {
+                        e.insert(candidate);
+                    }
+                }
+            }
         }
         Ok(out)
     }
@@ -476,6 +488,18 @@ impl Sde {
         rows.collect::<Result<HashMap<_, _>, _>>()
             .map_err(Into::into)
     }
+}
+
+/// Expected successful runs per invention attempt (`probability × runs`).
+fn invention_yield(d: &InventionData) -> f64 {
+    d.probability.unwrap_or(0.0) * d.runs_per_success as f64
+}
+
+/// Whether `a` is a better invention route than `b`: higher expected yield,
+/// then the lower inventing type id (deterministic).
+fn invention_better(a: &InventionData, b: &InventionData) -> bool {
+    let (ya, yb) = (invention_yield(a), invention_yield(b));
+    ya > yb || (ya == yb && a.inventing_blueprint_type_id < b.inventing_blueprint_type_id)
 }
 
 #[cfg(test)]
@@ -684,6 +708,31 @@ mod tests {
         assert_eq!(rxn.blueprint_type_id, 46207);
         assert_eq!(rxn.product_quantity, 10000);
         assert!(sde.manufacturable_blueprints().unwrap().is_empty());
+    }
+
+    #[test]
+    fn t3_invention_prefers_the_best_relic_regardless_of_row_order() {
+        // Regression for #1162: Tengu is invented from three relics; the
+        // Wrecked one (3 runs @ 14%) used to win by being scanned last.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE invCategories(categoryID INT, categoryName TEXT);
+             CREATE TABLE invGroups(groupID INT, categoryID INT, groupName TEXT);
+             CREATE TABLE invTypes(typeID INT, groupID INT, typeName TEXT, volume REAL);
+             CREATE TABLE industryActivityProducts(typeID INT, activityID INT, productTypeID INT, quantity INT);
+             CREATE TABLE industryActivityProbabilities(typeID INT, activityID INT, productTypeID INT, probability REAL);
+             CREATE TABLE industryActivityMaterials(typeID INT, activityID INT, materialTypeID INT, quantity INT);
+             INSERT INTO invCategories VALUES (34, 'Ancient Relics');
+             INSERT INTO invGroups VALUES (970, 34, 'Relics');
+             INSERT INTO invTypes VALUES (1, 970, 'Intact', 1.0), (2, 970, 'Malfunctioning', 1.0), (3, 970, 'Wrecked', 1.0);
+             INSERT INTO industryActivityProducts VALUES (3, 8, 99, 3), (1, 8, 99, 20), (2, 8, 99, 10);
+             INSERT INTO industryActivityProbabilities VALUES (3, 8, 99, 0.14), (1, 8, 99, 0.26), (2, 8, 99, 0.21);",
+        )
+        .unwrap();
+        let sde = Sde::from_connection(conn);
+        let all = sde.all_invention_products().unwrap();
+        assert_eq!(all[&99].inventing_blueprint_type_id, 1);
+        assert_eq!(all[&99].runs_per_success, 20);
     }
 
     #[test]

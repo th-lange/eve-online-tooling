@@ -46,11 +46,14 @@ struct RosterAssetRow {
 /// Walk the active selection's roster, gathering each character's personal
 /// assets plus their corp hangar — each corp fetched once, so alts in the same
 /// corp don't double up. A character's or corp's asset fetch failing skips just
-/// that owner; the rest of the roster is unaffected.
+/// that owner; the rest of the roster is unaffected. The returned flag is
+/// `false` when any owner failed, so callers don't cache a partial result as if
+/// it were complete (#1169, the #612 rule).
 async fn gather_roster_assets(
     auth_state: &AuthState,
     dir: &std::path::Path,
-) -> Vec<RosterAssetRow> {
+) -> (Vec<RosterAssetRow>, bool) {
+    let mut complete = true;
     let names = storage::character_names(dir);
     let mut out = Vec::new();
     let mut seen_corps: HashSet<i64> = HashSet::new();
@@ -59,20 +62,24 @@ async fn gather_roster_assets(
             .get(&cid)
             .cloned()
             .unwrap_or_else(|| format!("Character #{cid}"));
-        if let Ok(assets) = fetch_assets(auth_state, cid).await {
-            out.extend(assets.into_iter().map(|asset| RosterAssetRow {
+        match fetch_assets(auth_state, cid).await {
+            Ok(assets) => out.extend(assets.into_iter().map(|asset| RosterAssetRow {
                 asset,
                 owner: cname.clone(),
                 is_corp: false,
-            }));
+            })),
+            Err(_) => complete = false,
         }
         let Ok(corp_id) = corporation_id(auth_state, cid).await else {
+            complete = false;
             continue;
         };
         if !seen_corps.insert(corp_id) {
             continue;
         }
         let Ok(corp_assets) = fetch_corp_assets(auth_state, cid, corp_id).await else {
+            // Often just "no hangar-read role"; still incomplete for caching.
+            complete = false;
             continue;
         };
         if corp_assets.is_empty() {
@@ -89,7 +96,7 @@ async fn gather_roster_assets(
             is_corp: true,
         }));
     }
-    out
+    (out, complete)
 }
 
 // --- Shared cache entry (item-level, not aggregated) ---
@@ -107,6 +114,9 @@ struct CachedRawAsset {
     quantity: i64,
     owner: String,
     is_corp: bool,
+    /// Blueprint copies are not valued at the BPO's market price (#1166).
+    #[serde(default)]
+    is_blueprint_copy: bool,
 }
 
 // --- Flat view ---
@@ -189,6 +199,7 @@ struct FlatAsset {
     quantity: i64,
     owner: String,
     is_corp: bool,
+    is_blueprint_copy: bool,
 }
 
 /// Bare nesting node before names/values are attached.
@@ -200,6 +211,7 @@ struct TreeNode {
     is_location: bool,
     owner: Option<String>,
     is_corp: bool,
+    is_blueprint_copy: bool,
     children: Vec<TreeNode>,
 }
 
@@ -229,6 +241,7 @@ fn build_asset_tree(assets: &[FlatAsset]) -> Vec<TreeNode> {
                 is_location: false,
                 owner: Some(a.owner.clone()),
                 is_corp: a.is_corp,
+                is_blueprint_copy: a.is_blueprint_copy,
                 children: if a.item_id != 0 {
                     build(a.item_id, children_of)
                 } else {
@@ -249,6 +262,7 @@ fn build_asset_tree(assets: &[FlatAsset]) -> Vec<TreeNode> {
             is_location: true,
             owner: None,
             is_corp: false,
+            is_blueprint_copy: false,
             children: build(loc, &children_of),
         })
         .collect()
@@ -274,7 +288,17 @@ fn value_nodes(
                 .get(&tid)
                 .map(|m| (m.name.clone(), m.volume))
                 .unwrap_or_else(|| (format!("Type {tid}"), 0.0));
-            let unit = prices.get(&tid).copied().unwrap_or(0.0);
+            // A blueprint copy has no market price of its own (#1166).
+            let unit = if n.is_blueprint_copy {
+                0.0
+            } else {
+                prices.get(&tid).copied().unwrap_or(0.0)
+            };
+            let nm = if n.is_blueprint_copy {
+                format!("{nm} (copy)")
+            } else {
+                nm
+            };
             (nm, unit * n.quantity as f64, vol_each * n.quantity as f64)
         };
         value += child_value;
@@ -341,11 +365,11 @@ fn resolve_location_label(
 /// reads below all derive from the same single ESI fetch.
 async fn load_raw_assets(auth_state: &AuthState, dir: &std::path::Path) -> Vec<CachedRawAsset> {
     let sel = storage::active_character(dir).unwrap_or(0);
-    let cache_key = format!("assets_raw_v1_{sel}");
+    let cache_key = format!("assets_raw_v2_{sel}");
     if let Some(cached) = storage::cache_get(dir, &cache_key) {
         return cached;
     }
-    let roster = gather_roster_assets(auth_state, dir).await;
+    let (roster, complete) = gather_roster_assets(auth_state, dir).await;
     let raw: Vec<CachedRawAsset> = roster
         .into_iter()
         .map(|row| CachedRawAsset {
@@ -355,9 +379,12 @@ async fn load_raw_assets(auth_state: &AuthState, dir: &std::path::Path) -> Vec<C
             quantity: row.asset.quantity,
             owner: row.owner,
             is_corp: row.is_corp,
+            is_blueprint_copy: row.asset.is_blueprint_copy,
         })
         .collect();
-    let _ = storage::cache_put(dir, &cache_key, &raw, 600);
+    if complete {
+        let _ = storage::cache_put(dir, &cache_key, &raw, 600);
+    }
     raw
 }
 
@@ -608,10 +635,10 @@ pub async fn assets_load(
     let loc_name = |id: i64| -> String { labels.label(id).0 };
 
     // ── Flat view: aggregate by (type_id, owner, root_location) ────────────
-    let mut agg: HashMap<(i64, String, i64), (bool, i64)> = HashMap::new();
+    let mut agg: HashMap<(i64, String, i64, bool), (bool, i64)> = HashMap::new();
     for r in &raw {
         let root = index.root_of(r.location_id);
-        agg.entry((r.type_id, r.owner.clone(), root))
+        agg.entry((r.type_id, r.owner.clone(), root, r.is_blueprint_copy))
             .or_insert((r.is_corp, 0))
             .1 += r.quantity;
     }
@@ -619,10 +646,11 @@ pub async fn assets_load(
     let mut rows: Vec<AssetRow> = Vec::with_capacity(agg.len());
     let (mut sell_total, mut buy_total, mut volume_total) = (0.0, 0.0, 0.0);
 
-    for ((type_id, owner, root_loc), (is_corp, quantity)) in agg {
+    for ((type_id, owner, root_loc, is_copy), (is_corp, quantity)) in agg {
         let model = price_map.get(type_id);
-        let buy_price = model.and_then(|m| m.buy_percentile);
-        let sell_price = model.and_then(basis_price);
+        // Blueprint copies carry no value of their own (#1166).
+        let buy_price = model.and_then(|m| m.buy_percentile).filter(|_| !is_copy);
+        let sell_price = model.and_then(basis_price).filter(|_| !is_copy);
         let (name, vol_each, category, group) = item_meta
             .get(&type_id)
             .map(|m| {
@@ -634,6 +662,11 @@ pub async fn assets_load(
                 )
             })
             .unwrap_or_else(|| (format!("Type {type_id}"), 0.0, None, None));
+        let name = if is_copy {
+            format!("{name} (copy)")
+        } else {
+            name
+        };
         let q = quantity as f64;
         let sell_value = sell_price.unwrap_or(0.0) * q;
         let buy_value = buy_price.unwrap_or(0.0) * q;
@@ -676,6 +709,7 @@ pub async fn assets_load(
             quantity: r.quantity,
             owner: r.owner.clone(),
             is_corp: r.is_corp,
+            is_blueprint_copy: r.is_blueprint_copy,
         })
         .collect();
     let bare = build_asset_tree(&flat_assets);
@@ -695,6 +729,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn blueprint_copies_are_not_valued_at_the_originals_price() {
+        let mk = |id: i64, copy: bool| TreeNode {
+            id,
+            type_id: Some(999),
+            quantity: 40,
+            is_location: false,
+            owner: None,
+            is_corp: false,
+            is_blueprint_copy: copy,
+            children: Vec::new(),
+        };
+        let prices = HashMap::from([(999, 1_500_000_000.0)]);
+        let meta = crate::sde::ItemMetaMap::default();
+        let (nodes, total, _) =
+            value_nodes(vec![mk(1, false), mk(2, true)], &prices, &meta, &|_| {
+                String::new()
+            });
+        assert_eq!(nodes[0].sell_value, 40.0 * 1_500_000_000.0);
+        assert_eq!(nodes[1].sell_value, 0.0);
+        assert!(nodes[1].name.ends_with("(copy)"));
+        assert_eq!(total, nodes[0].sell_value);
+    }
+
+    #[test]
     fn nests_items_under_containers_under_stations() {
         let assets = vec![
             FlatAsset {
@@ -704,6 +762,7 @@ mod tests {
                 quantity: 1,
                 owner: "Alice".into(),
                 is_corp: false,
+                is_blueprint_copy: false,
             },
             FlatAsset {
                 item_id: 2,
@@ -712,6 +771,7 @@ mod tests {
                 quantity: 5,
                 owner: "Alice".into(),
                 is_corp: false,
+                is_blueprint_copy: false,
             },
             FlatAsset {
                 item_id: 3,
@@ -720,6 +780,7 @@ mod tests {
                 quantity: 1000,
                 owner: "Bob".into(),
                 is_corp: false,
+                is_blueprint_copy: false,
             },
         ];
         let roots = build_asset_tree(&assets);
@@ -821,6 +882,7 @@ mod tests {
             quantity,
             owner: "Alice".into(),
             is_corp: false,
+            is_blueprint_copy: false,
         }
     }
 
