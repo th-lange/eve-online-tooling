@@ -156,6 +156,12 @@ fn prune(mut conns: Vec<Connection>, now: u64) -> Vec<Connection> {
     conns
 }
 
+/// Serialises every load → mutate → save of the connection store (#1181). Held
+/// only across the synchronous section (never an `.await`): network imports
+/// fetch first, then take this lock and re-read, so a manual edit made while an
+/// import was in flight is merged into rather than overwritten.
+pub(crate) static LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
 /// Load the stored connections (auto-pruned of dead wormholes), alongside the
 /// app data dir the caller will need to save back into.
 pub(crate) fn load(app: &AppHandle) -> Result<(std::path::PathBuf, Vec<Connection>), String> {

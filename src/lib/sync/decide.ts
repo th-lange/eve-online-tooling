@@ -2,18 +2,23 @@
 // it's trivially unit-tested (see `decide.test.ts`) — newer unix-ms wins,
 // whole-module replace, no field merge.
 
-export type SyncDecision = "import" | "export" | "noop";
+export type SyncDecision = "import" | "export" | "noop" | "skip";
+
+/**
+ * What the sync folder holds for one module: the file's `updatedAt`; `"absent"`
+ * (no file); or `"unusable"` (a file is there but unreadable, malformed, from
+ * another schema version or the wrong shape). The last must never be treated
+ * as absent: exporting would destroy a possibly newer copy (#1176).
+ */
+export type RemoteState = number | "absent" | "unusable";
 
 /**
  * `localTs` is this device's `updatedAt` for the module (from the sync
- * manifest, `0` if never touched/imported); `remoteTs` is the sync file's
- * `updatedAt`, or `undefined` if there's no (schema-matching) remote file.
+ * manifest, `0` if never touched/imported).
  */
-export function decideSync(
-  localTs: number,
-  remoteTs: number | undefined,
-): SyncDecision {
-  if (remoteTs !== undefined && remoteTs > localTs) return "import";
-  if (localTs > (remoteTs ?? -1)) return "export";
+export function decideSync(localTs: number, remote: RemoteState): SyncDecision {
+  if (remote === "unusable") return "skip";
+  if (remote !== "absent" && remote > localTs) return "import";
+  if (remote === "absent" || localTs > remote) return "export";
   return "noop";
 }

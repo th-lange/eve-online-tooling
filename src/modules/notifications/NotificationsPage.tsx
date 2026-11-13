@@ -41,6 +41,8 @@ export function NotificationsPage() {
     queryFn: notifications,
     staleTime: NOTIFICATIONS_FEED_STALE_TIME_MS,
   });
+  const feed = q.data?.rows;
+  const failedCharacters = q.data?.failedCharacters ?? [];
   const [cat, setCat] = useState<string>("All");
 
   const dismiss = useMutation({
@@ -56,16 +58,14 @@ export function NotificationsPage() {
 
   const categories = useMemo(() => {
     const seen = new Set<string>();
-    for (const n of q.data ?? []) seen.add(n.category);
+    for (const n of feed ?? []) seen.add(n.category);
     return ["All", ...[...seen].sort()];
-  }, [q.data]);
+  }, [feed]);
 
-  const rows = (q.data ?? []).filter(
-    (n) => cat === "All" || n.category === cat,
-  );
-  const unread = (q.data ?? []).filter((n) => !n.isRead).length;
+  const rows = (feed ?? []).filter((n) => cat === "All" || n.category === cat);
+  const unread = (feed ?? []).filter((n) => !n.isRead).length;
   const multiCharacter =
-    new Set((q.data ?? []).map((n) => n.characterId)).size > 1;
+    new Set((feed ?? []).map((n) => n.characterId)).size > 1;
 
   return (
     <Page>
@@ -108,7 +108,18 @@ export function NotificationsPage() {
         scopeHint="check the notifications scope is enabled (a re-login may be needed to grant it)."
       />
 
-      {q.data && q.data.length > 0 && (
+      {failedCharacters.length > 0 && (
+        <div
+          role="alert"
+          className="mt-4 rounded border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-sm text-amber-200"
+        >
+          Could not load notifications for {failedCharacters.join(", ")}. The
+          feed below is incomplete; check their notifications scope (a re-login
+          may be needed) and refresh.
+        </div>
+      )}
+
+      {feed && feed.length > 0 && (
         <div className="mt-4 flex flex-wrap gap-1.5">
           {categories.map((c) => (
             <button
@@ -128,7 +139,7 @@ export function NotificationsPage() {
 
       <div className="mt-4 space-y-2">
         {q.isLoading && <div className="text-sm text-zinc-500">Loading…</div>}
-        {q.data && rows.length === 0 && !q.isLoading && (
+        {feed && rows.length === 0 && !q.isLoading && (
           <div className="text-sm text-zinc-500">Nothing here.</div>
         )}
         {rows.map((n) => (

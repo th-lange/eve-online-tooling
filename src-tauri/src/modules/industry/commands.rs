@@ -5,7 +5,7 @@
 //! Requires the `esi-industry.read_character_jobs.v1` scope (must be enabled on
 //! the EVE app + a re-login before this returns data).
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
@@ -38,6 +38,11 @@ struct StoredJob {
     facility_id: Option<i64>,
     #[serde(default)]
     station_id: Option<i64>,
+    /// The character who installed the job. Always present on ESI jobs; it is
+    /// what attributes a *corporation* job to a roster character (#1172) —
+    /// the corp endpoint returns the whole corp's jobs to whoever asks.
+    #[serde(default)]
+    installer_id: Option<i64>,
 }
 
 /// How long a delivered job is kept in the durable store after its
@@ -87,6 +92,20 @@ pub struct JobRow {
     pub owner: String,
     pub character_id: i64,
     pub character_name: String,
+}
+
+/// The `(activity_id, status)` pairs that occupy `character_id`'s job slots:
+/// their personal jobs, plus corp jobs they installed (those use the
+/// installer's slots too). Corp jobs installed by a corpmate don't. Pure.
+fn slot_jobs<'a>(
+    combined: &'a [(StoredJob, &'static str)],
+    character_id: i64,
+) -> Vec<(i64, &'a str)> {
+    combined
+        .iter()
+        .filter(|(j, owner)| *owner == "You" || j.installer_id == Some(character_id))
+        .map(|(j, _)| (j.activity_id, j.status.as_str()))
+        .collect()
 }
 
 /// Fetch corporation industry jobs (403/error → none: needs the scope + a corp
@@ -211,6 +230,7 @@ async fn character_industry_jobs(
     auth: &AuthState,
     character_id: i64,
     character_name: &str,
+    names: &HashMap<i64, String>,
 ) -> Result<(Vec<JobRow>, Slots), crate::model::AppError> {
     // include_completed so delivered jobs (the cost-basis source) come through.
     // The shared ESI client retries transient 5xx/timeouts (this endpoint 504s
@@ -243,15 +263,10 @@ async fn character_industry_jobs(
         1 + level(3406) + level(24624),
         1 + level(45748) + level(45749),
     );
-    let job_pools: Vec<(i64, &str)> = jobs
-        .iter()
-        .map(|j| (j.activity_id, j.status.as_str()))
-        .collect();
-    let slots = compute_slots((total_m, total_s, total_r), &job_pools);
 
-    // Corp jobs (display-only; needs the corp scope + a corp role — else none).
-    // Tag personal jobs "You" and corp jobs "Corp"; a job_id seen in both keeps
-    // the personal one. Slots above stay character-only.
+    // Corp jobs (display + the installer's slots; needs the corp scope + a corp
+    // role — else none). Tag personal jobs "You" and corp jobs "Corp"; a job_id
+    // seen in both keeps the personal one.
     let mut combined: Vec<(StoredJob, &'static str)> =
         jobs.into_iter().map(|j| (j, "You")).collect();
     if let Ok(corp_id) = corporation_id(auth, character_id).await {
@@ -262,6 +277,10 @@ async fn character_industry_jobs(
             }
         }
     }
+    let slots = compute_slots(
+        (total_m, total_s, total_r),
+        &slot_jobs(&combined, character_id),
+    );
 
     // Resolve names: product/blueprint via SDE, facility via /universe/names.
     // Opened here (not passed in) so no `!Sync` connection is held across an
@@ -282,6 +301,18 @@ async fn character_industry_jobs(
                 .or(j.station_id)
                 .and_then(|id| facilities.get(&id).cloned())
                 .unwrap_or_default();
+            // A corp job belongs to whoever installed it, not to the roster
+            // character whose request happened to return it (#1172).
+            let (row_character_id, row_character_name) = match (owner, j.installer_id) {
+                ("Corp", Some(installer)) => (
+                    installer,
+                    names
+                        .get(&installer)
+                        .cloned()
+                        .unwrap_or_else(|| installer.to_string()),
+                ),
+                _ => (character_id, character_name.to_string()),
+            };
             JobRow {
                 job_id: j.job_id,
                 activity: activity_name(j.activity_id).to_string(),
@@ -293,8 +324,8 @@ async fn character_industry_jobs(
                 end_date: j.end_date,
                 facility,
                 owner: owner.to_string(),
-                character_id,
-                character_name: character_name.to_string(),
+                character_id: row_character_id,
+                character_name: row_character_name,
             }
         })
         .collect();
@@ -353,7 +384,7 @@ pub async fn industry_jobs_core(
     let mut by_character: Vec<CharacterSlots> = Vec::new();
     for cid in targets {
         let name = names.get(&cid).cloned().unwrap_or_else(|| cid.to_string());
-        match character_industry_jobs(dir, auth, cid, &name).await {
+        match character_industry_jobs(dir, auth, cid, &name, &names).await {
             Ok((r, s)) => {
                 append_new_jobs(&mut rows, &mut seen_jobs, r);
                 slots.manufacturing.used += s.manufacturing.used;
@@ -463,7 +494,7 @@ pub fn line_status(result: &JobsResult) -> LineStatusResult {
 
 #[cfg(test)]
 mod tests {
-    use super::{append_new_jobs, compute_slots, line_status, merge_jobs, slot_pool};
+    use super::{append_new_jobs, compute_slots, line_status, merge_jobs, slot_jobs, slot_pool};
     use super::{CharacterSlots, JobRow, JobsResult, Slot, Slots, StoredJob, JOB_RETENTION_SECS};
     use std::collections::HashSet;
 
@@ -480,6 +511,7 @@ mod tests {
             end_date: end_date.to_string(),
             facility_id: None,
             station_id: None,
+            installer_id: None,
         }
     }
 
@@ -506,6 +538,28 @@ mod tests {
         assert_eq!(ids, vec![1, 900, 2], "the shared corp job is listed once");
         // The first sighting wins, so the corp job keeps character 1's tagging.
         assert_eq!(rows[1].character_id, 1);
+    }
+
+    #[test]
+    fn corp_jobs_use_only_the_installers_slots() {
+        let installed_by = |job_id: i64, installer: i64| StoredJob {
+            installer_id: Some(installer),
+            ..stored_job(job_id, "")
+        };
+        let combined = vec![
+            (stored_job(1, ""), "You"),
+            (installed_by(2, 10), "Corp"), // mine, run from the corp hangar
+            (installed_by(3, 20), "Corp"), // a corpmate's job
+        ];
+        let mine = slot_jobs(&combined, 10);
+        assert_eq!(mine.len(), 2, "personal job + my own corp job");
+        assert_eq!(
+            compute_slots((5, 5, 5), &slot_jobs(&combined[1..], 99))
+                .manufacturing
+                .used,
+            0,
+            "a corpmate's corp job never occupies someone else's slot"
+        );
     }
 
     #[test]

@@ -29,6 +29,36 @@ pub struct TripwireConfig {
     pub mask: Option<String>,
 }
 
+/// Reject a base URL that would send the Basic Auth credentials in cleartext
+/// (#1181): `https://` is required, except for a loopback host (`localhost`,
+/// `127.0.0.1`, `[::1]`) where plain `http://` never leaves the machine. Returns
+/// the URL unchanged when acceptable. Pure (testable).
+pub fn validate_base_url(url: &str) -> Result<&str, String> {
+    let lower = url.to_ascii_lowercase();
+    if lower.starts_with("https://") && lower.len() > "https://".len() {
+        return Ok(url);
+    }
+    if let Some(rest) = lower.strip_prefix("http://") {
+        // Host is everything up to the first `/`, `?` or `#`, minus any `:port`.
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+        // Drop any `user:pass@` so `localhost:x@evil.example` can't pass.
+        let authority = authority.rsplit('@').next().unwrap_or("");
+        let host = if let Some(v6) = authority.strip_prefix('[') {
+            v6.split(']').next().unwrap_or("")
+        } else {
+            authority.split(':').next().unwrap_or("")
+        };
+        if matches!(host, "localhost" | "127.0.0.1" | "::1") {
+            return Ok(url);
+        }
+    }
+    Err(
+        "Tripwire base URL must start with https:// (plain http:// would send your \
+         password unencrypted; only localhost is allowed over http)."
+            .to_string(),
+    )
+}
+
 /// Accept an integer that MySQL/PDO may serialize as a JSON string or a number.
 fn de_opt_i64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<i64>, D::Error> {
     use serde::Deserialize as _;
@@ -104,6 +134,9 @@ pub async fn fetch(
     password: &str,
     mask: &str,
 ) -> Result<(Vec<RawSignature>, Vec<RawWormhole>), String> {
+    // Also checked here: a config saved before the scheme check existed may
+    // still hold an http:// URL.
+    validate_base_url(&config.base_url)?;
     let http = crate::esi::http_client_builder()
         .build()
         .map_err(|e| e.to_string())?;
@@ -147,6 +180,23 @@ async fn parse_body<T: serde::de::DeserializeOwned>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn base_url_must_be_https_unless_loopback() {
+        assert!(validate_base_url("https://tripwire.eve-apps.com").is_ok());
+        assert!(validate_base_url("HTTPS://trip.example.org/wh/").is_ok());
+        assert!(validate_base_url("http://localhost:8080").is_ok());
+        assert!(validate_base_url("http://127.0.0.1/tripwire").is_ok());
+        assert!(validate_base_url("http://[::1]:9000").is_ok());
+        assert!(validate_base_url("http://tripwire.eve-apps.com").is_err());
+        // A loopback-looking prefix on a real host is still a real host.
+        assert!(validate_base_url("http://localhost.evil.example").is_err());
+        assert!(validate_base_url("http://localhost@evil.example").is_err());
+        assert!(validate_base_url("http://localhost:x@evil.example").is_err());
+        assert!(validate_base_url("ftp://localhost").is_err());
+        assert!(validate_base_url("tripwire.example.org").is_err());
+        assert!(validate_base_url("https://").is_err());
+    }
 
     #[test]
     fn jump_mass_buckets() {

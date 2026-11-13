@@ -8,7 +8,10 @@ import { piPlannerSetupsExport, piPlannerSetupsImport } from "../api/pi";
 import { queryClient } from "../queryClient";
 import { piKeys } from "../queryKeys";
 import { notifyExternalStorageChange } from "../externalStorageEvent";
-import type { Reminder } from "../../modules/reminders/reminders";
+import {
+  isReminderList,
+  type Reminder,
+} from "../../modules/reminders/reminders";
 
 /** One module a folder sync can carry. `schema` is a bump-on-incompatible-
  *  change version tag written into the sync file and checked on read — a
@@ -20,6 +23,9 @@ export interface SyncableStore {
   label: string;
   read(): Promise<unknown>;
   apply(data: unknown): Promise<void>;
+  /** Optional shape check on a remote file's `data` before `apply`; a payload
+   *  it rejects is skipped as unusable, never applied (#1176). */
+  validate?(data: unknown): boolean;
 }
 
 // Character scoping: every store here is **global** — its data carries no EVE
@@ -43,6 +49,8 @@ const remindersStore: SyncableStore = {
       return [];
     }
   },
+  // A non-array here would crash the root ReminderProvider on every launch.
+  validate: isReminderList,
   async apply(data) {
     localStorage.setItem(STORAGE_KEYS.reminders, JSON.stringify(data));
     // ReminderProvider's `usePersistentState` only reads localStorage on
