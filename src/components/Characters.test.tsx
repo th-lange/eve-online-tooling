@@ -1,13 +1,17 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { mockInvoke, renderWithQuery } from "../test/harness";
 
-// Capture the `auth://persist-failed` handler so a test can fire the event the
-// backend emits when the failure set changes.
+// Capture the backend event handlers so a test can fire the events it emits:
+// `auth://persist-failed` (failure set changed) and `auth://login-url`.
+const handlers: Record<string, (e: { payload: unknown }) => void> = {};
 let persistFailedHandler: (() => void) | undefined;
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn((_event: string, cb: () => void) => {
-    persistFailedHandler = cb;
+  listen: vi.fn((event: string, cb: (e: { payload: unknown }) => void) => {
+    handlers[event] = cb;
+    if (event === "auth://persist-failed") {
+      persistFailedHandler = () => cb({ payload: undefined });
+    }
     return Promise.resolve(() => {});
   }),
 }));
@@ -57,5 +61,43 @@ describe("Characters — unsaved-login warning (#1036)", () => {
 
     await screen.findByLabelText("Active character");
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+describe("Characters — cancellable SSO login (#1143)", () => {
+  it("offers the login link and Cancel while waiting, and Cancel frees the button", async () => {
+    let finishLogin!: (e: unknown) => void;
+    mockInvoke({
+      auth_characters: () => ROSTER,
+      auth_active_character: () => 1,
+      auth_persist_failures: () => [],
+      auth_login: () => new Promise((_, reject) => (finishLogin = reject)),
+      auth_login_cancel: () => {
+        finishLogin({ kind: "message", message: "login cancelled" });
+      },
+    });
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    renderWithQuery(<Characters />);
+
+    fireEvent.click(await screen.findByText("+ Add character"));
+    expect(await screen.findByText("Waiting for login…")).toBeDisabled();
+
+    await waitFor(() => expect(handlers["auth://login-url"]).toBeDefined());
+    act(() =>
+      handlers["auth://login-url"]({
+        payload: "https://sso.example/authorize",
+      }),
+    );
+    fireEvent.click(await screen.findByText("Copy login link"));
+    expect(writeText).toHaveBeenCalledWith("https://sso.example/authorize");
+
+    fireEvent.click(screen.getByText("Cancel"));
+    expect(await screen.findByText("+ Add character")).toBeEnabled();
+    // A cancelled login is not a failure.
+    expect(screen.queryByText(/Login failed/)).not.toBeInTheDocument();
   });
 });

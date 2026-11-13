@@ -1,7 +1,7 @@
 //! Tauri command surface for EVE SSO (multi-character).
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use super::auth::{self, AuthState};
@@ -9,27 +9,62 @@ use super::character;
 use crate::model::Character;
 use crate::storage;
 
+/// Event carrying the SSO authorize URL of the login now waiting for its
+/// browser redirect, so the UI can offer a "copy login link" fallback when the
+/// browser doesn't open. The URL holds only the PKCE *challenge* and `state`;
+/// the verifier never leaves the backend.
+const LOGIN_URL_EVENT: &str = "auth://login-url";
+
 /// Log in (or re-authorize) a character via EVE SSO and add it to the roster.
-/// Opens the browser and waits for the loopback redirect.
+/// Opens the browser and waits for the loopback redirect. A login already
+/// waiting is cancelled (superseded); [`auth_login_cancel`] aborts this one.
 #[tauri::command]
 #[specta::specta]
 pub async fn auth_login(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
 ) -> Result<Character, crate::model::AppError> {
+    let cancel = auth_state.begin_login();
+    let result = run_login(&app, &auth_state, &cancel).await;
+    auth_state.end_login(&cancel);
+    result
+}
+
+/// Abort the login currently waiting for its browser redirect (no-op if none).
+/// The pending `auth_login` call resolves with a "login cancelled" error and
+/// the loopback port is freed.
+#[tauri::command]
+#[specta::specta]
+pub fn auth_login_cancel(auth_state: State<'_, AuthState>) {
+    auth_state.cancel_login();
+}
+
+async fn run_login(
+    app: &AppHandle,
+    auth_state: &AuthState,
+    cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Result<Character, crate::model::AppError> {
     let pkce = auth::generate_pkce();
     let csrf = auth::random_state();
 
     // Bind the loopback server before opening the browser so the redirect can't
-    // arrive before we're listening.
-    let server = auth::bind_loopback()?;
+    // arrive before we're listening. The bind may briefly wait out a login that
+    // was just cancelled/superseded, so it runs off the async runtime.
+    let server = tokio::task::spawn_blocking(auth::bind_loopback)
+        .await
+        .map_err(|e| e.to_string())??;
     let url = auth::authorize_url(&pkce.challenge, &csrf);
-    app.opener()
-        .open_url(url, None::<&str>)
-        .map_err(|e| e.to_string())?;
+    // Hand the link to the UI first, then try the browser. A launcher that
+    // fails (or "succeeds" without opening anything) must not abort the login:
+    // the user can still finish it from the copied link.
+    let _ = app.emit(LOGIN_URL_EVENT, &url);
+    if let Err(e) = app.opener().open_url(&url, None::<&str>) {
+        eprintln!("esi::auth: could not open the system browser: {e}");
+    }
 
     // Wait for the redirect off the async runtime.
-    let code = tokio::task::spawn_blocking(move || auth::capture_code(server, &csrf))
+    let waiter = cancel.clone();
+    let code = tokio::task::spawn_blocking(move || auth::capture_code(server, &csrf, &waiter))
         .await
         .map_err(|e| e.to_string())??;
 
@@ -42,9 +77,14 @@ pub async fn auth_login(
     .await?;
     let token_character = auth::character_from_token(&tokens.access_token)?;
 
-    // Persist the refresh token (keychain) and the roster (json), de-duping.
-    storage::store_refresh_token(token_character.character_id, &tokens.refresh_token)?;
-    let dir = crate::storage::app_data_dir(&app)?;
+    // Persist the refresh token (keychain — blocking OS I/O, so off the async
+    // runtime like the refresh path) and the roster (json), de-duping.
+    let character_id = token_character.character_id;
+    let refresh_token = tokens.refresh_token.clone();
+    tokio::task::spawn_blocking(move || storage::store_refresh_token(character_id, &refresh_token))
+        .await
+        .map_err(|e| e.to_string())??;
+    let dir = crate::storage::app_data_dir(app)?;
     let character = Character {
         character_id: token_character.character_id,
         name: token_character.name,
@@ -58,7 +98,7 @@ pub async fn auth_login(
     // your login" warning for this character no longer applies.
     auth_state.clear_persist_failure(character.character_id);
 
-    auth::cache_login_token(&auth_state, &character, &tokens);
+    auth::cache_login_token(auth_state, &character, &tokens);
     Ok(character)
 }
 
@@ -356,21 +396,69 @@ pub async fn warm_active_character(app: &AppHandle) {
     let _ = character::fetch_assets(&auth, character_id).await;
 }
 
-/// Remove a character: drop it from the roster, delete its keychain entry, and
-/// forget any cached token. Returns the updated roster.
+/// Remove a character: revoke its refresh token at the SSO (best effort), delete
+/// it from the keychain, forget cached tokens/data, and drop the character from
+/// the roster. Returns the updated roster.
+///
+/// Keychain access is blocking OS I/O (it can sit on an unlock prompt), so it
+/// runs on the blocking pool. If the keychain delete fails the character is
+/// *kept* in the roster so the user can retry — dropping it would orphan the
+/// token with no UI to remove it — and the error is returned; in-memory state
+/// and cached ESI data are purged regardless, and a failed roster save does
+/// not stop that either.
 #[tauri::command]
 #[specta::specta]
-pub fn auth_logout(
+pub async fn auth_logout(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
     character_id: i64,
 ) -> Result<Vec<Character>, crate::model::AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
-    let mut roster = storage::load_roster(&dir);
-    roster.retain(|c| c.character_id != character_id);
-    storage::save_roster(&dir, &roster)?;
-    storage::delete_refresh_token(character_id)?;
+    remove_character(&auth_state, &dir, character_id).await
+}
+
+/// The body of [`auth_logout`], split out so it is testable without an app.
+async fn remove_character(
+    auth_state: &AuthState,
+    dir: &std::path::Path,
+    character_id: i64,
+) -> Result<Vec<Character>, crate::model::AppError> {
+    // Read the token before deleting it so it can be revoked at the SSO.
+    let stored = tokio::task::spawn_blocking(move || storage::load_refresh_token(character_id))
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .flatten();
+    if let Some(token) = stored {
+        if let Err(e) =
+            auth::revoke_refresh_token(auth_state.http(), auth_state.revoke_url(), &token).await
+        {
+            // Best effort: offline logout must still work.
+            eprintln!("esi::auth: SSO revoke for character {character_id} failed: {e}");
+        }
+    }
+
+    let deleted = tokio::task::spawn_blocking(move || storage::delete_refresh_token(character_id))
+        .await
+        .map_err(|e| format!("keychain task panicked: {e}"))
+        .and_then(|r| r);
+
+    // Whatever else happens, this character's session state and private
+    // cached responses go.
     auth_state.forget(character_id);
+    auth_state.purge_character_cache(character_id).await;
+
+    if let Err(e) = deleted {
+        return Err(format!(
+            "couldn't delete the saved login from the OS keychain ({e}); \
+             the character was kept so you can try again"
+        )
+        .into());
+    }
+
+    let mut roster = storage::load_roster(dir);
+    roster.retain(|c| c.character_id != character_id);
+    storage::save_roster(dir, &roster)?;
     Ok(roster)
 }
 
@@ -378,6 +466,7 @@ pub fn auth_logout(
 pub fn specta_commands() -> tauri_specta::Commands<tauri::Wry> {
     tauri_specta::collect_commands![
         auth_login,
+        auth_login_cancel,
         auth_characters,
         auth_set_active_character,
         auth_active_character,
@@ -418,6 +507,112 @@ mod tests {
             storage::cache_get::<HashMap<String, i64>>(&dir, "roster_stock"),
             Some(stock)
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A one-shot SSO stub recording the form body of the revoke request.
+    fn revoke_stub() -> (String, std::sync::mpsc::Receiver<String>) {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("bind stub");
+        let addr = server.server_addr().to_ip().expect("addr");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            if let Ok(mut req) = server.recv() {
+                let mut body = String::new();
+                let _ = std::io::Read::read_to_string(req.as_reader(), &mut body);
+                let _ = tx.send(body);
+                let _ = req.respond(tiny_http::Response::from_string(""));
+            }
+        });
+        (format!("http://{addr}/"), rx)
+    }
+
+    fn logout_fixture(
+        id: i64,
+    ) -> (
+        std::path::PathBuf,
+        AuthState,
+        std::sync::mpsc::Receiver<String>,
+    ) {
+        use crate::esi::token_cache::tests::counting_credential;
+        counting_credential::install();
+        let dir = std::env::temp_dir().join(format!("logout-test-{id}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let roster: Vec<Character> = [id, id + 1]
+            .iter()
+            .map(|&character_id| Character {
+                character_id,
+                name: format!("Pilot {character_id}"),
+                scopes: vec![],
+            })
+            .collect();
+        storage::save_roster(&dir, &roster).unwrap();
+        storage::store_refresh_token(id, "secret-refresh").unwrap();
+        // This character's cached private responses, plus a neighbour whose id
+        // merely shares the digits as a prefix.
+        let cache = dir.join("esi-cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(cache.join(format!("c{id}_latest_x.json")), "{}").unwrap();
+        std::fs::write(cache.join(format!("c{id}9_latest_x.json")), "{}").unwrap();
+        let (revoke_url, rx) = revoke_stub();
+        let auth = AuthState::with_cache(dir.clone()).with_revoke_url(revoke_url);
+        (dir, auth, rx)
+    }
+
+    fn block_on<F: std::future::Future>(f: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(f)
+    }
+
+    #[test]
+    fn logout_revokes_deletes_the_token_and_purges_only_that_characters_cache() {
+        let id = 910_301;
+        let (dir, auth, revoked) = logout_fixture(id);
+
+        let roster = block_on(remove_character(&auth, &dir, id)).expect("logout");
+
+        assert_eq!(
+            roster.iter().map(|c| c.character_id).collect::<Vec<_>>(),
+            vec![id + 1]
+        );
+        assert_eq!(storage::load_roster(&dir).len(), 1);
+        assert_eq!(storage::load_refresh_token(id).unwrap(), None);
+        let form = revoked.try_recv().expect("revoke request was sent");
+        assert!(form.contains("token=secret-refresh"), "{form}");
+        assert!(!dir
+            .join("esi-cache")
+            .join(format!("c{id}_latest_x.json"))
+            .exists());
+        assert!(dir
+            .join("esi-cache")
+            .join(format!("c{id}9_latest_x.json"))
+            .exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_keychain_delete_surfaces_keeps_the_roster_entry_but_still_forgets() {
+        use crate::esi::token_cache::tests::counting_credential;
+        let id = 910_303;
+        let (dir, auth, _revoked) = logout_fixture(id);
+        let credential = counting_credential::credential_for(id);
+        credential.fail_deletes(true);
+
+        let err = block_on(remove_character(&auth, &dir, id)).expect_err("must surface");
+        assert!(format!("{err:?}").contains("keychain"), "{err:?}");
+        // Retryable: still listed, token still there; but cached data is gone.
+        assert_eq!(storage::load_roster(&dir).len(), 2);
+        assert!(storage::load_refresh_token(id).unwrap().is_some());
+        assert!(!dir
+            .join("esi-cache")
+            .join(format!("c{id}_latest_x.json"))
+            .exists());
+
+        credential.fail_deletes(false);
+        block_on(remove_character(&auth, &dir, id)).expect("retry succeeds");
+        assert_eq!(storage::load_roster(&dir).len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

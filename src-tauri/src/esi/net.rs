@@ -30,6 +30,10 @@ use serde::Serialize;
 const LOW_BUDGET: i64 = 10;
 /// Total attempts (1 try + up to 3 retries).
 const MAX_ATTEMPTS: u32 = 4;
+/// Longest `Retry-After` we are willing to sleep through. A larger value is
+/// not waited out: the limited response is returned to the caller instead of
+/// leaving the command pending with no feedback (#1150).
+const MAX_RETRY_AFTER: Duration = Duration::from_secs(60);
 
 /// Process-global view of ESI's error budget.
 pub struct ErrorBudget {
@@ -150,7 +154,11 @@ where
             Ok(resp) => {
                 budget.observe(resp.headers());
                 if attempt < MAX_ATTEMPTS && should_retry_status(resp.status()) {
-                    let wait = retry_after(resp.headers()).unwrap_or_else(|| backoff(attempt));
+                    let wait = match retry_after(resp.headers()) {
+                        Some(d) if d > MAX_RETRY_AFTER => return Ok(resp),
+                        Some(d) => d,
+                        None => backoff(attempt),
+                    };
                     tokio::time::sleep(wait).await;
                     continue;
                 }
@@ -294,6 +302,39 @@ mod tests {
         h.insert(RETRY_AFTER, "5".parse().unwrap());
         assert_eq!(retry_after(&h), Some(Duration::from_secs(5)));
         assert_eq!(retry_after(&HeaderMap::new()), None);
+    }
+
+    #[test]
+    fn an_oversized_retry_after_returns_the_response_instead_of_sleeping() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let server = tiny_http::Server::http("127.0.0.1:0").expect("bind loopback");
+            let addr = server.server_addr().to_ip().expect("ip addr");
+            let server_thread = std::thread::spawn(move || {
+                // Exactly one request: a retry would find no server to answer.
+                if let Ok(request) = server.recv() {
+                    let header =
+                        tiny_http::Header::from_bytes(&b"Retry-After"[..], &b"3600"[..]).unwrap();
+                    let _ = request.respond(
+                        tiny_http::Response::from_string("")
+                            .with_status_code(429)
+                            .with_header(header),
+                    );
+                }
+            });
+            let client = Client::new();
+            let url = format!("http://{addr}/");
+            let started = std::time::Instant::now();
+            let resp = send_retrying_with(&ErrorBudget::new(), || client.get(&url))
+                .await
+                .expect("response");
+            assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+            assert!(started.elapsed() < Duration::from_secs(5));
+            server_thread.join().expect("server thread");
+        });
     }
 
     #[test]

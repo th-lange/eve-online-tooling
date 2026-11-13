@@ -14,6 +14,21 @@ export async function authLogin(): Promise<Character> {
   return unwrapCommand(await commands.authLogin());
 }
 
+/** Abort the SSO login waiting for its browser redirect (no-op if none). The
+ *  pending {@link authLogin} then rejects with "login cancelled". */
+export async function authLoginCancel(): Promise<void> {
+  await commands.authLoginCancel();
+}
+
+/** Fires with the SSO authorize URL when a login starts waiting for its
+ *  browser redirect — lets the UI offer a "copy login link" fallback when the
+ *  browser doesn't open. */
+export function onAuthLoginUrl(
+  handler: (url: string) => void,
+): Promise<UnlistenFn> {
+  return listen<string>("auth://login-url", (e) => handler(e.payload));
+}
+
 /** The current character roster. */
 export async function authCharacters(): Promise<Character[]> {
   return unwrapCommand(await commands.authCharacters());

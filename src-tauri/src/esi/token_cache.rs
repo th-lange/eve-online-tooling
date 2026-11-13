@@ -7,6 +7,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
@@ -18,6 +19,28 @@ use crate::model::Character;
 /// SSO token endpoint. Always this outside tests; overridable via
 /// [`AuthState::with_token_url`] so tests can point it at a local stub.
 const TOKEN_URL: &str = "https://login.eveonline.com/v2/oauth/token";
+/// SSO refresh-token revocation endpoint (see [`AuthState::revoke_url`]).
+const REVOKE_URL: &str = "https://login.eveonline.com/v2/oauth/revoke";
+
+/// A token younger than this that ESI still rejects with 401/403 is a genuine
+/// permission failure (missing scope/role), not a stale token — see
+/// [`AuthState::invalidate_rejected`].
+const FRESH_TOKEN_SECS: u64 = 60;
+
+/// How long a looked-up structure name stays cached. Names rarely change.
+const STRUCTURE_FOUND_TTL_SECS: u64 = 24 * 60 * 60;
+/// How long a 403/404 on a structure is remembered. Short, so regained access
+/// (new ACL entry) is picked up within the session.
+const STRUCTURE_DENIED_TTL_SECS: u64 = 30 * 60;
+
+/// Result of a structure lookup remembered by [`AuthState::structure_cached`].
+#[derive(Clone, Debug, PartialEq)]
+pub enum StructureLookup {
+    /// Resolved: `(name, solar_system_id)`.
+    Found(String, i64),
+    /// ESI answered 403/404: this character can't see the structure.
+    Denied,
+}
 
 /// Lock a `Mutex` guarding small pieces of in-memory auth state (the
 /// per-character access-token cache, per-character refresh locks),
@@ -61,9 +84,17 @@ pub struct AuthState {
     /// [`AuthState::set_persist_failure_notifier`].
     persist_notifier: Arc<OnceLock<Box<dyn Fn() + Send + Sync>>>,
     cache: Arc<ConditionalCache>,
+    /// Cancel flag of the SSO login currently waiting for its browser redirect
+    /// — see [`AuthState::begin_login`].
+    pending_login: Mutex<Option<Arc<AtomicBool>>>,
+    /// Remembered structure lookups keyed by `(character, structure)`, each
+    /// with its expiry (epoch secs) — see [`AuthState::structure_cached`].
+    structures: Mutex<HashMap<(i64, i64), (StructureLookup, u64)>>,
     /// SSO token endpoint. Always [`TOKEN_URL`] outside tests; overridable via
     /// [`AuthState::with_token_url`] so tests can point it at a local stub.
     token_url: String,
+    /// SSO revoke endpoint. Always [`REVOKE_URL`] outside tests.
+    revoke_url: String,
 }
 
 struct CachedToken {
@@ -72,6 +103,8 @@ struct CachedToken {
     /// monotonic clock stops during suspend, so after a long sleep a cached
     /// token would still look valid and every authed call would fail (#1146).
     expires_at: u64,
+    /// When this token was cached (epoch seconds).
+    issued_at: u64,
 }
 
 impl Default for AuthState {
@@ -103,7 +136,10 @@ impl AuthState {
             persist_failures: Arc::default(),
             persist_notifier: Arc::default(),
             cache: Arc::new(cache),
+            pending_login: Mutex::new(None),
+            structures: Mutex::new(HashMap::new()),
             token_url: TOKEN_URL.to_string(),
+            revoke_url: REVOKE_URL.to_string(),
         }
     }
 
@@ -118,6 +154,18 @@ impl AuthState {
     /// [`refresh`].
     pub fn token_url(&self) -> &str {
         &self.token_url
+    }
+
+    /// The SSO revoke endpoint — always [`REVOKE_URL`] outside tests.
+    pub fn revoke_url(&self) -> &str {
+        &self.revoke_url
+    }
+
+    /// Point the SSO revoke endpoint at a local stub. Test-only.
+    #[cfg(test)]
+    pub fn with_revoke_url(mut self, revoke_url: impl Into<String>) -> Self {
+        self.revoke_url = revoke_url.into();
+        self
     }
 
     /// Point the SSO token endpoint at a local stub instead of EVE's real
@@ -152,13 +200,97 @@ impl AuthState {
     fn cache_token(&self, character_id: i64, access_token: String, expires_in: u64) {
         // Refresh a minute early to avoid using a just-expired token.
         let ttl = Duration::from_secs(expires_in.saturating_sub(60));
+        let now = crate::util::time::now_secs();
         recover_lock(self.tokens.lock()).insert(
             character_id,
             CachedToken {
                 access_token,
-                expires_at: crate::util::time::now_secs() + ttl.as_secs(),
+                expires_at: now + ttl.as_secs(),
+                issued_at: now,
             },
         );
+    }
+
+    /// ESI rejected `rejected_token` with 401/403. Drops it from the cache so
+    /// the next [`AuthState::access_token_for`] refreshes through the
+    /// single-flighted path, and returns whether retrying is worthwhile:
+    /// `false` when the rejected token is itself fresh (issued under
+    /// [`FRESH_TOKEN_SECS`] ago) — then the 403 is a real permission failure
+    /// and a refresh would only rotate the refresh token for nothing; `true`
+    /// otherwise, including when the cache already holds a different token
+    /// (another caller refreshed meanwhile).
+    pub fn invalidate_rejected(&self, character_id: i64, rejected_token: &str) -> bool {
+        let mut tokens = recover_lock(self.tokens.lock());
+        match tokens.get(&character_id) {
+            Some(t) if t.access_token == rejected_token => {
+                if crate::util::time::now_secs().saturating_sub(t.issued_at) < FRESH_TOKEN_SECS {
+                    return false;
+                }
+                tokens.remove(&character_id);
+                true
+            }
+            // Someone else already replaced or dropped it: retry picks that up.
+            _ => true,
+        }
+    }
+
+    /// Register a new SSO login attempt, cancelling any one still waiting for
+    /// its redirect (its capture loop notices within a poll and frees the
+    /// loopback port). Returns the new attempt's cancel flag.
+    pub fn begin_login(&self) -> Arc<AtomicBool> {
+        let flag = Arc::new(AtomicBool::new(false));
+        let previous = recover_lock(self.pending_login.lock()).replace(flag.clone());
+        if let Some(previous) = previous {
+            previous.store(true, Ordering::SeqCst);
+        }
+        flag
+    }
+
+    /// Cancel the login currently waiting for its redirect, if any.
+    pub fn cancel_login(&self) {
+        if let Some(flag) = recover_lock(self.pending_login.lock()).take() {
+            flag.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// A login attempt finished (any outcome): forget its flag unless a newer
+    /// attempt has already replaced it.
+    pub fn end_login(&self, flag: &Arc<AtomicBool>) {
+        let mut pending = recover_lock(self.pending_login.lock());
+        if pending.as_ref().is_some_and(|p| Arc::ptr_eq(p, flag)) {
+            *pending = None;
+        }
+    }
+
+    /// A still-fresh remembered structure lookup for this character.
+    pub fn structure_cached(
+        &self,
+        character_id: i64,
+        structure_id: i64,
+    ) -> Option<StructureLookup> {
+        recover_lock(self.structures.lock())
+            .get(&(character_id, structure_id))
+            .filter(|(_, expires)| *expires > crate::util::time::now_secs())
+            .map(|(lookup, _)| lookup.clone())
+    }
+
+    /// Remember a structure lookup outcome (long TTL for names, short for
+    /// 403/404) so Assets reloads don't re-ask ESI — and burn error budget —
+    /// for the same structures.
+    pub fn remember_structure(
+        &self,
+        character_id: i64,
+        structure_id: i64,
+        lookup: StructureLookup,
+    ) {
+        let ttl = match lookup {
+            StructureLookup::Found(..) => STRUCTURE_FOUND_TTL_SECS,
+            StructureLookup::Denied => STRUCTURE_DENIED_TTL_SECS,
+        };
+        let now = crate::util::time::now_secs();
+        let mut map = recover_lock(self.structures.lock());
+        map.retain(|_, (_, expires)| *expires > now);
+        map.insert((character_id, structure_id), (lookup, now + ttl));
     }
 
     /// The cached access token for a character if it is still valid.
@@ -251,7 +383,15 @@ impl AuthState {
     pub fn forget(&self, character_id: i64) {
         recover_lock(self.tokens.lock()).remove(&character_id);
         recover_lock(self.refresh_locks.lock()).remove(&character_id);
+        recover_lock(self.structures.lock()).retain(|(c, _), _| *c != character_id);
         self.clear_persist_failure(character_id);
+    }
+
+    /// Delete a character's conditionally-cached ESI responses (memory and
+    /// disk) — private data that must not outlive the character's removal.
+    pub async fn purge_character_cache(&self, character_id: i64) {
+        // Authed entries are keyed `c{id}:{path}` (see `esi::character`).
+        self.cache.remove_prefix(&format!("c{character_id}:")).await;
     }
 
     /// Install the callback fired whenever the set of characters with an
@@ -312,7 +452,7 @@ pub fn cache_login_token(state: &AuthState, character: &Character, token: &Token
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -388,7 +528,7 @@ mod tests {
     /// call-a-fresh-`Entry`-every-time functions — and (b) counts
     /// `set_secret` calls, so tests can assert exactly when a rotation write
     /// actually happens.
-    mod counting_credential {
+    pub(crate) mod counting_credential {
         use std::any::Any;
         use std::collections::HashMap;
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -404,6 +544,7 @@ mod tests {
             secret: Mutex<Option<Vec<u8>>>,
             set_calls: AtomicUsize,
             fail_sets: AtomicBool,
+            fail_deletes: AtomicBool,
         }
 
         #[derive(Clone, Default)]
@@ -413,6 +554,11 @@ mod tests {
             /// Number of `set_secret`/`set_password` calls seen so far.
             pub fn set_calls(&self) -> usize {
                 self.0.set_calls.load(Ordering::SeqCst)
+            }
+
+            /// Make every subsequent delete fail (or succeed again).
+            pub fn fail_deletes(&self, fail: bool) {
+                self.0.fail_deletes.store(fail, Ordering::SeqCst);
             }
 
             /// Make every subsequent write fail (or succeed again), to
@@ -437,6 +583,11 @@ mod tests {
                 self.0.secret.lock().clone().ok_or(keyring::Error::NoEntry)
             }
             fn delete_credential(&self) -> keyring::Result<()> {
+                if self.0.fail_deletes.load(Ordering::SeqCst) {
+                    return Err(keyring::Error::NoStorageAccess(Box::new(
+                        std::io::Error::other("keychain locked"),
+                    )));
+                }
                 let mut secret = self.0.secret.lock();
                 if secret.take().is_none() {
                     return Err(keyring::Error::NoEntry);
@@ -749,5 +900,114 @@ mod tests {
         state.forget(910_107); // logout drops the warning with the character
         assert!(state.persist_failures().is_empty());
         assert_eq!(seen(), 4);
+    }
+
+    #[test]
+    fn invalidate_rejected_drops_only_an_aged_token_that_is_still_cached() {
+        let state = AuthState::new();
+        // Fresh token rejected: a real permission failure, no refresh.
+        state.cache_token(910_201, "fresh".into(), 3600);
+        assert!(!state.invalidate_rejected(910_201, "fresh"));
+        assert_eq!(state.cached_token(910_201).unwrap().0, "fresh");
+
+        // Aged token rejected (e.g. after a long suspend): dropped, retry.
+        recover_lock(state.tokens.lock())
+            .get_mut(&910_201)
+            .unwrap()
+            .issued_at -= FRESH_TOKEN_SECS + 1;
+        assert!(state.invalidate_rejected(910_201, "fresh"));
+        assert!(state.cached_token(910_201).is_none());
+
+        // Someone else already replaced it: just retry with theirs.
+        state.cache_token(910_201, "newer".into(), 3600);
+        assert!(state.invalidate_rejected(910_201, "older"));
+        assert_eq!(state.cached_token(910_201).unwrap().0, "newer");
+    }
+
+    #[test]
+    fn a_new_login_cancels_the_pending_one_and_cancel_stops_the_current() {
+        let state = AuthState::new();
+        let first = state.begin_login();
+        let second = state.begin_login();
+        assert!(
+            first.load(Ordering::SeqCst),
+            "superseded login is cancelled"
+        );
+        assert!(!second.load(Ordering::SeqCst));
+
+        // A finished (superseded) attempt must not clear its successor's flag.
+        state.end_login(&first);
+        state.cancel_login();
+        assert!(second.load(Ordering::SeqCst));
+        state.cancel_login(); // nothing pending: no-op
+    }
+
+    #[test]
+    fn a_rejected_cached_token_is_replaced_via_refresh_and_the_call_retried_once() {
+        counting_credential::install();
+        let character_id = 910_210;
+        crate::storage::store_refresh_token(character_id, "refresh-token").expect("seed");
+        let sso = serde_json::json!({
+            "access_token": "fresh-access-token",
+            "refresh_token": "refresh-token",
+            "expires_in": 1200,
+        })
+        .to_string();
+        let (token_url, _hits, _sso) = start_counting_token_stub(sso);
+        let state = AuthState::new().with_token_url(token_url);
+
+        // A cached token that looks valid but ESI no longer accepts (the
+        // laptop slept through its lifetime).
+        state.cache_token(character_id, "dead-token".into(), 3600);
+        recover_lock(state.tokens.lock())
+            .get_mut(&character_id)
+            .unwrap()
+            .issued_at -= 3600;
+
+        let api = tiny_http::Server::http("127.0.0.1:0").expect("bind api");
+        let api_url = format!("http://{}/", api.server_addr().to_ip().expect("addr"));
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            for req in api.incoming_requests() {
+                let auth = req
+                    .headers()
+                    .iter()
+                    .find(|h| h.field.equiv("Authorization"))
+                    .map(|h| h.value.to_string())
+                    .unwrap_or_default();
+                let ok = auth == "Bearer fresh-access-token";
+                log.lock().unwrap().push(auth);
+                let _ = req.respond(
+                    tiny_http::Response::from_string(if ok { "[7]" } else { "{}" })
+                        .with_status_code(if ok { 200 } else { 401 }),
+                );
+            }
+        });
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let got: Vec<i64> = rt
+            .block_on(super::super::character::with_token_retry(
+                &state,
+                character_id,
+                |token| {
+                    let (state, api_url) = (&state, &api_url);
+                    async move {
+                        state
+                            .cache()
+                            .get_json("k", || state.http().get(api_url).bearer_auth(&token))
+                            .await
+                    }
+                },
+            ))
+            .expect("retry with the refreshed token succeeds");
+        assert_eq!(got, vec![7]);
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec!["Bearer dead-token", "Bearer fresh-access-token"]
+        );
     }
 }

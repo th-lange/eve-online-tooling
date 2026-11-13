@@ -5,6 +5,7 @@
 //! the access-token JWT for the character. The Client ID is public (native
 //! PKCE app); there is no client secret.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -164,6 +165,28 @@ pub async fn refresh(
     Ok(resp.json().await?)
 }
 
+/// Revoke a refresh token at the SSO (`POST /v2/oauth/revoke`), so a removed
+/// character's token stops working at CCP rather than lingering until it
+/// expires. Short timeout: logout must not hang on a slow network.
+pub async fn revoke_refresh_token(
+    http: &reqwest::Client,
+    revoke_url: &str,
+    refresh_token: &str,
+) -> Result<(), AuthError> {
+    let params = [
+        ("token_type_hint", "refresh_token"),
+        ("token", refresh_token),
+        ("client_id", CLIENT_ID),
+    ];
+    http.post(revoke_url)
+        .timeout(Duration::from_secs(5))
+        .form(&params)
+        .send()
+        .await?
+        .error_for_status()?;
+    Ok(())
+}
+
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Scp {
@@ -218,65 +241,136 @@ fn character_id_from_sub(sub: &str) -> Option<i64> {
     sub.rsplit(':').next()?.parse().ok()
 }
 
+/// How long [`bind_loopback`] keeps retrying a busy port. A login that was just
+/// cancelled or superseded releases the port within one capture poll
+/// ([`CAPTURE_POLL`]); this covers that hand-off without making a genuinely
+/// foreign listener hang the UI.
+const BIND_RETRY: Duration = Duration::from_secs(3);
+/// How often [`capture_code`] wakes up to check for cancellation.
+const CAPTURE_POLL: Duration = Duration::from_millis(250);
+
 /// Bind the loopback redirect server on the fixed [`REDIRECT_PORT`]. Done before
-/// opening the browser so the redirect can't arrive before we're listening. A
-/// busy port is almost always a login that's still open (its server holds 8765
-/// until it completes or times out), so the error says so rather than failing
-/// obscurely.
+/// opening the browser so the redirect can't arrive before we're listening.
+/// A previous login that was cancelled/superseded (see
+/// [`super::token_cache::AuthState::begin_login`]) frees the port within a
+/// poll interval, so a busy port is retried briefly before giving up; if it
+/// stays busy, some other program owns it.
 pub fn bind_loopback() -> Result<tiny_http::Server, AuthError> {
-    tiny_http::Server::http(("127.0.0.1", REDIRECT_PORT)).map_err(|_| {
-        AuthError::Server(format!(
-            "port {REDIRECT_PORT} is in use — a previous login may still be open; \
-             quit and relaunch the app, then try again"
-        ))
-    })
+    let deadline = Instant::now() + BIND_RETRY;
+    loop {
+        match tiny_http::Server::http(("127.0.0.1", REDIRECT_PORT)) {
+            Ok(server) => return Ok(server),
+            Err(_) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(100)),
+            Err(_) => {
+                return Err(AuthError::Server(format!(
+                    "port {REDIRECT_PORT} is in use by another program — close it and try again"
+                )))
+            }
+        }
+    }
 }
 
-/// Block until the SSO redirect arrives (or we time out), returning the code.
-pub fn capture_code(server: tiny_http::Server, expected_state: &str) -> Result<String, AuthError> {
+/// What one request to the loopback server means for the login in flight.
+#[derive(Debug, PartialEq, Eq)]
+enum Callback {
+    /// Not our redirect (wrong path, wrong/missing `state`, no code): answer
+    /// with this status and keep waiting. A stray local request must never be
+    /// able to abort a login in progress.
+    Ignore(u16),
+    /// The SSO redirect carrying the authorization code.
+    Code(String),
+    /// The SSO redirect reporting a terminal failure (`?error=access_denied…`);
+    /// holds the human-readable reason.
+    Denied(String),
+}
+
+/// Classify a request URL against the expected CSRF `state`. Only
+/// `/callback` with a matching `state` is trusted.
+fn classify_callback(path_and_query: &str, expected_state: &str) -> Callback {
+    let Ok(url) = reqwest::Url::parse(&format!("http://localhost{path_and_query}")) else {
+        return Callback::Ignore(400);
+    };
+    if url.path() != "/callback" {
+        return Callback::Ignore(404);
+    }
+    let (mut code, mut state, mut error, mut description) = (None, None, None, None);
+    for (key, value) in url.query_pairs() {
+        let slot = match key.as_ref() {
+            "code" => &mut code,
+            "state" => &mut state,
+            "error" => &mut error,
+            "error_description" => &mut description,
+            _ => continue,
+        };
+        *slot = Some(value.into_owned());
+    }
+    if state.as_deref() != Some(expected_state) {
+        return Callback::Ignore(400);
+    }
+    if let Some(error) = error {
+        return Callback::Denied(description.unwrap_or(error));
+    }
+    match code {
+        Some(code) => Callback::Code(code),
+        None => Callback::Ignore(400),
+    }
+}
+
+/// Block until the SSO redirect arrives, the login is cancelled via `cancel`,
+/// or we time out; returns the authorization code. Dropping `server` on return
+/// frees the loopback port immediately.
+pub fn capture_code(
+    server: tiny_http::Server,
+    expected_state: &str,
+    cancel: &AtomicBool,
+) -> Result<String, AuthError> {
     let deadline = Instant::now() + LOGIN_TIMEOUT;
     loop {
+        if cancel.load(Ordering::SeqCst) {
+            return Err(AuthError::Cancelled);
+        }
         if Instant::now() >= deadline {
             return Err(AuthError::Timeout);
         }
-        match server.recv_timeout(Duration::from_secs(1)) {
-            Ok(Some(request)) => {
-                let (code, state) = parse_callback(request.url());
-                let _ = request.respond(done_page());
-                if let Some(code) = code {
-                    return if state.as_deref() == Some(expected_state) {
-                        Ok(code)
-                    } else {
-                        Err(AuthError::StateMismatch)
-                    };
+        match server.recv_timeout(CAPTURE_POLL) {
+            Ok(Some(request)) => match classify_callback(request.url(), expected_state) {
+                Callback::Ignore(status) => {
+                    let _ = request
+                        .respond(tiny_http::Response::from_string("").with_status_code(status));
                 }
-                // Ignore unrelated requests (e.g. favicon) and keep waiting.
-            }
+                Callback::Code(code) => {
+                    let _ = request.respond(result_page(
+                        "Login complete",
+                        "You can close this tab and return to EVE Online Tooling.",
+                    ));
+                    return Ok(code);
+                }
+                Callback::Denied(reason) => {
+                    let _ = request.respond(result_page("Login failed", &reason));
+                    return Err(AuthError::Denied(reason));
+                }
+            },
             Ok(None) => continue,
             Err(e) => return Err(AuthError::Server(e.to_string())),
         }
     }
 }
 
-fn parse_callback(path_and_query: &str) -> (Option<String>, Option<String>) {
-    let Ok(url) = reqwest::Url::parse(&format!("http://localhost{path_and_query}")) else {
-        return (None, None);
-    };
-    let mut code = None;
-    let mut state = None;
-    for (key, value) in url.query_pairs() {
-        match key.as_ref() {
-            "code" => code = Some(value.into_owned()),
-            "state" => state = Some(value.into_owned()),
-            _ => {}
-        }
-    }
-    (code, state)
+/// Minimal HTML escaping: the message can carry text from the query string.
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
-fn done_page() -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
-    let html = "<!doctype html><html><body style=\"font-family:sans-serif;background:#18181b;color:#e4e4e7;padding:3rem;text-align:center\">\
-        <h2>Login complete</h2><p>You can close this tab and return to EVE Online Tooling.</p></body></html>";
+fn result_page(title: &str, message: &str) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
+    let html = format!(
+        "<!doctype html><html><body style=\"font-family:sans-serif;background:#18181b;color:#e4e4e7;padding:3rem;text-align:center\">\
+        <h2>{}</h2><p>{}</p></body></html>",
+        escape_html(title),
+        escape_html(message)
+    );
     let header =
         tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..])
             .expect("valid header");
@@ -431,5 +525,130 @@ mod tests {
         }
 
         server_thread.join().expect("server thread");
+    }
+
+    /// Fire one raw GET at the loopback server.
+    fn get(addr: std::net::SocketAddr, path: &str) {
+        use std::io::{Read, Write};
+        let mut s = std::net::TcpStream::connect(addr).expect("connect");
+        write!(
+            s,
+            "GET {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+        )
+        .expect("write");
+        let mut sink = String::new();
+        let _ = s.read_to_string(&mut sink);
+    }
+
+    #[test]
+    fn classify_accepts_only_callback_with_matching_state() {
+        assert_eq!(
+            classify_callback("/callback?code=abc&state=st", "st"),
+            Callback::Code("abc".into())
+        );
+        // Wrong path, wrong state, no state, no code: all ignored, never fatal.
+        assert_eq!(
+            classify_callback("/?code=abc&state=st", "st"),
+            Callback::Ignore(404)
+        );
+        assert_eq!(
+            classify_callback("/callback?code=abc&state=bad", "st"),
+            Callback::Ignore(400)
+        );
+        assert_eq!(
+            classify_callback("/callback?code=abc", "st"),
+            Callback::Ignore(400)
+        );
+        assert_eq!(
+            classify_callback("/callback?state=st", "st"),
+            Callback::Ignore(400)
+        );
+        assert_eq!(
+            classify_callback("/favicon.ico", "st"),
+            Callback::Ignore(404)
+        );
+    }
+
+    #[test]
+    fn classify_treats_sso_error_as_terminal_with_its_description() {
+        assert_eq!(
+            classify_callback(
+                "/callback?error=access_denied&error_description=User%20denied%20access&state=st",
+                "st"
+            ),
+            Callback::Denied("User denied access".into())
+        );
+        // Falls back to the error code without a description.
+        assert_eq!(
+            classify_callback("/callback?error=access_denied&state=st", "st"),
+            Callback::Denied("access_denied".into())
+        );
+        // An unauthenticated `?error=` must not be able to kill the login.
+        assert_eq!(
+            classify_callback("/callback?error=x", "st"),
+            Callback::Ignore(400)
+        );
+    }
+
+    #[test]
+    fn capture_code_survives_stray_requests_and_returns_the_real_code() {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("bind");
+        let addr = server.server_addr().to_ip().expect("addr");
+        let t = std::thread::spawn(move || capture_code(server, "st", &AtomicBool::new(false)));
+        get(addr, "/?code=evil&state=nope");
+        get(addr, "/callback?code=evil&state=nope");
+        get(addr, "/favicon.ico");
+        get(addr, "/callback?code=good&state=st");
+        assert_eq!(t.join().unwrap().unwrap(), "good");
+    }
+
+    #[test]
+    fn capture_code_surfaces_a_denied_login() {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("bind");
+        let addr = server.server_addr().to_ip().expect("addr");
+        let t = std::thread::spawn(move || capture_code(server, "st", &AtomicBool::new(false)));
+        get(
+            addr,
+            "/callback?error=access_denied&error_description=nope&state=st",
+        );
+        match t.join().unwrap() {
+            Err(AuthError::Denied(reason)) => assert_eq!(reason, "nope"),
+            other => panic!("expected Denied, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn capture_code_returns_promptly_when_cancelled_and_frees_the_port() {
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("bind");
+        let addr = server.server_addr().to_ip().expect("addr");
+        let cancel = Arc::new(AtomicBool::new(false));
+        let flag = cancel.clone();
+        let t = std::thread::spawn(move || capture_code(server, "st", &flag));
+        cancel.store(true, Ordering::SeqCst);
+        let started = Instant::now();
+        assert!(matches!(t.join().unwrap(), Err(AuthError::Cancelled)));
+        assert!(started.elapsed() < Duration::from_secs(5));
+        // The server was dropped with the thread: the port frees up. tiny_http
+        // releases its listener from a background thread, so allow a moment.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match tiny_http::Server::http(addr) {
+                Ok(_) => break,
+                Err(e) => {
+                    assert!(Instant::now() < deadline, "port never freed: {e}");
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn result_page_escapes_the_message() {
+        let page = result_page("t", "<script>x</script>");
+        let mut body = String::new();
+        let mut reader = page.into_reader();
+        std::io::Read::read_to_string(&mut reader, &mut body).unwrap();
+        assert!(!body.contains("<script>"));
+        assert!(body.contains("&lt;script&gt;"));
     }
 }
