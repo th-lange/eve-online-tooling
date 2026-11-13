@@ -4,22 +4,17 @@ name: CI
 # runs on tags, so without this nothing verified a change before it merged —
 # a PR could land with broken tests and only surface at release time.
 #
-# Kept Linux-only to conserve Actions minutes; the compiled crate is
-# platform-independent for test purposes. Lint gates (clippy -D warnings,
-# rustfmt --check) are added once the codebase is clean — see #327.
+# Kept Linux-only to conserve Actions minutes. Lint gates (clippy -D warnings,
+# rustfmt --check) are live in the jobs below.
+#
+# No workflow-level `paths-ignore`: both jobs below are required status checks,
+# and a path-filtered workflow never reports them, so a docs-only PR would sit
+# on "Expected" forever and auto-merge could never fire (#1199).
 on:
   pull_request:
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-      - "LICENSE"
   push:
     branches:
       - main
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-      - "LICENSE"
 
 # A newer push to the same branch/PR cancels the in-flight run.
 concurrency:

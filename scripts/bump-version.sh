@@ -66,7 +66,9 @@ echo "Updating Cargo.lock ..."
 ( cd "$ROOT/src-tauri" && cargo update -p "$CRATE" >/dev/null )
 
 echo
-echo "Done. Review, then cut the release:"
+echo "Done. Review, then land it via a pull request (never push to main):"
 echo "  git diff --stat"
-echo "  git commit -am \"chore(release): v$VERSION\""
-echo "  git tag v$VERSION && git push origin main --tags"
+echo "  git switch -c chore/v$VERSION && git commit -am \"chore(release): v$VERSION\""
+echo "  git push -u origin chore/v$VERSION && gh pr create && gh pr merge --auto --merge --delete-branch"
+echo "Once merged, tag the merge commit on main and push only that tag:"
+echo "  git tag v$VERSION <merge-commit> && git push origin v$VERSION"
