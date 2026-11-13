@@ -28,6 +28,7 @@ import {
 import { usePersistentSort } from "../../lib/usePersistentSort";
 import { FeesFromCharacter } from "../../components/FeesFromCharacter";
 import { DataTable, type SortColumn } from "../../components/DataTable";
+import { tickDown, tickUp } from "../../lib/orderTick";
 import { EmptyState } from "../../components/EmptyState";
 import { Page, PageHeader, PrimaryButton } from "../../components/page";
 import { SdeGate } from "../../components/SdeGate";
@@ -456,15 +457,15 @@ function TradeTable({
           <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
             <UndercutPrice
               value={r.buy}
-              tick={0.01}
-              label="buy (overcut +0.01)"
+              step="up"
+              label="buy (overcut one tick)"
             />
           </td>
           <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">
             <UndercutPrice
               value={r.sell}
-              tick={-0.01}
-              label="sell (undercut −0.01)"
+              step="down"
+              label="sell (undercut one tick)"
             />
           </td>
           <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">
@@ -526,14 +527,14 @@ function TradeTable({
 /** A price that copies an undercut/overcut value (one tick) to the clipboard. */
 function UndercutPrice({
   value,
-  tick,
+  step,
   label,
 }: {
   value: number;
-  tick: number;
+  step: "up" | "down";
   label: string;
 }) {
-  const adjusted = Math.max(value + tick, 0);
+  const adjusted = step === "up" ? tickUp(value) : tickDown(value);
   return (
     <button
       onClick={() => copyToClipboard(adjusted.toFixed(2))}

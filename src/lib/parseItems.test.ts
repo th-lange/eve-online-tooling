@@ -59,4 +59,34 @@ describe("shared paste item parser", () => {
       { name: "Pyerite", quantity: 250 },
     ]);
   });
+
+  it("keeps a number inside the name (#1165)", () => {
+    // Tab: first cell is the name, whatever it contains.
+    expect(parseLine("Navy Cap Booster 400\t20")).toEqual({
+      name: "Navy Cap Booster 400",
+      quantity: 20,
+    });
+    expect(parseLine("Cap Booster 25\t3\tCharge\t0.1 m3")).toEqual({
+      name: "Cap Booster 25",
+      quantity: 3,
+    });
+    // Spaces: the quantity is the last of the first numeric run.
+    expect(parseLine("Navy Cap Booster 400 20")).toEqual({
+      name: "Navy Cap Booster 400",
+      quantity: 20,
+    });
+    expect(parseLine("Navy Cap Booster 400 x12")).toEqual({
+      name: "Navy Cap Booster 400",
+      quantity: 12,
+    });
+    // A leading X5-style token is part of the name when a quantity follows.
+    expect(parseLine("X5 Enduring Stasis Webifier 2")).toEqual({
+      name: "X5 Enduring Stasis Webifier",
+      quantity: 2,
+    });
+    expect(parseLine("X5 Enduring Stasis Webifier\t2")).toEqual({
+      name: "X5 Enduring Stasis Webifier",
+      quantity: 2,
+    });
+  });
 });
