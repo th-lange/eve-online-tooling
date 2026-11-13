@@ -84,7 +84,7 @@ fn rah_step(r: [f64; 4], shift_amt: f64, profile: &DamageProfile) -> [f64; 4] {
         return r; // degenerate all-zero profile: nothing to shift toward
     }
     let mut order = [0usize, 1, 2, 3];
-    order.sort_by(|&a, &b| received[a].partial_cmp(&received[b]).unwrap());
+    order.sort_by(|&a, &b| received[a].total_cmp(&received[b]));
     let mut donated = 0.0;
     let mut next = r;
     for &i in &order[..donors] {
@@ -183,6 +183,13 @@ pub fn tank(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rah_step_tolerates_nan_resonance() {
+        let profile = DamageProfile([0.25; 4]);
+        // Must not panic on the sort even with a poisoned resonance.
+        let _ = rah_step([f64::NAN, 0.5, 0.5, 0.5], 0.06, &profile);
+    }
 
     #[test]
     fn ehp_with_no_resists_equals_raw_hp() {
