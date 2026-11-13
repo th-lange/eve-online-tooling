@@ -81,9 +81,19 @@ async fn run_login(
     // runtime like the refresh path) and the roster (json), de-duping.
     let character_id = token_character.character_id;
     let refresh_token = tokens.refresh_token.clone();
-    tokio::task::spawn_blocking(move || storage::store_refresh_token(character_id, &refresh_token))
+    {
+        // Serialize with any refresh of this character that is in flight: SSO
+        // rotates refresh tokens, so a refresh that started with the *old*
+        // grant must not write its rotated token over the one we just got
+        // (silently reverting newly granted scopes) (#1148).
+        let lock = auth_state.refresh_lock(character_id);
+        let _refreshing = lock.lock().await;
+        tokio::task::spawn_blocking(move || {
+            storage::store_refresh_token(character_id, &refresh_token)
+        })
         .await
         .map_err(|e| e.to_string())??;
+    }
     let dir = crate::storage::app_data_dir(app)?;
     let character = Character {
         character_id: token_character.character_id,
@@ -423,6 +433,12 @@ async fn remove_character(
     dir: &std::path::Path,
     character_id: i64,
 ) -> Result<Vec<Character>, crate::model::AppError> {
+    // Wait out any refresh of this character already in flight, so it can't
+    // re-create the keychain entry we are about to delete (#1148). Queued
+    // refreshes then find no stored token and fail instead of resurrecting it.
+    let lock = auth_state.refresh_lock(character_id);
+    let _refreshing = lock.lock().await;
+
     // Read the token before deleting it so it can be revoked at the SSO.
     let stored = tokio::task::spawn_blocking(move || storage::load_refresh_token(character_id))
         .await
@@ -589,6 +605,34 @@ mod tests {
             .join("esi-cache")
             .join(format!("c{id}9_latest_x.json"))
             .exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn logout_waits_for_an_in_flight_refresh_of_that_character() {
+        // #1148: a refresh holding the character's lock must finish before
+        // logout touches the keychain, or it could resurrect the deleted token.
+        let id = 910_310;
+        let (dir, auth, _revoked) = logout_fixture(id);
+        let lock = auth.refresh_lock(id);
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let held = lock.lock().await;
+                let logout = remove_character(&auth, &dir, id);
+                tokio::pin!(logout);
+                // While the refresh is "in flight" the logout must not finish.
+                let early =
+                    tokio::time::timeout(std::time::Duration::from_millis(150), &mut logout).await;
+                assert!(early.is_err(), "logout ran while a refresh held the lock");
+                assert!(storage::load_refresh_token(id).unwrap().is_some());
+                drop(held);
+                logout.await
+            });
+        result.expect("logout completes once the refresh is done");
+        assert_eq!(storage::load_refresh_token(id).unwrap(), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
