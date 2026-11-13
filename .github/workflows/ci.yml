@@ -193,7 +193,7 @@ jobs:
           sudo apt-get install -y --fix-missing \
             libwebkit2gtk-4.1-dev build-essential curl wget file \
             libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
-            pkg-config patchelf
+            pkg-config patchelf xvfb
 
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 (2026-10-16)
         with:
@@ -236,5 +236,33 @@ jobs:
           test -x squashfs-root/AppRun
           if [ -e squashfs-root/usr/bin/xdg-open ]; then
             echo "::error::extracted AppImage contains usr/bin/xdg-open (#1140)"
+            exit 1
+          fi
+
+      # #1200: the app must actually start. Run the AppImage headless for a
+      # few seconds; still running at the timeout (124) is success, any
+      # earlier exit (missing lib, WebKit/Tauri startup panic) fails.
+      # --appimage-extract-and-run avoids needing FUSE on the runner.
+      - name: Launch smoke test (xvfb)
+        timeout-minutes: 3
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          WEBKIT_DISABLE_COMPOSITING_MODE: "1"
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+        run: |
+          appimage=$(find "$PWD/src-tauri/target/release/bundle/appimage" -maxdepth 1 -name '*.AppImage' | head -n1)
+          [ -n "$appimage" ] || { echo "::error::no .AppImage produced"; exit 1; }
+          chmod +x "$appimage"
+          export HOME="$RUNNER_TEMP/smoke-home"
+          mkdir -p "$HOME"
+          set +e
+          timeout 20 xvfb-run -a dbus-run-session -- "$appimage" --appimage-extract-and-run 2>"$RUNNER_TEMP/smoke.err"
+          code=$?
+          set -e
+          echo "--- app stderr ---"
+          cat "$RUNNER_TEMP/smoke.err"
+          echo "--- exit code: $code ---"
+          if [ "$code" -ne 124 ]; then
+            echo "::error::app exited early with code $code instead of staying up for 20s (#1200)"
             exit 1
           fi
