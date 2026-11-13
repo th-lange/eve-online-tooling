@@ -88,7 +88,7 @@ pub fn migrate_legacy_kv(app_data_dir: &Path, plugin_id: &str) {
         .map_or(Ok(()), std::fs::create_dir_all)
         .and_then(|()| std::fs::rename(&old, &new));
     if let Err(e) = moved {
-        eprintln!("plugins: could not migrate kv store of {plugin_id:?}: {e}");
+        tracing::warn!("plugins: could not migrate kv store of {plugin_id:?}: {e}");
     }
 }
 

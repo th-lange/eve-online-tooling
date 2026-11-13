@@ -120,8 +120,8 @@ fn quarantine_corrupt(path: &Path) {
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("data");
     let aside = path.with_file_name(format!("{name}.corrupt-{}", crate::util::time::now_secs()));
     match std::fs::rename(path, &aside) {
-        Ok(()) => eprintln!("storage: kept the unreadable file as {}", aside.display()),
-        Err(e) => eprintln!("storage: couldn't set {} aside: {e}", path.display()),
+        Ok(()) => tracing::warn!("storage: kept the unreadable file as {}", aside.display()),
+        Err(e) => tracing::warn!("storage: couldn't set {} aside: {e}", path.display()),
     }
 }
 
@@ -130,7 +130,7 @@ fn quarantine_corrupt(path: &Path) {
 /// silent) or when it's present but fails to parse (a real data problem —
 /// hand-edited, truncated write, format drift between app versions) rather
 /// than conflating the two outcomes. The corrupt case is logged via
-/// `eprintln!` naming the path and the parse error, so corruption doesn't
+/// `tracing::warn!` naming the path and the parse error, so corruption doesn't
 /// silently masquerade as "feature never used" (#1035). Shared by
 /// [`load_roster`] and [`load_id_list`], which previously duplicated this
 /// exact "read → parse → unwrap_or_default" pattern.
@@ -143,7 +143,7 @@ fn load_json_or_default<T: DeserializeOwned + Default>(path: &Path) -> T {
     match serde_json::from_slice(&bytes) {
         Ok(value) => value,
         Err(e) => {
-            eprintln!(
+            tracing::warn!(
                 "storage: failed to parse {}: {e} — falling back to an empty default; \
                  the file on disk is left untouched until the next save",
                 path.display()
@@ -398,7 +398,7 @@ pub fn load_data<T: DeserializeOwned>(app_data_dir: &Path, name: &str) -> Option
             // Present but unparseable is a data problem, not "nothing stored":
             // callers merge into `unwrap_or_default()` and save, which would
             // otherwise overwrite accumulated history with an empty set.
-            eprintln!("storage: failed to parse {}: {e}", path.display());
+            tracing::warn!("storage: failed to parse {}: {e}", path.display());
             quarantine_corrupt(&path);
             None
         }
