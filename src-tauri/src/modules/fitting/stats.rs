@@ -40,7 +40,7 @@ const MAX_ACTIVE_DRONES: i32 = 5;
 /// Cache key for the built-in hull-class target archetype library (#890),
 /// mirroring `commands.rs`'s `NPC_PROFILE_CACHE_KEY` — rebuilding it is a
 /// handful of SDE queries per `fitting_simulate` call otherwise.
-const ARCHETYPE_CACHE_KEY: &str = "fitting_target_archetypes";
+const ARCHETYPE_CACHE_KEY: &str = "fitting_target_archetypes_v2";
 /// Same week-long TTL as the NPC profile library cache (#873) — well past
 /// any plausible SDE update cadence; `cache_get_versioned` invalidates on
 /// SDE swap regardless.
@@ -141,17 +141,7 @@ pub(super) fn run_dogma(
     let module_items: Vec<&FitItem> = fit
         .items
         .iter()
-        .filter(|i| {
-            matches!(
-                i.slot,
-                SlotKind::High
-                    | SlotKind::Mid
-                    | SlotKind::Low
-                    | SlotKind::Rig
-                    | SlotKind::Subsystem
-                    | SlotKind::Mode
-            )
-        })
+        .filter(|i| is_resolved_module(i.slot))
         .collect();
 
     // Drones (DPS) and charges (weapon damage) need their base attributes too.
@@ -664,7 +654,10 @@ pub(super) fn resolved_feasibility(
     let mut fighter_stores = resolved.fighters.iter();
     let mut val_items: Vec<ValItem> = Vec::with_capacity(fit.items.len());
     for item in &fit.items {
-        if is_ship_module(item.slot) {
+        if is_resolved_module(item.slot) {
+            // `resolved.modules` is parallel to the items passing
+            // `is_resolved_module` (which includes the T3D mode), so every such
+            // item must consume exactly one store or later modules misalign.
             let Some(store) = module_stores.next() else {
                 continue;
             };
@@ -1618,6 +1611,14 @@ pub(super) fn is_ship_module(slot: SlotKind) -> bool {
     )
 }
 
+/// Whether an item gets a store in `ResolvedFit::modules`: every ship module
+/// plus the T3 destroyer mode item (which carries stat bonuses but no
+/// CPU/PG). The resolver's callers and `resolved_feasibility` must share this
+/// one predicate — they walk `fit.items` and `resolved.modules` in lockstep.
+pub(super) fn is_resolved_module(slot: SlotKind) -> bool {
+    is_ship_module(slot) || slot == SlotKind::Mode
+}
+
 /// A type's required-skill ids (requiredSkill1/2/3 = attrs 182/183/184), for
 /// `*RequiredSkillModifier` targeting.
 pub(super) fn required_skills_of(attrs: &AttrMap, type_id: i64) -> Vec<i64> {
@@ -1994,6 +1995,68 @@ mod tests {
             charges,
             unresolved: 0,
         }
+    }
+
+    /// #1186: a T3 destroyer mode item sits in `resolved.modules` (it has a
+    /// store) but carries no CPU/PG. With the mode ahead of the module in
+    /// `fit.items`, the module must still read *its own* store, so an over-CPU
+    /// fit is flagged.
+    #[test]
+    fn feasibility_stays_aligned_when_a_mode_precedes_modules() {
+        let mut ship = AttrStore::new();
+        ship.set_base(48, 100.0); // cpu output
+        ship.set_base(11, 100.0); // powergrid output
+        ship.set_base(14, 1.0); // one high slot
+        let mut resolved = resolved_fit(
+            vec![store(&[]), store(&[(50, 150.0), (30, 10.0)])],
+            vec![None, None],
+            Vec::new(),
+        );
+        resolved.ship = ship;
+        let mut mode = item(1, None, ModuleState::Online, 1);
+        mode.slot = SlotKind::Mode;
+        let module = item(2, None, ModuleState::Online, 1);
+        let fit = Fit {
+            id: String::new(),
+            name: String::new(),
+            ship_type_id: 0,
+            items: vec![mode, module],
+            projected: Vec::new(),
+        };
+        let layout = ShipLayout {
+            type_id: 0,
+            name: String::new(),
+            group_name: String::new(),
+            high_slots: 1,
+            mid_slots: 0,
+            low_slots: 0,
+            rig_slots: 0,
+            subsystem_slots: 0,
+            mode_slots: 1,
+            turret_hardpoints: 0,
+            launcher_hardpoints: 0,
+            cpu_output: 100.0,
+            powergrid_output: 100.0,
+            calibration: 0.0,
+            drone_bay: 0.0,
+            drone_bandwidth: 0.0,
+            fighter_tubes: 0,
+            fighter_light_slots: 0,
+            fighter_support_slots: 0,
+            fighter_heavy_slots: 0,
+            fighter_bay: 0.0,
+        };
+        let (resources, problems, _) =
+            resolved_feasibility(&resolved, &layout, &EffectMap::new(), &fit, &|_| 0.0);
+        assert!(
+            (resources.cpu_used - 150.0).abs() < 1e-9,
+            "cpu used = {}",
+            resources.cpu_used
+        );
+        assert!(
+            problems.iter().any(|p| p.severity == Severity::Error),
+            "over-CPU fit must be flagged: {problems:?}"
+        );
     }
 
     /// Offline/online modules never fire; an otherwise-identical active one
