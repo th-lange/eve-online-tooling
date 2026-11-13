@@ -127,6 +127,15 @@ pub struct ProducedItem {
     pub locked: bool,
 }
 
+/// The colonies overview plus the characters whose colonies could not be
+/// (fully) loaded, so the UI can say the list is partial (#1169).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PiOverview {
+    pub colonies: Vec<ColonyView>,
+    pub failed_characters: Vec<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ColonyView {
@@ -202,7 +211,7 @@ pub async fn pi_overview_core(
     dir: &std::path::Path,
     sde: Sde,
     auth: &AuthState,
-) -> Result<Vec<ColonyView>, crate::model::AppError> {
+) -> Result<PiOverview, crate::model::AppError> {
     let character_ids = storage::target_characters(dir);
     if character_ids.is_empty() {
         return Err(crate::model::AppError::auth_required());
@@ -216,6 +225,7 @@ pub async fn pi_overview_core(
     let names = storage::character_names(dir);
 
     let mut views = Vec::new();
+    let mut failed_characters: Vec<String> = Vec::new();
     // (character_id, planet_ids) for every character whose planets *list*
     // call succeeded this round — feeds notes::colony_liveness so a note row
     // only gets pruned when we positively know its colony is gone, not when
@@ -231,16 +241,21 @@ pub async fn pi_overview_core(
             .cloned()
             .unwrap_or_else(|| format!("Character {character_id}"));
 
-        let colonies: Vec<EsiColony> = match authed_get(
+        let colonies_result: Result<Vec<EsiColony>, _> = authed_get(
             auth,
             character_id,
             &format!("/latest/characters/{character_id}/planets/"),
         )
         .await
-        {
-            Ok(colonies) => colonies,
-            Err(_) if aggregating => continue,
-            Err(e) => return Err(e.to_string().into()),
+        .map_err(|e| e.to_string());
+        let Some(colonies) = crate::model::settle_character_fetch(
+            colonies_result,
+            aggregating,
+            &character_name,
+            &mut failed_characters,
+        )?
+        else {
+            continue;
         };
         fetched.push((character_id, colonies.iter().map(|c| c.planet_id).collect()));
 
@@ -253,7 +268,12 @@ pub async fn pi_overview_core(
             .await
             {
                 Ok(planet) => planet,
-                Err(_) => continue,
+                Err(_) => {
+                    // One colony's detail is missing: the list is partial even
+                    // for a single character, so report it (#1169).
+                    crate::model::note_failed_character(&mut failed_characters, &character_name);
+                    continue;
+                }
             };
 
             if let Ok(view) = build_colony(
@@ -284,7 +304,10 @@ pub async fn pi_overview_core(
         }
     }
 
-    Ok(views)
+    Ok(PiOverview {
+        colonies: views,
+        failed_characters,
+    })
 }
 
 /// Colonies overview with extractor timers, storage usage, and the balance.
@@ -292,7 +315,7 @@ pub async fn pi_overview_core(
 pub async fn pi_overview(
     app: AppHandle,
     auth_state: State<'_, AuthState>,
-) -> Result<Vec<ColonyView>, crate::model::AppError> {
+) -> Result<PiOverview, crate::model::AppError> {
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
     pi_overview_core(&dir, sde, &auth_state).await
 }

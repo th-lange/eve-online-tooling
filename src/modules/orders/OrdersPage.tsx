@@ -12,6 +12,7 @@ import {
 } from "../../lib/api";
 import { authKeys, ordersKeys, productionKeys } from "../../lib/queryKeys";
 import { QueryResult } from "../../components/QueryResult";
+import { PartialFetchNotice } from "../../components/PartialFetchNotice";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
 import { formatInt, formatIsk } from "../../lib/format";
 import { usePersistentSort } from "../../lib/usePersistentSort";
@@ -34,7 +35,8 @@ export function OrdersPage() {
     queryKey: ordersKeys.market(active.data ?? null),
     queryFn: marketOrders,
   });
-  const rows = useMemo(() => orders.data?.data ?? [], [orders.data]);
+  const rows = useMemo(() => orders.data?.data.rows ?? [], [orders.data]);
+  const hasFailures = (orders.data?.data.failedCharacters.length ?? 0) > 0;
   const undercut = rows.filter((r) => r.undercut).length;
   // Show the Character column only once orders span more than one character
   // (i.e. "All characters" is active); single-character views stay exactly
@@ -128,7 +130,7 @@ export function OrdersPage() {
           isError: orders.isError,
           error: orders.error,
           isPending: orders.isPending,
-          data: orders.data?.data,
+          data: orders.data?.data.rows,
         }}
         pendingLabel="Loading…"
         loginMessage="Log in a character first to view your market orders."
@@ -138,12 +140,13 @@ export function OrdersPage() {
             re-login after it's enabled on the EVE app.
           </>
         }
-        isEmpty={(d) => d.length === 0}
+        isEmpty={(d) => d.length === 0 && !hasFailures}
         emptyTitle="No open orders."
         emptyHint="You have no active buy or sell orders for the selected character(s)."
       >
         {() => (
           <>
+            <PartialFetchNotice failed={orders.data?.data.failedCharacters} />
             {rows.length > 0 && (
               <div className="mt-3 text-sm text-zinc-400">
                 {formatInt(rows.length)} open order(s) ·{" "}
@@ -175,11 +178,15 @@ export function OrdersPage() {
               </div>
             )}
 
-            <OrdersTable
-              rows={rows}
-              showCharacter={multiCharacter}
-              buildCost={buildCost}
-            />
+            {/* With every fetch failed the table's "No open orders" would
+                contradict the notice above. */}
+            {(rows.length > 0 || !hasFailures) && (
+              <OrdersTable
+                rows={rows}
+                showCharacter={multiCharacter}
+                buildCost={buildCost}
+              />
+            )}
           </>
         )}
       </QueryResult>

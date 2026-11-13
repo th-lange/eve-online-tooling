@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { type ColonyView } from "../../lib/api";
+import { PartialFetchNotice } from "../../components/PartialFetchNotice";
 import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { Centered } from "../../components/page";
 import { Colony } from "./Colony";
 
 function ColoniesTab({
   colonies,
+  failedCharacters,
   rows,
   now,
   lockedSet,
@@ -16,6 +18,8 @@ function ColoniesTab({
   onFocused,
 }: {
   colonies: { error: unknown; isError: boolean; isFetching: boolean };
+  /** Characters skipped because their colonies failed to load (#1169). */
+  failedCharacters: string[];
   rows: ColonyView[];
   now: number;
   lockedSet: Set<number>;
@@ -61,9 +65,14 @@ function ColoniesTab({
         className="mt-4 text-sm"
       />
 
-      {!colonies.isError && rows.length === 0 && !colonies.isFetching && (
-        <Centered>No colonies found for this character.</Centered>
-      )}
+      <PartialFetchNotice failed={failedCharacters} className="mt-4" />
+
+      {!colonies.isError &&
+        failedCharacters.length === 0 &&
+        rows.length === 0 &&
+        !colonies.isFetching && (
+          <Centered>No colonies found for this character.</Centered>
+        )}
 
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
         {rows.map((c) => (
