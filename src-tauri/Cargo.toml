@@ -27,7 +27,7 @@ tauri-build = { version = "~2.6", features = [] }
 [dependencies]
 tauri = { version = "~2.11", features = [] }
 tauri-plugin-opener = "~2.5"
-tauri-plugin-notification = "~2.3"
+tauri-plugin-notification = "~2.4"
 # Native folder picker for the sync-folder setting (#1128 follow-up).
 tauri-plugin-dialog = "~2.7"
 # Type-safe TS binding generation for Tauri commands (pilot started with the orders module, #589; orders, market, auth and production are generated today).
