@@ -46,6 +46,36 @@ async fn obs_call(
     settings: &ObsSettings,
     requests: &[(&str, Value)],
 ) -> Result<Vec<Result<Value, String>>, String> {
+    obs_call_within(settings, requests, OBS_CALL_TIMEOUT).await
+}
+
+/// Upper bound for one whole connect → identify → requests exchange. A
+/// firewalled host, a hung OBS or a port that accepts TCP but never sends
+/// `Hello` would otherwise park the caller (and its socket) forever (#1178).
+const OBS_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// [`obs_call`] with an explicit deadline over the entire exchange; dropping
+/// the future on timeout closes the socket.
+async fn obs_call_within(
+    settings: &ObsSettings,
+    requests: &[(&str, Value)],
+    limit: std::time::Duration,
+) -> Result<Vec<Result<Value, String>>, String> {
+    tokio::time::timeout(limit, obs_exchange(settings, requests))
+        .await
+        .unwrap_or_else(|_| {
+            Err(format!(
+                "OBS at {} did not respond within {}s",
+                settings.url,
+                limit.as_secs_f32().ceil() as u32
+            ))
+        })
+}
+
+async fn obs_exchange(
+    settings: &ObsSettings,
+    requests: &[(&str, Value)],
+) -> Result<Vec<Result<Value, String>>, String> {
     let (ws, _) = tokio_tungstenite::connect_async(&settings.url)
         .await
         .map_err(|e| format!("OBS not reachable at {}: {e}", settings.url))?;
@@ -240,5 +270,32 @@ mod tests {
         let version = obs_test_connection(settings).await.unwrap();
         assert_eq!(version, "OBS 31.0.0 (websocket 5.5.2)");
         server.await.unwrap();
+    }
+
+    /// A server that accepts TCP but never sends `Hello` must produce a
+    /// timeout error instead of hanging the caller (#1178).
+    #[tokio::test]
+    async fn silent_server_times_out_with_a_clear_error() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            // Complete the websocket upgrade, then say nothing.
+            let _ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        });
+        let settings = ObsSettings {
+            url: format!("ws://{addr}"),
+            password: None,
+        };
+        let err = obs_call_within(
+            &settings,
+            &[("GetVersion", json!({}))],
+            std::time::Duration::from_millis(200),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("did not respond"), "{err}");
+        server.abort();
     }
 }

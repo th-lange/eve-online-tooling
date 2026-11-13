@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -195,6 +195,24 @@ pub struct LogSummary {
     pub segments: Vec<OverviewSegment>,
 }
 
+/// What the single shared capture/playback loop is doing, announced on
+/// `dps://mode` so the always-on fight overlay can tell a replay from live
+/// combat and re-claim live capture when its loop is stopped (#1175).
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum CaptureMode {
+    /// A live gamelog tail owns the loop.
+    Live,
+    /// A past log is being replayed; its buckets/events are not live combat.
+    Playback,
+    /// Nothing is running (explicit stop, or a replay ran to its end).
+    Stopped,
+}
+
+fn emit_mode(app: &AppHandle, mode: CaptureMode) {
+    let _ = app.emit("dps://mode", mode);
+}
+
 /// Start (or restart) tailing the newest gamelog in `settings.gamelogs_dir`.
 /// Returns immediately; raw combat-log events arrive on `dps://events`,
 /// finalized 5 s buckets on `dps://buckets`.
@@ -215,6 +233,7 @@ pub async fn dps_start(
     // Fresh capture starts unpaused; the loop watches this flag to freeze.
     let paused = state.paused.clone();
     paused.store(false, Ordering::SeqCst);
+    emit_mode(&app, CaptureMode::Live);
 
     // SDE path (for ore → m³); resolved once. Mining lines need a volume lookup.
     let sde_db = crate::storage::app_data_dir(&app)
@@ -248,11 +267,16 @@ pub async fn dps_start(
         let mut header_cache: HashMap<PathBuf, String> = HashMap::new();
         let mut current =
             pick_newest_gamelog(&dir, settings.character.as_deref(), &mut header_cache);
+        let capture_started = SystemTime::now();
         let mut offset = current
             .as_ref()
             .and_then(|p| std::fs::metadata(p).ok())
             .map(|m| m.len())
             .unwrap_or(0);
+        // Where each previously tailed file was left, so swapping back to it
+        // (multiboxing: mtime flips between clients) resumes instead of
+        // replaying the session from byte 0 (#1174).
+        let mut offsets: HashMap<PathBuf, u64> = HashMap::new();
         // Detected once when `current` is (re)assigned, not per line — a
         // localized client's header never changes mid-session (#868).
         let mut lang = match &current {
@@ -292,8 +316,15 @@ pub async fn dps_start(
                     if current.as_deref() != Some(newest.as_path()) {
                         lang = detect_file_lang(&newest).await;
                         emit_source(&app, &newest);
+                        if let Some(prev) = current.take() {
+                            offsets.insert(prev, offset);
+                        }
+                        offset = swap_start_offset(
+                            offsets.get(&newest).copied(),
+                            std::fs::metadata(&newest).ok().as_ref(),
+                            capture_started,
+                        );
                         current = Some(newest);
-                        offset = 0;
                     }
                 }
             }
@@ -354,8 +385,9 @@ pub async fn dps_start(
 
 /// Stop the active capture or playback (bump the generation so the loop exits).
 #[tauri::command]
-pub fn dps_stop(state: State<'_, DpsState>) {
+pub fn dps_stop(app: AppHandle, state: State<'_, DpsState>) {
     state.generation.fetch_add(1, Ordering::SeqCst);
+    emit_mode(&app, CaptureMode::Stopped);
     // A stopped session is not "paused" — clear the flag so the next start/
     // playback isn't born frozen if it raced a lingering pause.
     state.paused.store(false, Ordering::SeqCst);
@@ -475,6 +507,7 @@ pub async fn dps_playback(
     let my_gen = generation.fetch_add(1, Ordering::SeqCst) + 1;
     let paused = state.paused.clone();
     paused.store(false, Ordering::SeqCst);
+    emit_mode(&app, CaptureMode::Playback);
     // Seed the live speed knob so the slider can adjust the running replay.
     state
         .speed_bits
@@ -545,6 +578,7 @@ pub async fn dps_playback(
             };
             if ended {
                 let _ = app.emit("dps://done", ());
+                emit_mode(&app, CaptureMode::Stopped);
                 break;
             }
         }
@@ -721,8 +755,18 @@ pub fn dps_log_stat(file: String) -> Result<u64, String> {
 /// doesn't map to a known phrase; the file still lists, it's just
 /// unattributed (still tailable directly by picking it in playback).
 #[tauri::command]
-pub fn dps_list_logs(gamelogs_dir: String) -> Result<Vec<LogFile>, String> {
-    let dir = Path::new(&gamelogs_dir);
+pub async fn dps_list_logs(gamelogs_dir: String) -> Result<Vec<LogFile>, String> {
+    // One open+read per file: off the main thread (#1180).
+    tokio::task::spawn_blocking(move || list_logs_blocking(&gamelogs_dir, 0))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Blocking body of [`dps_list_logs`]. Files modified before `min_modified`
+/// (epoch secs) are skipped *before* their header is read, so callers that
+/// only want recent logs never pay for the whole folder's history (#1180).
+fn list_logs_blocking(gamelogs_dir: &str, min_modified: u64) -> Result<Vec<LogFile>, String> {
+    let dir = Path::new(gamelogs_dir);
     if !dir.is_dir() {
         return Err(format!("not a folder: {gamelogs_dir}"));
     }
@@ -731,6 +775,9 @@ pub fn dps_list_logs(gamelogs_dir: String) -> Result<Vec<LogFile>, String> {
         .into_iter()
         .filter_map(|(path, mtime)| {
             let modified = mtime.duration_since(UNIX_EPOCH).ok()?.as_secs();
+            if modified < min_modified {
+                return None;
+            }
             let character = super::parser::detect_character(&read_header_sync(&path));
             Some(LogFile {
                 name: path.file_name()?.to_string_lossy().into_owned(),
@@ -749,21 +796,22 @@ pub fn dps_list_logs(gamelogs_dir: String) -> Result<Vec<LogFile>, String> {
 /// Ordered by most recent activity; logs with no recognised `Listener:`
 /// header (see [`dps_list_logs`]) are skipped, not listed as unattributed.
 #[tauri::command]
-pub fn dps_list_characters(gamelogs_dir: String) -> Result<Vec<String>, String> {
+pub async fn dps_list_characters(gamelogs_dir: String) -> Result<Vec<String>, String> {
     let cutoff = crate::util::time::now_secs().saturating_sub(24 * 3600);
-    let mut seen = std::collections::HashSet::new();
-    let mut characters = Vec::new();
-    for log in dps_list_logs(gamelogs_dir)? {
-        if log.modified < cutoff {
-            continue;
-        }
-        if let Some(character) = log.character {
-            if seen.insert(character.clone()) {
-                characters.push(character);
+    tokio::task::spawn_blocking(move || {
+        let mut seen = std::collections::HashSet::new();
+        let mut characters = Vec::new();
+        for log in list_logs_blocking(&gamelogs_dir, cutoff)? {
+            if let Some(character) = log.character {
+                if seen.insert(character.clone()) {
+                    characters.push(character);
+                }
             }
         }
-    }
-    Ok(characters)
+        Ok(characters)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Parse a user's overview export (YAML, from the overview settings window's
@@ -852,6 +900,32 @@ fn read_header_sync(path: &Path) -> String {
     let n = file.read(&mut buf).unwrap_or(0);
     buf.truncate(n);
     String::from_utf8_lossy(&buf).into_owned()
+}
+
+/// Byte offset to start tailing a gamelog the loop just swapped to (#1174).
+/// A file we already tailed resumes where we left it. A file first seen now
+/// starts at 0 only if it was *created during this capture* (a new session —
+/// everything in it is new); a pre-existing file starts at its current end so
+/// the session's old damage is never replayed as one fake burst. When the
+/// platform reports no creation time, the safe choice is the end.
+fn swap_start_offset(
+    saved: Option<u64>,
+    meta: Option<&std::fs::Metadata>,
+    capture_started: SystemTime,
+) -> u64 {
+    if let Some(off) = saved {
+        return off;
+    }
+    let Some(meta) = meta else { return 0 };
+    let created_during_capture = meta
+        .created()
+        .map(|c| c >= capture_started)
+        .unwrap_or(false);
+    if created_during_capture {
+        0
+    } else {
+        meta.len()
+    }
 }
 
 /// Read bytes appended to `path` since `offset`. Returns the decoded text up to
@@ -1040,6 +1114,53 @@ mod tests {
         path
     }
 
+    /// #1174: a pre-existing file we swap to must start at its end (no replay
+    /// of the session), a file we already tailed resumes, a file created
+    /// during the capture reads from 0.
+    #[test]
+    fn swap_offset_never_replays_preexisting_logs() {
+        let tmp = TmpDir::new("swap-offset");
+        let path = tmp.0.join("a.txt");
+        std::fs::write(&path, "0123456789").unwrap();
+        let meta = std::fs::metadata(&path).unwrap();
+        let created = meta.created().expect("platform reports creation time");
+
+        // Capture began after the file existed -> start at its end.
+        let later = created + Duration::from_secs(60);
+        assert_eq!(swap_start_offset(None, Some(&meta), later), 10);
+        // Previously tailed -> resume exactly there.
+        assert_eq!(swap_start_offset(Some(4), Some(&meta), later), 4);
+        // Created during the capture -> whole file is new.
+        let earlier = created - Duration::from_secs(60);
+        assert_eq!(swap_start_offset(None, Some(&meta), earlier), 0);
+    }
+
+    /// #1180: the mtime cutoff applies before headers are read, and old
+    /// files are omitted.
+    #[test]
+    fn list_logs_skips_files_older_than_cutoff() {
+        let tmp = TmpDir::new("list-logs-cutoff");
+        let header = "------\n  Gamelog\n  Listener: Pilot\n";
+        let old = tmp.0.join("old.txt");
+        let new = tmp.0.join("new.txt");
+        std::fs::write(&old, header).unwrap();
+        std::fs::write(&new, header).unwrap();
+        let old_time = SystemTime::now() - Duration::from_secs(10 * 24 * 3600);
+        std::fs::File::options()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(old_time)
+            .unwrap();
+        let cutoff = crate::util::time::now_secs() - 24 * 3600;
+
+        let all = list_logs_blocking(tmp.0.to_str().unwrap(), 0).unwrap();
+        assert_eq!(all.len(), 2);
+        let recent = list_logs_blocking(tmp.0.to_str().unwrap(), cutoff).unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].name, "new.txt");
+    }
+
     #[tokio::test]
     async fn read_appended_reads_complete_lines_and_reoffsets() {
         let tmp = TmpDir::new("read-appended");
@@ -1179,13 +1300,15 @@ mod tests {
         );
     }
 
-    #[test]
-    fn dps_list_logs_reads_each_files_character_from_its_header() {
+    #[tokio::test]
+    async fn dps_list_logs_reads_each_files_character_from_its_header() {
         let tmp = TmpDir::new("list-logs-character");
         touch_with_header(&tmp.0, "alice.txt", 30, "Alice");
         touch(&tmp.0, "unattributed.txt", 20); // no header at all.
 
-        let logs = dps_list_logs(tmp.0.to_string_lossy().into_owned()).expect("list logs");
+        let logs = dps_list_logs(tmp.0.to_string_lossy().into_owned())
+            .await
+            .expect("list logs");
         assert_eq!(logs.len(), 2);
         let alice = logs.iter().find(|l| l.name == "alice.txt").unwrap();
         assert_eq!(alice.character.as_deref(), Some("Alice"));
@@ -1193,8 +1316,8 @@ mod tests {
         assert_eq!(unattributed.character, None);
     }
 
-    #[test]
-    fn dps_list_characters_dedupes_and_skips_stale_and_unattributed_logs() {
+    #[tokio::test]
+    async fn dps_list_characters_dedupes_and_skips_stale_and_unattributed_logs() {
         let tmp = TmpDir::new("list-characters");
         // Two sessions for Alice within 24h — only one "Alice" in the result.
         touch_with_header(&tmp.0, "alice-1.txt", 60 * 60, "Alice");
@@ -1205,8 +1328,9 @@ mod tests {
         // No recognised header — excluded, never shown as "unattributed".
         touch(&tmp.0, "unattributed.txt", 10);
 
-        let mut characters =
-            dps_list_characters(tmp.0.to_string_lossy().into_owned()).expect("list characters");
+        let mut characters = dps_list_characters(tmp.0.to_string_lossy().into_owned())
+            .await
+            .expect("list characters");
         characters.sort();
         assert_eq!(characters, vec!["Alice".to_string(), "Bob".to_string()]);
     }
