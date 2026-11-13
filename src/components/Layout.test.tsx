@@ -260,7 +260,10 @@ describe("Layout sidebar", () => {
       "recording",
       id(PRODUCTION),
     ]);
-  });
+    // The per-test timeout must outlast the 15 s `findByRole` above: the first
+    // lazy import of the real page graph is ~0.5 s idle but >5 s on a busy
+    // machine, which tripped vitest's 5 s default (#1246).
+  }, 20_000);
 
   it("restores a hidden module back to its group", () => {
     // A profile where defaultHidden seeding already ran.
