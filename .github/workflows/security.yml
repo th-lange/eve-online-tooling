@@ -85,6 +85,14 @@ jobs:
     name: cargo audit
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # rustsec/audit-check reports through a check run (PRs/pushes) and an
+    # issue (schedule). With the workflow-wide read-only token it failed with
+    # "Resource not accessible by integration" while the job stayed green, so
+    # 41 advisories were never reported (#1198).
+    permissions:
+      contents: read
+      checks: write
+      issues: write
     steps:
       - uses: actions/checkout@v4
 
