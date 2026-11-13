@@ -1,10 +1,15 @@
-# Weekly dependency updates. Minor/patch bumps are grouped into one PR per
-# ecosystem; majors stay individual PRs for a deliberate review.
+# Weekly dependency updates, minor/patch only, grouped into one PR per
+# ecosystem. Deliberately NOT automated:
 #
-# The Tauri npm packages and Rust crates MUST move together: `tauri build`
-# aborts on a major.minor mismatch (v0.79.0, #1200), and CI's
-# scripts/check-tauri-versions.mjs fails a PR that skews them. So one group
-# per ecosystem collects them (any update type) into a single PR.
+# - Major versions: they need a human (TypeScript/Vite/Vitest/jsdom/ESLint
+#   majors, rusqlite, rand, boa_engine, and the actions' majors all change
+#   behaviour). Bump them by hand in a dedicated PR. Security updates are
+#   unaffected by `ignore` and still open PRs.
+# - The Tauri npm packages and Rust crates: they MUST move together —
+#   `tauri build` aborts on a major.minor mismatch (v0.79.0, #1200) and CI's
+#   scripts/check-tauri-versions.mjs fails a PR that skews them. Dependabot
+#   cannot group across ecosystems, so a lone `tauri` crate or `@tauri-apps/*`
+#   bump would always fail that check. Update both sides in one manual PR.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -15,6 +20,9 @@ updates:
     groups:
       actions:
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /
@@ -22,11 +30,12 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
-      tauri:
-        patterns:
-          - "@tauri-apps/*"
       minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@tauri-apps/*"
 
   - package-ecosystem: cargo
     directory: /src-tauri
@@ -34,9 +43,10 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
-      tauri:
-        patterns:
-          - "tauri"
-          - "tauri-*"
       minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tauri"
+      - dependency-name: "tauri-*"
