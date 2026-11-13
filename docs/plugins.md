@@ -44,12 +44,17 @@ wrapped one level deep in a single folder — both work, matching the shape of
 the release zips linked below. Dropping a plugin whose `id` you already have
 installed **replaces** it — that's also how you update one; the update takes
 effect on the plugin's next invocation (any already-running instance of the
-old version is discarded). A malformed manifest is rejected before anything
+old version is discarded). The plugin's `storage:own` data lives outside the
+install folder (`plugin-data/<id>/kv/`), so an update keeps it; only **Remove**
+deletes it. A malformed manifest is rejected before anything
 is published; nothing changes — an existing install of that `id` stays
 intact and keeps working.
 
 Prefer doing it by hand? Copy the folder straight into the path shown on the
 Plugins page, then click **Rescan** (or restart the app) to pick it up.
+Symlinks are never followed: a symlinked plugin folder or `plugin.json` is
+ignored, symlinks inside a dropped folder are not copied, and a plugin can't
+read a symlink through its `plugin://` UI assets or its storage.
 
 ### Removing
 
@@ -195,7 +200,9 @@ plugins_invoke(pluginId, fn, argsJson) -> Result<JsonValue, AppError>
 
 `argsJson` is passed to your exported function as its input, and your return
 value is handed back as JSON. Runaway plugins are stopped: each instance has a
-memory cap (~64 MiB) and a per-call timeout.
+memory cap (~64 MiB) and a per-call timeout. A plugin may have at most 4
+calls running or queued at once; further `plugins_invoke` calls fail
+immediately with a "busy" error until some finish.
 
 ## The reference plugin
 

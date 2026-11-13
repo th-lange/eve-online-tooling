@@ -4,12 +4,16 @@
 //!
 //! Scripts are trusted but not unbounded: every run is bounded so a runaway
 //! `while(true)` returns an error instead of freezing the app. Rhai is capped by
-//! an operation count plus a wall-clock deadline it checks on progress; the JS
+//! an operation count plus a wall-clock budget it checks on progress; the JS
 //! engine (`boa`) is capped by a loop-iteration limit and a recursion limit.
-//! Heap memory is bounded too, but only by a best-effort watchdog outside
+//! Both engines are additionally held to the wall-clock budget by
+//! [`execute_watched`], which returns an error and detaches the worker when it
+//! is exceeded (boa can't be preempted from inside). The budget counts script
+//! time only — time spent blocked inside host capability calls is excluded
+//! (see [`Budget`]). Heap memory is bounded too, but only by a best-effort watchdog outside
 //! either engine — see [`Limits::max_memory_mb`] and issue #815.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -23,10 +27,13 @@ use super::types::{Language, ScriptRun};
 
 /// Ceilings applied to every run.
 ///
-/// Loop iterations, recursion depth, and wall-clock are enforced *inside* the
-/// engine (Rhai checks its op count/deadline on every instruction; `boa`
-/// checks its loop/recursion counters on every loop iteration and call) — a
-/// script simply cannot cross them. `max_memory_mb` is different: neither
+/// Loop iterations and recursion depth are enforced *inside* the engine (Rhai
+/// checks its op count on every instruction; `boa` checks its loop/recursion
+/// counters per call frame) — a script simply cannot cross them. The
+/// wall-clock budget is checked by Rhai on every instruction *and* by
+/// [`execute_watched`] for both engines, because `boa`'s loop counter is per
+/// call frame and doesn't see native iteration (`map`/`filter`/`sort`
+/// callbacks), so a JS script can otherwise run unbounded (#1156). `max_memory_mb` is different: neither
 /// engine has a native heap cap (Rhai has none; `boa` 0.21 doesn't expose
 /// one), so it's enforced *outside* the engine, by [`run`]'s watchdog thread,
 /// which samples process RSS growth since the run started. That makes it a
@@ -48,7 +55,8 @@ use super::types::{Language, ScriptRun};
 ///   issue #815.
 #[derive(Clone, Copy)]
 pub struct Limits {
-    /// Wall-clock budget (Rhai aborts on progress past this).
+    /// Wall-clock budget for the script's own execution, excluding time spent
+    /// inside host capability calls (see [`Budget`]).
     pub timeout: Duration,
     /// Max Rhai operations before it aborts.
     pub max_ops: u64,
@@ -75,21 +83,159 @@ impl Default for Limits {
     }
 }
 
-/// Out-of-band abort signal the memory watchdog trips. Cloned into the engine
-/// so it can poll [`is_tripped`](Interrupt::is_tripped) from whatever
-/// periodic checkpoint it already has (Rhai's `on_progress`); an engine
-/// without one (`boa`) can only observe it before `eval` starts.
-#[derive(Clone, Default)]
-pub struct Interrupt(Arc<AtomicBool>);
+/// Wall-clock accounting for one run. Counts only time the *script* spends
+/// executing: time blocked inside a host capability call (a cold-cache
+/// `pi_overview`/`industry_jobs` fetch can take several seconds) is excluded,
+/// so a slow ESI round-trip can't make an otherwise cheap script "time out"
+/// right after the data arrives (#1156). Engines run one host call at a time
+/// on the worker thread; the watchdog thread reads concurrently, hence the
+/// atomics.
+pub struct Budget {
+    start: Instant,
+    /// Total nanoseconds spent in completed host calls.
+    host_nanos: AtomicU64,
+    /// Nanoseconds since `start` at which the in-progress host call began,
+    /// plus one (so `0` means "not inside a host call").
+    in_call_since: AtomicU64,
+    /// Set once the caller stopped waiting for the worker; host calls then
+    /// fail fast so a detached script can't keep reaching capabilities.
+    abandoned: AtomicBool,
+}
+
+impl Budget {
+    fn new() -> Self {
+        Self {
+            start: Instant::now(),
+            host_nanos: AtomicU64::new(0),
+            in_call_since: AtomicU64::new(0),
+            abandoned: AtomicBool::new(false),
+        }
+    }
+
+    fn begin_host_call(&self) {
+        let since = self.start.elapsed().as_nanos() as u64;
+        self.in_call_since.store(since + 1, Ordering::SeqCst);
+    }
+
+    fn end_host_call(&self) {
+        let since = self.in_call_since.swap(0, Ordering::SeqCst);
+        if since != 0 {
+            let spent = (self.start.elapsed().as_nanos() as u64).saturating_sub(since - 1);
+            self.host_nanos.fetch_add(spent, Ordering::SeqCst);
+        }
+    }
+
+    /// Script time so far: wall time minus completed and in-progress host calls.
+    fn script_time(&self) -> Duration {
+        let now = self.start.elapsed().as_nanos() as u64;
+        let since = self.in_call_since.load(Ordering::SeqCst);
+        let mut host = self.host_nanos.load(Ordering::SeqCst);
+        if since != 0 {
+            host += now.saturating_sub(since - 1);
+        }
+        Duration::from_nanos(now.saturating_sub(host))
+    }
+}
+
+/// Out-of-band abort signal the memory watchdog trips, plus the run's wall-clock
+/// [`Budget`]. Cloned into the engine so it can poll
+/// [`is_tripped`](Interrupt::is_tripped) / [`out_of_time`](Interrupt::out_of_time)
+/// from whatever periodic checkpoint it already has (Rhai's `on_progress`); an
+/// engine without one (`boa`) can only observe it before `eval` starts.
+#[derive(Clone)]
+pub struct Interrupt {
+    tripped: Arc<AtomicBool>,
+    budget: Arc<Budget>,
+}
+
+impl Default for Interrupt {
+    fn default() -> Self {
+        Self {
+            tripped: Arc::new(AtomicBool::new(false)),
+            budget: Arc::new(Budget::new()),
+        }
+    }
+}
 
 impl Interrupt {
     fn trip(&self) {
-        self.0.store(true, Ordering::Relaxed);
+        self.tripped.store(true, Ordering::Relaxed);
     }
 
     /// Whether the watchdog has asked the running script to stop.
     pub fn is_tripped(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
+        self.tripped.load(Ordering::Relaxed)
+    }
+
+    /// Whether the script has used up `timeout` of its own (non-host-call) time.
+    pub fn out_of_time(&self, timeout: Duration) -> bool {
+        self.budget.script_time() >= timeout
+    }
+}
+
+/// Decorates a [`Host`] so every call is timed against the run's [`Budget`]
+/// (its duration doesn't count toward the wall-clock timeout), and so calls
+/// after the caller has abandoned the run fail instead of running.
+struct TimedHost {
+    inner: Arc<dyn Host>,
+    budget: Arc<Budget>,
+}
+
+impl TimedHost {
+    fn timed<T>(&self, f: impl FnOnce(&dyn Host) -> Result<T, String>) -> Result<T, String> {
+        if self.budget.abandoned.load(Ordering::SeqCst) {
+            return Err("script was stopped".to_string());
+        }
+        self.budget.begin_host_call();
+        let out = f(self.inner.as_ref());
+        self.budget.end_host_call();
+        out
+    }
+}
+
+impl Host for TimedHost {
+    // Logging is in-process and instant; it stays outside the accounting.
+    fn log(&self, line: String) {
+        self.inner.log(line);
+    }
+    fn take_logs(&self) -> Vec<String> {
+        self.inner.take_logs()
+    }
+    fn notify(&self, title: &str, body: &str) -> Result<(), String> {
+        self.timed(|h| h.notify(title, body))
+    }
+    fn market_price(&self, type_id: i64, region_id: Option<i64>) -> Result<Value, String> {
+        self.timed(|h| h.market_price(type_id, region_id))
+    }
+    fn sde_type_info(&self, type_id: i64) -> Result<Value, String> {
+        self.timed(|h| h.sde_type_info(type_id))
+    }
+    fn assets(&self) -> Result<Value, String> {
+        self.timed(|h| h.assets())
+    }
+    fn corp_assets(&self) -> Result<Value, String> {
+        self.timed(|h| h.corp_assets())
+    }
+    fn my_orders(&self) -> Result<Value, String> {
+        self.timed(|h| h.my_orders())
+    }
+    fn kv_get(&self, key: &str) -> Result<String, String> {
+        self.timed(|h| h.kv_get(key))
+    }
+    fn kv_set(&self, key: &str, value: &str) -> Result<(), String> {
+        self.timed(|h| h.kv_set(key, value))
+    }
+    fn play_sound(&self, path: &str) -> Result<(), String> {
+        self.timed(|h| h.play_sound(path))
+    }
+    fn send_alarm(&self, text: &str, detail: Option<&str>) -> Result<(), String> {
+        self.timed(|h| h.send_alarm(text, detail))
+    }
+    fn write_message(&self, text: &str, detail: Option<&str>) -> Result<(), String> {
+        self.timed(|h| h.write_message(text, detail))
+    }
+    fn call(&self, name: &str, args: &Value) -> Result<Value, String> {
+        self.timed(|h| h.call(name, args))
     }
 }
 
@@ -157,11 +303,11 @@ fn run_with_sampler(
     }
 }
 
-/// Run `code` on a dedicated thread and race it against a memory watchdog on
-/// the calling thread. Whichever finishes first wins; on a memory trip the
-/// losing worker thread is detached (not joined), so this call never blocks
-/// more than [`WATCHDOG_GRACE`] past the point of exceeding
-/// `limits.max_memory_mb`. `sample_rss` is the process-RSS source (MiB) —
+/// Run `code` on a dedicated thread and race it against a memory + wall-clock
+/// watchdog on the calling thread. Whichever finishes first wins; on a memory
+/// trip or an exhausted `limits.timeout` budget the losing worker thread is
+/// detached (not joined), so this call never blocks more than
+/// [`WATCHDOG_GRACE`] past the point of exceeding either limit. `sample_rss` is the process-RSS source (MiB) —
 /// [`resident_memory_mb`] in production, injectable so tests can drive the
 /// watchdog deterministically instead of depending on real process memory.
 fn execute_watched(
@@ -172,6 +318,12 @@ fn execute_watched(
     sample_rss: &dyn Fn() -> Option<u64>,
 ) -> Result<Value, String> {
     let interrupt = Interrupt::default();
+    // Time host calls against the run's budget (and stop a detached worker
+    // from reaching capabilities once we've given up on it).
+    let host: Arc<dyn Host> = Arc::new(TimedHost {
+        inner: host,
+        budget: interrupt.budget.clone(),
+    });
     let (tx, rx) = mpsc::channel();
     let code = code.to_string();
     let worker_limits = *limits;
@@ -202,6 +354,20 @@ fn execute_watched(
                 return Err("script worker terminated unexpectedly".to_string());
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
+                // Wall-clock budget, enforced here for both engines: `boa`
+                // can't be preempted from inside and Rhai's own check only
+                // fires on its next op. Rhai usually unwinds on its own within
+                // the grace window with its own "timed out" message; a worker
+                // that doesn't (`boa`) is detached.
+                if interrupt.out_of_time(limits.timeout) {
+                    if let Ok(result) = rx.recv_timeout(WATCHDOG_GRACE) {
+                        let _ = worker.join();
+                        return result;
+                    }
+                    interrupt.budget.abandoned.store(true, Ordering::SeqCst);
+                    drop(worker);
+                    return Err("execution timed out".to_string());
+                }
                 let (Some(baseline), Some(current)) = (baseline_rss, sample_rss()) else {
                     // No RSS sampling on this platform: fall back to the
                     // pre-#815 behavior (time/iteration limits only).
@@ -222,6 +388,7 @@ fn execute_watched(
                 // without joining detaches the thread — it keeps running
                 // independently and frees its memory once it trips its own
                 // loop-iteration limit or errors out on its own.
+                interrupt.budget.abandoned.store(true, Ordering::SeqCst);
                 drop(worker);
                 return Err(format!("script exceeded memory limit ({max_growth} MiB)"));
             }
@@ -273,6 +440,8 @@ mod tests {
     struct FakeHost {
         logs: Mutex<Vec<String>>,
         kv: Mutex<HashMap<String, String>>,
+        /// How long `market_price` blocks, simulating a slow cold-cache fetch.
+        market_delay: Duration,
     }
 
     impl Host for FakeHost {
@@ -290,6 +459,7 @@ mod tests {
             type_id: i64,
             _region: Option<i64>,
         ) -> Result<serde_json::Value, String> {
+            std::thread::sleep(self.market_delay);
             Ok(json!({
                 "typeId": type_id,
                 "sell": 100.0,
@@ -520,6 +690,44 @@ mod tests {
         let out = run(host(), Language::Rhai, "while true {}", &limits);
         assert!(!out.ok);
         assert!(out.error.unwrap().contains("timed out"));
+    }
+
+    #[test]
+    fn js_runaway_native_iteration_is_stopped_by_the_wall_clock() {
+        // #1156: boa's loop counter is per call frame, so a hot loop with a
+        // generous iteration cap would otherwise run for as long as it likes.
+        // Only the wall-clock budget in `execute_watched` bounds the caller.
+        let limits = Limits {
+            timeout: Duration::from_millis(100),
+            loop_iter_limit: 20_000_000, // detached worker still ends soon
+            ..Limits::default()
+        };
+        let started = std::time::Instant::now();
+        let out = run(host(), Language::Js, "while (true) {}", &limits);
+        assert!(!out.ok);
+        assert!(out.error.unwrap().contains("timed out"));
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn host_call_time_does_not_count_against_the_budget() {
+        // #1156: a slow capability call (cold cache) must not trip the
+        // timeout when the script itself is cheap — in either engine.
+        let limits = Limits {
+            timeout: Duration::from_millis(100),
+            ..Limits::default()
+        };
+        for (language, code) in [
+            (Language::Rhai, "market_price(34).sell"),
+            (Language::Js, "market_price(34).sell"),
+        ] {
+            let slow: Arc<dyn Host> = Arc::new(FakeHost {
+                market_delay: Duration::from_millis(400),
+                ..FakeHost::default()
+            });
+            let out = run(slow, language, code, &limits);
+            assert!(out.ok, "{language:?}: {:?}", out.error);
+        }
     }
 
     #[test]

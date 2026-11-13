@@ -59,6 +59,38 @@ pub fn resolve_asset(plugins_root: &Path, url_path: &str) -> Result<PathBuf, Ass
     Ok(plugins_root.join(id).join(asset))
 }
 
+/// Resolve `file` (the output of [`resolve_asset`]) through the filesystem
+/// and require the result to stay inside its own plugin's directory. The
+/// structural check in [`resolve_asset`] can't see symlinks: a hand-installed
+/// plugin shipping `x -> ~/.ssh/id_ed25519` (or a whole dir link) would
+/// otherwise be served to its UI frame (#1151). `Ok(Some(path))` is the
+/// canonical path to read, `Ok(None)` a missing file (404), and
+/// `Err(Traversal)` an escape (403).
+pub fn confine_to_plugin(plugins_root: &Path, file: &Path) -> Result<Option<PathBuf>, AssetError> {
+    let Some(id) = file
+        .strip_prefix(plugins_root)
+        .ok()
+        .and_then(|rel| rel.components().next())
+    else {
+        return Err(AssetError::Traversal);
+    };
+    let Ok(canonical_root) = std::fs::canonicalize(plugins_root) else {
+        return Ok(None);
+    };
+    // The plugin's own dir must not itself be a symlink to somewhere else.
+    let plugin_dir = canonical_root.join(id);
+    match std::fs::canonicalize(plugins_root.join(id)) {
+        Ok(p) if p == plugin_dir => {}
+        Ok(_) => return Err(AssetError::Traversal),
+        Err(_) => return Ok(None),
+    }
+    match std::fs::canonicalize(file) {
+        Ok(real) if real.starts_with(&plugin_dir) => Ok(Some(real)),
+        Ok(_) => Err(AssetError::Traversal),
+        Err(_) => Ok(None),
+    }
+}
+
 /// Best-effort MIME type from a file extension, for the served asset.
 pub fn content_type(path: &Path) -> &'static str {
     match path.extension().and_then(|e| e.to_str()) {
@@ -82,6 +114,47 @@ pub fn content_type(path: &Path) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tmp(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("eve-proto-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn confine_serves_regular_files_and_404s_missing_ones() {
+        let root = tmp("confine-ok");
+        std::fs::create_dir_all(root.join("acme")).unwrap();
+        std::fs::write(root.join("acme/index.html"), "hi").unwrap();
+        let file = resolve_asset(&root, "/acme/index.html").unwrap();
+        assert!(confine_to_plugin(&root, &file).unwrap().is_some());
+        let missing = resolve_asset(&root, "/acme/nope.js").unwrap();
+        assert_eq!(confine_to_plugin(&root, &missing).unwrap(), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn confine_rejects_symlinks_leaving_the_plugin_dir() {
+        let root = tmp("confine-link");
+        std::fs::create_dir_all(root.join("acme")).unwrap();
+        std::fs::create_dir_all(root.join("other")).unwrap();
+        std::fs::write(root.join("other/secret"), "s").unwrap();
+        std::fs::write(root.join("secret.txt"), "s").unwrap();
+        // File link out of the plugin dir, dir link into a sibling plugin,
+        // and a plugin dir that is itself a link.
+        std::os::unix::fs::symlink(root.join("secret.txt"), root.join("acme/leak")).unwrap();
+        std::os::unix::fs::symlink(root.join("other"), root.join("acme/dir")).unwrap();
+        std::os::unix::fs::symlink(root.join("other"), root.join("alias")).unwrap();
+        for path in ["/acme/leak", "/acme/dir/secret", "/alias/secret"] {
+            let file = resolve_asset(&root, path).unwrap();
+            assert_eq!(
+                confine_to_plugin(&root, &file),
+                Err(AssetError::Traversal),
+                "{path}"
+            );
+        }
+    }
 
     #[test]
     fn resolves_asset_under_plugin_dir() {

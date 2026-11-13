@@ -37,23 +37,29 @@ fn recover_lock<'a, T>(
     result.unwrap_or_else(PoisonError::into_inner)
 }
 
+/// `Clone` is a cheap handle copy: every field is shared (`Arc`), so a clone
+/// sees the same token cache, refresh single-flight locks and persist-failure
+/// state as the original. That is how the plugin manager shares the app's
+/// managed instance rather than running a second, uncoordinated one (#1148).
+///
 /// In-memory auth state: an HTTP client and a per-character access-token cache,
 /// plus the shared conditional response cache for authed ESI reads. Refresh
 /// tokens live in the keychain, not here.
+#[derive(Clone)]
 pub struct AuthState {
     http: reqwest::Client,
-    tokens: Mutex<HashMap<i64, CachedToken>>,
+    tokens: Arc<Mutex<HashMap<i64, CachedToken>>>,
     /// One async lock per character, serialising that character's refreshes.
     /// EVE SSO *rotates* refresh tokens, so two concurrent refreshes would each
     /// invalidate the other's token and the loser's write would strand the
     /// character — see [`AuthState::access_token_for`].
-    refresh_locks: Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>,
+    refresh_locks: Arc<Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>>,
     /// Characters whose rotated refresh token failed to persist to the
     /// keychain — see [`AuthState::persist_failures`].
-    persist_failures: Mutex<BTreeSet<i64>>,
+    persist_failures: Arc<Mutex<BTreeSet<i64>>>,
     /// Fired when `persist_failures` changes — see
     /// [`AuthState::set_persist_failure_notifier`].
-    persist_notifier: OnceLock<Box<dyn Fn() + Send + Sync>>,
+    persist_notifier: Arc<OnceLock<Box<dyn Fn() + Send + Sync>>>,
     cache: Arc<ConditionalCache>,
     /// SSO token endpoint. Always [`TOKEN_URL`] outside tests; overridable via
     /// [`AuthState::with_token_url`] so tests can point it at a local stub.
@@ -92,10 +98,10 @@ impl AuthState {
             .expect("failed to build HTTP client");
         Self {
             http,
-            tokens: Mutex::new(HashMap::new()),
-            refresh_locks: Mutex::new(HashMap::new()),
-            persist_failures: Mutex::new(BTreeSet::new()),
-            persist_notifier: OnceLock::new(),
+            tokens: Arc::default(),
+            refresh_locks: Arc::default(),
+            persist_failures: Arc::default(),
+            persist_notifier: Arc::default(),
             cache: Arc::new(cache),
             token_url: TOKEN_URL.to_string(),
         }
@@ -164,7 +170,7 @@ impl AuthState {
     }
 
     /// The lock guarding this character's refreshes, created on first use.
-    fn refresh_lock(&self, character_id: i64) -> Arc<tokio::sync::Mutex<()>> {
+    pub(crate) fn refresh_lock(&self, character_id: i64) -> Arc<tokio::sync::Mutex<()>> {
         recover_lock(self.refresh_locks.lock())
             .entry(character_id)
             .or_default()
