@@ -606,7 +606,10 @@ export function ResourcesPanel({
       {validation.length > 0 && (
         <ul className="mt-2 space-y-1">
           {validation.map((p, i) => (
-            <li key={i} className="text-xs text-red-400">
+            <li
+              key={i}
+              className={`text-xs ${p.severity === "warning" ? "text-amber-400" : "text-red-400"}`}
+            >
               ⚠ {p.message}
             </li>
           ))}

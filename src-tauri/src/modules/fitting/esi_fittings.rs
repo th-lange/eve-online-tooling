@@ -12,7 +12,7 @@ use super::types::{Fit, FitItem, ModuleState, SlotKind};
 
 /// Map an ESI fitting `flag` string to `(slot kind, index within the slot)`.
 /// ESI uses names like `HiSlot0`–`HiSlot7`, `MedSlot0`–7, `LoSlot0`–7,
-/// `RigSlot0`–2, `SubSystemSlot0`–4, `DroneBay`, `Cargo`.
+/// `RigSlot0`–2, `SubSystemSlot0`–3, `DroneBay`, `FighterBay`, `Cargo`.
 pub fn flag_to_slot(flag: &str) -> Option<(SlotKind, i32)> {
     let index_of = |prefix: &str| {
         flag.strip_prefix(prefix)
@@ -33,19 +33,20 @@ pub fn flag_to_slot(flag: &str) -> Option<(SlotKind, i32)> {
     if let Some(i) = index_of("SubSystemSlot") {
         return Some((SlotKind::Subsystem, i));
     }
-    if let Some(i) = index_of("FighterTube") {
-        return Some((SlotKind::Fighter, i));
-    }
     match flag {
         "DroneBay" => Some((SlotKind::Drone, 0)),
+        // ESI has no per-tube flag: every fighter stack rides in `FighterBay`.
+        "FighterBay" => Some((SlotKind::Fighter, 0)),
         "Cargo" => Some((SlotKind::Cargo, 0)),
-        _ => None, // FighterBay (unfitted spares) / ServiceSlot / implants — not placed in the editor
+        _ => None, // ServiceSlot / implants — not placed in the editor
     }
 }
 
 /// Map a `(slot, index)` back to an ESI fitting `flag` string — the inverse of
-/// [`flag_to_slot`]. Drones/cargo collapse to their bay regardless of index;
-/// implants/boosters aren't part of an ESI fitting (returns `None`).
+/// [`flag_to_slot`]. Drones/fighters/cargo collapse to their bay regardless of
+/// index; implants/boosters/modes aren't part of an ESI fitting (returns `None`).
+/// `index` must be a dense 0-based rank (see [`fit_to_esi_items`]): ESI only
+/// accepts `HiSlot0`–7, `RigSlot0`–2, etc.
 pub fn slot_to_flag(slot: SlotKind, index: i32) -> Option<String> {
     Some(match slot {
         SlotKind::High => format!("HiSlot{index}"),
@@ -53,7 +54,7 @@ pub fn slot_to_flag(slot: SlotKind, index: i32) -> Option<String> {
         SlotKind::Low => format!("LoSlot{index}"),
         SlotKind::Rig => format!("RigSlot{index}"),
         SlotKind::Subsystem => format!("SubSystemSlot{index}"),
-        SlotKind::Fighter => format!("FighterTube{index}"),
+        SlotKind::Fighter => "FighterBay".into(),
         SlotKind::Drone => "DroneBay".into(),
         SlotKind::Cargo => "Cargo".into(),
         SlotKind::Implant | SlotKind::Booster | SlotKind::Mode => return None,
@@ -70,13 +71,23 @@ pub struct EsiFitItemOut {
 
 /// Flatten a [`Fit`] into the ESI fitting item list for a create-fitting POST: a
 /// module per slot, plus its loaded charge as a separate item sharing the module's
-/// flag, plus drones/cargo in their bay. Implants/boosters are dropped.
+/// flag, plus drones/fighters/cargo in their bay. Implants/boosters are dropped.
+///
+/// Slot flags come from each item's *rank* among its slot kind (ordered by the
+/// stored index), not the stored index itself: the editor never compacts indexes
+/// on removal, so after a few swaps an index can reach 8 or 3 — a flag ESI rejects.
 pub fn fit_to_esi_items(fit: &Fit) -> Vec<EsiFitItemOut> {
     let mut out = Vec::new();
-    for it in &fit.items {
-        let Some(flag) = slot_to_flag(it.slot, it.index) else {
+    // Stable sort keeps source order for equal indexes (e.g. a bay's items).
+    let mut ordered: Vec<&FitItem> = fit.items.iter().collect();
+    ordered.sort_by_key(|it| it.index);
+    let mut next_rank: std::collections::HashMap<SlotKind, i32> = std::collections::HashMap::new();
+    for it in ordered {
+        let rank = next_rank.entry(it.slot).or_insert(0);
+        let Some(flag) = slot_to_flag(it.slot, *rank) else {
             continue;
         };
+        *rank += 1;
         out.push(EsiFitItemOut {
             flag: flag.clone(),
             quantity: it.quantity.max(1) as i64,
@@ -123,6 +134,7 @@ pub fn esi_fitting_to_fit(
 ) -> Fit {
     let mut items: Vec<FitItem> = Vec::new();
     let mut drone_index = 0i32;
+    let mut fighter_index = 0i32;
     let mut cargo_index = 0i32;
 
     // Pass 1 — modules, drones and cargo (slot charges handled in pass 2).
@@ -141,6 +153,16 @@ pub fn esi_fitting_to_fit(
                     qty,
                 ));
                 drone_index += 1;
+            }
+            SlotKind::Fighter => {
+                items.push(module(
+                    it.type_id,
+                    slot,
+                    fighter_index,
+                    ModuleState::Active,
+                    qty,
+                ));
+                fighter_index += 1;
             }
             SlotKind::Cargo => {
                 items.push(module(
@@ -166,7 +188,7 @@ pub fn esi_fitting_to_fit(
         let Some((slot, index)) = flag_to_slot(&it.flag) else {
             continue;
         };
-        if matches!(slot, SlotKind::Drone | SlotKind::Cargo) {
+        if matches!(slot, SlotKind::Drone | SlotKind::Fighter | SlotKind::Cargo) {
             continue; // already added in pass 1
         }
         match items
@@ -238,7 +260,7 @@ mod tests {
             flag_to_slot("SubSystemSlot0"),
             Some((SlotKind::Subsystem, 0))
         );
-        assert_eq!(flag_to_slot("FighterBay"), None);
+        assert_eq!(flag_to_slot("FighterBay"), Some((SlotKind::Fighter, 0)));
     }
 
     #[test]
@@ -256,6 +278,10 @@ mod tests {
         assert_eq!(
             slot_to_flag(SlotKind::Drone, 5).as_deref(),
             Some("DroneBay")
+        );
+        assert_eq!(
+            slot_to_flag(SlotKind::Fighter, 2).as_deref(),
+            Some("FighterBay")
         );
         assert_eq!(slot_to_flag(SlotKind::Cargo, 0).as_deref(), Some("Cargo"));
         assert_eq!(slot_to_flag(SlotKind::Implant, 0), None);
@@ -304,6 +330,60 @@ mod tests {
                 type_id: 20
             }
         );
+    }
+
+    #[test]
+    fn fit_to_esi_items_ranks_gapped_indexes_into_valid_flags() {
+        // Rigs 0 and 1 were removed and a new one added (index 3), and highs
+        // drifted to index 8: raw indexes would give RigSlot3 / HiSlot8.
+        let fit = Fit {
+            id: "x".into(),
+            name: "n".into(),
+            ship_type_id: 587,
+            items: vec![
+                module(1, SlotKind::Rig, 2, ModuleState::Online, 1),
+                module(2, SlotKind::Rig, 3, ModuleState::Online, 1),
+                module(3, SlotKind::High, 8, ModuleState::Active, 1),
+                module(4, SlotKind::High, 5, ModuleState::Active, 1),
+                module(5, SlotKind::Fighter, 4, ModuleState::Active, 9),
+            ],
+            projected: Vec::new(),
+        };
+        let flags: Vec<(i64, String)> = fit_to_esi_items(&fit)
+            .into_iter()
+            .map(|o| (o.type_id, o.flag))
+            .collect();
+        for expected in [
+            (1, "RigSlot0"),
+            (2, "RigSlot1"),
+            (4, "HiSlot0"),
+            (3, "HiSlot1"),
+            (5, "FighterBay"),
+        ] {
+            assert!(
+                flags.contains(&(expected.0, expected.1.to_string())),
+                "{expected:?} missing in {flags:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn imports_fighter_bay_as_fighters() {
+        let f = fitting(
+            r#"{"fitting_id": 8, "name": "Archon", "description": "", "ship_type_id": 23757,
+                "items": [
+                  {"type_id": 400, "flag": "FighterBay", "quantity": 3},
+                  {"type_id": 401, "flag": "FighterBay", "quantity": 2}
+                ]}"#,
+        );
+        let fit = esi_fitting_to_fit(&f, EsiFitSource::Character, &|_| false);
+        let fighters: Vec<_> = fit
+            .items
+            .iter()
+            .filter(|i| i.slot == SlotKind::Fighter)
+            .map(|i| (i.type_id, i.index, i.quantity))
+            .collect();
+        assert_eq!(fighters, vec![(400, 0, 3), (401, 1, 2)]);
     }
 
     #[test]

@@ -18,7 +18,7 @@ import {
 import { fittingKeys } from "../../lib/queryKeys";
 import { copyToClipboard } from "../../lib/useCopyToClipboard";
 import type { FitStateSlice } from "./useFitCoreState";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /** The fit-editing state machine's write side: the immutable-update helpers
  *  that mutate the fit client-side (slot edits, charges, projected modules)
@@ -53,6 +53,12 @@ export interface FitMutationsSlice {
 export function useFitCoreMutations(state: FitStateSlice): FitMutationsSlice {
   const qc = useQueryClient();
   const { fit, setFit, eft, setEft } = state;
+  // Always-current fit, for async mutations that must not apply a result
+  // computed from a stale snapshot over edits made while they ran.
+  const fitRef = useRef(fit);
+  useEffect(() => {
+    fitRef.current = fit;
+  }, [fit]);
 
   const importEft = useMutation({
     mutationFn: () => fittingImportEft(eft),
@@ -223,8 +229,17 @@ export function useFitCoreMutations(state: FitStateSlice): FitMutationsSlice {
 
   // Add a module/drone the user picked: the backend classifies its slot and
   // places it at the next free index, then we re-simulate off the new fit.
+  // The round-trip is async: if the fit changed while it ran (another edit
+  // landed), the result is stale and applying it would silently discard that
+  // edit — so redo the add on the latest fit until the base is still current.
   const addItem = useMutation({
-    mutationFn: (typeId: number) => fittingAddItem(fit!, typeId),
+    mutationFn: async (typeId: number) => {
+      for (;;) {
+        const base = fitRef.current!;
+        const next = await fittingAddItem(base, typeId);
+        if (fitRef.current === base) return next;
+      }
+    },
     onSuccess: (f) => setFit(f),
     onError: (e) => console.error("Couldn't add module", e),
   });
