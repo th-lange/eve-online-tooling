@@ -12,10 +12,14 @@ import type {
 // DpsPage subscribes to the 5 s buckets via `listen` (the log rides inside
 // them, #1000); capture the callback so a test can push payloads directly.
 let bucketsHandler: ((buckets: DpsBucket[]) => void) | undefined;
+let playbackBucketsHandler: ((buckets: DpsBucket[]) => void) | undefined;
 vi.mock("@tauri-apps/api/event", () => ({
   listen: (name: string, handler: (e: { payload: DpsBucket[] }) => void) => {
     if (name === "dps://buckets")
       bucketsHandler = (buckets: DpsBucket[]) => handler({ payload: buckets });
+    if (name === "dps://playback-buckets")
+      playbackBucketsHandler = (buckets: DpsBucket[]) =>
+        handler({ payload: buckets });
     return Promise.resolve(() => {});
   },
 }));
@@ -121,6 +125,7 @@ beforeEach(() => {
   invokeMock.mockReset();
   localStorage.clear();
   bucketsHandler = undefined;
+  playbackBucketsHandler = undefined;
 });
 
 describe("DpsPage — playback file picker", () => {
@@ -215,7 +220,7 @@ describe("DpsPage — playback timeline", () => {
     // A finalized bucket advances the playhead to its end — a mid-log
     // position (`pos` is a multiple of 5, so it's a valid bucket end).
     const pos = SUMMARY_START + 200;
-    act(() => bucketsHandler?.([makeBucket(pos - 5)]));
+    act(() => playbackBucketsHandler?.([makeBucket(pos - 5)]));
 
     // Stop, then Play again — playback must resume at `pos`, not restart at 0.
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
@@ -355,5 +360,22 @@ describe("DpsPage — character picker (#1047)", () => {
     renderWithQuery(<DpsPage />);
 
     expect(await screen.findByRole("option", { name: "Alpha" })).toBeVisible();
+  });
+});
+
+describe("DpsPage — live vs playback channels (#1175)", () => {
+  it("ignores a replay's buckets while in live mode", async () => {
+    mockInvoke({ auth_characters: () => [] });
+    renderWithQuery(<DpsPage />);
+    await waitFor(() => expect(bucketsHandler).toBeDefined());
+
+    act(() => playbackBucketsHandler!([makeBucket(1000)]));
+    expect(screen.getAllByText(/Waiting for the first 5s bucket/).length).toBe(
+      2,
+    );
+    act(() => bucketsHandler!([makeBucket(2000)]));
+    expect(
+      screen.queryByText(/Waiting for the first 5s bucket/),
+    ).not.toBeInTheDocument();
   });
 });

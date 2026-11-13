@@ -30,11 +30,6 @@ export const INFO_FEED_REFRESH_INTERVAL_MS = 3_000;
  * the open panel's 3s wins while it's on screen. */
 export const INFO_ALARM_BADGE_REFRESH_INTERVAL_MS = 30_000;
 
-/** Logs page backend tail: the tightest interval in the app, deliberately —
- * logs are watched live while debugging, and staleness there is directly
- * user-visible. */
-export const LOGS_POLL_INTERVAL_MS = 2_000;
-
 /** Faction Warfare jump-distance-to-front table: recomputed from the active
  * character's live location. A character can only cover a handful of jumps
  * in 90s, so this stays cheap while still tracking movement. */

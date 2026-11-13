@@ -1,17 +1,12 @@
 import {
-  useContext,
   useMemo,
   useRef,
   useEffect,
   useState,
   useSyncExternalStore,
 } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { logStore, type LogEntry } from "../../lib/logStore";
-import { logsList, logsClear } from "../../lib/api";
-import { LOGS_POLL_INTERVAL_MS } from "../../lib/refreshIntervals";
-import { ModuleActiveContext } from "../../components/moduleActiveContext";
-import { logsKeys } from "../../lib/queryKeys";
+import { logsClear } from "../../lib/api";
 
 type Level = "all" | "error" | "warn";
 type Source = "all" | "frontend" | "backend";
@@ -31,43 +26,22 @@ const SOURCE_BADGE: Record<string, string> = {
 };
 
 export function LogsPage() {
-  const qc = useQueryClient();
   const [levelFilter, setLevelFilter] = useState<Level>("all");
   const [sourceFilter, setSourceFilter] = useState<Source>("all");
   const [autoScroll, setAutoScroll] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Frontend entries from the singleton store.
-  const frontendEntries = useSyncExternalStore(
+  // Frontend and backend entries both live in the singleton store: backend
+  // records arrive pushed via `logs://entry` (plus a startup backfill, see
+  // logCapture), so there's no polling. Newest-last by timestamp.
+  const entries = useSyncExternalStore(
     logStore.subscribe,
     logStore.getSnapshot,
   );
-
-  // Backend entries, polled only while this page is the active view —
-  // ModuleHost keeps visited pages mounted (hidden), so an ungated interval
-  // would keep polling the backend every 2s for the rest of the session.
-  const active = useContext(ModuleActiveContext);
-  const { data: backendRaw = [] } = useQuery({
-    queryKey: logsKeys.list,
-    queryFn: logsList,
-    refetchInterval: active ? LOGS_POLL_INTERVAL_MS : false,
-  });
-
-  // Merge and sort by timestamp.
-  const all = useMemo<LogEntry[]>(() => {
-    const be: LogEntry[] = backendRaw.map((e) => ({
-      id: e.id * -1 - 1, // negative ids to avoid collision with frontend ids
-      ts: e.ts,
-      level: e.level as "error" | "warn",
-      source: "backend" as const,
-      target: e.target,
-      message: e.message,
-    }));
-    // Frontend store already contains backend events received via Tauri
-    // listener; exclude those to avoid duplicating backend entries.
-    const fe = frontendEntries.filter((e) => e.source === "frontend");
-    return [...fe, ...be].sort((a, b) => a.ts - b.ts);
-  }, [frontendEntries, backendRaw]);
+  const all = useMemo<LogEntry[]>(
+    () => [...entries].sort((a, b) => a.ts - b.ts),
+    [entries],
+  );
 
   const filtered = useMemo(
     () =>
@@ -89,7 +63,6 @@ export function LogsPage() {
   async function handleClearAll() {
     logStore.clear();
     await logsClear();
-    qc.setQueryData(logsKeys.list, []);
   }
 
   return (
