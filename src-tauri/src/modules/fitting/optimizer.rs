@@ -10,8 +10,8 @@ use super::context::DogmaContext;
 use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
 use super::engine::tank::DamageProfile;
 use super::stats::{
-    base_damage, capacitor_of, is_ship_module, required_skills_of, resolved_feasibility, tank_of,
-    AttrMap, EffectMap, GroupMap,
+    base_damage, capacitor_of, is_resolved_module, required_skills_of, resolved_feasibility,
+    tank_of, AttrMap, EffectMap, GroupMap,
 };
 use super::types::{Fit, FitItem, ModuleState, Severity, SlotKind};
 use crate::market::{default_region_id, resolve_location, MarketService};
@@ -337,7 +337,7 @@ pub(super) fn evaluate(
     let module_items: Vec<&FitItem> = fit
         .items
         .iter()
-        .filter(|i| is_ship_module(i.slot))
+        .filter(|i| is_resolved_module(i.slot))
         .collect();
     let drone_items: Vec<&FitItem> = fit
         .items
