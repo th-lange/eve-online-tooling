@@ -24,6 +24,9 @@ How a recording runs, whichever path you pick:
 - **Fight end** (5 s of silence) → recorder stops after the configurable
   **post-roll** (default 10 s), so the aftermath stays in the clip. If combat
   re-erupts within the post-roll, the same recording keeps rolling.
+- Replays in the DPS Meter never trigger recordings or the overlay, and
+  stopping or replaying there doesn't disable fight detection: the overlay
+  takes live capture back once the replay/stop finishes.
 - Turning *Record fights* off mid-fight stops the recorder immediately.
 - **Only for character** (multi-boxing): set a character name and only fights
   from *that* character's gamelog record — the capture reports whose log it
