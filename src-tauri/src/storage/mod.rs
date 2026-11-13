@@ -84,6 +84,47 @@ fn roster_path(app_data_dir: &Path) -> std::path::PathBuf {
     app_data_dir.join("characters.json")
 }
 
+/// Replace `path` with `data` atomically: write a sibling temp file, then
+/// rename it over the target, so a crash/power loss mid-write leaves either the
+/// old or the new file — never a truncated one (#1147). `durable` also fsyncs
+/// the temp file first; use it for user data, skip it for re-fetchable caches.
+fn write_atomic(path: &Path, data: &[u8], durable: bool) -> Result<(), String> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("data");
+    let tmp = path.with_file_name(format!(
+        ".{name}.tmp-{}-{}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    ));
+    let result = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(data)?;
+        if durable {
+            f.sync_all()?;
+        }
+        drop(f);
+        std::fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result.map_err(|e| e.to_string())
+}
+
+/// Move an unparseable file aside (`<name>.corrupt-<epoch>`) so the next save
+/// can't silently overwrite whatever is recoverable in it.
+fn quarantine_corrupt(path: &Path) {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("data");
+    let aside = path.with_file_name(format!("{name}.corrupt-{}", crate::util::time::now_secs()));
+    match std::fs::rename(path, &aside) {
+        Ok(()) => eprintln!("storage: kept the unreadable file as {}", aside.display()),
+        Err(e) => eprintln!("storage: couldn't set {} aside: {e}", path.display()),
+    }
+}
+
 /// Load and parse a JSON file, falling back to `T::default()` when the file
 /// is absent/unreadable (the normal "nothing persisted yet" case — stays
 /// silent) or when it's present but fails to parse (a real data problem —
@@ -122,7 +163,7 @@ pub fn load_roster(app_data_dir: &Path) -> Vec<Character> {
 pub fn save_roster(app_data_dir: &Path, roster: &[Character]) -> Result<(), String> {
     std::fs::create_dir_all(app_data_dir).map_err(|e| e.to_string())?;
     let data = serde_json::to_vec_pretty(roster).map_err(|e| e.to_string())?;
-    std::fs::write(roster_path(app_data_dir), data).map_err(|e| e.to_string())
+    write_atomic(&roster_path(app_data_dir), &data, true)
 }
 
 const ACTIVE_CHARACTER_KEY: &str = "active_character";
@@ -219,7 +260,7 @@ pub fn load_id_list(app_data_dir: &Path, name: &str) -> Vec<i64> {
 pub fn save_id_list(app_data_dir: &Path, name: &str, ids: &[i64]) -> Result<(), String> {
     std::fs::create_dir_all(app_data_dir).map_err(|e| e.to_string())?;
     let data = serde_json::to_vec_pretty(ids).map_err(|e| e.to_string())?;
-    std::fs::write(app_data_dir.join(format!("{name}.json")), data).map_err(|e| e.to_string())
+    write_atomic(&app_data_dir.join(format!("{name}.json")), &data, true)
 }
 
 // --- Durable Expires-gated cache ---
@@ -349,8 +390,19 @@ pub fn prune_cache_startup(app_data_dir: &Path) {
 /// restarts and grow beyond ESI's window.
 pub fn load_data<T: DeserializeOwned>(app_data_dir: &Path, name: &str) -> Option<T> {
     let safe = sanitize(name);
-    let bytes = std::fs::read(app_data_dir.join("data").join(format!("{safe}.json"))).ok()?;
-    serde_json::from_slice(&bytes).ok()
+    let path = app_data_dir.join("data").join(format!("{safe}.json"));
+    let bytes = std::fs::read(&path).ok()?;
+    match serde_json::from_slice(&bytes) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            // Present but unparseable is a data problem, not "nothing stored":
+            // callers merge into `unwrap_or_default()` and save, which would
+            // otherwise overwrite accumulated history with an empty set.
+            eprintln!("storage: failed to parse {}: {e}", path.display());
+            quarantine_corrupt(&path);
+            None
+        }
+    }
 }
 
 /// Persist a durable JSON document by name.
@@ -362,7 +414,7 @@ pub fn save_data<T: Serialize>(app_data_dir: &Path, name: &str, value: &T) -> Re
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     let data = serde_json::to_vec(value).map_err(|e| e.to_string())?;
-    std::fs::write(path, data).map_err(|e| e.to_string())
+    write_atomic(&path, &data, true)
 }
 
 /// Path-safety filter for caller-controlled names: every on-disk filename
@@ -425,7 +477,7 @@ fn write_envelope<T: Serialize>(
         value,
     };
     let data = serde_json::to_vec(&env).map_err(|e| e.to_string())?;
-    std::fs::write(path, data).map_err(|e| e.to_string())
+    write_atomic(&path, &data, false)
 }
 
 // --- Hash short-circuit for providers with no revalidation headers (#886) ---
@@ -495,6 +547,49 @@ pub fn cache_get_if_changed<T: DeserializeOwned>(app_data_dir: &Path, key: &str)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tempdir() -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "eve-storage-atomic-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn save_is_atomic_and_leaves_no_temp_files() {
+        let dir = tempdir();
+        save_data(&dir, "doc", &vec![1, 2, 3]).unwrap();
+        save_data(&dir, "doc", &vec![4]).unwrap();
+        assert_eq!(load_data::<Vec<i32>>(&dir, "doc"), Some(vec![4]));
+        let leftovers: Vec<_> = std::fs::read_dir(dir.join("data"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        assert_eq!(leftovers, vec!["doc.json".to_string()]);
+    }
+
+    #[test]
+    fn corrupt_data_is_set_aside_not_overwritten() {
+        let dir = tempdir();
+        std::fs::create_dir_all(dir.join("data")).unwrap();
+        std::fs::write(dir.join("data/doc.json"), b"{ truncated").unwrap();
+        assert_eq!(load_data::<Vec<i32>>(&dir, "doc"), None);
+        // The bad file moved aside, so a following save can't clobber it.
+        assert!(!dir.join("data/doc.json").exists());
+        let kept = std::fs::read_dir(dir.join("data")).unwrap().any(|e| {
+            e.unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("doc.json.corrupt-")
+        });
+        assert!(kept);
+    }
 
     #[test]
     fn cache_round_trips_and_expires() {

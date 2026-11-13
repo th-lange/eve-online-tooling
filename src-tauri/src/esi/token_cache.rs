@@ -8,7 +8,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::auth::AuthError;
 use super::cache::ConditionalCache;
@@ -62,7 +62,10 @@ pub struct AuthState {
 
 struct CachedToken {
     access_token: String,
-    expires_at: Instant,
+    /// Wall-clock expiry (epoch seconds). Not an `Instant`: on Linux/macOS a
+    /// monotonic clock stops during suspend, so after a long sleep a cached
+    /// token would still look valid and every authed call would fail (#1146).
+    expires_at: u64,
 }
 
 impl Default for AuthState {
@@ -127,7 +130,7 @@ impl AuthState {
         recover_lock(self.tokens.lock())
             .get(&character_id)
             .map(|t| {
-                let valid = t.expires_at > Instant::now();
+                let valid = t.expires_at > crate::util::time::now_secs();
                 (t.access_token.clone(), valid)
             })
     }
@@ -147,7 +150,7 @@ impl AuthState {
             character_id,
             CachedToken {
                 access_token,
-                expires_at: Instant::now() + ttl,
+                expires_at: crate::util::time::now_secs() + ttl.as_secs(),
             },
         );
     }
@@ -156,7 +159,7 @@ impl AuthState {
     fn valid_cached_token(&self, character_id: i64) -> Option<String> {
         recover_lock(self.tokens.lock())
             .get(&character_id)
-            .filter(|t| t.expires_at > Instant::now())
+            .filter(|t| t.expires_at > crate::util::time::now_secs())
             .map(|t| t.access_token.clone())
     }
 
