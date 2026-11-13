@@ -9,6 +9,10 @@ const PLASMOID = 1;
 const WATER = 2;
 const T2_ITEM = 3;
 
+function overview(colonies: ColonyView[], failedCharacters: string[] = []) {
+  return { colonies, failedCharacters };
+}
+
 /** Colony where plasmoids (extracted P0) have piled up in storage while the
  * factory is starved of water (also extracted, but storage is empty and the
  * balance is running a deficit). */
@@ -325,7 +329,7 @@ describe("PIPage Planner tab", () => {
     mockInvoke({
       sde_status: () => SDE_INSTALLED,
       auth_active_character: () => null,
-      pi_overview: () => [],
+      pi_overview: () => overview([]),
       pi_locked_get: () => [],
       sde_search_pi_commodities: () => [{ id: 9848, name: "Robotics" }],
       pi_production_chain: () => ROBOTICS_CHAIN,
@@ -359,7 +363,7 @@ describe("PIPage Planner tab", () => {
     mockInvoke({
       sde_status: () => SDE_INSTALLED,
       auth_active_character: () => null,
-      pi_overview: () => [],
+      pi_overview: () => overview([]),
       pi_locked_get: () => [],
       sde_search_pi_commodities: () => [{ id: 9848, name: "Robotics" }],
       pi_production_chain: () => ROBOTICS_CHAIN,
@@ -386,7 +390,7 @@ describe("PIPage Planner tab", () => {
     mockInvoke({
       sde_status: () => SDE_INSTALLED,
       auth_active_character: () => null,
-      pi_overview: () => [],
+      pi_overview: () => overview([]),
       pi_locked_get: () => [],
       sde_search_pi_commodities: () => [{ id: 9848, name: "Robotics" }],
       pi_production_chain: () => ROBOTICS_CHAIN,
@@ -422,7 +426,7 @@ describe("PIPage Planner tab", () => {
     mockInvoke({
       sde_status: () => SDE_INSTALLED,
       auth_active_character: () => null,
-      pi_overview: () => [],
+      pi_overview: () => overview([]),
       pi_locked_get: () => [],
       sde_search_pi_commodities: () => [{ id: 2869, name: "Nano-Factory" }],
       pi_production_chain: () => NANO_FACTORY_CHAIN,
@@ -451,7 +455,7 @@ describe("PIPage Planner tab", () => {
     mockInvoke({
       sde_status: () => SDE_INSTALLED,
       auth_active_character: () => null,
-      pi_overview: () => [],
+      pi_overview: () => overview([]),
       pi_locked_get: () => [],
       sde_search_pi_commodities: () => [{ id: 9848, name: "Robotics" }],
       pi_production_chain: () => ROBOTICS_CHAIN,
@@ -496,7 +500,7 @@ describe("PIPage Planner tab", () => {
     mockInvoke({
       sde_status: () => SDE_INSTALLED,
       auth_active_character: () => null,
-      pi_overview: () => [],
+      pi_overview: () => overview([]),
       pi_locked_get: () => [],
       pi_production_chain: () => ROBOTICS_CHAIN,
     });
@@ -511,7 +515,7 @@ describe("PIPage Planner tab", () => {
     mockInvoke({
       sde_status: () => SDE_INSTALLED,
       auth_active_character: () => null,
-      pi_overview: () => [],
+      pi_overview: () => overview([]),
       pi_locked_get: () => [],
       sde_search_pi_commodities: () => [{ id: 9848, name: "Robotics" }],
       pi_production_chain: () => ROBOTICS_CHAIN,
@@ -539,7 +543,7 @@ describe("PIPage Planner tab", () => {
     mockInvoke({
       sde_status: () => SDE_INSTALLED,
       auth_active_character: () => null,
-      pi_overview: () => [],
+      pi_overview: () => overview([]),
       pi_locked_get: () => [],
       sde_search_pi_commodities: (args) => {
         const { query } = args as { query: string };
@@ -616,7 +620,7 @@ describe("PIPage Planner tab", () => {
     mockInvoke({
       sde_status: () => SDE_INSTALLED,
       auth_active_character: () => null,
-      pi_overview: () => [],
+      pi_overview: () => overview([]),
       pi_locked_get: () => [],
       sde_search_pi_commodities: (args) => {
         const { query } = args as { query: string };
@@ -708,7 +712,7 @@ describe("PIPage Planner tab", () => {
     mockInvoke({
       sde_status: () => SDE_INSTALLED,
       auth_active_character: () => null,
-      pi_overview: () => [],
+      pi_overview: () => overview([]),
       pi_locked_get: () => [],
       sde_search_pi_commodities: () => [{ id: 9848, name: "Robotics" }],
       pi_production_chain: () => ROBOTICS_CHAIN,
@@ -733,7 +737,7 @@ describe("PIPage Planner tab", () => {
     mockInvoke({
       sde_status: () => SDE_INSTALLED,
       auth_active_character: () => null,
-      pi_overview: () => [],
+      pi_overview: () => overview([]),
       pi_locked_get: () => [],
       sde_search_pi_commodities: () => [{ id: 9848, name: "Robotics" }],
       pi_production_chain: () => ROBOTICS_CHAIN,
@@ -777,7 +781,7 @@ describe("PIPage Planner tab", () => {
     mockInvoke({
       sde_status: () => SDE_INSTALLED,
       auth_active_character: () => null,
-      pi_overview: () => [],
+      pi_overview: () => overview([]),
       pi_locked_get: () => [],
       sde_search_pi_commodities: () => [{ id: 9848, name: "Robotics" }],
       pi_production_chain: () => ROBOTICS_CHAIN,
@@ -854,7 +858,7 @@ describe("PIPage Planner tab", () => {
     mockInvoke({
       sde_status: () => SDE_INSTALLED,
       auth_active_character: () => null,
-      pi_overview: () => [],
+      pi_overview: () => overview([]),
       pi_locked_get: () => [],
       sde_search_pi_commodities: () => [{ id: 9848, name: "Robotics" }],
       pi_production_chain: () => ROBOTICS_CHAIN,
@@ -908,7 +912,7 @@ describe("PIPage Planner tab", () => {
     mockInvoke({
       sde_status: () => SDE_INSTALLED,
       auth_active_character: () => null,
-      pi_overview: () => [],
+      pi_overview: () => overview([]),
       pi_locked_get: () => [],
       pi_planner_setups: () => [SAVED],
       pi_production_chain: () => ROBOTICS_CHAIN,
@@ -951,12 +955,13 @@ describe("PIPage Colonies tab — notes & target products", () => {
     mockInvoke({
       sde_status: () => SDE_INSTALLED,
       auth_active_character: () => null,
-      pi_overview: () => [
-        colony({
-          notes: "Building Robotics here for the T2 module run.",
-          targetProducts: [{ typeId: 9848, name: "Robotics" }],
-        }),
-      ],
+      pi_overview: () =>
+        overview([
+          colony({
+            notes: "Building Robotics here for the T2 module run.",
+            targetProducts: [{ typeId: 9848, name: "Robotics" }],
+          }),
+        ]),
       pi_locked_get: () => [],
     });
     renderWithQuery(<PIPage />);
@@ -973,7 +978,7 @@ describe("PIPage Colonies tab — notes & target products", () => {
     mockInvoke({
       sde_status: () => SDE_INSTALLED,
       auth_active_character: () => null,
-      pi_overview: () => [colony()],
+      pi_overview: () => overview([colony()]),
       pi_locked_get: () => [],
       pi_colony_note_set: () => ({
         characterId: 1,
@@ -1011,7 +1016,7 @@ describe("PIPage Colonies tab — notes & target products", () => {
     mockInvoke({
       sde_status: () => SDE_INSTALLED,
       auth_active_character: () => null,
-      pi_overview: () => [colony()],
+      pi_overview: () => overview([colony()]),
       pi_locked_get: () => [],
       sde_search_pi_commodities: () => [{ id: 9848, name: "Robotics" }],
       pi_colony_note_set: () => ({
@@ -1044,9 +1049,10 @@ describe("PIPage Colonies tab — notes & target products", () => {
     mockInvoke({
       sde_status: () => SDE_INSTALLED,
       auth_active_character: () => null,
-      pi_overview: () => [
-        colony({ targetProducts: [{ typeId: 9848, name: "Robotics" }] }),
-      ],
+      pi_overview: () =>
+        overview([
+          colony({ targetProducts: [{ typeId: 9848, name: "Robotics" }] }),
+        ]),
       pi_locked_get: () => [],
       pi_colony_note_set: () => ({
         characterId: 1,
@@ -1072,5 +1078,72 @@ describe("PIPage Colonies tab — notes & target products", () => {
       }),
     );
     expect(screen.queryByText("Robotics")).not.toBeInTheDocument();
+  });
+});
+
+describe("PIPage Colonies tab — partial aggregation (#1169)", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+    localStorage.clear();
+  });
+
+  it("names the characters that failed and still shows the rest", async () => {
+    mockInvoke({
+      sde_status: () => SDE_INSTALLED,
+      auth_active_character: () => null,
+      pi_overview: () =>
+        overview(
+          [
+            colony(),
+            colony({
+              characterId: 2,
+              characterName: "Other Pilot",
+              planetId: 2,
+            }),
+          ],
+          ["Alt One", "Alt Two"],
+        ),
+      pi_locked_get: () => [],
+    });
+    renderWithQuery(<PIPage />);
+
+    expect(
+      await screen.findByText(
+        "Couldn't load Alt One, Alt Two — showing the rest.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Other Pilot")).toBeInTheDocument();
+  });
+
+  it("does not claim there are no colonies when the only character failed to load", async () => {
+    mockInvoke({
+      sde_status: () => SDE_INSTALLED,
+      auth_active_character: () => null,
+      pi_overview: () => overview([], ["Alt One"]),
+      pi_locked_get: () => [],
+    });
+    renderWithQuery(<PIPage />);
+
+    expect(
+      await screen.findByText(/Couldn't load Alt One/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/No colonies found/)).toBeNull();
+  });
+
+  it("shows no notice when every character loaded", async () => {
+    mockInvoke({
+      sde_status: () => SDE_INSTALLED,
+      auth_active_character: () => null,
+      pi_overview: () =>
+        overview([
+          colony(),
+          colony({ characterId: 2, characterName: "Other Pilot", planetId: 2 }),
+        ]),
+      pi_locked_get: () => [],
+    });
+    renderWithQuery(<PIPage />);
+
+    await screen.findByText("Other Pilot");
+    expect(screen.queryByText(/Couldn't load/)).toBeNull();
   });
 });

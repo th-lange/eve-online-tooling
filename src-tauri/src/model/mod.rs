@@ -63,6 +63,35 @@ impl<T> Fresh<T> {
     }
 }
 
+/// Records `name` in `failed` once, so a character that fails several calls in
+/// one aggregation is still listed a single time.
+pub fn note_failed_character(failed: &mut Vec<String>, name: &str) {
+    if !failed.iter().any(|n| n == name) {
+        failed.push(name.to_owned());
+    }
+}
+
+/// Settle one character's fetch inside a per-character fan-out (#1169).
+/// A success yields `Some(value)`. A failure while `aggregating` several
+/// characters is recorded in `failed` and yields `None`, so the rest still show
+/// and the UI can say who is missing; with a single target the failure is the
+/// answer and is returned instead of an empty result masquerading as "no data".
+pub fn settle_character_fetch<T, E>(
+    result: Result<T, E>,
+    aggregating: bool,
+    character_name: &str,
+    failed: &mut Vec<String>,
+) -> Result<Option<T>, E> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(_) if aggregating => {
+            note_failed_character(failed, character_name);
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// A structured, serializable command error (#337). Serializes to
 /// `{ "kind": …, "message": … }` so the frontend can tell an auth-required
 /// state apart from a generic failure and show a clearer message, rather than
@@ -113,6 +142,38 @@ impl From<&str> for AppError {
         AppError::Message {
             message: s.to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod fan_out_tests {
+    use super::{note_failed_character, settle_character_fetch};
+
+    #[test]
+    fn aggregating_failure_is_recorded_and_skipped() {
+        let mut failed = Vec::new();
+        let ok = settle_character_fetch::<_, String>(Ok(1), true, "Alice", &mut failed);
+        let bad = settle_character_fetch::<i32, _>(Err("403"), true, "Bob", &mut failed);
+        assert_eq!(ok, Ok(Some(1)));
+        assert_eq!(bad, Ok(None));
+        assert_eq!(failed, vec!["Bob".to_string()]);
+    }
+
+    #[test]
+    fn single_target_failure_propagates_and_is_not_listed() {
+        let mut failed = Vec::new();
+        let r = settle_character_fetch::<i32, _>(Err("403"), false, "Bob", &mut failed);
+        assert_eq!(r, Err("403"));
+        assert!(failed.is_empty());
+    }
+
+    #[test]
+    fn a_character_is_listed_once() {
+        let mut failed = Vec::new();
+        note_failed_character(&mut failed, "Bob");
+        note_failed_character(&mut failed, "Bob");
+        note_failed_character(&mut failed, "Cy");
+        assert_eq!(failed, vec!["Bob".to_string(), "Cy".to_string()]);
     }
 }
 

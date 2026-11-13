@@ -50,6 +50,8 @@ export interface AssetsPayload {
   sellTotal: number;
   buyTotal: number;
   volumeTotal: number;
+  /** Characters whose assets couldn't be loaded and are missing from this payload. */
+  failedCharacters: string[];
 }
 
 /** Load the roster's assets — flat rows + location tree — in one call. */
