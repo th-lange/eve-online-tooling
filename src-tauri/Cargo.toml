@@ -22,15 +22,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 export-bindings = []
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "~2.6", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
-tauri-plugin-notification = "2"
+tauri = { version = "~2.11", features = [] }
+tauri-plugin-opener = "~2.5"
+tauri-plugin-notification = "~2.3"
 # Native folder picker for the sync-folder setting (#1128 follow-up).
-tauri-plugin-dialog = "2"
-# Type-safe TS binding generation for Tauri commands (pilot: orders module only, #589).
+tauri-plugin-dialog = "~2.7"
+# Type-safe TS binding generation for Tauri commands (pilot started with the orders module, #589; orders, market, auth and production are generated today).
 # Pinned with `=` per upstream guidance — tauri-specta v2 is still pre-1.0 and each
 # rc can introduce breaking changes.
 specta = "=2.0.0-rc.22"
@@ -68,7 +68,7 @@ rhai = { version = "1.25", features = ["sync", "serde"] }
 boa_engine = "0.21"
 # Plugin drag-and-drop install (folder or .zip) — extraction only.
 zip = { version = "2", default-features = false, features = ["deflate"] }
-# Error reporting: captures panics and WARN/ERROR records in release builds.
+# Error reporting: captures panics in release builds (only the `panic` integration is wired).
 # DSN baked in via SENTRY_DSN env var at build time (absent = disabled).
 # rustls matches the rest of the project; avoids pulling in native-tls.
 sentry = { version = "0.34", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }

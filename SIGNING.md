@@ -15,9 +15,10 @@ Every practical path to a trusted Authenticode certificate on Windows —
 Microsoft's own **Azure Artifact Signing** (formerly Trusted Signing), or a
 traditional EV cert — requires **identity validation**, and for Public Trust
 certs (the only kind that actually suppresses the SmartScreen prompt) that
-validation is currently only available to developers billing out of the
-**US, Canada, the EU, or the UK**. Outside those regions there is no path at
-a reasonable price — full price, no free/OSS tier, no shortcut. Apple's
+validation is currently only available to **organizations in the US, Canada,
+the EU or the UK**, and to **individual developers only in the US and Canada**.
+This project is run by an individual outside that set, so there is no path at
+a reasonable price — no free/OSS tier, no shortcut. Apple's
 equivalent (a $99/year Developer ID + notarization) is at least available
 everywhere, but it's still a recurring cost for a free hobby project.
 

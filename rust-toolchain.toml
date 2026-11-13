@@ -6,7 +6,7 @@
 #
 # rustup honours this file for any cargo command run from the repo (it wins over
 # the default toolchain), so it is the single source of truth. Keep the version
-# in step with the `toolchain:` inputs in .github/workflows/{ci,release}.yml,
+# in step with the `toolchain:` inputs in .github/workflows/{ci,release,warm-release-cache}.yml,
 # which pre-install the same toolchain in CI.
 [toolchain]
 channel = "1.98.1"

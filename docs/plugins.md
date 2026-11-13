@@ -1,8 +1,8 @@
 # Writing a plugin
 
 eve-online-tooling can load **third-party plugins** dropped into a local folder.
-A plugin adds either pure logic/data (a pricing model, a BOM optimizer, a custom
-profit engine) or — later — its own UI page.
+A plugin adds pure logic/data (a pricing model, a BOM optimizer, a custom
+profit engine), its own UI page, or both.
 
 Plugins are **untrusted**. They run in a WebAssembly sandbox and get **no
 ambient authority**: no filesystem, no network, no keychain, no ESI tokens.
@@ -11,7 +11,7 @@ each of those is gated behind a permission the user explicitly grants at install
 time. If a plugin's manifest asks for a capability the user hasn't granted, the
 plugin can't even start.
 
-This page documents Phase 1 — **logic plugins** (WASM).
+This page documents **logic plugins** (WASM) first; [UI plugins](#ui-plugins) are covered further down.
 
 ## Where plugins live
 
@@ -107,7 +107,7 @@ lives in
 | `version`       | yes      | Plugin version (semver).                                           |
 | `minAppVersion` | yes      | Minimum app version this plugin supports (semver). Enforced: install and activation are refused on an older app, naming the required version. |
 | `wasm`          | one of   | Path to the WASM entry point (relative to the plugin folder).      |
-| `ui`            | one of   | Path to the UI HTML entry point (Phase 2).                         |
+| `ui`            | one of   | Path to the UI HTML entry point (see [UI plugins](#ui-plugins)).  |
 | `permissions`   | no       | Capabilities requested (see below). Empty = a powerless plugin.    |
 | `mcpTools`      | no       | MCP tools this plugin backs (see below). Each needs a `wasm` entry. |
 | `allowedHosts`  | no       | Hosts the plugin may contact; required (and only valid) with `net:fetch`. |
