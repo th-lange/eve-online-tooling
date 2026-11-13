@@ -102,18 +102,25 @@ impl<K: Eq + Hash + Clone, V: Clone> TtlCache<K, V> {
     }
 
     pub fn put(&self, key: K, value: V) {
+        self.put_many(std::iter::once((key, value)));
+    }
+
+    /// Insert a batch under one lock, sweeping expired entries **once** for
+    /// the whole batch. A per-insert sweep is O(n) each, so a full-catalogue
+    /// scan (~19k types per hub) went quadratic (#1160).
+    ///
+    /// The sweep is what stops the map growing without bound: `get`/`get_stale`
+    /// skip expired entries but never remove them, so without it stale
+    /// (region, type) prices would accumulate over a long session.
+    pub fn put_many(&self, entries: impl IntoIterator<Item = (K, V)>) {
         let mut map = recover_lock(self.map.lock());
         let now = Instant::now();
-        // Drop any entries that have aged out (past both `ttl` and
-        // `max_stale`) before inserting. Without this the map only ever
-        // grows — `get`/`get_stale` skip expired entries but never remove
-        // them — so over a long session stale (region, type) prices would
-        // accumulate unbounded. The sweep is O(n) but n is small (a handful
-        // of regions × requested types) and puts only happen behind a
-        // network fetch, so the cost is negligible.
+        // Drop entries past both `ttl` and `max_stale`.
         map.retain(|_, (expires_at, _)| *expires_at + self.max_stale > now);
-        let jitter = self.jitter(&key);
-        map.insert(key, (now + self.ttl + jitter, value));
+        for (key, value) in entries {
+            let jitter = self.jitter(&key);
+            map.insert(key, (now + self.ttl + jitter, value));
+        }
     }
 
     /// Number of live entries. Test-only; used to assert eviction behaviour.
@@ -160,6 +167,16 @@ mod tests {
         cache.put(1, "a".into());
         cache.put(2, "b".into());
         assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn put_many_sweeps_once_and_inserts_every_entry() {
+        let cache: TtlCache<i64, String> = TtlCache::new(Duration::ZERO);
+        cache.put(1, "old".into());
+        // Zero TTL: the batch's own entries are born expired, but the old
+        // entry must still be reclaimed by the single sweep before inserting.
+        cache.put_many([(2, "a".into()), (3, "b".into())]);
+        assert_eq!(cache.len(), 2);
     }
 
     #[test]

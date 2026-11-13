@@ -107,9 +107,11 @@ pub fn sde_status(app: AppHandle) -> Result<SdeStatus, String> {
 
 /// Whether [`sde_update`] should actually (re)download. A missing local copy or
 /// an explicit `force` always downloads; otherwise only a published md5 that
-/// differs from the stored one counts as changed. When either md5 is unknown
-/// (no sidecar yet, or the fetch failed) we keep what we have rather than
-/// surprising the user with a multi-hundred-MB transfer. Pure (testable).
+/// differs from the stored one counts as changed. An unknown *remote* md5 (the
+/// fetch failed) keeps what we have rather than re-pulling hundreds of MB on a
+/// guess. An unknown *local* md5 (install predates the sidecar, or its write
+/// failed) downloads once, otherwise such an install could never update (#1158);
+/// the sidecar is written afterwards so it settles. Pure (testable).
 fn needs_download(
     installed: bool,
     force: bool,
@@ -119,7 +121,11 @@ fn needs_download(
     if !installed || force {
         return true;
     }
-    matches!((local_md5, remote_md5), (Some(l), Some(r)) if l != r)
+    match (local_md5, remote_md5) {
+        (Some(l), Some(r)) => l != r,
+        (None, Some(_)) => true,
+        (_, None) => false,
+    }
 }
 
 /// Download/refresh the SDE, emitting `sde://progress` throughout.
@@ -158,7 +164,9 @@ pub async fn sde_update(app: AppHandle, force: bool) -> Result<SdeStatus, String
 
     // Record the md5 we just installed so future checks can short-circuit.
     if let Some(remote) = remote_md5 {
-        let _ = tokio::fs::write(md5_path(&paths), remote).await;
+        if let Err(e) = tokio::fs::write(md5_path(&paths), remote).await {
+            eprintln!("sde: couldn't record md5 sidecar (next check re-downloads): {e}");
+        }
     }
     Ok(status_of(&paths, true))
 }
@@ -176,9 +184,10 @@ mod update_tests {
         assert!(!needs_download(true, false, Some("a"), Some("a")));
         // A new dump → download.
         assert!(needs_download(true, false, Some("a"), Some("b")));
-        // Unknown either side (no sidecar yet / fetch failed) → keep what we
-        // have rather than re-pulling hundreds of MB on a guess.
-        assert!(!needs_download(true, false, None, Some("b")));
+        // No sidecar yet → download once so the install can ever update.
+        assert!(needs_download(true, false, None, Some("b")));
+        // Remote md5 unknown (fetch failed) → keep what we have.
+        assert!(!needs_download(true, false, None, None));
         assert!(!needs_download(true, false, Some("a"), None));
     }
 }
