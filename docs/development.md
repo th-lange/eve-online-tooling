@@ -111,17 +111,23 @@ other docs for subsystems: [plugins](plugins.md), [scripts](scripts.md),
 Installers are produced by the **Release** GitHub Actions workflow
 (`.github/workflows/release.yml`). To cut a release:
 
-1. Bump the version everywhere at once: `scripts/bump-version.sh 0.25.0` (edits
-   `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json` and
-   regenerates both lockfiles). Review the diff.
-2. Commit, then tag and push:
-   `git commit -am "chore(release): v0.25.0" && git tag v0.25.0 && git push origin main --tags`.
+1. On a `chore/vX.Y.Z` branch, bump the version everywhere at once:
+   `scripts/bump-version.sh 0.25.0` (edits `package.json`,
+   `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json` and regenerates both
+   lockfiles). Review the diff and commit `chore(release): v0.25.0`.
+2. Open a PR and enable auto-merge
+   (`gh pr merge --auto --merge --delete-branch`); CI gates it. Never push to
+   `main` directly (see [AGENTS.md](../AGENTS.md)).
+3. Tag the resulting merge commit on `main` and push **only that tag**:
+   `git tag v0.25.0 <merge-commit> && git push origin v0.25.0`.
 
-The workflow builds **Windows** installers on every tag; **macOS** (universal)
-and **Linux** join in on minor releases (`vX.Y.0`) or a manual run with
-`all_platforms`. It attaches the installers to the GitHub Release for that tag,
-then fills in the release notes with the changelog and the unsigned-build note
-(see [`SIGNING.md`](https://github.com/th-lange/eve-online-tooling/blob/main/SIGNING.md)).
+The workflow builds **Windows, macOS (universal) and Linux** installers on every
+`v*` tag. It refuses to run from a non-tag ref and fails fast if the tag does
+not match the versions in `package.json`, `Cargo.toml` and `tauri.conf.json`. It
+attaches the installers to a draft GitHub Release, which is published (with the
+changelog and the unsigned-build note, see
+[`SIGNING.md`](https://github.com/th-lange/eve-online-tooling/blob/main/SIGNING.md))
+only once every platform leg has succeeded.
 
 **Keep `@tauri-apps/cli` at ≥ 2.12** (bundler ≥ 2.10): older bundlers copy the
 build host's `/usr/bin/xdg-open` into the AppImage whenever

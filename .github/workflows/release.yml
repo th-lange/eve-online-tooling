@@ -4,7 +4,8 @@ name: Release
 # pushed. Can also be run manually against a tag via "Run workflow".
 #
 # Builds the full set — Windows, macOS (universal) and Linux — on every tagged
-# release.
+# release. Both jobs refuse to run from a non-tag ref: a manual run from `main`
+# would otherwise publish a release literally tagged "main" (#1201).
 on:
   push:
     tags:
@@ -19,6 +20,7 @@ concurrency:
 
 jobs:
   release:
+    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     timeout-minutes: 45
@@ -39,6 +41,22 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+
+      # The tag must match the version the binaries are built with, or every
+      # user is told "update available" forever (the update check compares the
+      # release tag with the binary's own version). Fail before any build.
+      - name: Require tag to match manifest versions
+        shell: bash
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          pkg=$(node -p "require('./package.json').version")
+          conf=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          crate=$(sed -n 's/^version *= *"\(.*\)"/\1/p' src-tauri/Cargo.toml | head -n1)
+          echo "tag=$want package.json=$pkg tauri.conf.json=$conf Cargo.toml=$crate"
+          if [ "$want" != "$pkg" ] || [ "$want" != "$conf" ] || [ "$want" != "$crate" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match the manifest versions"
+            exit 1
+          fi
 
       # Validate build-time secrets before spending any runner minutes.
       # A release must never ship with the Feedback module silently disabled —
@@ -137,6 +155,7 @@ jobs:
   # unsigned so people aren't left guessing at the SmartScreen/Gatekeeper
   # prompt. Replaces the old fixed-text-only body that had to be hand-edited
   notes:
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: release
     runs-on: ubuntu-latest
     timeout-minutes: 15
