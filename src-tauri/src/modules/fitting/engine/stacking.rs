@@ -13,22 +13,31 @@ pub fn penalty(index: usize) -> f64 {
 
 /// Combine stacking-penalized multiplicative factors into one multiplier.
 ///
-/// Factors are sorted by descending deviation from 1.0 (strongest applied at
-/// full strength), then each successive factor's *bonus* is attenuated by
-/// [`penalty`]. Order-independent: shuffling the inputs yields the same result.
+/// Bonuses (factor > 1) and penalties (factor < 1) are penalized in two
+/// **separate** chains, as in EVE/pyfa: within each chain the factors are
+/// sorted by descending deviation from 1.0 (strongest applied at full
+/// strength) and each successive factor's deviation is attenuated by
+/// [`penalty`]. Neutral factors (== 1.0) are skipped. Order-independent.
 pub fn combine_penalized(factors: &[f64]) -> f64 {
-    let mut deviations: Vec<f64> = factors.iter().map(|&f| f - 1.0).collect();
-    // Strongest (largest |deviation|) first.
+    let (mut bonuses, mut penalties): (Vec<f64>, Vec<f64>) = factors
+        .iter()
+        .map(|&f| f - 1.0)
+        .filter(|d| *d != 0.0)
+        .partition(|d| *d > 0.0);
+    chain(&mut bonuses) * chain(&mut penalties)
+}
+
+/// Penalize one same-sign chain of deviations (strongest first).
+fn chain(deviations: &mut [f64]) -> f64 {
     deviations.sort_by(|a, b| {
         b.abs()
             .partial_cmp(&a.abs())
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    let mut result = 1.0;
-    for (i, dev) in deviations.iter().enumerate() {
-        result *= 1.0 + dev * penalty(i);
-    }
-    result
+    deviations
+        .iter()
+        .enumerate()
+        .fold(1.0, |acc, (i, dev)| acc * (1.0 + dev * penalty(i)))
 }
 
 #[cfg(test)]
@@ -60,6 +69,17 @@ mod tests {
         let got = combine_penalized(&[1.5, 1.5]);
         let want = 1.5 * (1.0 + 0.5 * penalty(1));
         assert!((got - want).abs() < 1e-12);
+    }
+
+    #[test]
+    fn bonuses_and_penalties_use_separate_chains() {
+        // Two +60% bonuses and two -60% (x0.4) penalties: each pair is its own chain.
+        let got = combine_penalized(&[1.6, 0.4, 1.6, 0.4]);
+        let bonus = 1.6 * (1.0 + 0.6 * penalty(1));
+        let pen = 0.4 * (1.0 - 0.6 * penalty(1));
+        assert!((got - bonus * pen).abs() < 1e-12);
+        // A bonus must not push a penalty down the chain: 1.1 alongside 0.5 is untouched.
+        assert!((combine_penalized(&[1.1, 0.5]) - 0.55).abs() < 1e-12);
     }
 
     #[test]

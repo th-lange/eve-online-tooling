@@ -49,6 +49,25 @@ const RAPID_FIRING_ROF_BONUS: &str = "rapidFiringSkillBoostRofBonus";
 const ROF_ATTR: i64 = 51;
 const ROF_BONUS_ATTR: i64 = 293;
 
+/// `missileDMGBonus` / `missileDMGBonusPassive` — Ballistic Control Systems (and
+/// the passive variants). Their SDE modifier targets the *character's*
+/// `missileDamageMultiplier` (212), which nothing reads; the real in-game effect
+/// is a stacking-penalized multiplier (`missileDamageMultiplierBonus`, 213) on
+/// the four damage attrs of charges requiring Missile Launcher Operation, so the
+/// engine synthesizes that application (#1182).
+const MISSILE_DMG_BONUS: [&str; 2] = ["missileDMGBonus", "missileDMGBonusPassive"];
+const MISSILE_DMG_BONUS_ATTR: i64 = 213;
+/// Missile Launcher Operation — the skill every missile charge requires.
+const MISSILE_LAUNCHER_OPERATION: i64 = 3319;
+
+/// `moduleBonusMicrowarpdrive` — carries no `modifierInfo`; the MWD's signature
+/// bloom (`signatureRadiusBonus` 554, percent) onto the ship's signatureRadius
+/// (552) is procedural, so the engine synthesizes it (#1182). The effect has a
+/// duration, so it is dropped unless the module is active, as it should be.
+const MWD_SIG_BLOOM: &str = "moduleBonusMicrowarpdrive";
+const SIG_BONUS_ATTR: i64 = 554;
+const SIG_RADIUS_ATTR: i64 = 552;
+
 /// One entity in the fit tree, reduced to what resolution needs.
 #[derive(Debug, Clone, Default)]
 pub struct EntityInput {
@@ -186,6 +205,8 @@ pub fn resolve(
         let mut has_dmg_skill_bonus = false;
         let mut has_skill_boost_dmg = false;
         let mut has_rof_boost = false;
+        let mut has_missile_dmg_bonus = false;
+        let mut has_mwd_bloom = false;
         for &eid in &e.effect_ids {
             if let Some(meta) = effects.get(&eid) {
                 // Overload (category 5) effects only apply while the module is
@@ -203,10 +224,39 @@ pub fn resolve(
                 if meta.name == RAPID_FIRING_ROF_BONUS {
                     has_rof_boost = true;
                 }
+                if MISSILE_DMG_BONUS.contains(&meta.name.as_str()) {
+                    has_missile_dmg_bonus = true;
+                }
+                if meta.name == MWD_SIG_BLOOM {
+                    has_mwd_bloom = true;
+                }
                 let (m, dropped) = modifiers_for(meta, is_stackable);
                 *unresolved += dropped;
                 out.extend(m);
             }
+        }
+        // Ballistic Control System: penalized multiplier on missile damage (#1182).
+        if has_missile_dmg_bonus {
+            for tgt in DAMAGE_ATTRS {
+                out.push(ModifierDef {
+                    src_attr: MISSILE_DMG_BONUS_ATTR,
+                    op: Op::PostMul,
+                    tgt_attr: tgt,
+                    domain: Domain::SkillReqOnShip(MISSILE_LAUNCHER_OPERATION),
+                    penalized: true,
+                });
+            }
+        }
+        // Microwarpdrive signature bloom: stacking-penalized, joining the same
+        // chain as any other signatureRadius percent bonus on the hull (#1182).
+        if has_mwd_bloom {
+            out.push(ModifierDef {
+                src_attr: SIG_BONUS_ATTR,
+                op: Op::PostPercent,
+                tgt_attr: SIG_RADIUS_ATTR,
+                domain: Domain::Ship,
+                penalized: true,
+            });
         }
         // Synthesize the missing application: this skill's scaled damageMultiplier
         // bonus (292) postPercent-boosts damageMultiplier (64) on items requiring
@@ -322,6 +372,26 @@ pub fn resolve(
         &req_skills,
         &mut aux,
     );
+    // Pass 4b — charge→host (`otherID`): a loaded charge's `Other` modifiers
+    // apply to its host module (ammo/crystal cap, range, tracking penalties).
+    // Runs before the module pass so scripts reshape the host's bonus attrs
+    // *before* the host reads and projects them. Charge-sourced modifiers are
+    // exempt from stacking, so they are never penalized.
+    for (a, ms) in aux.iter().zip(&aux_mods) {
+        let AuxDest::Charge(host) = a.dest else {
+            continue;
+        };
+        for m in ms {
+            if m.domain == Domain::Other {
+                // A charge that lacks the source attribute uses its dogma default
+                // (e.g. a crystal without `fallofMultiplier` → 1.0), so the
+                // multiplier is a no-op instead of ×0 zeroing the host's falloff.
+                let value = a.store.get_or(m.src_attr, default_of(m.src_attr));
+                modules[host].apply(m.tgt_attr, m.op, value, false);
+            }
+        }
+    }
+
     for i in 0..modules.len() {
         // Read source from module i, apply to ship / other modules / aux.
         let ms = module_mods[i].clone();
@@ -368,24 +438,6 @@ pub fn resolve(
                 &req_skills,
                 &mut aux,
             );
-        }
-    }
-
-    // Pass 4b — charge→host (`otherID`): a loaded charge's `Other` modifiers
-    // apply to its host module (ammo/crystal cap, range, tracking penalties).
-    // Runs after the module pass so the host's base/skill attrs are resolved.
-    for (a, ms) in aux.iter().zip(&aux_mods) {
-        let AuxDest::Charge(host) = a.dest else {
-            continue;
-        };
-        for m in ms {
-            if m.domain == Domain::Other {
-                // A charge that lacks the source attribute uses its dogma default
-                // (e.g. a crystal without `fallofMultiplier` → 1.0), so the
-                // multiplier is a no-op instead of ×0 zeroing the host's falloff.
-                let value = a.store.get_or(m.src_attr, default_of(m.src_attr));
-                modules[host].apply(m.tgt_attr, m.op, value, m.penalized);
-            }
         }
     }
 
@@ -810,6 +862,150 @@ mod tests {
             (cap_need - 15.0).abs() < 1e-9,
             "host capNeed = {cap_need}, want 15"
         );
+    }
+
+    /// Scripts (#1184): a charge's `otherID` modifier must reshape the host's
+    /// bonus attribute *before* the host projects it onto the ship. Sensor
+    /// Booster 566 = 30%, script +50% on it -> the ship's scanResolution (564)
+    /// gets +45%, not +30%.
+    #[test]
+    fn script_changes_host_bonus_before_host_projects_it() {
+        let mut effects = HashMap::new();
+        // Host: postPercent ship attr 564 by own attr 566.
+        effects.insert(
+            800,
+            effect(800, vec![mi("ItemModifier", "shipID", 6, 564, 566, None)]),
+        );
+        // Script: postPercent host attr 566 by own attr 999.
+        effects.insert(
+            801,
+            effect(801, vec![mi("ItemModifier", "otherID", 6, 566, 999, None)]),
+        );
+        let input = FitInput {
+            ship: EntityInput {
+                attrs: vec![(564, 100.0)],
+                ..Default::default()
+            },
+            modules: vec![EntityInput {
+                attrs: vec![(566, 30.0)],
+                effect_ids: vec![800],
+                ..Default::default()
+            }],
+            charges: vec![Some(EntityInput {
+                attrs: vec![(999, 50.0)],
+                effect_ids: vec![801],
+                ..Default::default()
+            })],
+            ..Default::default()
+        };
+        let resolved = resolve(&input, &effects, &|_| true, &|_| 0.0);
+        let scan_res = resolved.ship.get(564);
+        assert!(
+            (scan_res - 145.0).abs() < 1e-9,
+            "scan res = {scan_res}, want 145"
+        );
+    }
+
+    /// Charge-sourced modifiers are exempt from stacking (#1187): Barrage-style
+    /// falloff multiplier (x1.5, flagged penalized) next to two penalized module
+    /// bonuses must not be pushed down the chain, nor push the modules down.
+    #[test]
+    fn charge_modifier_is_not_stacking_penalized() {
+        let mut effects = HashMap::new();
+        // Charge multiplies host falloff (158) by its attr 999 (postMul, non-stackable -> flagged).
+        effects.insert(
+            810,
+            effect(810, vec![mi("ItemModifier", "otherID", 4, 158, 999, None)]),
+        );
+        let input = FitInput {
+            modules: vec![EntityInput {
+                attrs: vec![(158, 10.0)],
+                ..Default::default()
+            }],
+            charges: vec![Some(EntityInput {
+                attrs: vec![(999, 1.5)],
+                effect_ids: vec![810],
+                ..Default::default()
+            })],
+            ..Default::default()
+        };
+        // is_stackable false -> modifier_from marks the charge modifier penalized.
+        let resolved = resolve(&input, &effects, &|_| false, &|_| 0.0);
+        let falloff = resolved.modules[0].get(158);
+        assert!((falloff - 15.0).abs() < 1e-9, "falloff = {falloff}");
+    }
+
+    /// Ballistic Control Systems (#1182): three BCS II (x1.1 each, penalized) on
+    /// a missile requiring Missile Launcher Operation. Expect
+    /// 1.1 * (1+0.1*p1) * (1+0.1*p2) on kinetic damage.
+    #[test]
+    fn ballistic_control_systems_boost_missile_damage_with_penalty() {
+        let mut bcs = effect(763, vec![mi("ItemModifier", "charID", 0, 212, 213, None)]);
+        bcs.name = "missileDMGBonus".into();
+        let mut effects = HashMap::new();
+        effects.insert(763, bcs);
+        let bcs_entity = || EntityInput {
+            attrs: vec![(213, 1.1)],
+            effect_ids: vec![763],
+            ..Default::default()
+        };
+        let input = FitInput {
+            modules: vec![
+                bcs_entity(),
+                bcs_entity(),
+                bcs_entity(),
+                EntityInput::default(), // launcher
+            ],
+            charges: vec![
+                None,
+                None,
+                None,
+                Some(EntityInput {
+                    attrs: vec![(117, 100.0)],
+                    required_skills: vec![3319],
+                    ..Default::default()
+                }),
+            ],
+            ..Default::default()
+        };
+        // Missile damage attrs are non-stackable in the SDE; the synthesized
+        // modifiers are penalized regardless.
+        let resolved = resolve(&input, &effects, &|_| false, &|_| 0.0);
+        let dmg = resolved.charges[3].as_ref().unwrap().get(117);
+        let want = 100.0
+            * 1.1
+            * (1.0 + 0.1 * super::super::stacking::penalty(1))
+            * (1.0 + 0.1 * super::super::stacking::penalty(2));
+        assert!(
+            (dmg - want).abs() < 1e-9,
+            "missile dmg = {dmg}, want {want}"
+        );
+        // Not the unpenalized 1.1^3.
+        assert!(dmg < 100.0 * 1.1_f64.powi(3) - 0.1);
+    }
+
+    /// MWD signature bloom (#1182): 475% on a 100 m hull -> 575 m, only for the
+    /// active module (the effect is dropped by the caller when not running).
+    #[test]
+    fn microwarpdrive_bloom_applies_to_ship_signature() {
+        let mut mwd = effect(6730, vec![]);
+        mwd.name = "moduleBonusMicrowarpdrive".into();
+        let mut effects = HashMap::new();
+        effects.insert(6730, mwd);
+        let input = FitInput {
+            ship: EntityInput {
+                attrs: vec![(552, 100.0)],
+                ..Default::default()
+            },
+            modules: vec![EntityInput {
+                attrs: vec![(554, 475.0)],
+                effect_ids: vec![6730],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let resolved = resolve(&input, &effects, &|_| false, &|_| 0.0);
+        assert!((resolved.ship.get(552) - 575.0).abs() < 1e-9);
     }
 
     /// Surgical Strike at level V: scales its own damageMultiplierBonus (292) by
