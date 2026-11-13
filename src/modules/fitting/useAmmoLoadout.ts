@@ -1,7 +1,8 @@
 import { useMemo } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { fittingAmmoTable, fittingLoadAmmo, type AmmoRow } from "../../lib/api";
 import { fittingKeys } from "../../lib/queryKeys";
+import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { useFitState } from "./useFitEditorContext";
 
 /**
@@ -13,10 +14,15 @@ import { useFitState } from "./useFitEditorContext";
  */
 export function useAmmoLoadout() {
   const { fit, skillSource, setFit } = useFitState();
+  // One full simulation per cargo ammo type on the backend: debounce edits and
+  // only ask at all when there is cargo to compare (#1189).
+  const settledFit = useDebouncedValue(fit, 150);
+  const hasCargo = settledFit?.items.some((i) => i.slot === "cargo") ?? false;
   const ammoTable = useQuery({
-    queryKey: fittingKeys.ammoTable(fit, skillSource),
-    queryFn: () => fittingAmmoTable(fit!, skillSource),
-    enabled: fit != null,
+    queryKey: fittingKeys.ammoTable(settledFit, skillSource),
+    queryFn: () => fittingAmmoTable(settledFit!, skillSource),
+    enabled: settledFit != null && hasCargo,
+    placeholderData: keepPreviousData,
   });
   const ammoStats: Record<number, AmmoRow> = useMemo(
     () => Object.fromEntries((ammoTable.data ?? []).map((r) => [r.typeId, r])),

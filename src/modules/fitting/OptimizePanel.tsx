@@ -4,6 +4,7 @@ import { SlidersHorizontal, X } from "lucide-react";
 import {
   errorMessage,
   fittingOptimize,
+  type Fit,
   type OptimizeMode,
   type OptimizeObjective,
 } from "../../lib/api";
@@ -53,12 +54,19 @@ export function OptimizePanel({ regionId }: { regionId: number }) {
   // in the effect below, and only treat *further* changes as manual edits.
   const pendingOptimizeApplyRef = useRef(false);
   const lastOptimizedFitRef = useRef<typeof fit>(null);
+  const fitRef = useRef(fit);
+  useEffect(() => {
+    fitRef.current = fit;
+  }, [fit]);
+  const [staleResult, setStaleResult] = useState(false);
 
   const optimize = useMutation({
-    mutationFn: () => {
+    // The fit the optimizer ran on, passed in so `onSuccess` can tell whether
+    // the user edited it meanwhile.
+    mutationFn: (base: Fit) => {
       const maxCost = maxCostM.trim() ? Number(maxCostM) * 1_000_000 : null;
       return fittingOptimize(
-        fit!,
+        base,
         objective,
         Object.entries(meta)
           .filter(([, on]) => on)
@@ -67,7 +75,14 @@ export function OptimizePanel({ regionId }: { regionId: number }) {
         { capStable, maxCost, regionId },
       );
     },
-    onSuccess: (res) => {
+    onSuccess: (res, base) => {
+      // The optimize call takes seconds; applying its result over a fit that
+      // changed meanwhile would silently throw those edits away.
+      if (fitRef.current !== base) {
+        setStaleResult(true);
+        return;
+      }
+      setStaleResult(false);
       pendingOptimizeApplyRef.current = true;
       setFit(res.fit);
       const unmet: string[] = [];
@@ -111,7 +126,11 @@ export function OptimizePanel({ regionId }: { regionId: number }) {
           setCapStable={setCapStable}
           maxCostM={maxCostM}
           setMaxCostM={setMaxCostM}
-          onOptimize={() => optimize.mutate()}
+          onOptimize={() => {
+            if (!fit) return;
+            setStaleResult(false);
+            optimize.mutate(fit);
+          }}
           pending={optimize.isPending}
         />
       </div>
@@ -121,6 +140,14 @@ export function OptimizePanel({ regionId }: { regionId: number }) {
             ? `Optimize failed: ${errorMessage(optimize.error)}`
             : null
         }
+      />
+      <InlineError
+        message={
+          staleResult
+            ? "The fit changed while optimizing, so the result was discarded. Run the optimizer again."
+            : null
+        }
+        className="mb-2 text-xs text-amber-400"
       />
       {unmetConstraints && (
         <div className="mb-2 flex items-center justify-between gap-2 rounded border border-amber-700/50 bg-amber-950/20 px-2 py-1">
