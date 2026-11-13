@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { logStore, type LogLevel } from "./logStore";
+import { errorMessage } from "./api/common";
 
 function args2msg(args: unknown[]): string {
   return args
@@ -12,7 +13,7 @@ function args2msg(args: unknown[]): string {
 /**
  * Install global error interceptors. Call once before React mounts.
  * - Wraps console.error / console.warn so existing callers are unaffected.
- * - Installs window.onerror and window.onunhandledrejection.
+ * - Listens for window `error` and `unhandledrejection` (additively).
  * - Subscribes to the Tauri `logs://entry` event for backend entries.
  */
 export function initLogCapture(): void {
@@ -41,29 +42,28 @@ export function initLogCapture(): void {
     });
   };
 
-  window.onerror = (_msg, source, _line, _col, error) => {
+  // addEventListener, not `window.onerror = …`: assigning the property would
+  // replace the handlers Sentry installed just before us, so uncaught errors
+  // never reached Sentry (#1192).
+  window.addEventListener("error", (event) => {
     logStore.push({
       ts: Date.now(),
       level: "error",
       source: "frontend",
-      target: source ?? "window",
-      message: error?.message ?? String(_msg),
+      target: event.filename || "window",
+      message: event.error ? errorMessage(event.error) : String(event.message),
     });
-    return false;
-  };
+  });
 
-  window.onunhandledrejection = (event) => {
+  window.addEventListener("unhandledrejection", (event) => {
     logStore.push({
       ts: Date.now(),
       level: "error",
       source: "frontend",
       target: "promise",
-      message:
-        event.reason instanceof Error
-          ? event.reason.message
-          : String(event.reason),
+      message: errorMessage(event.reason),
     });
-  };
+  });
 
   // Receive backend WARN/ERROR records in real-time.
   listen<BackendEntry>("logs://entry", (event) => {

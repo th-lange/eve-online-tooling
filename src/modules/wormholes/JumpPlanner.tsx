@@ -30,6 +30,7 @@ export function JumpPlanner() {
         </span>
         <Field label="Ship">
           <Combo
+            scope="ships"
             value={ship}
             onPick={setShip}
             search={sdeSearchShips}

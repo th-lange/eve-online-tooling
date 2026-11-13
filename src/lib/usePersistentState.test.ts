@@ -43,4 +43,20 @@ describe("usePersistentState", () => {
 
     expect(result.current[0]).toBe("a");
   });
+
+  it("keeps two instances of one key in sync without a restart (#1191)", () => {
+    const a = renderHook(() => usePersistentState("shared", false));
+    const b = renderHook(() => usePersistentState("shared", false));
+    act(() => a.result.current[1](true));
+    expect(b.result.current[0]).toBe(true);
+    act(() => b.result.current[1](false));
+    expect(a.result.current[0]).toBe(false);
+  });
+
+  it("doesn't leak between different keys", () => {
+    const a = renderHook(() => usePersistentState("one", 1));
+    const b = renderHook(() => usePersistentState("two", 1));
+    act(() => a.result.current[1](5));
+    expect(b.result.current[0]).toBe(1);
+  });
 });

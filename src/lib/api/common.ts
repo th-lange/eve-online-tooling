@@ -92,7 +92,11 @@ export function isAuthRequired(e: unknown): boolean {
 
 /** A human-readable message for any command rejection (structured or string). */
 export function errorMessage(e: unknown): string {
-  return isAppError(e) ? e.message : String(e);
+  if (isAppError(e)) return e.message;
+  // `String(new Error("x"))` is "Error: x"; a bare `{kind, message}` object
+  // would otherwise log as "[object Object]" (#1196).
+  if (e instanceof Error) return e.message;
+  return String(e);
 }
 
 /**

@@ -85,6 +85,7 @@ function ColonyNotes({
           </span>
         ))}
         <Combo
+          scope="pi-commodities"
           value={picked}
           onPick={addTarget}
           search={sdeSearchPiCommodities}

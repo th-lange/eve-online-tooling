@@ -39,6 +39,7 @@ export function Routing() {
         </Field>
         <Field label="Ship (optional)">
           <Combo
+            scope="ships"
             value={ship}
             onPick={setShip}
             search={sdeSearchShips}

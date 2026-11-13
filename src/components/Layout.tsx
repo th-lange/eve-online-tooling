@@ -31,6 +31,7 @@ import {
   useReleaseCheck,
 } from "../modules/settings/useReleaseCheck";
 import { SyncScheduler } from "../modules/settings/SyncScheduler";
+import { ModuleErrorBoundary } from "./ErrorBoundary";
 import appIcon from "../assets/app-icon.png";
 
 const PINS_KEY = STORAGE_KEYS.sidebarPins;
@@ -56,13 +57,16 @@ const COLORS: { key: string; label: string; hex: string }[] = [
 const COLOR_HEX = new Map(COLORS.map((c) => [c.key, c.hex]));
 
 /** Keep only string entries — defends against hand-edited/corrupted storage. */
-function sanitizeIds(raw: string[]): string[] {
-  return raw.filter((x) => typeof x === "string");
+function sanitizeIds(raw: unknown): string[] {
+  // Hand-edited storage can hold any JSON value; a non-array used to throw
+  // here, in the always-mounted shell, so the app crashed on every launch.
+  return Array.isArray(raw) ? raw.filter((x) => typeof x === "string") : [];
 }
 
 /** Keep only entries whose value is a known color key. */
-function sanitizeColors(raw: Record<string, string>): Record<string, string> {
+function sanitizeColors(raw: unknown): Record<string, string> {
   const out: Record<string, string> = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
   for (const [id, key] of Object.entries(raw)) {
     if (typeof key === "string" && COLOR_HEX.has(key)) out[id] = key;
   }
@@ -438,7 +442,9 @@ function ModuleHost({
                       <div className="p-6 text-sm text-slate-400">Loading…</div>
                     }
                   >
-                    <m.Component />
+                    <ModuleErrorBoundary moduleId={m.id} title={m.title}>
+                      <m.Component />
+                    </ModuleErrorBoundary>
                   </Suspense>
                 </ModuleActiveContext.Provider>
               </ModuleChromeContext.Provider>

@@ -1,6 +1,13 @@
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import {
   EXTERNAL_STORAGE_EVENT,
+  notifyExternalStorageChange,
   type ExternalStorageEventDetail,
 } from "./externalStorageEvent";
 
@@ -31,10 +38,19 @@ export function usePersistentState<T>(
   initial: T,
 ): [T, Dispatch<SetStateAction<T>>] {
   const [state, setState] = useState<T>(() => readPersisted(key, initial));
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
+  // Persist, and tell every other instance of the same key when the stored
+  // value actually changed — otherwise two components using one key (e.g. the
+  // sync scheduler and its settings card) drift apart until a restart (#1191).
   useEffect(() => {
     try {
-      localStorage.setItem(key, JSON.stringify(state));
+      const next = JSON.stringify(state);
+      if (localStorage.getItem(key) !== next) {
+        localStorage.setItem(key, next);
+        notifyExternalStorageChange(key);
+      }
     } catch {
       // Storage may be unavailable; state still works in-memory.
     }
@@ -44,7 +60,11 @@ export function usePersistentState<T>(
     function onExternal(e: Event) {
       const detail = (e as CustomEvent<ExternalStorageEventDetail>).detail;
       if (detail?.key !== key) return;
-      setState(readPersisted(key, initial));
+      const stored = readPersisted(key, initial);
+      // Our own write (or an equal value from a sibling) — nothing to adopt.
+      // Comparing serialized forms also ends the notify → adopt → notify loop.
+      if (JSON.stringify(stored) === JSON.stringify(stateRef.current)) return;
+      setState(stored);
     }
     window.addEventListener(EXTERNAL_STORAGE_EVENT, onExternal);
     return () => window.removeEventListener(EXTERNAL_STORAGE_EVENT, onExternal);

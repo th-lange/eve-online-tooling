@@ -53,8 +53,13 @@ describe("errorMessage", () => {
   it("falls back to String(e) for a legacy plain-string rejection", () => {
     expect(errorMessage("boom")).toBe("boom");
   });
+});
 
-  it("falls back to String(e) for a legacy Error rejection", () => {
-    expect(errorMessage(new Error("boom"))).toBe("Error: boom");
+describe("errorMessage for logging (#1196)", () => {
+  it("uses an Error's message, not 'Error: …'", () => {
+    expect(errorMessage(new Error("boom"))).toBe("boom");
+  });
+  it("never renders a structured error as [object Object]", () => {
+    expect(errorMessage({ kind: "message", message: "nope" })).toBe("nope");
   });
 });

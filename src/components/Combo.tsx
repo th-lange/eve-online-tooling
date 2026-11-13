@@ -8,6 +8,7 @@ import { comboKeys } from "../lib/queryKeys";
  * typing fires one backend request per pause instead of one per keystroke. */
 export function Combo<T extends { id: number; name: string }>({
   label,
+  scope,
   value,
   onPick,
   search,
@@ -19,6 +20,11 @@ export function Combo<T extends { id: number; name: string }>({
   title,
 }: {
   label?: string;
+  /** Names the search backend in the default cache key ("ships",
+   *  "systems", …). Required in practice whenever `label` is omitted: the key
+   *  is otherwise `["combo", "", text]`, shared by *every* unlabelled combo, so
+   *  a ship picker's cached results would be served to a system picker (#1193). */
+  scope?: string;
   value: T | null;
   onPick: (v: T | null) => void;
   search: (query: string) => Promise<T[]>;
@@ -37,7 +43,7 @@ export function Combo<T extends { id: number; name: string }>({
   const [text, setText] = useState("");
   const debouncedText = useDebouncedValue(text, 200);
   const results = useQuery({
-    queryKey: (queryKey ?? ((t) => comboKeys.default(label ?? "", t)))(
+    queryKey: (queryKey ?? ((t) => comboKeys.default(scope ?? label ?? "", t)))(
       debouncedText,
     ),
     queryFn: () => search(debouncedText),
