@@ -1759,7 +1759,7 @@ pub(crate) fn simulate_fit(
     let (dogma, dogma_error) = match dogma {
         Ok(d) => (Some(d), None),
         Err(e) => {
-            eprintln!("fitting: dogma simulation failed: {e}");
+            tracing::warn!("fitting: dogma simulation failed: {e}");
             (None, Some(e))
         }
     };

@@ -398,7 +398,7 @@ impl Sde {
                 match serde_json::from_str::<Vec<ModifierInfo>>(&json) {
                     Ok(mods) => meta.modifiers = mods,
                     Err(e) => {
-                        eprintln!(
+                        tracing::warn!(
                             "effect {} has unparseable modifierInfo: {e}",
                             meta.effect_id
                         )

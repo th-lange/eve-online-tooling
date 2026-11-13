@@ -363,7 +363,7 @@ impl AuthState {
                     // is still good), but the *next* refresh reuses the
                     // now-rotated-away token and the character gets logged
                     // out — so log it and flag it for the UI to warn about.
-                    eprintln!(
+                    tracing::error!(
                         "esi::auth: failed to persist rotated refresh token for character \
                          {character_id}: {e} — next refresh may use a stale token and force a re-login"
                     );

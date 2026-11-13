@@ -59,7 +59,7 @@ async fn run_login(
     // the user can still finish it from the copied link.
     let _ = app.emit(LOGIN_URL_EVENT, &url);
     if let Err(e) = app.opener().open_url(&url, None::<&str>) {
-        eprintln!("esi::auth: could not open the system browser: {e}");
+        tracing::warn!("esi::auth: could not open the system browser: {e}");
     }
 
     // Wait for the redirect off the async runtime.
@@ -434,7 +434,7 @@ async fn remove_character(
             auth::revoke_refresh_token(auth_state.http(), auth_state.revoke_url(), &token).await
         {
             // Best effort: offline logout must still work.
-            eprintln!("esi::auth: SSO revoke for character {character_id} failed: {e}");
+            tracing::warn!("esi::auth: SSO revoke for character {character_id} failed: {e}");
         }
     }
 

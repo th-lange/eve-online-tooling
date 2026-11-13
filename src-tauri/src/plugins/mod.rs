@@ -299,7 +299,7 @@ fn discover(plugins_dir: &Path) -> Vec<Manifest> {
         // disk into the plugin root; never treat one as a plugin (#1151).
         // `DirEntry::file_type` does not follow symlinks.
         if dirent.file_type().is_ok_and(|t| t.is_symlink()) {
-            eprintln!("plugins: skipping symlinked entry {dir:?}");
+            tracing::warn!("plugins: skipping symlinked entry {dir:?}");
             continue;
         }
         if !dir.is_dir() {
@@ -317,7 +317,7 @@ fn discover(plugins_dir: &Path) -> Vec<Manifest> {
         if std::fs::symlink_metadata(dir.join("plugin.json"))
             .is_ok_and(|m| m.file_type().is_symlink())
         {
-            eprintln!("plugins: skipping {dir_id:?}: plugin.json is a symlink");
+            tracing::warn!("plugins: skipping {dir_id:?}: plugin.json is a symlink");
             continue;
         }
         let Ok(raw) = std::fs::read_to_string(dir.join("plugin.json")) else {
@@ -325,7 +325,7 @@ fn discover(plugins_dir: &Path) -> Vec<Manifest> {
         };
         match Manifest::parse_and_validate(&raw, dir_id) {
             Ok(manifest) => manifests.push(manifest),
-            Err(e) => eprintln!("plugins: skipping {dir_id:?}: {e}"),
+            Err(e) => tracing::warn!("plugins: skipping {dir_id:?}: {e}"),
         }
     }
     manifests.sort_by(|a, b| a.id.cmp(&b.id));
@@ -419,7 +419,7 @@ fn copy_dir_all(source: &Path, dest: &Path) -> std::io::Result<()> {
         let to = dest.join(entry.file_name());
         let kind = entry.file_type()?; // does not follow symlinks
         if kind.is_symlink() {
-            eprintln!("plugins: not copying symlink {:?}", entry.path());
+            tracing::warn!("plugins: not copying symlink {:?}", entry.path());
         } else if kind.is_dir() {
             copy_dir_all(&entry.path(), &to)?;
         } else {

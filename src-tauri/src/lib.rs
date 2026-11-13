@@ -269,7 +269,7 @@ pub fn run() {
                 let ctx = mcp::build_ctx(&dir, registry, manager);
                 let port = mcp::configured_port(&dir);
                 if let Err(e) = app.state::<mcp::McpState>().start(ctx, port) {
-                    eprintln!("mcp: autostart failed: {e}");
+                    tracing::warn!("mcp: autostart failed: {e}");
                 }
             }
 

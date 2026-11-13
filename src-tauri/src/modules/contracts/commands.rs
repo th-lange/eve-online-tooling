@@ -111,7 +111,7 @@ pub async fn contracts_scan(
                         // item fetch (404/500/timeout) would otherwise collapse
                         // to an empty Vec and show as a (wrong) zero-content
                         // contract rather than being excluded (#1031).
-                        eprintln!(
+                        tracing::warn!(
                             "contracts_scan: item fetch failed for contract {id}: {e} — excluding it from results"
                         );
                         None

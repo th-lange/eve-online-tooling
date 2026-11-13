@@ -176,7 +176,7 @@ pub async fn sde_update(app: AppHandle, force: bool) -> Result<SdeStatus, String
     // Record the md5 we just installed so future checks can short-circuit.
     if let Some(remote) = remote_md5 {
         if let Err(e) = tokio::fs::write(md5_path(&paths), remote).await {
-            eprintln!("sde: couldn't record md5 sidecar (next check re-downloads): {e}");
+            tracing::warn!("sde: couldn't record md5 sidecar (next check re-downloads): {e}");
         }
     }
     Ok(status_of(&paths, true))

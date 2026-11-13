@@ -81,7 +81,7 @@ pub async fn collect_orders(
             // Not silent: the skipped character is logged so an expired token /
             // missing scope on one alt is at least diagnosable (#1169).
             Err(e) if aggregating => {
-                eprintln!("orders: skipping character {character_id}: {e}");
+                tracing::warn!("orders: skipping character {character_id}: {e}");
             }
             Err(e) => return Err(e),
         }
@@ -153,7 +153,7 @@ async fn fetch_character_orders(
                     best.insert((*location_id, m.type_id), m);
                 }
             }
-            Err(e) => eprintln!("orders: no pricing for location {location_id}: {e}"),
+            Err(e) => tracing::warn!("orders: no pricing for location {location_id}: {e}"),
         }
     }
 
