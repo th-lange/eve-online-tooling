@@ -21,7 +21,12 @@ function activate() {
 beforeEach(() => {
   localStorage.clear();
   syncNowMock.mockReset();
-  syncNowMock.mockResolvedValue({ imported: [], exported: [], unchanged: [] });
+  syncNowMock.mockResolvedValue({
+    imported: [],
+    exported: [],
+    unchanged: [],
+    skipped: [],
+  });
   vi.useFakeTimers();
 });
 afterEach(() => vi.useRealTimers());

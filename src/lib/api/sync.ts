@@ -12,6 +12,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 export interface SyncFile {
   name: string;
   content: string;
+  /** The file exists but couldn't be read (`content` is empty). */
+  unreadable: boolean;
 }
 
 /** Every top-level `*.json` file in `dir`, in one round trip. */

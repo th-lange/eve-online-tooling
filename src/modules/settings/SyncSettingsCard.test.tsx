@@ -19,7 +19,12 @@ beforeEach(() => {
   localStorage.clear();
   pickFolder.mockReset();
   syncNowMock.mockReset();
-  syncNowMock.mockResolvedValue({ imported: [], exported: [], unchanged: [] });
+  syncNowMock.mockResolvedValue({
+    imported: [],
+    exported: [],
+    unchanged: [],
+    skipped: [],
+  });
 });
 
 describe("SyncSettingsCard", () => {
