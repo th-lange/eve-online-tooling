@@ -42,6 +42,11 @@ export function SyncScheduler() {
     }
     running.current = true;
     void syncNow(dir)
+      .then((r) => {
+        if (r.skipped.length > 0) {
+          console.warn("Auto-sync skipped unusable remote files:", r.skipped);
+        }
+      })
       .catch((e: unknown) => console.error("Auto-sync failed", e))
       .finally(() => {
         running.current = false;

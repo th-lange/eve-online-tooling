@@ -230,6 +230,39 @@ fn save_store(dir: &std::path::Path, store: &mut Store) -> Result<(), AppError> 
     Ok(())
 }
 
+/// Serialises every load → mutate → save of the history store (#1181). No guard
+/// is ever held across an `.await`: the network calls run first, then the store
+/// is re-read fresh, patched and written inside this lock, so a concurrent
+/// submit / retry / forget can't be overwritten by a stale copy.
+static STORE_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+
+/// Keeps two page-open retry passes from sending the same pending entry twice.
+static RETRY_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Load the store fresh, apply `mutate`, save — all under [`STORE_LOCK`].
+fn update_store<R>(app: &AppHandle, mutate: impl FnOnce(&mut Store) -> R) -> Result<R, AppError> {
+    let _guard = STORE_LOCK.lock();
+    let (dir, mut store) = load_store(app)?;
+    let out = mutate(&mut store);
+    save_store(&dir, &mut store)?;
+    Ok(out)
+}
+
+/// Fold freshly delivered copies of entries back into the current store. Only
+/// entries that are still `Pending` there are touched, so an entry another
+/// pass already marked `Sent` is never reverted, and entries added or removed
+/// while the network calls were in flight are left alone. Pure (testable).
+fn apply_deliveries(entries: &mut [FeedbackEntry], delivered: Vec<FeedbackEntry>) {
+    for d in delivered {
+        if let Some(e) = entries
+            .iter_mut()
+            .find(|e| e.id == d.id && e.status == EntryStatus::Pending)
+        {
+            *e = d;
+        }
+    }
+}
+
 /// A local key for a history row. Random rather than sequential so it stays
 /// unique even if the store is restored from a backup mid-session.
 fn local_id() -> String {
@@ -361,7 +394,9 @@ pub async fn feedback_submit(
 ) -> Result<FeedbackEntry, AppError> {
     validate(kind, &module, rating, &subject, &body)?;
 
-    let (dir, mut store) = load_store(&app)?;
+    // Read-only here: the store is re-read when the result is recorded below,
+    // so edits made during the network call survive (#1181).
+    let (dir, store) = load_store(&app)?;
     // The module is inactive without a logged-in character — the nav hides it,
     // but a direct route (or a stale page) can still reach this command.
     if !has_character(&dir) {
@@ -387,8 +422,8 @@ pub async fn feedback_submit(
     };
     deliver(&mut entry).await;
 
-    store.entries.push(entry.clone());
-    save_store(&dir, &mut store)?;
+    let recorded = entry.clone();
+    update_store(&app, move |store| store.entries.push(recorded))?;
     Ok(entry)
 }
 
@@ -419,32 +454,31 @@ fn select_retries(entries: &[FeedbackEntry]) -> Vec<usize> {
 /// concurrent — see [`MAX_RETRIES_PER_VISIT`]. Returns the updated history.
 #[tauri::command]
 pub async fn feedback_retry_pending(app: AppHandle) -> Result<Vec<FeedbackEntry>, AppError> {
-    let (dir, mut store) = load_store(&app)?;
+    let _one_pass = RETRY_LOCK.lock().await;
+    let (_, store) = load_store(&app)?;
     if !firebase::is_configured() {
         return Ok(store.entries);
     }
-    let retry: std::collections::HashSet<usize> =
-        select_retries(&store.entries).into_iter().collect();
-    let to_deliver: Vec<&mut FeedbackEntry> = store
-        .entries
-        .iter_mut()
-        .enumerate()
-        .filter(|(i, _)| retry.contains(i))
-        .map(|(_, e)| e)
+    // Deliver private copies; the shared store is only touched afterwards.
+    let mut batch: Vec<FeedbackEntry> = select_retries(&store.entries)
+        .into_iter()
+        .map(|i| store.entries[i].clone())
         .collect();
-    futures_util::future::join_all(to_deliver.into_iter().map(deliver)).await;
-    save_store(&dir, &mut store)?;
-    Ok(store.entries)
+    futures_util::future::join_all(batch.iter_mut().map(deliver)).await;
+    update_store(&app, move |store| {
+        apply_deliveries(&mut store.entries, batch);
+        store.entries.clone()
+    })
 }
 
 /// Drop one local history row. Only the local mirror is affected — the
 /// submitted document itself can't be recalled, which the UI says plainly.
 #[tauri::command]
 pub fn feedback_forget(app: AppHandle, id: String) -> Result<Vec<FeedbackEntry>, AppError> {
-    let (dir, mut store) = load_store(&app)?;
-    store.entries.retain(|e| e.id != id);
-    save_store(&dir, &mut store)?;
-    Ok(store.entries)
+    update_store(&app, |store| {
+        store.entries.retain(|e| e.id != id);
+        store.entries.clone()
+    })
 }
 
 #[cfg(test)]
@@ -470,6 +504,33 @@ mod tests {
             status: EntryStatus::Sent,
             error: None,
         }
+    }
+
+    #[test]
+    fn deliveries_never_revert_or_resurrect_entries() {
+        let mut sent = entry_at(1); // already Sent by a concurrent pass
+        let mut pending = entry_at(2);
+        pending.status = EntryStatus::Pending;
+        let added_meanwhile = entry_at(3);
+
+        // Our stale copies: `sent` still looked Pending, `pending` just got
+        // delivered, and a third entry was forgotten while we were in flight.
+        let mut stale_sent = sent.clone();
+        stale_sent.status = EntryStatus::Pending;
+        let mut delivered_pending = pending.clone();
+        delivered_pending.status = EntryStatus::Sent;
+        delivered_pending.doc_id = Some("doc".into());
+        let forgotten = entry_at(9);
+
+        let mut current = vec![sent.clone(), pending.clone(), added_meanwhile.clone()];
+        apply_deliveries(&mut current, vec![stale_sent, delivered_pending, forgotten]);
+
+        assert_eq!(current.len(), 3, "nothing resurrected, nothing dropped");
+        sent.status = EntryStatus::Sent;
+        assert_eq!(current[0].status, EntryStatus::Sent, "Sent isn't reverted");
+        assert_eq!(current[1].status, EntryStatus::Sent);
+        assert_eq!(current[1].doc_id.as_deref(), Some("doc"));
+        assert_eq!(current[2].id, added_meanwhile.id);
     }
 
     #[test]

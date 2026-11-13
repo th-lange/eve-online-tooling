@@ -37,6 +37,7 @@ fn default_scope() -> Scope {
 /// removed something, so browsing the page doesn't rewrite the store file.
 #[tauri::command]
 pub fn wh_connections(app: AppHandle) -> Result<Vec<ConnectionView>, String> {
+    let _guard = store::LOCK.lock();
     let (dir, conns, changed) = store::load_with_change(&app)?;
     if changed {
         store::save_and_view(&dir, &conns)
@@ -70,6 +71,7 @@ pub fn wh_add_connection(
     app: AppHandle,
     connection: NewConnection,
 ) -> Result<Vec<ConnectionView>, String> {
+    let _guard = store::LOCK.lock();
     let (dir, mut conns) = store::load(&app)?;
     let candidate = Connection {
         id: conns.iter().map(|c| c.id).max().unwrap_or(0) + 1,
@@ -104,6 +106,7 @@ pub fn wh_update_connection(
     source_sig: Option<String>,
     target_sig: Option<String>,
 ) -> Result<Vec<ConnectionView>, String> {
+    let _guard = store::LOCK.lock();
     let (dir, mut conns) = store::load(&app)?;
     if let Some(c) = conns.iter_mut().find(|c| c.id == id) {
         if eol && !c.eol {
@@ -123,6 +126,7 @@ pub fn wh_update_connection(
 /// Delete a connection.
 #[tauri::command]
 pub fn wh_delete_connection(app: AppHandle, id: i64) -> Result<Vec<ConnectionView>, String> {
+    let _guard = store::LOCK.lock();
     let (dir, mut conns) = store::load(&app)?;
     conns.retain(|c| c.id != id);
     store::save_and_view(&dir, &conns)
@@ -626,7 +630,9 @@ fn merge_by_source(
 /// the merged, name-enriched connection set (same shape as `wh_connections`).
 #[tauri::command]
 pub async fn wh_import_evescout(app: AppHandle) -> Result<Vec<ConnectionView>, AppError> {
-    let (dir, existing) = store::load(&app)?;
+    // Network first; the store is read only once the feed is in hand, under
+    // the store lock, so edits made while the fetch was in flight survive.
+    let dir = crate::storage::app_data_dir(&app)?;
     let feed = crate::evescout::fetch_signatures(&dir).await?;
     let now = crate::util::time::now_secs();
     let imported: Vec<Connection> = feed
@@ -634,6 +640,8 @@ pub async fn wh_import_evescout(app: AppHandle) -> Result<Vec<ConnectionView>, A
         .iter()
         .filter_map(|s| imported_connection(s, now))
         .collect();
+    let _guard = store::LOCK.lock();
+    let (dir, existing) = store::load(&app)?;
     let merged = merge_by_source(existing, imported, ConnSource::Evescout);
     store::save_and_view(&dir, &merged).map_err(AppError::from)
 }
@@ -903,6 +911,10 @@ pub fn wh_tripwire_connect(
 ) -> Result<TripwireStatus, String> {
     let dir = crate::storage::app_data_dir(&app)?;
     let base = base_url.trim();
+    // Basic Auth credentials go to this URL: refuse cleartext http (#1181).
+    if !base.is_empty() {
+        tripwire::validate_base_url(base)?;
+    }
     let mask = mask.map(|m| m.trim().to_string()).filter(|m| !m.is_empty());
     let cfg = tripwire::TripwireConfig {
         base_url: if base.is_empty() {
@@ -964,6 +976,7 @@ pub async fn wh_tripwire_import(app: AppHandle) -> Result<Vec<ConnectionView>, A
         })
         .collect();
 
+    let _guard = store::LOCK.lock();
     let (_dir, existing) = store::load(&app)?;
     let imported = tripwire_connections(
         &sigs,

@@ -128,6 +128,12 @@ fn needs_download(
     }
 }
 
+/// Serialises [`sde_update`] process-wide (#1164): the download writes to fixed
+/// `.part` paths, so two overlapping runs (startup auto-refresh + a manual
+/// Update click, or a webview reload mid-download) would truncate each other's
+/// temp files and could swap in a half-written database.
+static SDE_UPDATE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Download/refresh the SDE, emitting `sde://progress` throughout.
 ///
 /// When already installed and `force` is false, it only re-downloads if
@@ -136,6 +142,11 @@ fn needs_download(
 #[tauri::command]
 pub async fn sde_update(app: AppHandle, force: bool) -> Result<SdeStatus, String> {
     let paths = paths(&app)?;
+
+    // Held across check + download + swap. The md5 / installed checks below
+    // run only after acquiring it, so a run that waited behind another one sees
+    // the fresh install and short-circuits instead of re-downloading.
+    let _single_flight = SDE_UPDATE_LOCK.lock().await;
 
     // The md5 that describes the dump we are about to fetch. Read *before* the
     // download (and reused for the freshness check below), because Fuzzwork

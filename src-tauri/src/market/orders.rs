@@ -78,7 +78,11 @@ pub async fn collect_orders(
         let character_name = names.get(&character_id).cloned().unwrap_or_default();
         match fetch_character_orders(auth, market, dir, character_id, &character_name).await {
             Ok(mut character_rows) => rows.append(&mut character_rows),
-            Err(_) if aggregating => {}
+            // Not silent: the skipped character is logged so an expired token /
+            // missing scope on one alt is at least diagnosable (#1169).
+            Err(e) if aggregating => {
+                eprintln!("orders: skipping character {character_id}: {e}");
+            }
             Err(e) => return Err(e),
         }
     }
@@ -137,12 +141,19 @@ async fn fetch_character_orders(
     }
     let mut best: HashMap<(i64, i64), PriceModel> = HashMap::new();
     for ((region_id, location_id), type_ids) in &by_station {
-        let models = market
+        // A pricing outage must not hide the character's own orders (ESI
+        // already answered): leave this station unpriced so its rows keep
+        // `best_price: None` and are simply not flagged as undercut (#1169).
+        match market
             .price_models_at(resolve_location(*region_id, Some(*location_id)), type_ids)
             .await
-            .map_err(|e| e.to_string())?;
-        for m in models {
-            best.insert((*location_id, m.type_id), m);
+        {
+            Ok(models) => {
+                for m in models {
+                    best.insert((*location_id, m.type_id), m);
+                }
+            }
+            Err(e) => eprintln!("orders: no pricing for location {location_id}: {e}"),
         }
     }
 

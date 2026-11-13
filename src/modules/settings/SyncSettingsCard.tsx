@@ -21,6 +21,12 @@ function summarize(result: SyncResult): string {
   if (result.unchanged.length > 0) {
     parts.push(`unchanged ${result.unchanged.join(", ")}`);
   }
+  if (result.skipped.length > 0) {
+    parts.push(
+      `skipped ${result.skipped.join(", ")} (the file in the sync folder is ` +
+        "unreadable or from a different app version — left untouched)",
+    );
+  }
   return parts.length > 0 ? parts.join(" · ") : "nothing to sync";
 }
 
@@ -98,7 +104,7 @@ export function SyncSettingsCard() {
     setStatus(null);
     try {
       const result = await RUN[kind](dir);
-      setStatus({ ok: true, text: summarize(result) });
+      setStatus({ ok: result.skipped.length === 0, text: summarize(result) });
       setLastSyncedAt(Date.now());
     } catch (e) {
       setStatus({ ok: false, text: errorMessage(e) });
