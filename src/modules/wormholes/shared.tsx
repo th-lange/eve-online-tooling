@@ -12,6 +12,7 @@ export function SystemPicker({
 }) {
   return (
     <Combo
+      scope="systems"
       value={picked}
       onPick={onPick}
       search={systemSearch}

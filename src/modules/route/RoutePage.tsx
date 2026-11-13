@@ -247,6 +247,7 @@ function Workbench() {
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm font-semibold text-zinc-300">Focus</span>
           <Combo
+            scope="systems"
             value={centre}
             onPick={(m) => (m ? focusSystem(m) : setCentre(null))}
             search={systemSearch}

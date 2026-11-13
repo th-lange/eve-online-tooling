@@ -23,6 +23,12 @@ import {
   characterKeys,
   industryKeys,
   esiKeys,
+  assetsKeys,
+  rosterKeys,
+  lpKeys,
+  fittingKeys,
+  intelKeys,
+  marketKeys,
 } from "../lib/queryKeys";
 
 // Logged-in EVE characters. The active character (the default used by every
@@ -52,6 +58,15 @@ const PER_CHARACTER_QUERY_ROOTS = [
   characterKeys.all, // trade fees (broker/sales tax)
   industryKeys.all, // industry jobs
   esiKeys.all, // active character's current ship
+  // Roots below carry no character id in their key but are scoped to the
+  // active/target character(s) on the backend (#1194):
+  assetsKeys.all, // roster-wide; changes when characters are added/removed
+  rosterKeys.stock,
+  lpKeys.balances,
+  fittingKeys.esi, // fits saved in-game for the primary character
+  intelKeys.fwEnlistment, // personal faction-warfare enlistment
+  intelKeys.fwPersonalStats,
+  marketKeys.currentLocation, // active character's current system
 ];
 
 export function Characters() {
@@ -171,6 +186,13 @@ export function Characters() {
       {login.isError && (
         <p className="mt-1 text-xs text-rose-400">
           Login failed: {errorMessage(login.error)}
+        </p>
+      )}
+      {(logout.isError || setActive.isError) && (
+        <p role="alert" className="mt-1 text-xs text-rose-400">
+          {logout.isError
+            ? `Couldn't remove the character: ${errorMessage(logout.error)}`
+            : `Couldn't switch character: ${errorMessage(setActive.error)}`}
         </p>
       )}
     </div>

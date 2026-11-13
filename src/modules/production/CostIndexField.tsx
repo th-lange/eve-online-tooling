@@ -44,6 +44,7 @@ export function CostIndexField({
       />
       <div className="mt-1">
         <Combo
+          scope="systems"
           value={picked}
           onPick={setPicked}
           search={systemSearch}

@@ -33,6 +33,8 @@ export const SHOPPING_LISTS_KEY = ["shopping", "lists"] as const;
  *  stock-location picker uses — same 600s backend cache, no Jita valuation.
  *  `stockAll` is the prefix that sweeps every per-location stock entry. */
 export const assetsKeys = {
+  /** Prefix covering every assets read (roster-wide; changes with the roster). */
+  all: ["assets"] as const,
   load: () =>
     queryOptions({
       queryKey: ["assets", "load"] as const,

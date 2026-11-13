@@ -9,6 +9,7 @@ import {
 } from "react-router-dom";
 import { queryClient } from "./lib/queryClient";
 import { initLogCapture } from "./lib/logCapture";
+import { RootErrorPage } from "./components/ErrorBoundary";
 import { Layout } from "./components/Layout";
 import { modules } from "./modules/registry";
 import { STORAGE_KEYS } from "./lib/storageKeys";
@@ -54,6 +55,7 @@ const router = createBrowserRouter([
   {
     path: "/",
     element: <Layout />,
+    errorElement: <RootErrorPage />,
     children: [
       { index: true, element: <Navigate to={`/${savedModule}`} replace /> },
       // One catch-all segment; the active module (built-in or an active plugin
