@@ -65,7 +65,7 @@ parking_lot = "0.12.5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 rhai = { version = "1.25", features = ["sync", "serde"] }
-boa_engine = "0.21"
+boa_engine = "0.22"
 # Plugin drag-and-drop install (folder or .zip) — extraction only.
 zip = { version = "2", default-features = false, features = ["deflate"] }
 # Error reporting: captures panics in release builds (only the `panic` integration is wired).
