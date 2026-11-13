@@ -31,7 +31,7 @@ use rand::distributions::Alphanumeric;
 use rand::Rng;
 use serde::Serialize;
 use serde_json::{json, Value};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::capabilities;
 use crate::market::MarketService;
@@ -487,10 +487,15 @@ pub fn mcp_start(
         .map_err(AppError::from)
 }
 
-/// Stop the MCP bridge.
+/// Stop the MCP bridge. `stop` joins the serve thread, which can be busy in a
+/// slow plugin tool call (the loop is single-threaded), so the join runs on
+/// the blocking pool — a sync command would freeze the UI thread on it
+/// (#1153).
 #[tauri::command]
-pub fn mcp_stop(state: State<'_, McpState>) -> McpStatus {
-    state.stop()
+pub async fn mcp_stop(app: AppHandle) -> Result<McpStatus, AppError> {
+    tokio::task::spawn_blocking(move || app.state::<McpState>().stop())
+        .await
+        .map_err(|e| AppError::from(format!("mcp stop task failed: {e}")))
 }
 
 /// Current MCP bridge status.
@@ -538,23 +543,25 @@ pub fn mcp_set_dev_tier(app: AppHandle, dev_tier: bool) -> Result<McpConfig, App
 }
 
 /// Set the preferred port (`0` = auto). If the bridge is running, it restarts
-/// on the new port so the change takes effect immediately.
+/// on the new port so the change takes effect immediately. Async with the
+/// restart on the blocking pool, for the same reason as [`mcp_stop`].
 #[tauri::command]
-pub fn mcp_set_port(
-    app: AppHandle,
-    state: State<'_, McpState>,
-    registry: State<'_, Arc<PluginRegistry>>,
-    manager: State<'_, Arc<PluginManager>>,
-    port: u16,
-) -> Result<McpStatus, AppError> {
-    let dir = crate::storage::app_data_dir(&app)?;
-    crate::storage::save_data(&dir, PORT_KEY, &port).map_err(AppError::from)?;
-    if state.status().running {
-        state.stop();
-        let ctx = build_ctx(&dir, registry.inner().clone(), manager.inner().clone());
-        state.start(ctx, port).map_err(AppError::from)?;
-    }
-    Ok(state.status())
+pub async fn mcp_set_port(app: AppHandle, port: u16) -> Result<McpStatus, AppError> {
+    tokio::task::spawn_blocking(move || -> Result<McpStatus, AppError> {
+        let dir = crate::storage::app_data_dir(&app)?;
+        crate::storage::save_data(&dir, PORT_KEY, &port).map_err(AppError::from)?;
+        let state = app.state::<McpState>();
+        if state.status().running {
+            state.stop();
+            let registry = app.state::<Arc<PluginRegistry>>().inner().clone();
+            let manager = app.state::<Arc<PluginManager>>().inner().clone();
+            let ctx = build_ctx(&dir, registry, manager);
+            state.start(ctx, port).map_err(AppError::from)?;
+        }
+        Ok(state.status())
+    })
+    .await
+    .map_err(|e| AppError::from(format!("mcp port task failed: {e}")))?
 }
 
 #[cfg(test)]
