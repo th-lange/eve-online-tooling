@@ -111,14 +111,20 @@ function FightOverlayToggle() {
           ? "Fight overlay on — click to disable"
           : "Fight overlay off — click to enable"
       }
-      aria-label="Toggle fight overlay"
+      aria-label="Fight overlay"
+      aria-pressed={enabled}
       className={`flex shrink-0 items-center rounded p-1.5 transition-colors ${
         enabled
           ? "text-rose-400 hover:text-rose-300"
           : "text-zinc-600 hover:text-zinc-400"
       }`}
     >
-      <Swords size={14} />
+      {/* Filled when on, outline when off, so the state isn't colour-only. */}
+      <Swords
+        size={14}
+        aria-hidden="true"
+        fill={enabled ? "currentColor" : "none"}
+      />
     </button>
   );
 }

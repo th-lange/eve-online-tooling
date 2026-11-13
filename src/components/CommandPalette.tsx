@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { CornerDownLeft, Package, Search } from "lucide-react";
@@ -7,6 +7,7 @@ import { sdeKeys } from "../lib/queryKeys";
 import { openItemInMarketSearch } from "../lib/deepLink";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 import { fuzzy } from "../lib/fuzzy";
+import { Modal } from "./Modal";
 
 // A flat row in the result list — either a module jump or an item lookup.
 type Entry =
@@ -22,17 +23,16 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const listId = useId();
+  const optionId = (i: number) => `${listId}-opt-${i}`;
   const navigate = useNavigate();
 
-  // Global hotkey: ⌘K / Ctrl+K toggles, Esc closes.
+  // Global hotkey: ⌘K / Ctrl+K toggles. Escape is handled by Modal.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setOpen((o) => !o);
-      } else if (e.key === "Escape") {
-        setOpen(false);
       }
     };
     const onOpen = () => setOpen(true);
@@ -44,13 +44,12 @@ export function CommandPalette() {
     };
   }, []);
 
-  // Reset and focus each time it opens.
+  // Reset each time it opens; Modal moves focus to the input and restores it
+  // to the previously focused element on close.
   useEffect(() => {
     if (open) {
       setQ("");
       setSel(0);
-      // Focus after the element is painted.
-      requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [open]);
 
@@ -98,7 +97,14 @@ export function CommandPalette() {
     setSel((s) => Math.min(s, Math.max(0, entries.length - 1)));
   }, [entries.length]);
 
-  if (!open) return null;
+  // Keep the highlighted row visible inside the scrolling list.
+  useEffect(() => {
+    if (!open) return;
+    document
+      .getElementById(optionId(sel))
+      ?.scrollIntoView({ block: "nearest" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- optionId is derived from listId
+  }, [open, sel, entries.length, listId]);
 
   const activate = (entry: Entry | undefined) => {
     if (!entry) return;
@@ -112,18 +118,29 @@ export function CommandPalette() {
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 pt-[12vh]"
-      onClick={() => setOpen(false)}
+    <Modal
+      open={open}
+      onClose={() => setOpen(false)}
+      aria-label="Command palette"
+      backdropClassName="fixed inset-0 z-50 bg-black/50"
+      className="fixed left-1/2 top-[12vh] z-50 w-[36rem] max-w-[90vw] -translate-x-1/2 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl"
     >
-      <div
-        className="w-[36rem] max-w-[90vw] overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div>
         <div className="flex items-center gap-2 border-b border-zinc-800 px-3">
-          <Search size={16} className="shrink-0 text-zinc-500" />
+          <Search
+            size={16}
+            className="shrink-0 text-zinc-500"
+            aria-hidden="true"
+          />
           <input
-            ref={inputRef}
+            role="combobox"
+            aria-label="Jump to a module or search an item"
+            aria-expanded="true"
+            aria-controls={listId}
+            aria-autocomplete="list"
+            aria-activedescendant={
+              entries.length > 0 ? optionId(sel) : undefined
+            }
             value={q}
             onChange={(e) => setQ(e.currentTarget.value)}
             onKeyDown={(e) => {
@@ -143,7 +160,12 @@ export function CommandPalette() {
           />
         </div>
 
-        <div className="max-h-80 overflow-y-auto py-1">
+        <div
+          id={listId}
+          role="listbox"
+          aria-label="Results"
+          className="max-h-80 overflow-y-auto py-1"
+        >
           {entries.length === 0 && (
             <div className="px-3 py-6 text-center text-xs text-zinc-500">
               {trimmed.length >= 2 && itemQuery.isFetching
@@ -152,11 +174,14 @@ export function CommandPalette() {
             </div>
           )}
           {entries.map((entry, i) => (
-            <button
+            <div
               key={`${entry.kind}:${entry.id}`}
+              id={optionId(i)}
+              role="option"
+              aria-selected={i === sel}
               onMouseEnter={() => setSel(i)}
               onClick={() => activate(entry)}
-              className={`flex w-full items-center gap-2 px-3 py-2 text-left ${
+              className={`flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left ${
                 i === sel ? "bg-indigo-600/20" : "hover:bg-zinc-800/60"
               }`}
             >
@@ -178,7 +203,7 @@ export function CommandPalette() {
               {i === sel && (
                 <CornerDownLeft size={14} className="shrink-0 text-zinc-500" />
               )}
-            </button>
+            </div>
           ))}
         </div>
 
@@ -187,6 +212,6 @@ export function CommandPalette() {
           <span>⌘K</span>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

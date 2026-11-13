@@ -1,4 +1,5 @@
 import { errorMessage } from "../../lib/api";
+import { InlineError } from "../../components/InlineError";
 import {
   BlueprintLibrary,
   FilterChips,
@@ -33,6 +34,7 @@ export function Results({ wb }: { wb: WorkbenchState }) {
     blacklistRow,
     rowsByType,
     setList,
+    listError,
     saveImported,
     isStale,
     dirtyCount,
@@ -52,6 +54,7 @@ export function Results({ wb }: { wb: WorkbenchState }) {
           library: (owned.data?.length ?? 0) + imported.length,
         }}
       />
+      <InlineError message={listError} />
 
       {view === "opportunities" && activeFilters.length > 0 && (
         <FilterChips filters={activeFilters} onReset={resetAllFilters} />

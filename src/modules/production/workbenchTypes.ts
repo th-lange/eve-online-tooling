@@ -144,6 +144,8 @@ export interface WorkbenchState {
     { list: ListName; typeId: number; add: boolean },
     unknown
   >;
+  /** Message of the last failed favorite/blacklist write, or null. */
+  listError: string | null;
   autoRecalc: boolean;
   setAutoRecalc: (fn: (a: boolean) => boolean) => void;
 }
