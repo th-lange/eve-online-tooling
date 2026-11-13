@@ -13,11 +13,14 @@
 //!   readout draws on. `dps_playback` drives the same fold from a virtual
 //!   clock, so live and replay are identical.
 //!
-//! Lifecycle is a generation counter held in [`DpsState`]: each `dps_start`
-//! bumps it and the loop runs only while its captured generation is current, so
-//! a restart cleanly supersedes the old loop and `dps_stop` simply bumps it
-//! again to end the current one. (This stop mechanism is the one piece with no
-//! prior precedent in the codebase.)
+//! Live capture and playback are independent lanes (#1175). Each has its own
+//! generation counter in [`DpsState`]: `dps_start` / `dps_playback` bump only
+//! their lane's counter and the loop runs only while its captured generation is
+//! current, so a restart cleanly supersedes that lane's old loop and `dps_stop`
+//! bumps the requested lane(s) to end them. Playback emits on its own
+//! `dps://playback-*` channels, so a replay can never feed the always-on fight
+//! overlay (which only listens to the live channels) and the DPS Meter's
+//! Stop/Play/scrub can never end the overlay's live capture.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -60,18 +63,59 @@ const MAX_PLAYBACK_LOG_BYTES: u64 = 50 * 1024 * 1024;
 /// delay after a relog is invisible next to the login itself.
 const RESCAN_TICKS: u32 = 10;
 
-/// Shared run-state. The active loop runs while its generation == `generation`;
-/// `dps_start`/`dps_playback`/`dps_stop` bump it. `paused` freezes the active
-/// loop's virtual clock in place (true pause/continue) without tearing it down.
-/// `speed_bits` is the playback speed multiplier as `f64::to_bits`, read live
-/// by the replay loop each tick so the speed slider adjusts the running replay
-/// without a restart (ignored by live capture). 0 bits = +0.0 → treated as the
+/// Which loop a `dps_stop` targets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CaptureLane {
+    /// The live gamelog tail (`dps_start`).
+    Live,
+    /// The past-log replay (`dps_playback`).
+    Playback,
+}
+
+/// Run-state of both lanes. A lane's loop runs while its generation equals the
+/// one it captured at spawn; `dps_start` / `dps_playback` bump only their own
+/// lane and `dps_stop` bumps the requested one(s). `paused` freezes the replay's
+/// virtual clock in place (true pause/continue) without tearing it down — live
+/// capture has no pause. `speed_bits` is the playback speed multiplier as
+/// `f64::to_bits`, read live by the replay loop each tick so the speed slider
+/// adjusts the running replay without a restart. 0 bits = +0.0 → treated as the
 /// 1× default until the first `dps_playback` sets it.
 #[derive(Default)]
 pub struct DpsState {
-    generation: Arc<AtomicU64>,
+    live_generation: Arc<AtomicU64>,
+    playback_generation: Arc<AtomicU64>,
     paused: Arc<AtomicBool>,
     speed_bits: Arc<AtomicU64>,
+}
+
+impl DpsState {
+    fn generation(&self, lane: CaptureLane) -> &Arc<AtomicU64> {
+        match lane {
+            CaptureLane::Live => &self.live_generation,
+            CaptureLane::Playback => &self.playback_generation,
+        }
+    }
+
+    /// Supersede `lane`'s running loop (if any); returns the new loop's
+    /// generation. The other lane is untouched.
+    fn claim(&self, lane: CaptureLane) -> u64 {
+        self.generation(lane).fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    /// End `lane`'s loop; `None` ends both.
+    fn stop(&self, lane: Option<CaptureLane>) {
+        for l in [CaptureLane::Live, CaptureLane::Playback] {
+            if lane.is_none() || lane == Some(l) {
+                self.claim(l);
+            }
+        }
+        if lane != Some(CaptureLane::Live) {
+            // A stopped replay is not "paused" — clear the flag so the next
+            // playback isn't born frozen if it raced a lingering pause.
+            self.paused.store(false, Ordering::SeqCst);
+        }
+    }
 }
 
 /// Clamp a raw speed to the supported range and encode it for `speed_bits`.
@@ -195,27 +239,10 @@ pub struct LogSummary {
     pub segments: Vec<OverviewSegment>,
 }
 
-/// What the single shared capture/playback loop is doing, announced on
-/// `dps://mode` so the always-on fight overlay can tell a replay from live
-/// combat and re-claim live capture when its loop is stopped (#1175).
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "lowercase")]
-enum CaptureMode {
-    /// A live gamelog tail owns the loop.
-    Live,
-    /// A past log is being replayed; its buckets/events are not live combat.
-    Playback,
-    /// Nothing is running (explicit stop, or a replay ran to its end).
-    Stopped,
-}
-
-fn emit_mode(app: &AppHandle, mode: CaptureMode) {
-    let _ = app.emit("dps://mode", mode);
-}
-
 /// Start (or restart) tailing the newest gamelog in `settings.gamelogs_dir`.
 /// Returns immediately; raw combat-log events arrive on `dps://events`,
-/// finalized 5 s buckets on `dps://buckets`.
+/// finalized 5 s buckets on `dps://buckets` (live only — replays use the
+/// `dps://playback-*` channels).
 #[tauri::command]
 pub async fn dps_start(
     app: AppHandle,
@@ -227,13 +254,10 @@ pub async fn dps_start(
         return Err(format!("not a folder: {}", settings.gamelogs_dir));
     }
 
-    // Claim a generation; the previous loop (if any) sees a newer value and exits.
-    let generation = state.generation.clone();
-    let my_gen = generation.fetch_add(1, Ordering::SeqCst) + 1;
-    // Fresh capture starts unpaused; the loop watches this flag to freeze.
-    let paused = state.paused.clone();
-    paused.store(false, Ordering::SeqCst);
-    emit_mode(&app, CaptureMode::Live);
+    // Claim the live lane; its previous loop (if any) sees a newer value and
+    // exits. Playback is a separate lane and keeps running.
+    let generation = state.generation(CaptureLane::Live).clone();
+    let my_gen = state.claim(CaptureLane::Live);
 
     // SDE path (for ore → m³); resolved once. Mining lines need a volume lookup.
     let sde_db = crate::storage::app_data_dir(&app)
@@ -293,9 +317,6 @@ pub async fn dps_start(
             ticker.tick().await;
             if generation.load(Ordering::SeqCst) != my_gen {
                 break; // superseded by another start, or stopped.
-            }
-            if paused.load(Ordering::SeqCst) {
-                continue; // frozen: don't read new lines or emit while paused.
             }
             tick = tick.wrapping_add(1);
 
@@ -383,19 +404,16 @@ pub async fn dps_start(
     Ok(())
 }
 
-/// Stop the active capture or playback (bump the generation so the loop exits).
+/// Stop the live capture or the playback (bump that lane's generation so its
+/// loop exits). `lane` omitted stops both.
 #[tauri::command]
-pub fn dps_stop(app: AppHandle, state: State<'_, DpsState>) {
-    state.generation.fetch_add(1, Ordering::SeqCst);
-    emit_mode(&app, CaptureMode::Stopped);
-    // A stopped session is not "paused" — clear the flag so the next start/
-    // playback isn't born frozen if it raced a lingering pause.
-    state.paused.store(false, Ordering::SeqCst);
+pub fn dps_stop(state: State<'_, DpsState>, lane: Option<CaptureLane>) {
+    state.stop(lane);
 }
 
-/// Freeze the active playback/capture loop in place (true pause): the virtual
-/// clock and the moving-average window hold, so [`dps_resume`] continues from
-/// the exact same point with no re-seek or window re-warm.
+/// Freeze the active playback in place (true pause): the virtual clock and the
+/// moving-average window hold, so [`dps_resume`] continues from the exact same
+/// point with no re-seek or window re-warm. Live capture cannot be paused.
 #[tauri::command]
 pub fn dps_pause(state: State<'_, DpsState>) {
     state.paused.store(true, Ordering::SeqCst);
@@ -474,8 +492,9 @@ fn seek_start(events: &[super::parser::DpsEvent], seek_ts: Option<i64>) -> (i64,
 }
 
 /// Replay a past gamelog through the same fold at `speed`× real time. Emits
-/// `dps://events` and `dps://buckets` exactly like a live capture, so the UI
-/// (combat log + time grid) is identical. `settings.seek_ts` (set by dragging
+/// `dps://playback-events` and `dps://playback-buckets` — the same payloads a
+/// live capture sends on `dps://events` / `dps://buckets`, so the UI (combat log
+/// + time grid) is identical but the fight overlay never sees a replay. `settings.seek_ts` (set by dragging
 /// the timeline slider) starts the virtual clock mid-file instead of at the
 /// first event; the bucket grid anchors there with nothing to pre-warm (each
 /// bucket is self-contained). Rejects logs over [`MAX_PLAYBACK_LOG_BYTES`]
@@ -503,11 +522,10 @@ pub async fn dps_playback(
     let events =
         load_and_resolve_events(&app, &settings.file, settings.extraction_plan.as_ref()).await?;
 
-    let generation = state.generation.clone();
-    let my_gen = generation.fetch_add(1, Ordering::SeqCst) + 1;
+    let generation = state.generation(CaptureLane::Playback).clone();
+    let my_gen = state.claim(CaptureLane::Playback);
     let paused = state.paused.clone();
     paused.store(false, Ordering::SeqCst);
-    emit_mode(&app, CaptureMode::Playback);
     // Seed the live speed knob so the slider can adjust the running replay.
     state
         .speed_bits
@@ -554,7 +572,7 @@ pub async fn dps_playback(
                 idx += 1;
             }
             if !batch.is_empty() {
-                let _ = app.emit("dps://events", &batch);
+                let _ = app.emit("dps://playback-events", &batch);
             }
             let mut finalized: Vec<super::bucket::DpsBucket> = Vec::new();
             for ev in &batch {
@@ -567,18 +585,17 @@ pub async fn dps_playback(
                 for b in &mut finalized {
                     attach_weapon_kinds_bucket(b, &mut weapon_kinds, sde_db.as_deref());
                 }
-                let _ = app.emit("dps://buckets", &finalized);
+                let _ = app.emit("dps://playback-buckets", &finalized);
             }
             // End: at the region's stop mark when playing a selection, else
             // one bucket past the last event so its final bucket finalizes.
-            // Either way emit `dps://done` so the UI can loop.
+            // Either way emit `dps://playback-done` so the UI can loop.
             let ended = match stop_ts {
                 Some(s) => now >= s,
                 None => now > end + super::bucket::BUCKET_SECS,
             };
             if ended {
-                let _ = app.emit("dps://done", ());
-                emit_mode(&app, CaptureMode::Stopped);
+                let _ = app.emit("dps://playback-done", ());
                 break;
             }
         }
@@ -1192,6 +1209,43 @@ mod tests {
         // Truncated file (offset now beyond EOF) is also a no-op.
         std::fs::write(&path, "short").expect("truncate file");
         assert!(read_appended(&path, offset).await.is_none());
+    }
+
+    #[test]
+    fn live_and_playback_lanes_supersede_and_stop_independently() {
+        let st = DpsState::default();
+        let live = st.claim(CaptureLane::Live);
+        let play = st.claim(CaptureLane::Playback);
+        let current = |l: CaptureLane| st.generation(l).load(Ordering::SeqCst);
+        // Starting a replay must not supersede the live loop (#1175).
+        assert_eq!(current(CaptureLane::Live), live);
+        assert_eq!(current(CaptureLane::Playback), play);
+
+        // A new replay (scrub) supersedes only the old replay.
+        let play2 = st.claim(CaptureLane::Playback);
+        assert_ne!(play2, play);
+        assert_eq!(current(CaptureLane::Live), live);
+
+        // Stopping the replay leaves live capture running...
+        st.paused.store(true, Ordering::SeqCst);
+        st.stop(Some(CaptureLane::Playback));
+        assert_ne!(current(CaptureLane::Playback), play2);
+        assert_eq!(current(CaptureLane::Live), live);
+        assert!(!st.paused.load(Ordering::SeqCst));
+
+        // ...stopping live leaves a replay (and its pause) alone...
+        let play3 = st.claim(CaptureLane::Playback);
+        st.paused.store(true, Ordering::SeqCst);
+        st.stop(Some(CaptureLane::Live));
+        assert_ne!(current(CaptureLane::Live), live);
+        assert_eq!(current(CaptureLane::Playback), play3);
+        assert!(st.paused.load(Ordering::SeqCst));
+
+        // ...and no lane ends both.
+        let live2 = st.claim(CaptureLane::Live);
+        st.stop(None);
+        assert_ne!(current(CaptureLane::Live), live2);
+        assert_ne!(current(CaptureLane::Playback), play3);
     }
 
     #[test]

@@ -207,14 +207,19 @@ export function dpsStart(settings: DpsSettings): Promise<void> {
   return invoke<void>("dps_start", { settings });
 }
 
-/** Replay a past gamelog at `speed`×; buckets arrive via {@link onDpsBuckets}. */
+/** Replay a past gamelog at `speed`×; buckets arrive via
+ *  {@link onDpsPlaybackBuckets} (never on the live channels). */
 export function dpsPlayback(settings: DpsPlaybackSettings): Promise<void> {
   return invoke<void>("dps_playback", { settings });
 }
 
-/** Stop the active capture. */
-export function dpsStop(): Promise<void> {
-  return invoke<void>("dps_stop");
+/** Which loop a {@link dpsStop} ends: live capture and playback are
+ *  independent (#1175), so stopping a replay never ends live capture. */
+export type DpsLane = "live" | "playback";
+
+/** Stop one lane's loop (`lane` omitted stops both). */
+export function dpsStop(lane?: DpsLane): Promise<void> {
+  return invoke<void>("dps_stop", { lane });
 }
 
 /** Freeze the active playback in place (true pause). */
@@ -263,16 +268,17 @@ export function dpsParseOverviewExport(
   return invoke<DpsExtractionPlan>("dps_parse_overview_export", { path });
 }
 
-/** Subscribe to raw combat-log events — one batch per poll, in the order
- *  they'll land in the next bucket, for a scrolling log view. */
+/** Subscribe to raw LIVE combat-log events — one batch per poll, in the order
+ *  they'll land in the next bucket, for a scrolling log view. Replays arrive
+ *  on {@link onDpsPlaybackEvents} instead. */
 export function onDpsEvents(
   handler: (events: DpsEvent[]) => void,
 ): Promise<UnlistenFn> {
   return listen<DpsEvent[]>("dps://events", (event) => handler(event.payload));
 }
 
-/** Subscribe to finalized 5 s buckets — one batch per poll (usually a single
- *  bucket, more after a seek or at high playback speed). */
+/** Subscribe to finalized LIVE 5 s buckets — one batch per poll (usually a
+ *  single bucket). Replays arrive on {@link onDpsPlaybackBuckets}. */
 export function onDpsBuckets(
   handler: (buckets: DpsBucket[]) => void,
 ): Promise<UnlistenFn> {
@@ -298,21 +304,26 @@ export function onDpsSource(
   return listen<DpsSource>("dps://source", (event) => handler(event.payload));
 }
 
-/** Subscribe to natural playback-end notifications (loop support). */
-export function onDpsDone(handler: () => void): Promise<UnlistenFn> {
-  return listen<void>("dps://done", () => handler());
-}
-
-/** What the shared capture/playback loop is doing (`dps://mode`, #1175). */
-export type DpsCaptureMode = "live" | "playback" | "stopped";
-
-/** Subscribe to capture-mode changes. Playback shares the live channels, so
- *  consumers that only care about live combat (the fight overlay) use this to
- *  ignore replays and to notice when the live loop was stopped. */
-export function onDpsMode(
-  handler: (mode: DpsCaptureMode) => void,
+/** Subscribe to a replay's raw combat-log events (`dps://playback-events`). */
+export function onDpsPlaybackEvents(
+  handler: (events: DpsEvent[]) => void,
 ): Promise<UnlistenFn> {
-  return listen<DpsCaptureMode>("dps://mode", (event) =>
+  return listen<DpsEvent[]>("dps://playback-events", (event) =>
     handler(event.payload),
   );
+}
+
+/** Subscribe to a replay's finalized 5 s buckets (`dps://playback-buckets`;
+ *  more than one per batch after a seek or at high playback speed). */
+export function onDpsPlaybackBuckets(
+  handler: (buckets: DpsBucket[]) => void,
+): Promise<UnlistenFn> {
+  return listen<DpsBucket[]>("dps://playback-buckets", (event) =>
+    handler(event.payload),
+  );
+}
+
+/** Subscribe to natural playback-end notifications (loop support). */
+export function onDpsPlaybackDone(handler: () => void): Promise<UnlistenFn> {
+  return listen<void>("dps://playback-done", () => handler());
 }

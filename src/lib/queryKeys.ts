@@ -307,12 +307,6 @@ export const localintelKeys = {
     ["localintel", "hood", systemId, depth] as const,
 };
 
-// --- Logs ---
-
-export const logsKeys = {
-  list: ["logs_list"] as const,
-};
-
 // --- LP store ---
 
 export const lpKeys = {
