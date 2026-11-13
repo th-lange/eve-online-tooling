@@ -57,7 +57,7 @@ sha2 = "0.10"
 base64 = "0.22"
 # Parse HTTP `Expires`/`Date` headers for ESI's caching contract.
 httpdate = "1"
-rand = "0.8"
+rand = "0.9"
 tiny_http = "0.12"
 semver = "1.0.28"
 extism = "1.30.0"
