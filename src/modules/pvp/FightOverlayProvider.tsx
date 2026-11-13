@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   pvpProfiles,
@@ -6,11 +13,13 @@ import {
   pvpPilotFits,
   onDpsBuckets,
   onDpsSource,
+  onDpsMode,
   dpsStart,
   fittingListLocal,
   fittingSimulate,
   errorMessage,
   type DpsBucket,
+  type DpsCaptureMode,
   type DpsEvent,
   type Fit,
   type WeaponRange,
@@ -33,6 +42,12 @@ import { BUCKET_SECS, smoothSeries } from "../dpsmeter/dpsMeterShared";
 import { FightOverlayContext } from "./fightOverlayContext";
 import { isCombatBucket, nextFightBuckets } from "./fightBuckets";
 import { useFightRecorder } from "../recording/useFightRecorder";
+import { useRecording } from "../recording/recordingContext";
+
+/** How long after the capture loop reports "stopped" the overlay waits before
+ *  re-claiming live capture (#1175) — long enough for a stop → playback pair
+ *  from the DPS Meter to land first. */
+const LIVE_RECLAIM_DELAY_MS = 1500;
 
 /** Metres → compact km/m string. Used in AttackerCard and FightPanel. */
 function km(m: number): string {
@@ -586,6 +601,15 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
   // Settings "Test" preview: sample data, rebuilt each time the button is hit.
   const [testFight, setTestFight] = useState<TestFight | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
+  // The post-roll doubles as the re-engage window: combat resuming within it
+  // continues the same fight (#1173). Read via a ref so a settings edit
+  // doesn't resubscribe the bucket listener and drop batches.
+  const { recording } = useRecording();
+  const reengageSecsRef = useRef(recording.postRollSecs);
+  reengageSecsRef.current = recording.postRollSecs;
+  // What the shared capture loop is doing (#1175): the DPS Meter's replays
+  // arrive on the same channels as live combat and must not feed detection.
+  const captureModeRef = useRef<DpsCaptureMode>("live");
 
   useEffect(() => {
     if (!enabled) {
@@ -596,8 +620,13 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     }
     let cancelled = false;
     onDpsBuckets((batch) => {
-      if (!cancelled) {
-        setFightBuckets((prev) => batch.reduce(nextFightBuckets, prev));
+      if (!cancelled && captureModeRef.current !== "playback") {
+        setFightBuckets((prev) =>
+          batch.reduce(
+            (acc, b) => nextFightBuckets(acc, b, reengageSecsRef.current),
+            prev,
+          ),
+        );
       }
     }).then((fn) => {
       if (cancelled) fn();
@@ -638,10 +667,20 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
   // Auto-run a background live capture whenever the overlay is on, so combat
   // is always detected without opening the DPS meter first. `dps_start` seeks
   // to the current end of the newest gamelog and is generation-guarded, so
-  // this simply (re)claims the shared tail; the DPS page still starts/stops
-  // its own. We (re)start once per enable and when the folder changes.
+  // this simply (re)claims the shared tail. We (re)start once per enable and
+  // when the folder changes — and again whenever the loop is stopped or a
+  // replay finishes (#1175: the DPS Meter's Stop/Play/scrub end whatever loop
+  // is running, which would otherwise leave detection silently dead).
   const [gamelogsDir] = useEveLogDir("gamelogs");
   const startedDirRef = useRef<string | null>(null);
+  const claimLiveCapture = useCallback((dir: string) => {
+    setCaptureError(null);
+    void dpsStart({ gamelogsDir: dir }).catch((e) =>
+      setCaptureError(
+        `Fight overlay capture failed to start: ${errorMessage(e)}`,
+      ),
+    );
+  }, []);
   useEffect(() => {
     if (!enabled) {
       startedDirRef.current = null;
@@ -649,13 +688,40 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     }
     if (!gamelogsDir || startedDirRef.current === gamelogsDir) return;
     startedDirRef.current = gamelogsDir;
-    setCaptureError(null);
-    void dpsStart({ gamelogsDir }).catch((e) =>
-      setCaptureError(
-        `Fight overlay capture failed to start: ${errorMessage(e)}`,
-      ),
-    );
-  }, [enabled, gamelogsDir]);
+    claimLiveCapture(gamelogsDir);
+  }, [enabled, gamelogsDir, claimLiveCapture]);
+
+  useEffect(() => {
+    if (!enabled || !gamelogsDir) return;
+    let cancelled = false;
+    let reclaimTimer: number | null = null;
+    let unlisten: (() => void) | null = null;
+    onDpsMode((mode) => {
+      if (cancelled) return;
+      captureModeRef.current = mode;
+      if (reclaimTimer !== null) {
+        window.clearTimeout(reclaimTimer);
+        reclaimTimer = null;
+      }
+      if (mode === "stopped") {
+        // Debounced: the meter's scrub/loop sends stop → playback in quick
+        // succession, and re-claiming live in between would kill that replay.
+        reclaimTimer = window.setTimeout(() => {
+          reclaimTimer = null;
+          claimLiveCapture(gamelogsDir);
+        }, LIVE_RECLAIM_DELAY_MS);
+      }
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      if (reclaimTimer !== null) window.clearTimeout(reclaimTimer);
+      unlisten?.();
+      captureModeRef.current = "live";
+    };
+  }, [enabled, gamelogsDir, claimLiveCapture]);
 
   const latestBucket = fightBuckets[fightBuckets.length - 1];
   const latestAt = latestBucket?.end ?? 0;

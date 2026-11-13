@@ -6,16 +6,20 @@ import { useFightOverlay } from "./fightOverlayContext";
 import { RecordingProvider } from "../recording/RecordingProvider";
 import { useRecording } from "../recording/recordingContext";
 import type { DpsBucket } from "../../lib/api";
+import { STORAGE_KEYS } from "../../lib/storageKeys";
 
 // The overlay subscribes to dps://buckets and dps://source via `listen`;
 // capture the callbacks so tests can push fight data directly.
 let bucketsHandler: ((buckets: DpsBucket[]) => void) | undefined;
+let modeHandler: ((mode: string) => void) | undefined;
 let sourceHandler:
   ((source: { path: string; character: string | null }) => void) | undefined;
 vi.mock("@tauri-apps/api/event", () => ({
   listen: (name: string, handler: (e: { payload: unknown }) => void) => {
     if (name === "dps://buckets")
       bucketsHandler = (buckets) => handler({ payload: buckets });
+    if (name === "dps://mode")
+      modeHandler = (mode) => handler({ payload: mode });
     if (name === "dps://source")
       sourceHandler = (source) => handler({ payload: source });
     return Promise.resolve(() => {});
@@ -274,6 +278,95 @@ describe("FightOverlayProvider — recording hooks (#1014)", () => {
       );
       act(() => bucketsHandler!([bucket(1005, 20)]));
       expect(hookCalls()).toEqual(["rec 1000"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("FightOverlayProvider — shared capture loop (#1175)", () => {
+  function setup(extra: Record<string, unknown> = {}) {
+    localStorage.clear();
+    localStorage.setItem("pvp.fightScan", "true");
+    localStorage.setItem(STORAGE_KEYS.eveGamelogsDir, "/logs/Gamelogs");
+    localStorage.setItem(
+      "pvp.fightRecording",
+      JSON.stringify({
+        enabled: true,
+        postRollSecs: 10,
+        hooks: { enabled: true, startCommand: "rec {start}", endCommand: "" },
+        obs: { enabled: false, url: "", password: "" },
+        ...extra,
+      }),
+    );
+    bucketsHandler = undefined;
+    modeHandler = undefined;
+    invokeMock.mockClear();
+    mockInvoke({
+      pvp_profiles: () => ({ pilots: [], unresolved: [] }),
+      dps_start: () => undefined,
+    });
+    renderWithQuery(
+      <RecordingProvider>
+        <FightOverlayProvider>
+          <div />
+        </FightOverlayProvider>
+      </RecordingProvider>,
+    );
+  }
+  const startCalls = () =>
+    invokeMock.mock.calls.filter((c) => c[0] === "dps_start").length;
+
+  it("ignores replayed buckets so an old log never starts a recording", async () => {
+    vi.useFakeTimers();
+    try {
+      setup();
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      act(() => modeHandler!("playback"));
+      act(() => bucketsHandler!([bucket(1000, 50)]));
+      expect(hookCalls()).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("re-claims live capture after the loop stops, unless a replay follows", async () => {
+    vi.useFakeTimers();
+    try {
+      setup();
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(startCalls()).toBe(1); // initial claim
+
+      // Stop → playback in quick succession (the meter's scrub): no re-claim.
+      act(() => modeHandler!("stopped"));
+      await act(() => vi.advanceTimersByTimeAsync(500));
+      act(() => modeHandler!("playback"));
+      await act(() => vi.advanceTimersByTimeAsync(5_000));
+      expect(startCalls()).toBe(1);
+
+      // Replay finishes: the loop is gone, so the overlay takes it back and
+      // live buckets count again.
+      act(() => modeHandler!("stopped"));
+      await act(() => vi.advanceTimersByTimeAsync(2_000));
+      expect(startCalls()).toBe(2);
+      act(() => modeHandler!("live"));
+      act(() => bucketsHandler!([bucket(2000, 50)]));
+      expect(hookCalls()).toEqual(["rec 2000"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("detects a new fight after an NPC-only burst froze the buffer (#1173)", async () => {
+    vi.useFakeTimers();
+    try {
+      setup();
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      act(() => bucketsHandler!([bucket(1000, 50)]));
+      act(() => bucketsHandler!([bucket(1005)])); // freezes
+      await act(() => vi.advanceTimersByTimeAsync(11_000)); // post-roll elapsed
+      act(() => bucketsHandler!([bucket(1100, 80)]));
+      expect(hookCalls()).toEqual(["rec 1000", "rec 1100"]);
     } finally {
       vi.useRealTimers();
     }
