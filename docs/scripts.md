@@ -133,7 +133,13 @@ sell;
 
 Every run is bounded so it can't hang the app:
 
-- a wall-clock timeout,
+- a wall-clock timeout (2 s) on both languages. It counts the script's own
+  execution only: time blocked inside a capability call (`assets`,
+  `pi_overview`, …) is not counted. A script that blows it returns
+  "execution timed out" and its worker is abandoned (it can no longer call
+  capabilities); a JavaScript loop that never calls out can't be killed
+  mid-flight, so it may keep burning CPU in the background until it hits its
+  loop-iteration cap,
 - Rhai: an operation-count cap; JavaScript: a loop-iteration and recursion cap,
 - Rhai only: a data-size cap (8 MiB of cumulative string content, 512 Ki
   array/map entries) covering both script-built values and capability

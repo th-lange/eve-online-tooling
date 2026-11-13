@@ -10,12 +10,13 @@
 //! ever exposed.
 //!
 //! First capability: `storage:own` — a per-plugin key/value store rooted at
-//! `plugins/<id>/kv/`, with no path escape and no visibility into any other
+//! `plugin-data/<id>/kv/` (outside the install dir, so reinstalling a plugin
+//! keeps its data and `plugin://` never serves it), with no path escape and no visibility into any other
 //! plugin's data or the app's own storage. Further capabilities (`sde:read`,
 //! `market:read`, `assets:read`) plug into `host_functions` the same way.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use extism::{CurrentPlugin, Error, Function, UserData, Val, PTR};
@@ -53,19 +54,54 @@ impl BrokerCtx {
         }
     }
 
-    /// This plugin's private KV directory: `plugins/<id>/kv/`.
+    /// This plugin's private KV directory: `plugin-data/<id>/kv/`.
     fn kv_dir(&self) -> PathBuf {
-        self.app_data_dir
-            .join("plugins")
-            .join(&self.plugin_id)
-            .join("kv")
+        plugin_data_dir(&self.app_data_dir, &self.plugin_id).join("kv")
     }
 }
 
-/// Sanitize a KV key to a single safe filename component. Rejects empty keys
-/// and anything with a path separator or `..`, so a key can never escape the
-/// plugin's own `kv/` dir.
-fn key_path(ctx: &BrokerCtx, key: &str) -> Result<PathBuf, Error> {
+/// Where a plugin's persistent data lives: `<app_data_dir>/plugin-data/<id>/`.
+/// Deliberately **outside** `plugins/<id>/` — that directory is replaced
+/// wholesale on every (re)install, which used to wipe the plugin's KV store
+/// (#1154), and is also what the `plugin://` protocol serves to plugin UIs.
+/// Only uninstalling a plugin deletes this directory.
+pub fn plugin_data_dir(app_data_dir: &Path, plugin_id: &str) -> PathBuf {
+    app_data_dir.join("plugin-data").join(plugin_id)
+}
+
+/// One-time migration of a pre-#1154 KV store (`plugins/<id>/kv/`) to its new
+/// home. Only a real directory is moved (never a symlink planted by a
+/// hand-installed plugin), and only when the new location doesn't exist yet,
+/// so it can never overwrite data. Best-effort: a failure is logged and the
+/// plugin simply starts with an empty store.
+pub fn migrate_legacy_kv(app_data_dir: &Path, plugin_id: &str) {
+    let old = app_data_dir.join("plugins").join(plugin_id).join("kv");
+    if !std::fs::symlink_metadata(&old).is_ok_and(|m| m.is_dir()) {
+        return;
+    }
+    let new = plugin_data_dir(app_data_dir, plugin_id).join("kv");
+    if new.exists() {
+        return;
+    }
+    let moved = new
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::rename(&old, &new));
+    if let Err(e) = moved {
+        eprintln!("plugins: could not migrate kv store of {plugin_id:?}: {e}");
+    }
+}
+
+/// Sanitize a KV key to a single safe filename component and resolve it to a
+/// file inside the plugin's own `kv/` dir. Rejects empty keys and anything
+/// with a path separator or `..`, and — because the character filter alone
+/// doesn't stop a *symlink* — canonicalizes the `kv/` dir and requires it to
+/// sit under `plugin-data/`, and refuses a key whose file is itself a symlink
+/// (a hand-installed plugin could otherwise point it at any app document;
+/// `.` is an allowed key character, so `scripts.json` is a valid key).
+/// `create` makes the `kv/` dir first (writes); for reads a missing dir
+/// yields `Ok(None)` (empty store).
+fn key_path(ctx: &BrokerCtx, key: &str, create: bool) -> Result<Option<PathBuf>, Error> {
     let safe: String = key
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-' || *c == '.')
@@ -73,7 +109,23 @@ fn key_path(ctx: &BrokerCtx, key: &str) -> Result<PathBuf, Error> {
     if safe.is_empty() || safe.contains("..") {
         return Err(Error::msg(format!("invalid storage key {key:?}")));
     }
-    Ok(ctx.kv_dir().join(safe))
+    let kv = ctx.kv_dir();
+    if create {
+        std::fs::create_dir_all(&kv).map_err(|e| Error::msg(e.to_string()))?;
+    }
+    let Ok(canonical_kv) = std::fs::canonicalize(&kv) else {
+        return Ok(None); // no kv dir yet -> nothing stored
+    };
+    let canonical_root = std::fs::canonicalize(ctx.app_data_dir.join("plugin-data"))
+        .map_err(|e| Error::msg(e.to_string()))?;
+    if !canonical_kv.starts_with(&canonical_root) {
+        return Err(Error::msg("plugin storage dir escapes plugin-data"));
+    }
+    let file = canonical_kv.join(safe);
+    if std::fs::symlink_metadata(&file).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(Error::msg(format!("storage key {key:?} is a symlink")));
+    }
+    Ok(Some(file))
 }
 
 /// Build the Extism host functions this plugin is entitled to, given its
@@ -95,8 +147,10 @@ pub fn host_functions(granted: &HashSet<Permission>, ctx: Arc<BrokerCtx>) -> Vec
                   _ud: UserData<()>|
                   -> Result<(), Error> {
                 let key: String = plugin.memory_get_val(&inputs[0])?;
-                let path = key_path(&get_ctx, &key)?;
-                let value = std::fs::read_to_string(&path).unwrap_or_default();
+                let value = match key_path(&get_ctx, &key, false)? {
+                    Some(path) => std::fs::read_to_string(&path).unwrap_or_default(),
+                    None => String::new(),
+                };
                 plugin.memory_set_val(&mut outputs[0], value)?;
                 Ok(())
             },
@@ -115,10 +169,8 @@ pub fn host_functions(granted: &HashSet<Permission>, ctx: Arc<BrokerCtx>) -> Vec
                   -> Result<(), Error> {
                 let key: String = plugin.memory_get_val(&inputs[0])?;
                 let value: String = plugin.memory_get_val(&inputs[1])?;
-                let path = key_path(&set_ctx, &key)?;
-                if let Some(parent) = path.parent() {
-                    std::fs::create_dir_all(parent).map_err(|e| Error::msg(e.to_string()))?;
-                }
+                let path = key_path(&set_ctx, &key, true)?
+                    .ok_or_else(|| Error::msg("plugin storage dir unavailable"))?;
                 std::fs::write(&path, value).map_err(|e| Error::msg(e.to_string()))?;
                 Ok(())
             },
@@ -289,19 +341,90 @@ mod tests {
         )
     }
 
+    fn tmp(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("eve-broker-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     #[test]
     fn key_path_stays_inside_the_plugin_kv_dir() {
-        let ctx = test_ctx("/data", "acme");
-        let ok = key_path(&ctx, "prefs").unwrap();
-        assert_eq!(ok, PathBuf::from("/data/plugins/acme/kv/prefs"));
+        let dir = tmp("kvpath");
+        let ctx = test_ctx(dir.to_str().unwrap(), "acme");
+        let ok = key_path(&ctx, "prefs", true).unwrap().unwrap();
+        assert_eq!(
+            ok,
+            std::fs::canonicalize(dir.join("plugin-data/acme/kv"))
+                .unwrap()
+                .join("prefs")
+        );
         // A traversal attempt is rejected outright, never resolved.
-        assert!(key_path(&ctx, "../../etc/passwd").is_err());
+        assert!(key_path(&ctx, "../../etc/passwd", true).is_err());
     }
 
     #[test]
     fn empty_key_is_rejected() {
         let ctx = test_ctx("/data", "acme");
-        assert!(key_path(&ctx, "///").is_err());
+        assert!(key_path(&ctx, "///", false).is_err());
+    }
+
+    #[test]
+    fn missing_kv_dir_reads_as_empty_without_creating_it() {
+        let dir = tmp("kvmissing");
+        let ctx = test_ctx(dir.to_str().unwrap(), "acme");
+        assert_eq!(key_path(&ctx, "k", false).unwrap(), None);
+        assert!(!dir.join("plugin-data").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_kv_dir_cannot_reach_other_app_data() {
+        // The #1151 attack: a hand-installed plugin ships `kv -> ../../data`.
+        let dir = tmp("kvlink");
+        std::fs::create_dir_all(dir.join("plugin-data/acme")).unwrap();
+        std::fs::create_dir_all(dir.join("outside")).unwrap();
+        std::fs::write(dir.join("outside/scripts.json"), "secret").unwrap();
+        std::os::unix::fs::symlink(dir.join("outside"), dir.join("plugin-data/acme/kv")).unwrap();
+        let ctx = test_ctx(dir.to_str().unwrap(), "acme");
+        assert!(key_path(&ctx, "scripts.json", false).is_err());
+        assert!(key_path(&ctx, "scripts.json", true).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_kv_file_is_refused() {
+        let dir = tmp("kvfilelink");
+        let kv = dir.join("plugin-data/acme/kv");
+        std::fs::create_dir_all(&kv).unwrap();
+        std::fs::write(dir.join("target.json"), "secret").unwrap();
+        std::os::unix::fs::symlink(dir.join("target.json"), kv.join("scripts.json")).unwrap();
+        let ctx = test_ctx(dir.to_str().unwrap(), "acme");
+        assert!(key_path(&ctx, "scripts.json", true).is_err());
+        // An ordinary key beside it still works.
+        assert!(key_path(&ctx, "prefs", true).unwrap().is_some());
+    }
+
+    #[test]
+    fn legacy_kv_moves_out_of_the_install_dir_once() {
+        let dir = tmp("kvmigrate");
+        let old = dir.join("plugins/acme/kv");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("prefs"), "v1").unwrap();
+        migrate_legacy_kv(&dir, "acme");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("plugin-data/acme/kv/prefs")).unwrap(),
+            "v1"
+        );
+        assert!(!old.exists());
+        // A second legacy dir (e.g. shipped in a new archive) never overwrites.
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("prefs"), "seeded").unwrap();
+        migrate_legacy_kv(&dir, "acme");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("plugin-data/acme/kv/prefs")).unwrap(),
+            "v1"
+        );
     }
 
     #[test]

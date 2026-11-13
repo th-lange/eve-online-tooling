@@ -1,11 +1,10 @@
 //! Rhai backend: builds a fresh [`rhai::Engine`] per run with operation and size
-//! caps plus a wall-clock deadline and the memory watchdog's abort signal
+//! caps plus a wall-clock budget (host-call time excluded) and the memory watchdog's abort signal
 //! (both checked in `on_progress`, which runs on every VM instruction), binds
 //! the curated host API as native functions, evaluates the snippet, and
 //! converts its [`rhai::Dynamic`] result to JSON.
 
 use std::sync::Arc;
-use std::time::Instant;
 
 use rhai::serde::to_dynamic;
 use rhai::{Dynamic, Engine, EvalAltResult, ImmutableString, Position};
@@ -47,12 +46,13 @@ impl ScriptEngine for RhaiEngine {
         // runs on every operation, so it's also where the engine-agnostic
         // memory watchdog in `engine::execute_watched` gets to actually cut a
         // Rhai script short (#815) — returning `Some` terminates the eval.
-        let deadline = Instant::now() + limits.timeout;
+        // The budget excludes time blocked in host capability calls (#1156).
+        let timeout = limits.timeout;
         let interrupt = interrupt.clone();
         engine.on_progress(move |_ops| {
             if interrupt.is_tripped() {
                 Some(Dynamic::from("memory"))
-            } else if Instant::now() >= deadline {
+            } else if interrupt.out_of_time(timeout) {
                 Some(Dynamic::from("timeout"))
             } else {
                 None

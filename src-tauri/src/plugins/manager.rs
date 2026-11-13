@@ -102,11 +102,73 @@ pub struct PluginManager {
     /// practice (one app data dir per running app / per test).
     market: std::sync::OnceLock<Arc<MarketService>>,
     auth: std::sync::OnceLock<Arc<AuthState>>,
+    /// Per-plugin lock serialising *cold builds* (wasm compile), so a burst of
+    /// invokes — or the rebuild after every failed call evicts the instance —
+    /// compiles once instead of once per thread (#1153).
+    build_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// Calls currently admitted per plugin id; see [`PluginManager::try_begin`].
+    in_flight: Arc<Mutex<HashMap<String, usize>>>,
+}
+
+/// Most calls to a single plugin that may be admitted at once (one running
+/// plus a short queue behind its per-instance mutex). Beyond this the call is
+/// refused immediately instead of parking another blocking-pool thread for up
+/// to the full call timeout, which starved every other `spawn_blocking` user
+/// (keychain loads, script runs, installs) — #1153.
+const MAX_IN_FLIGHT_PER_PLUGIN: usize = 4;
+
+/// RAII admission ticket from [`PluginManager::try_begin`]; releases the slot
+/// on drop (including when the call's task panics).
+pub struct InFlightGuard {
+    counts: Arc<Mutex<HashMap<String, usize>>>,
+    id: String,
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        let mut counts = self.counts.lock();
+        if let Some(n) = counts.get_mut(&self.id) {
+            *n -= 1;
+            if *n == 0 {
+                counts.remove(&self.id);
+            }
+        }
+    }
 }
 
 impl PluginManager {
+    /// A manager with its own lazily built services; production wiring uses
+    /// [`Self::with_auth`], so this exists for tests only.
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A manager whose plugins share the app's managed `AuthState` (a cheap
+    /// handle clone over the same token cache and refresh locks), instead of
+    /// lazily building a second, uncoordinated instance whose refreshes could
+    /// race the app's and double-rotate a character's refresh token (#1148).
+    pub fn with_auth(auth: AuthState) -> Self {
+        let manager = Self::default();
+        let _ = manager.auth.set(Arc::new(auth));
+        manager
+    }
+
+    /// Admit one more call to plugin `id`, or refuse when it already has
+    /// [`MAX_IN_FLIGHT_PER_PLUGIN`] calls running/queued. Called *before*
+    /// handing the call to the blocking pool, so a flood of invokes from a
+    /// misbehaving plugin UI can't occupy the pool's threads.
+    pub fn try_begin(&self, id: &str) -> Result<InFlightGuard, String> {
+        let mut counts = self.in_flight.lock();
+        let n = counts.entry(id.to_string()).or_insert(0);
+        if *n >= MAX_IN_FLIGHT_PER_PLUGIN {
+            return Err(format!("plugin {id:?} is busy; try again shortly"));
+        }
+        *n += 1;
+        Ok(InFlightGuard {
+            counts: self.in_flight.clone(),
+            id: id.to_string(),
+        })
     }
 
     fn shared_market(&self, app_data_dir: &Path) -> Arc<MarketService> {
@@ -143,9 +205,9 @@ impl PluginManager {
     /// The cached Extism instance for plugin `id`, building and caching one
     /// on a cold lookup. The fs read + wasm compile of a cold build happen
     /// *outside* the map lock so a slow first load of one plugin doesn't
-    /// stall every other plugin's lookup. If two threads race to build the
-    /// same plugin, `or_insert` keeps the first insert and the loser's
-    /// instance is simply dropped — wasteful but rare and correct.
+    /// stall every other plugin's lookup. Concurrent cold builds of the *same*
+    /// plugin are single-flighted on a per-plugin build lock (#1153); the
+    /// `or_insert` below only guards an evict/rebuild interleaving.
     fn load_or_build_plugin(
         &self,
         app_data_dir: &Path,
@@ -154,6 +216,18 @@ impl PluginManager {
         allowed_hosts: &[String],
         wasm_path: &Path,
     ) -> Result<Arc<Mutex<Plugin>>, String> {
+        if let Some(entry) = self.loaded.lock().get(id).cloned() {
+            return Ok(entry);
+        }
+        // Single-flight the cold build: queue on this plugin's build lock, then
+        // re-check the map — whoever won the race already cached the instance.
+        let build_lock = self
+            .build_locks
+            .lock()
+            .entry(id.to_string())
+            .or_default()
+            .clone();
+        let _building = build_lock.lock();
         if let Some(entry) = self.loaded.lock().get(id).cloned() {
             return Ok(entry);
         }
@@ -319,11 +393,16 @@ pub async fn plugins_invoke(
     args: Value,
 ) -> Result<Value, AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
+    // Backpressure (#1153): refuse when this plugin already has its quota of
+    // calls in flight, *before* taking a blocking-pool thread. The ticket
+    // moves into the task and frees its slot when the call finishes.
+    let ticket = manager.try_begin(&plugin_id).map_err(AppError::from)?;
     // Both are `Arc`-managed in Tauri state, so cloning into the closure is
     // a cheap refcount bump.
     let registry = registry.inner().clone();
     let manager = manager.inner().clone();
     tokio::task::spawn_blocking(move || {
+        let _ticket = ticket;
         run_plugin(&registry, &manager, &dir, &plugin_id, &r#fn, &args).map_err(AppError::from)
     })
     .await
@@ -685,7 +764,7 @@ mod tests {
             .unwrap();
         assert_eq!(serde_json::from_slice::<Value>(&got).unwrap(), "hello");
         // Persisted inside the plugin's own namespaced dir.
-        assert!(dir.join("plugins/acme/kv/shared").exists());
+        assert!(dir.join("plugin-data/acme/kv/shared").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -980,5 +1059,33 @@ mod tests {
             .unwrap_err();
         assert!(!err.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn in_flight_cap_refuses_extra_calls_and_frees_slots_on_drop() {
+        let mgr = PluginManager::new();
+        let held: Vec<_> = (0..MAX_IN_FLIGHT_PER_PLUGIN)
+            .map(|_| mgr.try_begin("noisy").unwrap())
+            .collect();
+        assert!(mgr.try_begin("noisy").is_err());
+        // The cap is per plugin: a quiet plugin is unaffected.
+        assert!(mgr.try_begin("quiet").is_ok());
+        drop(held);
+        assert!(mgr.try_begin("noisy").is_ok());
+        // Fully released ids don't linger in the map.
+        assert!(mgr.in_flight.lock().is_empty());
+    }
+
+    #[test]
+    fn with_auth_shares_the_apps_refresh_locks() {
+        // #1148: the plugin manager must coordinate refreshes with the
+        // app's own AuthState, not run a second instance.
+        let app_auth = AuthState::new();
+        let mgr = PluginManager::with_auth(app_auth.clone());
+        let plugin_auth = mgr.shared_auth(Path::new("/unused"));
+        assert!(Arc::ptr_eq(
+            &app_auth.refresh_lock(42),
+            &plugin_auth.refresh_lock(42)
+        ));
     }
 }
