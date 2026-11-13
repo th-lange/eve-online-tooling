@@ -117,6 +117,11 @@ struct Value {
     /// post-multiplicative factors with their penalized flag (postPercent stored
     /// as 1 + p/100, postDiv as 1/x).
     post: Vec<(f64, bool)>,
+    /// penalized postDiv factors (stored as 1/x). pyfa/EVE give these their own
+    /// penalty group (`penaltyGroup='postDiv'`), so they never share a chain
+    /// with postMul/postPercent bonuses (e.g. T3D defense-mode resist bonuses
+    /// vs. hardeners). Unpenalized postDiv factors go into `post` as usual.
+    post_div_penalized: Vec<f64>,
     post_assign: Option<f64>,
 }
 
@@ -141,6 +146,7 @@ impl Value {
         }
         v *= unpenalized;
         v *= combine_penalized(&penalized);
+        v *= combine_penalized(&self.post_div_penalized);
         if let Some(pa) = self.post_assign {
             v = pa;
         }
@@ -191,7 +197,11 @@ impl AttrStore {
             Op::PostMul => slot.post.push((value, penalized)),
             Op::PostDiv => {
                 if value != 0.0 {
-                    slot.post.push((1.0 / value, penalized));
+                    if penalized {
+                        slot.post_div_penalized.push(1.0 / value);
+                    } else {
+                        slot.post.push((1.0 / value, false));
+                    }
                 }
             }
             Op::PostPercent => slot.post.push((1.0 + value / 100.0, penalized)),
@@ -278,5 +288,22 @@ mod tests {
         s.set_base(51, 4.0);
         s.apply(51, Op::PostDiv, 2.0, false); // 4 / 2 = 2
         assert!((s.get(51) - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn penalized_post_div_has_its_own_chain() {
+        // Confessor Defense Mode: modeArmorEmResistancePostDiv = 1.1111 (-10% resonance
+        // as 1/x) with two penalized hardener resonance multipliers (0.85 each).
+        let mut s = AttrStore::new();
+        s.set_base(267, 1.0);
+        s.apply(267, Op::PostMul, 0.85, true);
+        s.apply(267, Op::PostMul, 0.85, true);
+        s.apply(267, Op::PostDiv, 1.1111, true);
+        // Separate chains: the mode bonus is first in its own group (full strength),
+        // not 3rd in the shared chain.
+        let want = combine_penalized(&[0.85, 0.85]) * (1.0 / 1.1111);
+        assert!((s.get(267) - want).abs() < 1e-9);
+        let shared = combine_penalized(&[0.85, 0.85, 1.0 / 1.1111]);
+        assert!((s.get(267) - shared).abs() > 1e-3);
     }
 }

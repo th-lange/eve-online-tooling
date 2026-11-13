@@ -41,14 +41,20 @@ fn new_fit_id() -> String {
 
 /// Resolve a parsed EFT mutation block against the SDE: the mutaplasmid
 /// name and each attribute name to their ids (#876). `None` if the
-/// mutaplasmid name is unknown or applies to nothing — a best-effort import
-/// keeps the base module unmutated rather than failing the whole paste,
-/// matching the "unknown module — skip" leniency the rest of this parser
-/// already uses. Unknown *individual* attribute names are dropped, not
-/// fatal, since a future SDE could rename/retire one.
+/// mutaplasmid name is unknown, doesn't apply to `base_type_id`, or nothing
+/// valid is left — a best-effort import keeps the base module unmutated
+/// rather than failing the whole paste, matching the "unknown module — skip"
+/// leniency the rest of this parser already uses. Attributes the mutaplasmid
+/// doesn't roll are dropped and the rest clamped to its roll range
+/// ([`sanitize_mutation_attrs`]), so a hand-edited paste can't smuggle in
+/// arbitrary attribute overrides.
 fn resolve_mutation(sde: &Sde, base_type_id: i64, parsed: &ParsedMutation) -> Option<ItemMutation> {
     let (mutaplasmid_type_id, _) = sde.type_by_name(&parsed.mutaplasmid_name).ok()??;
-    let attrs: HashMap<i64, f64> = parsed
+    let roll = sde.mutaplasmid_roll(mutaplasmid_type_id).ok()??;
+    if !roll.applicable_type_ids.contains(&base_type_id) {
+        return None;
+    }
+    let requested: HashMap<i64, f64> = parsed
         .attrs
         .iter()
         .filter_map(|(name, value)| {
@@ -58,6 +64,12 @@ fn resolve_mutation(sde: &Sde, base_type_id: i64, parsed: &ParsedMutation) -> Op
                 .map(|id| (id, *value))
         })
         .collect();
+    let base_attrs: HashMap<i64, f64> = sde
+        .type_attributes_raw(base_type_id)
+        .ok()?
+        .into_iter()
+        .collect();
+    let attrs = sanitize_mutation_attrs(&roll.attribute_ranges, &base_attrs, requested);
     if attrs.is_empty() {
         return None;
     }
@@ -66,6 +78,27 @@ fn resolve_mutation(sde: &Sde, base_type_id: i64, parsed: &ParsedMutation) -> Op
         mutaplasmid_type_id,
         attrs,
     })
+}
+
+/// Keep only the mutated attributes the mutaplasmid actually rolls
+/// (`ranges`: attribute id -> (min, max) multiplier on the base value),
+/// clamp each into `[base * min, base * max]` (same bounds as
+/// [`fitting_mutation_ranges`]), and drop non-finite values.
+fn sanitize_mutation_attrs(
+    ranges: &HashMap<i64, (f64, f64)>,
+    base_attrs: &HashMap<i64, f64>,
+    attrs: HashMap<i64, f64>,
+) -> HashMap<i64, f64> {
+    attrs
+        .into_iter()
+        .filter(|(_, v)| v.is_finite())
+        .filter_map(|(id, v)| {
+            let &(min_mult, max_mult) = ranges.get(&id)?;
+            let base = base_attrs.get(&id).copied().unwrap_or(0.0);
+            let (a, b) = (base * min_mult, base * max_mult);
+            Some((id, v.clamp(a.min(b), a.max(b))))
+        })
+        .collect()
 }
 
 /// A hull's slot layout + fitting resources, for the empty editor (#160).
@@ -1625,6 +1658,34 @@ pub fn fitting_delete_target_profile(app: AppHandle, id: String) -> Result<(), S
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sanitize_mutation_attrs_drops_foreign_and_clamps_to_roll_range() {
+        // 50MN MWD-like: cpu(50) rolls 0.8x..1.2x of 40; a lower-is-better attr
+        // (1 -> 0.5x..0.9x of 100) has min < max too; mass(4) isn't rolled.
+        let ranges = HashMap::from([(50, (0.8, 1.2)), (1, (0.5, 0.9))]);
+        let base = HashMap::from([(50, 40.0), (1, 100.0), (4, 1000.0)]);
+        let out = sanitize_mutation_attrs(
+            &ranges,
+            &base,
+            HashMap::from([(50, 1000.0), (1, 10.0), (4, 1.0), (999, 5.0)]),
+        );
+        assert_eq!(out.len(), 2, "foreign attributes must be dropped: {out:?}");
+        assert!((out[&50] - 48.0).abs() < 1e-9, "clamped to base*max");
+        assert!((out[&1] - 50.0).abs() < 1e-9, "clamped to base*min");
+        // In-range values pass through unchanged.
+        let ok = sanitize_mutation_attrs(&ranges, &base, HashMap::from([(50, 44.0)]));
+        assert_eq!(ok[&50], 44.0);
+    }
+
+    #[test]
+    fn sanitize_mutation_attrs_rejects_non_finite() {
+        let ranges = HashMap::from([(50, (0.8, 1.2))]);
+        let base = HashMap::from([(50, 40.0)]);
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(sanitize_mutation_attrs(&ranges, &base, HashMap::from([(50, bad)])).is_empty());
+        }
+    }
+
     use super::*;
     use crate::modules::fitting::engine::tank::DamageProfile;
     use crate::modules::fitting::stats::run_dogma;

@@ -29,7 +29,7 @@ pub fn prop_velocity(base_velocity: f64, mass: f64, props: &[(f64, f64)]) -> f64
         return base_velocity;
     }
     // Stacking penalty across multiple prop mods (strongest first, full weight).
-    bonuses.sort_by(|a, b| b.abs().partial_cmp(&a.abs()).unwrap());
+    bonuses.sort_by(|a, b| b.abs().total_cmp(&a.abs()));
     let total: f64 = bonuses
         .iter()
         .enumerate()
@@ -72,6 +72,13 @@ pub fn targeting(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn non_finite_prop_input_does_not_panic() {
+        // A NaN speed factor must not abort the sort (the result is NaN, not a panic).
+        let v = prop_velocity(400.0, 1.0e6, &[(f64::NAN, 1.5e6), (100.0, 1.5e6)]);
+        assert!(v.is_nan());
+    }
 
     #[test]
     fn prop_velocity_boosts_by_speed_factor_over_mass() {
