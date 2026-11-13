@@ -87,8 +87,14 @@ function Workbench() {
     ),
     queryFn: () => reprocessingEfficiency(params),
   });
-  const { favorites, blacklist, toggleFavorite, blacklistRow, remove } =
-    useTypeIdLists("reprocessing", setRows, (r) => r.typeId);
+  const {
+    favorites,
+    blacklist,
+    listError,
+    toggleFavorite,
+    blacklistRow,
+    remove,
+  } = useTypeIdLists("reprocessing", setRows, (r) => r.typeId);
 
   const run = useMutation({
     mutationFn: (p: ReprocessParams) => reprocessingScan(p),
@@ -220,6 +226,7 @@ function Workbench() {
           favorites: favorites.data?.length ?? 0,
           blacklist: blacklist.data?.length ?? 0,
         }}
+        error={listError}
       />
 
       <div className="mt-3">

@@ -146,4 +146,19 @@ describe("InfoPanel", () => {
     renderPanel([]);
     expect(await screen.findByText(/Nothing yet/)).toBeInTheDocument();
   });
+
+  it("shows a failed Clear all instead of silently keeping the feed", async () => {
+    renderPanel();
+    const base = invokeMock.getMockImplementation()!;
+    invokeMock.mockImplementation((cmd: string, args?: unknown) =>
+      cmd === "info_clear"
+        ? Promise.reject({ kind: "db", message: "locked" })
+        : base(cmd, args),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Clear all" }));
+    expect(
+      await screen.findByText(/Couldn't clear the panel: locked/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Orders outpriced")).toBeInTheDocument();
+  });
 });

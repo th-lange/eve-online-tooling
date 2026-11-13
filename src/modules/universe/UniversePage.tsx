@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   errorMessage,
@@ -11,6 +11,8 @@ import {
 } from "../../lib/api";
 import { formatInt, formatIsk } from "../../lib/format";
 import { Page, PageHeader } from "../../components/page";
+import { InlineError } from "../../components/InlineError";
+import { QueryErrorNotice } from "../../components/QueryErrorNotice";
 import { SdeGate } from "../../components/SdeGate";
 import { uniKeys } from "../../lib/queryKeys";
 
@@ -183,24 +185,39 @@ function Detail({ typeId }: { typeId: number }) {
     queryKey: uniKeys.attrs(typeId),
     queryFn: () => sdeTypeAttributes(typeId),
   });
+  const [openError, setOpenError] = useState<string | null>(null);
+  // A stale "couldn't open" message must not follow the user to another type.
+  useEffect(() => setOpenError(null), [typeId]);
   const d = detail.data;
-  if (!d) return <div className="p-4 text-sm text-zinc-500">Loading…</div>;
+  if (detail.isError)
+    return <QueryErrorNotice error={detail.error} className="p-4 text-sm" />;
+  if (detail.isPending)
+    return <div className="p-4 text-sm text-zinc-500">Loading…</div>;
+  // The command resolves `null` for a type id that isn't in the SDE.
+  if (!d)
+    return (
+      <div className="p-4 text-sm text-zinc-500">
+        Type #{typeId} isn't in the SDE.
+      </div>
+    );
   return (
     <div>
       <div className="flex items-start justify-between">
         <h2 className="text-lg font-semibold text-zinc-100">{d.name}</h2>
         <button
-          onClick={() =>
+          onClick={() => {
+            setOpenError(null);
             openMarketWindow(d.typeId).catch((e) =>
-              alert(`Couldn't open market window: ${errorMessage(e)}`),
-            )
-          }
+              setOpenError(`Couldn't open market window: ${errorMessage(e)}`),
+            );
+          }}
           title="Open this item's market in the EVE client"
           className="rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300 hover:bg-zinc-800"
         >
           Open in EVE
         </button>
       </div>
+      <InlineError message={openError} className="mt-1 text-xs text-rose-400" />
       <div className="mt-1 text-xs text-zinc-500">
         type #{d.typeId}
         {!d.published && " · unpublished"}

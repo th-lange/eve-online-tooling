@@ -131,8 +131,14 @@ export function useWorkbench(): WorkbenchState {
     onSuccess: setRows,
   });
 
-  const { favorites, blacklist, setList, toggleFavorite, blacklistRow } =
-    useTypeIdLists("production", setRows, (r) => r.blueprintTypeId);
+  const {
+    favorites,
+    blacklist,
+    setList,
+    listError,
+    toggleFavorite,
+    blacklistRow,
+  } = useTypeIdLists("production", setRows, (r) => r.blueprintTypeId);
 
   // The pricing/cost settings that actually drive a re-price (the client-side
   // filters are excluded — they apply instantly). A change to any of these
@@ -483,6 +489,7 @@ export function useWorkbench(): WorkbenchState {
     calculate,
     resetAllFilters,
     setList,
+    listError,
     autoRecalc,
     setAutoRecalc,
   };

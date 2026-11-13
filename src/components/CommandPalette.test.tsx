@@ -61,7 +61,64 @@ describe("CommandPalette", () => {
     renderPalette();
     fireEvent.keyDown(window, { key: "k", metaKey: true });
     expect(screen.getByPlaceholderText(/Jump to a module/)).toBeInTheDocument();
-    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByPlaceholderText(/Jump to a module/)).toBeNull();
+  });
+});
+
+describe("CommandPalette accessibility", () => {
+  it("is a labelled modal dialog with a combobox driving a listbox", () => {
+    renderPalette();
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(
+      screen.getByRole("dialog", { name: "Command palette" }),
+    ).toBeInTheDocument();
+    const input = screen.getByRole("combobox", {
+      name: /jump to a module/i,
+    });
+    expect(input).toHaveFocus();
+    const listbox = screen.getByRole("listbox");
+    expect(input).toHaveAttribute("aria-controls", listbox.id);
+  });
+
+  it("moves aria-activedescendant and scrolls the selection into view", () => {
+    const spy = vi.spyOn(Element.prototype, "scrollIntoView");
+    renderPalette();
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    const input = screen.getByRole("combobox");
+    const options = screen.getAllByRole("option");
+    expect(options.length).toBeGreaterThan(2);
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
+    expect(input).toHaveAttribute("aria-activedescendant", options[0].id);
+
+    spy.mockClear();
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    const now = screen.getAllByRole("option");
+    expect(now[2]).toHaveAttribute("aria-selected", "true");
+    expect(input).toHaveAttribute("aria-activedescendant", now[2].id);
+    expect(spy).toHaveBeenLastCalledWith({ block: "nearest" });
+    expect(spy.mock.instances.at(-1)).toBe(now[2]);
+    spy.mockRestore();
+  });
+
+  it("restores focus to the opener on Escape", () => {
+    render(
+      <>
+        <button>opener</button>
+        <QueryClientProvider client={new QueryClient()}>
+          <MemoryRouter>
+            <CommandPalette />
+          </MemoryRouter>
+        </QueryClientProvider>
+      </>,
+    );
+    const opener = screen.getByText("opener");
+    opener.focus();
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(screen.getByRole("combobox")).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(opener).toHaveFocus();
   });
 });
