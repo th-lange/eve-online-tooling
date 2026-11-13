@@ -48,6 +48,10 @@ const ATTR_MAX_VELOCITY: i64 = 37;
 const ATTR_MASS: i64 = 4;
 const ATTR_SPEED_FACTOR: i64 = 20;
 const ATTR_SPEED_BOOST_FACTOR: i64 = 567;
+/// `massAddition` — the mass a running prop mod adds to the hull.
+const ATTR_MASS_ADDITION: i64 = 796;
+/// `signatureRadiusBonus` — an MWD's signature bloom, in percent.
+const ATTR_SIG_BONUS: i64 = 554;
 
 /// Canonical SDE `invGroups` ids for the three hull classes this module
 /// derives archetypes for (categoryID 6 "Ship").
@@ -142,37 +146,52 @@ fn average_t1_hull_class(sde: &Sde, group_id: i64) -> Option<(f64, f64, f64)> {
     Some((sig_sum / n, vel_sum / n, mass_sum / n))
 }
 
-/// A prop mod's `(speedFactor, speedBoostFactor)` pair, for
-/// `engine::navigation::prop_velocity`. Empty (no bonus) if the type is
-/// missing from the SDE or carries neither attribute.
-fn prop_mod_props(sde: &Sde, type_id: i64) -> Vec<(f64, f64)> {
+/// What a running prop mod does to the hull it is fitted to.
+#[derive(Default)]
+struct PropMod {
+    /// `(speedFactor, speedBoostFactor)` pair for `engine::navigation::prop_velocity`
+    /// (empty if the type is missing or carries neither attribute).
+    props: Vec<(f64, f64)>,
+    /// `massAddition` (796), added to the hull before the velocity boost —
+    /// the same order `stats::run_dogma` uses for a player's fit.
+    mass_addition: f64,
+    /// `signatureRadiusBonus` (554) in percent: an MWD's bloom (AB has none).
+    sig_bonus_pct: f64,
+}
+
+fn prop_mod(sde: &Sde, type_id: i64) -> PropMod {
     let Ok(attrs) = sde.type_attributes_raw(type_id) else {
-        return Vec::new();
+        return PropMod::default();
     };
     let sf = attr(&attrs, ATTR_SPEED_FACTOR);
     let sbf = attr(&attrs, ATTR_SPEED_BOOST_FACTOR);
     if sf > 0.0 && sbf > 0.0 {
-        vec![(sf, sbf)]
+        PropMod {
+            props: vec![(sf, sbf)],
+            mass_addition: attr(&attrs, ATTR_MASS_ADDITION),
+            sig_bonus_pct: attr(&attrs, ATTR_SIG_BONUS),
+        }
     } else {
-        Vec::new()
+        PropMod::default()
     }
 }
 
-/// Build one archetype from a class average + its prop mod's bonus.
+/// Build one archetype from a class average + its prop mod's effect on the
+/// hull (velocity boost on the mass-added hull, signature bloom).
 fn archetype(
     id: &str,
     label: &str,
     sig: f64,
     base_velocity: f64,
     mass: f64,
-    props: &[(f64, f64)],
+    prop: &PropMod,
 ) -> TargetArchetype {
-    let boosted_speed = prop_velocity(base_velocity, mass, props);
+    let boosted_speed = prop_velocity(base_velocity, mass + prop.mass_addition, &prop.props);
     TargetArchetype {
         id: id.to_string(),
         label: label.to_string(),
         target: TargetProfile {
-            sig_radius: sig,
+            sig_radius: sig * (1.0 + prop.sig_bonus_pct / 100.0),
             speed: boosted_speed,
             angular_velocity: boosted_speed / HIGH_TRANSVERSAL_ORBIT_M,
             drones_keep_pace: true,
@@ -196,7 +215,7 @@ pub(super) fn built_in_archetypes(sde: &Sde) -> Vec<TargetArchetype> {
             sig,
             vel,
             mass,
-            &prop_mod_props(sde, AB_1MN_II),
+            &prop_mod(sde, AB_1MN_II),
         ));
         out.push(archetype(
             "builtin:frigate-mwd",
@@ -204,7 +223,7 @@ pub(super) fn built_in_archetypes(sde: &Sde) -> Vec<TargetArchetype> {
             sig,
             vel,
             mass,
-            &prop_mod_props(sde, MWD_5MN_II),
+            &prop_mod(sde, MWD_5MN_II),
         ));
     }
 
@@ -215,7 +234,7 @@ pub(super) fn built_in_archetypes(sde: &Sde) -> Vec<TargetArchetype> {
             sig,
             vel,
             mass,
-            &prop_mod_props(sde, AB_10MN_II),
+            &prop_mod(sde, AB_10MN_II),
         ));
     }
 
@@ -226,7 +245,7 @@ pub(super) fn built_in_archetypes(sde: &Sde) -> Vec<TargetArchetype> {
             sig,
             vel,
             mass,
-            &prop_mod_props(sde, AB_100MN_II),
+            &prop_mod(sde, AB_100MN_II),
         ));
     }
 
@@ -267,7 +286,9 @@ mod tests {
              -- 5MN Microwarpdrive II (440): speedFactor 510, speedBoostFactor 1.5e6.
              INSERT INTO invTypes VALUES (440, 51, '5MN Microwarpdrive II', 1, 0.0);
              INSERT INTO dgmTypeAttributes VALUES (440, 20, 510.0, NULL);
-             INSERT INTO dgmTypeAttributes VALUES (440, 567, 1500000.0, NULL);",
+             INSERT INTO dgmTypeAttributes VALUES (440, 567, 1500000.0, NULL);
+             INSERT INTO dgmTypeAttributes VALUES (440, 796, 500000.0, NULL);
+             INSERT INTO dgmTypeAttributes VALUES (440, 554, 500.0, NULL);",
         )
     }
 
@@ -315,6 +336,11 @@ mod tests {
             .unwrap();
         // MWD's larger speedFactor (510) should boost speed further than the AB.
         assert!(mwd.target.speed > ab.target.speed);
+        // massAddition (500k kg) is added to the hull before the boost, and the
+        // +500% signature bloom multiplies the class-average sig (35 m -> 210 m).
+        let expected_mwd_speed = 360.0 * (1.0 + 510.0 * 1_500_000.0 / 1_600_000.0 / 100.0);
+        assert!((mwd.target.speed - expected_mwd_speed).abs() < 1e-6);
+        assert!((mwd.target.sig_radius - 210.0).abs() < 1e-9);
     }
 
     /// Spot-checks the derived Frigate archetype's sig/speed against the real
