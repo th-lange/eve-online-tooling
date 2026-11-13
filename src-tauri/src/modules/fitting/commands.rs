@@ -17,8 +17,8 @@ use super::engine::resolve::{resolve, FitInput};
 use super::esi_fittings::EsiFitSource;
 use super::npc_profiles;
 use super::types::{
-    AbyssalWeatherSelection, Fit, FitItem, FitPrice, FitPriceLine, FitStats, ItemMutation,
-    ModuleState, NpcProfile, SlotKind, TargetProfile, TargetProfileLibrary,
+    AbyssalWeatherSelection, Fit, FitItem, FitPrice, FitPriceLine, FitProblem, FitStats,
+    ItemMutation, ModuleState, NpcProfile, Severity, SlotKind, TargetProfile, TargetProfileLibrary,
 };
 use crate::esi::{self, corporation_id, AuthState, SkillLevels};
 use crate::market::{resolve_location, MarketService};
@@ -122,7 +122,11 @@ pub(crate) fn import_eft_to_fit(sde: &Sde, text: &str) -> Result<Fit, String> {
             type_id,
             slot,
             index: take_index(slot, &mut next_index),
-            state: ModuleState::Active,
+            state: if m.offline {
+                ModuleState::Offline
+            } else {
+                ModuleState::Active
+            },
             charge_type_id,
             quantity: 1,
             active_drones: None,
@@ -309,12 +313,16 @@ fn parse_item_line(line: &str) -> Option<(String, i64)> {
         let qty = cols.find_map(parse_qty).unwrap_or(1);
         return (!name.is_empty()).then_some((name, qty));
     }
-    // Trailing "Name xN" / "Name x N".
-    if let Some((name, tail)) = line.rsplit_once('x') {
-        if let Some(q) = parse_qty(tail) {
-            let name = name.trim();
-            if !name.is_empty() {
-                return Some((name.to_string(), q));
+    // Trailing "Name xN" / "Name x N". The `x` must be its own word start
+    // (preceded by whitespace): splitting on any `x` turned "Onyx 1" into "Ony".
+    if let Some(pos) = line.rfind(['x', 'X']) {
+        let (name, tail) = (&line[..pos], &line[pos + 1..]);
+        if name.ends_with(char::is_whitespace) {
+            if let Some(q) = parse_qty(tail) {
+                let name = name.trim();
+                if !name.is_empty() {
+                    return Some((name.to_string(), q));
+                }
             }
         }
     }
@@ -449,7 +457,7 @@ pub fn fitting_import_list(app: AppHandle, text: String) -> Result<Fit, String> 
 /// Next free 0-based index for `slot`, i.e. one past the highest currently used
 /// (or 0 when the slot is empty). Pure, so the placement logic is unit-tested
 /// without an SDE.
-fn next_slot_index(items: &[FitItem], slot: SlotKind) -> i32 {
+pub(super) fn next_slot_index(items: &[FitItem], slot: SlotKind) -> i32 {
     items
         .iter()
         .filter(|it| it.slot == slot)
@@ -612,8 +620,13 @@ async fn character_skill_levels(
 
 /// Resolve the dogma engine's skill levels from `skill_source`: the active
 /// character's real skills when it's `"character"`, else `None` (treated as
-/// all-V by [`skill_fn`]). Shared by [`fitting_module_info`] and
-/// [`fitting_simulate`] (#172–#177, #266).
+/// all-V by [`skill_fn`]). Shared by [`fitting_module_info`],
+/// [`fitting_simulate`] and [`fitting_ammo_table`] (#172–#177, #266).
+///
+/// When the character's skills can't be loaded (no character, expired token,
+/// missing scope, ESI down) this still falls back to all-V so the editor keeps
+/// working, but returns a user-facing warning so the caller can say the numbers
+/// are *not* the pilot's own (#1188).
 ///
 /// MUST be awaited (and thus complete) *before* the caller opens the SDE:
 /// `rusqlite::Connection` isn't `Send`, so an open SDE handle can never be
@@ -623,11 +636,18 @@ async fn resolve_skill_levels(
     app: &AppHandle,
     auth_state: &AuthState,
     skill_source: Option<&str>,
-) -> Option<SkillLevels> {
-    if skill_source == Some("character") {
-        character_skill_levels(app, auth_state).await.ok()
-    } else {
-        None
+) -> (Option<SkillLevels>, Option<String>) {
+    if skill_source != Some("character") {
+        return (None, None);
+    }
+    match character_skill_levels(app, auth_state).await {
+        Ok(levels) => (Some(levels), None),
+        Err(e) => (
+            None,
+            Some(format!(
+                "Using all-V skills: couldn't load the character's skills ({e})"
+            )),
+        ),
     }
 }
 
@@ -660,7 +680,9 @@ pub async fn fitting_module_info(
     type_ids: Vec<i64>,
 ) -> Result<Vec<ModuleInfo>, String> {
     // Skills first (async, before opening the SDE — see resolve_skill_levels).
-    let levels = resolve_skill_levels(&app, &auth_state, skill_source.as_deref()).await;
+    // The stats panel reports a skill fallback; here the warning is dropped.
+    let (levels, _skill_warning) =
+        resolve_skill_levels(&app, &auth_state, skill_source.as_deref()).await;
     let lookup = skill_fn(levels.as_ref());
 
     let (dir, sde) = crate::sde::dir_and_sde(&app)?;
@@ -857,6 +879,12 @@ pub(crate) fn fit_to_eft(sde: &Sde, fit: &Fit) -> String {
         SlotKind::Low,
         SlotKind::Rig,
         SlotKind::Subsystem,
+        // Mode, implants and boosters have no EFT section of their own; they
+        // follow as bare lines, which the importer re-classifies from the SDE
+        // (mode by group, implants by category), so export → import keeps them.
+        SlotKind::Mode,
+        SlotKind::Implant,
+        SlotKind::Booster,
     ] {
         let mut in_slot: Vec<&FitItem> = fit.items.iter().filter(|i| i.slot == slot).collect();
         in_slot.sort_by_key(|i| i.index);
@@ -867,6 +895,8 @@ pub(crate) fn fit_to_eft(sde: &Sde, fit: &Fit) -> String {
                 charge,
                 empty_slot: None,
                 mutation: i.mutation.as_ref().map(|m| export_mutation(sde, m)),
+                offline: i.state == ModuleState::Offline
+                    && !matches!(slot, SlotKind::Implant | SlotKind::Booster),
             });
         }
     }
@@ -1214,24 +1244,40 @@ pub async fn fitting_simulate(
     factor_reload: Option<bool>,
 ) -> Result<FitStats, String> {
     // Skills first (async, before opening the SDE — see resolve_skill_levels).
-    let levels = resolve_skill_levels(&app, &auth_state, skill_source.as_deref()).await;
-    let lookup = skill_fn(levels.as_ref());
+    let (levels, skill_warning) =
+        resolve_skill_levels(&app, &auth_state, skill_source.as_deref()).await;
 
-    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
-    simulate_fit(
-        &sde,
-        &dir,
-        &fit,
-        &lookup,
-        damage_profile,
-        neut_gjs,
-        target_profile,
-        fleet_boosts,
-        environment_effect,
-        abyssal_weather,
-        spool_pct,
-        factor_reload,
-    )
+    // A full dogma pass is seconds of synchronous SDE + CPU work: run it on the
+    // blocking pool, not a tokio worker (#1189). `Sde` isn't `Send`, so it is
+    // opened inside the closure.
+    tokio::task::spawn_blocking(move || {
+        let lookup = skill_fn(levels.as_ref());
+        let (dir, sde) = crate::sde::dir_and_sde(&app)?;
+        let mut stats = simulate_fit(
+            &sde,
+            &dir,
+            &fit,
+            &lookup,
+            damage_profile,
+            neut_gjs,
+            target_profile,
+            fleet_boosts,
+            environment_effect,
+            abyssal_weather,
+            spool_pct,
+            factor_reload,
+        )?;
+        if let Some(message) = skill_warning {
+            stats.validation.push(FitProblem {
+                severity: Severity::Warning,
+                message,
+                item_index: None,
+            });
+        }
+        Ok(stats)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// One row of the ammo comparison: what a cargo ammo does when loaded.
@@ -1274,78 +1320,87 @@ pub async fn fitting_ammo_table(
     skill_source: Option<String>,
 ) -> Result<Vec<AmmoRow>, String> {
     // Skills first (async), before opening the SDE — see resolve_skill_levels.
-    let levels = resolve_skill_levels(&app, &auth_state, skill_source.as_deref()).await;
-    let lookup = skill_fn(levels.as_ref());
-    let (dir, sde) = crate::sde::dir_and_sde(&app)?;
+    // The stats panel reports a skill fallback; here the warning is dropped.
+    let (levels, _skill_warning) =
+        resolve_skill_levels(&app, &auth_state, skill_source.as_deref()).await;
 
-    // Fitted high-slot weapons that accept a charge (turrets/launchers), each
-    // mapped to the charges it can load. Ancillary reps are low slot;
-    // smartbombs/neuts take none, so `compatible_charges` is empty for them.
-    let mut weapon_charges: HashMap<i64, Vec<i64>> = HashMap::new();
-    for it in fit.items.iter().filter(|i| i.slot == SlotKind::High) {
-        if weapon_charges.contains_key(&it.type_id) {
-            continue;
-        }
-        let charges = sde
-            .compatible_charges(it.type_id)
-            .map_err(|e| e.to_string())?;
-        if !charges.is_empty() {
-            weapon_charges.insert(it.type_id, charges.into_iter().map(|(id, _)| id).collect());
-        }
-    }
-    if weapon_charges.is_empty() {
-        return Ok(Vec::new());
-    }
+    // One full simulate per cargo ammo type: run on the blocking pool, not a
+    // tokio worker (#1189). `Sde` isn't `Send`, so it is opened in the closure.
+    tokio::task::spawn_blocking(move || {
+        let lookup = skill_fn(levels.as_ref());
+        let (dir, sde) = crate::sde::dir_and_sde(&app)?;
 
-    let cargo: Vec<i64> = fit
-        .items
-        .iter()
-        .filter(|i| i.slot == SlotKind::Cargo)
-        .map(|i| i.type_id)
-        .collect();
-    let sets: Vec<Vec<i64>> = weapon_charges.values().cloned().collect();
-    let candidates = cargo_ammo_candidates(&sets, &cargo);
-
-    let mut rows = Vec::with_capacity(candidates.len());
-    for ammo in candidates {
-        // Load this ammo into every high-slot weapon that can take it.
-        let mut probe = fit.clone();
-        for item in probe.items.iter_mut().filter(|i| i.slot == SlotKind::High) {
-            if weapon_charges
-                .get(&item.type_id)
-                .is_some_and(|cs| cs.contains(&ammo))
-            {
-                item.charge_type_id = Some(ammo);
+        // Fitted high-slot weapons that accept a charge (turrets/launchers), each
+        // mapped to the charges it can load. Ancillary reps are low slot;
+        // smartbombs/neuts take none, so `compatible_charges` is empty for them.
+        let mut weapon_charges: HashMap<i64, Vec<i64>> = HashMap::new();
+        for it in fit.items.iter().filter(|i| i.slot == SlotKind::High) {
+            if weapon_charges.contains_key(&it.type_id) {
+                continue;
+            }
+            let charges = sde
+                .compatible_charges(it.type_id)
+                .map_err(|e| e.to_string())?;
+            if !charges.is_empty() {
+                weapon_charges.insert(it.type_id, charges.into_iter().map(|(id, _)| id).collect());
             }
         }
-        let stats = simulate_fit(
-            &sde, &dir, &probe, &lookup, None, None, None, None, None, None, None,
-            None, // factor_reload (#871)
-        )?;
-        let dps = stats
-            .dps
-            .as_ref()
-            .map(|d| d.turret + d.missile)
-            .unwrap_or(0.0);
-        let wr = stats
-            .weapon_ranges
+        if weapon_charges.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let cargo: Vec<i64> = fit
+            .items
             .iter()
-            .find(|w| w.charge_type_id == Some(ammo));
-        rows.push(AmmoRow {
-            type_id: ammo,
-            name: sde.type_name_or_id(ammo),
-            dps,
-            optimal: wr.map(|w| w.optimal).unwrap_or(0.0),
-            falloff: wr.map(|w| w.falloff).unwrap_or(0.0),
-            tracking: wr.map(|w| w.tracking).unwrap_or(0.0),
+            .filter(|i| i.slot == SlotKind::Cargo)
+            .map(|i| i.type_id)
+            .collect();
+        let sets: Vec<Vec<i64>> = weapon_charges.values().cloned().collect();
+        let candidates = cargo_ammo_candidates(&sets, &cargo);
+
+        let mut rows = Vec::with_capacity(candidates.len());
+        for ammo in candidates {
+            // Load this ammo into every high-slot weapon that can take it.
+            let mut probe = fit.clone();
+            for item in probe.items.iter_mut().filter(|i| i.slot == SlotKind::High) {
+                if weapon_charges
+                    .get(&item.type_id)
+                    .is_some_and(|cs| cs.contains(&ammo))
+                {
+                    item.charge_type_id = Some(ammo);
+                }
+            }
+            let stats = simulate_fit(
+                &sde, &dir, &probe, &lookup, None, None, None, None, None, None, None,
+                None, // factor_reload (#871)
+            )?;
+            let dps = stats
+                .dps
+                .as_ref()
+                .map(|d| d.turret + d.missile)
+                .unwrap_or(0.0);
+            let wr = stats
+                .weapon_ranges
+                .iter()
+                .find(|w| w.charge_type_id == Some(ammo));
+            rows.push(AmmoRow {
+                type_id: ammo,
+                name: sde.type_name_or_id(ammo),
+                dps,
+                optimal: wr.map(|w| w.optimal).unwrap_or(0.0),
+                falloff: wr.map(|w| w.falloff).unwrap_or(0.0),
+                tracking: wr.map(|w| w.tracking).unwrap_or(0.0),
+            });
+        }
+        rows.sort_by(|a, b| {
+            b.dps
+                .partial_cmp(&a.dps)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
-    }
-    rows.sort_by(|a, b| {
-        b.dps
-            .partial_cmp(&a.dps)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    Ok(rows)
+        Ok(rows)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -2267,6 +2322,18 @@ mod tests {
         assert_eq!(parse_qty("II"), None);
         assert_eq!(parse_qty("Warrior"), None);
         assert_eq!(parse_qty(""), None);
+    }
+
+    #[test]
+    fn parse_item_line_only_splits_on_a_standalone_x() {
+        // "Onyx 1" must not lose its "x" ("Ony" + qty 1 → dropped line).
+        assert_eq!(parse_item_line("Onyx 1"), Some(("Onyx".into(), 1)));
+        assert_eq!(parse_item_line("Onyx x3"), Some(("Onyx".into(), 3)));
+        assert_eq!(parse_item_line("Onyx"), Some(("Onyx".into(), 1)));
+        assert_eq!(
+            parse_item_line("Hobgoblin II X5"),
+            Some(("Hobgoblin II".into(), 5))
+        );
     }
 
     #[test]

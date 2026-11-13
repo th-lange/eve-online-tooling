@@ -119,8 +119,7 @@ pub struct Fit {
 #[serde(rename_all = "camelCase")]
 pub enum Severity {
     Error,
-    /// Non-blocking advisory (e.g. a soft cap); emitted as the engine grows.
-    #[allow(dead_code)]
+    /// Non-blocking advisory (e.g. the skill basis fell back to all-V).
     Warning,
 }
 

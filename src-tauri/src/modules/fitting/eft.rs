@@ -51,6 +51,8 @@ pub struct ParsedModule {
     pub empty_slot: Option<SlotKind>,
     /// The mutaplasmid roll on the line right beneath this module, if any.
     pub mutation: Option<ParsedMutation>,
+    /// The line carried the ` /OFFLINE` suffix (pyfa/EFT's offline marker).
+    pub offline: bool,
 }
 
 /// A trailing line with an `xN` count — a drone or cargo item (disambiguated by
@@ -109,6 +111,19 @@ fn split_quantity(line: &str) -> Option<(&str, i32)> {
     (!name.is_empty() && qty > 0).then_some((name, qty))
 }
 
+/// Split a trailing ` /OFFLINE` (case-insensitive) off a module line.
+fn strip_offline(line: &str) -> (&str, bool) {
+    const SUFFIX: &str = "/OFFLINE";
+    let split = line.len().saturating_sub(SUFFIX.len());
+    // `get` is None when `split` lands mid-codepoint, so this never panics.
+    if let (Some(head), Some(tail)) = (line.get(..split), line.get(split..)) {
+        if tail.eq_ignore_ascii_case(SUFFIX) && head.ends_with(char::is_whitespace) {
+            return (head.trim_end(), true);
+        }
+    }
+    (line, false)
+}
+
 /// Parse a mutation line — `<mutaplasmid name>: <attr1> <value1>, <attr2>
 /// <value2>, …` — into `(name, [(attr, value), …])`, or `None` if the line
 /// doesn't have that shape. Strict on purpose: a false positive would eat an
@@ -125,6 +140,11 @@ fn parse_mutation_line(line: &str) -> Option<(String, Vec<(String, f64)>)> {
             let (attr, value) = part.trim().rsplit_once(' ')?;
             let attr = attr.trim();
             let value: f64 = value.trim().parse().ok()?;
+            // `NaN`/`inf` parse as f64 but would poison attribute math and the
+            // `partial_cmp().unwrap()` sorts downstream.
+            if !value.is_finite() {
+                return None;
+            }
             (!attr.is_empty()).then_some((attr.to_string(), value))
         })
         .collect::<Option<Vec<_>>>()?;
@@ -174,9 +194,13 @@ pub fn parse_eft(text: &str) -> Result<ParsedEft, EftError> {
                 charge: None,
                 empty_slot: empty_slot_kind(word).or(Some(SlotKind::High)),
                 mutation: None,
+                offline: false,
             });
             continue;
         }
+        // Trailing ` /OFFLINE` marks an offline module; strip it so the name
+        // still resolves. (Never present on drone/cargo `xN` lines.)
+        let (line, offline) = strip_offline(line);
         // `Name xN` → drone/cargo extra.
         if let Some((name, qty)) = split_quantity(line) {
             extras.push(ParsedExtra {
@@ -207,6 +231,7 @@ pub fn parse_eft(text: &str) -> Result<ParsedEft, EftError> {
             charge,
             empty_slot: None,
             mutation,
+            offline,
         });
     }
 
@@ -228,8 +253,14 @@ pub fn format_eft(fit: &ParsedEft) -> String {
         for m in &fit.modules {
             match (&m.empty_slot, &m.charge) {
                 (Some(slot), _) => out.push_str(&format!("[Empty {} slot]\n", slot_word(*slot))),
-                (None, Some(charge)) => out.push_str(&format!("{}, {}\n", m.name, charge)),
-                (None, None) => out.push_str(&format!("{}\n", m.name)),
+                (None, Some(charge)) => out.push_str(&format!("{}, {}", m.name, charge)),
+                (None, None) => out.push_str(&m.name),
+            }
+            if m.empty_slot.is_none() {
+                if m.offline {
+                    out.push_str(" /OFFLINE");
+                }
+                out.push('\n');
             }
             if let Some(mutation) = &m.mutation {
                 let attrs = mutation
@@ -335,6 +366,28 @@ Barrage S x500\n";
         let text = format_eft(&fit);
         // Re-parsing the serialized form yields the same structure.
         assert_eq!(parse_eft(&text).unwrap(), fit);
+    }
+
+    #[test]
+    fn parses_offline_suffix_and_round_trips_it() {
+        let fit = parse_eft(
+            "[Rifter, t]\n\nDamage Control II /OFFLINE\n200mm AutoCannon II, Barrage S /offline\n1MN Afterburner II\n",
+        )
+        .unwrap();
+        assert_eq!(fit.modules[0].name, "Damage Control II");
+        assert!(fit.modules[0].offline);
+        assert_eq!(fit.modules[1].name, "200mm AutoCannon II");
+        assert_eq!(fit.modules[1].charge.as_deref(), Some("Barrage S"));
+        assert!(fit.modules[1].offline);
+        assert!(!fit.modules[2].offline);
+        assert_eq!(parse_eft(&format_eft(&fit)).unwrap(), fit);
+    }
+
+    #[test]
+    fn mutation_line_rejects_non_finite_values() {
+        assert_eq!(parse_mutation_line("Mut: cpu NaN"), None);
+        assert_eq!(parse_mutation_line("Mut: cpu inf, power 1"), None);
+        assert!(parse_mutation_line("Mut: cpu 1.5").is_some());
     }
 
     #[test]

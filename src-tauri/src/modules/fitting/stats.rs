@@ -1752,8 +1752,16 @@ pub(crate) fn simulate_fit(
         abyssal_weather,
         spool_pct.unwrap_or(1.0).clamp(0.0, 1.0),
         factor_reload.unwrap_or(false),
-    )
-    .ok();
+    );
+    // A dogma failure used to vanish via `.ok()`, leaving an all-`None` panel
+    // with no explanation (#1188). Keep the fallback stats but report why.
+    let (dogma, dogma_error) = match dogma {
+        Ok(d) => (Some(d), None),
+        Err(e) => {
+            eprintln!("fitting: dogma simulation failed: {e}");
+            (None, Some(e))
+        }
+    };
 
     // Classify any EW projected onto the fit (#265) — presence only.
     let projected_ew = classify_projected_ew(sde, fit);
@@ -1763,10 +1771,19 @@ pub(crate) fn simulate_fit(
             .as_ref()
             .map(|d| d.resources.clone())
             .unwrap_or(base_resources),
-        validation: dogma
-            .as_ref()
-            .map(|d| d.validation.clone())
-            .unwrap_or(base_validation),
+        validation: match (&dogma, dogma_error) {
+            (Some(d), _) => d.validation.clone(),
+            (None, Some(e)) => {
+                let mut v = base_validation;
+                v.push(FitProblem {
+                    severity: Severity::Error,
+                    message: format!("Couldn't compute stats: {e}"),
+                    item_index: None,
+                });
+                v
+            }
+            (None, None) => base_validation,
+        },
         capacitor: dogma.as_ref().map(|d| d.capacitor.clone()),
         tank: dogma.as_ref().map(|d| d.tank.clone()),
         dps: dogma.as_ref().map(|d| d.dps.clone()),

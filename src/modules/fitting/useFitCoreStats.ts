@@ -10,6 +10,7 @@ import {
   type WeaponRange,
 } from "../../lib/api";
 import { fittingKeys } from "../../lib/queryKeys";
+import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import type { FitStateSlice } from "./useFitCoreState";
 import type { FitContext } from "./fitHelpers";
 
@@ -76,10 +77,12 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
   );
   const nameOf = (id: number) => nameMap.get(id) ?? `#${id}`;
 
-  const fitKey = useMemo(() => (fit ? JSON.stringify(fit) : ""), [fit]);
-  const stats = useQuery({
-    queryKey: fittingKeys.simulate(
-      fitKey,
+  // Every simulate rebuilds the dogma context, so a slider drag or number-field
+  // keystroke must not fire one per tick: debounce all simulate inputs together
+  // so the query key only moves once the edit settles (#1189).
+  const simInputs = useMemo(
+    () => ({
+      fit,
       skillSource,
       neutGjs,
       targetProfile,
@@ -88,23 +91,63 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
       abyssalWeather,
       spoolPct,
       factorReload,
+    }),
+    [
+      fit,
+      skillSource,
+      neutGjs,
+      targetProfile,
+      fleetBoosts,
+      environmentEffect,
+      abyssalWeather,
+      spoolPct,
+      factorReload,
+    ],
+  );
+  const debounced = useDebouncedValue(simInputs, 150);
+  // A different hull (or the first fit) isn't an incremental edit: query it
+  // right away instead of showing the previous hull's numbers for the delay.
+  const sim =
+    debounced.fit?.shipTypeId === fit?.shipTypeId ? debounced : simInputs;
+  const simFit = sim.fit;
+  const fitKey = useMemo(
+    () => (simFit ? JSON.stringify(simFit) : ""),
+    [simFit],
+  );
+  const stats = useQuery({
+    queryKey: fittingKeys.simulate(
+      fitKey,
+      sim.skillSource,
+      sim.neutGjs,
+      sim.targetProfile,
+      sim.fleetBoosts,
+      sim.environmentEffect,
+      sim.abyssalWeather,
+      sim.spoolPct,
+      sim.factorReload,
     ),
-    queryFn: fit
+    queryFn: simFit
       ? () =>
           fittingSimulate(
-            fit,
-            skillSource,
+            simFit,
+            sim.skillSource,
             undefined,
-            neutGjs,
-            targetProfile,
-            fleetBoosts.length > 0 ? fleetBoosts : undefined,
-            environmentEffect,
-            abyssalWeather,
-            spoolPct,
-            factorReload,
+            sim.neutGjs,
+            sim.targetProfile,
+            sim.fleetBoosts.length > 0 ? sim.fleetBoosts : undefined,
+            sim.environmentEffect,
+            sim.abyssalWeather,
+            sim.spoolPct,
+            sim.factorReload,
           )
       : undefined,
-    enabled: fit != null,
+    enabled: simFit != null,
+    // Keep the previous numbers on screen (dimmed by StatsAside) while the next
+    // result computes — but only for the same hull: another ship's layout and
+    // slot counts must never stand in for this one's.
+    meta: { shipTypeId: simFit?.shipTypeId },
+    placeholderData: (prev, prevQuery) =>
+      prevQuery?.meta?.shipTypeId === simFit?.shipTypeId ? prev : undefined,
   });
   // The jammed view only applies while ECM is actually projected onto the fit.
   const jammedActive = jammed && !!stats.data?.projectedEw?.some((t) => t.jam);

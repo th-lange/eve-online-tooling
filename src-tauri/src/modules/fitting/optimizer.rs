@@ -177,11 +177,8 @@ pub(super) fn new_module(type_id: i64, slot: SlotKind, index: i32) -> FitItem {
 /// Append `count` copies of weapon type `tid` to the fit's high slots (active, no
 /// charge), indexed after any existing high-slot modules — a uniform rack.
 pub(super) fn add_weapons(fit: &mut Fit, tid: i64, count: i64) {
-    let start = fit
-        .items
-        .iter()
-        .filter(|i| i.slot == SlotKind::High)
-        .count() as i32;
+    // One past the highest index, not the count: a fit with gaps would collide.
+    let start = super::commands::next_slot_index(&fit.items, SlotKind::High);
     for k in 0..count {
         fit.items
             .push(new_module(tid, SlotKind::High, start + k as i32));
@@ -703,7 +700,7 @@ impl<'a> SearchCtx<'a> {
             }
             let cap = slot_capacity(&self.layout, *slot);
             while (fit.items.iter().filter(|i| i.slot == *slot).count() as i64) < cap {
-                let index = fit.items.iter().filter(|i| i.slot == *slot).count() as i32;
+                let index = super::commands::next_slot_index(&fit.items, *slot);
                 let mut best: Option<(i64, f64)> = None;
                 for &tid in cands {
                     if !self.unique_ok(fit, tid, None) {
