@@ -16,8 +16,10 @@ import {
   dpsSetPlaybackSpeed,
   errorMessage,
   onDpsBuckets,
-  onDpsDone,
   onDpsEvents,
+  onDpsPlaybackBuckets,
+  onDpsPlaybackDone,
+  onDpsPlaybackEvents,
   type DpsBucket,
   type DpsEvent,
   type DpsExtractionPlan,
@@ -28,6 +30,7 @@ import { mergeListenerCharacters } from "../../lib/listenerCharacters";
 import { authKeys } from "../../lib/queryKeys";
 import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { useEveLogDir } from "../../lib/useEveLogDir";
+import { useFightOverlay } from "../pvp/fightOverlayContext";
 import { usePersistentState } from "../../lib/usePersistentState";
 import {
   LOG_BUFFER,
@@ -87,6 +90,18 @@ export function useDpsPlaybackState() {
   // so a log segment and a chart bucket can never drift apart.
   const logEvents = useMemo(() => buckets.flatMap((b) => b.events), [buckets]);
   const [mode, setMode] = useState<Mode>("live");
+  // Live capture and playback are independent backend loops on separate
+  // channels (#1175); the meter shows only the feed matching its mode, and
+  // live data unless the meter's own Stop detached it (the overlay may keep
+  // the backend loop running after that).
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const liveOnRef = useRef(true);
+  const acceptsFeed = (feed: Mode) =>
+    modeRef.current === feed && (feed === "playback" || liveOnRef.current);
+  const { enabled: overlayEnabled } = useFightOverlay();
+  const overlayEnabledRef = useRef(overlayEnabled);
+  overlayEnabledRef.current = overlayEnabled;
   const [logs, setLogs] = useState<DpsLogFile[]>([]);
   const [file, setFile] = useState("");
   const [speed, setSpeed] = useState(4);
@@ -206,8 +221,8 @@ export function useDpsPlaybackState() {
   // hidden so it doesn't re-render in the background.
   useEffect(() => {
     let cancelled = false;
-    let unlisten: (() => void) | undefined;
-    onDpsEvents((batch) => {
+    const unlisten: (() => void)[] = [];
+    const handle = (batch: DpsEvent[]) => {
       if (cancelled) return;
       if (!activeRef.current) {
         const buf = bufferedEventsRef.current;
@@ -216,13 +231,21 @@ export function useDpsPlaybackState() {
         return;
       }
       setPendingEvents((prev) => appendEvents(prev, batch, LOG_BUFFER));
-    }).then((u) => {
-      if (cancelled) u();
-      else unlisten = u;
-    });
+    };
+    for (const [feed, subscribe] of [
+      ["live", onDpsEvents],
+      ["playback", onDpsPlaybackEvents],
+    ] as const) {
+      subscribe((batch) => {
+        if (acceptsFeed(feed)) handle(batch);
+      }).then((u) => {
+        if (cancelled) u();
+        else unlisten.push(u);
+      });
+    }
     return () => {
       cancelled = true;
-      unlisten?.();
+      unlisten.forEach((u) => u());
     };
   }, []);
 
@@ -237,21 +260,29 @@ export function useDpsPlaybackState() {
     // bare `unlisten?.()` would then be a no-op and the old listener leaks,
     // duplicating every bucket (the half-width chart + doubled log lines).
     let cancelled = false;
-    let unlisten: (() => void) | undefined;
-    onDpsBuckets((batch) => {
+    const unlisten: (() => void)[] = [];
+    const handle = (batch: DpsBucket[]) => {
       if (cancelled) return;
       if (!activeRef.current) {
         bufferedBucketsRef.current.push(...batch);
         return;
       }
       setBuckets((prev) => appendBuckets(prev, batch));
-    }).then((u) => {
-      if (cancelled) u();
-      else unlisten = u;
-    });
+    };
+    for (const [feed, subscribe] of [
+      ["live", onDpsBuckets],
+      ["playback", onDpsPlaybackBuckets],
+    ] as const) {
+      subscribe((batch) => {
+        if (acceptsFeed(feed)) handle(batch);
+      }).then((u) => {
+        if (cancelled) u();
+        else unlisten.push(u);
+      });
+    }
     return () => {
       cancelled = true;
-      unlisten?.();
+      unlisten.forEach((u) => u());
     };
   }, []);
 
@@ -276,7 +307,7 @@ export function useDpsPlaybackState() {
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    onDpsDone(() => {
+    onDpsPlaybackDone(() => {
       if (cancelled) return;
       setRunning(false);
       const p = loopParamsRef.current;
@@ -339,6 +370,7 @@ export function useDpsPlaybackState() {
     bufferedBucketsRef.current = [];
     setPendingEvents([]);
     try {
+      liveOnRef.current = true;
       await dpsStart({
         gamelogsDir: dir,
         extractionPlan: extractionPlan ?? undefined,
@@ -357,7 +389,14 @@ export function useDpsPlaybackState() {
       pausedAtRef.current = lastBucketEnd;
       setSeekPos(lastBucketEnd);
     }
-    await dpsStop();
+    if (mode === "live") {
+      liveOnRef.current = false;
+      // The fight overlay's detection runs on the same live capture: only
+      // end the backend loop when nothing else needs it.
+      if (!overlayEnabledRef.current) await dpsStop("live");
+    } else {
+      await dpsStop("playback");
+    }
     setRunning(false);
     setPaused(false);
   }
@@ -427,7 +466,7 @@ export function useDpsPlaybackState() {
     setSeekPos(ts);
     pausedAtRef.current = ts;
     if (running) {
-      void dpsStop();
+      void dpsStop("playback");
       setRunning(false);
     }
     setPaused(false);

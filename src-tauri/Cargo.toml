@@ -63,7 +63,7 @@ semver = "1.0.28"
 extism = "1.30.0"
 parking_lot = "0.12.5"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std", "tracing-log"] }
 rhai = { version = "1.25", features = ["sync", "serde"] }
 boa_engine = "0.21"
 # Plugin drag-and-drop install (folder or .zip) — extraction only.

@@ -11,8 +11,6 @@ import { errorMessage } from "./api/common";
 export const queryClient = new QueryClient({
   queryCache: new QueryCache({
     onError(error, query) {
-      // Don't record failures from the logs query itself (avoids feedback loop).
-      if (query.queryKey[0] === "logs_list") return;
       logStore.push({
         ts: Date.now(),
         level: "error",

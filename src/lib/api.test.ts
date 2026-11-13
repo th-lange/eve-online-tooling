@@ -187,8 +187,8 @@ describe("api.dpsmeter", () => {
       settings: { gamelogsDir: "/logs/Gamelogs" },
     });
 
-    await dpsStop();
-    expect(invokeMock).toHaveBeenCalledWith("dps_stop");
+    await dpsStop("playback");
+    expect(invokeMock).toHaveBeenCalledWith("dps_stop", { lane: "playback" });
 
     await dpsPlayback({ file: "/logs/a.txt", speed: 4 });
     expect(invokeMock).toHaveBeenCalledWith("dps_playback", {

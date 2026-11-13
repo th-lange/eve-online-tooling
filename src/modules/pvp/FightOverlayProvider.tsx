@@ -13,13 +13,11 @@ import {
   pvpPilotFits,
   onDpsBuckets,
   onDpsSource,
-  onDpsMode,
   dpsStart,
   fittingListLocal,
   fittingSimulate,
   errorMessage,
   type DpsBucket,
-  type DpsCaptureMode,
   type DpsEvent,
   type Fit,
   type WeaponRange,
@@ -43,11 +41,6 @@ import { FightOverlayContext } from "./fightOverlayContext";
 import { isCombatBucket, nextFightBuckets } from "./fightBuckets";
 import { useFightRecorder } from "../recording/useFightRecorder";
 import { useRecording } from "../recording/recordingContext";
-
-/** How long after the capture loop reports "stopped" the overlay waits before
- *  re-claiming live capture (#1175) — long enough for a stop → playback pair
- *  from the DPS Meter to land first. */
-const LIVE_RECLAIM_DELAY_MS = 1500;
 
 /** Metres → compact km/m string. Used in AttackerCard and FightPanel. */
 function km(m: number): string {
@@ -607,9 +600,6 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
   const { recording } = useRecording();
   const reengageSecsRef = useRef(recording.postRollSecs);
   reengageSecsRef.current = recording.postRollSecs;
-  // What the shared capture loop is doing (#1175): the DPS Meter's replays
-  // arrive on the same channels as live combat and must not feed detection.
-  const captureModeRef = useRef<DpsCaptureMode>("live");
 
   useEffect(() => {
     if (!enabled) {
@@ -620,7 +610,7 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     }
     let cancelled = false;
     onDpsBuckets((batch) => {
-      if (!cancelled && captureModeRef.current !== "playback") {
+      if (!cancelled) {
         setFightBuckets((prev) =>
           batch.reduce(
             (acc, b) => nextFightBuckets(acc, b, reengageSecsRef.current),
@@ -666,11 +656,10 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
 
   // Auto-run a background live capture whenever the overlay is on, so combat
   // is always detected without opening the DPS meter first. `dps_start` seeks
-  // to the current end of the newest gamelog and is generation-guarded, so
-  // this simply (re)claims the shared tail. We (re)start once per enable and
-  // when the folder changes — and again whenever the loop is stopped or a
-  // replay finishes (#1175: the DPS Meter's Stop/Play/scrub end whatever loop
-  // is running, which would otherwise leave detection silently dead).
+  // to the current end of the newest gamelog and is generation-guarded. We
+  // (re)start once per enable and when the folder changes. The DPS Meter's
+  // replays run in a separate backend lane on their own channels (#1175), so
+  // its Stop/Play/scrub can neither end this capture nor feed this overlay.
   const [gamelogsDir] = useEveLogDir("gamelogs");
   const startedDirRef = useRef<string | null>(null);
   const claimLiveCapture = useCallback((dir: string) => {
@@ -689,38 +678,6 @@ export function FightOverlayProvider({ children }: { children: ReactNode }) {
     if (!gamelogsDir || startedDirRef.current === gamelogsDir) return;
     startedDirRef.current = gamelogsDir;
     claimLiveCapture(gamelogsDir);
-  }, [enabled, gamelogsDir, claimLiveCapture]);
-
-  useEffect(() => {
-    if (!enabled || !gamelogsDir) return;
-    let cancelled = false;
-    let reclaimTimer: number | null = null;
-    let unlisten: (() => void) | null = null;
-    onDpsMode((mode) => {
-      if (cancelled) return;
-      captureModeRef.current = mode;
-      if (reclaimTimer !== null) {
-        window.clearTimeout(reclaimTimer);
-        reclaimTimer = null;
-      }
-      if (mode === "stopped") {
-        // Debounced: the meter's scrub/loop sends stop → playback in quick
-        // succession, and re-claiming live in between would kill that replay.
-        reclaimTimer = window.setTimeout(() => {
-          reclaimTimer = null;
-          claimLiveCapture(gamelogsDir);
-        }, LIVE_RECLAIM_DELAY_MS);
-      }
-    }).then((fn) => {
-      if (cancelled) fn();
-      else unlisten = fn;
-    });
-    return () => {
-      cancelled = true;
-      if (reclaimTimer !== null) window.clearTimeout(reclaimTimer);
-      unlisten?.();
-      captureModeRef.current = "live";
-    };
   }, [enabled, gamelogsDir, claimLiveCapture]);
 
   const latestBucket = fightBuckets[fightBuckets.length - 1];

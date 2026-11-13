@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { logStore, type LogLevel } from "./logStore";
 import { errorMessage } from "./api/common";
+import { logsList, type BackendLogEntry } from "./api/logs";
 
 function args2msg(args: unknown[]): string {
   return args
@@ -14,7 +15,8 @@ function args2msg(args: unknown[]): string {
  * Install global error interceptors. Call once before React mounts.
  * - Wraps console.error / console.warn so existing callers are unaffected.
  * - Listens for window `error` and `unhandledrejection` (additively).
- * - Subscribes to the Tauri `logs://entry` event for backend entries.
+ * - Subscribes to the Tauri `logs://entry` event for backend entries, then
+ *   backfills what the backend captured before the subscription existed.
  */
 export function initLogCapture(): void {
   const origError = console.error.bind(console);
@@ -65,23 +67,21 @@ export function initLogCapture(): void {
     });
   });
 
-  // Receive backend WARN/ERROR records in real-time.
-  listen<BackendEntry>("logs://entry", (event) => {
-    const p = event.payload;
+  // Receive backend WARN/ERROR records in real-time. The store dedups by
+  // backend id, so the backfill below may overlap the live stream freely.
+  const pushBackend = (p: BackendLogEntry) =>
     logStore.push({
       ts: p.ts,
       level: p.level as LogLevel,
       source: "backend",
       target: p.target,
       message: p.message,
+      backendId: p.id,
     });
-  }).catch(origError);
-}
-
-interface BackendEntry {
-  id: number;
-  ts: number;
-  level: string;
-  target: string;
-  message: string;
+  listen<BackendLogEntry>("logs://entry", (event) => pushBackend(event.payload))
+    // Subscribe first, then backfill: anything emitted before the listener
+    // existed (startup warnings) is only in the backend's ring buffer.
+    .then(() => logsList())
+    .then((list) => list.forEach(pushBackend))
+    .catch(origError);
 }
