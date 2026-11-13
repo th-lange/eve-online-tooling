@@ -38,7 +38,7 @@ pure-frontend commands (`vite`, `vitest`) do not.
 
 ## Prerequisites
 
-- **Node** (used 26) and npm.
+- **Node** `^20.19.0 || >=22.12.0` (`engines`; we use 26) and npm.
 - **Rust** toolchain via rustup; `cargo` must be on `PATH` (`. "$HOME/.cargo/env"`).
 - **Linux system libs** for the WebView/build (without these `cargo` fails at `glib-sys`/`webkit`):
   ```
@@ -49,12 +49,12 @@ pure-frontend commands (`vite`, `vitest`) do not.
   at build time via `EVE_TOOLING_FIREBASE_PROJECT_ID` / `EVE_TOOLING_FIREBASE_API_KEY`. A build
   without them disables sending and falls back to a prefilled GitHub issue, which is what dev
   builds do — see `docs/feedback.md`.
-- **EVE developer application** (needed once SSO lands, issue #3): register at
-  https://developers.eveonline.com for a **Client ID**, set the callback to the app's loopback
-  `http://localhost:8765/callback`, scopes `publicData`, `esi-assets.read_assets.v1`,
-  `esi-characters.read_blueprints.v1`, `esi-universe.read_structures.v1`
-  (resolves player-structure names in Assets). Native PKCE flow — no client secret.
-  **Re-login** after enabling newly added scopes so the SSO grant picks them up.
+- **EVE developer application** (SSO): the app hard-codes its public **Client ID**
+  (`CLIENT_ID` in `src-tauri/src/esi/oauth_exchange.rs`; native PKCE, no client secret) with the
+  loopback callback `http://localhost:8765/callback`. The requested scopes are the `SCOPES` list in
+  that file; every one must also be enabled on the registered application or SSO rejects the login.
+  Only a fork using its own application has to register its own Client ID. **Re-login** after a
+  newly added scope so the SSO grant picks it up.
 
 ## Architecture
 
@@ -80,7 +80,7 @@ so the UI wires itself up.
   - `util/` — cross-cutting helpers (`time`: epoch-now, civil-date math, RFC-3339 parsing)
   - `lists.rs` — shared persisted type-id lists (blacklist/favorites) reused across modules
   - `evescout` — EVE-Scout public Thera/Turnur wormhole connections
-- `modules/` — the feature modules (25 today: production, trading, fitting, wormholes, PI, the DPS
+- `modules/` — the feature modules (30+ today: production, trading, fitting, wormholes, PI, the DPS
   meter, feedback, …), each exposing its own commands. See `src/modules/registry.ts` for the full list. The
   mapping to `src/modules/registry.ts` entries isn't strictly 1:1: some frontend modules are views
   over a shared service (`universe` → `sde`, `market-search` → `market`), some frontend modules
@@ -94,7 +94,7 @@ so the UI wires itself up.
 - `modules/registry.ts` — the list of feature modules (id, title, description, page component).
 - `modules/<feature>/` — each module's pages/components/hooks (e.g. `production/ProductionPage.tsx`).
 - `components/` — shared UI (`Layout` = registry-driven sidebar shell; `BridgeStatus` = `invoke` health).
-- `lib/api.ts` — typed wrappers over `invoke` (components depend on this, not raw command strings).
+- `lib/api/` — typed wrappers over `invoke`, one file per domain plus `generated/` tauri-specta bindings (components depend on this, not raw command strings).
 - `lib/queryClient.ts` — shared TanStack Query client.
 
 Styling is Tailwind v4 via `@tailwindcss/vite` (`@import "tailwindcss"` in `src/index.css`). Tests are
@@ -115,9 +115,9 @@ Vitest (jsdom), config in `vite.config.ts`, setup in `src/test/setup.ts`. To tes
 - **SSO**: OAuth2 PKCE against `login.eveonline.com/v2/oauth/{authorize,token}`; access token is a JWT
   (parse `character_id`/name); refresh token stored in the OS keychain via the `keyring` crate.
 - **Profit / EIV** (per blueprint, ME, runs):
-  - `required_qty(mat) = max(runs, ceil(base_qty * runs * (1 - ME/100)))` (min 1 per run)
+  - `required_qty(mat) = max(runs, ceil(base_qty * runs * (1 - ME/100) * me_bonus))` (min 1 per run; `required_quantity`)
   - `material_cost = Σ required_qty * price(mat)` using a configurable price vector
-  - `job_fee = (Σ base_qty * adjusted_price) * system_cost_index * (1 + facility_tax)`
+  - `job_fee = EIV * (system_cost_index * (1 − cost_bonus) + facility_tax + scc_surcharge)` (`job_fee` in `modules/production/engine.rs`)
   - `profit = product_qty * product_price − material_cost − job_fee`; also margin % and per-unit
   - **T2** adds invention EV: `invention_cost / (success_probability × runs_per_success)` (#9).
   - **T3/reactions** use a recursive build-vs-buy BOM (#10). Keep the engine **activity-aware and
@@ -150,7 +150,7 @@ code comments, and docs — never use one where another is meant:
 - Keep the Rust core well-commented — the maintainer is fluent in C#/Python/TS, newer to Rust.
 - New cross-cutting capability → a shared service; feature-specific logic → a module. Don't reach
   around the service layer from a module.
-- Expose frontend↔Rust calls through `lib/api.ts`, not inline `invoke("name")`.
+- Expose frontend↔Rust calls through `lib/api/`, not inline `invoke("name")`.
 - Tauri command naming: every command a module exposes uses one stable prefix unique to that
   module (e.g. `orders_*`, `trading_*`, `accounting_*`, `localintel_*`, `intel_*`, `route_*`,
   `appraisal_*`, `notifications_*`, `feedback_*`). Shared-service prefixes (`market_`, `sde_`, `auth_`, `esi_`) are

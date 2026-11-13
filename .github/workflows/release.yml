@@ -40,7 +40,7 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # The tag must match the version the binaries are built with, or every
       # user is told "update available" forever (the update check compares the
@@ -97,7 +97,7 @@ jobs:
             libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
             pkg-config patchelf
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26
           cache: npm
@@ -107,7 +107,7 @@ jobs:
           toolchain: 1.98.1
           targets: ${{ matrix.rust-targets }}
 
-      - uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: "./src-tauri -> target"
           # Restore the release-mode dependency cache built on main by the
@@ -121,8 +121,7 @@ jobs:
         run: npm ci
 
       # No code signing: see the "Why builds are unsigned" note in the notes
-      # job below and in the README. Not revisiting this without a sane-cost
-      # path for non-US/CA/EU/UK developers.
+      # job below and SIGNING.md (the single source for the rationale).
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -183,7 +182,7 @@ jobs:
             echo
             echo "### Why unsigned"
             echo
-            echo "Code signing is not available to developers outside North America at a reasonable price. Microsoft's Authenticode (with enough reputation to skip SmartScreen) and Apple's notarization both gate their cert/identity requirements behind verification and fees that effectively exclude non-North-American independent developers. This is a free hobby project — it ships unsigned rather than pay a screening tollbooth that isn't offered on fair terms outside the US/Canada. Build from source if you'd rather not click through the warning."
+            echo "Public-Trust code signing needs identity validation that is only offered to organizations in the US/CA/EU/UK and to individuals in the US/CA, and Apple's Developer ID is a recurring fee; for a free hobby project that is not worth paying just to dodge a dialog. See [SIGNING.md](https://github.com/th-lange/eve-online-tooling/blob/main/SIGNING.md) for the full reasoning. Build from source if you'd rather not click through the warning."
           } > notes.md
           gh release edit "$TAG" --repo "$REPO" --notes-file notes.md
 

@@ -99,13 +99,8 @@ warn on first launch. That's expected and safe to bypass:
 - **Windows** — SmartScreen: **More info → Run anyway**.
 - **Linux** — no prompt.
 
-Signing a Windows Public-Trust cert (the only kind that suppresses SmartScreen)
-requires identity validation available only to companies in the US/CA/EU/UK - 
-and to individuals in US / CA. As I am not a company - I simply can not sign it
-until I am willing to pay roughly 250$ a year... Apple is a similar story:
-Apple's Developer ID is a recurring fee — neither is worth it to dodge a dialog on
-a free tool. The full reasoning is in [`SIGNING.md`](SIGNING.md); it's a
-deliberate, closed decision, not a TODO.
+Why the builds are unsigned is a deliberate, closed decision, not a TODO — the
+full reasoning is in [`SIGNING.md`](SIGNING.md).
 
 ## Build from source & contribute
 

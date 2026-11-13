@@ -66,7 +66,7 @@ cap (below) is far less likely to matter.
 >
 > On Linux, `play_sound` needs GStreamer's system plugins. If you launched the
 > app from a **snap** terminal and hear nothing (`GStreamer element appsink not
-> found`), see the audio troubleshooting note in the README — the snap's env
+> found`), see the audio troubleshooting note in [development.md](development.md) — the snap's env
 > hides the system plugins from the WebView.
 
 The editor autocompletes these functions (and their signatures) as you type, so

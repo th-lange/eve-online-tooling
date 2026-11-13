@@ -4,8 +4,15 @@ name: CI
 # runs on tags, so without this nothing verified a change before it merged —
 # a PR could land with broken tests and only surface at release time.
 #
-# Kept Linux-only to conserve Actions minutes. Lint gates (clippy -D warnings,
-# rustfmt --check) are live in the jobs below.
+# Kept Linux-only to conserve Actions minutes. That is NOT "platform-independent":
+# cfg-gated Windows/macOS code (e.g. modules/recording/commands.rs,
+# modules/scripts/engine.rs, webview_cache.rs, mcp/mod.rs) is only compiled on
+# those platforms by warm-release-cache.yml after merge and by release.yml at
+# tag time. Lint gates (clippy -D warnings, rustfmt --check) are live below.
+#
+# The `bundle` job runs `tauri build` on Linux, but only for release PRs
+# (`chore/v*`) and changes to the version/packaging inputs, so the common PR
+# does not pay for a full release build (#1200).
 #
 # No workflow-level `paths-ignore`: both jobs below are required status checks,
 # and a path-filtered workflow never reports them, so a docs-only PR would sit
@@ -27,9 +34,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 26
           cache: npm
@@ -46,9 +53,14 @@ jobs:
       - name: Test
         run: npm run test
 
-      # `npm run build`'s prebuild step regenerates the tauri-specta TS
-      # bindings for the orders module (#589), so this job also needs a Rust
-      # toolchain even though it's frontend-focused.
+      # `tauri build` aborts on a Tauri crate/npm major.minor mismatch, which
+      # otherwise only shows up at tag time (v0.79.0, #1200).
+      - name: Check Tauri crate/npm versions are aligned
+        run: node scripts/check-tauri-versions.mjs
+
+      # This job also needs a Rust toolchain even though it's frontend-focused:
+      # the bindings step below runs `cargo test` to regenerate the tauri-specta
+      # TS bindings (#589). `npm run build` itself does not.
       - name: Install Linux dependencies
         run: |
           sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 update
@@ -61,7 +73,7 @@ jobs:
         with:
           toolchain: 1.98.1
 
-      - uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: "./src-tauri -> target"
           # Only write to the cache on main — PRs read from it but don't write,
@@ -91,7 +103,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install Linux dependencies
         run: |
@@ -106,7 +118,7 @@ jobs:
           toolchain: 1.98.1
           components: rustfmt, clippy
 
-      - uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: "./src-tauri -> target"
           # Only write to the cache on main — PRs read from it but don't write,
@@ -121,3 +133,108 @@ jobs:
 
       - name: Test
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  # Decides whether the (expensive) bundle job runs. Release PRs and anything
+  # touching versions/packaging inputs get a real `tauri build`; everything else
+  # skips it. Kept as its own job so `bundle` can be skipped by `if:` without a
+  # runner, and no workflow-level path filter is needed (see #1199 above).
+  bundle-gate:
+    name: Bundle gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          run=false
+          if [ "$EVENT" = pull_request ]; then
+            case "$HEAD_REF" in chore/v*) run=true ;; esac
+            range="origin/$BASE_REF...HEAD"
+          else
+            range="$BEFORE..HEAD"
+            # New branch / forced push: no usable "before" commit, so be safe.
+            git cat-file -e "$BEFORE^{commit}" 2>/dev/null || run=true
+          fi
+          if [ "$run" = false ]; then
+            if git diff --name-only "$range" | grep -Eq '(^|/)(Cargo\.toml|Cargo\.lock|package\.json|package-lock\.json|tauri\.conf\.json)$'; then
+              run=true
+            fi
+          fi
+          echo "bundle job: run=$run"
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+  bundle:
+    name: Bundle (Linux appimage + deb)
+    needs: bundle-gate
+    if: needs.bundle-gate.outputs.run == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 26
+          cache: npm
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 update
+          sudo apt-get install -y --fix-missing \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+            pkg-config patchelf
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 (2026-10-16)
+        with:
+          toolchain: 1.98.1
+
+      - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: "./src-tauri -> target"
+          # Same release-mode cache the release workflow reads; never written here.
+          shared-key: "release-build"
+          save-if: "false"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build bundles
+        run: npm run tauri build -- --bundles appimage,deb
+
+      # #1140: the AppImage must not ship its own xdg-open (it shadows the
+      # host's and breaks opening links). #1104: bundles must actually exist.
+      - name: Assert bundle contents
+        run: |
+          bundle=src-tauri/target/release/bundle
+          appdir=$(find "$bundle/appimage" -maxdepth 1 -name '*.AppDir' -type d | head -n1)
+          [ -n "$appdir" ] || { echo "::error::no AppDir under $bundle/appimage"; exit 1; }
+          if [ -e "$appdir/usr/bin/xdg-open" ]; then
+            echo "::error::AppDir contains usr/bin/xdg-open (#1140)"
+            exit 1
+          fi
+          ls "$bundle"/deb/*.deb >/dev/null
+
+      # --appimage-extract needs no FUSE, so it runs on a stock runner.
+      - name: Extract the AppImage
+        run: |
+          appimage=$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -name '*.AppImage' | head -n1)
+          [ -n "$appimage" ] || { echo "::error::no .AppImage produced"; exit 1; }
+          chmod +x "$appimage"
+          cd "$RUNNER_TEMP"
+          "$GITHUB_WORKSPACE/$appimage" --appimage-extract >/dev/null
+          test -x squashfs-root/AppRun
+          if [ -e squashfs-root/usr/bin/xdg-open ]; then
+            echo "::error::extracted AppImage contains usr/bin/xdg-open (#1140)"
+            exit 1
+          fi

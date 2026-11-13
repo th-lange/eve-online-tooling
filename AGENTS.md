@@ -14,8 +14,10 @@ Project stack, commands, architecture, and naming conventions live in
   not fast-forward or merge into `main` locally and push.
 - **Run the full check suite locally before every commit** — never rely on CI
   to catch a formatting/lint/test failure. Match what CI runs:
-  `npm run lint`, `npm run format:check`, `npm run test`, `npm run build`, and
-  in `src-tauri`: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+  `npm run lint`, `npm run format:check`, `npm run test`,
+  `node scripts/check-tauri-versions.mjs`, `npm run generate:bindings` (then
+  `git diff --exit-code -- src/lib/api/generated` — CI fails on drift),
+  `npm run build`, and in `src-tauri`: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
   `cargo test`. Auto-fix formatting first with `npx prettier --write .` and
   `cargo fmt`.
 - **Merge with auto-merge, gated on CI:** enable it with
