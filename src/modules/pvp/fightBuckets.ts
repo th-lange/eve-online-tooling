@@ -15,16 +15,22 @@ export function isCombatBucket(b: DpsBucket): boolean {
 /** Overlay bucket-buffer reducer (#986): begin on the first combat bucket,
  *  keep appending while the fight is live (capped at 120 buckets = 10 min,
  *  incl. the final empty wind-down bucket), then freeze after **one empty
- *  bucket** (5 s of silence) — and **stay** frozen, no matter what arrives
- *  next, until the caller explicitly clears the buffer (the panel's Dismiss
- *  button). That only-Dismiss-resets rule is #950: a stray quiet moment
- *  between volleys must never silently throw the collected fight away; on
- *  the 5 s grid a quiet moment is a whole empty bucket, which is also the
- *  freeze signal — so the freeze keeps the fight ON screen, and resumption
- *  only ever starts from a deliberately-cleared slate. Exported for tests. */
+ *  bucket** (5 s of silence) so the panel keeps showing the fight instead of
+ *  scrolling an empty grid.
+ *
+ *  A frozen buffer is not dead (#1173): when a new combat bucket arrives
+ *  - within `reengageSecs` of the frozen tail (the recorder's post-roll), the
+ *    fight resumed — it is appended, so `live` rises again and the recording
+ *    keeps rolling;
+ *  - later than that, it is a new fight — the buffer restarts from it. This
+ *    matters when the earlier burst was NPC-only: the panel never opened, so
+ *    there is nothing to Dismiss, yet a later real PvP attack must still be
+ *    detected.
+ *  Exported for tests. */
 export function nextFightBuckets(
   prev: DpsBucket[],
   bucket: DpsBucket,
+  reengageSecs: number,
 ): DpsBucket[] {
   if (prev.length === 0) {
     return isCombatBucket(bucket) ? [bucket] : prev;
@@ -43,8 +49,13 @@ export function nextFightBuckets(
     }
     return prev;
   }
-  // Already frozen: stays exactly as-is regardless of what arrives.
-  if (!isCombatBucket(prev[prev.length - 1])) return prev;
+  const tail = prev[prev.length - 1];
+  if (!isCombatBucket(tail)) {
+    // Frozen: idle buckets are dropped; combat either resumes the fight
+    // (within the post-roll) or starts a new one.
+    if (!isCombatBucket(bucket)) return prev;
+    if (bucket.start - tail.end > reengageSecs) return [bucket];
+  }
   // Still live (or this is the final empty bucket that freezes it): append.
   return [...prev, bucket].slice(-120);
 }

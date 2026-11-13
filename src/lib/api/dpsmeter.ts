@@ -302,3 +302,17 @@ export function onDpsSource(
 export function onDpsDone(handler: () => void): Promise<UnlistenFn> {
   return listen<void>("dps://done", () => handler());
 }
+
+/** What the shared capture/playback loop is doing (`dps://mode`, #1175). */
+export type DpsCaptureMode = "live" | "playback" | "stopped";
+
+/** Subscribe to capture-mode changes. Playback shares the live channels, so
+ *  consumers that only care about live combat (the fight overlay) use this to
+ *  ignore replays and to notice when the live loop was stopped. */
+export function onDpsMode(
+  handler: (mode: DpsCaptureMode) => void,
+): Promise<UnlistenFn> {
+  return listen<DpsCaptureMode>("dps://mode", (event) =>
+    handler(event.payload),
+  );
+}
