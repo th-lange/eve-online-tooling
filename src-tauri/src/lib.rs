@@ -312,6 +312,7 @@ pub fn run() {
             mcp::mcp_set_dev_tier,
             commands::eve_default_log_dir,
             esi::commands::auth_login,
+            esi::commands::auth_login_cancel,
             esi::commands::auth_characters,
             esi::commands::auth_logout,
             esi::commands::auth_persist_failures,

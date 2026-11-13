@@ -33,6 +33,9 @@ const STRUCTURE_FOUND_TTL_SECS: u64 = 24 * 60 * 60;
 /// (new ACL entry) is picked up within the session.
 const STRUCTURE_DENIED_TTL_SECS: u64 = 30 * 60;
 
+/// `(character, structure)` → remembered lookup and its expiry (epoch secs).
+type StructureCache = HashMap<(i64, i64), (StructureLookup, u64)>;
+
 /// Result of a structure lookup remembered by [`AuthState::structure_cached`].
 #[derive(Clone, Debug, PartialEq)]
 pub enum StructureLookup {
@@ -86,10 +89,10 @@ pub struct AuthState {
     cache: Arc<ConditionalCache>,
     /// Cancel flag of the SSO login currently waiting for its browser redirect
     /// — see [`AuthState::begin_login`].
-    pending_login: Mutex<Option<Arc<AtomicBool>>>,
+    pending_login: Arc<Mutex<Option<Arc<AtomicBool>>>>,
     /// Remembered structure lookups keyed by `(character, structure)`, each
     /// with its expiry (epoch secs) — see [`AuthState::structure_cached`].
-    structures: Mutex<HashMap<(i64, i64), (StructureLookup, u64)>>,
+    structures: Arc<Mutex<StructureCache>>,
     /// SSO token endpoint. Always [`TOKEN_URL`] outside tests; overridable via
     /// [`AuthState::with_token_url`] so tests can point it at a local stub.
     token_url: String,
@@ -136,8 +139,8 @@ impl AuthState {
             persist_failures: Arc::default(),
             persist_notifier: Arc::default(),
             cache: Arc::new(cache),
-            pending_login: Mutex::new(None),
-            structures: Mutex::new(HashMap::new()),
+            pending_login: Arc::new(Mutex::new(None)),
+            structures: Arc::new(Mutex::new(HashMap::new())),
             token_url: TOKEN_URL.to_string(),
             revoke_url: REVOKE_URL.to_string(),
         }
