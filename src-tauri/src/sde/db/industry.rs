@@ -114,9 +114,14 @@ impl Sde {
             let row: Option<(i64, i64)> = self
                 .conn
                 .query_row(
-                    "SELECT typeID, quantity
-                     FROM industryActivityProducts
-                     WHERE activityID = ?1 AND productTypeID = ?2
+                    // Published blueprints only: the SDE keeps unpublished test
+                    // blueprints (e.g. "Test Reaction Blueprint" for Tungsten
+                    // Carbide) that would otherwise win `LIMIT 1` (#1171).
+                    "SELECT iap.typeID, iap.quantity
+                     FROM industryActivityProducts iap
+                     JOIN invTypes bp ON bp.typeID = iap.typeID AND bp.published = 1
+                     WHERE iap.activityID = ?1 AND iap.productTypeID = ?2
+                     ORDER BY iap.typeID
                      LIMIT 1",
                     params![activity_id, product_type_id],
                     |r| Ok((r.get(0)?, r.get(1)?)),
@@ -166,7 +171,8 @@ impl Sde {
         let mut stmt = self.conn.prepare(
             "SELECT iap.typeID, iap.productTypeID, t.typeName, iap.quantity
              FROM industryActivityProducts iap
-             JOIN invTypes t ON t.typeID = iap.productTypeID
+             JOIN invTypes t ON t.typeID = iap.productTypeID AND t.published = 1
+             JOIN invTypes bp ON bp.typeID = iap.typeID AND bp.published = 1
              WHERE iap.activityID = ?1
              ORDER BY t.typeName",
         )?;
@@ -655,6 +661,29 @@ mod tests {
         let sde = fixture();
         // 998 is the T1 inventing BP — nothing invents it.
         assert!(sde.invention_for(998).unwrap().is_none());
+    }
+
+    #[test]
+    fn recipe_for_ignores_unpublished_blueprints() {
+        // Regression for #1171: Tungsten Carbide (16672) is also "produced" by
+        // an unpublished test blueprint with a lower type id; it must lose.
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE invTypes(typeID INT, groupID INT, typeName TEXT, volume REAL, published INT);
+             CREATE TABLE industryActivityProducts(typeID INT, activityID INT, productTypeID INT, quantity INT);
+             CREATE TABLE industryActivityMaterials(typeID INT, activityID INT, materialTypeID INT, quantity INT);
+             INSERT INTO invTypes VALUES
+               (16672, 1, 'Tungsten Carbide', 1.0, 1),
+               (45732, 1, 'Test Reaction Blueprint', 1.0, 0),
+               (46207, 1, 'Tungsten Carbide Reaction Formula', 1.0, 1);
+             INSERT INTO industryActivityProducts VALUES (45732, 11, 16672, 20), (46207, 11, 16672, 10000);",
+        )
+        .unwrap();
+        let sde = Sde::from_connection(conn);
+        let rxn = sde.recipe_for(16672).unwrap().unwrap();
+        assert_eq!(rxn.blueprint_type_id, 46207);
+        assert_eq!(rxn.product_quantity, 10000);
+        assert!(sde.manufacturable_blueprints().unwrap().is_empty());
     }
 
     #[test]

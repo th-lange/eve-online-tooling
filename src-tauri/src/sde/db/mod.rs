@@ -512,7 +512,7 @@ pub(crate) fn test_sde(sql: &str) -> Sde {
 fn fixture() -> Sde {
     test_sde(
         "CREATE TABLE invGroups(groupID INT, categoryID INT, groupName TEXT);
-             CREATE TABLE invTypes(typeID INT, groupID INT, typeName TEXT, volume REAL);
+             CREATE TABLE invTypes(typeID INT, groupID INT, typeName TEXT, volume REAL, published INT);
              CREATE TABLE industryActivityProducts(typeID INT, activityID INT, productTypeID INT, quantity INT);
              CREATE TABLE industryActivityMaterials(typeID INT, activityID INT, materialTypeID INT, quantity INT);
              CREATE TABLE invMetaGroups(metaGroupID INT, metaGroupName TEXT);
@@ -525,14 +525,14 @@ fn fixture() -> Sde {
              INSERT INTO invMetaTypes VALUES (100, NULL, 2);
              INSERT INTO invGroups VALUES (10, 4, 'Widgets'), (18, 4, 'Minerals');
              INSERT INTO invTypes VALUES
-               (100, 10, 'Widget', 5.0),
-               (200, 18, 'Tritanium', 0.01),
-               (300, 18, 'Pyerite', 0.01),
-               (500, 18, 'Datacore - Test', 0.1),
-               (600, 18, 'Composite', 1.0),
-               (998, 10, 'Widget I Blueprint', 0.01),
-               (999, 10, 'Widget Blueprint', 0.01),
-               (9000, 10, 'Composite Reaction Formula', 0.01);
+               (100, 10, 'Widget', 5.0, 1),
+               (200, 18, 'Tritanium', 0.01, 1),
+               (300, 18, 'Pyerite', 0.01, 1),
+               (500, 18, 'Datacore - Test', 0.1, 1),
+               (600, 18, 'Composite', 1.0, 1),
+               (998, 10, 'Widget I Blueprint', 0.01, 1),
+               (999, 10, 'Widget Blueprint', 0.01, 1),
+               (9000, 10, 'Composite Reaction Formula', 0.01, 1);
              INSERT INTO industryActivityProducts VALUES (999, 1, 100, 1);
              INSERT INTO industryActivityMaterials VALUES (999, 1, 200, 40), (999, 1, 300, 10);
              -- Reaction: formula 9000 makes 100 Composite (600) from 50 Tritanium (200).

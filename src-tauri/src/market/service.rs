@@ -267,10 +267,9 @@ impl MarketService {
             || async {
                 let missing = misses.lock().clone();
                 let fetched = self.fuzzwork.aggregates(location, &missing).await?;
-                for (type_id, agg) in fetched {
-                    self.aggregates.put((key, type_id), agg.clone());
-                    out.lock().insert(type_id, agg);
-                }
+                self.aggregates
+                    .put_many(fetched.iter().map(|(t, a)| ((key, *t), a.clone())));
+                out.lock().extend(fetched);
                 Ok::<(), EsiError>(())
             },
         )

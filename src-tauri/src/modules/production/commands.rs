@@ -659,8 +659,8 @@ mod resolve_input_tests {
     /// (product B=20) needs 1x A=10.
     fn cycle_sde() -> Sde {
         test_sde(
-            "CREATE TABLE invTypes(typeID INT, typeName TEXT);
-             INSERT INTO invTypes VALUES (10, 'A'), (20, 'B');
+            "CREATE TABLE invTypes(typeID INT, typeName TEXT, published INT);
+             INSERT INTO invTypes VALUES (10, 'A', 1), (20, 'B', 1), (11, 'A BP', 1), (21, 'B BP', 1);
              CREATE TABLE industryActivityProducts(typeID INT, activityID INT, productTypeID INT, quantity INT);
              CREATE TABLE industryActivityMaterials(typeID INT, activityID INT, materialTypeID INT, quantity INT);
              INSERT INTO industryActivityProducts VALUES (11, 1, 10, 1), (21, 1, 20, 1);
@@ -672,8 +672,8 @@ mod resolve_input_tests {
     /// with no recipe of its own (a genuine Buy leaf).
     fn chain_sde() -> Sde {
         test_sde(
-            "CREATE TABLE invTypes(typeID INT, typeName TEXT);
-             INSERT INTO invTypes VALUES (10, 'A'), (20, 'B'), (30, 'C');
+            "CREATE TABLE invTypes(typeID INT, typeName TEXT, published INT);
+             INSERT INTO invTypes VALUES (10, 'A', 1), (20, 'B', 1), (30, 'C', 1), (11, 'A BP', 1), (21, 'B BP', 1);
              CREATE TABLE industryActivityProducts(typeID INT, activityID INT, productTypeID INT, quantity INT);
              CREATE TABLE industryActivityMaterials(typeID INT, activityID INT, materialTypeID INT, quantity INT);
              INSERT INTO industryActivityProducts VALUES (11, 1, 10, 1), (21, 1, 20, 1);
@@ -685,8 +685,8 @@ mod resolve_input_tests {
     /// 50x Tritanium (200, a Buy leaf).
     fn reaction_sde() -> Sde {
         test_sde(
-            "CREATE TABLE invTypes(typeID INT, typeName TEXT);
-             INSERT INTO invTypes VALUES (200, 'Tritanium'), (600, 'Composite');
+            "CREATE TABLE invTypes(typeID INT, typeName TEXT, published INT);
+             INSERT INTO invTypes VALUES (200, 'Tritanium', 1), (600, 'Composite', 1), (500, 'Composite Formula', 1);
              CREATE TABLE industryActivityProducts(typeID INT, activityID INT, productTypeID INT, quantity INT);
              CREATE TABLE industryActivityMaterials(typeID INT, activityID INT, materialTypeID INT, quantity INT);
              INSERT INTO industryActivityProducts VALUES (500, 11, 600, 100);
