@@ -1,6 +1,7 @@
 import { type Dispatch, type SetStateAction } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  errorMessage,
   getList,
   setList as setListApi,
   type ListModule,
@@ -50,9 +51,23 @@ export function useTypeIdLists<T extends { favorite: boolean }>(
 ) {
   const { favorites, blacklist, setList } = useSavedLists(module);
 
+  // The optimistic row edits below are rolled back when the backend rejects
+  // the write; otherwise a failed favorite/blacklist would look successful
+  // until the next scan resurrected the row. The failure is surfaced via
+  // `listError` (the mutation error clears on the next attempt).
   function toggleFavorite(r: T) {
     const id = getId(r);
-    setList.mutate({ list: "favorites", typeId: id, add: !r.favorite });
+    setList.mutate(
+      { list: "favorites", typeId: id, add: !r.favorite },
+      {
+        onError: () =>
+          setRows((prev) =>
+            prev.map((x) =>
+              getId(x) === id ? { ...x, favorite: r.favorite } : x,
+            ),
+          ),
+      },
+    );
     setRows((prev) =>
       prev.map((x) => (getId(x) === id ? { ...x, favorite: !x.favorite } : x)),
     );
@@ -60,7 +75,15 @@ export function useTypeIdLists<T extends { favorite: boolean }>(
 
   function blacklistRow(r: T) {
     const id = getId(r);
-    setList.mutate({ list: "blacklist", typeId: id, add: true });
+    setList.mutate(
+      { list: "blacklist", typeId: id, add: true },
+      {
+        onError: () =>
+          setRows((prev) =>
+            prev.some((x) => getId(x) === id) ? prev : [...prev, r],
+          ),
+      },
+    );
     setRows((prev) => prev.filter((x) => getId(x) !== id));
   }
 
@@ -72,6 +95,8 @@ export function useTypeIdLists<T extends { favorite: boolean }>(
     favorites,
     blacklist,
     setList,
+    /** Message of the last failed list write, or null. */
+    listError: setList.isError ? errorMessage(setList.error) : null,
     toggleFavorite,
     blacklistRow,
     remove,

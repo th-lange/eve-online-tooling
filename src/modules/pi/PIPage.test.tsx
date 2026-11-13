@@ -646,7 +646,7 @@ describe("PIPage Planner tab", () => {
     fireEvent.change(search2, { target: { value: "mechanical" } });
     fireEvent.click(
       await screen.findByRole(
-        "button",
+        "option",
         { name: "Mechanical Parts" },
         { timeout: 2000 },
       ),

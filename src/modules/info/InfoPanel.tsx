@@ -2,11 +2,13 @@ import { useContext, useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Bell, ChevronRight, MessageSquare, Trash2 } from "lucide-react";
 import {
+  errorMessage,
   infoClear,
   infoClearSource,
   onInfoEntry,
   type InfoEntry,
 } from "../../lib/api";
+import { InlineError } from "../../components/InlineError";
 import { Page, PageHeader, Centered } from "../../components/page";
 import { ModuleActiveContext } from "../../components/moduleActiveContext";
 import { useInfoAlerts, useInfoFeed } from "./infoContext";
@@ -100,6 +102,15 @@ export function InfoPanel() {
       <p className="mt-1 text-xs text-zinc-600">
         EVE Online Tooling v{__APP_VERSION__}
       </p>
+      <InlineError
+        message={
+          clear.isError
+            ? `Couldn't clear the panel: ${errorMessage(clear.error)}`
+            : clearSource.isError
+              ? `Couldn't clear ${clearSource.variables}: ${errorMessage(clearSource.error)}`
+              : null
+        }
+      />
       {rows.length === 0 ? (
         <Centered>
           Nothing yet. Scripts and plugins post here with{" "}

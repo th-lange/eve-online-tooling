@@ -22,6 +22,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 import { invoke } from "@tauri-apps/api/core";
 
 import { Layout } from "./Layout";
+import { FightOverlayContext } from "../modules/pvp/fightOverlayContext";
 import { modules } from "../modules/registry";
 
 // Two modules in the same section (Industry) and one in another (Trading),
@@ -63,6 +64,33 @@ function pinnedRowFor(title: string): HTMLElement {
 function pinnedHandleFor(title: string): HTMLElement {
   return within(pinnedRowFor(title)).getByTitle("Drag to reorder");
 }
+
+describe("Layout fight overlay toggle", () => {
+  it.each([true, false])("reports enabled=%s via aria-pressed", (enabled) => {
+    const setEnabled = vi.fn();
+    const qc = new QueryClient();
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <FightOverlayContext.Provider
+            value={{
+              enabled,
+              setEnabled,
+              runTest: () => {},
+              captureError: null,
+            }}
+          >
+            <Layout />
+          </FightOverlayContext.Provider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const toggle = screen.getByRole("button", { name: "Fight overlay" });
+    expect(toggle).toHaveAttribute("aria-pressed", String(enabled));
+    fireEvent.click(toggle);
+    expect(setEnabled).toHaveBeenCalledWith(!enabled);
+  });
+});
 
 describe("Layout sidebar", () => {
   beforeEach(() => {

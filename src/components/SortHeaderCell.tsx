@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { ChevronDown, ChevronUp, Info } from "lucide-react";
 import type { SortDir } from "../lib/usePersistentSort";
 
@@ -30,12 +31,11 @@ export function SortHeaderCell<K extends string>({
   /** Render as a de-emphasised support column (smaller, muted, group rule). */
   demoted?: boolean;
 }) {
+  const descId = useId();
   return (
     <th
-      onClick={() => onClick(column.key)}
-      title={column.description}
       aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : "none"}
-      className={`cursor-pointer select-none px-3 py-2 font-medium hover:text-zinc-100 ${
+      className={`select-none px-3 py-2 font-medium ${
         column.numeric ? "text-right" : "text-left"
       } ${
         demoted
@@ -43,15 +43,26 @@ export function SortHeaderCell<K extends string>({
           : "text-zinc-300"
       }`}
     >
-      <span
-        className={`inline-flex items-center gap-1 ${
+      <button
+        type="button"
+        onClick={() => onClick(column.key)}
+        title={column.description}
+        aria-describedby={descId}
+        className={`inline-flex cursor-pointer items-center gap-1 font-medium hover:text-zinc-100 ${
           column.numeric ? "flex-row-reverse" : ""
         }`}
       >
         {column.label}
         <Info size={12} className="text-zinc-400" aria-hidden="true" />
         {active &&
-          (dir === "asc" ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
+          (dir === "asc" ? (
+            <ChevronUp size={14} aria-hidden="true" />
+          ) : (
+            <ChevronDown size={14} aria-hidden="true" />
+          ))}
+      </button>
+      <span id={descId} className="sr-only">
+        {column.description}
       </span>
     </th>
   );

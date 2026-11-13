@@ -196,12 +196,12 @@ describe("FW playstyle presets (#904)", () => {
     });
 
     // Clicking the "System" header still re-sorts the table in Plexing mode.
-    fireEvent.click(screen.getByRole("columnheader", { name: /^System/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^System/i }));
     await waitFor(() => {
       const rows = inTable().getAllByRole("row");
       expect(within(rows[1]).getByText("AlphaSys")).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole("columnheader", { name: /^System/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^System/i }));
     await waitFor(() => {
       const rows = inTable().getAllByRole("row");
       expect(within(rows[1]).getByText("ZetaSys")).toBeInTheDocument();
@@ -509,9 +509,7 @@ describe("FW NPC kills column", () => {
     expect(inTable().getByText("42")).toBeInTheDocument();
 
     // Sortable via its column header.
-    fireEvent.click(
-      screen.getByRole("columnheader", { name: /NPC Kills 1h/i }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /NPC Kills 1h/i }));
     const rows = inTable().getAllByRole("row");
     // Header row + 2 data rows; after a desc-toggle click the highest NPC
     // kill count (FarmSystem) should lead.

@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
 import type { ListItem } from "../lib/api/common";
 import { AddToListButton } from "./AddToListButton";
+import { InlineError } from "./InlineError";
 import { Centered } from "./page";
 
 export type ListTab = "opportunities" | "favorites" | "blacklist";
@@ -10,10 +11,13 @@ export function ListTabs({
   tab,
   onChange,
   counts,
+  error,
 }: {
   tab: ListTab;
   onChange: (t: ListTab) => void;
   counts: { favorites: number; blacklist: number };
+  /** Failure message from a favorite/blacklist write (see `useTypeIdLists`). */
+  error?: string | null;
 }) {
   const tabs: { value: ListTab; label: string }[] = [
     { value: "opportunities", label: "Opportunities" },
@@ -21,21 +25,24 @@ export function ListTabs({
     { value: "blacklist", label: `Blacklist (${counts.blacklist})` },
   ];
   return (
-    <div className="mt-4 inline-flex rounded border border-zinc-800 bg-zinc-900 p-0.5">
-      {tabs.map((t) => (
-        <button
-          key={t.value}
-          onClick={() => onChange(t.value)}
-          className={`rounded px-3 py-1.5 text-sm ${
-            tab === t.value
-              ? "bg-zinc-700 text-zinc-100"
-              : "text-zinc-400 hover:text-zinc-200"
-          }`}
-        >
-          {t.label}
-        </button>
-      ))}
-    </div>
+    <>
+      <div className="mt-4 inline-flex rounded border border-zinc-800 bg-zinc-900 p-0.5">
+        {tabs.map((t) => (
+          <button
+            key={t.value}
+            onClick={() => onChange(t.value)}
+            className={`rounded px-3 py-1.5 text-sm ${
+              tab === t.value
+                ? "bg-zinc-700 text-zinc-100"
+                : "text-zinc-400 hover:text-zinc-200"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <InlineError message={error} />
+    </>
   );
 }
 
@@ -116,12 +123,15 @@ export function RowActionsCell<
           e.stopPropagation();
           onFavorite(row);
         }}
-        title="Favorite"
+        title={row.favorite ? "Remove from favorites" : "Add to favorites"}
+        aria-label={row.favorite ? "Remove from favorites" : "Add to favorites"}
+        aria-pressed={row.favorite}
         className={
           row.favorite ? "text-amber-400" : "text-zinc-600 hover:text-amber-400"
         }
       >
-        ★
+        {/* Filled vs outline glyph so the state survives without colour. */}
+        {row.favorite ? "★" : "☆"}
       </button>
       <button
         onClick={(e) => {

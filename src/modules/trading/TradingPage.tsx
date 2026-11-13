@@ -69,8 +69,14 @@ function Workbench() {
   const [rows, setRows] = useState<TradeRow[]>([]);
 
   const regions = useQuery(marketKeys.regions());
-  const { favorites, blacklist, toggleFavorite, blacklistRow, remove } =
-    useTypeIdLists("trading", setRows, (r) => r.typeId);
+  const {
+    favorites,
+    blacklist,
+    listError,
+    toggleFavorite,
+    blacklistRow,
+    remove,
+  } = useTypeIdLists("trading", setRows, (r) => r.typeId);
 
   const run = useMutation({
     mutationFn: (p: TradeParams) => stationTrading(p),
@@ -193,6 +199,7 @@ function Workbench() {
           favorites: favorites.data?.length ?? 0,
           blacklist: blacklist.data?.length ?? 0,
         }}
+        error={listError}
       />
 
       <div className="mt-3">
