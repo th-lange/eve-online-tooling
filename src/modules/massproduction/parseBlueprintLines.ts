@@ -2,14 +2,13 @@
 // blueprint list, with an explicit "how many to build" count per line. Kept
 // pure (no Tauri imports) so it's unit-tested, mirroring `lib/parseItems.ts`.
 
-import { isNumberToken } from "../../lib/parseItems";
+import { splitLine } from "../../lib/parseItems";
 import type { BlueprintLine } from "../../lib/api";
 
 /**
  * Parse one liberally-formatted line into a name plus an optional explicit
  * build-run count, or `null` when there's no name. Same tokenizing rule as
- * the shared `parseLine` (name = leading non-numeric tokens, count = the
- * first number after it) — but unlike that parser, a missing number stays
+ * the shared `parseLine` (see `splitLine`) — but unlike that parser, a missing number stays
  * `null` here rather than defaulting to 1: Mass Production needs to tell
  * "no number typed" (keep the mode's computed default — real Owned
  * ownership, or Hypothetical's rule-derived assumption) apart from
@@ -18,16 +17,12 @@ import type { BlueprintLine } from "../../lib/api";
 export function parseBlueprintLine(
   raw: string,
 ): { name: string; buildRuns: number | null } | null {
-  const line = raw.trim();
-  if (!line) return null;
-  const tokens = line.split(/[\t ]+/).filter(Boolean);
-  let i = 0;
-  while (i < tokens.length && !isNumberToken(tokens[i])) i++;
-  const name = tokens.slice(0, i).join(" ").trim();
-  if (!name) return null;
+  const parts = splitLine(raw);
+  if (!parts) return null;
+  const { name } = parts;
   let buildRuns: number | null = null;
-  if (i < tokens.length) {
-    const digits = tokens[i].replace(/\D/g, "");
+  if (parts.qtyToken) {
+    const digits = parts.qtyToken.replace(/\D/g, "");
     if (digits) buildRuns = Math.max(0, Number(digits));
   }
   return { name, buildRuns };

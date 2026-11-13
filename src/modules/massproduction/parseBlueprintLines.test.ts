@@ -52,7 +52,7 @@ describe("parseBlueprintLines", () => {
       "5MN Microwarpdrive II Blueprint",
       "Rifter Blueprint\t5",
       "",
-      "garbage 1000 2000",
+      "garbage 1000 trailing",
     ].join("\n");
     expect(parseBlueprintLines(text)).toEqual([
       { name: "5MN Microwarpdrive II Blueprint", buildRuns: null },

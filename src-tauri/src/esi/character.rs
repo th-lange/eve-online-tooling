@@ -34,6 +34,10 @@ pub struct RawAsset {
     /// asset's `location_id` — that's how the location tree nests). 0 if absent.
     #[serde(default)]
     pub item_id: i64,
+    /// True for a blueprint *copy*: ESI reports it under the BPO's type id, so
+    /// pricing it by type would value a BPC at the original's market price.
+    #[serde(default)]
+    pub is_blueprint_copy: bool,
 }
 
 /// Authenticated, paginated ESI GET for the given character. Conditionally

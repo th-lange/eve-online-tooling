@@ -162,6 +162,10 @@ export function useWorkbench(): WorkbenchState {
     blueprintCostPerRun,
     inventionSkill,
     decryptorTypeId,
+    // Late-arriving owned blueprints / stock change what a calculation would
+    // price, so they mark the table stale like any other input (#1170).
+    ownedLoadedAt: owned.dataUpdatedAt,
+    stockLoadedAt: stock.dataUpdatedAt,
   };
   // Snapshot of `settings` as of the last calculate, to detect staleness.
   const [calcSettings, setCalcSettings] = useState(settings);
@@ -214,11 +218,16 @@ export function useWorkbench(): WorkbenchState {
     return () => clearTimeout(t);
   }, [autoRecalc, isStale, dirtyCount]);
 
-  // Rank once on first load.
+  // Rank once on first load — but only after the owned-blueprint query has
+  // settled (success or error), otherwise "use owned ME/TE" prices every BPO at
+  // ME 0 because `ownedMe` is still empty (#1170).
+  const didInitialCalc = useRef(false);
   useEffect(() => {
+    if (didInitialCalc.current || owned.isPending) return;
+    didInitialCalc.current = true;
     calculate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [owned.isPending]);
 
   const categoryOptions = useMemo(
     () => uniqueSorted(rows, (r) => r.category),

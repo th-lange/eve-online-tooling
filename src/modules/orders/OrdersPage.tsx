@@ -19,6 +19,7 @@ import { DataTable, type SortColumn } from "../../components/DataTable";
 import { EmptyState } from "../../components/EmptyState";
 import { DataAge } from "../../components/DataAge";
 import { Page, PageHeader, PrimaryButton } from "../../components/page";
+import { tickDown, tickUp } from "../../lib/orderTick";
 
 export function OrdersPage() {
   // The backend resolves orders against its own bookmarked active character
@@ -364,10 +365,10 @@ function OrdersTable({
   );
 }
 
-/** One tick better than the station's best: undercut a sell, overbid a buy. */
+/** One valid tick better than the station's best: undercut a sell, overbid a buy. */
 function undercutPrice(r: OrderRow): number {
   const best = r.bestPrice ?? r.price;
-  return r.isBuy ? best + 0.01 : best - 0.01;
+  return r.isBuy ? tickUp(best) : tickDown(best);
 }
 
 interface BuildCosts {

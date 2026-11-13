@@ -470,7 +470,7 @@ const CHAT_DEDUP_COOLDOWN_SECS: i64 = 3;
 
 /// A token that is purely a number (optional `,`/`.` thousands separators and
 /// an `x` prefix/suffix like "x100"/"100x"). Mirrors the frontend paste parser
-/// (`shopping/parse.ts`), so chat and paste accept the same formats.
+/// (`lib/parseItems.ts`), so chat and paste accept the same formats.
 fn is_number_token(t: &str) -> bool {
     let t = t.strip_prefix(['x', 'X']).unwrap_or(t);
     let t = t.strip_suffix(['x', 'X']).unwrap_or(t);
@@ -478,6 +478,45 @@ fn is_number_token(t: &str) -> bool {
         && t.chars().any(|c| c.is_ascii_digit())
         && t.chars()
             .all(|c| c.is_ascii_digit() || c == '.' || c == ',')
+}
+
+/// Split a line into `(name, quantity token)`. Mirrors the frontend's
+/// `splitLine` (`lib/parseItems.ts`): tab-separated lines take the first cell
+/// as the name (so "Navy Cap Booster 400⇥20" keeps its 400); space-separated
+/// lines take the last token of the first numeric run as the quantity, and a
+/// leading numeric token ("X5 Enduring Stasis Webifier 2") is part of the name
+/// when a quantity follows later (#1165).
+fn split_line(line: &str) -> Option<(String, Option<&str>)> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+    if line.contains('\t') {
+        let mut cells = line.split('\t').map(str::trim).filter(|c| !c.is_empty());
+        let name = cells.next()?;
+        if is_number_token(name) {
+            return None;
+        }
+        return Some((name.to_string(), cells.find(|c| is_number_token(c))));
+    }
+    let tokens: Vec<&str> = line.split(' ').filter(|t| !t.is_empty()).collect();
+    let is_num: Vec<bool> = tokens.iter().map(|t| is_number_token(t)).collect();
+    let run_end = |from: usize| {
+        let mut e = from;
+        while e < tokens.len() && is_num[e] {
+            e += 1;
+        }
+        e
+    };
+    let Some(mut first) = is_num.iter().position(|&n| n) else {
+        return Some((tokens.join(" "), None));
+    };
+    if first == 0 {
+        let start = run_end(0);
+        first = start + is_num[start..].iter().position(|&n| n)?;
+    }
+    let qty_idx = run_end(first) - 1;
+    Some((tokens[..qty_idx].join(" "), Some(tokens[qty_idx])))
 }
 
 /// Parse one chat line into `(item name, quantity)`: the name is the leading
@@ -494,24 +533,13 @@ fn parse_chat_line(raw: &str) -> Option<(String, i64)> {
         .chars()
         .filter(|c| !c.is_control() || *c == '\t')
         .collect();
-    let tokens: Vec<&str> = line.split([' ', '\t']).filter(|t| !t.is_empty()).collect();
-    let split = tokens
-        .iter()
-        .position(|t| is_number_token(t))
-        .unwrap_or(tokens.len());
-    if split == 0 {
-        return None; // empty or quantity-first line — no name
-    }
-    let name = tokens[..split].join(" ");
+    let (name, qty_token) = split_line(&line)?;
     if name.len() > MAX_NAME_LEN {
         return None;
     }
     let mut qty = 1i64;
-    if split < tokens.len() {
-        let digits: String = tokens[split]
-            .chars()
-            .filter(|c| c.is_ascii_digit())
-            .collect();
+    if let Some(tok) = qty_token {
+        let digits: String = tok.chars().filter(|c| c.is_ascii_digit()).collect();
         if let Ok(n) = digits.parse::<i64>() {
             qty = n.clamp(1, MAX_LINE_QTY);
         }
@@ -899,6 +927,20 @@ mod tests {
     #[test]
     fn rejects_untrusted_junk() {
         assert_eq!(parse_chat_line(""), None);
+        // A number inside the name is not the quantity (#1165).
+        assert_eq!(
+            parse_chat_line("Navy Cap Booster 400\t20"),
+            Some(("Navy Cap Booster 400".into(), 20))
+        );
+        assert_eq!(
+            parse_chat_line("Navy Cap Booster 400 x12"),
+            Some(("Navy Cap Booster 400".into(), 12))
+        );
+        assert_eq!(
+            parse_chat_line("X5 Enduring Stasis Webifier 2"),
+            Some(("X5 Enduring Stasis Webifier".into(), 2))
+        );
+        assert_eq!(parse_chat_line("1000 Tritanium"), None);
         assert_eq!(parse_chat_line("   "), None);
         assert_eq!(parse_chat_line("100"), None); // quantity-first, no name
                                                   // Control characters are stripped before parsing.
