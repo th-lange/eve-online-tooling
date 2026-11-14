@@ -7,9 +7,26 @@ profit engine), its own UI page, or both.
 Plugins are **untrusted**. They run in a WebAssembly sandbox and get **no
 ambient authority**: no filesystem, no network, no keychain, no ESI tokens.
 The only things a plugin can reach are the host functions the app exposes, and
-each of those is gated behind a permission the user explicitly grants at install
-time. If a plugin's manifest asks for a capability the user hasn't granted, the
-plugin can't even start.
+each of those is gated behind a permission declared in the plugin's manifest.
+There is no separate install-time permission prompt: **activating a plugin on
+the Plugins page is the consent**. An inactive plugin can't run at all, and an
+active one runs with exactly the permissions (and `allowedHosts`) declared in
+the `plugin.json` of the version currently installed. The plugin card lists
+those permissions and hosts, so review them before you activate.
+
+> **Updating a plugin changes its permissions without a new prompt.**
+> Reinstalling or updating an active plugin (or editing its `plugin.json` on
+> disk) keeps it active, and whatever the new manifest declares, including new
+> permissions or hosts, takes effect on its next call. After every update,
+> check the permissions and network hosts shown on the plugin's card, and
+> deactivate it if they're not what you expect.
+>
+> **Only activate plugins you trust.** The WASM sandbox has no filesystem,
+> network (beyond `allowedHosts`) or token access, but plugin guests have WASI
+> enabled and a guest can block the host thread serving its call (for
+> example by sleeping through WASI) beyond the per-call timeout. The damage is
+> bounded by the per-plugin cap of 4 in-flight calls (below), but a
+> misbehaving plugin can still tie up that capacity.
 
 This page documents **logic plugins** (WASM) first; [UI plugins](#ui-plugins) are covered further down.
 
@@ -202,7 +219,10 @@ plugins_invoke(pluginId, fn, argsJson) -> Result<JsonValue, AppError>
 value is handed back as JSON. Runaway plugins are stopped: each instance has a
 memory cap (~64 MiB) and a per-call timeout. A plugin may have at most 4
 calls running or queued at once; further `plugins_invoke` calls fail
-immediately with a "busy" error until some finish.
+immediately with a "busy" error until some finish. The timeout cannot interrupt
+a guest that is blocked inside a WASI call (WASI is enabled for guests), so such
+a guest holds its call thread until the call returns; the in-flight cap bounds
+how many threads one plugin can hold this way.
 
 ## The reference plugin
 
@@ -227,12 +247,9 @@ cp eve-online-tooling-plugins/pricing-model/target/wasm32-unknown-unknown/releas
 
 Drag the `pricing-model/` folder (its `plugin.json` + `pricing_model.wasm`)
 onto the app window, or copy it into `<app_data_dir>/plugins/` and click
-**Rescan**. Then approve the requested permissions when prompted.
-
-> The install-time **consent** prompt that grants permissions is tracked
-> separately; until it lands, grants are empty, so a plugin that needs a
-> capability (like this one) can be exercised through the test suite but not
-> yet granted live in the running app.
+**Rescan**. Then review the permissions on its card and click **Activate**;
+activation grants the permissions declared in the manifest (there is no
+separate permission prompt).
 
 ## Exposing MCP tools
 
@@ -252,9 +269,15 @@ bridge](./mcp.md). Declare them in `plugin.json`:
 
 `function` is the exported WASM function that implements the tool; it's called
 exactly like `plugins_invoke` (JSON in, JSON out) with your granted
-capabilities. The host advertises the tool as `<pluginId>.<name>` — but only
-while your plugin **and** the MCP bridge are active. Your plugin never touches
-the network; the native bridge proxies the call.
+capabilities, **including** any auth-gated ones (`assets:read`, `orders:read`,
+...) and `net:fetch` to your `allowedHosts`; MCP-routed calls are not reduced to
+public data. Because a connected MCP client may forward tool results to a cloud
+model, the host advertises the tool as `<pluginId>.<name>` — and routes calls
+to it — only while your plugin is active, the MCP bridge is running, **and the
+user has switched on "Expose these tools to MCP clients"** on your plugin's card
+(default off; persisted per plugin, forgotten on uninstall). The card lists your
+tools and warns the user that they may return data the plugin can read. Keep tool
+descriptions and schemas honest: they are shown to the agent as-is.
 
 ## UI plugins
 

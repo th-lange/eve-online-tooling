@@ -22,6 +22,14 @@ export const PERMISSION_LABELS: Record<PluginPermission, string> = {
   "info:write": "Post alarms and messages to the Info Panel",
 };
 
+/** An MCP tool a plugin declares it backs (advertised as `<pluginId>.<name>`). */
+export interface PluginMcpTool {
+  name: string;
+  description: string;
+  inputSchema: unknown;
+  function: string;
+}
+
 /** A plugin's `plugin.json`, as parsed by the host. */
 export interface PluginManifest {
   id: string;
@@ -33,12 +41,17 @@ export interface PluginManifest {
   permissions: PluginPermission[];
   /** Hosts the plugin may contact (only when it requests net:fetch). */
   allowedHosts?: string[];
+  /** MCP tools the plugin contributes; only served to MCP clients while the
+   *  plugin is active and the user has opted in (`mcpExposed`). */
+  mcpTools?: PluginMcpTool[];
 }
 
 /** An installed plugin plus whether it is currently activated. */
 export interface PluginEntry {
   manifest: PluginManifest;
   active: boolean;
+  /** User opted in to exposing this plugin's `mcpTools` to MCP clients. */
+  mcpExposed: boolean;
 }
 
 /** Installed plugins with their manifest metadata and activation state. */
@@ -87,4 +100,13 @@ export function pluginSetActive(
   active: boolean,
 ): Promise<void> {
   return invoke<void>("plugins_set_active", { pluginId, active });
+}
+
+/** Opt a plugin in or out of exposing its MCP tools to MCP clients (off by
+ *  default; also requires the plugin to be active). */
+export function pluginSetMcpExposed(
+  pluginId: string,
+  exposed: boolean,
+): Promise<void> {
+  return invoke<void>("plugins_set_mcp_exposed", { pluginId, exposed });
 }

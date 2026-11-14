@@ -806,7 +806,10 @@ mod tests {
     /// capability's `run` fn is handed a `HostCtx` whose `auth` is `None` on
     /// the MCP bridge (scripts/plugins pass a real one), so the invariant
     /// lives here, not in `HostCtx`'s shape — flip `mcp_dev`/`mcp` on an
-    /// auth-gated capability and this test fails.
+    /// auth-gated capability and this test fails. Plugin-contributed MCP tools
+    /// are the deliberate exception (they run with the plugin's full grants);
+    /// they are gated by a per-plugin opt-in, pinned in
+    /// `mcp::tests::plugin_tool_appears_only_while_active_and_exposed_and_routes`.
     #[test]
     fn mcp_never_reaches_auth_gated_data() {
         let auth_gated = |p: Permission| {

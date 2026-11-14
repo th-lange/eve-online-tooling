@@ -17,6 +17,7 @@ const entries: PluginEntry[] = [
       permissions: [],
     },
     active: true,
+    mcpExposed: false,
   },
   {
     // Active but UI-less (WASM-only) — must NOT appear as a nav module.
@@ -29,6 +30,7 @@ const entries: PluginEntry[] = [
       permissions: [],
     },
     active: true,
+    mcpExposed: false,
   },
   {
     // A UI plugin that is not activated — inert, so no nav entry.
@@ -41,6 +43,7 @@ const entries: PluginEntry[] = [
       permissions: [],
     },
     active: false,
+    mcpExposed: false,
   },
 ];
 

@@ -31,6 +31,11 @@ use manifest::{id_is_safe, Manifest};
 /// Storage document holding the ids of activated plugins.
 const ACTIVE_KEY: &str = "plugins_active";
 
+/// Storage document holding the ids of plugins the user has opted in to expose
+/// through the MCP bridge (#1152). Separate from activation: an active plugin's
+/// MCP tools stay hidden until its id is here too.
+const MCP_EXPOSED_KEY: &str = "plugins_mcp_exposed";
+
 /// One installed plugin as shown to the UI: its manifest metadata plus whether
 /// it is currently activated.
 #[derive(Debug, Clone, Serialize)]
@@ -38,6 +43,9 @@ const ACTIVE_KEY: &str = "plugins_active";
 pub struct PluginEntry {
     pub manifest: Manifest,
     pub active: bool,
+    /// Whether the user opted in to exposing this plugin's `mcpTools` to MCP
+    /// clients. Default off; only meaningful while the plugin is active.
+    pub mcp_exposed: bool,
 }
 
 /// The installed, valid plugins plus their activation state. Discovered once at
@@ -47,6 +55,7 @@ pub struct PluginEntry {
 pub struct PluginRegistry {
     manifests: Mutex<Vec<Manifest>>,
     active: Mutex<HashSet<String>>,
+    mcp_exposed: Mutex<HashSet<String>>,
     app_data_dir: PathBuf,
 }
 
@@ -70,9 +79,16 @@ impl PluginRegistry {
             .into_iter()
             .filter(|id| installed.contains(id.as_str()))
             .collect();
+        let mcp_exposed: HashSet<String> =
+            storage::load_data::<Vec<String>>(app_data_dir, MCP_EXPOSED_KEY)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|id| installed.contains(id.as_str()))
+                .collect();
         Self {
             manifests: Mutex::new(manifests),
             active: Mutex::new(active),
+            mcp_exposed: Mutex::new(mcp_exposed),
             app_data_dir: app_data_dir.to_path_buf(),
         }
     }
@@ -81,11 +97,13 @@ impl PluginRegistry {
     pub fn list(&self) -> Vec<PluginEntry> {
         let manifests = self.manifests.lock();
         let active = self.active.lock();
+        let exposed = self.mcp_exposed.lock();
         manifests
             .iter()
             .map(|m| PluginEntry {
                 manifest: m.clone(),
                 active: active.contains(&m.id),
+                mcp_exposed: exposed.contains(&m.id),
             })
             .collect()
     }
@@ -93,6 +111,11 @@ impl PluginRegistry {
     /// Whether plugin `id` is currently activated.
     pub fn is_active(&self, id: &str) -> bool {
         self.active.lock().contains(id)
+    }
+
+    /// Whether the user opted in to exposing plugin `id`'s MCP tools.
+    pub fn is_mcp_exposed(&self, id: &str) -> bool {
+        self.mcp_exposed.lock().contains(id)
     }
 
     /// The manifest for `id`, if installed.
@@ -138,14 +161,38 @@ impl PluginRegistry {
         self.persist_active(&set)
     }
 
-    /// `(pluginId, tool)` for every MCP tool declared by a currently-active
-    /// plugin. Drives the MCP bridge's plugin-contributed tool surface.
+    /// Persist the MCP opt-in set, sorted like [`Self::persist_active`].
+    fn persist_mcp_exposed(&self, set: &HashSet<String>) -> Result<(), String> {
+        let mut ids: Vec<String> = set.iter().cloned().collect();
+        ids.sort();
+        storage::save_data(&self.app_data_dir, MCP_EXPOSED_KEY, &ids)
+    }
+
+    /// Opt plugin `id` in or out of exposing its MCP tools to MCP clients,
+    /// persisting the choice. Errors if the id isn't installed.
+    pub fn set_mcp_exposed(&self, id: &str, exposed: bool) -> Result<(), String> {
+        if !self.manifests.lock().iter().any(|m| m.id == id) {
+            return Err(format!("unknown plugin {id:?}"));
+        }
+        let mut set = self.mcp_exposed.lock();
+        if exposed {
+            set.insert(id.to_string());
+        } else {
+            set.remove(id);
+        }
+        self.persist_mcp_exposed(&set)
+    }
+
+    /// `(pluginId, tool)` for every MCP tool declared by a plugin that is both
+    /// currently active **and** opted in to MCP exposure (#1152). Drives the
+    /// MCP bridge's plugin-contributed tool surface.
     pub fn active_mcp_tools(&self) -> Vec<(String, manifest::McpToolDef)> {
         let manifests = self.manifests.lock();
         let active = self.active.lock();
+        let exposed = self.mcp_exposed.lock();
         manifests
             .iter()
-            .filter(|m| active.contains(&m.id))
+            .filter(|m| active.contains(&m.id) && exposed.contains(&m.id))
             .flat_map(|m| m.mcp_tools.iter().map(|t| (m.id.clone(), t.clone())))
             .collect()
     }
@@ -159,7 +206,10 @@ impl PluginRegistry {
         let installed: HashSet<String> = fresh.iter().map(|m| m.id.clone()).collect();
         let mut manifests = self.manifests.lock();
         let mut active = self.active.lock();
+        let mut exposed = self.mcp_exposed.lock();
         *manifests = fresh;
+        exposed.retain(|id| installed.contains(id));
+        let _ = self.persist_mcp_exposed(&exposed);
         let removed: Vec<String> = active
             .iter()
             .filter(|id| !installed.contains(*id))
@@ -276,6 +326,11 @@ impl PluginRegistry {
             let mut set = self.active.lock();
             set.remove(id);
             self.persist_active(&set)?;
+        }
+        {
+            let mut set = self.mcp_exposed.lock();
+            set.remove(id);
+            self.persist_mcp_exposed(&set)?;
         }
         let _ = std::fs::remove_dir_all(self.plugins_dir().join(id));
         // Uninstall is the only thing that deletes a plugin's data (#1154);
@@ -646,6 +701,28 @@ mod tests {
         // Deactivate persists too.
         reloaded.set_active("acme", false).unwrap();
         assert!(!PluginRegistry::load(&root).is_active("acme"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn mcp_exposure_is_opt_in_persisted_and_pruned() {
+        let root = tmp("mcp-exposed");
+        write_plugin(&root, "acme", &manifest_json("acme"));
+        let reg = PluginRegistry::load(&root);
+        // Default off, and unknown ids are rejected.
+        assert!(!reg.is_mcp_exposed("acme"));
+        assert!(!reg.list()[0].mcp_exposed);
+        assert!(reg.set_mcp_exposed("ghost", true).is_err());
+        // Persists across a reload, independent of activation.
+        reg.set_mcp_exposed("acme", true).unwrap();
+        let reloaded = PluginRegistry::load(&root);
+        assert!(reloaded.is_mcp_exposed("acme"));
+        assert!(!reloaded.is_active("acme"));
+        assert!(reloaded.list()[0].mcp_exposed);
+        // Uninstalling forgets the opt-in so a reinstall starts off again.
+        reloaded.remove("acme").unwrap();
+        write_plugin(&root, "acme", &manifest_json("acme"));
+        assert!(!PluginRegistry::load(&root).is_mcp_exposed("acme"));
         let _ = std::fs::remove_dir_all(&root);
     }
 
