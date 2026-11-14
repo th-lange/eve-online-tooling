@@ -102,6 +102,18 @@ warn on first launch. That's expected and safe to bypass:
 Why the builds are unsigned is a deliberate, closed decision, not a TODO — the
 full reasoning is in [`SIGNING.md`](SIGNING.md).
 
+### Verifying downloads
+
+Every release ships a `SHA256SUMS` file and a GitHub build-provenance
+attestation for each installer. This is the only integrity check for the Linux
+AppImage/deb/rpm (no OS signing) and complements the unsigned Windows/macOS
+installers. Put the installer and `SHA256SUMS` in one folder, then:
+
+```sh
+sha256sum -c --ignore-missing SHA256SUMS
+gh attestation verify <file> --repo th-lange/eve-online-tooling
+```
+
 ## Build from source & contribute
 
 Prerequisites, dev commands, architecture notes and the release process live in
