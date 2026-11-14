@@ -41,7 +41,7 @@ const SUBTITLE = (
       href="https://github.com/th-lange/eve-online-tooling-plugins"
       target="_blank"
       rel="noreferrer"
-      className="text-zinc-300 underline hover:text-white"
+      className="text-zinc-300 underline hover:text-zinc-50"
     >
       Browse example plugins →
     </a>
