@@ -82,16 +82,20 @@ export function MiningPanel({
           x2={w - pad}
           y1={h - pad}
           y2={h - pad}
-          stroke="#27272a"
+          stroke="var(--color-zinc-800)"
           strokeWidth="0.75"
         />
         {points.length > 1 && (
           <>
-            <polygon points={area} fill="#fcd34d" fillOpacity="0.08" />
+            <polygon
+              points={area}
+              fill="var(--color-amber-300)"
+              fillOpacity="0.08"
+            />
             <polyline
               points={line}
               fill="none"
-              stroke="#fcd34d"
+              stroke="var(--color-amber-300)"
               strokeWidth="1.75"
             />
           </>

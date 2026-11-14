@@ -211,7 +211,7 @@ export function PlaybackTimeline({
           x2={((value - start) / span) * w}
           y1={0}
           y2={h}
-          stroke="#e4e4e7"
+          stroke="var(--color-zinc-200)"
           strokeWidth="1.5"
         />
       </svg>

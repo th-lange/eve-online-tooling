@@ -113,6 +113,17 @@
   --color-sky-800: oklch(90.1% 0.058 230.902);
   --color-sky-900: oklch(95.1% 0.026 236.824);
   --color-sky-950: oklch(97.7% 0.013 236.62);
+  --color-blue-50: oklch(28.2% 0.091 267.935);
+  --color-blue-100: oklch(28.2% 0.091 267.935);
+  --color-blue-200: oklch(37.9% 0.146 265.522);
+  --color-blue-300: oklch(42.4% 0.199 265.638);
+  --color-blue-400: oklch(48.8% 0.243 264.376);
+  --color-blue-500: oklch(54.6% 0.245 262.881);
+  --color-blue-600: oklch(48.8% 0.243 264.376);
+  --color-blue-700: oklch(48.8% 0.243 264.376);
+  --color-blue-800: oklch(88.2% 0.059 254.128);
+  --color-blue-900: oklch(93.2% 0.032 255.585);
+  --color-blue-950: oklch(97% 0.014 254.604);
   --color-indigo-50: oklch(25.7% 0.09 281.288);
   --color-indigo-100: oklch(25.7% 0.09 281.288);
   --color-indigo-200: oklch(35.9% 0.144 278.697);

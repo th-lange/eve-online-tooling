@@ -1,7 +1,7 @@
 import { act, render, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ThemeApplier } from "../components/ThemeApplier";
-import { useThemePreference } from "./useTheme";
+import { useResolvedTheme, useThemePreference } from "./useTheme";
 
 type Listener = () => void;
 function stubMatchMedia(initialDark: boolean) {
@@ -56,5 +56,18 @@ describe("theme preference", () => {
     act(() => os.setOsDark(true));
     act(() => os.setOsDark(false));
     expect(attr()).toBe("dark");
+  });
+
+  it("useResolvedTheme tracks the preference and, for 'system', the OS", () => {
+    const os = stubMatchMedia(true);
+    const resolved = renderHook(() => useResolvedTheme());
+    const setting = renderHook(() => useThemePreference());
+    expect(resolved.result.current).toBe("dark");
+    act(() => setting.result.current[1]("light"));
+    expect(resolved.result.current).toBe("light");
+    act(() => setting.result.current[1]("system"));
+    expect(resolved.result.current).toBe("dark");
+    act(() => os.setOsDark(false));
+    expect(resolved.result.current).toBe("light");
   });
 });

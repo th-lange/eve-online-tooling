@@ -255,10 +255,10 @@ export function SettingsPage() {
           <fieldset className="p-4">
             <legend className="text-sm font-medium text-zinc-100">Theme</legend>
             <p className="mt-0.5 text-xs text-zinc-500">
-              Dark is the default. <strong>Light is new</strong>: the main
-              screens, sidebar, tables and dialogs follow it, but charts,
-              graphs, the script editor and plugin pages are still dark-only
-              (#1213). System follows your OS.
+              Dark is the default. <strong>Light is new</strong>: charts, the
+              script editor and plugin pages follow it too (a plugin must handle
+              the host's theme message to restyle itself). System follows your
+              OS. Please report any screen that looks off.
             </p>
             <div className="mt-3 flex flex-wrap gap-4">
               {THEME_PREFERENCES.map((t) => (

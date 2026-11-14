@@ -79,7 +79,9 @@ describe("BucketChart", () => {
     const mid = render(
       <BucketChart buckets={buckets} series={BUCKET_SERIES_OUT} markTs={0} />,
     );
-    const midRect = mid.container.querySelector('rect[fill="#818cf8"]')!;
+    const midRect = mid.container.querySelector(
+      'rect[fill="var(--color-indigo-400)"]',
+    )!;
     expect(Number(midRect.getAttribute("x"))).toBe(0);
     // Minute [0,60) clamps to the drawn [0,25) → 5 buckets × 10px.
     expect(Number(midRect.getAttribute("width"))).toBe(50);
@@ -89,7 +91,7 @@ describe("BucketChart", () => {
       <BucketChart buckets={buckets} series={BUCKET_SERIES_OUT} markTs={60} />,
     );
     expect(
-      off.container.querySelector('rect[fill="#818cf8"]'),
+      off.container.querySelector('rect[fill="var(--color-indigo-400)"]'),
     ).not.toBeInTheDocument();
   });
 
@@ -128,7 +130,9 @@ describe("BucketChart", () => {
     const dashed = container.querySelector('rect[stroke-dasharray="3 3"]')!;
     expect(Number(dashed.getAttribute("x"))).toBe((25 / 5) * 10 + 1);
     // Minute 0 clamps to the drawn range INCLUDING the ghost: [0, 30) → 60px.
-    const mark = container.querySelector('rect[fill="#818cf8"]')!;
+    const mark = container.querySelector(
+      'rect[fill="var(--color-indigo-400)"]',
+    )!;
     expect(Number(mark.getAttribute("x"))).toBe(0);
     expect(Number(mark.getAttribute("width"))).toBe((30 / 5) * 10);
   });

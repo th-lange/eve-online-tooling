@@ -366,8 +366,10 @@ fn escape_html(s: &str) -> String {
 
 fn result_page(title: &str, message: &str) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
     let html = format!(
-        "<!doctype html><html><body style=\"font-family:sans-serif;background:#18181b;color:#e4e4e7;padding:3rem;text-align:center\">\
-        <h2>{}</h2><p>{}</p></body></html>",
+        "<!doctype html><html><head><meta name=\"color-scheme\" content=\"dark light\">\
+        <style>body{{font-family:sans-serif;background:#18181b;color:#e4e4e7;padding:3rem;text-align:center}}\
+        @media (prefers-color-scheme:light){{body{{background:#fafafa;color:#18181b}}}}</style></head>\
+        <body><h2>{}</h2><p>{}</p></body></html>",
         escape_html(title),
         escape_html(message)
     );

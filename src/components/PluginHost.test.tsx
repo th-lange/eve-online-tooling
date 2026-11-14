@@ -183,3 +183,30 @@ describe("PluginHost", () => {
     expect(invokeMock.mock.calls.length).toBe(before);
   });
 });
+
+describe("PluginHost theme message", () => {
+  it("tells the frame the theme on load and again when the app theme changes", async () => {
+    const { act, renderHook } = await import("@testing-library/react");
+    const { fireEvent } = await import("@testing-library/react");
+    const { useThemePreference } = await import("../lib/useTheme");
+    localStorage.clear();
+    render(<PluginHost pluginId="pricing-model" />);
+    const frame = screen.getByTitle(
+      "plugin-pricing-model",
+    ) as HTMLIFrameElement;
+    const win = stubFrameWindow();
+
+    fireEvent.load(frame);
+    expect(win.postMessage).toHaveBeenLastCalledWith(
+      { channel: CHANNEL, kind: "theme", theme: "dark" },
+      "*",
+    );
+
+    const setting = renderHook(() => useThemePreference());
+    act(() => setting.result.current[1]("light"));
+    expect(win.postMessage).toHaveBeenLastCalledWith(
+      { channel: CHANNEL, kind: "theme", theme: "light" },
+      "*",
+    );
+  });
+});

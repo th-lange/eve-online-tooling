@@ -5,6 +5,7 @@ import {
   type CompletionContext,
   type CompletionResult,
 } from "@codemirror/autocomplete";
+import { useResolvedTheme } from "../../lib/useTheme";
 import { SCRIPT_API } from "./apiCatalog";
 
 const OPTIONS = SCRIPT_API.map((e) => ({
@@ -35,11 +36,12 @@ export function CodeEditor({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const theme = useResolvedTheme();
   return (
     <CodeMirror
       value={value}
       onChange={onChange}
-      theme="dark"
+      theme={theme}
       height="320px"
       extensions={[
         javascript(),

@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { errorMessage, pluginInvoke } from "../lib/api";
+import { useResolvedTheme } from "../lib/useTheme";
 
 /**
  * Renders an untrusted plugin's UI (issue #501).
@@ -26,6 +27,16 @@ interface InvokeRequest {
   id: number;
   fn: string;
   args?: unknown;
+}
+
+/** Tells the guest which theme is in force (`dark` | `light`). Sent when the
+ *  frame loads and whenever the app's theme changes; a guest that doesn't know
+ *  the `theme` kind ignores it. The frame is a separate opaque-origin document,
+ *  so it cannot read the app's CSS variables — it styles itself from this. */
+interface ThemeMessage {
+  channel: typeof CHANNEL;
+  kind: "theme";
+  theme: "dark" | "light";
 }
 
 type HostReply =
@@ -70,6 +81,15 @@ export function PluginHost({
   className?: string;
 }) {
   const ref = useRef<HTMLIFrameElement>(null);
+  const theme = useResolvedTheme();
+
+  const sendTheme = useCallback(() => {
+    const msg: ThemeMessage = { channel: CHANNEL, kind: "theme", theme };
+    ref.current?.contentWindow?.postMessage(msg, "*");
+  }, [theme]);
+  // Re-send on every theme change; `onLoad` covers the first paint, when the
+  // guest's listener only now exists.
+  useEffect(sendTheme, [sendTheme]);
 
   useEffect(() => {
     let inFlight = 0;
@@ -131,6 +151,7 @@ export function PluginHost({
       title={`plugin-${pluginId}`}
       src={`plugin://localhost/${pluginId}/index.html`}
       sandbox="allow-scripts"
+      onLoad={sendTheme}
       className={className ?? "h-full w-full border-0"}
     />
   );

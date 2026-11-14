@@ -146,16 +146,24 @@ export function DepthChart({
         }}
       >
         {model.buyArea && (
-          <polygon points={model.buyArea} fill="#10b98122" stroke="none" />
+          <polygon
+            points={model.buyArea}
+            fill="color-mix(in srgb, var(--color-emerald-500) 13%, transparent)"
+            stroke="none"
+          />
         )}
         {model.sellArea && (
-          <polygon points={model.sellArea} fill="#fb718522" stroke="none" />
+          <polygon
+            points={model.sellArea}
+            fill="color-mix(in srgb, var(--color-rose-400) 13%, transparent)"
+            stroke="none"
+          />
         )}
         {model.buyLine && (
           <polyline
             points={model.buyLine}
             fill="none"
-            stroke="#34d399"
+            stroke="var(--color-emerald-400)"
             strokeWidth="1.5"
             vectorEffect="non-scaling-stroke"
           />
@@ -164,7 +172,7 @@ export function DepthChart({
           <polyline
             points={model.sellLine}
             fill="none"
-            stroke="#fb7185"
+            stroke="var(--color-rose-400)"
             strokeWidth="1.5"
             vectorEffect="non-scaling-stroke"
           />
@@ -176,7 +184,7 @@ export function DepthChart({
               x2={reading.px}
               y1={PAD_TOP}
               y2={H - PAD_BOTTOM}
-              stroke="#52525b"
+              stroke="var(--color-zinc-600)"
               strokeWidth="0.75"
             />
             {hoverY != null && (
@@ -185,7 +193,7 @@ export function DepthChart({
                 x2={W - PAD_X}
                 y1={hoverY}
                 y2={hoverY}
-                stroke="#52525b"
+                stroke="var(--color-zinc-600)"
                 strokeWidth="0.75"
               />
             )}
@@ -194,7 +202,7 @@ export function DepthChart({
                 cx={reading.px}
                 cy={model.y(reading.buyVol)}
                 r="3"
-                fill="#34d399"
+                fill="var(--color-emerald-400)"
               />
             )}
             {reading.sellVol > 0 && (
@@ -202,7 +210,7 @@ export function DepthChart({
                 cx={reading.px}
                 cy={model.y(reading.sellVol)}
                 r="3"
-                fill="#fb7185"
+                fill="var(--color-rose-400)"
               />
             )}
           </g>

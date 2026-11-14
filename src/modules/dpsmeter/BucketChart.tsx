@@ -203,7 +203,7 @@ export const BucketChart = memo(function BucketChart({
                     x2={width}
                     y1={PAD_Y + f * (H - PAD_Y - PAD_B)}
                     y2={PAD_Y + f * (H - PAD_Y - PAD_B)}
-                    stroke="#27272a"
+                    stroke="var(--color-zinc-800)"
                     strokeWidth="0.75"
                   />
                 ))}
@@ -214,14 +214,14 @@ export const BucketChart = memo(function BucketChart({
                       x2={l.x}
                       y1={PAD_Y}
                       y2={H - PAD_B}
-                      stroke="#27272a"
+                      stroke="var(--color-zinc-800)"
                       strokeWidth="0.75"
                     />
                     <text
                       x={l.x}
                       y={H - 8}
                       textAnchor="middle"
-                      fill="#71717a"
+                      fill="var(--color-zinc-500)"
                       fontSize="11"
                     >
                       {l.text}
@@ -234,9 +234,9 @@ export const BucketChart = memo(function BucketChart({
                     y={PAD_Y}
                     width={markW}
                     height={H - PAD_Y - PAD_B}
-                    fill="#818cf8"
+                    fill="var(--color-indigo-400)"
                     fillOpacity="0.18"
-                    stroke="#818cf8"
+                    stroke="var(--color-indigo-400)"
                     strokeWidth="1"
                   />
                 )}
@@ -262,14 +262,14 @@ export const BucketChart = memo(function BucketChart({
                       width={Math.max(1, pxPerBucket - 2)}
                       height={H - PAD_Y - PAD_B}
                       fill="none"
-                      stroke="#52525b"
+                      stroke="var(--color-zinc-600)"
                       strokeWidth="1"
                       strokeDasharray="3 3"
                     />
                     {(
                       [
-                        ["dpsOut", ghost.damageOut, "#34d399"],
-                        ["dpsIn", ghost.damageIn, "#f87171"],
+                        ["dpsOut", ghost.damageOut, "var(--color-emerald-400)"],
+                        ["dpsIn", ghost.damageIn, "var(--color-red-400)"],
                       ] as const
                     )
                       .filter(([id]) => series.some((s) => s.id === id))
@@ -298,7 +298,7 @@ export const BucketChart = memo(function BucketChart({
                     x2={hover * pxPerBucket + pxPerBucket / 2}
                     y1={PAD_Y}
                     y2={H - PAD_B}
-                    stroke="#a1a1aa"
+                    stroke="var(--color-zinc-400)"
                     strokeWidth="0.75"
                     strokeDasharray="4 3"
                   />
