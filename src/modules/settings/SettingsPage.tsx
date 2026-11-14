@@ -9,6 +9,14 @@ import type { NearbyFlipRadius } from "../faction-warfare/homeDefenseAlerts";
 import { useCheckForUpdatesEnabled, useReleaseCheck } from "./useReleaseCheck";
 import { useConfirmBeforeQuit } from "./useConfirmBeforeQuit";
 import { SyncSettingsCard } from "./SyncSettingsCard";
+import { useThemePreference } from "../../lib/useTheme";
+import { THEME_PREFERENCES, type ThemePreference } from "../../lib/theme";
+
+const THEME_LABELS: Record<ThemePreference, string> = {
+  system: "System",
+  dark: "Dark",
+  light: "Light (preview)",
+};
 
 const NEARBY_FLIP_OPTIONS: readonly { key: NearbyFlipRadius; label: string }[] =
   [
@@ -47,6 +55,7 @@ export function SettingsPage() {
   const [checkForUpdates, setCheckForUpdates] = useCheckForUpdatesEnabled();
   const release = useReleaseCheck(checkForUpdates);
   const [confirmBeforeQuit, setConfirmBeforeQuit] = useConfirmBeforeQuit();
+  const [theme, setTheme] = useThemePreference();
 
   return (
     <Page>
@@ -236,6 +245,39 @@ export function SettingsPage() {
               aria-label="Confirm before quitting the app"
             />
           </div>
+        </SettingsSection>
+
+        <SettingsSection
+          id="appearance"
+          title="Appearance"
+          description="Colour theme for the whole app."
+        >
+          <fieldset className="p-4">
+            <legend className="text-sm font-medium text-zinc-100">Theme</legend>
+            <p className="mt-0.5 text-xs text-zinc-500">
+              Dark is the default. <strong>Light is a preview</strong>: most
+              screens are still dark-only and will look unfinished until they
+              are migrated (#1213). System follows your OS.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-4">
+              {THEME_PREFERENCES.map((t) => (
+                <label
+                  key={t}
+                  className="flex cursor-pointer items-center gap-2 text-sm text-zinc-200"
+                >
+                  <input
+                    type="radio"
+                    name="theme"
+                    value={t}
+                    checked={theme === t}
+                    onChange={() => setTheme(t)}
+                    className="h-4 w-4 cursor-pointer accent-indigo-500"
+                  />
+                  {THEME_LABELS[t]}
+                </label>
+              ))}
+            </div>
+          </fieldset>
         </SettingsSection>
 
         <SettingsSection

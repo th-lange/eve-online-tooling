@@ -31,6 +31,7 @@ import {
   useReleaseCheck,
 } from "../modules/settings/useReleaseCheck";
 import { SyncScheduler } from "../modules/settings/SyncScheduler";
+import { ThemeApplier } from "./ThemeApplier";
 import { ModuleErrorBoundary } from "./ErrorBoundary";
 import appIcon from "../assets/app-icon.png";
 
@@ -377,6 +378,7 @@ export function Layout() {
       <CommandPalette />
       <NavBridge />
       <SyncScheduler />
+      <ThemeApplier />
       <SupportModal />
     </div>
   );

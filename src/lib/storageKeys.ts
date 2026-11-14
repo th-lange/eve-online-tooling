@@ -44,6 +44,9 @@ export const STORAGE_KEYS = {
   supportSeen: "support.firstRunSeen",
   // Settings: check for a newer release on startup (default on, opt-out)
   checkForUpdates: "settings.checkForUpdates",
+  // Settings: appearance — "system" | "dark" | "light" (default dark). Read
+  // before first paint by public/theme-init.js, which hard-codes this value.
+  theme: "settings.theme",
   // Settings: confirm before quitting the app (default on, opt-out)
   confirmBeforeQuit: "settings.confirmBeforeQuit",
   // PI Planner: the commodities currently being planned, kept across visits
