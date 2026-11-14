@@ -44,7 +44,8 @@ pub enum Permission {
 }
 
 /// One MCP tool a plugin declares it backs. The host advertises it (namespaced
-/// as `<pluginId>.<name>`) while the plugin is active, and routes a call to the
+/// as `<pluginId>.<name>`) while the plugin is active and the user has opted
+/// in to MCP exposure (#1152), and routes a call to the
 /// plugin's exported `function` via the normal sandboxed plugin path.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -6,8 +6,11 @@ external AI agent through the **Model Context Protocol (MCP)**. Ask an assistant
 the answer from the app.
 
 The bridge is **off by default**, **localhost-only**, **token-guarded**, and
-exposes **only public data** — no character, wallet, asset, or account
-information ever leaves the app, and no tool can change anything in-game.
+the built-in tools expose **only public data** — no character, wallet, asset,
+or account information ever leaves the app through them, and no built-in tool
+can change anything in-game. The one exception is [plugin-contributed
+tools](#plugin-contributed-tools), which you must enable per plugin and which
+can return whatever that plugin is allowed to read.
 
 ## Turning it on
 
@@ -93,17 +96,22 @@ facts after a change to `sde/`, `market/`, or an exposed engine.
 
 ### Plugin-contributed tools
 
-An **active** plugin (see [`plugins.md`](./plugins.md)) can declare its own MCP
-tools in its `plugin.json`. They appear here namespaced as `<pluginId>.<tool>`,
-but only while that plugin is active, and a call routes through the same
-sandboxed plugin path — so the plugin still can't touch the network, and every
-data access stays behind its granted capabilities. Deactivate the plugin (or
-the bridge) and its tools vanish.
+A plugin (see [`plugins.md`](./plugins.md)) can declare its own MCP tools in
+its `plugin.json`. They appear here namespaced as `<pluginId>.<tool>`, but only
+while that plugin is **active** *and* you have switched on **Expose these tools
+to MCP clients** on its card on the Plugins page (off by default). A call routes
+through the sandboxed plugin path with **all of the plugin's own granted
+permissions**, so a plugin that holds `assets:read` or `orders:read` can return
+that personal data, and one with `net:fetch` can contact its `allowedHosts`.
+Unlike the built-in tools, plugin tools are therefore **not** limited to public
+data. Only enable this for plugins you trust, and remember a client may forward
+the result to a cloud model (see below). Deactivate the plugin, switch the
+toggle off, or stop the bridge and its tools vanish.
 
-> Not exposed — by design: character/ESI data (assets, wallet, orders, skills,
-> industry jobs, contracts, notifications), anything requiring a login token,
-> and any in-game action. The bridge is built so a tool physically cannot reach
-> those.
+> Built-in tools never expose character/ESI data (assets, wallet, orders,
+> skills, industry jobs, contracts, notifications) or anything requiring a
+> login token, and none can take an in-game action; the built-in registry is
+> pinned by a test. Plugin-contributed tools are the opt-in exception above.
 
 ## Configuring a client
 
@@ -131,5 +139,7 @@ your client's docs for where its MCP-server config lives.
 The bridge binds `127.0.0.1` only, so nothing on your network can reach it. But
 "local endpoint" does not mean "your data stays on your machine": a client app
 (e.g. a desktop assistant) may still forward whatever a tool returns to its own
-cloud model. That's fine here because everything exposed is public game data —
-and it's the reason character/account data is kept out entirely.
+cloud model. That's fine for the built-in tools because everything they expose is public game
+data, which is why character/account data is kept out of them entirely. It is
+also why plugin-contributed tools, which can return personal data, are
+off until you enable them per plugin.

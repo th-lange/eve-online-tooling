@@ -1,6 +1,5 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import * as Sentry from "@sentry/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import {
   createBrowserRouter,
@@ -22,18 +21,6 @@ import { FwHomeDefenseProvider } from "./modules/faction-warfare/FwHomeDefensePr
 import { ConfirmQuitProvider } from "./modules/settings/ConfirmQuitProvider";
 import { ReminderProvider } from "./modules/reminders/ReminderProvider";
 import "./index.css";
-
-// Sentry: DSN is baked in at build time via VITE_SENTRY_DSN; absent = disabled.
-// Initialised before initLogCapture so Sentry's global handlers are chained first.
-const sentryDsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
-if (sentryDsn) {
-  Sentry.init({
-    dsn: sentryDsn,
-    release: __APP_VERSION__,
-    environment: import.meta.env.MODE,
-    sendDefaultPii: true,
-  });
-}
 
 // Routes are generated from the module registry: "/" redirects to the
 // last-visited module (persisted in localStorage), falling back to the first

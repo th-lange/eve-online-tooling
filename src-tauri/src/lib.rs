@@ -106,21 +106,6 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     sanitize_snap_gstreamer_env();
 
-    // Sentry error reporting. The DSN is baked in at compile time via the
-    // SENTRY_DSN environment variable; absent (dev builds, forks) = disabled.
-    // _guard must live until the process exits: tauri::Builder::run() is
-    // blocking, so declaring it here keeps it alive for the full app lifetime.
-    let _sentry_guard = option_env!("SENTRY_DSN").map(|dsn| {
-        sentry::init((
-            dsn,
-            sentry::ClientOptions {
-                release: sentry::release_name!(),
-                send_default_pii: true,
-                ..Default::default()
-            },
-        ))
-    });
-
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
@@ -303,6 +288,7 @@ pub fn run() {
             plugins::manager::plugins_remove,
             plugins::manager::plugins_invoke,
             plugins::manager::plugins_set_active,
+            plugins::manager::plugins_set_mcp_exposed,
             mcp::mcp_start,
             mcp::mcp_stop,
             mcp::mcp_status,

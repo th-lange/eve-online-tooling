@@ -1,0 +1,19 @@
+# cargo-audit configuration (read by `cargo audit` and rustsec/audit-check when
+# run from src-tauri/). Every ignore needs a written reason and an exit path.
+
+[advisories]
+ignore = [
+    # zip 2.x: ZipArchive::extract() / ZipStreamReader::extract() apply Unix
+    # permission bits (SUID/SGID), create symlinks, and abort on a symlink
+    # edge case. We NEVER call extract(): `plugins::extract_zip` walks entries
+    # itself, rejects unsafe names via `enclosed_name()`, caps entry count and
+    # total decompressed bytes, and writes plain files with `File::create`, so
+    # no mode bits are applied and no symlink is ever created (pinned by the
+    # test `zip_symlink_entries_are_extracted_as_plain_files`). The fix is
+    # zip >= 9, a major API migration; revisit when we next touch plugin
+    # install, or if any code starts calling extract().
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
+    "RUSTSEC-2026-0429",
+]

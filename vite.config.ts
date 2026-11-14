@@ -15,8 +15,7 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
 
-  // Bake the app version into the bundle so Sentry's release field matches the
-  // Cargo version without a runtime import.
+  // Bake the app version into the bundle without a runtime import.
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
   },

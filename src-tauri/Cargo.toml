@@ -43,7 +43,7 @@ serde_json = "1"
 serde_yaml = "0.9"
 thiserror = "1"
 # SDE service: SQLite (statically bundled), streaming download, bz2 decompress.
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 flate2 = "1"
 futures-util = "0.3"
@@ -60,7 +60,7 @@ httpdate = "1"
 rand = "0.8"
 tiny_http = "0.12"
 semver = "1.0.28"
-extism = "1.30.0"
+extism = "1.41.0"
 parking_lot = "0.12.5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std", "tracing-log"] }
@@ -68,10 +68,6 @@ rhai = { version = "1.25", features = ["sync", "serde"] }
 boa_engine = "0.21"
 # Plugin drag-and-drop install (folder or .zip) — extraction only.
 zip = { version = "2", default-features = false, features = ["deflate"] }
-# Error reporting: captures panics in release builds (only the `panic` integration is wired).
-# DSN baked in via SENTRY_DSN env var at build time (absent = disabled).
-# rustls matches the rest of the project; avoids pulling in native-tls.
-sentry = { version = "0.34", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Native WebKitCache clearing (#1114) — same libwebkit2gtk already linked
@@ -86,7 +82,7 @@ tokio = { version = "1", features = ["macros", "rt"] }
 # Shipped binaries carry full debug symbols by default (cargo's release
 # profile only sets opt-level = 3; strip defaults to "none"). Stripping cuts
 # tens of percent off every bundle format without changing codegen or
-# behavior — Sentry (above) doesn't need local debug symbols present in the
-# binary users download. See #1094.
+# behavior — users don't need local debug symbols present in the
+# binary they download. See #1094.
 [profile.release]
 strip = true
