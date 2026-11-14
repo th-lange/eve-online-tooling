@@ -19,7 +19,8 @@
     "format:check": "prettier --check .",
     "tauri": "tauri",
     "gen:wh-systems": "node scripts/gen-wh-systems.mjs",
-    "feedback:pull": "node scripts/feedback-pull.mjs"
+    "feedback:pull": "node scripts/feedback-pull.mjs",
+    "gen:light-palette": "node scripts/gen-light-palette.mjs > src/theme-light.css"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",

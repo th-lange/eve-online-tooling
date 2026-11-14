@@ -15,7 +15,7 @@ import { THEME_PREFERENCES, type ThemePreference } from "../../lib/theme";
 const THEME_LABELS: Record<ThemePreference, string> = {
   system: "System",
   dark: "Dark",
-  light: "Light (preview)",
+  light: "Light (beta)",
 };
 
 const NEARBY_FLIP_OPTIONS: readonly { key: NearbyFlipRadius; label: string }[] =
@@ -255,9 +255,10 @@ export function SettingsPage() {
           <fieldset className="p-4">
             <legend className="text-sm font-medium text-zinc-100">Theme</legend>
             <p className="mt-0.5 text-xs text-zinc-500">
-              Dark is the default. <strong>Light is a preview</strong>: most
-              screens are still dark-only and will look unfinished until they
-              are migrated (#1213). System follows your OS.
+              Dark is the default. <strong>Light is new</strong>: the main
+              screens, sidebar, tables and dialogs follow it, but charts,
+              graphs, the script editor and plugin pages are still dark-only
+              (#1213). System follows your OS.
             </p>
             <div className="mt-3 flex flex-wrap gap-4">
               {THEME_PREFERENCES.map((t) => (
