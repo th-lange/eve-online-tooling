@@ -17,6 +17,7 @@ import {
   pluginsInstall,
   pluginsRemove,
   pluginSetActive,
+  pluginSetMcpExposed,
   mcpStatus,
   mcpStart,
   mcpStop,
@@ -201,6 +202,11 @@ function PluginCard({ entry }: { entry: PluginEntry }) {
     mutationFn: (next: boolean) => pluginSetActive(manifest.id, next),
     onSuccess: () => qc.invalidateQueries({ queryKey: pluginsKeys.all }),
   });
+  const exposeMcp = useMutation({
+    mutationFn: (next: boolean) => pluginSetMcpExposed(manifest.id, next),
+    onSuccess: () => qc.invalidateQueries({ queryKey: pluginsKeys.all }),
+  });
+  const mcpTools = manifest.mcpTools ?? [];
   const remove = useMutation({
     mutationFn: () => pluginsRemove(manifest.id),
     onSuccess: (list) => qc.setQueryData(pluginsKeys.all, list),
@@ -223,8 +229,11 @@ function PluginCard({ entry }: { entry: PluginEntry }) {
           </span>
         </div>
         <div className="mt-0.5 text-xs text-zinc-500">{manifest.id}</div>
+        <div className="mt-2 text-[10px] uppercase tracking-wide text-zinc-500">
+          Permissions (from the installed version)
+        </div>
         {manifest.permissions.length > 0 ? (
-          <ul className="mt-2 flex flex-wrap gap-1.5">
+          <ul className="mt-1 flex flex-wrap gap-1.5">
             {manifest.permissions.map((p) => (
               <li
                 key={p}
@@ -236,7 +245,7 @@ function PluginCard({ entry }: { entry: PluginEntry }) {
             ))}
           </ul>
         ) : (
-          <div className="mt-2 text-xs text-zinc-500">
+          <div className="mt-1 text-xs text-zinc-500">
             Requests no capabilities.
           </div>
         )}
@@ -246,6 +255,40 @@ function PluginCard({ entry }: { entry: PluginEntry }) {
             <span className="text-zinc-400">
               {manifest.allowedHosts.join(", ")}
             </span>
+          </div>
+        ) : null}
+        {mcpTools.length > 0 ? (
+          <div className="mt-3 rounded border border-amber-900/60 bg-amber-950/20 p-2">
+            <div className="text-xs font-medium text-zinc-300">MCP tools</div>
+            <ul className="mt-1 space-y-0.5 text-xs text-zinc-400">
+              {mcpTools.map((t) => (
+                <li key={t.name} title={t.description}>
+                  <code className="text-zinc-300">
+                    {manifest.id}.{t.name}
+                  </code>
+                  {t.description ? ` — ${t.description}` : null}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1.5 text-xs text-amber-300/90">
+              These tools run with all of this plugin&apos;s permissions, so
+              they may return data the plugin can read (such as your assets or
+              orders). MCP clients may forward tool results to a cloud model.
+            </p>
+            <label className="mt-1.5 flex items-center gap-2 text-xs text-zinc-300">
+              <input
+                type="checkbox"
+                checked={entry.mcpExposed}
+                disabled={exposeMcp.isPending}
+                onChange={(e) => exposeMcp.mutate(e.target.checked)}
+              />
+              Expose these tools to MCP clients
+              {entry.mcpExposed && !active ? (
+                <span className="text-zinc-500">
+                  (served only while the plugin is active)
+                </span>
+              ) : null}
+            </label>
           </div>
         ) : null}
       </div>

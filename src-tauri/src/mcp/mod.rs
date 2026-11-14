@@ -303,7 +303,7 @@ fn dispatch(req: &Value, ctx: &ToolCtx) -> Option<Value> {
 }
 
 /// The tools this server advertises: the built-in read-only tools plus any
-/// declared by currently-active plugins (namespaced `<pluginId>.<tool>`), plus
+/// declared by plugins that are active **and** opted in to MCP exposure (namespaced `<pluginId>.<tool>`), plus
 /// the **dev-tier** compute-engine tools when [`dev_tier_enabled`] is on.
 fn tool_list(ctx: &ToolCtx) -> Value {
     let mut tools = vec![json!({
@@ -375,6 +375,11 @@ fn call_tool(params: Option<&Value>, ctx: &ToolCtx) -> Result<Value, (i64, Strin
 fn route_plugin_tool(name: &str, args: &Value, ctx: &ToolCtx) -> Result<Value, (i64, String)> {
     let unknown = || (-32602, format!("unknown tool: {name}"));
     let (plugin_id, tool) = name.split_once('.').ok_or_else(unknown)?;
+    // A plugin's tools are only reachable once the user opted in to MCP
+    // exposure (#1152); to a client an un-exposed plugin looks nonexistent.
+    if !ctx.registry.is_mcp_exposed(plugin_id) {
+        return Err(unknown());
+    }
     let manifest = ctx.registry.manifest(plugin_id).ok_or_else(unknown)?;
     let def = manifest
         .mcp_tools
@@ -845,7 +850,7 @@ mod tests {
     }
 
     #[test]
-    fn plugin_tool_appears_only_while_active_and_routes() {
+    fn plugin_tool_appears_only_while_active_and_exposed_and_routes() {
         let dir = tmp("plugin-tool");
         let pdir = dir.join("plugins").join("echo-plugin");
         std::fs::create_dir_all(&pdir).unwrap();
@@ -875,7 +880,16 @@ mod tests {
                 .collect()
         };
 
-        // Inactive: not advertised, not callable.
+        // Active but not opted in to MCP: still hidden and uncallable (#1152).
+        ctx.registry.set_active("echo-plugin", true).unwrap();
+        assert!(!names(&ctx).contains(&"echo-plugin.echo".to_string()));
+        assert!(call(&ctx, "echo-plugin.echo", json!({ "a": 1 }))
+            .get("error")
+            .is_some());
+        ctx.registry.set_active("echo-plugin", false).unwrap();
+
+        // Opted in but inactive: not advertised, not callable.
+        ctx.registry.set_mcp_exposed("echo-plugin", true).unwrap();
         assert!(!names(&ctx).contains(&"echo-plugin.echo".to_string()));
         assert!(call(&ctx, "echo-plugin.echo", json!({ "a": 1 }))
             .get("error")
@@ -891,6 +905,14 @@ mod tests {
         // Deactivated: gone again.
         ctx.registry.set_active("echo-plugin", false).unwrap();
         assert!(!names(&ctx).contains(&"echo-plugin.echo".to_string()));
+
+        // Opt-out while active: gone again, and the call is refused.
+        ctx.registry.set_active("echo-plugin", true).unwrap();
+        ctx.registry.set_mcp_exposed("echo-plugin", false).unwrap();
+        assert!(!names(&ctx).contains(&"echo-plugin.echo".to_string()));
+        assert!(call(&ctx, "echo-plugin.echo", json!({ "a": 1 }))
+            .get("error")
+            .is_some());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
