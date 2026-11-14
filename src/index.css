@@ -1,7 +1,33 @@
 @import "tailwindcss";
 
+/* Appearance (#1213). `data-theme` on <html> is set before first paint by
+ * public/theme-init.js and kept current by ThemeApplier. `dark:` variants key
+ * off it (not the OS media query) so the in-app setting wins. */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+/* Semantic colour tokens. Defined (static, so they are always emitted) but not
+ * used by any component yet: stage 2 migrates components from raw zinc-*
+ * utilities to these. Dark values are the zinc shades the app uses today. */
+@theme static {
+  --color-surface: #09090b; /* zinc-950: page background */
+  --color-surface-raised: #18181b; /* zinc-900: cards, panels */
+  --color-border: #27272a; /* zinc-800 */
+  --color-fg: #f4f4f5; /* zinc-100 */
+  --color-fg-muted: #a1a1aa; /* zinc-400 */
+}
+
+/* The default before JS runs is dark, like the app has always been. */
 :root {
   color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --color-surface: #ffffff;
+  --color-surface-raised: #f4f4f5; /* zinc-100 */
+  --color-border: #e4e4e7; /* zinc-200 */
+  --color-fg: #18181b; /* zinc-900 */
+  --color-fg-muted: #52525b; /* zinc-600: AA on white */
 }
 
 html,
