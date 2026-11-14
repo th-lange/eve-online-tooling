@@ -1,6 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { PluginHost } from "./PluginHost";
+import { MAX_IN_FLIGHT_INVOKES, PluginHost } from "./PluginHost";
 
 const invokeMock = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
@@ -33,6 +33,10 @@ function postFrom(source: unknown, data: unknown) {
 const flush = () => new Promise((r) => setTimeout(r, 20));
 
 describe("PluginHost", () => {
+  beforeEach(() => {
+    invokeMock.mockReset();
+  });
+
   it("forwards a guest invoke to plugins_invoke and replies with the result", async () => {
     invokeMock.mockResolvedValue({ isk: 42 });
     render(<PluginHost pluginId="pricing-model" />);
@@ -114,6 +118,40 @@ describe("PluginHost", () => {
       },
       "*",
     );
+  });
+
+  it("rejects invokes above the in-flight cap and frees slots as calls settle", async () => {
+    const pending: Array<(v: unknown) => void> = [];
+    invokeMock.mockImplementation(
+      () => new Promise((resolve) => pending.push(resolve)),
+    );
+    render(<PluginHost pluginId="pricing-model" />);
+    const win = stubFrameWindow();
+
+    for (let id = 1; id <= MAX_IN_FLIGHT_INVOKES + 1; id++) {
+      postFrom(win, { channel: CHANNEL, kind: "invoke", id, fn: "slow" });
+    }
+    await flush();
+
+    // Only the first MAX calls reached the backend; the extra one was refused
+    // immediately with a clear error.
+    expect(invokeMock).toHaveBeenCalledTimes(MAX_IN_FLIGHT_INVOKES);
+    expect(win.postMessage).toHaveBeenCalledTimes(1);
+    expect(win.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: MAX_IN_FLIGHT_INVOKES + 1,
+        ok: false,
+        error: expect.stringContaining("busy"),
+      }),
+      "*",
+    );
+
+    // Settling one call frees a slot for the next invoke.
+    pending[0]("done");
+    await flush();
+    postFrom(win, { channel: CHANNEL, kind: "invoke", id: 99, fn: "slow" });
+    await flush();
+    expect(invokeMock).toHaveBeenCalledTimes(MAX_IN_FLIGHT_INVOKES + 1);
   });
 
   it("ignores messages from a foreign source window", async () => {

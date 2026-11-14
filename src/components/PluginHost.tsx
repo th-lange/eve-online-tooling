@@ -44,6 +44,13 @@ type HostReply =
       error: string;
     };
 
+/** Most invokes one plugin frame may have outstanding. Mirrors
+ *  `MAX_IN_FLIGHT_PER_PLUGIN` in `src-tauri/src/plugins/manager.rs`: each call
+ *  parks a blocking-pool thread, so a frame posting thousands of requests would
+ *  starve every other `spawn_blocking` user (#1153). Above the cap we refuse
+ *  here instead of crossing the IPC boundary just to be refused there. */
+export const MAX_IN_FLIGHT_INVOKES = 4;
+
 function isInvokeRequest(data: unknown): data is InvokeRequest {
   if (typeof data !== "object" || data === null) return false;
   const m = data as Record<string, unknown>;
@@ -65,6 +72,8 @@ export function PluginHost({
   const ref = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
+    let inFlight = 0;
+
     function onMessage(event: MessageEvent) {
       // Only accept messages from *our* iframe's window. A sandboxed frame
       // without allow-same-origin has a null origin, so source identity — not
@@ -75,6 +84,18 @@ export function PluginHost({
 
       const { id, fn, args } = event.data;
       const reply = (r: HostReply) => frame.contentWindow?.postMessage(r, "*");
+
+      if (inFlight >= MAX_IN_FLIGHT_INVOKES) {
+        reply({
+          channel: CHANNEL,
+          kind: "result",
+          id,
+          ok: false,
+          error: `plugin is busy: more than ${MAX_IN_FLIGHT_INVOKES} calls in flight`,
+        });
+        return;
+      }
+      inFlight += 1;
 
       // Forward to this plugin's own logic only — the broker still gates every
       // capability inside plugins_invoke.
@@ -94,7 +115,10 @@ export function PluginHost({
             // its API, a bad argument) before the guest ever sees it.
             error: errorMessage(err),
           }),
-        );
+        )
+        .finally(() => {
+          inFlight -= 1;
+        });
     }
 
     window.addEventListener("message", onMessage);
