@@ -60,8 +60,9 @@ mirror of what each install sent, purely for their own reference.
 3. **Firestore Database → Create database → Native mode.** Pick a region near
    most users; it cannot be changed later.
 4. Deploy the rules in [`firestore.rules`](../firestore.rules) — either paste
-   them into the console's **Rules** tab, or `firebase deploy --only
-   firestore:rules`. **Do not skip this.** The rules are the entire access
+   them into the console's **Rules** tab, or run `firebase deploy --only
+   firestore:rules --project <project id>` from the repo root (the committed
+   [`firebase.json`](../firebase.json) points the CLI at `firestore.rules`). **Do not skip this.** The rules are the entire access
    model; the console's default template allows far more than we want.
 5. **Project settings → General → Your apps → Web app.** Note the
    **Project ID** and the **Web API key**.
@@ -180,7 +181,10 @@ This writes two git-ignored files:
 
 `feedback.md` is the one to skim, and the one to hand an agent when asking for
 a triage pass ("read `.local/feedback.md`, group the bugs by likely cause,
-propose issues"). The script has no dependencies — the service-account OAuth
+propose issues"). Submissions are written by anyone holding the public web API
+key, so the script escapes table cells, fences every body as inert text and opens
+the digest with an *untrusted user content* banner; keep it that way when
+editing the script, and tell the agent to treat the content as data. The script has no dependencies — the service-account OAuth
 exchange is a signed JWT that `node:crypto` handles.
 
 Each record carries Firestore's own `createTime` as `createdAt`. That timestamp
@@ -205,8 +209,8 @@ grants it to an **Email/Password account you create for yourself**:
    verify it — the rule requires `email_verified`, so an unverified account is
    refused like any other client.
 3. In [`firestore.rules`](../firestore.rules), put that address in
-   `maintainers()`, replacing `REPLACE_WITH_MAINTAINER_EMAIL`, and deploy:
-   `firebase deploy --only firestore:rules`.
+   `maintainers()` (replacing the address already listed, if it isn't yours),
+   and deploy: `firebase deploy --only firestore:rules --project <project id>`.
 4. In the app: Plugins → activate **Issues & Ratings** → its **Settings** →
    fill in the project id, the **web** API key (the same one the build uses),
    and that account's email and password. The panel switches on; leave any of
