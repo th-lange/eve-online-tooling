@@ -429,6 +429,19 @@ pub fn plugins_set_active(
     Ok(())
 }
 
+/// Opt an installed plugin in or out of exposing its `mcpTools` to MCP clients
+/// (#1152). Off by default; independent of activation.
+#[tauri::command]
+pub fn plugins_set_mcp_exposed(
+    registry: State<'_, Arc<PluginRegistry>>,
+    plugin_id: String,
+    exposed: bool,
+) -> Result<(), AppError> {
+    registry
+        .set_mcp_exposed(&plugin_id, exposed)
+        .map_err(AppError::from)
+}
+
 /// Re-scan the plugins folder at runtime so a plugin added or removed since
 /// launch is picked up without restarting the app. Evicts the cached instance
 /// of any plugin that vanished, then returns the fresh list.

@@ -288,6 +288,7 @@ pub fn run() {
             plugins::manager::plugins_remove,
             plugins::manager::plugins_invoke,
             plugins::manager::plugins_set_active,
+            plugins::manager::plugins_set_mcp_exposed,
             mcp::mcp_start,
             mcp::mcp_stop,
             mcp::mcp_status,

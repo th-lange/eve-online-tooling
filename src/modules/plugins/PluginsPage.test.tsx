@@ -40,6 +40,7 @@ const PLUGIN: PluginEntry = {
     permissions: ["sde:read", "storage:own"],
   },
   active: false,
+  mcpExposed: false,
 };
 
 const RUNNING: McpStatus = {
@@ -63,6 +64,7 @@ function renderPage(entries: PluginEntry[], mcpStart: McpStatus = STOPPED) {
         case "plugins_list":
           return Promise.resolve(entries);
         case "plugins_set_active":
+        case "plugins_set_mcp_exposed":
           return Promise.resolve();
         case "mcp_status":
           return Promise.resolve(mcp);
@@ -139,6 +141,49 @@ describe("PluginsPage", () => {
         active: true,
       }),
     );
+  });
+
+  it("lists a plugin's MCP tools with a warning and an opt-in toggle", async () => {
+    const withTools: PluginEntry = {
+      ...PLUGIN,
+      manifest: {
+        ...PLUGIN.manifest,
+        permissions: ["assets:read", "net:fetch"],
+        allowedHosts: ["api.example.com"],
+        mcpTools: [
+          {
+            name: "summary",
+            description: "Summarise holdings",
+            inputSchema: { type: "object" },
+            function: "summary",
+          },
+        ],
+      },
+    };
+    renderPage([withTools]);
+    await screen.findByText("Pricing Model");
+    const card = pluginCard("Pricing Model");
+    expect(within(card).getByText("pricing-model.summary")).toBeInTheDocument();
+    expect(within(card).getByText(/forward tool results/i)).toBeInTheDocument();
+    expect(within(card).getByText("Read your assets")).toBeInTheDocument();
+    expect(within(card).getByText("api.example.com")).toBeInTheDocument();
+    const box = within(card).getByRole("checkbox", {
+      name: /Expose these tools to MCP clients/,
+    });
+    expect(box).not.toBeChecked();
+    fireEvent.click(box);
+    await waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("plugins_set_mcp_exposed", {
+        pluginId: "pricing-model",
+        exposed: true,
+      }),
+    );
+  });
+
+  it("shows no MCP section for a plugin without MCP tools", async () => {
+    renderPage([PLUGIN]);
+    await screen.findByText("Pricing Model");
+    expect(screen.queryByText("MCP tools")).toBeNull();
   });
 
   it("shows an empty state when nothing is installed", async () => {
