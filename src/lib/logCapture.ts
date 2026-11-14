@@ -45,8 +45,7 @@ export function initLogCapture(): void {
   };
 
   // addEventListener, not `window.onerror = …`: assigning the property would
-  // replace the handlers Sentry installed just before us, so uncaught errors
-  // never reached Sentry (#1192).
+  // replace any handler another script installed.
   window.addEventListener("error", (event) => {
     logStore.push({
       ts: Date.now(),
