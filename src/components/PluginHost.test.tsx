@@ -86,6 +86,31 @@ describe("PluginHost", () => {
     );
   });
 
+  it("keeps the message when the command rejects with an AppError object", async () => {
+    // `plugins_invoke` rejects with the serialized Rust error, which is a plain
+    // object. Stringifying it naively produced "[object Object]" in the guest,
+    // hiding real diagnoses like a 403 from the API a plugin fetches.
+    invokeMock.mockImplementation(() =>
+      Promise.reject({ kind: "Other", message: "Firestore denied the read" }),
+    );
+    render(<PluginHost pluginId="pricing-model" />);
+    const win = stubFrameWindow();
+
+    postFrom(win, { channel: CHANNEL, kind: "invoke", id: 2, fn: "fetch_feedback" });
+    await flush();
+
+    expect(win.postMessage).toHaveBeenCalledWith(
+      {
+        channel: CHANNEL,
+        kind: "result",
+        id: 2,
+        ok: false,
+        error: "Firestore denied the read",
+      },
+      "*",
+    );
+  });
+
   it("ignores messages from a foreign source window", async () => {
     render(<PluginHost pluginId="pricing-model" />);
     stubFrameWindow();

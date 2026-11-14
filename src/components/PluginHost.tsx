@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { pluginInvoke } from "../lib/api";
+import { errorMessage, pluginInvoke } from "../lib/api";
 
 /**
  * Renders an untrusted plugin's UI (issue #501).
@@ -88,7 +88,11 @@ export function PluginHost({
             kind: "result",
             id,
             ok: false,
-            error: err instanceof Error ? err.message : String(err),
+            // `plugins_invoke` rejects with a serialized `AppError` — a plain
+            // object, not an `Error`. `String(err)` on that yields
+            // "[object Object]", losing the plugin's own diagnosis (a 403 from
+            // its API, a bad argument) before the guest ever sees it.
+            error: err instanceof Error ? err.message : errorMessage(err),
           }),
         );
     }
