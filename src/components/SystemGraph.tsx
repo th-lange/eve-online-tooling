@@ -94,15 +94,15 @@ export interface SystemGraphEdge {
  *  than re-hardcoded; w-space/unknown have no security band, so those stay
  *  local. */
 const KIND_HEX: Record<NodeKind, string> = {
-  wspace: "#a855f7",
+  wspace: "var(--color-purple-500)",
   ...SEC_HEX,
-  unknown: "#a1a1aa",
+  unknown: "var(--color-zinc-400)",
 };
 
 /** Edge colour for a link touching a selected node — distinct from the
  *  default stargate grey and wormhole purple so a clicked system's
  *  connections stand out at a glance. */
-const SELECTED_EDGE_HEX = "#38bdf8"; // sky-400
+const SELECTED_EDGE_HEX = "var(--color-sky-400)"; // sky-400
 
 /** Colour of a node's border/text by kind. */
 function kindClass(kind: NodeKind): string {
@@ -660,7 +660,10 @@ export function SystemGraph({
           selectedIds.has(e.source) || selectedIds.has(e.target);
         const color = highlighted
           ? SELECTED_EDGE_HEX
-          : (e.color ?? (e.variant === "wormhole" ? "#a855f7" : "#52525b"));
+          : (e.color ??
+            (e.variant === "wormhole"
+              ? "var(--color-purple-500)"
+              : "var(--color-zinc-600)"));
         return {
           id: `${e.source}-${e.target}-${i}`,
           source: e.source,
@@ -734,7 +737,7 @@ export function SystemGraph({
       proOptions={{ hideAttribution: true }}
       minZoom={0.2}
     >
-      <Background color="#27272a" gap={20} />
+      <Background color="var(--color-zinc-800)" gap={20} />
       <Controls
         showInteractive={false}
         className="!bg-zinc-900 !border-zinc-700"

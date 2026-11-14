@@ -13,7 +13,13 @@ const PAD = 8;
 const PAD_BOTTOM = 18;
 const WINDOW_DAYS = 90;
 // Region line colours (primary first). Extra regions cycle through the rest.
-const COLORS = ["#34d399", "#38bdf8", "#f59e0b", "#a78bfa", "#fb7185"];
+const COLORS = [
+  "var(--color-emerald-400)",
+  "var(--color-sky-400)",
+  "var(--color-amber-500)",
+  "var(--color-violet-400)",
+  "var(--color-rose-400)",
+];
 
 export interface RegionSeries {
   name: string;
@@ -125,7 +131,7 @@ export function MultiRegionHistory({ regions }: { regions: RegionSeries[] }) {
           <polyline
             points={model.ma7}
             fill="none"
-            stroke="#71717a"
+            stroke="var(--color-zinc-500)"
             strokeWidth="1"
             strokeDasharray="3 2"
             vectorEffect="non-scaling-stroke"
@@ -135,7 +141,7 @@ export function MultiRegionHistory({ regions }: { regions: RegionSeries[] }) {
           <polyline
             points={model.ma28}
             fill="none"
-            stroke="#52525b"
+            stroke="var(--color-zinc-600)"
             strokeWidth="1"
             strokeDasharray="5 3"
             vectorEffect="non-scaling-stroke"

@@ -86,17 +86,17 @@ function MiniDpsChart({ buckets }: { buckets: DpsBucket[] }) {
       .join(" ");
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full rounded">
-      <rect width={W} height={H} fill="#09090b" rx="3" />
+      <rect width={W} height={H} fill="var(--color-zinc-950)" rx="3" />
       <polyline
         points={path("damageOut")}
         fill="none"
-        stroke="#34d399"
+        stroke="var(--color-emerald-400)"
         strokeWidth="1.5"
       />
       <polyline
         points={path("damageIn")}
         fill="none"
-        stroke="#f87171"
+        stroke="var(--color-red-400)"
         strokeWidth="1.5"
       />
     </svg>

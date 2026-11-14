@@ -35,6 +35,7 @@ const ACCENT = [
   "emerald",
   "teal",
   "sky",
+  "blue",
   "indigo",
   "violet",
   "purple",

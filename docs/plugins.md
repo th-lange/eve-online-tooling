@@ -353,6 +353,36 @@ for types) into your UI and `import { invoke }` from it. The `plugin://` host
 sends `Access-Control-Allow-Origin`, so a sandboxed frame can ES-module-import
 its own assets (app builds from v0.40).
 
+### Following the app's theme
+
+The app has a Light and a Dark theme. Your UI is a separate, sandboxed
+document, so it cannot read the app's CSS variables — the host tells it instead.
+It posts the current theme when your frame loads and again whenever the user
+changes it:
+
+```js
+// parent → your window
+{ channel: "eve-plugin", kind: "theme", theme: "dark" }   // or "light"
+```
+
+Handle it by switching your own styles, e.g.:
+
+```html
+<script>
+  window.addEventListener("message", (e) => {
+    const m = e.data;
+    if (m && m.channel === "eve-plugin" && m.kind === "theme") {
+      document.documentElement.dataset.theme = m.theme;
+      document.documentElement.style.colorScheme = m.theme;
+    }
+  });
+</script>
+```
+
+A UI that ignores the message keeps whatever colours it ships with (older
+plugins are dark-only and will look out of place in Light). Messages of kinds
+you don't know should always be ignored, so adding this is backwards compatible.
+
 ### Reference
 
 [`eve-online-tooling-plugins/pricing-model/`](https://github.com/th-lange/eve-online-tooling-plugins/tree/main/pricing-model)

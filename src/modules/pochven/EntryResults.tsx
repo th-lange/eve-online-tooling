@@ -153,7 +153,7 @@ export function EntryResults({ data }: { data: EntrySearchResult }) {
             : "unknown",
         sub: node.candidate ? `→ ${node.leadsTo.join(" / ")}` : undefined,
         current: node.origin,
-        accent: done ? "#34d399" : undefined,
+        accent: done ? "var(--color-emerald-400)" : undefined,
       };
     });
   // Route colouring: green = the next jump(s) to make (or the selected system's
@@ -176,7 +176,7 @@ export function EntryResults({ data }: { data: EntrySearchResult }) {
         source: String(a),
         target: String(b),
         variant: "stargate" as const,
-        color: isGreen ? "#34d399" : "#52525b",
+        color: isGreen ? "var(--color-emerald-400)" : "var(--color-zinc-600)",
       },
     ];
   });

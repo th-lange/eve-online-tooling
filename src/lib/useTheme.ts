@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { usePersistentState } from "./usePersistentState";
 import { STORAGE_KEYS } from "./storageKeys";
 import {
@@ -6,6 +6,7 @@ import {
   DEFAULT_THEME,
   resolveTheme,
   sanitizeThemePreference,
+  type ResolvedTheme,
   systemPrefersDark,
   type ThemePreference,
 } from "./theme";
@@ -41,4 +42,24 @@ export function useApplyTheme(): void {
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, [pref]);
+}
+
+/**
+ * The concrete theme in force (`dark` | `light`), for things that can't use CSS
+ * variables: the CodeMirror editor's theme prop and the theme message sent to
+ * plugin frames. Re-evaluates when the preference changes and, only while the
+ * preference is "system", when the OS setting changes.
+ */
+export function useResolvedTheme(): ResolvedTheme {
+  const [pref] = useThemePreference();
+  const [osDark, setOsDark] = useState(systemPrefersDark);
+  useEffect(() => {
+    if (pref !== "system" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => setOsDark(mq.matches);
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [pref]);
+  return resolveTheme(pref, osDark);
 }

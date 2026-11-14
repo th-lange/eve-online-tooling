@@ -159,7 +159,9 @@ export function EwPanel({
 }
 
 export function CapGauge({ cap }: { cap: CapStats }) {
-  const color = cap.stable ? "#10b981" : "#ef4444";
+  const color = cap.stable
+    ? "var(--color-emerald-500)"
+    : "var(--color-red-500)";
   return (
     <div>
       <div className="flex justify-between text-xs">
@@ -236,7 +238,7 @@ export function CapChart({
             x2={w}
             y1={padY + f * (h - 2 * padY)}
             y2={padY + f * (h - 2 * padY)}
-            stroke="#27272a"
+            stroke="var(--color-zinc-800)"
             strokeWidth="0.75"
           />
         ))}
@@ -266,7 +268,7 @@ export function DpsRangeCurve({ curve }: { curve: [number, number][] }) {
     .map(([d, dps]) => `${x(d).toFixed(1)},${y(dps).toFixed(1)}`)
     .join(" ");
   const area = `0,${h} ${line} ${w},${h}`;
-  const color = "#f59e0b";
+  const color = "var(--color-amber-500)";
   return (
     <div className="mt-1">
       <svg
@@ -282,7 +284,7 @@ export function DpsRangeCurve({ curve }: { curve: [number, number][] }) {
             x2={w}
             y1={padY + f * (h - 2 * padY)}
             y2={padY + f * (h - 2 * padY)}
-            stroke="#27272a"
+            stroke="var(--color-zinc-800)"
             strokeWidth="0.75"
           />
         ))}
@@ -309,12 +311,12 @@ export interface DpsRangeSeries {
  *  (matches the single-curve `DpsRangeCurve`'s amber), then increasingly
  *  broken patterns. */
 const OVERLAY_COLORS = [
-  "#f59e0b",
-  "#38bdf8",
-  "#34d399",
-  "#a78bfa",
-  "#fb7185",
-  "#facc15",
+  "var(--color-amber-500)",
+  "var(--color-sky-400)",
+  "var(--color-emerald-400)",
+  "var(--color-violet-400)",
+  "var(--color-rose-400)",
+  "var(--color-yellow-400)",
 ];
 const OVERLAY_DASHES = [undefined, "6 3", "2 2", "8 2 2 2", "3 6", "1 3 4 3"];
 
@@ -383,7 +385,7 @@ export function DpsRangeOverlayChart({ series }: { series: DpsRangeSeries[] }) {
             x2={w}
             y1={padY + f * (h - 2 * padY)}
             y2={padY + f * (h - 2 * padY)}
-            stroke="#27272a"
+            stroke="var(--color-zinc-800)"
             strokeWidth="0.75"
           />
         ))}

@@ -33,10 +33,10 @@ export function Sparkline({
   const stroke =
     color ??
     (values[values.length - 1] > values[0]
-      ? "#34d399"
+      ? "var(--color-emerald-400)"
       : values[values.length - 1] < values[0]
-        ? "#fb7185"
-        : "#71717a");
+        ? "var(--color-rose-400)"
+        : "var(--color-zinc-500)");
   return (
     <svg
       viewBox={`0 0 ${width} ${height}`}

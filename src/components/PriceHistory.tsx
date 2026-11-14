@@ -115,7 +115,7 @@ export function PriceHistoryView({
         series={series}
         pick={(p) => p.volume}
         label="Daily volume"
-        color="#60a5fa"
+        color="var(--color-blue-400)"
         fmt={(v) => formatInt(v)}
       />
       <div className="mt-4 max-h-72 overflow-auto rounded border border-zinc-800">
@@ -310,12 +310,16 @@ function PriceChart({
   return (
     <div className="rounded border border-zinc-800 bg-zinc-900 p-2">
       <div className="mb-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-        <Legend color="#34d399" label="Average price" />
-        {showMa && <Legend color="#f59e0b" label={`MA ${period}d`} />}
-        {showChannel && (
-          <Legend color="#38bdf8" label={`Donchian ${period}d`} />
+        <Legend color="var(--color-emerald-400)" label="Average price" />
+        {showMa && (
+          <Legend color="var(--color-amber-500)" label={`MA ${period}d`} />
         )}
-        {showMedian && <Legend color="#a78bfa" label="Daily median" />}
+        {showChannel && (
+          <Legend color="var(--color-sky-400)" label={`Donchian ${period}d`} />
+        )}
+        {showMedian && (
+          <Legend color="var(--color-violet-400)" label="Daily median" />
+        )}
         <span className="ml-auto tabular-nums text-zinc-300">
           {hover != null
             ? `${series[hover].date} · ${formatIsk(avg[hover])}` +
@@ -345,7 +349,7 @@ function PriceChart({
               x2={w - padX}
               y1={gy}
               y2={gy}
-              stroke="#27272a"
+              stroke="var(--color-zinc-800)"
               strokeWidth="0.75"
             />
           ))}
@@ -353,14 +357,14 @@ function PriceChart({
             <>
               <polygon
                 points={band}
-                fill="#38bdf8"
+                fill="var(--color-sky-400)"
                 fillOpacity="0.08"
                 stroke="none"
               />
               <polyline
                 points={upperLine}
                 fill="none"
-                stroke="#38bdf8"
+                stroke="var(--color-sky-400)"
                 strokeWidth="1"
                 strokeDasharray="3 3"
                 strokeOpacity="0.8"
@@ -368,7 +372,7 @@ function PriceChart({
               <polyline
                 points={lowerLine}
                 fill="none"
-                stroke="#38bdf8"
+                stroke="var(--color-sky-400)"
                 strokeWidth="1"
                 strokeDasharray="3 3"
                 strokeOpacity="0.8"
@@ -379,7 +383,7 @@ function PriceChart({
             <polyline
               points={medLine}
               fill="none"
-              stroke="#a78bfa"
+              stroke="var(--color-violet-400)"
               strokeWidth="1.5"
               strokeDasharray="5 4"
             />
@@ -387,14 +391,14 @@ function PriceChart({
           <polyline
             points={avgLine}
             fill="none"
-            stroke="#34d399"
+            stroke="var(--color-emerald-400)"
             strokeWidth="1.5"
           />
           {showMa && (
             <polyline
               points={maLine}
               fill="none"
-              stroke="#f59e0b"
+              stroke="var(--color-amber-500)"
               strokeWidth="1.5"
             />
           )}
@@ -405,7 +409,7 @@ function PriceChart({
                 x2={x(hover)}
                 y1={padY}
                 y2={h - padY}
-                stroke="#52525b"
+                stroke="var(--color-zinc-600)"
                 strokeWidth="0.75"
               />
               <line
@@ -413,11 +417,16 @@ function PriceChart({
                 x2={w - padX}
                 y1={hoverY}
                 y2={hoverY}
-                stroke="#52525b"
+                stroke="var(--color-zinc-600)"
                 strokeWidth="0.75"
                 strokeDasharray="2 2"
               />
-              <circle cx={x(hover)} cy={y(avg[hover])} r="3" fill="#34d399" />
+              <circle
+                cx={x(hover)}
+                cy={y(avg[hover])}
+                r="3"
+                fill="var(--color-emerald-400)"
+              />
             </g>
           )}
         </svg>
@@ -520,7 +529,7 @@ function Chart({
             x2={w - padX}
             y1={gy}
             y2={gy}
-            stroke="#27272a"
+            stroke="var(--color-zinc-800)"
             strokeWidth="0.75"
           />
         ))}
@@ -532,7 +541,7 @@ function Chart({
               x2={x(hover)}
               y1={padY}
               y2={h - padY}
-              stroke="#52525b"
+              stroke="var(--color-zinc-600)"
               strokeWidth="0.75"
             />
             <circle cx={x(hover)} cy={y(vals[hover])} r="3" fill={color} />
