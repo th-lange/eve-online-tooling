@@ -1,6 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { useRouteError } from "react-router-dom";
-import * as Sentry from "@sentry/react";
 import { errorMessage } from "../lib/api/common";
 
 /** The card shown in place of a crashed page: what happened plus a way out. */
@@ -50,7 +49,7 @@ function CrashCard({
  * Isolates one module page: a render error there shows a recovery card instead
  * of unmounting the whole shell (sidebar, every other kept-alive page and its
  * in-memory state). Reported to the Logs page (via `console.error`, which the
- * log capture records) and to Sentry when enabled (#1195).
+ * log capture records).
  */
 export class ModuleErrorBoundary extends Component<
   { moduleId: string; title: string; children: ReactNode },
@@ -67,9 +66,6 @@ export class ModuleErrorBoundary extends Component<
       `Module "${this.props.moduleId}" crashed: ${errorMessage(error)}`,
       info.componentStack ?? "",
     );
-    Sentry.captureException(error, {
-      extra: { moduleId: this.props.moduleId },
-    });
   }
 
   render() {
