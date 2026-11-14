@@ -1017,6 +1017,40 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn zip_symlink_entries_are_extracted_as_plain_files() {
+        // `.cargo/audit.toml` ignores the zip `extract()` advisories because
+        // our own extraction never creates symlinks or applies mode bits: this
+        // pins that claim. A symlink entry must land as a regular file, and a
+        // SUID mode on a normal entry must not be applied.
+        use std::io::Write as _;
+        use std::os::unix::fs::PermissionsExt as _;
+        let root = tmp("zip-no-symlink");
+        std::fs::create_dir_all(&root).unwrap();
+        let zip_path = root.join("evil.zip");
+        let file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip.add_symlink("link", "/etc/passwd", opts).unwrap();
+        zip.start_file("suid.bin", opts.unix_permissions(0o4755))
+            .unwrap();
+        zip.write_all(b"x").unwrap();
+        zip.finish().unwrap();
+
+        let out = root.join("out");
+        extract_zip(&zip_path, &out).unwrap();
+        let link_meta = std::fs::symlink_metadata(out.join("link")).unwrap();
+        assert!(!link_meta.file_type().is_symlink(), "symlink was created");
+        let mode = std::fs::metadata(out.join("suid.bin"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o7000, 0, "SUID/SGID bits were applied: {mode:o}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn extract_zip_rejects_an_archive_over_the_entry_cap() {
         let root = tmp("zip-entry-cap");
         std::fs::create_dir_all(&root).unwrap();

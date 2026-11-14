@@ -43,7 +43,7 @@ serde_json = "1"
 serde_yaml = "0.9"
 thiserror = "1"
 # SDE service: SQLite (statically bundled), streaming download, bz2 decompress.
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 flate2 = "1"
 futures-util = "0.3"
@@ -60,7 +60,7 @@ httpdate = "1"
 rand = "0.8"
 tiny_http = "0.12"
 semver = "1.0.28"
-extism = "1.30.0"
+extism = "1.41.0"
 parking_lot = "0.12.5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std", "tracing-log"] }
