@@ -6,11 +6,13 @@ rules_version = '2';
 // public binary — that key is an identifier, not a credential, so anyone can
 // point a client at this project. What they can *do* is decided entirely here.
 //
-// The collection is create-only. Nobody reads a submission back through the
-// client API: not another user, not the person who wrote it, not the app. The
-// maintainer reads the corpus with a service-account key (see
-// scripts/feedback-pull.mjs), which bypasses rules by design and never leaves
-// their machine.
+// The collection is create-only for users: nobody reads a submission back
+// through the client API — not another user, not the person who wrote it, not
+// the app itself. Exactly one identity may read it, the maintainer's
+// Email/Password account named in `maintainers()` below; that is what lets the
+// `issue-board` plugin show the corpus in-app. Bulk/offline reads still use a
+// service-account key (see scripts/feedback-pull.mjs), which bypasses rules by
+// design and never leaves the maintainer's machine.
 //
 // Keep the checks below in step with `validate()` in
 // src-tauri/src/modules/feedback/commands.rs. The Rust side exists to give a
@@ -19,14 +21,63 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     match /feedback/{submission} {
-      allow create: if isWellFormedSubmission();
-      // Write-only, forever. No client path reads, edits or deletes feedback.
-      allow read, update, delete: if false;
+      // Documents get Firestore's auto-generated id (20 chars of [A-Za-z0-9],
+      // which is what the app's POST without a documentId produces). Pinning it
+      // keeps a client from choosing its own ids (and from putting arbitrary
+      // text in the id that scripts/feedback-pull.mjs prints).
+      allow create: if submission.matches('^[A-Za-z0-9]{20}$')
+        && isWellFormedSubmission();
+      // Read is for the maintainer alone — the Email/Password account listed in
+      // `maintainers()` below. Every other client (every copy of the app, and
+      // anyone holding the shipped web API key, which is public by design) still
+      // gets nothing back: a submission is unreadable to its own author.
+      // This is what backs the `issue-board` plugin's Feedback panel; without a
+      // maintainer login that panel stays empty.
+      allow read: if isMaintainer();
+      // Never editable or deletable from a client, maintainer included: a
+      // deletion request is handled in the Firestore console.
+      allow update, delete: if false;
+    }
+
+    // Triage state the maintainer keeps *about* a submission: which ones have
+    // been read. It lives in its own collection, keyed by the submission's
+    // document id, so the corpus itself stays immutable (`feedback` is still
+    // `update, delete: if false` above) and a user can neither see nor write
+    // this. Nothing here is user data — only `readAt`.
+    match /feedbackState/{submission} {
+      // `read` covers `get` *and* `list`, and neither carries a
+      // `request.resource` — naming it in the condition makes a list evaluate
+      // to an error, which Firestore reports as a plain permission denial. So
+      // the shape check belongs on `write` alone.
+      allow read: if isMaintainer();
+      allow write: if isMaintainer() && isWellFormedState();
+    }
+
+    function isWellFormedState() {
+      // A delete carries no resource; only writes that create or change a
+      // document are shape-checked.
+      return request.resource == null
+        || (request.resource.data.keys().hasOnly(['readAt'])
+            && request.resource.data.readAt is string
+            && request.resource.data.readAt.size() <= 32);
     }
 
     // Anything else in this project is closed.
     match /{document=**} {
       allow read, write: if false;
+    }
+
+    // The accounts allowed to read the corpus. Add the Email/Password user you
+    // created for yourself in Authentication → Users; see docs/feedback.md.
+    // Anonymous accounts carry no email, so they can never match.
+    function maintainers() {
+      return ['lotterleben007@gmx.de'];
+    }
+
+    function isMaintainer() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email in maintainers();
     }
 
     function isWellFormedSubmission() {
@@ -37,14 +88,22 @@ service cloud.firestore {
         && d.keys().hasOnly(['kind', 'module', 'rating', 'subject', 'body', 'character', 'appVersion', 'os', 'uid'])
         && d.keys().hasAll(['kind', 'module', 'rating', 'subject', 'body', 'character', 'appVersion', 'os', 'uid'])
         && d.kind in ['rating', 'bug', 'feature']
-        && d.module is string && d.module.size() > 0 && d.module.size() <= 40
+        // Registry ids are lowercase slugs (validate() in commands.rs).
+        && d.module is string && d.module.matches('^[a-z0-9-]{1,40}$')
         && d.rating is int && d.rating >= 0 && d.rating <= 5
+        // A rating needs at least one star; bug and feature reports may carry 0.
+        && (d.kind != 'rating' || d.rating >= 1)
         && d.body is string && d.body.size() <= 4000
+        // A rating can stand alone; a bug or feature request needs real text.
+        && (d.kind == 'rating' || d.body.matches('(?s).*\\S.*'))
         && d.subject is string && d.subject.size() <= 120
         // Optional by design — a user who unticks the box sends an explicit null.
         && (d.character == null || (d.character is string && d.character.size() <= 64))
+        // Semver-ish, e.g. 0.81.0 or 0.81.0-beta.1 (the app's package version).
         && d.appVersion is string && d.appVersion.size() <= 32
-        && d.os is string && d.os.size() <= 32
+        && d.appVersion.matches('^[0-9]+\\.[0-9]+\\.[0-9]+([-+][0-9A-Za-z.-]+)?$')
+        // std::env::consts::OS: "linux", "macos", "windows", ... — a short slug.
+        && d.os is string && d.os.matches('^[a-z0-9_-]{1,32}$')
         // A client cannot attribute a submission to somebody else's account.
         && d.uid is string && d.uid == request.auth.uid;
     }

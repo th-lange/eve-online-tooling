@@ -39,9 +39,12 @@ itself rather than relying on being unreachable.
 - Nothing is sent until the user presses the button. The app shows the exact
   payload beforehand (`feedback_preview` returns the same record `feedback_submit`
   uploads, so the preview cannot drift from reality).
-- The collection is **write-only**. No client can read a submission back — not
-  another user, not its author, not the app. Only a service-account key can
-  read the corpus, and that key lives on the maintainer's machine.
+- The collection is **write-only for users**. No copy of the app can read a
+  submission back — not another user, not its author, not the app itself. Two
+  maintainer-side routes exist and neither is reachable from a shipped build: a
+  service-account key (`npm run feedback:pull`), and a single Email/Password
+  account named in `firestore.rules`, which the in-app feedback panel of the
+  `issue-board` plugin signs in as. Both live only on the maintainer's machine.
 
 Because users cannot read their submissions back, the app keeps a **local**
 mirror of what each install sent, purely for their own reference.
@@ -57,8 +60,9 @@ mirror of what each install sent, purely for their own reference.
 3. **Firestore Database → Create database → Native mode.** Pick a region near
    most users; it cannot be changed later.
 4. Deploy the rules in [`firestore.rules`](../firestore.rules) — either paste
-   them into the console's **Rules** tab, or `firebase deploy --only
-   firestore:rules`. **Do not skip this.** The rules are the entire access
+   them into the console's **Rules** tab, or run `firebase deploy --only
+   firestore:rules --project <project id>` from the repo root (the committed
+   [`firebase.json`](../firebase.json) points the CLI at `firestore.rules`). **Do not skip this.** The rules are the entire access
    model; the console's default template allows far more than we want.
 5. **Project settings → General → Your apps → Web app.** Note the
    **Project ID** and the **Web API key**.
@@ -138,9 +142,10 @@ secrets** — not Environment secrets. `${{ secrets.NAME }}` only resolves
 environment secrets for a job that declares an `environment:` key, and no job
 here does; an environment secret would arrive as an empty string.
 
-**A release fails if either is missing.** The `setup` job checks both before
-any build runner starts, so the workflow stops in seconds with an explicit
-error naming the missing secret. The alternative was worse: an empty secret
+**A release fails if either is missing.** The *Require build config secrets*
+step runs in each build-matrix leg of `release.yml`, before that leg builds
+anything, so each leg stops in seconds with an explicit error naming the
+missing secret. The alternative was worse: an empty secret
 builds perfectly and the only symptom is that no feedback ever arrives. A
 consequence worth knowing — a **fork cannot run the release workflow** without
 setting its own two secrets.
@@ -176,12 +181,77 @@ This writes two git-ignored files:
 
 `feedback.md` is the one to skim, and the one to hand an agent when asking for
 a triage pass ("read `.local/feedback.md`, group the bugs by likely cause,
-propose issues"). The script has no dependencies — the service-account OAuth
+propose issues"). Submissions are written by anyone holding the public web API
+key, so the script escapes table cells, fences every body as inert text and opens
+the digest with an *untrusted user content* banner; keep it that way when
+editing the script, and tell the agent to treat the content as data. The script has no dependencies — the service-account OAuth
 exchange is a signed JWT that `node:crypto` handles.
 
 Each record carries Firestore's own `createTime` as `createdAt`. That timestamp
 is server-side, so unlike a client-supplied one it cannot be forged or
 backdated — which is why the client sends no timestamp at all.
+
+## Reading the corpus *in the app* (maintainer account)
+
+`feedback-pull.mjs` is the offline route. For reading the same corpus inside the
+app, the [`issue-board` plugin](https://github.com/th-lange/eve-online-tooling-plugins/tree/main/issue-board)
+("Issues & Ratings") has an **In-app feedback** panel: every submission with its
+kind, module, stars, text, character and app version, plus the star distribution
+and the lowest-rated modules. It reads Firestore over REST, from the plugin's
+WASM sandbox, with no service account anywhere near it.
+
+That needs exactly one identity to be allowed to read, and `firestore.rules`
+grants it to an **Email/Password account you create for yourself**:
+
+1. **Authentication → Sign-in method → Email/Password → Enable.** (Anonymous
+   stays enabled; submissions still use it.)
+2. **Authentication → Users → Add user.** Use an address you control, then
+   verify it — the rule requires `email_verified`, so an unverified account is
+   refused like any other client.
+3. In [`firestore.rules`](../firestore.rules), put that address in
+   `maintainers()` (replacing the address already listed, if it isn't yours),
+   and deploy: `firebase deploy --only firestore:rules --project <project id>`.
+4. In the app: Plugins → activate **Issues & Ratings** → its **Settings** →
+   fill in the project id, the **web** API key (the same one the build uses),
+   and that account's email and password. The panel switches on; leave any of
+   them blank and it stays off.
+
+What this does **not** change: no other client can read the corpus. Users still
+cannot read their own submissions back, the app itself cannot, and anybody who
+extracts the shipped API key gets an anonymous account, which carries no email
+and therefore never matches `maintainers()`. `update` and `delete` remain denied
+to every client including you — deletion is still a Firestore console action.
+
+The credentials live in that plugin's private key/value store
+(`<app_data_dir>/plugins/issue-board/kv/`), are never handed back over the
+plugin bridge, and leave the machine only as the body of one
+`accounts:signInWithPassword` call and the bearer token on the Firestore read.
+Running the plugin on a machine you don't control means putting a password that
+can read the whole corpus on it — use the offline pull there instead.
+
+### Marking submissions read
+
+The panel tracks which submissions you have already read: unread rows are bold
+with a dot, opening one marks it read, the dot toggles it back, and **Mark all
+read** clears whatever the current filters show.
+
+That state is **not** stored in the submissions — `feedback` documents stay
+immutable (`update, delete: if false`). It lives in a separate
+`feedbackState/{submissionId}` collection holding one field, `readAt`, which
+only the maintainer can read or write:
+
+```
+match /feedbackState/{submission} {
+  allow read, write: if isMaintainer() && isWellFormedState();
+}
+```
+
+So the flags follow your account rather than the machine — read something on
+the desktop and it is read on the laptop. Marking is one batched
+`documents:commit`, so "mark all read" over hundreds of rows is a single
+request that either lands entirely or not at all. Unread is simply the absence
+of a document, so the collection only ever holds what was actually read, and
+deleting it resets everything to unread.
 
 ## Replying to a reporter
 
