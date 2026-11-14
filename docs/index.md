@@ -54,9 +54,11 @@ Grab the installer for your OS from the
 `.AppImage` / `.deb` / `.rpm` (Linux), `.dmg` (macOS), `.msi` / `-setup.exe`
 (Windows).
 
-The builds are **unsigned** — a deliberate call for a free hobby project, so
-your OS warns on first launch (macOS: right-click → **Open**; Windows:
-**More info → Run anyway**). Full reasoning:
+The builds are currently **unsigned**, so your OS warns on first launch (macOS:
+right-click → **Open**; Windows: **More info → Run anyway**). We have applied to
+the [SignPath Foundation](https://signpath.org) for free Windows code signing and
+would be grateful for their support; nothing is signed until that is granted.
+Background:
 [SIGNING.md](https://github.com/th-lange/eve-online-tooling/blob/main/SIGNING.md).
 
 ## Build from source

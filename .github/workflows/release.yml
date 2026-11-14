@@ -179,9 +179,9 @@ jobs:
             echo "- **Windows**: SmartScreen → **More info** → **Run anyway**."
             echo "- **macOS**: right-click the app → **Open** (or \`xattr -dr com.apple.quarantine \"/Applications/EVE Online Tooling.app\"\`)."
             echo
-            echo "### Why unsigned"
+            echo "### Why unsigned (for now)"
             echo
-            echo "Public-Trust code signing needs identity validation that is only offered to organizations in the US/CA/EU/UK and to individuals in the US/CA, and Apple's Developer ID is a recurring fee; for a free hobby project that is not worth paying just to dodge a dialog. See [SIGNING.md](https://github.com/th-lange/eve-online-tooling/blob/main/SIGNING.md) for the full reasoning. Build from source if you'd rather not click through the warning."
+            echo "Public-Trust code signing normally needs identity validation that is only offered to organizations in the US/CA/EU/UK and to individuals in the US/CA, and Apple's Developer ID is a recurring fee. For Windows we have applied to the [SignPath Foundation](https://signpath.org) for free code signing and would be grateful for their support; nothing is signed until that is granted. See [SIGNING.md](https://github.com/th-lange/eve-online-tooling/blob/main/SIGNING.md) for the details. Build from source if you'd rather not click through the warning."
             echo
             echo "## Verifying downloads"
             echo

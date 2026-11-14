@@ -89,18 +89,22 @@ Grab the installer for your OS from the
 The first time you open the Production module it downloads the EVE **SDE** (a few
 hundred MB) into your app data dir — a one-off.
 
-### The builds are unsigned (on purpose)
+### The builds are currently unsigned
 
-This is a free hobby project, so the installers aren't code-signed — your OS will
-warn on first launch. That's expected and safe to bypass:
+This is a free hobby project and the installers aren't code-signed yet — your OS
+will warn on first launch. That's expected and safe to bypass:
 
 - **macOS** — right-click the app → **Open** (or
   `xattr -dr com.apple.quarantine "/Applications/EVE Online Tooling.app"`).
 - **Windows** — SmartScreen: **More info → Run anyway**.
 - **Linux** — no prompt.
 
-Why the builds are unsigned is a deliberate, closed decision, not a TODO — the
-full reasoning is in [`SIGNING.md`](SIGNING.md).
+**Windows code signing:** we have applied to the
+[SignPath Foundation](https://signpath.org) for free code signing for our
+Windows installers (application submitted 2026-11-14, no answer yet) and would be
+very grateful for their support. Nothing is signed until that is granted; if it
+is, this section becomes the project's code signing policy as SignPath requires.
+Background and the other options we ruled out are in [`SIGNING.md`](SIGNING.md).
 
 ### Verifying downloads
 

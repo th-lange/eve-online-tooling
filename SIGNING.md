@@ -1,35 +1,45 @@
-# Code signing — not happening (for now)
+# Code signing — applied to SignPath Foundation (pending)
 
-**Decision: builds stay unsigned.** Not a gap to fill in, not a TODO — a
-deliberate call, revisit only if the underlying gatekeeping changes.
+**Status: builds are unsigned.** For Windows we have applied (2026-11-14) to the
+[SignPath Foundation](https://signpath.org), which provides free code signing
+for open-source projects, and we would be grateful for their support. Nothing is
+signed until they accept; this file is updated when that changes.
 
 | Platform | Status | Notes |
 | --- | --- | --- |
 | 🐧 Linux | ✅ no signing needed | AppImage/deb/rpm run unsigned, no OS prompt. |
 | 🍎 macOS | ❌ unsigned | Gatekeeper warns on first launch — right-click → **Open**, or `xattr -dr com.apple.quarantine`. |
-| 🪟 Windows | ❌ unsigned | SmartScreen warns on first launch — **More info** → **Run anyway**. |
+| 🪟 Windows | ❌ unsigned, SignPath application pending | SmartScreen warns on first launch — **More info** → **Run anyway**. |
 
-## Why
+## Why this was unsigned until now
 
-Every practical path to a trusted Authenticode certificate on Windows —
-Microsoft's own **Azure Artifact Signing** (formerly Trusted Signing), or a
-traditional EV cert — requires **identity validation**, and for Public Trust
-certs (the only kind that actually suppresses the SmartScreen prompt) that
-validation is currently only available to **organizations in the US, Canada,
-the EU or the UK**, and to **individual developers only in the US and Canada**.
-This project is run by an individual outside that set, so there is no path at
-a reasonable price — no free/OSS tier, no shortcut. Apple's
-equivalent (a $99/year Developer ID + notarization) is at least available
-everywhere, but it's still a recurring cost for a free hobby project.
+The usual routes to a trusted Authenticode certificate on Windows — Microsoft's
+**Azure Artifact Signing** (formerly Trusted Signing) or a traditional EV cert —
+require **identity validation**, and for Public Trust certs (the kind that
+suppresses the SmartScreen prompt) that is currently only available to
+**organizations in the US, Canada, the EU or the UK**, and to **individual
+developers only in the US and Canada**. This project is run by an individual
+outside that set, so there was no path at a reasonable price. Apple's
+equivalent (a $99/year Developer ID + notarization) is available everywhere but
+is a recurring cost for a free hobby project, so macOS stays unsigned.
 
-This project isn't paying an ongoing fee, or routing around a geography
-requirement, so a handful of maintainers can dodge a warning dialog. The
-SmartScreen/Gatekeeper prompts exist to let platform vendors gatekeep who
-gets to look "trustworthy" by default; small independent, non-US-aligned
-developers just eat the warning. So: unsigned it stays. If Microsoft ever
-opens Public Trust identity validation to the rest of the world at a sane
-price, this file gets rewritten — until then, this is a closed question, not
-an open one.
+## The SignPath route
+
+SignPath Foundation's certificate is issued to the Foundation, so it needs no
+identity validation of the maintainer and no fee. In exchange it asks for: an
+OSI-approved licence (MIT), a released and documented project, MFA for everyone
+with repository or SignPath access, builds produced by CI in a verifiable way,
+manual approval of every signed release, product name/version metadata on the
+signed binaries, and a published **code signing policy** (team roles and a
+privacy statement). Acceptance also depends on a "verifiable reputation" review,
+which a young project may not pass; if they decline, Windows stays unsigned and
+this file says so.
+
+If accepted, the plan is: the release workflow builds the Windows installers
+unsigned, submits them to SignPath through its GitHub integration, waits for the
+maintainer's approval, and publishes the signed files; `SHA256SUMS` and the
+attestation are then generated over the **signed** files. The README then carries
+SignPath's required wording and the code signing policy.
 
 ## Verifying downloads instead
 
