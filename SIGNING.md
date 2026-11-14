@@ -31,5 +31,19 @@ opens Public Trust identity validation to the rest of the world at a sane
 price, this file gets rewritten — until then, this is a closed question, not
 an open one.
 
+## Verifying downloads instead
+
+Unsigned does not mean unverifiable. Each release includes a `SHA256SUMS` file
+and a GitHub build-provenance attestation per installer (generated in the
+`notes` job of `.github/workflows/release.yml`). This covers every platform,
+including the Linux AppImage/deb/rpm, which have no OS signing at all:
+
+```sh
+sha256sum -c --ignore-missing SHA256SUMS
+gh attestation verify <file> --repo th-lange/eve-online-tooling
+```
+
+There is deliberately no in-app updater (#1205).
+
 Every release page repeats the click-through instructions and this
 reasoning — see `.github/workflows/release.yml`'s `notes` job.
