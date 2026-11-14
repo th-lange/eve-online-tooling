@@ -92,7 +92,7 @@ export function PluginHost({
             // object, not an `Error`. `String(err)` on that yields
             // "[object Object]", losing the plugin's own diagnosis (a 403 from
             // its API, a bad argument) before the guest ever sees it.
-            error: err instanceof Error ? err.message : errorMessage(err),
+            error: errorMessage(err),
           }),
         );
     }

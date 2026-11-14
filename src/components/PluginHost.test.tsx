@@ -96,7 +96,12 @@ describe("PluginHost", () => {
     render(<PluginHost pluginId="pricing-model" />);
     const win = stubFrameWindow();
 
-    postFrom(win, { channel: CHANNEL, kind: "invoke", id: 2, fn: "fetch_feedback" });
+    postFrom(win, {
+      channel: CHANNEL,
+      kind: "invoke",
+      id: 2,
+      fn: "fetch_feedback",
+    });
     await flush();
 
     expect(win.postMessage).toHaveBeenCalledWith(
