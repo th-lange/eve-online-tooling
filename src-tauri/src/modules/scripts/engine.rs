@@ -260,6 +260,14 @@ pub trait ScriptEngine {
 /// allocation-bomb case from #815 trips within tens of milliseconds.
 const WATCHDOG_POLL: Duration = Duration::from_millis(20);
 
+/// How many consecutive watchdog samples must show RSS growth past the cap
+/// before the script is killed (#1258). The RSS source is process-wide, so a
+/// transient spike from *another* thread (a big ESI response, an SDE download,
+/// a parallel test) would otherwise fail an innocent script. A real allocation
+/// bomb keeps growing, so it still trips within `MEMORY_TRIP_SAMPLES ×
+/// WATCHDOG_POLL` (60 ms).
+const MEMORY_TRIP_SAMPLES: u32 = 3;
+
 /// After tripping the interrupt, how long to keep waiting for the engine to
 /// notice and unwind before giving up on it. Meaningful for Rhai (which will
 /// notice); `boa` never will, so this just bounds how long the caller waits.
@@ -344,6 +352,7 @@ fn execute_watched(
 
     let baseline_rss = sample_rss();
     let max_growth = limits.max_memory_mb;
+    let mut samples_over = 0u32;
     loop {
         match rx.recv_timeout(WATCHDOG_POLL) {
             Ok(result) => {
@@ -374,6 +383,12 @@ fn execute_watched(
                     continue;
                 };
                 if current.saturating_sub(baseline) <= max_growth {
+                    samples_over = 0;
+                    continue;
+                }
+                // Only a *sustained* breach counts; see MEMORY_TRIP_SAMPLES.
+                samples_over += 1;
+                if samples_over < MEMORY_TRIP_SAMPLES {
                     continue;
                 }
                 interrupt.trip();
@@ -725,9 +740,59 @@ mod tests {
                 market_delay: Duration::from_millis(400),
                 ..FakeHost::default()
             });
-            let out = run(slow, language, code, &limits);
+            // Fixed RSS: this test is about wall-clock budgeting, not memory,
+            // and process-wide RSS from parallel tests must not influence it
+            // (#1258).
+            let out = run_with_sampler(slow, language, code, &limits, &|| Some(100));
             assert!(out.ok, "{language:?}: {:?}", out.error);
         }
+    }
+
+    #[test]
+    fn a_transient_rss_spike_does_not_kill_a_script_but_sustained_growth_does() {
+        // #1258: RSS is process-wide, so one high sample (another thread's
+        // allocation) must not trip the watchdog; growth that persists must.
+        let limits = Limits {
+            max_memory_mb: 1,
+            timeout: Duration::from_secs(10),
+            max_ops: u64::MAX,
+            ..Limits::default()
+        };
+        let slow = || -> Arc<dyn Host> {
+            Arc::new(FakeHost {
+                market_delay: Duration::from_millis(300),
+                ..FakeHost::default()
+            })
+        };
+        // One spike on the second sample, otherwise flat: the script survives.
+        let n = AtomicU64::new(0);
+        let spike = || {
+            let i = n.fetch_add(1, Ordering::Relaxed);
+            Some(if i == 1 { 500 } else { 100 })
+        };
+        let out = run_with_sampler(
+            slow(),
+            Language::Rhai,
+            "market_price(34).sell",
+            &limits,
+            &spike,
+        );
+        assert!(out.ok, "transient spike killed the script: {:?}", out.error);
+        // Growth that stays high is killed.
+        let m = AtomicU64::new(0);
+        let sustained = || {
+            let i = m.fetch_add(1, Ordering::Relaxed);
+            Some(if i == 0 { 100 } else { 500 })
+        };
+        let out = run_with_sampler(
+            host(),
+            Language::Rhai,
+            "let a = []; loop { a.push(#{}); }",
+            &limits,
+            &sustained,
+        );
+        assert!(!out.ok);
+        assert!(out.error.as_deref().unwrap().contains("memory limit"));
     }
 
     #[test]

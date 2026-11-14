@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { RefreshCw, X } from "lucide-react";
 import { Field } from "../../components/forms";
 import {
@@ -8,6 +8,7 @@ import {
 } from "../../lib/api";
 import { formatIsk, formatPercent } from "../../lib/format";
 import { EmptyState } from "../../components/EmptyState";
+import { InlineError } from "../../components/InlineError";
 import type { ResultsView, Tab, ImportedBlueprint } from "./types";
 
 // Presentational + form components and helpers extracted from ProductionPage (#341).
@@ -179,6 +180,9 @@ export function BlueprintLibrary({
   imported: ImportedBlueprint[];
   onImport: (next: ImportedBlueprint[]) => void;
 }) {
+  // Shown inline (not alert(), #820/#1196).
+  const [importError, setImportError] = useState<string | null>(null);
+
   function exportJson() {
     const payload = {
       owned: owned.map((b) => ({
@@ -203,6 +207,7 @@ export function BlueprintLibrary({
 
   function importJson(file: File) {
     file.text().then((text) => {
+      setImportError(null);
       try {
         const parsed = JSON.parse(text);
         const list: unknown[] = Array.isArray(parsed)
@@ -225,7 +230,7 @@ export function BlueprintLibrary({
         for (const b of next) merged.set(b.typeId, b);
         onImport([...merged.values()]);
       } catch {
-        alert("Couldn't parse that file as a blueprint library JSON.");
+        setImportError("Couldn't parse that file as a blueprint library JSON.");
       }
     });
   }
@@ -257,6 +262,10 @@ export function BlueprintLibrary({
           ranking.
         </span>
       </div>
+      <InlineError
+        message={importError}
+        className="mb-2 text-xs text-rose-400"
+      />
       <div className="overflow-auto rounded border border-zinc-800">
         <table className="w-full border-collapse text-sm">
           <thead className="bg-zinc-900 text-zinc-400">
