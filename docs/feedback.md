@@ -141,9 +141,10 @@ secrets** — not Environment secrets. `${{ secrets.NAME }}` only resolves
 environment secrets for a job that declares an `environment:` key, and no job
 here does; an environment secret would arrive as an empty string.
 
-**A release fails if either is missing.** The `setup` job checks both before
-any build runner starts, so the workflow stops in seconds with an explicit
-error naming the missing secret. The alternative was worse: an empty secret
+**A release fails if either is missing.** The *Require build config secrets*
+step runs in each build-matrix leg of `release.yml`, before that leg builds
+anything, so each leg stops in seconds with an explicit error naming the
+missing secret. The alternative was worse: an empty secret
 builds perfectly and the only symptom is that no feedback ever arrives. A
 consequence worth knowing — a **fork cannot run the release workflow** without
 setting its own two secrets.
