@@ -8,7 +8,9 @@ use std::path::Path;
 
 use super::context::DogmaContext;
 use super::engine::abyssal::apply_abyssal_weather;
-use super::engine::application::{missile_application, turret_application};
+use super::engine::application::{
+    missile_application, turret_chance_to_hit, turret_damage_multiplier,
+};
 use super::engine::attr::{attr, AttrStore};
 use super::engine::capacitor::{capacitor, ModuleDrain};
 use super::engine::cycle::cycle_of;
@@ -1036,7 +1038,7 @@ fn applied_dps_at(
                     40.0
                 }
             };
-            let app = turret_application(
+            let app = turret_damage_multiplier(turret_chance_to_hit(
                 optimal,
                 falloff,
                 tracking_speed,
@@ -1044,7 +1046,7 @@ fn applied_dps_at(
                 angular_velocity,
                 target_sig,
                 distance,
-            );
+            ));
             turret_dps += mult * damage_per_shot / rof_seconds * app;
         } else {
             // Missile explosion radius/velocity: `aoeCloudSize` (654) /
@@ -1070,6 +1072,7 @@ fn applied_dps_at(
                 missile_application(
                     explosion_radius,
                     explosion_velocity,
+                    charge.get(1353),
                     target_sig,
                     target_speed,
                 )
@@ -1125,12 +1128,16 @@ fn applied_dps_at(
         let drone_speed = store.get(37);
         let keeps_pace =
             target.drones_keep_pace && drone_speed > 1.0 && drone_speed >= target_speed;
+        // Expected damage factor of the hit roll, not the raw chance to hit.
+        // A drone that keeps pace has chance to hit 1.0, i.e. the multiplier
+        // is 1.015 (1% wrecking hits), matching pyfa, which runs drones
+        // through the same multiplier.
         let app = if keeps_pace {
-            1.0
+            turret_damage_multiplier(1.0)
         } else {
             let tracking_distance = store.get(54).max(1000.0);
             let drone_angular_velocity = target_speed / tracking_distance;
-            turret_application(
+            turret_chance_to_hit(
                 tracking_distance,
                 0.0,
                 tracking_speed,
@@ -2148,7 +2155,7 @@ mod tests {
             (51, 2000.0),   // 2s RoF
             (54, 10_000.0), // optimal
             (158, 5_000.0), // falloff
-            (160, 40.0),    // tracking speed
+            (160, 0.05),    // tracking speed
             (105, 40.0),    // sig resolution
         ]);
         let charge = store(&[(114, 25.0), (116, 25.0), (117, 25.0), (118, 25.0)]); // 100 dmg
@@ -2158,9 +2165,9 @@ mod tests {
         let module_items: Vec<&FitItem> = vec![&it];
 
         let target = TargetProfile {
-            sig_radius: 40.0, // small, fast frigate — hard to track
+            sig_radius: 40.0, // tracking term = 0.05 * 40 / (40 * 0.05) = 1
             speed: 400.0,
-            angular_velocity: 0.05, // rad/s — well past this turret's tracking
+            angular_velocity: 0.05, // rad/s
             drones_keep_pace: false,
             missiles_need_overtake: false,
         };
@@ -2173,7 +2180,14 @@ mod tests {
             applied.turret,
             paper.turret
         );
-        assert!(applied.turret > 0.0, "some rounds should still land");
+        // Tracking term 1 at optimal → chance to hit 0.5 → damage multiplier
+        // 0.01·3 + 0.49·((0.01+0.5)/2 + 0.49) = 0.39505 (#1267), not 0.5.
+        assert!(
+            (applied.turret - paper.turret * 0.39505).abs() < 1e-9,
+            "applied {} should be paper {} × 0.39505",
+            applied.turret,
+            paper.turret
+        );
         assert_eq!(applied.total, applied.turret);
     }
 
@@ -2253,10 +2267,12 @@ mod tests {
             missiles_need_overtake: false,
         };
         let applied = applied_dps_of(&resolved, &[], &drone_items, &[1], &target, &[]);
-        assert_eq!(
-            applied.drone,
-            1.0 * 100.0 / 1.0,
-            "full application: mult × dmg ÷ rof, no tracking loss"
+        // Full application (cth 1.0) → multiplier 0.03 + 0.99·0.995 = 1.01505
+        // (pyfa parity; the issue table rounds it to 1.015).
+        assert!(
+            (applied.drone - 1.0 * 100.0 / 1.0 * 1.01505).abs() < 1e-9,
+            "full application: mult × dmg ÷ rof × 1.01505, no tracking loss; got {}",
+            applied.drone
         );
 
         let target_off = TargetProfile {

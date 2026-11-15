@@ -2089,7 +2089,9 @@ mod tests {
         let target = crate::modules::fitting::types::TargetProfile {
             sig_radius: 40.0,
             speed: 400.0,
-            angular_velocity: 0.02, // 400 m/s ÷ 20km, the old derivation
+            // The resolved tracking here is 393.75 (this SDE stores attr 160 in
+            // milli-rad/s), so 400 gives a tracking term ~1 → chance to hit ~0.5.
+            angular_velocity: 400.0,
             drones_keep_pace: false,
             missiles_need_overtake: false,
         };

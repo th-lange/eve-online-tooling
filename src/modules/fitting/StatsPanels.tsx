@@ -743,7 +743,10 @@ export function DpsBreakdownPanel({
             </div>
           )}
           {appliedDps && (
-            <div className="text-xs text-zinc-500">
+            <div
+              className="text-xs text-zinc-500"
+              title="Expected damage against the target: turret/drone damage uses the hit-roll damage multiplier (not just chance to hit), so applied can slightly exceed paper (up to +1.5%) at perfect application."
+            >
               applied:{" "}
               <span className="text-amber-400">
                 {appliedDps.total.toFixed(0)} dps
