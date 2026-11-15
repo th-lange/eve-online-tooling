@@ -2089,9 +2089,7 @@ mod tests {
         let target = crate::modules::fitting::types::TargetProfile {
             sig_radius: 40.0,
             speed: 400.0,
-            // The resolved tracking here is 393.75 (this SDE stores attr 160 in
-            // milli-rad/s), so 400 gives a tracking term ~1 → chance to hit ~0.5.
-            angular_velocity: 400.0,
+            angular_velocity: 0.4, // rad/s
             drones_keep_pace: false,
             missiles_need_overtake: false,
         };
@@ -2112,12 +2110,21 @@ mod tests {
         )
         .unwrap();
         let applied = d.applied_dps.expect("applied dps when a target is given");
+        // Independent derivation (point-blank, so no falloff term): SDE
+        // trackingSpeed 315 × Motion Prediction V (+25%) = 393.75 and
+        // optimalSigRadius 40000 (both ×1000-scaled, only the ratio matters):
+        // term = 0.4 × 40000 / (393.75 × 40) = 1.01587, cth = 0.5^(term²).
+        let term: f64 = 0.4 * 40_000.0 / (393.75 * 40.0);
+        let cth = 0.5f64.powf(term * term);
+        let expected = d.dps.turret
+            * crate::modules::fitting::engine::application::turret_damage_multiplier(cth);
         assert!(
-            applied.total < d.dps.total,
-            "applied {} should be below paper {}",
-            applied.total,
-            d.dps.total
+            (applied.turret - expected).abs() < 1e-6 * expected.max(1.0),
+            "applied turret {} should be paper {} × mult(cth {cth}) = {expected}",
+            applied.turret,
+            d.dps.turret
         );
+        assert!(applied.total < d.dps.total);
         assert_eq!(d.dps_range_curve.len(), 30, "30 sampled points");
         assert!(
             d.dps_range_curve.iter().all(|&(dist, _)| dist >= 0.0),
