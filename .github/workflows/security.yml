@@ -99,7 +99,17 @@ jobs:
       # Gating: the lockfile is clean apart from advisories ignored, with a
       # written reason and an exit path, in src-tauri/.cargo/audit.toml.
       # "Unmaintained" notices are warnings and don't fail the job.
+      # rustsec/audit-check does not read src-tauri/.cargo/audit.toml (its run
+      # showed `"ignore":[]`), so pass the same IDs through its `ignore` input.
+      # audit.toml stays the single source, with a written reason per ID.
+      - name: Collect ignored advisories from audit.toml
+        id: ignores
+        run: |
+          ids=$(grep -oE 'RUSTSEC-[0-9]{4}-[0-9]{4}' src-tauri/.cargo/audit.toml | sort -u | paste -sd, -)
+          echo "ids=$ids" >> "$GITHUB_OUTPUT"
+          echo "Ignoring: $ids"
       - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: src-tauri
+          ignore: ${{ steps.ignores.outputs.ids }}
