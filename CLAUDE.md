@@ -115,9 +115,10 @@ Vitest (jsdom), config in `vite.config.ts`, setup in `src/test/setup.ts`. To tes
 - **SSO**: OAuth2 PKCE against `login.eveonline.com/v2/oauth/{authorize,token}`; access token is a JWT
   (parse `character_id`/name); refresh token stored in the OS keychain via the `keyring` crate.
 - **Profit / EIV** (per blueprint, ME, runs):
-  - `required_qty(mat) = max(runs, ceil(base_qty * runs * (1 - ME/100) * me_bonus))` (min 1 per run; `required_quantity`)
+  - `required_qty(mat) = max(runs, ceil(base_qty * runs * (1 - ME/100) * me_bonus))` (min 1 per run; the product is rounded to 2 decimals before `ceil`, as EVE does; `required_quantity`)
   - `material_cost = Σ required_qty * price(mat)` using a configurable price vector
   - `job_fee = EIV * (system_cost_index * (1 − cost_bonus) + facility_tax + scc_surcharge)` (`job_fee` in `modules/production/engine.rs`)
+  - Copy and invention fees are `job_fee(0.02 * EIV)` per attempt (`science_job_fee`): invention EIV = Σ base_qty × adjusted price of the *invented* T2 product's manufacturing materials (not datacores/decryptor/relic, which are material costs only); copy EIV = same for the source T1 product's manufacturing materials (one run). Matches EVE Ref's industry calculator (evidence-based, not an in-game quote).
   - `profit = product_qty * product_price − material_cost − job_fee`; also margin % and per-unit
   - **T2** adds invention EV: `invention_cost / (success_probability × runs_per_success)` (#9).
   - **T3/reactions** use a recursive build-vs-buy BOM (#10). Keep the engine **activity-aware and
