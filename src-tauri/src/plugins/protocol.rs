@@ -15,12 +15,15 @@ use super::manifest::id_is_safe;
 /// its own scheme and, critically, forbids **all network** (`connect-src
 /// 'none'`): a plugin UI reaches foreign data only through the host bridge into
 /// its sandboxed WASM (see `net:fetch`), never from the iframe itself.
+///
+/// Windows/Android serve the protocol as `http(s)://plugin.localhost` rather
+/// than `plugin://localhost`, so every source list names both forms (#1155).
 pub const PLUGIN_FRAME_CSP: &str = "default-src 'none'; \
-     script-src 'unsafe-inline' 'unsafe-eval' plugin:; \
-     style-src 'unsafe-inline' plugin:; \
-     img-src plugin: data: blob:; \
-     font-src plugin: data:; \
-     media-src plugin: data: blob:; \
+     script-src 'unsafe-inline' 'unsafe-eval' plugin: http://plugin.localhost https://plugin.localhost; \
+     style-src 'unsafe-inline' plugin: http://plugin.localhost https://plugin.localhost; \
+     img-src plugin: http://plugin.localhost https://plugin.localhost data: blob:; \
+     font-src plugin: http://plugin.localhost https://plugin.localhost data:; \
+     media-src plugin: http://plugin.localhost https://plugin.localhost data: blob:; \
      connect-src 'none'; \
      base-uri 'none'; \
      form-action 'none'";
@@ -114,6 +117,27 @@ pub fn content_type(path: &Path) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frame_csp_allows_the_windows_origin_but_no_network() {
+        for directive in [
+            "script-src",
+            "style-src",
+            "img-src",
+            "font-src",
+            "media-src",
+        ] {
+            let d = PLUGIN_FRAME_CSP
+                .split(';')
+                .map(str::trim)
+                .find(|d| d.starts_with(directive))
+                .unwrap_or_else(|| panic!("{directive} missing"));
+            assert!(d.contains("plugin:"), "{directive}: {d}");
+            assert!(d.contains("http://plugin.localhost"), "{directive}: {d}");
+            assert!(d.contains("https://plugin.localhost"), "{directive}: {d}");
+        }
+        assert!(PLUGIN_FRAME_CSP.contains("connect-src 'none'"));
+    }
 
     fn tmp(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("eve-proto-{tag}-{}", std::process::id()));

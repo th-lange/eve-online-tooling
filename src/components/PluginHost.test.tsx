@@ -1,10 +1,24 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MAX_IN_FLIGHT_INVOKES, PluginHost } from "./PluginHost";
 
 const invokeMock = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
+  convertFileSrc: (path: string, protocol = "asset") => {
+    const internals = (
+      window as unknown as {
+        __TAURI_INTERNALS__?: {
+          convertFileSrc?: (p: string, proto: string) => string;
+        };
+      }
+    ).__TAURI_INTERNALS__;
+    // Mirrors Tauri's per-platform behaviour (default: Linux/macOS).
+    return (
+      internals?.convertFileSrc?.(path, protocol) ??
+      `${protocol}://localhost/${encodeURIComponent(path)}`
+    );
+  },
 }));
 
 const CHANNEL = "eve-plugin";
@@ -181,6 +195,36 @@ describe("PluginHost", () => {
     postFrom(win, "not-an-object");
     await flush();
     expect(invokeMock.mock.calls.length).toBe(before);
+  });
+});
+
+describe("PluginHost frame URL", () => {
+  type Internals = { convertFileSrc: (p: string, proto: string) => string };
+  const w = window as unknown as { __TAURI_INTERNALS__?: Internals };
+  afterEach(() => {
+    delete w.__TAURI_INTERNALS__;
+  });
+
+  it("keeps plugin://localhost on Linux/macOS", () => {
+    w.__TAURI_INTERNALS__ = {
+      convertFileSrc: (p, proto) =>
+        `${proto}://localhost/${encodeURIComponent(p)}`,
+    };
+    render(<PluginHost pluginId="pricing-model" />);
+    expect(screen.getByTitle("plugin-pricing-model").getAttribute("src")).toBe(
+      "plugin://localhost/pricing-model/index.html",
+    );
+  });
+
+  it("uses http://plugin.localhost where Tauri serves protocols that way (Windows)", () => {
+    w.__TAURI_INTERNALS__ = {
+      convertFileSrc: (p, proto) =>
+        `http://${proto}.localhost/${encodeURIComponent(p)}`,
+    };
+    render(<PluginHost pluginId="pricing-model" />);
+    expect(screen.getByTitle("plugin-pricing-model").getAttribute("src")).toBe(
+      "http://plugin.localhost/pricing-model/index.html",
+    );
   });
 });
 
