@@ -20,6 +20,9 @@ use super::effects::modifiers_for;
 use super::modifier::{Domain, ModifierDef, Op};
 use super::warfare_buffs::{self, Target};
 
+/// Effect name of the Reactive Armor Hardener — see its skip in `mods` below.
+const ADAPTIVE_ARMOR_HARDENER: &str = "adaptiveArmorHardener";
+
 /// `damageMultiplierSkillBonus` — drone operation/specialization skills carry
 /// only the per-level self-scaling of attr 292 in their `modifierInfo`; the
 /// application (+292% to damageMultiplier on items requiring the skill) isn't in
@@ -220,6 +223,15 @@ pub fn resolve(
                 if meta.category == OVERLOAD_CATEGORY && !e.overheated {
                     continue;
                 }
+                // The Reactive Armor Hardener's resist shift is simulated by
+                // `stats::tank_of` (`tank::rah_shift`), which multiplies the
+                // ship's armor resonance by the *shifted* values itself. The
+                // Fuzzwork SDE carries no `modifierInfo` for this effect (it
+                // is code in PYFA too), but an SDE that did must not also
+                // apply the unshifted baseline here, so never resolve it.
+                if meta.name == ADAPTIVE_ARMOR_HARDENER {
+                    continue;
+                }
                 if meta.name == DAMAGE_MULT_SKILL_BONUS {
                     has_dmg_skill_bonus = true;
                 }
@@ -365,6 +377,7 @@ pub fn resolve(
             &group_ids,
             &req_skills,
             &mut aux,
+            default_of,
         );
     }
     apply_outward_from_ship(
@@ -375,6 +388,7 @@ pub fn resolve(
         &group_ids,
         &req_skills,
         &mut aux,
+        default_of,
     );
     // Pass 4b — charge→host (`otherID`): a loaded charge's `Other` modifiers
     // apply to its host module (ammo/crystal cap, range, tracking penalties).
@@ -418,7 +432,7 @@ pub fn resolve(
         let src_vals: Vec<(usize, f64)> = ms
             .iter()
             .enumerate()
-            .map(|(k, m)| (k, modules[i].get(m.src_attr)))
+            .map(|(k, m)| (k, modules[i].get_or(m.src_attr, default_of(m.src_attr))))
             .collect();
         for (k, value) in src_vals {
             let m = &ms[k];
@@ -443,7 +457,12 @@ pub fn resolve(
         let src_vals: Vec<(usize, f64)> = ms
             .iter()
             .enumerate()
-            .map(|(k, m)| (k, external_modules[i].get(m.src_attr)))
+            .map(|(k, m)| {
+                (
+                    k,
+                    external_modules[i].get_or(m.src_attr, default_of(m.src_attr)),
+                )
+            })
             .collect();
         for (k, value) in src_vals {
             let m = &ms[k];
@@ -554,7 +573,9 @@ fn apply_self(store: &mut AttrStore, mods: &[ModifierDef]) {
     }
 }
 
-/// Apply an affecting store's outward modifiers (source read from `affecting`).
+/// Apply an affecting store's outward modifiers (source read from `affecting`;
+/// a source attribute the entity doesn't carry reads as its dogma default —
+/// e.g. a ×multiplier of 1.0 — not 0, which would zero the target #1281).
 #[allow(clippy::too_many_arguments)]
 fn apply_outward(
     affecting: &AttrStore,
@@ -565,12 +586,13 @@ fn apply_outward(
     group_ids: &[i64],
     req_skills: &[&Vec<i64>],
     aux: &mut [Aux],
+    default_of: &impl Fn(i64) -> f64,
 ) {
     for m in mods {
         if m.domain == Domain::Item {
             continue;
         }
-        let value = affecting.get(m.src_attr);
+        let value = affecting.get_or(m.src_attr, default_of(m.src_attr));
         apply_to_targets(
             m, value, penalized, ship, modules, group_ids, req_skills, aux,
         );
@@ -579,6 +601,7 @@ fn apply_outward(
 
 /// Ship role bonuses: the ship is both affecting and a potential target, so read
 /// its source values first, then apply.
+#[allow(clippy::too_many_arguments)] // mirrors apply_outward
 fn apply_outward_from_ship(
     mods: &[ModifierDef],
     penalized: bool,
@@ -587,8 +610,12 @@ fn apply_outward_from_ship(
     group_ids: &[i64],
     req_skills: &[&Vec<i64>],
     aux: &mut [Aux],
+    default_of: &impl Fn(i64) -> f64,
 ) {
-    let vals: Vec<f64> = mods.iter().map(|m| ship.get(m.src_attr)).collect();
+    let vals: Vec<f64> = mods
+        .iter()
+        .map(|m| ship.get_or(m.src_attr, default_of(m.src_attr)))
+        .collect();
     for (m, value) in mods.iter().zip(vals) {
         if m.domain == Domain::Item {
             continue;
@@ -673,6 +700,73 @@ mod tests {
             modifiers,
         }
     }
+    /// A ship ×multiplier whose source attribute the ship doesn't carry reads
+    /// the attribute's dogma default (1.0), not 0 (#1281: Thanatos'
+    /// `fighterGenericModifiers` zeroed every fighter's damage multiplier).
+    #[test]
+    fn missing_source_attribute_uses_its_default_not_zero() {
+        let mut effects = HashMap::new();
+        // postMul (4) fighter damage 2226 by 6182, which the ship lacks.
+        effects.insert(
+            12869,
+            effect(
+                12869,
+                vec![mi_skill(
+                    "OwnerRequiredSkillModifier",
+                    "charID",
+                    4,
+                    2226,
+                    6182,
+                    40572,
+                )],
+            ),
+        );
+        let input = FitInput {
+            ship: EntityInput {
+                effect_ids: vec![12869],
+                ..Default::default()
+            },
+            fighters: vec![EntityInput {
+                attrs: vec![(2226, 1.0)],
+                required_skills: vec![40572],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let resolved = resolve(&input, &effects, &|_| true, &|a| {
+            if a == 6182 {
+                1.0
+            } else {
+                0.0
+            }
+        });
+        assert_eq!(resolved.fighters[0].get(2226), 1.0);
+    }
+
+    /// The Reactive Armor Hardener's own effect is never resolved — the
+    /// shifted resonance is applied by `stats::tank_of` (#1281).
+    #[test]
+    fn adaptive_armor_hardener_effect_is_not_resolved() {
+        let mut rah = effect(4928, vec![mi("ItemModifier", "shipID", 4, 267, 267, None)]);
+        rah.name = ADAPTIVE_ARMOR_HARDENER.into();
+        let mut effects = HashMap::new();
+        effects.insert(4928, rah);
+        let input = FitInput {
+            ship: EntityInput {
+                attrs: vec![(267, 1.0)],
+                ..Default::default()
+            },
+            modules: vec![EntityInput {
+                attrs: vec![(267, 0.85)],
+                effect_ids: vec![4928],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let resolved = resolve(&input, &effects, &|_| true, &|_| 0.0);
+        assert_eq!(resolved.ship.get(267), 1.0);
+    }
+
     /// Overload (overheat) effects must not apply while the module is not
     /// overheated (#703): a category-5 self damage bonus is dropped.
     #[test]

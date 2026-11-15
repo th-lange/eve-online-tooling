@@ -5,7 +5,6 @@
 use super::engine::tank::DamageProfile;
 use super::stats::run_dogma;
 use super::types::{Fit, FitItem, ModuleState, SlotKind};
-use crate::sde::Sde;
 
 /// Golden gate (#176): the live dogma engine vs PYFA-recorded numbers
 /// (`tools/pyfa-oracle/golden.json`, all-V, PYFA v2.67.0). Needs the
@@ -13,17 +12,10 @@ use crate::sde::Sde;
 /// (passes) when the SDE isn't available, e.g. in CI.
 #[test]
 fn golden_pyfa_fits() {
-    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
-        eprintln!("golden_pyfa_fits: EVE_SDE_PATH unset — skipping");
+    let Some((sde, dir)) = crate::test_support::test_sde() else {
         return;
     };
-    let path = std::path::PathBuf::from(&path);
-    if !path.exists() {
-        eprintln!("golden_pyfa_fits: {path:?} missing — skipping");
-        return;
-    }
-    let sde = Sde::open(&path).expect("open sde");
-    let dir = path.parent().unwrap();
+    let dir = dir.as_path();
     let tid = |name: &str| {
         sde.type_by_name(name)
             .unwrap()
@@ -81,6 +73,16 @@ fn golden_pyfa_fits() {
         /// Targeting lock range, metres (0 = not checked).
         lock_range: f64,
     }
+    // Rifter DPS (2026-11, #1281): the recorded `golden.json` total (139.32) is
+    // weapon 107.15 + 2x Warrior II 32.18, but PYFA doesn't enforce drone
+    // bandwidth and CCP has since given the Rifter `droneBandwidth = 0` /
+    // `droneCapacity = 0` in the SDE, so the engine correctly fields no
+    // drones. The three Rifter fits therefore carry no drones and expect the
+    // oracle's `weaponDps` (107.15), independently re-derived from the SDE with
+    // PYFA's formulas: 3 x 11 (6 expl + 5 kin) x 3.465 dmg-mult x (1.25 Small
+    // Projectile + 1.15 Surgical Strike + 1.10 spec) / (3.75 s x 0.9 Gunnery x
+    // 0.8 Rapid Firing x 0.625 hull ROF 5 x -7.5 %) = 107.15. Drone DPS is
+    // covered by the Vexor case.
     let cases: Vec<(&str, Fit, Golden)> = vec![
         (
             "Rifter",
@@ -90,11 +92,10 @@ fn golden_pyfa_fits() {
                     module("200mm AutoCannon II", SlotKind::High, Some("Barrage S"), 0),
                     module("200mm AutoCannon II", SlotKind::High, Some("Barrage S"), 1),
                     module("200mm AutoCannon II", SlotKind::High, Some("Barrage S"), 2),
-                    drone("Warrior II", 2),
                 ],
             ),
             Golden {
-                dps: 139.32,
+                dps: 107.15,
                 ehp: 2262.2,
                 cap_stable: true,
                 cap_pct: 100.0,
@@ -155,11 +156,10 @@ fn golden_pyfa_fits() {
                     module("200mm AutoCannon II", SlotKind::High, Some("Barrage S"), 1),
                     module("200mm AutoCannon II", SlotKind::High, Some("Barrage S"), 2),
                     module("200mm Steel Plates II", SlotKind::Low, None, 0),
-                    drone("Warrior II", 2),
                 ],
             ),
             Golden {
-                dps: 139.32,
+                dps: 107.15,
                 ehp: 3373.3,
                 cap_stable: true,
                 cap_pct: 100.0,
@@ -231,11 +231,10 @@ fn golden_pyfa_fits() {
                     module("200mm AutoCannon II", SlotKind::High, Some("Barrage S"), 1),
                     module("200mm AutoCannon II", SlotKind::High, Some("Barrage S"), 2),
                     module("1MN Afterburner II", SlotKind::Mid, None, 0),
-                    drone("Warrior II", 2),
                 ],
             ),
             Golden {
-                dps: 139.32,
+                dps: 107.15,
                 ehp: 2262.2,
                 cap_stable: true,
                 cap_pct: 95.51,
@@ -444,17 +443,10 @@ fn golden_pyfa_fits() {
 /// actually fitted.
 #[test]
 fn vedmak_spool_up_matches_hand_computed_ratio() {
-    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
-        eprintln!("vedmak_spool_up_matches_hand_computed_ratio: EVE_SDE_PATH unset — skipping");
+    let Some((sde, dir)) = crate::test_support::test_sde() else {
         return;
     };
-    let path = std::path::PathBuf::from(&path);
-    if !path.exists() {
-        eprintln!("vedmak_spool_up_matches_hand_computed_ratio: {path:?} missing — skipping");
-        return;
-    }
-    let sde = Sde::open(&path).expect("open sde");
-    let dir = path.parent().unwrap();
+    let dir = dir.as_path();
     let tid = |name: &str| {
         sde.type_by_name(name)
             .unwrap()
@@ -565,21 +557,10 @@ fn vedmak_spool_up_matches_hand_computed_ratio() {
 /// gates the capacitor sim, never the DPS panel.
 #[test]
 fn rapid_light_missile_launcher_sustained_dps_matches_hand_computed_ratio() {
-    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
-        eprintln!(
-            "rapid_light_missile_launcher_sustained_dps_matches_hand_computed_ratio: EVE_SDE_PATH unset — skipping"
-        );
+    let Some((sde, dir)) = crate::test_support::test_sde() else {
         return;
     };
-    let path = std::path::PathBuf::from(&path);
-    if !path.exists() {
-        eprintln!(
-            "rapid_light_missile_launcher_sustained_dps_matches_hand_computed_ratio: {path:?} missing — skipping"
-        );
-        return;
-    }
-    let sde = Sde::open(&path).expect("open sde");
-    let dir = path.parent().unwrap();
+    let dir = dir.as_path();
     let tid = |name: &str| {
         sde.type_by_name(name)
             .unwrap()
@@ -587,13 +568,18 @@ fn rapid_light_missile_launcher_sustained_dps_matches_hand_computed_ratio() {
             .0
     };
     // Untrained (level 0) skills are skipped entirely by the dogma engine —
-    // avoids the Rapid Launch RoF bonus and any Caldari-cruiser missile
-    // bonus confounding the hand-computed ratio below.
+    // avoids the Rapid Launch RoF bonus confounding the hand-computed ratio
+    // below. Hull: a Rifter (no hardpoint validation here), NOT a Caracal
+    // (#1281): a hull's per-level bonus is scaled by its *skill's* preMul
+    // effect (`caldariCruiserSkillLevelPreMulShipBonusCC…`), and a skipped
+    // level-0 skill never scales it, so the Caracal's -5% missile RoF bonus
+    // applied unscaled (6.24 s -> 5.928 s, ratio 0.772). The Rifter's bonuses
+    // only touch projectile turrets, so the module's own 6.24 s survives.
     let zero_skills = |_: i64| 0.0;
     let fit = Fit {
         id: "t".into(),
-        name: "Caracal".into(),
-        ship_type_id: tid("Caracal"),
+        name: "Rifter".into(),
+        ship_type_id: tid("Rifter"),
         items: vec![FitItem {
             type_id: tid("Rapid Light Missile Launcher II"),
             slot: SlotKind::High,
@@ -659,21 +645,10 @@ fn rapid_light_missile_launcher_sustained_dps_matches_hand_computed_ratio() {
 /// the #871 cycle helper: `(8*6) / (8*6 + 60) = 48/108 = 4/9`.
 #[test]
 fn punisher_ancillary_armor_repairer_matches_hand_computed_burst_and_sustained() {
-    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
-        eprintln!(
-            "punisher_ancillary_armor_repairer_matches_hand_computed_burst_and_sustained: EVE_SDE_PATH unset — skipping"
-        );
+    let Some((sde, dir)) = crate::test_support::test_sde() else {
         return;
     };
-    let path = std::path::PathBuf::from(&path);
-    if !path.exists() {
-        eprintln!(
-            "punisher_ancillary_armor_repairer_matches_hand_computed_burst_and_sustained: {path:?} missing — skipping"
-        );
-        return;
-    }
-    let sde = Sde::open(&path).expect("open sde");
-    let dir = path.parent().unwrap();
+    let dir = dir.as_path();
     let tid = |name: &str| {
         sde.type_by_name(name)
             .unwrap()
@@ -736,23 +711,17 @@ fn punisher_ancillary_armor_repairer_matches_hand_computed_burst_and_sustained()
 /// (161) 16 m³ → a 2-shot clip (`floor(42 / 16)`). Burst must be exactly
 /// `390 / 4 = 97.5`/s; sustained derates it by the #871 cycle helper:
 /// `(2*4) / (2*4 + 60) = 8/68 = 2/17`.
+///
+/// Hull (#1281): a Rifter (no hardpoint validation here), NOT a Cyclone. The
+/// Cyclone's +7.5 % shield-boost role bonus (`shipShieldBoost1MBC1`) is scaled
+/// by the trained Battlecruiser skill's preMul effect; with every skill at 0
+/// that skill is skipped, so the bonus applied unscaled (97.5 -> 104.81).
 #[test]
 fn cyclone_ancillary_shield_booster_matches_hand_computed_burst_and_sustained() {
-    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
-        eprintln!(
-            "cyclone_ancillary_shield_booster_matches_hand_computed_burst_and_sustained: EVE_SDE_PATH unset — skipping"
-        );
+    let Some((sde, dir)) = crate::test_support::test_sde() else {
         return;
     };
-    let path = std::path::PathBuf::from(&path);
-    if !path.exists() {
-        eprintln!(
-            "cyclone_ancillary_shield_booster_matches_hand_computed_burst_and_sustained: {path:?} missing — skipping"
-        );
-        return;
-    }
-    let sde = Sde::open(&path).expect("open sde");
-    let dir = path.parent().unwrap();
+    let dir = dir.as_path();
     let tid = |name: &str| {
         sde.type_by_name(name)
             .unwrap()
@@ -762,8 +731,8 @@ fn cyclone_ancillary_shield_booster_matches_hand_computed_burst_and_sustained() 
     let zero_skills = |_: i64| 0.0;
     let fit = Fit {
         id: "t".into(),
-        name: "Cyclone".into(),
-        ship_type_id: tid("Cyclone"),
+        name: "Rifter".into(),
+        ship_type_id: tid("Rifter"),
         items: vec![FitItem {
             type_id: tid("Large Ancillary Shield Booster"),
             slot: SlotKind::Mid,
@@ -819,23 +788,17 @@ fn cyclone_ancillary_shield_booster_matches_hand_computed_burst_and_sustained() 
 /// unarmed hull's own armor resonance and the RAH-fitted hull's shifted
 /// resonance: `shifted_resonance / unarmed_resonance` must be exactly
 /// `[0.4, 1.0, 1.0, 1.0]`.
+///
+/// (#1281) The current SDE gives the RAH's `adaptiveArmorHardener` effect no
+/// `modifierInfo` (it is code in PYFA too), so the engine now multiplies the
+/// hull's armor resonance by the shifted values itself; before, it divided by
+/// a baseline multiply that never happened and the ratio came out 0.4/0.85.
 #[test]
 fn rifter_reactive_armor_hardener_converges_to_hand_computed_em_resists() {
-    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
-        eprintln!(
-            "rifter_reactive_armor_hardener_converges_to_hand_computed_em_resists: EVE_SDE_PATH unset — skipping"
-        );
+    let Some((sde, dir)) = crate::test_support::test_sde() else {
         return;
     };
-    let path = std::path::PathBuf::from(&path);
-    if !path.exists() {
-        eprintln!(
-            "rifter_reactive_armor_hardener_converges_to_hand_computed_em_resists: {path:?} missing — skipping"
-        );
-        return;
-    }
-    let sde = Sde::open(&path).expect("open sde");
-    let dir = path.parent().unwrap();
+    let dir = dir.as_path();
     let tid = |name: &str| {
         sde.type_by_name(name)
             .unwrap()
@@ -918,21 +881,10 @@ fn rifter_reactive_armor_hardener_converges_to_hand_computed_em_resists() {
 /// license note; #875's own engine tests pin the exact discrete-sim math).
 #[test]
 fn rifter_cap_booster_stabilizes_an_otherwise_neut_unstable_hull() {
-    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
-        eprintln!(
-            "rifter_cap_booster_stabilizes_an_otherwise_neut_unstable_hull: EVE_SDE_PATH unset — skipping"
-        );
+    let Some((sde, dir)) = crate::test_support::test_sde() else {
         return;
     };
-    let path = std::path::PathBuf::from(&path);
-    if !path.exists() {
-        eprintln!(
-            "rifter_cap_booster_stabilizes_an_otherwise_neut_unstable_hull: {path:?} missing — skipping"
-        );
-        return;
-    }
-    let sde = Sde::open(&path).expect("open sde");
-    let dir = path.parent().unwrap();
+    let dir = dir.as_path();
     let tid = |name: &str| {
         sde.type_by_name(name)
             .unwrap()
@@ -1020,21 +972,10 @@ fn rifter_cap_booster_stabilizes_an_otherwise_neut_unstable_hull() {
 /// rolled multiplier, failing the assertion below.
 #[test]
 fn mutated_mwd_max_roll_speed_bonus_changes_max_velocity() {
-    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
-        eprintln!(
-            "mutated_mwd_max_roll_speed_bonus_changes_max_velocity: EVE_SDE_PATH unset — skipping"
-        );
+    let Some((sde, dir)) = crate::test_support::test_sde() else {
         return;
     };
-    let path = std::path::PathBuf::from(&path);
-    if !path.exists() {
-        eprintln!(
-            "mutated_mwd_max_roll_speed_bonus_changes_max_velocity: {path:?} missing — skipping"
-        );
-        return;
-    }
-    let sde = Sde::open(&path).expect("open sde");
-    let dir = path.parent().unwrap();
+    let dir = dir.as_path();
     let tid = |name: &str| {
         sde.type_by_name(name)
             .unwrap()
@@ -1132,17 +1073,10 @@ fn mutated_mwd_max_roll_speed_bonus_changes_max_velocity() {
 /// entered.
 #[test]
 fn unmutated_item_is_unaffected_by_mutation_field() {
-    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
-        eprintln!("unmutated_item_is_unaffected_by_mutation_field: EVE_SDE_PATH unset — skipping");
+    let Some((sde, dir)) = crate::test_support::test_sde() else {
         return;
     };
-    let path = std::path::PathBuf::from(&path);
-    if !path.exists() {
-        eprintln!("unmutated_item_is_unaffected_by_mutation_field: {path:?} missing — skipping");
-        return;
-    }
-    let sde = Sde::open(&path).expect("open sde");
-    let dir = path.parent().unwrap();
+    let dir = dir.as_path();
     let tid = |name: &str| {
         sde.type_by_name(name)
             .unwrap()
@@ -1199,6 +1133,12 @@ fn unmutated_item_is_unaffected_by_mutation_field() {
 /// `attackMissile` ("Rockets") is the higher-DPS one and wins auto-
 /// selection: 112.5 thermal damage per cycle, 1.0 damage multiplier,
 /// 5.0s rate of fire (`fighterAbilityAttackMissileDuration` 2233 = 5000ms).
+///
+/// (#1281) The SDE now also gives the hull a `fighterGenericModifiers` effect
+/// that postMultiplies the fighters' damage multiplier by the hull's
+/// `fighterLightDamageMultiplier` (6182) — which the Thanatos doesn't carry, so
+/// it must read as the attribute's default 1.0. The engine read it as 0,
+/// zeroing the multiplier (the 5 % role bonus then multiplied 0).
 /// A Thanatos's own role bonus (`shipBonusCarrierG1FighterDamage`, effect
 /// 6601 — ship-intrinsic, exempt from the stacking penalty and from any
 /// skill gate since it's the ship's own effect, not a trained skill's)
@@ -1215,21 +1155,10 @@ fn unmutated_item_is_unaffected_by_mutation_field() {
 /// the SDE, so sustained equals burst exactly.
 #[test]
 fn thanatos_two_light_fighter_squadrons_matches_hand_computed_dps() {
-    let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
-        eprintln!(
-            "thanatos_two_light_fighter_squadrons_matches_hand_computed_dps: EVE_SDE_PATH unset — skipping"
-        );
+    let Some((sde, dir)) = crate::test_support::test_sde() else {
         return;
     };
-    let path = std::path::PathBuf::from(&path);
-    if !path.exists() {
-        eprintln!(
-            "thanatos_two_light_fighter_squadrons_matches_hand_computed_dps: {path:?} missing — skipping"
-        );
-        return;
-    }
-    let sde = Sde::open(&path).expect("open sde");
-    let dir = path.parent().unwrap();
+    let dir = dir.as_path();
     let tid = |name: &str| {
         sde.type_by_name(name)
             .unwrap()

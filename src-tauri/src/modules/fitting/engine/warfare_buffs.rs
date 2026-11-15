@@ -943,13 +943,10 @@ mod tests {
     /// charges actually carry. Needs `EVE_SDE_PATH`.
     #[test]
     fn ids_and_bases_match_the_sde() {
-        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        let Some(path) = crate::test_support::sde_file() else {
             eprintln!("ids_and_bases_match_the_sde: EVE_SDE_PATH unset — skipping");
             return;
         };
-        if !std::path::Path::new(&path).exists() {
-            return;
-        }
         let conn = rusqlite::Connection::open_with_flags(
             &path,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,

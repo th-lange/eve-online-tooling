@@ -843,17 +843,9 @@ mod tests {
     /// same convention as `fitting::commands::tests`).
     #[test]
     fn golden_production_profit_required_quantities() {
-        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
-            eprintln!(
-                "golden_production_profit_required_quantities: EVE_SDE_PATH unset — skipping"
-            );
+        let Some((sde, _)) = crate::test_support::test_sde() else {
             return;
         };
-        let path = std::path::PathBuf::from(&path);
-        if !path.exists() {
-            return;
-        }
-        let sde = Sde::open(&path).unwrap();
         // Rifter blueprint (691), base (ME 0) materials per run — pinned in
         // docs/testing-mcp.md against the live SDE at doc-writing time.
         let materials = sde
@@ -885,16 +877,10 @@ mod tests {
     /// a real SDE.
     #[test]
     fn golden_fitting_stats_rifter_layout() {
-        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
-            eprintln!("golden_fitting_stats_rifter_layout: EVE_SDE_PATH unset — skipping");
+        let Some((sde, dir)) = crate::test_support::test_sde() else {
             return;
         };
-        let path = std::path::PathBuf::from(&path);
-        if !path.exists() {
-            return;
-        }
-        let sde = Sde::open(&path).unwrap();
-        let dir = path.parent().unwrap();
+        let dir = dir.as_path();
         let fit = fitting::commands::import_eft_to_fit(&sde, "[Rifter, Golden Test]").unwrap();
         let stats = fitting::simulate_fit(
             &sde,

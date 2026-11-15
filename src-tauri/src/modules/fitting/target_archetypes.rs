@@ -350,20 +350,9 @@ mod tests {
     /// Skips when `EVE_SDE_PATH` isn't set (CI has no bundled SDE).
     #[test]
     fn real_sde_frigate_average_matches_hand_computed_values() {
-        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
-            eprintln!(
-                "real_sde_frigate_average_matches_hand_computed_values: EVE_SDE_PATH unset — skipping"
-            );
+        let Some((sde, _)) = crate::test_support::test_sde() else {
             return;
         };
-        let path = std::path::PathBuf::from(&path);
-        if !path.exists() {
-            eprintln!(
-                "real_sde_frigate_average_matches_hand_computed_values: {path:?} missing — skipping"
-            );
-            return;
-        }
-        let sde = Sde::open(&path).expect("open bundled SDE");
         let (sig, vel, _mass) = average_t1_hull_class(&sde, FRIGATE_GROUP)
             .expect("real SDE should have Tech I frigate data");
         assert!(

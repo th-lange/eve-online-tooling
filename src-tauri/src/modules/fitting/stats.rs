@@ -1367,14 +1367,11 @@ pub(super) fn capacitor_of(
 ///
 /// Reactive Armor Hardener (#878): a running RAH (`resistanceShiftAmount`
 /// 1849 > 0) has its own unshifted per-type armor resonance iterated to a
-/// fixed point against `profile` (`engine::tank::rah_shift`), then swapped
-/// back into the ship's finalized armor resonance in place of the RAH's own
-/// baseline (unshifted) contribution: `armor_resonance[k] /= rah_base[k]`
-/// (undoing the plain multiply the standard resolve pass already applied)
-/// `* shifted[k]`. Exact as long as the RAH is the only source of resist
-/// bonus multiplying that baseline in — true in practice, since only one RAH
-/// can ever be fitted (`maxGroupActive` 763) and its own contribution isn't
-/// stacking-penalized against itself.
+/// fixed point against `profile` (`engine::tank::rah_shift`), then multiplied
+/// into the ship's finalized armor resonance. The resolve pass deliberately
+/// skips the RAH's own effect (`adaptiveArmorHardener`, which the SDE gives
+/// no modifiers anyway — #1281), so the shifted resonance is its only
+/// contribution; only one RAH can ever be fitted (`maxGroupActive` 763).
 ///
 /// Ancillary reps (#878): burst rep/s (the existing full-rate figure) and
 /// sustained rep/s — burst derated by the module's own reload cycle
@@ -1419,10 +1416,8 @@ pub(super) fn tank_of(
             store.get(268),
         ];
         let shifted = rah_shift(base, shift_amt, profile);
-        for k in 0..4 {
-            if base[k] > 0.0 {
-                armor.resonance[k] = armor.resonance[k] / base[k] * shifted[k];
-            }
+        for (r, shift) in armor.resonance.iter_mut().zip(shifted) {
+            *r *= shift;
         }
         rah_active = true;
         break; // only one RAH is ever fitted
@@ -2821,7 +2816,8 @@ mod tests {
     }
 
     /// Reactive Armor Hardener (#878) end-to-end through `tank_of`: a naked
-    /// hull (armor resonance 1.0, i.e. no other resist source) with only a
+    /// hull (armor resonance 1.0, i.e. no other resist source — the RAH's own
+    /// effect is never resolved) with only a
     /// running RAH (baseline 0.85/15% each, 6% shift/cycle) against a pure-EM
     /// profile — same fixed point `rah_shift`'s own unit test hand-verifies —
     /// converges to 60% EM resist and 0% on the other three, and flips
@@ -2830,7 +2826,7 @@ mod tests {
     fn rah_shifts_armor_resistances_to_a_fixed_point() {
         let mut ship = AttrStore::new();
         for id in [267, 270, 269, 268] {
-            ship.set_base(id, 0.85);
+            ship.set_base(id, 1.0);
         }
         let rah = store(&[
             (1849, 6.0),
@@ -2866,13 +2862,13 @@ mod tests {
     }
 
     /// A RAH that isn't actively cycling (`Online`, not `Active`) doesn't
-    /// shift — `rah_active` stays false and the resistances stay at the
-    /// module's own unshifted baseline (15% each).
+    /// shift — `rah_active` stays false and it contributes no resist at all
+    /// (its effect is active-only, and resolve never applies it, #1281).
     #[test]
     fn inactive_rah_does_not_shift() {
         let mut ship = AttrStore::new();
         for id in [267, 270, 269, 268] {
-            ship.set_base(id, 0.85);
+            ship.set_base(id, 1.0);
         }
         let rah = store(&[
             (1849, 6.0),
@@ -2894,7 +2890,7 @@ mod tests {
         let t = tank_of(&resolved, &items.iter().collect::<Vec<_>>(), &em_only);
         assert!(!t.rah_active);
         for v in t.armor_resists {
-            assert!((v - 0.15).abs() < 1e-9, "{:?}", t.armor_resists);
+            assert!(v.abs() < 1e-9, "{:?}", t.armor_resists);
         }
     }
 

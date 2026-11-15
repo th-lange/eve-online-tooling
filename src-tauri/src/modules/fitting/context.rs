@@ -47,9 +47,21 @@ impl DogmaContext {
         all_ids.extend_from_slice(extra_ids);
         all_ids.extend(&skill_ids);
 
-        let attrs = sde
+        let mut attrs = sde
             .types_attributes_raw(&all_ids)
             .map_err(|e| e.to_string())?;
+        // capacity/volume live on invTypes in this SDE, not dgmTypeAttributes.
+        for (type_id, extra) in sde
+            .types_inventory_attributes(&all_ids)
+            .map_err(|e| e.to_string())?
+        {
+            let entry = attrs.entry(type_id).or_default();
+            for (id, v) in extra {
+                if !entry.iter().any(|(k, _)| *k == id) {
+                    entry.push((id, v));
+                }
+            }
+        }
         let effects = sde.types_effects(&all_ids).map_err(|e| e.to_string())?;
         let groups = sde.types_groups(&all_ids).map_err(|e| e.to_string())?;
         let effect_meta = crate::sde::cached_effect_meta(dir)?;
