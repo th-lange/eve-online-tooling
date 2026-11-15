@@ -1729,16 +1729,10 @@ mod tests {
     /// A T2 turret should report both optimal *and* falloff (gated on the SDE).
     #[test]
     fn t2_turret_reports_optimal_and_falloff() {
-        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
-            eprintln!("t2_turret_reports_optimal_and_falloff: EVE_SDE_PATH unset — skipping");
+        let Some((sde, dir)) = crate::test_support::test_sde() else {
             return;
         };
-        let path = std::path::PathBuf::from(&path);
-        if !path.exists() {
-            return;
-        }
-        let sde = Sde::open(&path).unwrap();
-        let dir = path.parent().unwrap();
+        let dir = dir.as_path();
         let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
         let fit = Fit {
             id: "t".into(),
@@ -1824,15 +1818,10 @@ mod tests {
     /// CPU/PG, and reports no range (gated on the SDE).
     #[test]
     fn offline_module_drops_its_contribution() {
-        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        let Some((sde, dir)) = crate::test_support::test_sde() else {
             return;
         };
-        let path = std::path::PathBuf::from(&path);
-        if !path.exists() {
-            return;
-        }
-        let sde = Sde::open(&path).unwrap();
-        let dir = path.parent().unwrap();
+        let dir = dir.as_path();
         let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
         let gun = |state: ModuleState| Fit {
             id: "t".into(),
@@ -1921,15 +1910,10 @@ mod tests {
     /// Deactivated/offline modules draw no capacitor (gated on the SDE).
     #[test]
     fn inactive_and_offline_modules_draw_no_cap() {
-        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        let Some((sde, dir)) = crate::test_support::test_sde() else {
             return;
         };
-        let path = std::path::PathBuf::from(&path);
-        if !path.exists() {
-            return;
-        }
-        let sde = Sde::open(&path).unwrap();
-        let dir = path.parent().unwrap();
+        let dir = dir.as_path();
         let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
         // An afterburner is an active, cap-using module on a Rifter.
         let ab = |state: ModuleState| Fit {
@@ -2011,15 +1995,10 @@ mod tests {
     /// falls — but a passive module would be unchanged (gated on the SDE).
     #[test]
     fn deactivated_active_hardener_loses_resist() {
-        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        let Some((sde, dir)) = crate::test_support::test_sde() else {
             return;
         };
-        let path = std::path::PathBuf::from(&path);
-        if !path.exists() {
-            return;
-        }
-        let sde = Sde::open(&path).unwrap();
-        let dir = path.parent().unwrap();
+        let dir = dir.as_path();
         let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
         let hardener = |state: ModuleState| Fit {
             id: "t".into(),
@@ -2084,15 +2063,10 @@ mod tests {
     /// DPS-vs-range curve is populated (gated on the SDE).
     #[test]
     fn applied_dps_and_range_curve_populate_against_a_target() {
-        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
+        let Some((sde, dir)) = crate::test_support::test_sde() else {
             return;
         };
-        let path = std::path::PathBuf::from(&path);
-        if !path.exists() {
-            return;
-        }
-        let sde = Sde::open(&path).unwrap();
-        let dir = path.parent().unwrap();
+        let dir = dir.as_path();
         let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
         let fit = Fit {
             id: "t".into(),
@@ -2147,16 +2121,6 @@ mod tests {
             d.dps_range_curve.iter().all(|&(dist, _)| dist >= 0.0),
             "every sampled distance is non-negative"
         );
-    }
-
-    /// Open the real SDE (`EVE_SDE_PATH`), or `None` to skip.
-    fn real_sde() -> Option<(Sde, std::path::PathBuf)> {
-        let path = std::path::PathBuf::from(std::env::var_os("EVE_SDE_PATH")?);
-        if !path.exists() {
-            return None;
-        }
-        let dir = path.parent()?.to_path_buf();
-        Some((Sde::open(&path).ok()?, dir))
     }
 
     /// A single fitted module on the given hull, active.
@@ -2220,7 +2184,7 @@ mod tests {
     /// test documenting that the old `GangModifier` path did nothing.)
     #[test]
     fn fleet_boost_module_pick_cuts_sig_radius_and_agility() {
-        let Some((sde, dir)) = real_sde() else {
+        let Some((sde, dir)) = crate::test_support::test_sde() else {
             eprintln!("fleet_boost_module_pick: EVE_SDE_PATH unset — skipping");
             return;
         };
@@ -2273,7 +2237,7 @@ mod tests {
     /// duplicate source is ignored.
     #[test]
     fn rapid_deployment_raises_afterburner_speed() {
-        let Some((sde, dir)) = real_sde() else {
+        let Some((sde, dir)) = crate::test_support::test_sde() else {
             eprintln!("rapid_deployment: EVE_SDE_PATH unset — skipping");
             return;
         };
@@ -2324,7 +2288,7 @@ mod tests {
     /// exactly its percentage.
     #[test]
     fn shield_harmonizing_and_armor_reinforcement() {
-        let Some((sde, dir)) = real_sde() else {
+        let Some((sde, dir)) = crate::test_support::test_sde() else {
             eprintln!("shield_harmonizing: EVE_SDE_PATH unset — skipping");
             return;
         };
@@ -2377,16 +2341,10 @@ mod tests {
     /// the same external-modifier pass as a fleet boost.
     #[test]
     fn environment_effect_raises_shield_hp() {
-        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
-            eprintln!("environment_effect_raises_shield_hp: EVE_SDE_PATH unset — skipping");
+        let Some((sde, dir)) = crate::test_support::test_sde() else {
             return;
         };
-        let path = std::path::PathBuf::from(&path);
-        if !path.exists() {
-            return;
-        }
-        let sde = Sde::open(&path).unwrap();
-        let dir = path.parent().unwrap();
+        let dir = dir.as_path();
         let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
         let fit = Fit {
             id: "t".into(),
@@ -2442,16 +2400,10 @@ mod tests {
     /// not just the pure unit tests in `engine/abyssal.rs`.
     #[test]
     fn abyssal_gamma_weather_raises_shield_hp() {
-        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
-            eprintln!("abyssal_gamma_weather_raises_shield_hp: EVE_SDE_PATH unset — skipping");
+        let Some((sde, dir)) = crate::test_support::test_sde() else {
             return;
         };
-        let path = std::path::PathBuf::from(&path);
-        if !path.exists() {
-            return;
-        }
-        let sde = Sde::open(&path).unwrap();
-        let dir = path.parent().unwrap();
+        let dir = dir.as_path();
         let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
         let fit = Fit {
             id: "t".into(),
@@ -2580,15 +2532,9 @@ mod tests {
     /// classifies slots, stacks drones/ammo. Skips when the SDE isn't present.
     #[test]
     fn import_list_builds_a_fit_from_a_pasted_list() {
-        let Ok(path) = std::env::var("EVE_SDE_PATH") else {
-            eprintln!("import_list…: EVE_SDE_PATH unset — skipping");
+        let Some((sde, _)) = crate::test_support::test_sde() else {
             return;
         };
-        if !std::path::Path::new(&path).exists() {
-            eprintln!("import_list…: {path} missing — skipping");
-            return;
-        }
-        let sde = crate::sde::Sde::open(std::path::Path::new(&path)).expect("open sde");
         let list = "\
 Rifter
 200mm AutoCannon II
@@ -2619,15 +2565,9 @@ Nanite Repair Paste\t50\tCommodity";
     /// scanner-probe stack (a charge-category item) lands unfitted in cargo.
     #[test]
     fn import_dna_builds_a_fit_from_a_real_killboard_string() {
-        let Ok(path) = std::env::var("EVE_SDE_PATH") else {
-            eprintln!("import_dna…: EVE_SDE_PATH unset — skipping");
+        let Some((sde, _)) = crate::test_support::test_sde() else {
             return;
         };
-        if !std::path::Path::new(&path).exists() {
-            eprintln!("import_dna…: {path} missing — skipping");
-            return;
-        }
-        let sde = crate::sde::Sde::open(std::path::Path::new(&path)).expect("open sde");
         let dna_text = "72904:4250;2:4258;1:11577;1:33199;1:33201;1:33197;1:9580;1:9568;1:1405;2:31220;1:31788;1:30488;8::";
         let fit = import_dna_to_fit(&sde, dna_text).expect("import");
         assert_eq!(fit.ship_type_id, 72904, "hull is the Heron Navy Issue");
@@ -2650,15 +2590,9 @@ Nanite Repair Paste\t50\tCommodity";
     /// from their own dogma effects, same as every other module.
     #[test]
     fn import_dna_handles_t3_cruiser_subsystems() {
-        let Ok(path) = std::env::var("EVE_SDE_PATH") else {
-            eprintln!("import_dna t3c…: EVE_SDE_PATH unset — skipping");
+        let Some((sde, _)) = crate::test_support::test_sde() else {
             return;
         };
-        if !std::path::Path::new(&path).exists() {
-            eprintln!("import_dna t3c…: {path} missing — skipping");
-            return;
-        }
-        let sde = crate::sde::Sde::open(std::path::Path::new(&path)).expect("open sde");
         let id = |name: &str| sde.type_by_name(name).unwrap().unwrap().0;
         let legion = id("Legion");
         let core = id("Legion Core - Augmented Antimatter Reactor");
@@ -2689,15 +2623,9 @@ Nanite Repair Paste\t50\tCommodity";
     /// for byte, same as pyfa's own canonical-order exporter.
     #[test]
     fn dna_round_trips_through_a_resolved_fit() {
-        let Ok(path) = std::env::var("EVE_SDE_PATH") else {
-            eprintln!("dna round-trip…: EVE_SDE_PATH unset — skipping");
+        let Some((sde, _)) = crate::test_support::test_sde() else {
             return;
         };
-        if !std::path::Path::new(&path).exists() {
-            eprintln!("dna round-trip…: {path} missing — skipping");
-            return;
-        }
-        let sde = crate::sde::Sde::open(std::path::Path::new(&path)).expect("open sde");
         let id = |name: &str| sde.type_by_name(name).unwrap().unwrap().0;
         let rifter = id("Rifter");
         let gyro = id("Gyrostabilizer II");
@@ -2725,15 +2653,9 @@ Nanite Repair Paste\t50\tCommodity";
     /// drones aggregated, hull excluded.
     #[test]
     fn multibuy_export_matches_fitted_contents() {
-        let Ok(path) = std::env::var("EVE_SDE_PATH") else {
-            eprintln!("multibuy…: EVE_SDE_PATH unset — skipping");
+        let Some((sde, _)) = crate::test_support::test_sde() else {
             return;
         };
-        if !std::path::Path::new(&path).exists() {
-            eprintln!("multibuy…: {path} missing — skipping");
-            return;
-        }
-        let sde = crate::sde::Sde::open(std::path::Path::new(&path)).expect("open sde");
         let id = |name: &str| sde.type_by_name(name).unwrap().unwrap().0;
         let rifter = id("Rifter");
         let gun = id("200mm AutoCannon II");
@@ -2800,20 +2722,10 @@ Nanite Repair Paste\t50\tCommodity";
     /// and `aoeVelocity` (653) — see `engine::application::missile_application`.
     #[test]
     fn missile_weapon_range_and_archetype_dps_populate_from_real_sde_data() {
-        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
-            eprintln!(
-                "missile_weapon_range_and_archetype_dps_populate_from_real_sde_data: EVE_SDE_PATH unset — skipping"
-            );
+        let Some((sde, dir)) = crate::test_support::test_sde() else {
             return;
         };
-        let path = std::path::PathBuf::from(&path);
-        if !path.exists() {
-            return;
-        }
-        let sde = Sde::open(&path).unwrap();
-        // Real app_data_dir is the *grandparent* of sde.sqlite (SdePaths::new
-        // joins app_data_dir/sde/sde.sqlite) — not sde.sqlite's own parent.
-        let dir = path.parent().unwrap().parent().unwrap();
+        let dir = dir.as_path();
         let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
         let fit = Fit {
             id: "t".into(),
