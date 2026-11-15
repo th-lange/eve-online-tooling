@@ -148,6 +148,16 @@ other docs for subsystems: [plugins](plugins.md), [scripts](scripts.md),
   are inputs. The per-ID behaviour follows
   [pyfa](https://github.com/pyfa-org/Pyfa) (`Fit.__runCommandBoosts`,
   `commandLink.py`), re-expressed as our own data.
+- **Weapon application** (`engine/application.rs`, #1183/#1267) — re-implemented
+  from pyfa `graphs/data/fitDamageStats/calc/application.py`. Missiles:
+  `min(1, S/E, (S·Ve/(E·Vt))^drf)` (S target sig, E `aoeCloudSize` 654,
+  Ve `aoeVelocity` 653, Vt target speed, drf charge `aoeDamageReductionFactor`
+  1353; speed term skipped when Vt ≤ 0 or drf ≤ 0). Turrets and drones:
+  `turret_chance_to_hit` is the hit probability only; applied damage uses
+  `turret_damage_multiplier(cth) = 3·min(cth, 0.01) + (cth − min(cth, 0.01))·((0.01 + cth)/2 + 0.49)`
+  (1% wrecking hits at 3×, uniform 0.5–1.5 roll otherwise), so it is 1.015 at
+  cth 1 and 0.395 at cth 0.5. Drones that keep pace use multiplier(1.0) = 1.015
+  (pyfa parity). Applied ÷ paper DPS can therefore slightly exceed 100%.
 - **EVE SSO (multi-character)** — OAuth2 PKCE; each refresh token in the OS
   keychain, roster persisted across restarts.
 
