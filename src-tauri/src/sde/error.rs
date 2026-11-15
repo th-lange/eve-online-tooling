@@ -10,6 +10,8 @@ pub enum SdeError {
     Corrupt(String),
     #[error("decompression failed: {0}")]
     Decompress(String),
+    #[error("SDE update could not replace the database because it is in use; restart the app and try again")]
+    SwapFailed,
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
