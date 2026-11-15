@@ -29,6 +29,7 @@ pub use types::{
     TypeNameMap, WormholeType,
 };
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
 
@@ -94,17 +95,19 @@ pub(crate) struct PoolKey {
 }
 
 struct ConnPool {
-    db_path: PathBuf,
     generation: Generation,
     idle: Vec<Connection>,
 }
 
-/// Pool plus the set of database paths currently being swapped. Both live
-/// under one lock so "mark swap pending + drain" and "check in unless a swap
-/// is pending" are each atomic with respect to the other.
+/// One pool per database path, plus the set of paths currently being
+/// swapped. Both live under one lock so "mark swap pending + drain" and
+/// "check in unless a swap is pending" are each atomic with respect to the
+/// other. The app only ever opens one SDE path, so in production the map has
+/// a single entry; keying by path keeps callers with different paths (tests
+/// running in parallel) from resetting each other's pool.
 #[derive(Default)]
 struct PoolState {
-    pool: Option<ConnPool>,
+    pools: HashMap<PathBuf, ConnPool>,
     swapping: Vec<PathBuf>,
 }
 
@@ -135,9 +138,7 @@ impl Drop for SwapGuard {
 pub(crate) fn begin_swap(db_path: &Path) -> SwapGuard {
     let mut guard = SDE_CONN_POOL.lock().expect("sde conn pool lock");
     guard.swapping.push(db_path.to_path_buf());
-    if guard.pool.as_ref().is_some_and(|p| p.db_path == db_path) {
-        guard.pool = None;
-    }
+    guard.pools.remove(db_path);
     SwapGuard {
         db_path: db_path.to_path_buf(),
     }
@@ -147,11 +148,7 @@ pub(crate) fn begin_swap(db_path: &Path) -> SwapGuard {
 #[cfg(test)]
 fn idle_pooled_count(db_path: &Path) -> usize {
     let guard = SDE_CONN_POOL.lock().expect("sde conn pool lock");
-    guard
-        .pool
-        .as_ref()
-        .filter(|p| p.db_path == db_path)
-        .map_or(0, |p| p.idle.len())
+    guard.pools.get(db_path).map_or(0, |p| p.idle.len())
 }
 
 /// Pop an idle connection for `(db_path, generation)` if the pool currently
@@ -164,14 +161,18 @@ fn checkout_pooled_connection(db_path: &Path, generation: Generation) -> Option<
     if guard.swapping.iter().any(|p| p == db_path) {
         return None;
     }
-    match guard.pool.as_mut() {
-        Some(p) if p.db_path == db_path && p.generation == generation => p.idle.pop(),
+    match guard.pools.get_mut(db_path) {
+        Some(p) if p.generation == generation => p.idle.pop(),
         _ => {
-            guard.pool = Some(ConnPool {
-                db_path: db_path.to_path_buf(),
-                generation,
-                idle: Vec::new(),
-            });
+            // Unknown path or a stale generation: (re)start this path's pool,
+            // dropping (closing) any connections of the old generation.
+            guard.pools.insert(
+                db_path.to_path_buf(),
+                ConnPool {
+                    generation,
+                    idle: Vec::new(),
+                },
+            );
             None
         }
     }
@@ -185,8 +186,8 @@ pub(crate) fn return_pooled_connection(key: PoolKey, conn: Connection) {
     if guard.swapping.contains(&key.db_path) {
         return;
     }
-    if let Some(p) = guard.pool.as_mut() {
-        if p.db_path == key.db_path && p.generation == key.generation {
+    if let Some(p) = guard.pools.get_mut(&key.db_path) {
+        if p.generation == key.generation {
             p.idle.push(conn);
         }
     }
@@ -544,8 +545,8 @@ mod pool_tests {
 
     /// Mirrors [`cache_tests::get_or_build_serves_cache_until_the_generation_changes`]:
     /// exercises the pool primitives directly (pure over their inputs, no
-    /// SDE file on disk needed) rather than through `open_from_dir`, so it
-    /// can't collide with other tests sharing the process-wide pool static.
+    /// SDE file on disk needed). The pool is process-wide but keyed by path,
+    /// so tests using their own fake path can't disturb each other.
     #[test]
     fn pooled_connection_is_reused_within_a_generation_and_rebuilt_across_one() {
         let db_path = PathBuf::from("/fake/sde-pool-test/sde.sqlite");
@@ -617,5 +618,27 @@ mod pool_tests {
         assert!(checkout_pooled_connection(&db_path, gen).is_none());
         return_pooled_connection(key(), Connection::open_in_memory().unwrap());
         assert_eq!(idle_pooled_count(&db_path), 1);
+    }
+
+    /// Regression for the flake behind #1275/#1282: two callers with different
+    /// database paths (parallel tests) must not reset each other's pool.
+    #[test]
+    fn pools_for_different_paths_are_independent() {
+        let a = PathBuf::from("/fake/sde-pool-a/sde.sqlite");
+        let b = PathBuf::from("/fake/sde-pool-b/sde.sqlite");
+        let gen: Generation = (1, 100);
+        assert!(checkout_pooled_connection(&a, gen).is_none());
+        return_pooled_connection(
+            PoolKey {
+                db_path: a.clone(),
+                generation: gen,
+            },
+            Connection::open_in_memory().unwrap(),
+        );
+        // Touching path B (a checkout that initialises its own pool) used to
+        // replace the single global pool and drop A's idle connection.
+        assert!(checkout_pooled_connection(&b, gen).is_none());
+        assert_eq!(idle_pooled_count(&a), 1);
+        assert!(checkout_pooled_connection(&a, gen).is_some());
     }
 }
