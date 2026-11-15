@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { errorMessage, pluginInvoke } from "../lib/api";
 import { useResolvedTheme } from "../lib/useTheme";
 
@@ -71,6 +72,18 @@ function isInvokeRequest(data: unknown): data is InvokeRequest {
     typeof m.id === "number" &&
     typeof m.fn === "string"
   );
+}
+
+/**
+ * URL of a plugin's UI document. Tauri serves custom protocols as
+ * `plugin://localhost/…` on Linux/macOS but `http(s)://plugin.localhost/…` on
+ * Windows/Android (WebView2 never routes the bare scheme), and only
+ * `convertFileSrc` knows which. It percent-encodes its whole argument (`/`
+ * included), so ask it for the bare origin and append the path ourselves —
+ * ids are validated slugs, so no escaping is needed (#1155).
+ */
+function pluginFrameUrl(pluginId: string): string {
+  return `${convertFileSrc("", "plugin")}${pluginId}/index.html`;
 }
 
 export function PluginHost({
@@ -149,7 +162,7 @@ export function PluginHost({
     <iframe
       ref={ref}
       title={`plugin-${pluginId}`}
-      src={`plugin://localhost/${pluginId}/index.html`}
+      src={pluginFrameUrl(pluginId)}
       sandbox="allow-scripts"
       onLoad={sendTheme}
       className={className ?? "h-full w-full border-0"}
