@@ -202,6 +202,44 @@ impl Sde {
         Ok(map)
     }
 
+    /// `capacity` (38) and `volume` (161) for a batch of types, as dogma
+    /// `(attributeID, value)` pairs. They are dogma attributes in the game (and
+    /// PYFA's gamedata), but the Fuzzwork dump only carries them as `invTypes`
+    /// columns, so [`types_attributes_raw`](Self::types_attributes_raw) never
+    /// returns them — without them every clip size is unknown and reload is
+    /// silently skipped (#1281). Zero/NULL columns are omitted.
+    pub fn types_inventory_attributes(
+        &self,
+        type_ids: &[i64],
+    ) -> Result<HashMap<i64, Vec<(i64, f64)>>, SdeError> {
+        if type_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let placeholders = vec!["?"; type_ids.len()].join(", ");
+        let sql = format!(
+            "SELECT typeID, capacity, volume FROM invTypes WHERE typeID IN ({placeholders})"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(type_ids.iter()), |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, Option<f64>>(1)?,
+                r.get::<_, Option<f64>>(2)?,
+            ))
+        })?;
+        let mut map: HashMap<i64, Vec<(i64, f64)>> = HashMap::new();
+        for row in rows {
+            let (type_id, capacity, volume) = row?;
+            let attrs = map.entry(type_id).or_default();
+            for (attr_id, value) in [(38, capacity), (161, volume)] {
+                if let Some(v) = value.filter(|v| *v != 0.0) {
+                    attrs.push((attr_id, v));
+                }
+            }
+        }
+        Ok(map)
+    }
+
     /// Internal + display names for a set of dogma attribute ids (#876):
     /// `(attributeName, displayName)`. The EFT mutation block uses the
     /// internal name (the community convention, e.g. `cpu`, `capacitorNeed`
@@ -640,6 +678,24 @@ mod tests {
             .iter()
             .any(|&(id, v)| id == 64 && (v - 1.1).abs() < 1e-9));
         assert!(sde.types_attributes_raw(&[]).unwrap().is_empty());
+    }
+
+    /// `capacity`/`volume` live on `invTypes` in the Fuzzwork dump, not in
+    /// `dgmTypeAttributes`; they're surfaced as attributes 38/161, zeros omitted.
+    #[test]
+    fn inventory_attributes_expose_capacity_and_volume() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE invTypes(typeID INT, capacity REAL, volume REAL);
+             INSERT INTO invTypes VALUES (1, 0.3, 10.0), (2, 0, 0.015), (3, NULL, NULL);",
+        )
+        .unwrap();
+        let sde = Sde::from_connection(conn);
+        let m = sde.types_inventory_attributes(&[1, 2, 3]).unwrap();
+        assert_eq!(m[&1], vec![(38, 0.3), (161, 10.0)]);
+        assert_eq!(m[&2], vec![(161, 0.015)]);
+        assert!(m[&3].is_empty());
+        assert!(sde.types_inventory_attributes(&[]).unwrap().is_empty());
     }
 
     #[test]

@@ -88,6 +88,30 @@ blocking, since the existing dependency tree has known advisories that need
 a deliberate, tested bump rather than a silent CI-driven one — flip that off
 once those are triaged.
 
+### SDE-gated tests (fitting golden suite)
+
+The fitting engine's golden tests (`modules::fitting::golden_tests` and the
+other tests that need game data) run against the real Fuzzwork SDE. Point
+`EVE_SDE_PATH` at the **`sde.sqlite` file** — the one the app downloaded, e.g.
+`~/.local/share/com.thlange.eve-online-tooling/sde/sde.sqlite` (Linux), or any
+decompressed copy of <https://www.fuzzwork.co.uk/dump/latest-sqlite.db.gz>:
+
+```sh
+EVE_SDE_PATH=~/.local/share/com.thlange.eve-online-tooling/sde/sde.sqlite \
+  cargo test --manifest-path src-tauri/Cargo.toml --lib modules::fitting
+```
+
+Without the variable those tests print a "skipping" note and pass; with it set
+to a path that isn't a file they fail. The shared helper
+`test_support::test_sde()` (`src-tauri/src/test_support.rs`) opens the file and
+derives the app-data directory the engine expects (`<dir>/sde/sde.sqlite`; a
+temp-dir symlink is made when the file lives elsewhere) — use it for any new
+SDE-gated test rather than reading the variable yourself. The
+**Fitting (real SDE)** workflow (`.github/workflows/fitting-sde.yml`) runs them
+in CI on PRs touching `src-tauri/src/modules/fitting/**` or
+`src-tauri/src/sde/**`, on pushes to `main` and weekly (the SDE archive is
+cached by Fuzzwork's md5, so it only re-downloads when the dump changes).
+
 See [`CLAUDE.md`](https://github.com/th-lange/eve-online-tooling/blob/main/CLAUDE.md) for architecture and EVE domain notes, and the
 other docs for subsystems: [plugins](plugins.md), [scripts](scripts.md),
 [MCP](mcp.md).

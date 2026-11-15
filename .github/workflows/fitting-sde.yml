@@ -1,0 +1,101 @@
+name: Fitting (real SDE)
+
+# The fitting engine's golden tests only run when EVE_SDE_PATH points at a real
+# Fuzzwork SDE; the main CI job has none, so they skip there and drifted
+# unnoticed (all 7 failed on main — #1281). This job downloads the same SDE the
+# app does (src-tauri/src/sde/download.rs: SDE_URL, gzip -> sqlite), caches the
+# archive keyed by Fuzzwork's published md5 (so it only re-downloads when the
+# upstream dump changes) and runs the fitting tests against it.
+#
+# Path-filtered on purpose: it reports no status on unrelated PRs, so do NOT
+# make it a required check. The weekly schedule catches upstream SDE changes
+# (CCP retuning an item) even when nobody touches the engine.
+on:
+  pull_request:
+    paths:
+      - "src-tauri/src/modules/fitting/**"
+      - "src-tauri/src/sde/**"
+      - "src-tauri/src/test_support.rs"
+      - ".github/workflows/fitting-sde.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "src-tauri/src/modules/fitting/**"
+      - "src-tauri/src/sde/**"
+      - "src-tauri/src/test_support.rs"
+      - ".github/workflows/fitting-sde.yml"
+  schedule:
+    - cron: "0 5 * * 1" # Mondays, 05:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: fitting-sde-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  SDE_BASE_URL: https://www.fuzzwork.co.uk/dump/latest-sqlite.db.gz
+
+jobs:
+  fitting-golden:
+    name: Fitting golden tests (real SDE)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # The md5 is tiny; fetching it first gives a stable cache key that changes
+      # exactly when Fuzzwork publishes a new dump.
+      - name: Fetch Fuzzwork SDE md5
+        id: md5
+        run: |
+          md5=$(curl -fsSL --retry 5 --retry-delay 5 "${SDE_BASE_URL}.md5sum" | awk '{print $1}')
+          if ! [[ "$md5" =~ ^[0-9a-f]{32}$ ]]; then
+            echo "unexpected md5 response: '$md5'" >&2
+            exit 1
+          fi
+          echo "md5=$md5" >> "$GITHUB_OUTPUT"
+
+      - name: Cache SDE archive
+        id: sde-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/latest-sqlite.db.gz
+          key: fuzzwork-sde-${{ steps.md5.outputs.md5 }}
+
+      - name: Download SDE archive
+        if: steps.sde-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -fSL --retry 5 --retry-delay 10 -o "$RUNNER_TEMP/latest-sqlite.db.gz" "$SDE_BASE_URL"
+
+      # Verify even on a cache hit: cheap, and guards a poisoned/truncated entry.
+      - name: Verify and decompress SDE
+        env:
+          EXPECTED_MD5: ${{ steps.md5.outputs.md5 }}
+        run: |
+          echo "$EXPECTED_MD5  $RUNNER_TEMP/latest-sqlite.db.gz" | md5sum -c -
+          gunzip -c "$RUNNER_TEMP/latest-sqlite.db.gz" > "$RUNNER_TEMP/sde.sqlite"
+          echo "EVE_SDE_PATH=$RUNNER_TEMP/sde.sqlite" >> "$GITHUB_ENV"
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 update
+          sudo apt-get install -y --fix-missing \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+            pkg-config patchelf
+
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1 (2026-10-16)
+        with:
+          toolchain: 1.98.1
+
+      - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: "./src-tauri -> target"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Fitting tests against the real SDE
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib modules::fitting

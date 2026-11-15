@@ -38,6 +38,8 @@ mod plugins;
 mod release_check;
 mod sde;
 mod storage;
+#[cfg(test)]
+mod test_support;
 mod util;
 mod webview_cache;
 mod zkill;
