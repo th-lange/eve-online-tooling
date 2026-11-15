@@ -14,6 +14,7 @@ use super::context::DogmaContext;
 use super::dna::{self, DnaItem, ParsedDna};
 use super::eft::{self, ParsedEft, ParsedExtra, ParsedModule, ParsedMutation};
 use super::engine::resolve::{resolve, FitInput};
+use super::engine::warfare_buffs::FleetBoost;
 use super::esi_fittings::EsiFitSource;
 use super::npc_profiles;
 use super::types::{
@@ -829,7 +830,8 @@ fn resolve_module_costs(
             drones: Vec::new(),
             fighters: Vec::new(),
             charges,
-            gang_modules: Vec::new(),
+            external_modules: Vec::new(),
+            warfare_buffs: Vec::new(),
         },
         &ctx.effect_meta,
         &|a| ctx.is_stackable(a),
@@ -1270,7 +1272,7 @@ pub async fn fitting_simulate(
     damage_profile: Option<[f64; 4]>,
     neut_gjs: Option<f64>,
     target_profile: Option<TargetProfile>,
-    fleet_boosts: Option<Vec<[i64; 2]>>,
+    fleet_boosts: Option<Vec<FleetBoost>>,
     environment_effect: Option<i64>,
     abyssal_weather: Option<AbyssalWeatherSelection>,
     spool_pct: Option<f64>,
@@ -1688,7 +1690,9 @@ mod tests {
 
     use super::*;
     use crate::modules::fitting::engine::tank::DamageProfile;
+    use crate::modules::fitting::engine::warfare_buffs::LinkType;
     use crate::modules::fitting::stats::run_dogma;
+    use crate::modules::fitting::stats::DogmaStats;
 
     #[test]
     fn price_lines_rank_by_total_line_value() {
@@ -2145,32 +2149,81 @@ mod tests {
         );
     }
 
-    /// A T2 skirmish command burst raises the receiving ship's max velocity
-    /// (#705). **Currently fails against the real SDE** — not a test bug:
-    /// modern command-burst modules (e.g. Skirmish Command Burst II) carry no
-    /// computable dogma modifier for their actual bonus (`moduleBonusWarfare
-    /// LinkSkirmish`'s `modifierInfo` is empty in the SDE), and the charge's
-    /// effect (`chargeBonusWarfareCharge`) targets `otherID`-domain
-    /// attributes that are an indirection into CCP's separate "Warfare
-    /// Buffs" FSD data (`warfareBuffs.yaml`), which Fuzzwork's dogma-only
-    /// SQLite export doesn't carry. The #705 fleet-boosts feature as built
-    /// (assuming a `GangModifier`-shaped effect) can't model this class of
-    /// module from this data source — it needs a warfare-buffs data pipeline
-    /// that doesn't exist yet. Ignored rather than silently weakened so this
-    /// stays a visible, honest TODO instead of green-but-wrong.
+    /// Open the real SDE (`EVE_SDE_PATH`), or `None` to skip.
+    fn real_sde() -> Option<(Sde, std::path::PathBuf)> {
+        let path = std::path::PathBuf::from(std::env::var_os("EVE_SDE_PATH")?);
+        if !path.exists() {
+            return None;
+        }
+        let dir = path.parent()?.to_path_buf();
+        Some((Sde::open(&path).ok()?, dir))
+    }
+
+    /// A single fitted module on the given hull, active.
+    fn one_module_fit(sde: &Sde, ship: &str, module: &str, slot: SlotKind) -> Fit {
+        let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
+        Fit {
+            id: "t".into(),
+            name: "t".into(),
+            ship_type_id: tid(ship),
+            items: vec![FitItem {
+                type_id: tid(module),
+                slot,
+                index: 0,
+                state: ModuleState::Active,
+                charge_type_id: None,
+                quantity: 1,
+                active_drones: None,
+                mutation: None,
+                fighter_ability: None,
+            }],
+            projected: Vec::new(),
+        }
+    }
+
+    fn dogma_with(
+        sde: &Sde,
+        dir: &std::path::Path,
+        fit: &Fit,
+        boosts: &[FleetBoost],
+    ) -> DogmaStats {
+        let layout = sde.ship_layout(fit.ship_type_id).unwrap().unwrap();
+        run_dogma(
+            sde,
+            dir,
+            fit,
+            &layout,
+            &|_| 5.0,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            boosts,
+            None,
+            None,
+            1.0,
+            false, // factor_reload (#871)
+        )
+        .unwrap()
+    }
+
+    fn link(link_type: LinkType, strength_pct: f64, mindlink: bool) -> FleetBoost {
+        FleetBoost::GenericLink {
+            link_type,
+            strength_pct,
+            mindlink,
+        }
+    }
+
+    /// A concrete T2 skirmish burst + Evasive Maneuvers charge (#705, #1279)
+    /// cuts the receiving ship's signature radius and agility by exactly the
+    /// charge's −6 % × T2 1.25 × skills 1.5 = −11.25 %. (Formerly an ignored
+    /// test documenting that the old `GangModifier` path did nothing.)
     #[test]
-    #[ignore = "needs a warfare-buffs data source; see doc comment"]
-    fn fleet_boost_raises_ship_speed() {
-        let Some(path) = std::env::var_os("EVE_SDE_PATH") else {
-            eprintln!("fleet_boost_raises_ship_speed: EVE_SDE_PATH unset — skipping");
+    fn fleet_boost_module_pick_cuts_sig_radius_and_agility() {
+        let Some((sde, dir)) = real_sde() else {
+            eprintln!("fleet_boost_module_pick: EVE_SDE_PATH unset — skipping");
             return;
         };
-        let path = std::path::PathBuf::from(&path);
-        if !path.exists() {
-            return;
-        }
-        let sde = Sde::open(&path).unwrap();
-        let dir = path.parent().unwrap();
         let tid = |n: &str| sde.type_by_name(n).unwrap().unwrap().0;
         let fit = Fit {
             id: "t".into(),
@@ -2179,47 +2232,142 @@ mod tests {
             items: Vec::new(),
             projected: Vec::new(),
         };
-        let layout = sde.ship_layout(fit.ship_type_id).unwrap().unwrap();
-        let baseline = run_dogma(
+        let baseline = dogma_with(&sde, &dir, &fit, &[]);
+        assert!(baseline.fleet_buffs_applied.is_empty());
+        let boosted = dogma_with(
             &sde,
-            dir,
+            &dir,
             &fit,
-            &layout,
-            &|_| 5.0,
-            &DamageProfile::default(),
-            0.0,
-            None,
-            &[],
-            None,
-            None,
-            1.0,
-            false, // factor_reload (#871)
-        )
-        .unwrap();
-        let boosted = run_dogma(
-            &sde,
-            dir,
-            &fit,
-            &layout,
-            &|_| 5.0,
-            &DamageProfile::default(),
-            0.0,
-            None,
-            &[(
-                tid("Skirmish Command Burst II"),
-                tid("Evasive Maneuvers Charge"),
-            )],
-            None,
-            None,
-            1.0,
-            false, // factor_reload (#871)
-        )
-        .unwrap();
+            &[FleetBoost::Module {
+                module_type_id: tid("Skirmish Command Burst II"),
+                charge_type_id: Some(tid("Evasive Maneuvers Charge")),
+                strength_pct: 0.0,
+                mindlink: false,
+            }],
+        );
+        let f = 1.0 - 0.1125;
+        assert!(
+            (boosted.navigation.signature_radius - baseline.navigation.signature_radius * f).abs()
+                < 1e-6,
+            "sig {} vs {}",
+            boosted.navigation.signature_radius,
+            baseline.navigation.signature_radius
+        );
+        assert!(
+            (boosted.navigation.agility - baseline.navigation.agility * f).abs() < 1e-9,
+            "agility {} vs {}",
+            boosted.navigation.agility,
+            baseline.navigation.agility
+        );
+        let ids: Vec<i64> = boosted
+            .fleet_buffs_applied
+            .iter()
+            .map(|b| b.buff_id)
+            .collect();
+        assert_eq!(ids, vec![20, 60]);
+        assert!((boosted.fleet_buffs_applied[0].value_pct + 11.25).abs() < 1e-9);
+    }
+
+    /// Rapid Deployment raises an afterburner's speed boost (`speedFactor`,
+    /// pyfa buff 22) by the computed %, so the ship gets faster; a weaker
+    /// duplicate source is ignored.
+    #[test]
+    fn rapid_deployment_raises_afterburner_speed() {
+        let Some((sde, dir)) = real_sde() else {
+            eprintln!("rapid_deployment: EVE_SDE_PATH unset — skipping");
+            return;
+        };
+        let fit = one_module_fit(&sde, "Rifter", "1MN Afterburner II", SlotKind::Mid);
+        let baseline = dogma_with(&sde, &dir, &fit, &[]);
+        let rd = link(LinkType::SkirmishRapidDeployment, 5.0, true);
+        let boosted = dogma_with(&sde, &dir, &fit, std::slice::from_ref(&rd));
         assert!(
             boosted.navigation.max_velocity > baseline.navigation.max_velocity,
             "boosted {} should exceed baseline {}",
             boosted.navigation.max_velocity,
             baseline.navigation.max_velocity
+        );
+        // The AB's own speed boost is `bonus% = speedFactor × thrust/mass`
+        // scaled; the velocity uplift is proportional to speedFactor, so the
+        // extra uplift ratio equals the applied buff (12 × 1.5 × 1.25 × 1.25 × 1.25).
+        let v0 = baseline.navigation.max_velocity;
+        let applied = 12.0 * 1.5 * 1.25 * 1.25 * 1.25;
+        assert!((boosted.fleet_buffs_applied[0].value_pct - applied).abs() < 1e-9);
+        let hull = dogma_with(
+            &sde,
+            &dir,
+            &Fit {
+                items: Vec::new(),
+                ..fit.clone()
+            },
+            &[],
+        );
+        let base_boost = v0 / hull.navigation.max_velocity - 1.0;
+        let new_boost = boosted.navigation.max_velocity / hull.navigation.max_velocity - 1.0;
+        assert!(
+            (new_boost / base_boost - (1.0 + applied / 100.0)).abs() < 1e-6,
+            "uplift ratio {}",
+            new_boost / base_boost
+        );
+        // Adding a weaker duplicate (no mindlink, no hull bonus) changes nothing.
+        let dup = dogma_with(
+            &sde,
+            &dir,
+            &fit,
+            &[rd, link(LinkType::SkirmishRapidDeployment, 0.0, false)],
+        );
+        assert!((dup.navigation.max_velocity - boosted.navigation.max_velocity).abs() < 1e-9);
+    }
+
+    /// Shield Harmonizing lowers all four shield resonances, stacking-penalised
+    /// against a fitted hardener; Armor Reinforcement raises armor HP by
+    /// exactly its percentage.
+    #[test]
+    fn shield_harmonizing_and_armor_reinforcement() {
+        let Some((sde, dir)) = real_sde() else {
+            eprintln!("shield_harmonizing: EVE_SDE_PATH unset — skipping");
+            return;
+        };
+        let fit = one_module_fit(
+            &sde,
+            "Caracal",
+            "Multispectrum Shield Hardener II",
+            SlotKind::Mid,
+        );
+        let baseline = dogma_with(&sde, &dir, &fit, &[]);
+        let boosted = dogma_with(
+            &sde,
+            &dir,
+            &fit,
+            &[
+                link(LinkType::ShieldHarmonizing, 0.0, false),
+                link(LinkType::ArmorReinforcement, 0.0, false),
+            ],
+        );
+        // -8 × 1.5 × 1.25 = -15 %, joining the hardener's penalised chain: the
+        // hardener (the stronger factor) is applied at full, the buff × 0.869.
+        let (b0, b1) = (&baseline.tank.shield_resists, &boosted.tank.shield_resists);
+        for i in 0..4 {
+            assert!(b1[i] > b0[i], "shield resist {i}: {} vs {}", b1[i], b0[i]);
+        }
+        // Resist = 1 − resonance (fraction). Resonance picks up the buff as a
+        // penalised factor: res1 = res0 × (1 − 0.15 × 0.8691...) ... only if the
+        // hardener is the strongest factor; the multispectrum II's −30 % is.
+        let pen = 0.869_121_062_5; // stacking penalty for the 2nd factor
+        for i in 0..4 {
+            let res0 = 1.0 - b0[i];
+            let res1 = 1.0 - b1[i];
+            assert!(
+                (res1 / res0 - (1.0 - 0.15 * pen)).abs() < 1e-3,
+                "{i}: {}",
+                res1 / res0
+            );
+        }
+        assert!(boosted.tank.ehp > baseline.tank.ehp);
+        assert!(
+            (boosted.tank.armor_hp / baseline.tank.armor_hp - 1.15).abs() < 1e-9,
+            "armor HP ratio {}",
+            boosted.tank.armor_hp / baseline.tank.armor_hp
         );
     }
 

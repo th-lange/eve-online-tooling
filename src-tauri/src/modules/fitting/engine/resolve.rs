@@ -18,6 +18,7 @@ use crate::sde::EffectMeta;
 use super::attr::AttrStore;
 use super::effects::modifiers_for;
 use super::modifier::{Domain, ModifierDef, Op};
+use super::warfare_buffs::{self, Target};
 
 /// `damageMultiplierSkillBonus` — drone operation/specialization skills carry
 /// only the per-level self-scaling of attr 292 in their `modifierInfo`; the
@@ -110,14 +111,18 @@ pub struct FitInput {
     /// module's group/skill-keyed bonuses plus missile-damage skills/ship role
     /// bonuses, so its finalized damage drives missile DPS. `None` = empty slot.
     pub charges: Vec<Option<EntityInput>>,
-    /// Command-burst / fleet-link modules projecting `GangModifier` bonuses
-    /// onto this ship (#705). The user specifies which fleet-boost modules
-    /// (+ charges) they're "receiving"; each is built as an ordinary
-    /// [`EntityInput`] and its outward modifiers are applied to the ship in a
-    /// dedicated pass after the main module pass — stacking-penalized per its
-    /// own modifier flags, identical to how a fitted module projects onto the
+    /// External effect sources projecting onto this ship — currently the
+    /// wormhole / Pochven environment beacon. Each is built as an ordinary
+    /// [`EntityInput`] and its outward modifiers are applied in a dedicated
+    /// pass after the main module pass — stacking-penalized per its own
+    /// modifier flags, identical to how a fitted module projects onto the
     /// ship, just sourced externally instead of from `modules`.
-    pub gang_modules: Vec<EntityInput>,
+    pub external_modules: Vec<EntityInput>,
+    /// Merged fleet warfare buffs the fit receives (#1279): `(buff_id,
+    /// value)` with at most one entry per ID (see
+    /// [`super::warfare_buffs::merge`]). Applied per
+    /// [`super::warfare_buffs::applications`] after the fit's own modifiers.
+    pub warfare_buffs: Vec<(i64, f64)>,
 }
 
 /// Resolved attribute stores for the ship and each module (parallel to input).
@@ -322,15 +327,14 @@ pub fn resolve(
             AuxDest::Charge(i) => mods(input.charges[*i].as_ref().unwrap(), &mut unresolved),
         })
         .collect();
-    // Gang/fleet-link modules (#705): resolved as their own entities so their
-    // self-modifiers (e.g. a charge's bonus-magnitude effect) apply before
-    // they project outward.
-    let gang_mods: Vec<Vec<ModifierDef>> = input
-        .gang_modules
+    // External sources (environment beacons): resolved as their own entities
+    // so their self-modifiers apply before they project outward.
+    let external_mods: Vec<Vec<ModifierDef>> = input
+        .external_modules
         .iter()
         .map(|e| mods(e, &mut unresolved))
         .collect();
-    let mut gang_modules: Vec<AttrStore> = input.gang_modules.iter().map(seed).collect();
+    let mut external_modules: Vec<AttrStore> = input.external_modules.iter().map(seed).collect();
 
     // Pass A — self (Item) modifiers on every entity (e.g. skill per-level scaling).
     for (s, ms) in skills.iter_mut().zip(&skill_mods) {
@@ -343,7 +347,7 @@ pub fn resolve(
     for (a, ms) in aux.iter_mut().zip(&aux_mods) {
         apply_self(&mut a.store, ms);
     }
-    for (g, ms) in gang_modules.iter_mut().zip(&gang_mods) {
+    for (g, ms) in external_modules.iter_mut().zip(&external_mods) {
         apply_self(g, ms);
     }
 
@@ -392,6 +396,22 @@ pub fn resolve(
         }
     }
 
+    // Fleet warfare buffs (#1279): percentage boosts to the ship and to
+    // modules/charges, applied on top of everything the fit itself did so they
+    // act on skill-modified values. Must land *before* the module pass below,
+    // which reads module attributes (e.g. an afterburner's `speedFactor`) as
+    // the magnitude it projects onto the ship.
+    apply_warfare_buffs(
+        &input.warfare_buffs,
+        &mut ship,
+        &mut modules,
+        &group_ids,
+        &req_skills,
+        &input.charges,
+        &mut aux,
+        is_stackable,
+    );
+
     for i in 0..modules.len() {
         // Read source from module i, apply to ship / other modules / aux.
         let ms = module_mods[i].clone();
@@ -415,16 +435,15 @@ pub fn resolve(
         }
     }
 
-    // Pass C — gang/fleet-link modules (#705): each applies its outward
-    // modifiers to the ship (GangModifier -> Domain::Ship, see effects.rs),
-    // exactly like a fitted module projecting onto the ship — stacking
-    // penalization follows each modifier's own flag.
-    for i in 0..gang_modules.len() {
-        let ms = gang_mods[i].clone();
+    // Pass C — external sources (environment beacons): each applies its
+    // outward modifiers like a fitted module projecting onto the ship —
+    // stacking penalization follows each modifier's own flag.
+    for i in 0..external_modules.len() {
+        let ms = external_mods[i].clone();
         let src_vals: Vec<(usize, f64)> = ms
             .iter()
             .enumerate()
-            .map(|(k, m)| (k, gang_modules[i].get(m.src_attr)))
+            .map(|(k, m)| (k, external_modules[i].get(m.src_attr)))
             .collect();
         for (k, value) in src_vals {
             let m = &ms[k];
@@ -460,6 +479,62 @@ pub fn resolve(
         fighters,
         charges,
         unresolved,
+    }
+}
+
+/// Apply the merged warfare buffs (#1279) to the ship, modules and charges.
+/// A penalised application only joins the stacking chain when the attribute is
+/// itself non-stackable, like every other module bonus.
+#[allow(clippy::too_many_arguments)]
+fn apply_warfare_buffs(
+    buffs: &[(i64, f64)],
+    ship: &mut AttrStore,
+    modules: &mut [AttrStore],
+    group_ids: &[i64],
+    req_skills: &[&Vec<i64>],
+    charges: &[Option<EntityInput>],
+    aux: &mut [Aux],
+    is_stackable: &impl Fn(i64) -> bool,
+) {
+    for &(buff_id, value) in buffs {
+        for app in warfare_buffs::applications(buff_id) {
+            let penalized = app.penalized && !is_stackable(app.attr);
+            match app.target {
+                Target::Ship => ship.apply(app.attr, app.op, value, penalized),
+                Target::ModulesSkill(skills) => {
+                    for (i, s) in modules.iter_mut().enumerate() {
+                        if skills.iter().any(|k| req_skills[i].contains(k)) {
+                            s.apply(app.attr, app.op, value, penalized);
+                        }
+                    }
+                }
+                Target::ModulesGroup(groups) => {
+                    for (i, s) in modules.iter_mut().enumerate() {
+                        if groups.contains(&group_ids[i]) {
+                            s.apply(app.attr, app.op, value, penalized);
+                        }
+                    }
+                }
+                Target::ModulesChargeSkill(skill) => {
+                    for (i, s) in modules.iter_mut().enumerate() {
+                        let loaded = charges
+                            .get(i)
+                            .and_then(Option::as_ref)
+                            .is_some_and(|c| c.required_skills.contains(&skill));
+                        if loaded {
+                            s.apply(app.attr, app.op, value, penalized);
+                        }
+                    }
+                }
+                Target::ChargesSkill(skill) => {
+                    for a in aux.iter_mut() {
+                        if matches!(a.dest, AuxDest::Charge(_)) && a.req_skills.contains(&skill) {
+                            a.store.apply(app.attr, app.op, value, penalized);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -1093,24 +1168,22 @@ mod tests {
         assert_eq!(resolved.modules[0].get(64), 1.0);
     }
 
-    /// A fleet-link/command-burst module in `gang_modules` (#705) projects its
-    /// `Domain::Ship`-mapped `GangModifier` bonus straight onto the ship,
-    /// stacking-penalized per the modifier's own flag — mirroring how a
-    /// fitted module's outward modifiers reach the ship.
+    /// An external source in `external_modules` (an environment beacon) projects
+    /// its `ItemModifier(shipID)` bonus straight onto the ship, stacking-
+    /// penalized per the modifier's own flag — like a fitted module's outward
+    /// modifiers reaching the ship.
     #[test]
-    fn gang_module_bonus_reaches_the_ship() {
-        // A skirmish burst's velocity bonus: postPercent(658) scaled by the
-        // module's own warfare-buff-strength attribute (arbitrary attr 900).
-        let burst = effect(800, vec![mi("GangModifier", "shipID", 6, 51, 900, None)]);
+    fn external_module_bonus_reaches_the_ship() {
+        let beacon = effect(800, vec![mi("ItemModifier", "shipID", 6, 51, 900, None)]);
         let mut effects = HashMap::new();
-        effects.insert(800, burst);
+        effects.insert(800, beacon);
 
         let input = FitInput {
             ship: EntityInput {
                 attrs: vec![(51, 200.0)], // base max velocity
                 ..Default::default()
             },
-            gang_modules: vec![EntityInput {
+            external_modules: vec![EntityInput {
                 attrs: vec![(900, 20.0)], // +20% velocity
                 effect_ids: vec![800],
                 ..Default::default()
@@ -1119,5 +1192,55 @@ mod tests {
         };
         let resolved = resolve(&input, &effects, &|_| false, &|_| 0.0);
         assert_eq!(resolved.ship.get(51), 240.0); // 200 * 1.20
+    }
+
+    /// Warfare buffs (#1279): a ship-targeted % boost acts on the
+    /// skill-modified value, a penalised buff joins an existing stacking chain,
+    /// and skill-/group-keyed targets reach only matching modules.
+    #[test]
+    fn warfare_buffs_apply_to_ship_and_modules() {
+        // Hull sig 100, a skill-less +10% (unpenalised) ship bonus on it, and a
+        // penalised -10% already in the chain (via a module effect).
+        let sig_effect = effect(801, vec![mi("ItemModifier", "shipID", 6, 552, 901, None)]);
+        let mut effects = HashMap::new();
+        effects.insert(801, sig_effect);
+        let input = FitInput {
+            ship: EntityInput {
+                attrs: vec![(552, 100.0), (263, 1000.0), (265, 500.0)],
+                ..Default::default()
+            },
+            modules: vec![
+                // Fitted -20% sig module (penalised: attr 552 non-stackable).
+                EntityInput {
+                    attrs: vec![(901, -20.0)],
+                    effect_ids: vec![801],
+                    ..Default::default()
+                },
+                // An afterburner-like module requiring skill 3450.
+                EntityInput {
+                    attrs: vec![(20, 100.0)],
+                    required_skills: vec![3450],
+                    ..Default::default()
+                },
+                // An unrelated module.
+                EntityInput {
+                    attrs: vec![(20, 100.0)],
+                    required_skills: vec![1],
+                    ..Default::default()
+                },
+            ],
+            charges: vec![None, None, None],
+            warfare_buffs: vec![(20, -10.0), (12, 8.0), (15, 8.0), (22, 50.0)],
+            ..Default::default()
+        };
+        // 552 and 20 are non-stackable, everything else stackable.
+        let resolved = resolve(&input, &effects, &|a| a != 552 && a != 20, &|_| 0.0);
+        // Two penalised factors 0.8 and 0.9: strongest full, next × 0.869...
+        let want = 100.0 * (1.0 - 0.2) * (1.0 - 0.1 * super::super::stacking::penalty(1));
+        assert!((resolved.ship.get(552) - want).abs() < 1e-9);
+        assert!((resolved.ship.get(263) - 1080.0).abs() < 1e-9); // +8% shield HP
+        assert!((resolved.ship.get(265) - 540.0).abs() < 1e-9); // +8% armor HP
+        assert!((resolved.modules[1].get(20) - 150.0).abs() < 1e-9); // AB speedFactor +50%
+        assert_eq!(resolved.modules[2].get(20), 100.0);
     }
 }

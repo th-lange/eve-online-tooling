@@ -87,6 +87,10 @@ so the UI wires itself up.
   share one Rust module (`incursions` + `faction-warfare` → `modules/intel`; `transactions` →
   `modules/accounting`), and some frontend modules are backend-free static pages (`exploration`,
   `support`).
+  - Fitting fleet boosts (#1279): a burst charge only names buff IDs; what each buff does lives in the
+    `fitting/engine/warfare_buffs.rs` table (reference: pyfa's `Fit.__runCommandBoosts` and
+    `commandLink.py`), applied in `resolve` after the fit's own modifiers (strongest source per buff ID
+    wins; booster skills assumed V). Inputs are `FleetBoost::{GenericLink, Module}`.
 
 ### Frontend (`src/`)
 

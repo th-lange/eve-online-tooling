@@ -23,6 +23,7 @@ use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
 use super::engine::spool::apply_spool;
 use super::engine::tank::{rah_shift, tank, DamageProfile, Layer};
 use super::engine::validate::{validate, ValItem};
+use super::engine::warfare_buffs::{self, AppliedBuff, FleetBoost};
 use super::target_archetypes;
 use super::types::{
     AbyssalWeatherSelection, ArchetypeDps, CapStats, DpsBreakdown, EwTag, FighterAbilityStats, Fit,
@@ -96,15 +97,18 @@ pub(super) struct DogmaStats {
     /// archetypes (#890), computed within this same resolve pass. See
     /// `target_archetypes` for the derivation.
     pub(super) archetype_dps: Vec<ArchetypeDps>,
+    /// Fleet warfare buffs that ended up applied after the merge (#1279).
+    pub(super) fleet_buffs_applied: Vec<AppliedBuff>,
 }
 
 /// Build the engine inputs (ship + modules + all-V skills) from the SDE, resolve
 /// the fit once, and derive the dogma stats from the finalized attributes
 /// (capacitor #172, tank #173). `target_profile`, when given, additionally
 /// computes applied DPS and the DPS-vs-range curve (#701). `fleet_boosts`
-/// (#705) are command-burst/fleet-link modules the user is "receiving" from a
-/// fleet member — `(module_type_id, charge_type_id)` pairs, `-1` meaning no
-/// charge loaded — whose `GangModifier` effects project onto this ship.
+/// (#705, #1279) are the command bursts the user is "receiving" from fleet
+/// members — generic links or concrete module+charge picks — whose warfare
+/// buffs (see `engine::warfare_buffs`) are merged (strongest per buff ID wins)
+/// and applied during this resolve.
 /// `environment_effect` is a wormhole-class or Pochven-metaliminal-storm
 /// "environment beacon" type id the fit is sitting in (e.g. "Class 5 Pulsar
 /// Effects" or "Strong Metaliminal Plasma Firestorm"): its own
@@ -131,7 +135,7 @@ pub(super) fn run_dogma(
     damage_profile: &DamageProfile,
     neut_gjs: f64,
     target_profile: Option<&TargetProfile>,
-    fleet_boosts: &[(i64, i64)],
+    fleet_boosts: &[FleetBoost],
     environment_effect: Option<i64>,
     abyssal_weather: Option<AbyssalWeatherSelection>,
     spool_pct: f64,
@@ -183,12 +187,7 @@ pub(super) fn run_dogma(
     extra_ids.extend(fighter_items.iter().map(|i| i.type_id));
     extra_ids.extend(implant_items.iter().map(|i| i.type_id));
     extra_ids.extend(fit.projected.iter().map(|i| i.type_id));
-    extra_ids.extend(fleet_boosts.iter().map(|&(m, _)| m));
-    extra_ids.extend(
-        fleet_boosts
-            .iter()
-            .filter_map(|&(_, c)| (c > 0).then_some(c)),
-    );
+    extra_ids.extend(fleet_boosts.iter().flat_map(FleetBoost::type_ids));
     extra_ids.extend(environment_effect);
     let ctx = DogmaContext::load(sde, dir, &extra_ids)?;
 
@@ -273,27 +272,19 @@ pub(super) fn run_dogma(
         skills.push(ctx.entity(it.type_id, Vec::new()));
     }
 
-    // Fleet boosts (#705): command-burst/fleet-link modules the user is
-    // "receiving". Built as ordinary entities; a loaded charge's base
-    // attributes merge in on top of the module's own (command-burst charges
-    // carry the burst's magnitude attribute, which the module's GangModifier
-    // effect reads to scale its bonus). A wormhole/Pochven `environment_effect`
-    // beacon is appended the same way — its `ItemModifier`/
-    // `LocationRequiredSkillModifier` effects already target `shipID`, so it
-    // needs no special-casing beyond sitting in this external-modifier list.
-    let mut gang_modules =
-        Vec::with_capacity(fleet_boosts.len() + environment_effect.is_some() as usize);
-    for &(mod_id, charge_id) in fleet_boosts {
-        let mut e = ctx.entity(mod_id, required_skills_of(&ctx.attrs, mod_id));
-        if charge_id > 0 {
-            if let Some(charge_attrs) = ctx.attrs.get(&charge_id) {
-                e.attrs.extend(charge_attrs.iter().copied());
-            }
-        }
-        gang_modules.push(e);
-    }
+    // Fleet boosts (#705, #1279): every source's buff values, merged so only
+    // the strongest per buff ID applies. A wormhole/Pochven `environment_effect`
+    // beacon resolves as an external entity — its `ItemModifier`/
+    // `LocationRequiredSkillModifier` effects already target `shipID`.
+    let warfare_buffs = warfare_buffs::merge(
+        fleet_boosts
+            .iter()
+            .flat_map(|b| b.values(&|id| ctx.attrs.get(&id).map(Vec::as_slice))),
+    );
+    let fleet_buffs_applied = warfare_buffs::applied(&warfare_buffs);
+    let mut external_modules = Vec::with_capacity(environment_effect.is_some() as usize);
     if let Some(env_id) = environment_effect {
-        gang_modules.push(ctx.entity(env_id, required_skills_of(&ctx.attrs, env_id)));
+        external_modules.push(ctx.entity(env_id, required_skills_of(&ctx.attrs, env_id)));
     }
 
     let mut resolved = resolve(
@@ -304,7 +295,8 @@ pub(super) fn run_dogma(
             drones,
             fighters,
             charges,
-            gang_modules,
+            external_modules,
+            warfare_buffs,
         },
         &ctx.effect_meta,
         &|a| ctx.is_stackable(a),
@@ -608,6 +600,7 @@ pub(super) fn run_dogma(
         burnout_seconds: burnout_seconds_full,
         fighter_abilities: fighter_abilities_full,
         archetype_dps,
+        fleet_buffs_applied,
     })
 }
 
@@ -1637,8 +1630,7 @@ pub(super) fn required_skills_of(attrs: &AttrMap, type_id: i64) -> Vec<i64> {
 /// Core simulation shared by `fitting_simulate` and the PVP fit analysis: given
 /// an open SDE, a fit and a skill-level lookup, resolve the dogma engine and
 /// assemble [`FitStats`]. Kept engine-identical so both surfaces agree.
-/// `fleet_boosts` (#705) is `[module_type_id, charge_type_id]` pairs (`-1` for
-/// no charge) of command-burst/fleet-link modules the fit is "receiving".
+/// `fleet_boosts` (#705, #1279) are the command bursts the fit is "receiving".
 /// `environment_effect` is a wormhole-class or Pochven-metaliminal-storm
 /// beacon type id the fit is sitting in — see [`run_dogma`].
 /// `abyssal_weather` is the separate, mutually exclusive Abyssal Deadspace
@@ -1656,7 +1648,7 @@ pub(crate) fn simulate_fit(
     damage_profile: Option<[f64; 4]>,
     neut_gjs: Option<f64>,
     target_profile: Option<TargetProfile>,
-    fleet_boosts: Option<Vec<[i64; 2]>>,
+    fleet_boosts: Option<Vec<FleetBoost>>,
     environment_effect: Option<i64>,
     abyssal_weather: Option<AbyssalWeatherSelection>,
     spool_pct: Option<f64>,
@@ -1734,11 +1726,7 @@ pub(crate) fn simulate_fit(
     // skill-adjusted resources/validation). Best-effort.
     let profile = damage_profile.map(DamageProfile).unwrap_or_default();
     let neut = neut_gjs.unwrap_or(0.0);
-    let boosts: Vec<(i64, i64)> = fleet_boosts
-        .unwrap_or_default()
-        .into_iter()
-        .map(|[m, c]| (m, c))
-        .collect();
+    let boosts = fleet_boosts.unwrap_or_default();
     let dogma = run_dogma(
         sde,
         dir,
@@ -1827,6 +1815,10 @@ pub(crate) fn simulate_fit(
         archetype_dps: dogma
             .as_ref()
             .map(|d| d.archetype_dps.clone())
+            .unwrap_or_default(),
+        fleet_buffs_applied: dogma
+            .as_ref()
+            .map(|d| d.fleet_buffs_applied.clone())
             .unwrap_or_default(),
     })
 }

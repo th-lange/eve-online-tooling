@@ -239,12 +239,60 @@ export interface WeaponRange {
   explosionVelocity?: number;
 }
 
-/** A fleet boost module + optional charge projected onto this fit (#705) —
- *  a command-burst/fleet-link module the user is "receiving" from a fleet
- *  member. */
-export interface FleetBoost {
-  moduleTypeId: number;
-  chargeTypeId?: number;
+/** A command-burst link a generic fleet boost can stand for (#1279): one
+ *  burst charge, or "All" of a family. Mirrors Rust `warfare_buffs::LinkType`. */
+export type LinkType =
+  | "shieldHarmonizing"
+  | "shieldActiveShielding"
+  | "shieldExtension"
+  | "shieldAll"
+  | "armorEnergizing"
+  | "armorRapidRepair"
+  | "armorReinforcement"
+  | "armorAll"
+  | "skirmishEvasiveManeuvers"
+  | "skirmishInterdictionManeuvers"
+  | "skirmishRapidDeployment"
+  | "skirmishAll"
+  | "informationSensorOptimization"
+  | "informationElectronicSuperiority"
+  | "informationElectronicHardening"
+  | "informationAll"
+  | "expeditionStrength"
+  | "expeditionReach"
+  | "expeditionPinpointing"
+  | "expeditionAll"
+  | "miningFieldEnhancement"
+  | "miningOptimization"
+  | "miningPreservation"
+  | "miningEfficiency"
+  | "miningAll";
+
+/** A fleet boost the fit is "receiving" from a fleet member (#705, #1279).
+ *  `strengthPct` is the booster's command-ship/T3 hull bonus in %/level at V
+ *  (0 = none, typically 2–5); `mindlink` is a Command Burst mindlink. */
+export type FleetBoost =
+  | {
+      kind: "genericLink";
+      linkType: LinkType;
+      strengthPct: number;
+      mindlink: boolean;
+    }
+  | {
+      kind: "module";
+      moduleTypeId: number;
+      chargeTypeId?: number;
+      strengthPct: number;
+      mindlink: boolean;
+    };
+
+/** A fleet warfare buff that ended up applied after the "strongest source per
+ *  buff ID" merge (#1279). `valuePct` is percent for boosts (raw points for
+ *  virus coherence). */
+export interface AppliedBuff {
+  buffId: number;
+  label: string;
+  valuePct: number;
 }
 
 /** Target profile for applied-DPS calculation. `speed` feeds the missile
@@ -364,6 +412,9 @@ export interface FitStats {
    *  all "high transversal" — computed within the same batched simulate
    *  call, never re-run per archetype. Empty until the dogma engine runs. */
   archetypeDps?: ArchetypeDps[];
+  /** Fleet warfare buffs actually applied after the per-buff-ID merge
+   * (#1279); absent when the fit receives no boosts. */
+  fleetBuffsApplied?: AppliedBuff[];
 }
 
 /** One fitted fighter squadron's selected ability + its DPS contribution
@@ -515,9 +566,7 @@ export function fittingSimulate(
     damageProfile: damageProfile ?? null,
     neutGjs: neutGjs ?? null,
     targetProfile: targetProfile ?? null,
-    fleetBoosts: fleetBoosts
-      ? fleetBoosts.map((b) => [b.moduleTypeId, b.chargeTypeId ?? -1])
-      : null,
+    fleetBoosts: fleetBoosts ?? null,
     environmentEffect: environmentEffect ?? null,
     abyssalWeather: abyssalWeather ?? null,
     spoolPct: spoolPct ?? null,
