@@ -48,6 +48,20 @@ const entries: PluginEntry[] = [
 ];
 
 vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: (path: string, protocol = "asset") => {
+    const internals = (
+      window as unknown as {
+        __TAURI_INTERNALS__?: {
+          convertFileSrc?: (p: string, proto: string) => string;
+        };
+      }
+    ).__TAURI_INTERNALS__;
+    // Mirrors Tauri's per-platform behaviour (default: Linux/macOS).
+    return (
+      internals?.convertFileSrc?.(path, protocol) ??
+      `${protocol}://localhost/${encodeURIComponent(path)}`
+    );
+  },
   invoke: vi.fn((cmd: string) =>
     cmd === "plugins_list"
       ? Promise.resolve(entries)
