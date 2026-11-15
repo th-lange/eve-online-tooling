@@ -16,4 +16,14 @@ ignore = [
     "RUSTSEC-2026-0368",
     "RUSTSEC-2026-0369",
     "RUSTSEC-2026-0429",
+    # quick-xml 0.37.5 (Windows only): pulled in by tauri-winrt-notification
+    # 0.7 (via notify-rust <- tauri-plugin-notification), which calls only
+    # `quick_xml::escape::escape` to build toast XML. Both advisories are in
+    # the XML *reader* (NsReader namespace allocation, duplicate-attribute
+    # check), which that crate never uses, so neither is reachable. The other
+    # quick-xml path (plist, for macOS Info.plist) was fixed by bumping plist
+    # to 1.10 (quick-xml 0.42). Exit path: drop these once notify-rust moves to
+    # tauri-winrt-notification >= 0.8, which no longer depends on quick-xml.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
 ]
