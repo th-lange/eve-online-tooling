@@ -35,6 +35,14 @@ use super::types::{
 use crate::sde::{Sde, ShipLayout};
 use crate::storage;
 
+/// `optimalSigRadius`: the signature radius a turret/drone tracks perfectly
+/// against (the "signature resolution" in the tracking formula). Turrets store
+/// it scaled ×1000 together with `trackingSpeed` (e.g. 40000 / 315), so only the
+/// ratio is meaningful; drones store unscaled values (25 / 2.178). Attribute 105
+/// (used before) is `warpScrambleStrength`, absent on weapons, which silently
+/// fell back to 40 and made turret tracking ~1000× too lenient.
+const OPTIMAL_SIG_RADIUS: i64 = 620;
+
 /// The hard cap on simultaneously active drones — five, at Drones V, which
 /// the app assumes (all-V skills by default, same basis as everything else
 /// in this module).
@@ -1031,7 +1039,7 @@ fn applied_dps_at(
             let falloff = store.get(158);
             let tracking_speed = store.get(160);
             let sig_resolution = {
-                let sr = store.get(105);
+                let sr = store.get(OPTIMAL_SIG_RADIUS);
                 if sr > 0.0 {
                     sr
                 } else {
@@ -1105,7 +1113,7 @@ fn applied_dps_at(
         let mult = store.get(64);
         let tracking_speed = store.get(160);
         let sig_resolution = {
-            let sr = store.get(105);
+            let sr = store.get(OPTIMAL_SIG_RADIUS);
             if sr > 0.0 {
                 sr
             } else {
@@ -2156,7 +2164,7 @@ mod tests {
             (54, 10_000.0), // optimal
             (158, 5_000.0), // falloff
             (160, 0.05),    // tracking speed
-            (105, 40.0),    // sig resolution
+            (620, 40.0),    // optimalSigRadius (sig resolution)
         ]);
         let charge = store(&[(114, 25.0), (116, 25.0), (117, 25.0), (118, 25.0)]); // 100 dmg
 
@@ -2202,7 +2210,7 @@ mod tests {
             (54, 1_000.0), // optimal: 1km, so the curve exercises falloff early
             (158, 2_000.0),
             (160, 40.0),
-            (105, 40.0),
+            (620, 40.0),
         ]);
         let charge = store(&[(114, 25.0), (116, 25.0), (117, 25.0), (118, 25.0)]);
         let resolved = resolved_fit(vec![turret], vec![Some(charge)], Vec::new());
@@ -2248,7 +2256,7 @@ mod tests {
             (51, 1_000.0),  // 1s RoF
             (54, 20_000.0), // optimal
             (160, 0.5),     // tracking speed — poor
-            (105, 40.0),    // sig resolution
+            (620, 40.0),    // optimalSigRadius (sig resolution)
             (37, 3_000.0),  // drone max velocity — faster than the target
             (114, 25.0),
             (116, 25.0),
@@ -2298,7 +2306,7 @@ mod tests {
             (51, 1_000.0),
             (54, 20_000.0), // optimal / engagement distance
             (160, 40.0),    // tracking speed — decent, irrelevant at this speed
-            (105, 40.0),
+            (620, 40.0),
             (37, 3_000.0), // drone max velocity — utterly outpaced below
             (114, 25.0),
             (116, 25.0),
