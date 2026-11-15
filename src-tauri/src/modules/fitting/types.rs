@@ -477,6 +477,10 @@ pub struct FitStats {
     /// `target_archetypes` for the derivation.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub archetype_dps: Vec<ArchetypeDps>,
+    /// Fleet warfare buffs actually applied after the "strongest per buff ID"
+    /// merge (#1279), so the UI shows effective values. Empty without boosts.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub fleet_buffs_applied: Vec<super::engine::warfare_buffs::AppliedBuff>,
 }
 
 /// One fitted fighter squadron's selected ability + its DPS contribution

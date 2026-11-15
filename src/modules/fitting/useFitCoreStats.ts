@@ -61,6 +61,7 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
     }
     for (const it of fit.projected ?? []) s.add(it.typeId);
     for (const b of fleetBoosts) {
+      if (b.kind !== "module") continue;
       s.add(b.moduleTypeId);
       if (b.chargeTypeId) s.add(b.chargeTypeId);
     }

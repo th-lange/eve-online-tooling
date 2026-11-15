@@ -23,3 +23,4 @@ pub mod spool;
 pub mod stacking;
 pub mod tank;
 pub mod validate;
+pub mod warfare_buffs;

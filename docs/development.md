@@ -114,7 +114,16 @@ other docs for subsystems: [plugins](plugins.md), [scripts](scripts.md),
   relics, and a per-material drill-down. Validated against EVE-Guru-style output.
 - **Fitting engine** — a data-driven dogma engine validated exact against PYFA
   across a golden test suite (DPS, ranges, EHP/resists, cap sim, speed/align,
-  targeting; implants/boosters, T3 subsystems, projected effects).
+  targeting; implants/boosters, T3 subsystems, projected effects). **Fleet
+  boosts** (command/expedition/mining bursts, #1279) are modelled as *warfare
+  buffs*: a burst charge names buff IDs + magnitudes, and
+  `engine/warfare_buffs.rs` holds the per-ID table of what each buff boosts
+  (ship or module/charge targets, % vs add, stacking-penalised or not), applied
+  in `resolve` after the fit's own modifiers; per buff ID only the strongest
+  source applies. Booster skills are assumed at V; the hull bonus and mindlink
+  are inputs. The per-ID behaviour follows
+  [pyfa](https://github.com/pyfa-org/Pyfa) (`Fit.__runCommandBoosts`,
+  `commandLink.py`), re-expressed as our own data.
 - **EVE SSO (multi-character)** — OAuth2 PKCE; each refresh token in the OS
   keychain, roster persisted across restarts.
 

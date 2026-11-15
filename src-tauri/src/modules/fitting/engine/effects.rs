@@ -63,15 +63,6 @@ fn domain_of(mi: &ModifierInfo) -> Option<Domain> {
         "LocationRequiredSkillModifier" | "OwnerRequiredSkillModifier" => {
             Domain::SkillReqOnShip(mi.skill_type_id?)
         }
-        // Command-burst / fleet-link effects (#705): normally these project
-        // onto every gang member's ship. The simulator models them from the
-        // *receiving* ship's perspective — the caller builds an `EntityInput`
-        // for each fleet-boost module the user says they're receiving and
-        // resolves it as an external outward-modifier source, so mapping the
-        // effect straight to `Domain::Ship` (the ship that "receives" it) is
-        // correct here even though a real gang module never targets its own
-        // hull's `Domain::Ship`.
-        "GangModifier" => Domain::Ship,
         _ => return None,
     })
 }
@@ -143,15 +134,5 @@ mod tests {
         let (mods, dropped) = modifiers_for(&e, &|_| false);
         assert!(mods.is_empty());
         assert_eq!(dropped, 1);
-    }
-
-    #[test]
-    fn gang_modifier_targets_ship() {
-        // Command-burst effects (#705): GangModifier projects onto the
-        // receiving ship, so it maps to Domain::Ship.
-        let e = meta(vec![mi("GangModifier", "shipID", 2, 51, 51, None)]);
-        let (mods, dropped) = modifiers_for(&e, &|_| false);
-        assert_eq!(dropped, 0);
-        assert_eq!(mods[0].domain, Domain::Ship);
     }
 }
