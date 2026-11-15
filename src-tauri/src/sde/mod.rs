@@ -99,18 +99,75 @@ struct ConnPool {
     idle: Vec<Connection>,
 }
 
-static SDE_CONN_POOL: LazyLock<Mutex<Option<ConnPool>>> = LazyLock::new(|| Mutex::new(None));
+/// Pool plus the set of database paths currently being swapped. Both live
+/// under one lock so "mark swap pending + drain" and "check in unless a swap
+/// is pending" are each atomic with respect to the other.
+#[derive(Default)]
+struct PoolState {
+    pool: Option<ConnPool>,
+    swapping: Vec<PathBuf>,
+}
+
+static SDE_CONN_POOL: LazyLock<Mutex<PoolState>> =
+    LazyLock::new(|| Mutex::new(PoolState::default()));
+
+/// RAII marker for an in-progress database swap, from [`begin_swap`].
+/// While alive, connections for that path are never pooled: check-ins close
+/// them and check-outs open fresh ones. Dropping it re-enables pooling.
+pub(crate) struct SwapGuard {
+    db_path: PathBuf,
+}
+
+impl Drop for SwapGuard {
+    fn drop(&mut self) {
+        let mut guard = SDE_CONN_POOL.lock().expect("sde conn pool lock");
+        if let Some(i) = guard.swapping.iter().position(|p| *p == self.db_path) {
+            guard.swapping.swap_remove(i);
+        }
+    }
+}
+
+/// Mark a swap of `db_path` pending and close every idle pooled connection
+/// for it. On Windows SQLite opens files without `FILE_SHARE_DELETE`, so any
+/// open handle — including an idle pooled one — makes the rename over
+/// `db_path` fail (#1159). Connections currently checked out are closed on
+/// check-in instead of being pooled again while the guard lives.
+pub(crate) fn begin_swap(db_path: &Path) -> SwapGuard {
+    let mut guard = SDE_CONN_POOL.lock().expect("sde conn pool lock");
+    guard.swapping.push(db_path.to_path_buf());
+    if guard.pool.as_ref().is_some_and(|p| p.db_path == db_path) {
+        guard.pool = None;
+    }
+    SwapGuard {
+        db_path: db_path.to_path_buf(),
+    }
+}
+
+/// Number of idle connections currently pooled (test hook).
+#[cfg(test)]
+fn idle_pooled_count(db_path: &Path) -> usize {
+    let guard = SDE_CONN_POOL.lock().expect("sde conn pool lock");
+    guard
+        .pool
+        .as_ref()
+        .filter(|p| p.db_path == db_path)
+        .map_or(0, |p| p.idle.len())
+}
 
 /// Pop an idle connection for `(db_path, generation)` if the pool currently
 /// holds one; resets (and so drops/closes) the pool's idle connections if
 /// its identity doesn't match, exactly like [`get_or_build`] does for the
-/// whole-table caches.
+/// whole-table caches. While a swap of `db_path` is pending the pool is left
+/// alone and the caller opens a fresh connection.
 fn checkout_pooled_connection(db_path: &Path, generation: Generation) -> Option<Connection> {
     let mut guard = SDE_CONN_POOL.lock().expect("sde conn pool lock");
-    match guard.as_mut() {
+    if guard.swapping.iter().any(|p| p == db_path) {
+        return None;
+    }
+    match guard.pool.as_mut() {
         Some(p) if p.db_path == db_path && p.generation == generation => p.idle.pop(),
         _ => {
-            *guard = Some(ConnPool {
+            guard.pool = Some(ConnPool {
                 db_path: db_path.to_path_buf(),
                 generation,
                 idle: Vec::new(),
@@ -121,11 +178,14 @@ fn checkout_pooled_connection(db_path: &Path, generation: Generation) -> Option<
 }
 
 /// Return a checked-out connection to its pool, unless the pool has since
-/// moved on to a newer generation — in which case it's just dropped here,
-/// closing it.
+/// moved on to a newer generation or a swap of the database is pending — in
+/// which case it's just dropped here, closing it.
 pub(crate) fn return_pooled_connection(key: PoolKey, conn: Connection) {
     let mut guard = SDE_CONN_POOL.lock().expect("sde conn pool lock");
-    if let Some(p) = guard.as_mut() {
+    if guard.swapping.contains(&key.db_path) {
+        return;
+    }
+    if let Some(p) = guard.pool.as_mut() {
         if p.db_path == key.db_path && p.generation == key.generation {
             p.idle.push(conn);
         }
@@ -525,5 +585,37 @@ mod pool_tests {
         // ...and the stale generation-A pool was discarded rather than left
         // around to resurrect later.
         assert!(checkout_pooled_connection(&db_path, gen_a).is_none());
+    }
+
+    #[test]
+    fn begin_swap_drains_idle_connections_and_closes_returns_until_dropped() {
+        let db_path = PathBuf::from("/fake/sde-swap-test/sde.sqlite");
+        let gen: Generation = (1, 100);
+        let key = || PoolKey {
+            db_path: db_path.clone(),
+            generation: gen,
+        };
+
+        // Two idle pooled connections plus one checked out.
+        assert!(checkout_pooled_connection(&db_path, gen).is_none());
+        return_pooled_connection(key(), Connection::open_in_memory().unwrap());
+        return_pooled_connection(key(), Connection::open_in_memory().unwrap());
+        let in_flight = checkout_pooled_connection(&db_path, gen).unwrap();
+        assert_eq!(idle_pooled_count(&db_path), 1);
+
+        let swap = begin_swap(&db_path);
+        // (a) nothing is left open in the pool at rename time.
+        assert_eq!(idle_pooled_count(&db_path), 0);
+
+        // (b) a connection returned mid-swap is closed, not pooled.
+        return_pooled_connection(key(), in_flight);
+        assert_eq!(idle_pooled_count(&db_path), 0);
+        assert!(checkout_pooled_connection(&db_path, gen).is_none());
+
+        // Once the swap ends, pooling resumes.
+        drop(swap);
+        assert!(checkout_pooled_connection(&db_path, gen).is_none());
+        return_pooled_connection(key(), Connection::open_in_memory().unwrap());
+        assert_eq!(idle_pooled_count(&db_path), 1);
     }
 }

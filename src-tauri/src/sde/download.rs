@@ -6,7 +6,7 @@ use futures_util::StreamExt;
 use serde::Serialize;
 use tokio::io::AsyncWriteExt;
 
-use super::{SdeError, SdePaths, SDE_URL};
+use super::{begin_swap, SdeError, SdePaths, SDE_URL};
 
 /// Progress update emitted while (re)building the SDE. `phase` is one of
 /// `downloading` | `decompressing` | `verifying` | `done`.
@@ -98,6 +98,72 @@ pub async fn download_sde<F>(paths: &SdePaths, progress: F) -> Result<(), SdeErr
 where
     F: Fn(SdeProgress),
 {
+    let (downloaded, total) = match fetch_and_verify(paths, &progress).await {
+        Ok(v) => v,
+        Err(e) => {
+            cleanup_temp_files(paths).await;
+            return Err(e);
+        }
+    };
+    // 4. Swap into place and clean up.
+    install_verified(paths, SWAP_ATTEMPTS, SWAP_RETRY_DELAY).await?;
+    progress(SdeProgress::new("done", downloaded, total));
+    Ok(())
+}
+
+/// Rename attempts and spacing when swapping the new database in. Rides out
+/// in-flight queries still holding a checked-out connection (on Windows an
+/// open handle blocks the rename; see [`install_verified`]).
+const SWAP_ATTEMPTS: u32 = 10;
+const SWAP_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(150);
+
+/// Best-effort removal of the `*.part` files (~635 MB combined) so a failed
+/// update doesn't leave them behind.
+async fn cleanup_temp_files(paths: &SdePaths) {
+    let _ = tokio::fs::remove_file(&paths.tmp_archive).await;
+    let _ = tokio::fs::remove_file(&paths.tmp_db).await;
+}
+
+/// Replace `paths.db` with the verified `paths.tmp_db`.
+///
+/// Windows opens SQLite files without `FILE_SHARE_DELETE`, so renaming over a
+/// database with any open handle fails (#1159). Pending-swap mode closes all
+/// idle pooled connections and closes returned ones; the bounded retry covers
+/// queries that still hold a checked-out connection. On failure the temp
+/// files are removed and a clear error is returned.
+async fn install_verified(
+    paths: &SdePaths,
+    attempts: u32,
+    delay: std::time::Duration,
+) -> Result<(), SdeError> {
+    let swap = begin_swap(&paths.db);
+    let mut last_err = None;
+    for attempt in 0..attempts {
+        if attempt > 0 {
+            tokio::time::sleep(delay).await;
+        }
+        match tokio::fs::rename(&paths.tmp_db, &paths.db).await {
+            Ok(()) => {
+                drop(swap);
+                let _ = tokio::fs::remove_file(&paths.tmp_archive).await;
+                return Ok(());
+            }
+            Err(e) => last_err = Some(e),
+        }
+    }
+    drop(swap);
+    if let Some(e) = last_err {
+        tracing::warn!("sde: replacing the database failed after {attempts} attempts: {e}");
+    }
+    cleanup_temp_files(paths).await;
+    Err(SdeError::SwapFailed)
+}
+
+/// Steps 1-3: download, decompress, verify. Returns `(downloaded, total)`.
+async fn fetch_and_verify<F>(paths: &SdePaths, progress: &F) -> Result<(u64, Option<u64>), SdeError>
+where
+    F: Fn(SdeProgress),
+{
     tokio::fs::create_dir_all(&paths.dir).await?;
 
     // 1. Stream the gzip to a temp file so we never hold the whole archive in RAM.
@@ -146,11 +212,7 @@ where
         .await
         .map_err(|e| SdeError::Decompress(e.to_string()))??;
 
-    // 4. Swap into place and clean up.
-    tokio::fs::rename(&paths.tmp_db, &paths.db).await?;
-    let _ = tokio::fs::remove_file(&paths.tmp_archive).await;
-    progress(SdeProgress::new("done", downloaded, total));
-    Ok(())
+    Ok((downloaded, total))
 }
 
 fn decompress(archive: &Path, out: &Path) -> Result<(), SdeError> {
@@ -202,6 +264,47 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("eve-sde-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[tokio::test]
+    async fn failed_swap_returns_clear_error_and_removes_temp_files() {
+        let dir = std::env::temp_dir().join(format!("eve-sde-swap-fail-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let paths = SdePaths::new(dir.clone());
+        // A non-empty directory at the destination makes the rename fail on
+        // every platform.
+        std::fs::create_dir_all(paths.db.join("blocker")).unwrap();
+        std::fs::write(&paths.tmp_db, b"new db").unwrap();
+        std::fs::write(&paths.tmp_archive, b"archive").unwrap();
+
+        let err = install_verified(&paths, 3, Duration::from_millis(1))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, SdeError::SwapFailed));
+        assert!(err.to_string().contains("restart the app"));
+        assert!(!paths.tmp_db.exists());
+        assert!(!paths.tmp_archive.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn successful_swap_replaces_db_and_removes_archive() {
+        let dir = std::env::temp_dir().join(format!("eve-sde-swap-ok-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let paths = SdePaths::new(dir.clone());
+        std::fs::create_dir_all(&paths.dir).unwrap();
+        std::fs::write(&paths.db, b"old").unwrap();
+        std::fs::write(&paths.tmp_db, b"new").unwrap();
+        std::fs::write(&paths.tmp_archive, b"archive").unwrap();
+
+        install_verified(&paths, 3, Duration::from_millis(1))
+            .await
+            .unwrap();
+
+        assert_eq!(std::fs::read(&paths.db).unwrap(), b"new");
+        assert!(!paths.tmp_archive.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -212,7 +212,7 @@ const AUTOCHECK_INTERVAL: u64 = 24 * 3600;
 /// already installed (first-time download stays a deliberate user action), and
 /// at most once per day; re-downloads only if Fuzzwork's md5 changed. The SDE
 /// updates ~daily with the game, so this keeps static data current without the
-/// user clicking "Update". Silent on any failure.
+/// user clicking "Update". Failures are logged at warn level, not surfaced.
 pub async fn auto_refresh(app: &AppHandle) {
     let Ok(paths) = paths(app) else {
         return;
@@ -229,7 +229,11 @@ pub async fn auto_refresh(app: &AppHandle) {
     // Record the attempt up front so a slow/failed check doesn't retry every
     // launch within the day.
     let _ = crate::storage::save_data(&paths.dir, AUTOCHECK_KEY, &now);
-    let _ = sde_update(app.clone(), false).await;
+    if let Err(e) = sde_update(app.clone(), false).await {
+        tracing::warn!(
+            "sde: automatic refresh failed (will retry after the next daily check): {e}"
+        );
+    }
 }
 
 /// Type name/group/volume for a type id.
