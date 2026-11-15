@@ -158,6 +158,15 @@ fn job_fee(eiv: f64, config: &ProfitConfig) -> f64 {
         + eiv * config.scc_surcharge
 }
 
+/// Science jobs (copying, invention) are charged on 2% of the EIV of the
+/// manufacturing materials of the blueprint's product; index/tax/SCC then apply
+/// to that scaled base (EVE Ref `jobCostBase = 0.02 * EIV`).
+const SCIENCE_JOB_COST_BASE: f64 = 0.02;
+
+fn science_job_fee(eiv: f64, config: &ProfitConfig) -> f64 {
+    job_fee(eiv * SCIENCE_JOB_COST_BASE, config)
+}
+
 /// Per-material cost line for the UI drill-down.
 #[derive(Debug, Clone, Serialize, PartialEq, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -297,7 +306,10 @@ pub struct ProfitBreakdown {
 pub fn required_quantity(base_quantity: i64, runs: i64, me: i64, me_bonus: f64) -> i64 {
     let factor = (1.0 - (me as f64) / 100.0) * me_bonus;
     let raw = (base_quantity as f64) * (runs as f64) * factor;
-    (raw.ceil() as i64).max(runs)
+    // EVE rounds to 2 decimals before ceil, absorbing float noise such as
+    // 15939.000000000002 (which would otherwise ceil to 15940).
+    let rounded = (raw * 100.0).round() / 100.0;
+    (rounded.ceil() as i64).max(runs)
 }
 
 /// Build a single-level manufacturing step from SDE rows (all inputs `Buy`).
@@ -462,7 +474,6 @@ pub fn evaluate_with_stock(
         Some(inv) => {
             let mut datacore_lines = Vec::with_capacity(inv.datacores.len());
             let mut datacore_cost = 0.0;
-            let mut invention_eiv = 0.0;
             for dc in &inv.datacores {
                 let model = prices.get(&dc.type_id);
                 let unit = price_for(model, config.material_basis);
@@ -474,7 +485,6 @@ pub fn evaluate_with_stock(
                     }
                 };
                 datacore_cost += line;
-                invention_eiv += eiv_unit_value(model) * dc.base_quantity as f64;
                 datacore_lines.push(MaterialLine {
                     type_id: dc.type_id,
                     name: dc.name.clone(),
@@ -485,21 +495,27 @@ pub fn evaluate_with_stock(
                     built: false,
                 });
             }
-            // Invention job fee, using job_fee() like manufacturing. Approximation:
-            // config.system_cost_index is the manufacturing cost index; invention
-            // and copy jobs have their own per-activity cost indices in-game that
-            // this engine doesn't fetch. Parameterize per-activity indices later
-            // if/when they become available from ESI.
-            let invention_job_fee = job_fee(invention_eiv, config);
-            // Copy job fee for the T1 BPC consumed each attempt: EIV of the T1
-            // product run through job_fee(), same manufacturing-cost-index
-            // approximation as invention_job_fee above.
+            // Invention fee basis (per attempt, one run): EIV of the manufacturing
+            // materials of the INVENTED blueprint's product (this step's inputs at
+            // base quantity), not the datacores/decryptor/relic (those are consumed
+            // material costs only). 2% science base via science_job_fee().
+            // Approximation: config.system_cost_index is the manufacturing cost
+            // index; invention/copy have their own per-activity indices in-game
+            // that this engine doesn't fetch.
+            let invention_eiv: f64 = step
+                .inputs
+                .iter()
+                .map(|m| eiv_unit_value(prices.get(&m.type_id)) * m.base_quantity as f64)
+                .sum();
+            let invention_job_fee = science_job_fee(invention_eiv, config);
+            // Copy fee for the T1 BPC consumed each attempt (one run): EIV of the
+            // T1 source product's manufacturing materials, 2% science base.
             let copy_eiv: f64 = inv
                 .copy_materials
                 .iter()
                 .map(|m| eiv_unit_value(prices.get(&m.type_id)) * m.base_quantity as f64)
                 .sum();
-            let copy_fee = job_fee(copy_eiv, config);
+            let copy_fee = science_job_fee(copy_eiv, config);
             let attempt_cost = datacore_cost + invention_job_fee + copy_fee;
             let probability = (inv.probability * config.invention_skill_multiplier).min(1.0);
             let yielded = probability * inv.runs_per_success as f64;
@@ -663,16 +679,21 @@ mod tests {
 
     #[test]
     fn invention_and_copy_fees_include_scc_and_cost_bonus() {
-        // T2 step: no manufacturing materials of its own (isolates the
-        // invention/copy fee path); invention consumes 2x datacore (400) and
-        // the copy job consumes 3x copy material (500).
+        // T2 step: one manufacturing material of its own (4x type 600, the
+        // invented product's inputs, = invention fee basis); invention consumes
+        // 2x datacore (400) and the copy job's basis is 3x copy material (500).
         let step = BuildStep {
             activity: Activity::Manufacturing,
             blueprint_type_id: 998,
             product_type_id: 101,
             product_name: "T2 Widget".into(),
             product_per_run: 1,
-            inputs: vec![],
+            inputs: vec![InputLine {
+                type_id: 600,
+                name: "T2 Input".into(),
+                base_quantity: 4,
+                sourcing: Sourcing::Buy,
+            }],
             invention: Some(Invention {
                 datacores: vec![InputLine {
                     type_id: 400,
@@ -695,10 +716,12 @@ mod tests {
         let prices = HashMap::from([
             (400, price(400, Some(55.0), Some(50.0), None)),
             (500, price(500, Some(22.0), Some(20.0), None)),
+            (600, price(600, Some(30.0), Some(25.0), None)),
             (101, price(101, Some(1.0), Some(1.0), None)),
         ]);
 
-        // invention_eiv = 2*50 = 100; copy_eiv = 3*20 = 60.
+        // invention_eiv = 4*25 = 100 (invented product's inputs, NOT datacores);
+        // copy_eiv = 3*20 = 60. Science base = 2% of EIV.
         let cfg_with_bonus = ProfitConfig {
             system_cost_index: 0.05,
             facility_tax: 0.01,
@@ -708,10 +731,9 @@ mod tests {
         };
         let b = evaluate(&step, 1, 2, &prices, &cfg_with_bonus);
         let inv = b.invention.expect("invention breakdown present");
-        // job_fee(100, cfg) = 100*0.05*0.97 + 100*0.01 + 100*0.04 = 4.85+1+4 = 9.85
-        approx(inv.invention_job_fee, 9.85);
-        // job_fee(60, cfg) = 60*0.05*0.97 + 60*0.01 + 60*0.04 = 2.91+0.6+2.4 = 5.91
-        approx(inv.copy_fee, 5.91);
+        // rate = 0.05*0.97 + 0.01 + 0.04 = 0.0985; fee = 2.0 * rate.
+        approx(inv.invention_job_fee, 2.0 * 0.0985);
+        approx(inv.copy_fee, 1.2 * 0.0985);
 
         // Without the surcharge/cost_bonus terms both fees must be lower —
         // proves invention_job_fee/copy_fee actually flow through job_fee()
@@ -727,6 +749,94 @@ mod tests {
         let inv_no_bonus = b_no_bonus.invention.expect("invention breakdown present");
         assert!(inv.invention_job_fee > inv_no_bonus.invention_job_fee);
         assert!(inv.copy_fee > inv_no_bonus.copy_fee);
+    }
+
+    #[test]
+    fn copy_fee_is_two_percent_of_source_product_eiv() {
+        // Source T1 product EIV 200M, 1 run: jcb = 4M; index 5% + tax 1% +
+        // SCC 4% = 10% of jcb = 0.4M.
+        let mut step = science_step(vec![(400, 2)], vec![(500, 1)], vec![]);
+        step.inputs.clear();
+        let prices = HashMap::from([
+            (400, price(400, Some(1.0), Some(1.0), None)),
+            (500, price(500, Some(1.0), Some(200_000_000.0), None)),
+            (101, price(101, Some(1.0), Some(1.0), None)),
+        ]);
+        let cfg = ProfitConfig {
+            system_cost_index: 0.05,
+            facility_tax: 0.01,
+            scc_surcharge: 0.04,
+            ..Default::default()
+        };
+        let inv = evaluate(&step, 1, 2, &prices, &cfg).invention.unwrap();
+        approx(inv.copy_fee, 400_000.0);
+    }
+
+    #[test]
+    fn invention_fee_ignores_datacore_prices_and_scales_with_product_eiv() {
+        let cfg = ProfitConfig {
+            system_cost_index: 0.05,
+            facility_tax: 0.01,
+            scc_surcharge: 0.04,
+            ..Default::default()
+        };
+        let step = science_step(vec![(400, 2)], vec![], vec![(600, 10)]);
+        let mk = |dc_adj: f64, product_adj: f64| {
+            let prices = HashMap::from([
+                (400, price(400, Some(1.0), Some(dc_adj), None)),
+                (600, price(600, Some(1.0), Some(product_adj), None)),
+                (101, price(101, Some(1.0), Some(1.0), None)),
+            ]);
+            evaluate(&step, 1, 2, &prices, &cfg).invention.unwrap()
+        };
+        let base = mk(1_000.0, 1_000_000.0);
+        // EIV 10M -> jcb 200k -> 10% = 20k.
+        approx(base.invention_job_fee, 20_000.0);
+        // Datacore price change: fee unchanged, datacore material cost changes.
+        let dc = mk(9_999_999.0, 1_000_000.0);
+        approx(dc.invention_job_fee, base.invention_job_fee);
+        // Product material EIV doubles: fee doubles.
+        let doubled = mk(1_000.0, 2_000_000.0);
+        approx(doubled.invention_job_fee, 2.0 * base.invention_job_fee);
+    }
+
+    #[test]
+    fn required_quantity_rounds_to_two_decimals_before_ceil() {
+        // 175*100*0.92*0.99 = 15939 exactly in EVE; float gives ...39.000000000002.
+        assert_eq!(required_quantity(175, 100, 8, 0.99), 15939);
+        // Genuine fractions still round up.
+        assert_eq!(required_quantity(10, 1, 0, 1.0), 10);
+        assert_eq!(required_quantity(3, 1, 10, 1.0), 3);
+        assert_eq!(required_quantity(100, 1, 10, 1.0), 90);
+    }
+
+    fn science_step(
+        datacores: Vec<(i64, i64)>,
+        copy: Vec<(i64, i64)>,
+        inputs: Vec<(i64, i64)>,
+    ) -> BuildStep {
+        let line = |(type_id, q): (i64, i64)| InputLine {
+            type_id,
+            name: format!("m{type_id}"),
+            base_quantity: q,
+            sourcing: Sourcing::Buy,
+        };
+        BuildStep {
+            activity: Activity::Manufacturing,
+            blueprint_type_id: 998,
+            product_type_id: 101,
+            product_name: "T2".into(),
+            product_per_run: 1,
+            inputs: inputs.into_iter().map(line).collect(),
+            invention: Some(Invention {
+                datacores: datacores.into_iter().map(line).collect(),
+                copy_materials: copy.into_iter().map(line).collect(),
+                runs_per_success: 1,
+                probability: 1.0,
+                result_me: 2,
+                base_blueprint_type_id: 599,
+            }),
+        }
     }
 
     #[test]
