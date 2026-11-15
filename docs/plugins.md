@@ -294,6 +294,14 @@ iframe with **no `allow-same-origin`** — a unique opaque origin that can't rea
 the app's DOM or `localStorage`, call `invoke`, or reach the network
 (`connect-src 'none'`). Its only channel to the app is a `postMessage` bridge.
 
+On Windows (WebView2) Tauri serves the protocol as `http://plugin.localhost`
+instead of `plugin://localhost`; the host and the frame CSP accept both. Known
+caveat: on Windows, sub-resources requested from inside an iframe served by a
+custom protocol may fail with "connection refused"
+([tauri-apps/tauri#11505](https://github.com/tauri-apps/tauri/issues/11505)) —
+`index.html` itself loads. Until that is resolved, a **single-file UI** (inline
+script and styles) is the safe choice on Windows. Not yet verified on Windows.
+
 ### The bridge
 
 Your UI reaches its own logic through one call, `invoke(fn, args)`: it runs one
