@@ -1649,7 +1649,7 @@ dependencies = [
 
 [[package]]
 name = "eve-online-tooling"
-version = "0.83.0"
+version = "0.84.0"
 dependencies = [
  "base64 0.22.1",
  "boa_engine",
