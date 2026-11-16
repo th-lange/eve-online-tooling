@@ -864,6 +864,175 @@ fn rifter_reactive_armor_hardener_converges_to_hand_computed_em_resists() {
     }
 }
 
+/// Reactive Armor Hardener against **mixed** damage profiles, pinned to
+/// numbers recorded from PYFA itself (#1272): pyfa v2.70.0's `eve.db` driven
+/// headlessly through `eos` (pyfa source `b79cd90`, the commit the comparison
+/// used), reading `fit.ship.getModifiedItemAttr('armor<type>DamageResonance')`
+/// on a bare Rifter carrying one Reactive Armor Hardener, with
+/// `useStaticAdaptiveArmorHardener` off so the module simulates.
+///
+/// These two profiles are what the EM-only golden above can't see: with more
+/// than one damage type the cycle order depends on damage taken **after** the
+/// hull's own resists (a Rifter resists EM 60% and explosive 10%), and ties
+/// break in the module's attribute enumeration order. Recorded values:
+///
+/// | profile (em/th/kin/ex) | pyfa armour resonance |
+/// |---|---|
+/// | 30 / 15 / 15 / 40 | `[0.376, 0.65, 0.75, 0.414]` |
+/// | 25 / 25 / 25 / 25 | `[0.4, 0.60125, 0.615, 0.5895]` |
+#[test]
+fn rifter_reactive_armor_hardener_matches_pyfa_on_mixed_profiles() {
+    let Some((sde, dir)) = crate::test_support::test_sde() else {
+        return;
+    };
+    let dir = dir.as_path();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let zero_skills = |_: i64| 0.0;
+    let layout = sde.ship_layout(tid("Rifter")).unwrap().expect("layout");
+    let run = |profile: DamageProfile| {
+        run_dogma(
+            &sde,
+            dir,
+            &Fit {
+                id: "t".into(),
+                name: "Rifter".into(),
+                ship_type_id: tid("Rifter"),
+                items: vec![FitItem {
+                    type_id: tid("Reactive Armor Hardener"),
+                    slot: SlotKind::Low,
+                    index: 0,
+                    state: ModuleState::Active,
+                    charge_type_id: None,
+                    quantity: 1,
+                    active_drones: None,
+                    mutation: None,
+                    fighter_ability: None,
+                }],
+                projected: Vec::new(),
+            },
+            &layout,
+            &zero_skills,
+            &profile,
+            0.0,
+            None,
+            &[],
+            None,
+            None,
+            1.0,
+            false,
+        )
+        .expect("dogma")
+    };
+
+    for (profile, want) in [
+        (
+            DamageProfile([0.30, 0.15, 0.15, 0.40]),
+            [0.376, 0.65, 0.75, 0.414],
+        ),
+        (
+            DamageProfile([0.25, 0.25, 0.25, 0.25]),
+            [0.4, 0.60125, 0.615, 0.5895],
+        ),
+    ] {
+        let stats = run(profile);
+        for (i, want) in want.into_iter().enumerate() {
+            let got = 1.0 - stats.tank.armor_resists[i];
+            assert!(
+                (got - want).abs() < 1e-6,
+                "profile {:?} type {i}: resonance {got}, pyfa says {want}",
+                profile.0
+            );
+        }
+    }
+}
+
+/// Capacitor depletion with **identical** modules, pinned to numbers recorded
+/// from PYFA itself (#1272, #1294): pyfa v2.70.0's `eve.db` driven headlessly
+/// through `eos` (source `b79cd90`), all-V character, reading `fit.capState`
+/// on an unstable fit — where pyfa reports seconds to empty rather than a
+/// stable percentage. A Rifter with N Small Armour Repairer IIs:
+///
+/// | repairers | pyfa seconds to empty |
+/// |---|---|
+/// | 1 | 175.5 |
+/// | 2 | 24.75 |
+/// | 3 | 13.5 |
+///
+/// The multi-repairer rows are the point: pyfa staggers identical modules
+/// (`sim.stagger = True`, turrets excepted), so two repairers are one pulse
+/// every half cycle rather than a doubled spike. Before #1294 this engine
+/// fired them together and emptied the capacitor sooner.
+#[test]
+fn rifter_identical_repairers_match_pyfa_depletion_times() {
+    let Some((sde, dir)) = crate::test_support::test_sde() else {
+        return;
+    };
+    let dir = dir.as_path();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let all5 = |_: i64| 5.0;
+    let ship_type_id = tid("Rifter");
+    let rep = tid("Small Armor Repairer II");
+    let layout = sde.ship_layout(ship_type_id).unwrap().expect("layout");
+    let profile = DamageProfile([0.25, 0.25, 0.25, 0.25]);
+
+    for (count, want_seconds) in [(1usize, 175.5), (2, 24.75), (3, 13.5)] {
+        let items = (0..count)
+            .map(|i| FitItem {
+                type_id: rep,
+                slot: SlotKind::Low,
+                index: i as i32,
+                state: ModuleState::Active,
+                charge_type_id: None,
+                quantity: 1,
+                active_drones: None,
+                mutation: None,
+                fighter_ability: None,
+            })
+            .collect();
+        let stats = run_dogma(
+            &sde,
+            dir,
+            &Fit {
+                id: "t".into(),
+                name: "Rifter".into(),
+                ship_type_id,
+                items,
+                projected: Vec::new(),
+            },
+            &layout,
+            &all5,
+            &profile,
+            0.0,
+            None,
+            &[],
+            None,
+            None,
+            1.0,
+            false,
+        )
+        .expect("dogma");
+        assert!(
+            !stats.capacitor.stable,
+            "{count} repairers should out-drain the Rifter's recharge"
+        );
+        let got = stats.capacitor.depletion_seconds.expect("depletion time");
+        assert!(
+            (got - want_seconds).abs() < 0.001,
+            "{count} repairers: empties at {got}s, pyfa says {want_seconds}s"
+        );
+    }
+}
+
 /// Cap booster injection (#875) — no pyfa-oracle fixture exists for a cap
 /// booster fit (`tools/pyfa-oracle/golden.json` predates #875), so per the
 /// issue's documented fallback this is a hand-computed check against real
