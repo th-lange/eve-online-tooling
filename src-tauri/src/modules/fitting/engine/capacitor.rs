@@ -32,6 +32,10 @@ pub struct ModuleDrain {
     pub cycle_ms: f64,
     pub clip_shots: f64,
     pub reload_ms: f64,
+    /// Whether identical copies of this module may be spread evenly over one
+    /// cycle instead of all pulsing together (#1272). PYFA staggers every
+    /// module except turrets, which a pilot fires as one volley.
+    pub stagger: bool,
 }
 
 /// Compute capacitor stability from finalized attributes.
@@ -251,18 +255,66 @@ impl DrainEvent {
 /// Build the combined event list `simulate` drives: drains keep their
 /// positive `need` (subtract GJ); injections (#875) get theirs negated (add
 /// GJ) — the exact same per-module clip/reload state machine either way.
+///
+/// Identical staggerable modules are spread over one cycle rather than all
+/// pulsing at once, matching PYFA's `capSim.reset()` (#1272): with no clip to
+/// reload, N copies collapse into a single event firing every `cycle/N`; with
+/// a clip, the copies keep their own cycle but start
+/// `(cycle·clip + reload)/(N·clip)` apart. A fit's own burst therefore isn't
+/// made artificially harsh by assuming every rep, hardener and prop mod cycles
+/// on the same millisecond. Turrets (`stagger == false`) do pulse together —
+/// a pilot fires them as one volley — so their need is summed instead.
+/// Injections are never staggered: a cap booster is used the moment it's
+/// wanted.
 fn build_events(drains: &[ModuleDrain], injections: &[ModuleDrain]) -> Vec<DrainEvent> {
-    drains
-        .iter()
-        .filter(|d| d.need > 0.0 && d.cycle_ms > 0.0)
-        .map(|d| DrainEvent::new(d, d.need))
-        .chain(
-            injections
-                .iter()
-                .filter(|d| d.need > 0.0 && d.cycle_ms > 0.0)
-                .map(|d| DrainEvent::new(d, -d.need)),
-        )
-        .collect()
+    let mut groups: Vec<(ModuleDrain, usize)> = Vec::new();
+    for d in drains.iter().filter(|d| d.need > 0.0 && d.cycle_ms > 0.0) {
+        match groups.iter_mut().find(|(g, _)| same_drain(g, d)) {
+            Some((_, count)) => *count += 1,
+            None => groups.push((*d, 1)),
+        }
+    }
+
+    let mut events = Vec::with_capacity(groups.len() + injections.len());
+    for (d, count) in groups {
+        let n = count as f64;
+        if !d.stagger || count == 1 {
+            // One volley: N identical turrets draw N × need on one cycle.
+            let mut merged = d;
+            merged.need *= n;
+            events.push(DrainEvent::new(&merged, merged.need));
+        } else if d.clip_shots > 0.0 && d.reload_ms > 0.0 {
+            let offset = (d.cycle_ms * d.clip_shots + d.reload_ms) / (n * d.clip_shots);
+            for i in 0..count {
+                let mut e = DrainEvent::new(&d, d.need);
+                e.t = i as f64 * offset;
+                events.push(e);
+            }
+        } else {
+            // No reload: N evenly spread copies are one module pulsing N times
+            // as often — the same cap use, without the simultaneous spike.
+            let mut spread = d;
+            spread.cycle_ms = d.cycle_ms / n;
+            events.push(DrainEvent::new(&spread, spread.need));
+        }
+    }
+    events.extend(
+        injections
+            .iter()
+            .filter(|d| d.need > 0.0 && d.cycle_ms > 0.0)
+            .map(|d| DrainEvent::new(d, -d.need)),
+    );
+    events
+}
+
+/// Two drains are the same module for staggering purposes when every input
+/// the sim reads matches (PYFA groups on the identical tuple).
+fn same_drain(a: &ModuleDrain, b: &ModuleDrain) -> bool {
+    a.need == b.need
+        && a.cycle_ms == b.cycle_ms
+        && a.clip_shots == b.clip_shots
+        && a.reload_ms == b.reload_ms
+        && a.stagger == b.stagger
 }
 
 /// Core discrete event sim (#875) shared by [`time_to_empty`],
@@ -500,6 +552,7 @@ mod tests {
             cycle_ms,
             clip_shots: 0.0,
             reload_ms: 0.0,
+            stagger: true,
         }
     }
 
@@ -564,6 +617,37 @@ mod tests {
         assert!(end < 20.0, "unstable cap should be near empty, got {end}%");
     }
 
+    /// Identical staggerable modules spread over one cycle instead of pulsing
+    /// together (#1272, PYFA's `capSim` staggering), so the same average drain
+    /// empties the capacitor later than one simultaneous volley would.
+    #[test]
+    fn identical_modules_stagger_and_outlast_a_single_volley() {
+        let spread = [drain(40.0, 4_000.0), drain(40.0, 4_000.0)];
+        let volley = [
+            ModuleDrain {
+                stagger: false,
+                ..drain(40.0, 4_000.0)
+            },
+            ModuleDrain {
+                stagger: false,
+                ..drain(40.0, 4_000.0)
+            },
+        ];
+        let t_spread = time_to_empty(250.0, 125_000.0, &spread, 0.0, &[]);
+        let t_volley = time_to_empty(250.0, 125_000.0, &volley, 0.0, &[]);
+        assert!(
+            t_spread > t_volley,
+            "staggered {t_spread}s should outlast the volley {t_volley}s"
+        );
+        // Two modules drawing 40 GJ every 4 s, staggered, are one 40 GJ pulse
+        // every 2 s: 20 GJ/s against a 5 GJ/s peak recharge (2.5·250/125 s)
+        // empties 250 GJ on the pulse at t = 14 s.
+        assert!(
+            (t_spread - 14.0).abs() < 0.001,
+            "staggered depletion = {t_spread}s, want 14s"
+        );
+    }
+
     /// A neut projecting continuous GJ/s drain (#706) tips an otherwise-stable
     /// fit into instability, same as an equivalent module drain would.
     #[test]
@@ -606,6 +690,7 @@ mod tests {
             cycle_ms: 1000.0,
             clip_shots: 5.0,
             reload_ms: 20_000.0,
+            stagger: true,
         };
         let stable = capacitor(250.0, 125_000.0, 1.6, &[reloading], 0.0, &[]);
         assert!(
@@ -626,6 +711,7 @@ mod tests {
             cycle_ms: 1000.0,
             clip_shots: 5.0,
             reload_ms: 20_000.0,
+            stagger: true,
         };
         let t_reloading = time_to_empty(250.0, 125_000.0, &[reloading], 0.0, &[]);
         assert!(
@@ -649,6 +735,7 @@ mod tests {
             cycle_ms: 6_000.0,
             clip_shots: 0.0,
             reload_ms: 0.0,
+            stagger: true,
         };
         let boosted = capacitor(
             250.0,
@@ -679,6 +766,7 @@ mod tests {
             cycle_ms: 6_000.0,
             clip_shots: 2.0,
             reload_ms: 600_000.0, // 10 minutes
+            stagger: true,
         };
         let boosted = capacitor(
             250.0,
@@ -708,6 +796,7 @@ mod tests {
             cycle_ms: 6_000.0,
             clip_shots: 0.0,
             reload_ms: 0.0,
+            stagger: true,
         };
         let boosted = capacitor(
             250.0,
