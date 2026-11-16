@@ -7,6 +7,7 @@ import {
   BUCKET_SERIES_OUT,
   formatClock,
 } from "./dpsMeterShared";
+import type { SeriesThresholds } from "./thresholds";
 
 const hq = {
   misses: 0,
@@ -41,7 +42,10 @@ function bucket(start: number, damageOut = 50): DpsBucket {
 
 const buckets = [bucket(1000), bucket(1005), bucket(1010), bucket(1015)];
 
-function renderCharts({ markTs = null as number | null } = {}) {
+function renderCharts({
+  markTs = null as number | null,
+  thresholds = {} as SeriesThresholds,
+} = {}) {
   return render(
     <DpsChartContainer
       bySource={false}
@@ -53,6 +57,7 @@ function renderCharts({ markTs = null as number | null } = {}) {
       inSeries={BUCKET_SERIES_IN}
       combinedSeries={BUCKET_SERIES_OUT}
       markTs={markTs}
+      thresholds={thresholds}
     />,
   );
 }
@@ -76,5 +81,21 @@ describe("DpsChartContainer — bucket time grid (#984)", () => {
   it("shows no log-position label when markTs is unset", () => {
     renderCharts();
     expect(screen.queryByText(/log @/)).not.toBeInTheDocument();
+  });
+
+  it("draws a dashed guide for each in-scale damage threshold (#1270)", () => {
+    // Axis max is 10/s here: the 6/s alarm is drawn, the 40/s one is off the
+    // scale and would otherwise float above the chart.
+    const { container } = renderCharts({
+      thresholds: {
+        dpsOut: [
+          { atOrAbove: 6, level: "warn" },
+          { atOrAbove: 40, level: "danger" },
+        ],
+      },
+    });
+    const guides = container.querySelectorAll("line[stroke-dasharray]");
+    expect(guides).toHaveLength(1);
+    expect(guides[0]).toHaveAttribute("stroke", "var(--color-amber-500)");
   });
 });

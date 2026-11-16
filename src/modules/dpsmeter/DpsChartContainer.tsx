@@ -2,6 +2,7 @@ import { Columns2, Layers, Rows2 } from "lucide-react";
 import type { DpsBucket, DpsEvent } from "../../lib/api";
 import { BucketChart } from "./BucketChart";
 import type { BucketSeries, ChartLayout, GhostBucket } from "./dpsMeterShared";
+import type { SeriesThresholds } from "./thresholds";
 
 /** Graphs — outgoing and incoming; layout + breakdown toggles + the two (or
  *  one, in combined layout) time-grid charts. Everything draws from the
@@ -20,6 +21,7 @@ export function DpsChartContainer({
   ghost,
   onSelectBucket,
   eventsByBucket,
+  thresholds,
 }: {
   bySource: boolean;
   onSetBySource: (v: boolean) => void;
@@ -37,7 +39,17 @@ export function DpsChartContainer({
   ghost?: GhostBucket | null;
   onSelectBucket?: (bucketStart: number) => void;
   eventsByBucket?: Map<number, DpsEvent[]>;
+  /** Alarm thresholds (#1270). Only the two damage series' guides are drawn:
+   *  the chart's y-axis is scaled to the damage lines, so a logi/cap alarm
+   *  would land at a meaningless height. */
+  thresholds: SeriesThresholds;
 }) {
+  const guidesFor = (key: "dpsOut" | "dpsIn") =>
+    (thresholds[key] ?? []).map((t) => ({
+      value: t.atOrAbove,
+      level: t.level,
+    }));
+
   return (
     <>
       <div className="mt-6 flex items-center justify-end gap-2">
@@ -105,6 +117,7 @@ export function DpsChartContainer({
             ghost={ghost}
             onSelectBucket={onSelectBucket}
             eventsByBucket={eventsByBucket}
+            guides={[...guidesFor("dpsOut"), ...guidesFor("dpsIn")]}
           />
         ) : (
           <>
@@ -116,6 +129,7 @@ export function DpsChartContainer({
               ghost={ghost}
               onSelectBucket={onSelectBucket}
               eventsByBucket={eventsByBucket}
+              guides={guidesFor("dpsOut")}
             />
             <BucketChart
               buckets={buckets}
@@ -125,6 +139,7 @@ export function DpsChartContainer({
               ghost={ghost}
               onSelectBucket={onSelectBucket}
               eventsByBucket={eventsByBucket}
+              guides={guidesFor("dpsIn")}
             />
           </>
         )}

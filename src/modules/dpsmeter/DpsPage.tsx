@@ -14,6 +14,8 @@ import { FightBreakdown, TackleTags } from "./FightBreakdown";
 import { PrimaryExtras, SessionExtras } from "./HitQualityIndicators";
 import { LogFilePanel } from "./LogFilePanel";
 import { MiningPanel } from "./MiningPanel";
+import { ThresholdPopover } from "./ThresholdPopover";
+import { LEVEL_BORDER, LEVEL_TEXT, levelFor } from "./thresholds";
 import { OverviewExportPanel } from "./OverviewExportPanel";
 import { PlaybackControls } from "./PlaybackControls";
 import { PlaybackTimeline } from "./PlaybackTimeline";
@@ -144,50 +146,62 @@ export function DpsPage() {
 
       {/* Readouts */}
       <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {SERIES.map((s) => (
-          <div
-            key={s.key}
-            className={`rounded border border-zinc-800 bg-zinc-900/40 p-3 ${
-              s.primary ? "col-span-1" : ""
-            }`}
-          >
-            <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-              <span
-                className="inline-block h-2.5 w-2.5 rounded-sm"
-                style={{ background: s.color }}
-              />
-              {s.label}
-            </div>
+        {SERIES.map((s) => {
+          const rate = dps.latestRates?.[s.key] ?? 0;
+          const level = levelFor(rate, dps.thresholds[s.key]);
+          return (
             <div
-              className={`mt-1 tabular-nums ${
-                s.primary ? "text-3xl font-semibold" : "text-xl"
-              }`}
-              style={{ color: s.color }}
+              key={s.key}
+              className={`rounded border bg-zinc-900/40 p-3 ${
+                level === "normal" ? "border-zinc-800" : LEVEL_BORDER[level]
+              } ${level === "danger" ? "motion-safe:animate-pulse" : ""}`}
             >
-              {dps.latestRates ? formatRate(dps.latestRates[s.key]) : "—"}
+              <div className="flex items-center gap-1.5 text-xs text-zinc-400">
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-sm"
+                  style={{ background: s.color }}
+                />
+                {s.label}
+                <span className="ml-auto">
+                  <ThresholdPopover
+                    seriesKey={s.key}
+                    label={s.label}
+                    thresholds={dps.thresholds}
+                    onChange={dps.setThresholds}
+                  />
+                </span>
+              </div>
+              <div
+                className={`mt-1 tabular-nums ${
+                  s.primary ? "text-3xl font-semibold" : "text-xl"
+                } ${level === "normal" ? "" : LEVEL_TEXT[level]}`}
+                style={level === "normal" ? { color: s.color } : undefined}
+              >
+                {dps.latestRates ? formatRate(dps.latestRates[s.key]) : "—"}
+              </div>
+              {s.key === "dpsOut" && (
+                <PrimaryExtras
+                  peak={dps.seriesPeaks.dpsOut}
+                  total={dps.seriesTotals.dpsOut}
+                  quality={dps.latestBucket?.hitsOut}
+                />
+              )}
+              {s.key === "dpsIn" && (
+                <PrimaryExtras
+                  peak={dps.seriesPeaks.dpsIn}
+                  total={dps.seriesTotals.dpsIn}
+                  quality={dps.latestBucket?.hitsIn}
+                />
+              )}
+              {!s.primary && (
+                <SessionExtras
+                  peak={dps.seriesPeaks[s.key]}
+                  total={dps.seriesTotals[s.key]}
+                />
+              )}
             </div>
-            {s.key === "dpsOut" && (
-              <PrimaryExtras
-                peak={dps.seriesPeaks.dpsOut}
-                total={dps.seriesTotals.dpsOut}
-                quality={dps.latestBucket?.hitsOut}
-              />
-            )}
-            {s.key === "dpsIn" && (
-              <PrimaryExtras
-                peak={dps.seriesPeaks.dpsIn}
-                total={dps.seriesTotals.dpsIn}
-                quality={dps.latestBucket?.hitsIn}
-              />
-            )}
-            {!s.primary && (
-              <SessionExtras
-                peak={dps.seriesPeaks[s.key]}
-                total={dps.seriesTotals[s.key]}
-              />
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Tackle warning — you can't warp out while scrambled/pointed, so
@@ -272,6 +286,7 @@ export function DpsPage() {
         ghost={ghost}
         onSelectBucket={selectBucket}
         eventsByBucket={eventsByBucket}
+        thresholds={dps.thresholds}
       />
 
       {/* Mining overview — only once this session has actually mined. History
