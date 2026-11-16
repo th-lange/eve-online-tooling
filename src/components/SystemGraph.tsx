@@ -29,7 +29,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { computeLayout, computeRadialLayout } from "./systemGraphLayout";
-import { SEC_HEX } from "../lib/security";
+import { SEC_COLOR } from "../lib/security";
 
 /** Visual class of a system node — drives its colour. */
 export type NodeKind = "wspace" | "hisec" | "lowsec" | "nullsec" | "unknown";
@@ -89,20 +89,20 @@ export interface SystemGraphEdge {
   label?: string;
 }
 
-/** Hex colour of a node by kind — used to fill it when selected. Sec-band
- *  colours are derived from `SEC_HEX` (the shared source of truth) rather
+/** Colour of a node by kind — used to fill it when selected. Sec-band
+ *  colours are derived from `SEC_COLOR` (the shared source of truth) rather
  *  than re-hardcoded; w-space/unknown have no security band, so those stay
  *  local. */
-const KIND_HEX: Record<NodeKind, string> = {
+const KIND_COLOR: Record<NodeKind, string> = {
   wspace: "var(--color-purple-500)",
-  ...SEC_HEX,
+  ...SEC_COLOR,
   unknown: "var(--color-zinc-400)",
 };
 
 /** Edge colour for a link touching a selected node — distinct from the
  *  default stargate grey and wormhole purple so a clicked system's
  *  connections stand out at a glance. */
-const SELECTED_EDGE_HEX = "var(--color-sky-400)"; // sky-400
+const SELECTED_EDGE_COLOR = "var(--color-sky-400)"; // sky-400
 
 /** Colour of a node's border/text by kind. */
 function kindClass(kind: NodeKind): string {
@@ -246,7 +246,7 @@ function killHeat(n: number, hotAt: number): string {
 function SystemNode({ data, selected }: NodeProps<Node<SystemNodeData>>) {
   const style: CSSProperties = {};
   // The node's own colour (explicit fill/accent, else its security band).
-  const bandColor = data.fill ?? data.accent ?? KIND_HEX[data.kind];
+  const bandColor = data.fill ?? data.accent ?? KIND_COLOR[data.kind];
   // A selected node fills with that band colour (keeping the region's colour,
   // just solid with contrasting text) — as does an explicitly-filled node.
   const filled = !!data.fill || (!!selected && !!bandColor);
@@ -659,7 +659,7 @@ export function SystemGraph({
         const highlighted =
           selectedIds.has(e.source) || selectedIds.has(e.target);
         const color = highlighted
-          ? SELECTED_EDGE_HEX
+          ? SELECTED_EDGE_COLOR
           : (e.color ??
             (e.variant === "wormhole"
               ? "var(--color-purple-500)"

@@ -43,19 +43,21 @@ const HIDDEN_KEY = STORAGE_KEYS.sidebarHidden;
 const HIDDEN_SEEDED_KEY = STORAGE_KEYS.sidebarHiddenSeeded;
 
 // Accent palette for tagging sidebar entries. Tailwind 400-level hues, spread
-// around the wheel so they stay distinct as small accents on the dark sidebar.
-const COLORS: { key: string; label: string; hex: string }[] = [
-  { key: "rose", label: "Rose", hex: "#fb7185" },
-  { key: "orange", label: "Orange", hex: "#fb923c" },
-  { key: "amber", label: "Amber", hex: "#fbbf24" },
-  { key: "lime", label: "Lime", hex: "#a3e635" },
-  { key: "emerald", label: "Emerald", hex: "#34d399" },
-  { key: "cyan", label: "Cyan", hex: "#22d3ee" },
-  { key: "sky", label: "Sky", hex: "#38bdf8" },
-  { key: "violet", label: "Violet", hex: "#a78bfa" },
-  { key: "fuchsia", label: "Fuchsia", hex: "#e879f9" },
+// around the wheel so they stay distinct as small accents. Referenced through
+// the palette variables, not hex, so the Light theme's remap reaches them
+// (#1265) — the stored value is the key, so saved colours are unaffected.
+const COLORS: { key: string; label: string; color: string }[] = [
+  { key: "rose", label: "Rose", color: "var(--color-rose-400)" },
+  { key: "orange", label: "Orange", color: "var(--color-orange-400)" },
+  { key: "amber", label: "Amber", color: "var(--color-amber-400)" },
+  { key: "lime", label: "Lime", color: "var(--color-lime-400)" },
+  { key: "emerald", label: "Emerald", color: "var(--color-emerald-400)" },
+  { key: "cyan", label: "Cyan", color: "var(--color-cyan-400)" },
+  { key: "sky", label: "Sky", color: "var(--color-sky-400)" },
+  { key: "violet", label: "Violet", color: "var(--color-violet-400)" },
+  { key: "fuchsia", label: "Fuchsia", color: "var(--color-fuchsia-400)" },
 ];
-const COLOR_HEX = new Map(COLORS.map((c) => [c.key, c.hex]));
+const COLOR_VAR = new Map(COLORS.map((c) => [c.key, c.color]));
 
 /** Keep only string entries — defends against hand-edited/corrupted storage. */
 function sanitizeIds(raw: unknown): string[] {
@@ -69,7 +71,7 @@ function sanitizeColors(raw: unknown): Record<string, string> {
   const out: Record<string, string> = {};
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
   for (const [id, key] of Object.entries(raw)) {
-    if (typeof key === "string" && COLOR_HEX.has(key)) out[id] = key;
+    if (typeof key === "string" && COLOR_VAR.has(key)) out[id] = key;
   }
   return out;
 }
@@ -535,7 +537,7 @@ function NavRow({
   onDropRow: () => void;
   onDragOverRow: () => void;
 }) {
-  const hex = color ? COLOR_HEX.get(color) : undefined;
+  const accent = color ? COLOR_VAR.get(color) : undefined;
   const { unseen, hasEntries } = useInfoAlerts();
   return (
     <div
@@ -598,11 +600,11 @@ function NavRow({
         title={module.description}
         draggable={false}
         style={({ isActive }) =>
-          hex
+          accent
             ? {
                 // Left accent bar in both states; tint the label when inactive.
-                boxShadow: `inset 3px 0 0 ${hex}`,
-                ...(isActive ? {} : { color: hex }),
+                boxShadow: `inset 3px 0 0 ${accent}`,
+                ...(isActive ? {} : { color: accent }),
               }
             : undefined
         }
@@ -755,7 +757,7 @@ function ColorPicker({
   onSetColor: (key: string | null) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const hex = color ? COLOR_HEX.get(color) : undefined;
+  const accent = color ? COLOR_VAR.get(color) : undefined;
   return (
     <div className="relative shrink-0">
       <button
@@ -768,7 +770,11 @@ function ColorPicker({
       >
         <span
           className="block h-3 w-3 rounded-full border border-zinc-600"
-          style={hex ? { backgroundColor: hex, borderColor: hex } : undefined}
+          style={
+            accent
+              ? { backgroundColor: accent, borderColor: accent }
+              : undefined
+          }
         />
       </button>
       {open && (
@@ -790,7 +796,7 @@ function ColorPicker({
                     ? "outline outline-2 outline-offset-2 outline-zinc-300"
                     : ""
                 }`}
-                style={{ backgroundColor: c.hex }}
+                style={{ backgroundColor: c.color }}
               />
             ))}
             <button

@@ -16,7 +16,7 @@ import {
   systemsByClade,
   systemsByRole,
 } from "./data";
-import { SEC_HEX, secBand } from "../../lib/security";
+import { SEC_COLOR, secBand } from "../../lib/security";
 import { CLADE_HEX, CLADE_KRAI, ROLE_HEX, systemVisual } from "./visual";
 import { homeTriangleLayout } from "./graph";
 import { POCHVEN_SYSTEMS_MAP_STALE_TIME_MS } from "../../lib/refreshIntervals";
@@ -53,7 +53,9 @@ function ExitBadges({
           className="rounded bg-zinc-800 px-1.5 py-0.5 text-xs"
           title={`${e.region} · ${e.lightYears.toFixed(2)} ly`}
         >
-          <span style={{ color: SEC_HEX[secBand(e.security)] }}>{e.name}</span>
+          <span style={{ color: SEC_COLOR[secBand(e.security)] }}>
+            {e.name}
+          </span>
           <span className="text-zinc-500"> {e.lightYears.toFixed(1)} ly</span>
         </span>
       ))}
@@ -326,7 +328,10 @@ export function PochvenSystemsPopover() {
                                 )
                                   .filter(([, n]) => n > 0)
                                   .map(([b, n]) => (
-                                    <span key={b} style={{ color: SEC_HEX[b] }}>
+                                    <span
+                                      key={b}
+                                      style={{ color: SEC_COLOR[b] }}
+                                    >
                                       {n} {b.replace("sec", "")}
                                     </span>
                                   ))}
