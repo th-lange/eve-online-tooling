@@ -72,6 +72,8 @@ export function ParamsPanel({ wb }: { wb: WorkbenchState }) {
     setRigCostPct,
     costIndexPct,
     setCostIndexPct,
+    activityIndexPcts,
+    setActivityIndexPcts,
     facilityTaxPct,
     setFacilityTaxPct,
     blueprintCostPerRun,
@@ -359,7 +361,12 @@ export function ParamsPanel({ wb }: { wb: WorkbenchState }) {
               min={0}
               max={10}
             />
-            <CostIndexField value={costIndexPct} onChange={setCostIndexPct} />
+            <CostIndexField
+              value={costIndexPct}
+              onChange={setCostIndexPct}
+              activityPcts={activityIndexPcts}
+              onActivityPctsChange={setActivityIndexPcts}
+            />
             <Num
               label="Facility tax %"
               value={facilityTaxPct}

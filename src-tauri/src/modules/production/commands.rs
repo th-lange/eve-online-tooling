@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::esi::EsiClient;
@@ -122,6 +122,14 @@ pub struct ProfitParams {
     pub owned_me: HashMap<i64, i64>,
     #[serde(default)]
     pub system_cost_index: f64,
+    /// Per-activity cost indices (#1274). `None` = use `system_cost_index`,
+    /// which is what a hand-entered index means.
+    #[serde(default)]
+    pub invention_cost_index: Option<f64>,
+    #[serde(default)]
+    pub copying_cost_index: Option<f64>,
+    #[serde(default)]
+    pub reaction_cost_index: Option<f64>,
     #[serde(default)]
     pub facility_tax: f64,
     #[serde(default)]
@@ -341,6 +349,9 @@ pub async fn production_profit(
     let invention_skill_multiplier = 1.0 + skill / 40.0 + 2.0 * skill / 30.0;
     let config = ProfitConfig {
         system_cost_index: params.system_cost_index,
+        invention_cost_index: params.invention_cost_index,
+        copying_cost_index: params.copying_cost_index,
+        reaction_cost_index: params.reaction_cost_index,
         facility_tax: params.facility_tax,
         material_basis: params.material_basis.unwrap_or(PriceBasis::SellPercentile),
         product_basis: params.product_basis.unwrap_or(PriceBasis::SellPercentile),
@@ -545,13 +556,47 @@ const COST_INDEX_MAX_STALE_SECS: u64 = 24 * 3600;
 #[derive(Default)]
 pub struct CostIndexLocks(KeyLocks<()>);
 
-/// The **manufacturing** cost index CCP applies to job fees in a solar system,
-/// from ESI `/industry/systems/` (public). The full list is fetched once and
-/// cached ~1h on disk, then looked up per system. `None` when the system isn't
-/// listed (e.g. wormhole space). Lets the production tab use the real index
-/// instead of a hand-entered guess. When the refresh fails but a map ≤24h past
-/// expiry sits on disk, the stale map is served instead of an error via the
-/// shared [`deduplicated_cached_fetch_with_stale_fallback`] helper (#774, #888).
+/// The cost indices CCP applies to job fees in a solar system — one per
+/// industry activity (#1274). An activity the system doesn't list is `None`;
+/// the engine then falls back to `manufacturing`.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CostIndices {
+    pub manufacturing: Option<f64>,
+    pub invention: Option<f64>,
+    pub copying: Option<f64>,
+    pub reaction: Option<f64>,
+}
+
+/// Pick the activities the engine prices out of one system's ESI index list.
+/// Activities EVE has but this app doesn't cost (ME/TE research) are dropped.
+fn cost_indices_of(indices: &[EsiCostIndex]) -> CostIndices {
+    let pick = |activity: &str| {
+        indices
+            .iter()
+            .find(|c| c.activity == activity)
+            .map(|c| c.cost_index)
+    };
+    CostIndices {
+        manufacturing: pick("manufacturing"),
+        invention: pick("invention"),
+        copying: pick("copying"),
+        reaction: pick("reaction"),
+    }
+}
+
+/// Cache key for the per-system index map. Versioned: the v1 cache held a bare
+/// `HashMap<i64, f64>` of manufacturing indices and would deserialize into
+/// nothing useful here.
+const COST_INDEX_CACHE_KEY: &str = "industry_cost_indices_v2";
+
+/// The cost indices CCP applies to job fees in a solar system, from ESI
+/// `/industry/systems/` (public). The full list is fetched once and cached ~1h
+/// on disk, then looked up per system. `None` when the system isn't listed
+/// (e.g. wormhole space). Lets the production tab use the real indices instead
+/// of a hand-entered guess. When the refresh fails but a map ≤24h past expiry
+/// sits on disk, the stale map is served instead of an error via the shared
+/// [`deduplicated_cached_fetch_with_stale_fallback`] helper (#774, #888).
 #[tauri::command]
 #[specta::specta]
 pub async fn production_system_cost_index(
@@ -559,30 +604,25 @@ pub async fn production_system_cost_index(
     esi: State<'_, EsiClient>,
     locks: State<'_, CostIndexLocks>,
     system_id: i64,
-) -> Result<Option<f64>, AppError> {
+) -> Result<Option<CostIndices>, AppError> {
     let dir = crate::storage::app_data_dir(&app)?;
-    let map: HashMap<i64, f64> = deduplicated_cached_fetch_with_stale_fallback(
+    let map: HashMap<i64, CostIndices> = deduplicated_cached_fetch_with_stale_fallback(
         &locks.0,
         &(),
-        || storage::cache_get(&dir, "industry_cost_indices"),
+        || storage::cache_get(&dir, COST_INDEX_CACHE_KEY),
         || async {
             let systems: Vec<EsiIndustrySystem> = esi
                 .get_json("/latest/industry/systems/", &[])
                 .await
                 .map_err(|e| e.to_string())?;
-            let map: HashMap<i64, f64> = systems
+            let map: HashMap<i64, CostIndices> = systems
                 .into_iter()
-                .filter_map(|s| {
-                    s.cost_indices
-                        .iter()
-                        .find(|c| c.activity == "manufacturing")
-                        .map(|c| (s.solar_system_id, c.cost_index))
-                })
+                .map(|s| (s.solar_system_id, cost_indices_of(&s.cost_indices)))
                 .collect();
-            let _ = storage::cache_put(&dir, "industry_cost_indices", &map, 3600);
+            let _ = storage::cache_put(&dir, COST_INDEX_CACHE_KEY, &map, 3600);
             Ok::<_, String>(map)
         },
-        || storage::cache_get_stale(&dir, "industry_cost_indices", COST_INDEX_MAX_STALE_SECS),
+        || storage::cache_get_stale(&dir, COST_INDEX_CACHE_KEY, COST_INDEX_MAX_STALE_SECS),
     )
     .await?;
     Ok(map.get(&system_id).copied())
@@ -602,6 +642,27 @@ pub fn specta_commands() -> tauri_specta::Commands<tauri::Wry> {
 #[cfg(test)]
 mod cost_index_fallback_tests {
     use super::*;
+
+    /// ESI lists every activity a system has; the engine prices four of them
+    /// and takes each from its own entry (#1274).
+    #[test]
+    fn activity_indices_are_taken_per_activity() {
+        let entry = |activity: &str, cost_index: f64| EsiCostIndex {
+            activity: activity.into(),
+            cost_index,
+        };
+        let got = cost_indices_of(&[
+            entry("researching_time_efficiency", 0.01),
+            entry("invention", 0.19),
+            entry("manufacturing", 0.05),
+            entry("copying", 0.02),
+        ]);
+        assert_eq!(got.manufacturing, Some(0.05));
+        assert_eq!(got.invention, Some(0.19));
+        assert_eq!(got.copying, Some(0.02));
+        // Not listed (wormhole/low-activity systems) → the engine falls back.
+        assert_eq!(got.reaction, None);
+    }
 
     /// Expired-but-recoverable cache + failing ESI → the stale map is served
     /// (moved/adapted onto the generalized helper for #888; was a pure test

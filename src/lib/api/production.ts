@@ -1,5 +1,6 @@
 import {
   commands,
+  type CostIndices,
   type Decryptor,
   type InventionBreakdown,
   type MaterialLine,
@@ -10,6 +11,7 @@ import {
 import { unwrapCommand } from "./common";
 
 export type {
+  CostIndices,
   Decryptor,
   InventionBreakdown,
   MaterialLine,
@@ -30,10 +32,12 @@ export async function productionDecryptors(): Promise<Decryptor[]> {
   return unwrapCommand(await commands.productionDecryptors());
 }
 
-/** The live manufacturing cost index for a solar system (ESI /industry/systems/,
- *  cached ~1h). `null` when the system isn't listed (e.g. wormhole space). */
+/** The live per-activity cost indices for a solar system (ESI
+ *  /industry/systems/, cached ~1h). `null` when the system isn't listed (e.g.
+ *  wormhole space); an activity the system doesn't list is `null` inside the
+ *  record and falls back to manufacturing in the engine. */
 export async function productionSystemCostIndex(
   systemId: number,
-): Promise<number | null> {
+): Promise<CostIndices | null> {
   return unwrapCommand(await commands.productionSystemCostIndex(systemId));
 }

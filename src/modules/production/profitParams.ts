@@ -1,4 +1,5 @@
 import type { OwnedBlueprint, PriceBasis, ProfitParams } from "../../lib/api";
+import type { ActivityIndexPcts } from "./CostIndexField";
 import { STRUCTURES, type ImportedBlueprint, type StructureKey } from "./types";
 
 /**
@@ -74,6 +75,12 @@ export function resolveStock(
   return useStock ? (stock ?? {}) : {};
 }
 
+/** A percentage input as the 0..1 fraction the engine takes; `undefined`/`null`
+ *  stays `null`, which tells the engine to use the manufacturing index. */
+function fraction(pct: number | null | undefined): number | null {
+  return pct == null ? null : pct / 100;
+}
+
 /**
  * Count settings keys that differ between the current pricing inputs and the
  * snapshot taken as of the last Calculate — how many pricing-relevant
@@ -107,6 +114,9 @@ export interface ComposeProfitParamsInput {
   stock: Record<number, number> | undefined;
   buildComponents: boolean;
   costIndexPct: number;
+  /** Per-activity indices (%) from the picked build system; `null` = charge
+   *  every activity at `costIndexPct`. */
+  activityIndexPcts: ActivityIndexPcts | null;
   facilityTaxPct: number;
   includeSaleCost: boolean;
   sellTaxPct: number;
@@ -150,6 +160,9 @@ export function composeProfitParams(
     stock: resolveStock(input.useStock, input.stock),
     buildComponents: input.buildComponents,
     systemCostIndex: input.costIndexPct / 100,
+    inventionCostIndex: fraction(input.activityIndexPcts?.invention),
+    copyingCostIndex: fraction(input.activityIndexPcts?.copying),
+    reactionCostIndex: fraction(input.activityIndexPcts?.reaction),
     facilityTax: input.facilityTaxPct / 100,
     includeSalesCost: input.includeSaleCost,
     salesTax: input.sellTaxPct / 100,

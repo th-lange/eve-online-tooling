@@ -104,7 +104,14 @@ pub struct ProfitConfig {
     pub material_basis: PriceBasis,
     pub product_basis: PriceBasis,
     /// Manufacturing system cost index (0..1), from ESI `/industry/systems/`.
+    /// Also the fallback for every activity below that has no index of its own.
     pub system_cost_index: f64,
+    /// Invention index (0..1); `None` falls back to [`Self::system_cost_index`].
+    pub invention_cost_index: Option<f64>,
+    /// Copying index (0..1); `None` falls back to [`Self::system_cost_index`].
+    pub copying_cost_index: Option<f64>,
+    /// Reaction index (0..1); `None` falls back to [`Self::system_cost_index`].
+    pub reaction_cost_index: Option<f64>,
     /// Structure/facility tax fraction applied on top of the job fee.
     pub facility_tax: f64,
     /// Sales tax fraction (applied to revenue when `include_sales_cost`).
@@ -137,6 +144,9 @@ impl Default for ProfitConfig {
             material_basis: PriceBasis::SellMin,
             product_basis: PriceBasis::SellMin,
             system_cost_index: 0.0,
+            invention_cost_index: None,
+            copying_cost_index: None,
+            reaction_cost_index: None,
             facility_tax: 0.0,
             sales_tax: 0.0,
             broker_fee: 0.0,
@@ -150,12 +160,31 @@ impl Default for ProfitConfig {
     }
 }
 
-/// EVE job install cost from EIV: system-cost-index (less structure/rig cost
-/// bonus) + facility tax + SCC surcharge, all on the estimated item value.
-fn job_fee(eiv: f64, config: &ProfitConfig) -> f64 {
-    eiv * config.system_cost_index * (1.0 - config.cost_bonus)
-        + eiv * config.facility_tax
-        + eiv * config.scc_surcharge
+impl ProfitConfig {
+    /// The cost index CCP charges a job of `activity` against. Each activity has
+    /// its own index in-game (#1274); the manufacturing one stands in whenever
+    /// the caller supplied no separate value (manual entry, wormhole systems).
+    fn index_for(&self, activity: Activity) -> f64 {
+        match activity {
+            Activity::Manufacturing => self.system_cost_index,
+            Activity::Invention => self.invention_index(),
+            Activity::Reaction => self.reaction_cost_index.unwrap_or(self.system_cost_index),
+        }
+    }
+
+    fn invention_index(&self) -> f64 {
+        self.invention_cost_index.unwrap_or(self.system_cost_index)
+    }
+
+    fn copying_index(&self) -> f64 {
+        self.copying_cost_index.unwrap_or(self.system_cost_index)
+    }
+}
+
+/// EVE job install cost from EIV: the activity's cost index (less structure/rig
+/// cost bonus) + facility tax + SCC surcharge, all on the estimated item value.
+fn job_fee(eiv: f64, index: f64, config: &ProfitConfig) -> f64 {
+    eiv * index * (1.0 - config.cost_bonus) + eiv * config.facility_tax + eiv * config.scc_surcharge
 }
 
 /// Science jobs (copying, invention) are charged on 2% of the EIV of the
@@ -163,8 +192,8 @@ fn job_fee(eiv: f64, config: &ProfitConfig) -> f64 {
 /// to that scaled base (EVE Ref `jobCostBase = 0.02 * EIV`).
 const SCIENCE_JOB_COST_BASE: f64 = 0.02;
 
-fn science_job_fee(eiv: f64, config: &ProfitConfig) -> f64 {
-    job_fee(eiv * SCIENCE_JOB_COST_BASE, config)
+fn science_job_fee(eiv: f64, index: f64, config: &ProfitConfig) -> f64 {
+    job_fee(eiv * SCIENCE_JOB_COST_BASE, index, config)
 }
 
 /// Per-material cost line for the UI drill-down.
@@ -241,7 +270,7 @@ fn build_unit_cost(
         materials_total += input.base_quantity as f64 * unit;
         eiv += eiv_unit_value(model) * input.base_quantity as f64;
     }
-    let job_fee = job_fee(eiv, config);
+    let job_fee = job_fee(eiv, config.index_for(step.activity), config);
     Some((materials_total + job_fee) / step.product_per_run as f64)
 }
 
@@ -445,7 +474,7 @@ pub fn evaluate_with_stock(
         });
     }
 
-    let job_fee_amount = job_fee(eiv, config);
+    let job_fee_amount = job_fee(eiv, config.index_for(step.activity), config);
 
     // Revenue from selling the product.
     let units_produced = step.product_per_run * runs;
@@ -499,15 +528,16 @@ pub fn evaluate_with_stock(
             // materials of the INVENTED blueprint's product (this step's inputs at
             // base quantity), not the datacores/decryptor/relic (those are consumed
             // material costs only). 2% science base via science_job_fee().
-            // Approximation: config.system_cost_index is the manufacturing cost
-            // index; invention/copy have their own per-activity indices in-game
-            // that this engine doesn't fetch.
+            // Invention is charged against the *invention* cost index, not the
+            // manufacturing one (#1274); the copy leg below uses the copying
+            // index. Both fall back to manufacturing when unknown.
             let invention_eiv: f64 = step
                 .inputs
                 .iter()
                 .map(|m| eiv_unit_value(prices.get(&m.type_id)) * m.base_quantity as f64)
                 .sum();
-            let invention_job_fee = science_job_fee(invention_eiv, config);
+            let invention_job_fee =
+                science_job_fee(invention_eiv, config.invention_index(), config);
             // Copy fee for the T1 BPC consumed each attempt (one run): EIV of the
             // T1 source product's manufacturing materials, 2% science base.
             let copy_eiv: f64 = inv
@@ -515,7 +545,7 @@ pub fn evaluate_with_stock(
                 .iter()
                 .map(|m| eiv_unit_value(prices.get(&m.type_id)) * m.base_quantity as f64)
                 .sum();
-            let copy_fee = science_job_fee(copy_eiv, config);
+            let copy_fee = science_job_fee(copy_eiv, config.copying_index(), config);
             let attempt_cost = datacore_cost + invention_job_fee + copy_fee;
             let probability = (inv.probability * config.invention_skill_multiplier).min(1.0);
             let yielded = probability * inv.runs_per_success as f64;
@@ -674,7 +704,95 @@ mod tests {
             ..Default::default()
         };
         // 1000 EIV: 1000×0.05×0.97 + 1000×0.01 + 1000×0.04 = 48.5 + 10 + 40 = 98.5.
-        assert!((job_fee(1000.0, &cfg) - 98.5).abs() < 1e-9);
+        assert!((job_fee(1000.0, cfg.system_cost_index, &cfg) - 98.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn invention_and_copy_use_their_own_cost_indices() {
+        // Same step as above, but invention/copying carry indices of their own
+        // (#1274): invention 20%, copying 1%, manufacturing 5%.
+        let step = science_step(vec![(400, 2)], vec![(500, 3)], vec![(600, 4)]);
+        let prices = HashMap::from([
+            (400, price(400, Some(55.0), Some(50.0), None)),
+            (500, price(500, Some(22.0), Some(20.0), None)),
+            (600, price(600, Some(30.0), Some(25.0), None)),
+            (101, price(101, Some(1.0), Some(1.0), None)),
+        ]);
+        let cfg = ProfitConfig {
+            system_cost_index: 0.05,
+            invention_cost_index: Some(0.20),
+            copying_cost_index: Some(0.01),
+            facility_tax: 0.01,
+            scc_surcharge: 0.04,
+            ..Default::default()
+        };
+        let inv = evaluate(&step, 1, 2, &prices, &cfg)
+            .invention
+            .expect("invention breakdown present");
+        // invention_eiv = 4×25 = 100 → jcb 2.0, rate 0.20 + 0.01 + 0.04 = 0.25.
+        approx(inv.invention_job_fee, 2.0 * 0.25);
+        // copy_eiv = 3×20 = 60 → jcb 1.2, rate 0.01 + 0.01 + 0.04 = 0.06.
+        approx(inv.copy_fee, 1.2 * 0.06);
+    }
+
+    #[test]
+    fn missing_activity_indices_fall_back_to_manufacturing() {
+        let step = science_step(vec![(400, 2)], vec![(500, 3)], vec![(600, 4)]);
+        let prices = HashMap::from([
+            (400, price(400, Some(55.0), Some(50.0), None)),
+            (500, price(500, Some(22.0), Some(20.0), None)),
+            (600, price(600, Some(30.0), Some(25.0), None)),
+            (101, price(101, Some(1.0), Some(1.0), None)),
+        ]);
+        let manual = ProfitConfig {
+            system_cost_index: 0.05,
+            facility_tax: 0.01,
+            scc_surcharge: 0.04,
+            ..Default::default()
+        };
+        let spelled_out = ProfitConfig {
+            invention_cost_index: Some(0.05),
+            copying_cost_index: Some(0.05),
+            reaction_cost_index: Some(0.05),
+            ..manual.clone()
+        };
+        let a = evaluate(&step, 1, 2, &prices, &manual).invention.unwrap();
+        let b = evaluate(&step, 1, 2, &prices, &spelled_out)
+            .invention
+            .unwrap();
+        approx(a.invention_job_fee, b.invention_job_fee);
+        approx(a.copy_fee, b.copy_fee);
+    }
+
+    #[test]
+    fn reaction_sub_steps_are_charged_at_the_reaction_index() {
+        // A reaction sub-build: 10× gas (sell 5, adjusted 4) → 1 composite.
+        let reaction = BuildStep {
+            activity: Activity::Reaction,
+            blueprint_type_id: 900,
+            product_type_id: 700,
+            product_name: "Composite".into(),
+            product_per_run: 1,
+            inputs: vec![InputLine {
+                type_id: 800,
+                name: "Gas".into(),
+                base_quantity: 10,
+                sourcing: Sourcing::Buy,
+            }],
+            invention: None,
+        };
+        let prices = HashMap::from([(800, price(800, Some(5.0), Some(4.0), None))]);
+        let cfg = ProfitConfig {
+            system_cost_index: 0.05,
+            reaction_cost_index: Some(0.20),
+            ..Default::default()
+        };
+        // materials 10×5 = 50; EIV 10×4 = 40; job fee at the *reaction* index
+        // = 40×0.20 = 8 (it would be 2 at the manufacturing index).
+        approx(
+            build_unit_cost(&reaction, &prices, &cfg, MAX_BUILD_DEPTH).unwrap(),
+            58.0,
+        );
     }
 
     #[test]
