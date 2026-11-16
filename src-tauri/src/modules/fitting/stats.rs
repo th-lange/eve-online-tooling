@@ -17,7 +17,7 @@ use super::engine::cycle::cycle_of;
 use super::engine::damage::{damage, Weapon};
 use super::engine::fighter;
 use super::engine::heat::{burnout_seconds, rack_heat, HeatSource};
-use super::engine::navigation::{navigation, prop_velocity, targeting};
+use super::engine::navigation::{lock_time_secs, navigation, prop_velocity, targeting};
 use super::engine::projection::{
     apply_projection, apply_subsystem_slots, projected_from_attrs, ProjectedInput,
 };
@@ -29,8 +29,8 @@ use super::engine::warfare_buffs::{self, AppliedBuff, FleetBoost};
 use super::target_archetypes;
 use super::types::{
     AbyssalWeatherSelection, ArchetypeDps, CapStats, DpsBreakdown, EwTag, FighterAbilityStats, Fit,
-    FitItem, FitProblem, FitStats, ModuleState, NavStats, ResourceUsage, Severity, SlotKind,
-    TankStats, TargetProfile, TargetStats, WeaponRange,
+    FitItem, FitProblem, FitStats, LockTime, ModuleState, NavStats, ResourceUsage, Severity,
+    SlotKind, TankStats, TargetProfile, TargetStats, WeaponRange,
 };
 use crate::sde::{Sde, ShipLayout};
 use crate::storage;
@@ -461,13 +461,13 @@ pub(super) fn run_dogma(
         (None, Vec::new())
     };
 
-    // Applied DPS against each of the 4 built-in hull-class target
-    // archetypes (#890), reusing this same resolve pass — the archetype
-    // library itself is cached per SDE generation (rebuilding it is a
-    // handful of SDE queries, not free, but the SDE almost never changes).
-    let archetype_dps: Vec<ArchetypeDps> = {
+    // The built-in hull-class target archetypes (#890), cached per SDE
+    // generation (rebuilding is a handful of SDE queries, not free, but the
+    // SDE almost never changes). They feed both the applied-DPS rows and the
+    // reference lock times (#1268), so the sigs stay in one place.
+    let archetypes = {
         let generation = crate::sde::generation_id(dir).unwrap_or(0);
-        let archetypes = storage::cache_get_versioned::<Vec<target_archetypes::TargetArchetype>>(
+        storage::cache_get_versioned::<Vec<target_archetypes::TargetArchetype>>(
             dir,
             ARCHETYPE_CACHE_KEY,
             generation,
@@ -482,24 +482,26 @@ pub(super) fn run_dogma(
                 generation,
             );
             built
-        });
-        archetypes
-            .iter()
-            .map(|a| ArchetypeDps {
-                id: a.id.clone(),
-                label: a.label.clone(),
-                applied_dps: applied_dps_of(
-                    &resolved,
-                    &module_items,
-                    &drone_items,
-                    &drone_active_counts,
-                    &a.target,
-                    &weapon_ranges,
-                )
-                .total,
-            })
-            .collect()
+        })
     };
+
+    // Applied DPS against each archetype, reusing this same resolve pass.
+    let archetype_dps: Vec<ArchetypeDps> = archetypes
+        .iter()
+        .map(|a| ArchetypeDps {
+            id: a.id.clone(),
+            label: a.label.clone(),
+            applied_dps: applied_dps_of(
+                &resolved,
+                &module_items,
+                &drone_items,
+                &drone_active_counts,
+                &a.target,
+                &weapon_ranges,
+            )
+            .total,
+        })
+        .collect();
 
     // Overheat burnout estimate (#874), scattered back to `fit.items` order —
     // same "next() over the module-list positions" pattern as drone_active/
@@ -596,12 +598,27 @@ pub(super) fn run_dogma(
                 s.get(552),
             )
         },
-        targeting: targeting(
-            s.get(192),
-            s.get(76),
-            s.get(564),
-            [s.get(208), s.get(209), s.get(210), s.get(211)],
-        ),
+        targeting: {
+            let scan_res = s.get(564);
+            TargetStats {
+                target_lock_time: target_profile
+                    .and_then(|t| lock_time_secs(scan_res, t.sig_radius)),
+                lock_times: archetypes
+                    .iter()
+                    .map(|a| LockTime {
+                        label: a.label.clone(),
+                        sig_radius: a.target.sig_radius,
+                        seconds: lock_time_secs(scan_res, a.target.sig_radius),
+                    })
+                    .collect(),
+                ..targeting(
+                    s.get(192),
+                    s.get(76),
+                    scan_res,
+                    [s.get(208), s.get(209), s.get(210), s.get(211)],
+                )
+            }
+        },
         drone_active: drone_active_full,
         drone_max_active: drone_max_active_full,
         applied_dps,

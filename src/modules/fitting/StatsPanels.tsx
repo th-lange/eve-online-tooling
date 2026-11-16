@@ -12,6 +12,7 @@ import {
   type NavStats,
   type ResourceUsage,
   type TankStats,
+  type TargetStats,
 } from "../../lib/api";
 import { InlineError } from "../../components/InlineError";
 import { formatDuration, formatInt, formatIsk } from "../../lib/format";
@@ -876,6 +877,46 @@ export function NavigationPanel({
       </div>
     </div>
   );
+}
+
+/** Targeting section: scan resolution, simultaneous locks, and how long this
+ *  fit takes to lock the selected target plus each hull-class archetype
+ *  (#1268) — "can I lock that interceptor before it lands tackle". */
+export function TargetingPanel({ targeting }: { targeting: TargetStats }) {
+  return (
+    <div className="space-y-1 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3">
+      <h3 className="text-xs uppercase tracking-wide text-zinc-500">
+        Targeting
+      </h3>
+      <div className="text-xs text-zinc-400">
+        {Math.round(targeting.scanResolution)} mm · {targeting.maxTargets} locks
+        {targeting.targetLockTime != null &&
+          ` · target ${lockSecs(targeting.targetLockTime)}`}
+      </div>
+      {targeting.lockTimes.length > 0 && (
+        <ul className="space-y-0.5 text-[11px] text-zinc-500">
+          {targeting.lockTimes.map((l) => (
+            <li key={l.label} className="flex justify-between gap-2">
+              <span className="truncate">
+                {l.label}{" "}
+                <span className="text-zinc-600">
+                  {Math.round(l.sigRadius)}m
+                </span>
+              </span>
+              <span className="tabular-nums text-zinc-400">
+                {lockSecs(l.seconds)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** Lock time to one decimal; "—" when the fit can't lock at all. */
+function lockSecs(seconds: number | null) {
+  return seconds == null ? "—" : `${seconds.toFixed(1)}s`;
 }
 
 /** Price section: an on-demand "Price fit" button plus the last buy/sell

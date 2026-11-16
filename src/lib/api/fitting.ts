@@ -350,13 +350,25 @@ export interface NavStats {
   signatureRadius: number;
 }
 
+/** How long the fit takes to lock one reference target (#1268). */
+export interface LockTime {
+  label: string;
+  sigRadius: number;
+  /** `null` when the fit has no scan resolution to lock with. */
+  seconds: number | null;
+}
+
 /** Targeting: locks, range, scan resolution and sensor strength
- * `[radar, ladar, magnetometric, gravimetric]`. */
+ * `[radar, ladar, magnetometric, gravimetric]`, plus lock times. */
 export interface TargetStats {
   maxTargets: number;
   lockRange: number;
   scanResolution: number;
   sensorStrength: [number, number, number, number];
+  /** Lock time against the selected target profile; `null` without one. */
+  targetLockTime: number | null;
+  /** Lock times against the built-in hull-class archetypes. */
+  lockTimes: LockTime[];
 }
 
 /** Computed result of simulating a fit (resources + validation + dogma stats). */

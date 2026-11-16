@@ -66,12 +66,61 @@ pub fn targeting(
         lock_range,
         scan_resolution,
         sensor_strength,
+        // Lock times need a target; the caller fills them in (#1268).
+        target_lock_time: None,
+        lock_times: Vec::new(),
     }
+}
+
+/// EVE's maximum lock time: nothing takes longer, however small the target or
+/// coarse the sensors.
+const MAX_LOCK_TIME_SECS: f64 = 1800.0;
+
+/// Seconds to lock a `target_sig` metre target with `scan_res` mm of scan
+/// resolution: `40000 / (scanRes · asinh(sig)²)`, capped at
+/// [`MAX_LOCK_TIME_SECS`] (EVE's own formula, same as PYFA's `eos/calc.py`).
+///
+/// `scan_res` is read finalized, so skills, sensor boosters, remote boosts and
+/// damps are already in it. `None` when either input is non-positive or NaN —
+/// a fit damped to zero scan resolution never locks, and JSON cannot carry an
+/// infinity, so the UI shows "—" instead.
+pub fn lock_time_secs(scan_res: f64, target_sig: f64) -> Option<f64> {
+    // `is_sign_positive` alone would pass NaN and 0.0, hence the explicit
+    // finite + non-zero check (clippy rejects `!(x > 0.0)` on floats).
+    if !scan_res.is_finite() || !target_sig.is_finite() {
+        return None;
+    }
+    if scan_res <= 0.0 || target_sig <= 0.0 {
+        return None;
+    }
+    let seconds = 40_000.0 / (scan_res * target_sig.asinh().powi(2));
+    Some(seconds.min(MAX_LOCK_TIME_SECS))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lock_time_matches_the_eve_formula() {
+        // 300 mm scan res against a 35 m frigate:
+        // 40000 / (300 · asinh(35)²) = 40000 / (300 · 4.24889²) ≈ 7.39 s.
+        let t = lock_time_secs(300.0, 35.0).expect("locks");
+        assert!((t - 7.386).abs() < 0.01, "lock time = {t}, want ~7.39");
+        // A bigger target locks faster, a coarser sensor slower.
+        assert!(lock_time_secs(300.0, 400.0).unwrap() < t);
+        assert!(lock_time_secs(150.0, 35.0).unwrap() > t);
+    }
+
+    #[test]
+    fn lock_time_caps_and_guards_its_inputs() {
+        // Damped to nothing / no target → no number at all, not an infinity.
+        assert_eq!(lock_time_secs(0.0, 35.0), None);
+        assert_eq!(lock_time_secs(300.0, 0.0), None);
+        assert_eq!(lock_time_secs(f64::NAN, 35.0), None);
+        // Vanishing scan resolution hits EVE's 1800 s ceiling, not beyond.
+        assert_eq!(lock_time_secs(1e-9, 35.0), Some(1800.0));
+    }
 
     #[test]
     fn non_finite_prop_input_does_not_panic() {
