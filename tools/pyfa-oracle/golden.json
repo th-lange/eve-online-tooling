@@ -31,5 +31,35 @@
     "capStatePct": 100,
     "maxVelocity": 243.75,
     "alignTime": 5.817
+  },
+  {
+    "label": "Rifter + Reactive Armor Hardener, profile (30, 15, 15, 40)",
+    "profile": [30, 15, 15, 40],
+    "armorResonance": [0.376, 0.65, 0.75, 0.414]
+  },
+  {
+    "label": "Rifter + Reactive Armor Hardener, profile (25, 25, 25, 25)",
+    "profile": [25, 25, 25, 25],
+    "armorResonance": [0.4, 0.60125, 0.615, 0.5895]
+  },
+  {
+    "label": "Rifter + Reactive Armor Hardener, profile (100, 0, 0, 0)",
+    "profile": [100, 0, 0, 0],
+    "armorResonance": [0.16, 0.65, 0.75, 0.9]
+  },
+  {
+    "label": "Rifter + 1x Small Armor Repairer II",
+    "capStable": false,
+    "capState": 175.5
+  },
+  {
+    "label": "Rifter + 2x Small Armor Repairer II",
+    "capStable": false,
+    "capState": 24.75
+  },
+  {
+    "label": "Rifter + 3x Small Armor Repairer II",
+    "capStable": false,
+    "capState": 13.5
   }
 ]

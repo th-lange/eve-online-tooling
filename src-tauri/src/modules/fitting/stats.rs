@@ -1456,7 +1456,9 @@ pub(super) fn tank_of(
             store.get(269),
             store.get(268),
         ];
-        let shifted = rah_shift(base, shift_amt, profile);
+        // The armour's other resists weight which type actually lands
+        // hardest, exactly as PYFA orders its RAH cycle (#1272).
+        let shifted = rah_shift(base, shift_amt, profile, armor.resonance);
         for (r, shift) in armor.resonance.iter_mut().zip(shifted) {
             *r *= shift;
         }
