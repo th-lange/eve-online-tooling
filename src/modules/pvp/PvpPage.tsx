@@ -13,7 +13,7 @@ import {
   type AmmoLine,
 } from "../../lib/api";
 import { pvpKeys } from "../../lib/queryKeys";
-import { formatInt, iskShort } from "../../lib/format";
+import { compactNumber, formatInt } from "../../lib/format";
 import { useFightOverlay } from "./fightOverlayContext";
 import { Page, PageHeader } from "../../components/page";
 import { Stat } from "../../components/Stat";
@@ -490,13 +490,13 @@ function PilotCard({ p, fitLimit }: { p: PvpStats; fitLimit: number }) {
         />
         <Stat
           label="ISK destroyed"
-          value={iskShort(p.iskDestroyed)}
+          value={compactNumber(p.iskDestroyed)}
           dense
           accent="text-emerald-400"
         />
         <Stat
           label="ISK lost"
-          value={iskShort(p.iskLost)}
+          value={compactNumber(p.iskLost)}
           dense
           accent="text-red-400"
         />

@@ -144,8 +144,10 @@ export type BucketSeries = {
   get: (b: DpsBucket) => number;
 };
 
-// Same palette/ordering as SERIES, keyed to bucket sum fields.
-const BUCKET_FIELD: Record<SeriesKey, keyof DpsBucket> = {
+/** Same palette/ordering as SERIES, keyed to the bucket's absolute sum field —
+ *  the one place the series ↔ field mapping lives (the charts read rates from
+ *  it, the readouts sum it for session totals). */
+export const BUCKET_FIELD: Record<SeriesKey, keyof DpsBucket> = {
   dpsOut: "damageOut",
   dpsIn: "damageIn",
   logiOut: "repOut",

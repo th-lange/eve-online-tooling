@@ -331,9 +331,83 @@ describe("DpsPage — 5s bucket time grid (#983)", () => {
       screen.queryByText(/Waiting for the first 5s bucket/),
     ).not.toBeInTheDocument();
     // Both panels (Outgoing + Incoming, default side layout) show the grid,
-    // and the out chart's peak reads the bucket rate (100 hp / 5 s = 20/s).
+    // and the out chart's axis max reads the bucket rate (100 hp / 5 s = 20/s).
     expect(screen.getAllByText(/5s grid/).length).toBe(2);
-    expect(screen.getByText("peak 20")).toBeInTheDocument();
+    expect(screen.getByText("axis max 20")).toBeInTheDocument();
+  });
+});
+
+describe("DpsPage — session totals and max (#1269)", () => {
+  /** Three buckets: 100 damage out each (60 of it from Alpha), 50 rep in. */
+  function session(): DpsBucket[] {
+    return [1000, 1005, 1010].map((start) => ({
+      ...makeBucket(start),
+      repIn: 50,
+      byPilot: [
+        { name: "Alpha", dpsOut: 12, dpsIn: 0 },
+        { name: "Bravo", dpsOut: 8, dpsIn: 0 },
+      ],
+    }));
+  }
+
+  it("sums every series over the session and shows its busiest bucket", async () => {
+    mockInvoke({ auth_characters: () => [] });
+    renderWithQuery(<DpsPage />);
+    await waitFor(() => expect(bucketsHandler).toBeDefined());
+    act(() => bucketsHandler!(session()));
+
+    // DPS out: 3 × 100 damage = 300 total, busiest bucket 100/5 s = 20/s.
+    const dpsOut = screen.getByText("DPS out").closest("div")!.parentElement!;
+    expect(dpsOut).toHaveTextContent("total 300");
+    expect(dpsOut).toHaveTextContent("max 20");
+    // Logi in is a non-primary card and carries the same two numbers.
+    const logiIn = screen.getByText("Logi in").closest("div")!.parentElement!;
+    expect(logiIn).toHaveTextContent("total 150");
+    expect(logiIn).toHaveTextContent("max 10");
+    // A series that never fired stays at zero rather than going blank.
+    const capOut = screen
+      .getByText("Cap xfer out")
+      .closest("div")!.parentElement!;
+    expect(capOut).toHaveTextContent("total 0");
+  });
+
+  it("scopes the damage totals to the selected pilot", async () => {
+    mockInvoke({ auth_characters: () => [] });
+    renderWithQuery(<DpsPage />);
+    await waitFor(() => expect(bucketsHandler).toBeDefined());
+    act(() => bucketsHandler!(session()));
+
+    fireEvent.click(screen.getByRole("button", { name: "Alpha" }));
+    // Alpha's 12/s over three 5 s buckets = 180 of the 300 dealt.
+    const dpsOut = screen.getByText("DPS out").closest("div")!.parentElement!;
+    expect(dpsOut).toHaveTextContent("total 180");
+    expect(dpsOut).toHaveTextContent("max 12");
+    // Logi has no per-pilot breakdown, so it stays session-wide.
+    const logiIn = screen.getByText("Logi in").closest("div")!.parentElement!;
+    expect(logiIn).toHaveTextContent("total 150");
+  });
+
+  it("clears the totals when a new capture starts", async () => {
+    mockInvoke({
+      auth_characters: () => [],
+      eve_default_log_dir: () => "/logs",
+      dps_start: () => null,
+    });
+    renderWithQuery(<DpsPage />);
+    await waitFor(() => expect(bucketsHandler).toBeDefined());
+    act(() => bucketsHandler!(session()));
+    expect(
+      screen.getByText("DPS out").closest("div")!.parentElement!,
+    ).toHaveTextContent("total 300");
+
+    // Starting a capture drops the previous session's buckets, so the totals
+    // go with them rather than carrying into the new fight.
+    fireEvent.click(await screen.findByRole("button", { name: /Start/ }));
+    await waitFor(() =>
+      expect(
+        screen.getByText("DPS out").closest("div")!.parentElement!,
+      ).toHaveTextContent("total 0"),
+    );
   });
 });
 

@@ -61,9 +61,9 @@ describe("DpsChartContainer — bucket time grid (#984)", () => {
   it("draws both panels from the fixed 5s buckets", () => {
     renderCharts();
     // Both panels (Outgoing + Incoming in side layout) carry the grid tag,
-    // and the out chart's peak is the bucket rate (50 hp / 5 s = 10/s).
+    // and the out chart's axis max is the bucket rate (50 hp / 5 s = 10/s).
     expect(screen.getAllByText(/5s grid/).length).toBe(2);
-    expect(screen.getByText("peak 10")).toBeInTheDocument();
+    expect(screen.getByText("axis max 10")).toBeInTheDocument();
   });
 
   it("labels the log position with the cursor's minute", () => {

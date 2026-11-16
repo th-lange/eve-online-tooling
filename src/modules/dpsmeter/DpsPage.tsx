@@ -11,7 +11,7 @@ import {
   pendingGhostBucket,
 } from "./dpsMeterShared";
 import { FightBreakdown, TackleTags } from "./FightBreakdown";
-import { PrimaryExtras } from "./HitQualityIndicators";
+import { PrimaryExtras, SessionExtras } from "./HitQualityIndicators";
 import { LogFilePanel } from "./LogFilePanel";
 import { MiningPanel } from "./MiningPanel";
 import { OverviewExportPanel } from "./OverviewExportPanel";
@@ -168,14 +168,22 @@ export function DpsPage() {
             </div>
             {s.key === "dpsOut" && (
               <PrimaryExtras
-                peak={dps.peakOut}
+                peak={dps.seriesPeaks.dpsOut}
+                total={dps.seriesTotals.dpsOut}
                 quality={dps.latestBucket?.hitsOut}
               />
             )}
             {s.key === "dpsIn" && (
               <PrimaryExtras
-                peak={dps.peakIn}
+                peak={dps.seriesPeaks.dpsIn}
+                total={dps.seriesTotals.dpsIn}
                 quality={dps.latestBucket?.hitsIn}
+              />
+            )}
+            {!s.primary && (
+              <SessionExtras
+                peak={dps.seriesPeaks[s.key]}
+                total={dps.seriesTotals[s.key]}
               />
             )}
           </div>

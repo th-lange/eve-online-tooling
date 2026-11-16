@@ -16,8 +16,9 @@ export function formatInt(n: number | null | undefined): string {
   return int.format(n);
 }
 
-/** Compact ISK (52.3B, 1.4M) for dense stat grids. */
-export function iskShort(n: number): string {
+/** Compact magnitude (52.3B, 1.4M) for dense stat grids: ISK, damage, HP, m³ —
+ *  anything whose exact digits don't matter at a glance. */
+export function compactNumber(n: number): string {
   const abs = Math.abs(n);
   if (abs >= 1e12) return `${(n / 1e12).toFixed(1)}T`;
   if (abs >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
