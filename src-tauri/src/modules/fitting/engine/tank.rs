@@ -71,19 +71,29 @@ const RAH_MAX_ITERATIONS: usize = 1000;
 /// even against a single damage type) each donate up to `shift_amt` of
 /// resonance (capped so none exceeds 1.0, i.e. 0% resist) to whichever
 /// resonance(s) took the *most*, split evenly across recipients. Resonance
-/// sum is conserved every cycle. Ties break by array order (`[em, thermal,
-/// kinetic, explosive]`), mirroring the module's own fixed attribute
-/// enumeration order in-game — under a perfectly even profile this makes
-/// `em`/`thermal` donate first, a real (if arbitrary-looking) quirk of the
-/// mechanic, not a bug in the port.
-fn rah_step(r: [f64; 4], shift_amt: f64, profile: &DamageProfile) -> [f64; 4] {
-    let received: [f64; 4] = std::array::from_fn(|i| profile.0[i] * r[i]);
+/// sum is conserved every cycle.
+///
+/// Damage taken is the profile **after the armour's other resists**
+/// (`incoming`, the ship's armour resonance without this module) times the
+/// RAH's own current resonance — PYFA's `baseDamageTaken` ordering (#1272).
+/// A hull with uneven armour resists, or a Damage Control, therefore shifts
+/// toward the type that actually lands hardest, not the raw profile's peak.
+///
+/// Ties break in the module's in-game attribute enumeration order,
+/// `[em, explosive, kinetic, thermal]` (PYFA's `damagePattern_tuples`), so
+/// under a perfectly even profile `em`/`explosive` donate first — a real, if
+/// arbitrary-looking, quirk of the mechanic.
+fn rah_step(r: [f64; 4], shift_amt: f64, profile: &DamageProfile, incoming: [f64; 4]) -> [f64; 4] {
+    let received: [f64; 4] = std::array::from_fn(|i| profile.0[i] * incoming[i] * r[i]);
     let donors = received.iter().filter(|&&d| d == 0.0).count().max(2);
     let recipients = 4 - donors;
     if recipients == 0 {
         return r; // degenerate all-zero profile: nothing to shift toward
     }
-    let mut order = [0usize, 1, 2, 3];
+    // Indices are `[em, thermal, kinetic, explosive]`; PYFA enumerates them
+    // em, explosive, kinetic, thermal before its stable sort, and that order
+    // decides every tie.
+    let mut order = [0usize, 3, 2, 1];
     order.sort_by(|&a, &b| received[a].total_cmp(&received[b]));
     let mut donated = 0.0;
     let mut next = r;
@@ -116,15 +126,21 @@ fn round9(r: [f64; 4]) -> [f64; 4] {
 /// `base_resonance` is the module's own unshifted per-type resonance
 /// (`[em, thermal, kinetic, explosive]` — a base RAH starts at `[0.85; 4]`,
 /// 15% resist each); `shift_amt` is the module's `resistanceShiftAmount`
-/// (attribute 1849) ÷ 100.
-pub fn rah_shift(base_resonance: [f64; 4], shift_amt: f64, profile: &DamageProfile) -> [f64; 4] {
+/// (attribute 1849) ÷ 100; `incoming` is the ship's armour resonance without
+/// this module, which weights the damage each type actually lands (#1272).
+pub fn rah_shift(
+    base_resonance: [f64; 4],
+    shift_amt: f64,
+    profile: &DamageProfile,
+    incoming: [f64; 4],
+) -> [f64; 4] {
     if shift_amt <= 0.0 {
         return base_resonance;
     }
     let mut r = base_resonance;
     let mut history = vec![round9(r)];
     for _ in 0..RAH_MAX_ITERATIONS {
-        let next = rah_step(r, shift_amt, profile);
+        let next = rah_step(r, shift_amt, profile, incoming);
         let rounded = round9(next);
         if let Some(start) = history.iter().position(|&s| s == rounded) {
             let cycle = &history[start..];
@@ -188,7 +204,7 @@ mod tests {
     fn rah_step_tolerates_nan_resonance() {
         let profile = DamageProfile([0.25; 4]);
         // Must not panic on the sort even with a poisoned resonance.
-        let _ = rah_step([f64::NAN, 0.5, 0.5, 0.5], 0.06, &profile);
+        let _ = rah_step([f64::NAN, 0.5, 0.5, 0.5], 0.06, &profile, [1.0; 4]);
     }
 
     #[test]
@@ -310,7 +326,7 @@ mod tests {
     #[test]
     fn rah_shift_no_shift_amount_is_a_no_op() {
         let base = [0.85; 4];
-        let r = rah_shift(base, 0.0, &DamageProfile::default());
+        let r = rah_shift(base, 0.0, &DamageProfile::default(), [1.0; 4]);
         assert_eq!(r, base);
     }
 
@@ -326,7 +342,7 @@ mod tests {
         // give), EM ->0.40; cycle 4 donors exhausted, no further donation.
         let base = [0.85; 4];
         let em_only = DamageProfile([1.0, 0.0, 0.0, 0.0]);
-        let shifted = rah_shift(base, 0.06, &em_only);
+        let shifted = rah_shift(base, 0.06, &em_only, [1.0; 4]);
         assert!((shifted[0] - 0.4).abs() < 1e-9, "em resonance: {shifted:?}");
         assert!(
             (shifted[1] - 1.0).abs() < 1e-9,
@@ -347,23 +363,48 @@ mod tests {
     #[test]
     fn rah_shift_even_profile_oscillates_and_averages_by_tie_break_order() {
         // Under an even 25/25/25/25 split every type receives identical
-        // damage, so the tie-break (array order `[em, thermal, kinetic,
-        // explosive]`) always picks the same two donors/recipients: cycle 1
-        // donates em/thermal 0.85->0.91 and drains kinetic/explosive
-        // 0.85->0.79; cycle 2 (now kinetic/explosive are "least damaged")
-        // donates them 0.79->0.85 and drains em/thermal 0.91->0.85, landing
-        // exactly back on baseline — a period-2 loop {A, baseline} forever.
-        // The fixed point is the average of that loop, not the baseline
-        // itself: em/thermal settle 3pp better resisted than kinetic/
-        // explosive, a real (if tie-break-order-driven) quirk of the
-        // mechanic against a perfectly flat damage profile.
+        // damage, so the tie-break — the module's in-game enumeration order
+        // `[em, explosive, kinetic, thermal]`, as PYFA lists it — always picks
+        // the same two donors/recipients: cycle 1 donates em/explosive
+        // 0.85->0.91 and drains thermal/kinetic 0.85->0.79; cycle 2 (now
+        // thermal/kinetic are "least damaged") reverses it, landing exactly
+        // back on baseline — a period-2 loop {A, baseline} forever. The fixed
+        // point is the average of that loop: em/explosive settle 3pp worse
+        // resisted than thermal/kinetic, a real (if tie-break-order-driven)
+        // quirk of the mechanic against a perfectly flat damage profile.
         let base = [0.85; 4];
-        let shifted = rah_shift(base, 0.06, &DamageProfile::default());
+        let shifted = rah_shift(base, 0.06, &DamageProfile::default(), [1.0; 4]);
         assert!((shifted[0] - 0.88).abs() < 1e-9, "em: {shifted:?}");
-        assert!((shifted[1] - 0.88).abs() < 1e-9, "thermal: {shifted:?}");
+        assert!((shifted[1] - 0.82).abs() < 1e-9, "thermal: {shifted:?}");
         assert!((shifted[2] - 0.82).abs() < 1e-9, "kinetic: {shifted:?}");
-        assert!((shifted[3] - 0.82).abs() < 1e-9, "explosive: {shifted:?}");
+        assert!((shifted[3] - 0.88).abs() < 1e-9, "explosive: {shifted:?}");
         let sum: f64 = shifted.iter().sum();
         assert!((sum - 3.4).abs() < 1e-9, "resonance sum conserved: {sum}");
+    }
+
+    /// The armour's existing resists decide which damage type actually lands
+    /// hardest, so the RAH shifts toward *that* one, not the profile's raw
+    /// peak (#1272, PYFA's `baseDamageTaken`).
+    #[test]
+    fn rah_shift_follows_damage_after_the_armours_own_resists() {
+        // Profile leans explosive (40) over EM (30), but the hull resists
+        // explosive heavily (0.3 resonance) and EM barely (0.95), so EM lands
+        // 28.5 against explosive's 12 — EM must end up the best-resisted type.
+        let profile = DamageProfile([0.30, 0.15, 0.15, 0.40]);
+        let incoming = [0.95, 0.9, 0.9, 0.30];
+        let shifted = rah_shift([0.85; 4], 0.06, &profile, incoming);
+        assert!(
+            shifted[0] < shifted[3],
+            "EM should out-resist explosive here: {shifted:?}"
+        );
+        // Ignoring the armour's resists, the raw profile's two biggest shares
+        // (EM and explosive) soak the shift equally, so explosive ends up as
+        // well resisted as EM despite landing less than half the damage —
+        // the behaviour this weighting corrects.
+        let unweighted = rah_shift([0.85; 4], 0.06, &profile, [1.0; 4]);
+        assert!(
+            unweighted[3] <= unweighted[0],
+            "unweighted explosive should not lose out: {unweighted:?}"
+        );
     }
 }
