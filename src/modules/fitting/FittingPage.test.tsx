@@ -122,6 +122,11 @@ const STATS: FitStats = {
     lockRange: 30000,
     scanResolution: 800,
     sensorStrength: [0, 0, 20, 0],
+    targetLockTime: 2.8,
+    lockTimes: [
+      { label: "Frigate (AB)", sigRadius: 35, seconds: 2.8 },
+      { label: "Battleship (AB)", sigRadius: 400, seconds: 1.1 },
+    ],
   },
   price: null,
   weaponRanges: [],
@@ -201,6 +206,22 @@ describe("FittingPage", () => {
     const rigBank = screen.getByText("Rig").closest("div")!;
     expect(within(rigBank).getByText("0/3")).toBeInTheDocument();
     expect(screen.getByText("125mm Gatling AutoCannon II")).toBeInTheDocument();
+  });
+
+  it("shows lock times for the selected target and the hull archetypes (#1268)", async () => {
+    renderFitting();
+    await loadTheFit();
+    await screen.findByText("Solo brawl");
+
+    const panel = screen.getByText("Targeting").closest("div")!;
+    // Scan resolution + simultaneous locks, then the selected target's lock.
+    expect(
+      within(panel).getByText(/800 mm · 4 locks · target 2.8s/),
+    ).toBeInTheDocument();
+    // One row per archetype, each with its signature radius.
+    expect(within(panel).getByText("Frigate (AB)")).toBeInTheDocument();
+    expect(within(panel).getByText("35m")).toBeInTheDocument();
+    expect(within(panel).getByText("1.1s")).toBeInTheDocument();
   });
 
   it("collapses EFT import behind a button and imports on demand (#710)", async () => {

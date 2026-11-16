@@ -22,6 +22,7 @@ export {
   PricePanel,
   ResourcesPanel,
   TankResistsPanel,
+  TargetingPanel,
   Vitals,
   type DpsRangeSeries,
 } from "./StatsPanels";

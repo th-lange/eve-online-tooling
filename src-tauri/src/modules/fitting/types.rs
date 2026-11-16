@@ -368,8 +368,21 @@ pub struct NavStats {
     pub signature_radius: f64,
 }
 
-/// Targeting: locks, range, scan resolution and sensor strength (#175).
-/// `sensor_strength` is `[radar, ladar, magnetometric, gravimetric]`.
+/// How long this fit takes to lock one reference target (#1268).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LockTime {
+    /// What is being locked ("Frigate (AB)", "Selected target", …).
+    pub label: String,
+    /// The target's signature radius, in metres.
+    pub sig_radius: f64,
+    /// Seconds to lock it; `None` when this fit can't (no scan resolution).
+    pub seconds: Option<f64>,
+}
+
+/// Targeting: locks, range, scan resolution and sensor strength (#175), plus
+/// lock times against the selected target and the hull-class archetypes
+/// (#1268). `sensor_strength` is `[radar, ladar, magnetometric, gravimetric]`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TargetStats {
@@ -377,6 +390,12 @@ pub struct TargetStats {
     pub lock_range: f64,
     pub scan_resolution: f64,
     pub sensor_strength: [f64; 4],
+    /// Lock time against the currently selected target profile, when one is
+    /// set; `None` otherwise.
+    pub target_lock_time: Option<f64>,
+    /// Lock times against the built-in hull-class archetypes, in their library
+    /// order — the same sigs the archetype DPS rows use.
+    pub lock_times: Vec<LockTime>,
 }
 
 /// Computed result of simulating a fit: resources, validation and price come

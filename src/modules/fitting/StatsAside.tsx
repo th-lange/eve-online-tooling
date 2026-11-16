@@ -8,12 +8,14 @@ import {
   PricePanel,
   ResourcesPanel,
   TankResistsPanel,
+  TargetingPanel,
   Vitals,
 } from "./components";
 import { useFitState, useFitStats } from "./useFitEditorContext";
 
 /** Right-hand stats sidebar: a sticky vitals headline (DPS/EHP/cap/speed) over
- *  the detail stats (resources, DPS breakdown, EW, tank resists, navigation)
+ *  the detail stats (resources, DPS breakdown, EW, tank resists, navigation,
+ *  targeting)
  *  and price — purely presentational, driven by the simulate query
  *  (`FitEditorContext`) and the page-level `price` mutation. Each detail
  *  section is its own panel component (`StatsPanels.tsx`); this is just the
@@ -116,6 +118,10 @@ export function StatsAside({
             navigation={stats.data.navigation}
             lockRange={stats.data.targeting?.lockRange}
           />
+        )}
+
+        {stats.data?.targeting && (
+          <TargetingPanel targeting={stats.data.targeting} />
         )}
       </div>
 
