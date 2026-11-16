@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SEC_HEX, SEC_TEXT_CLASS, secBand } from "./security";
+import { SEC_COLOR, SEC_TEXT_CLASS, secBand } from "./security";
 
 describe("secBand", () => {
   it("bands clear-cut values like the game does", () => {
@@ -34,7 +34,7 @@ describe("colour maps", () => {
   it("cover every band in both rendering styles", () => {
     for (const band of ["hisec", "lowsec", "nullsec"] as const) {
       expect(SEC_TEXT_CLASS[band]).toMatch(/^text-/);
-      expect(SEC_HEX[band]).toMatch(/^#[0-9a-f]{6}$/);
+      expect(SEC_COLOR[band]).toMatch(/^var\(--color-[a-z]+-\d{3}\)$/);
     }
   });
 });

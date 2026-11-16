@@ -28,10 +28,11 @@ export const SEC_TEXT_CLASS: Record<SecBand, string> = {
   nullsec: "text-rose-400",
 };
 
-/** Hex per band for inline-style/SVG rendering; same 400-strength palette as
- *  SEC_TEXT_CLASS (emerald-400 / amber-400 / rose-400). */
-export const SEC_HEX: Record<SecBand, string> = {
-  hisec: "#34d399",
-  lowsec: "#fbbf24",
-  nullsec: "#fb7185",
+/** Colour per band for inline-style/SVG rendering; the same 400-strength
+ *  palette as SEC_TEXT_CLASS, referenced through the palette variables so the
+ *  Light theme's remap reaches it (#1265). */
+export const SEC_COLOR: Record<SecBand, string> = {
+  hisec: "var(--color-emerald-400)",
+  lowsec: "var(--color-amber-400)",
+  nullsec: "var(--color-rose-400)",
 };
