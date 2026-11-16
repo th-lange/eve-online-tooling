@@ -108,6 +108,7 @@ const COMPONENTS: Record<string, LazyExoticComponent<ComponentType>> = {
   pvp: page(() => import("./pvp/PvpPage"), "PvpPage"),
   info: page(() => import("./info/InfoPanel"), "InfoPanel"),
   scripts: page(() => import("./scripts/ScriptsPage"), "ScriptsPage"),
+  notes: page(() => import("./notes/NotesPage"), "NotesPage"),
   plugins: page(() => import("./plugins/PluginsPage"), "PluginsPage"),
   logs: page(() => import("./logs/LogsPage"), "LogsPage"),
   feedback: page(() => import("./feedback/FeedbackPage"), "FeedbackPage"),

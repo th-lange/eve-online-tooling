@@ -166,8 +166,9 @@ export function SyncSettingsCard() {
         <p className="rounded border border-amber-800/60 bg-amber-950/30 px-2 py-1.5 text-xs text-amber-300/90">
           This folder will hold one small JSON file per synced item
           (reminders.json, pi.json, …). Point your other devices at this same
-          folder — don't rename, move or hand-edit the files, or sync may
-          misbehave.
+          folder — don't rename, move or hand-edit those files, or sync may
+          misbehave. Your Notes are stored separately in a notes/ subfolder as
+          ordinary .md/.txt/.csv files, shared by every device on this folder.
         </p>
         <div className="flex flex-wrap items-center gap-2">
           <button

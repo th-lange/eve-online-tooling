@@ -8,6 +8,7 @@ import {
   Terminal,
   Bell,
   AlarmClock,
+  StickyNote,
   type LucideIcon,
 } from "lucide-react";
 
@@ -305,6 +306,14 @@ export const MODULE_METADATA: ModuleMeta[] = [
     description: "App-wide preferences, e.g. the global combat overview.",
     group: "support",
     icon: Settings,
+  },
+  {
+    id: "notes",
+    title: "Notes",
+    description:
+      "Text, Markdown and CSV table notes in folders — tagged, sortable and searchable, saved to your shared folder when set up.",
+    group: "support",
+    icon: StickyNote,
   },
   {
     id: "reminders",
