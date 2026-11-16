@@ -51,6 +51,9 @@ pub mod attr {
     pub const SHIELD_BONUS: i64 = 68;
     pub const SHIELD_CAPACITY: i64 = 263;
     pub const DRONE_CAPACITY: i64 = 283;
+    /// `moduleReactivationDelay`: dead time between cycles during which the
+    /// module draws no capacitor — PYFA folds it into the cap sim's cycle.
+    pub const MODULE_REACTIVATION_DELAY: i64 = 669;
     pub const CAPACITOR_CAPACITY: i64 = 482;
     pub const CALIBRATION: i64 = 1132;
     pub const RIG_SLOTS: i64 = 1137;
