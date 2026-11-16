@@ -45,7 +45,8 @@ Warfare, Exploration.
 [Plugins](plugins.md) (sandboxed WASM + UI), and an [MCP bridge](mcp.md).
 
 **Support** — [Feedback](feedback.md) (rate a module, report a bug, ask for a
-feature), Info Panel.
+feature), Info Panel, [Notes](notes.md) (Markdown/text/CSV notes in folders,
+tagged and searchable, kept on your shared drive when sync is set up).
 
 ## Install
 

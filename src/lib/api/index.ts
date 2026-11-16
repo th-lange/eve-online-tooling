@@ -39,3 +39,4 @@ export * from "./logs";
 export * from "./zkill";
 export * from "./ammo";
 export * from "./sync";
+export * from "./notes";

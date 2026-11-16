@@ -9,8 +9,8 @@ import type { PluginEntry } from "../../lib/api";
 const entries: PluginEntry[] = [
   {
     manifest: {
-      id: "notes",
-      name: "Notes",
+      id: "journal",
+      name: "Journal",
       version: "1.0.0",
       minAppVersion: "0.36.0",
       ui: "index.html",
@@ -86,26 +86,26 @@ describe("plugin UI modules", () => {
   it("shows an active UI plugin as a nav entry", async () => {
     renderAt("/");
     expect(
-      await screen.findByRole("link", { name: "Notes" }),
+      await screen.findByRole("link", { name: "Journal" }),
     ).toBeInTheDocument();
   });
 
   it("hides WASM-only and inactive plugins from the nav", async () => {
     renderAt("/");
     // Wait for the active UI plugin to appear, then assert the others don't.
-    await screen.findByRole("link", { name: "Notes" });
+    await screen.findByRole("link", { name: "Journal" });
     expect(screen.queryByRole("link", { name: "Pricer" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Hidden" })).toBeNull();
   });
 
   it("renders the plugin's UI in a sandboxed iframe at its route", async () => {
-    renderAt("/notes");
+    renderAt("/journal");
     const frame = (await screen.findByTitle(
-      "plugin-notes",
+      "plugin-journal",
     )) as HTMLIFrameElement;
     expect(frame.tagName).toBe("IFRAME");
     expect(frame.getAttribute("src")).toBe(
-      "plugin://localhost/notes/index.html",
+      "plugin://localhost/journal/index.html",
     );
     // No `allow-same-origin` — the frame stays cross-origin to the app.
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts");

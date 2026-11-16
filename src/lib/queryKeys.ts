@@ -463,6 +463,19 @@ export const scriptsKeys = {
   examples: ["scripts", "examples"] as const,
 };
 
+// --- Notes ---
+//
+// Every key carries the shared-folder setting (`null` = local store), so
+// switching sync on/off never serves one store's cache to the other.
+
+export const notesKeys = {
+  all: ["notes"] as const,
+  tree: (shared: string | null) => ["notes", "tree", shared] as const,
+  location: (shared: string | null) => ["notes", "location", shared] as const,
+  search: (shared: string | null, query: string) =>
+    ["notes", "search", shared, query] as const,
+};
+
 // --- Shopping (chat sync; SHOPPING_LISTS_KEY above covers the lists root) ---
 
 export const shoppingKeys = {
