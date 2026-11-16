@@ -32,6 +32,7 @@ import { STORAGE_KEYS } from "../../lib/storageKeys";
 import { useEveLogDir } from "../../lib/useEveLogDir";
 import { useFightOverlay } from "../pvp/fightOverlayContext";
 import { usePersistentState } from "../../lib/usePersistentState";
+import type { SeriesThresholds } from "./thresholds";
 import {
   LOG_BUFFER,
   appendBuckets,
@@ -122,6 +123,12 @@ export function useDpsPlaybackState() {
   const [miningInterval, setMiningInterval] = usePersistentState<15 | 30>(
     STORAGE_KEYS.dpsMiningInterval,
     30,
+  );
+  // Per-series alarm thresholds (#1270) — off by default, persisted like the
+  // layout prefs above so an alarm survives a restart.
+  const [thresholds, setThresholds] = usePersistentState<SeriesThresholds>(
+    STORAGE_KEYS.dpsThresholds,
+    {},
   );
   // Playback: paused state + saved position for resume; looping restarts
   // playback automatically when it ends naturally.
@@ -627,6 +634,8 @@ export function useDpsPlaybackState() {
     setBySource,
     miningInterval,
     setMiningInterval,
+    thresholds,
+    setThresholds,
     paused,
     looping,
     setLooping,

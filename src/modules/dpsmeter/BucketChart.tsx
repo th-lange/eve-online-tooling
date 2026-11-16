@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { DpsBucket, DpsEvent } from "../../lib/api";
 import { formatInt } from "../../lib/format";
+import { LEVEL_STROKE } from "./thresholds";
 import {
   BUCKET_SECS,
   CURSOR_SECS,
@@ -44,6 +45,7 @@ export const BucketChart = memo(function BucketChart({
   ghost,
   onSelectBucket,
   eventsByBucket,
+  guides,
 }: {
   buckets: DpsBucket[];
   series: readonly BucketSeries[];
@@ -52,6 +54,9 @@ export const BucketChart = memo(function BucketChart({
   ghost?: GhostBucket | null;
   onSelectBucket?: (bucketStart: number) => void;
   eventsByBucket?: Map<number, DpsEvent[]>;
+  /** Alarm thresholds (#1270) for the series drawn here, as faint horizontal
+   *  lines — where the readout flips colour, seen against the trend. */
+  guides?: readonly { value: number; level: "warn" | "danger" }[];
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // Stick to the live (right) edge until the user scrolls away from it; a
@@ -209,6 +214,26 @@ export const BucketChart = memo(function BucketChart({
                     strokeWidth="0.75"
                   />
                 ))}
+                {/* Alarm guides, clipped to the drawn scale: a threshold above
+                    the session's max would otherwise float off the chart. */}
+                {(guides ?? [])
+                  .filter((g) => g.value > 0 && g.value <= max)
+                  .map((g) => {
+                    const y = PAD_Y + (1 - g.value / max) * (H - PAD_Y - PAD_B);
+                    return (
+                      <line
+                        key={`${g.level}-${g.value}`}
+                        x1={0}
+                        x2={width}
+                        y1={y}
+                        y2={y}
+                        stroke={LEVEL_STROKE[g.level]}
+                        strokeWidth="1"
+                        strokeDasharray="4 3"
+                        strokeOpacity="0.5"
+                      />
+                    );
+                  })}
                 {labels.map((l) => (
                   <g key={l.x}>
                     <line

@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { invokeMock, mockInvoke, renderWithQuery } from "../../test/harness";
 import { DpsPage } from "./DpsPage";
+import { STORAGE_KEYS } from "../../lib/storageKeys";
 import type {
   DpsBucket,
   DpsLogFile,
@@ -451,5 +452,43 @@ describe("DpsPage — live vs playback channels (#1175)", () => {
     expect(
       screen.queryByText(/Waiting for the first 5s bucket/),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("DpsPage — alarm thresholds (#1270)", () => {
+  it("recolours a card once the live rate crosses a stored threshold", async () => {
+    localStorage.setItem(
+      STORAGE_KEYS.dpsThresholds,
+      JSON.stringify({
+        dpsIn: [
+          { atOrAbove: 10, level: "warn" },
+          { atOrAbove: 40, level: "danger" },
+        ],
+      }),
+    );
+    mockInvoke({ auth_characters: () => [] });
+    renderWithQuery(<DpsPage />);
+    await waitFor(() => expect(bucketsHandler).toBeDefined());
+
+    const card = () =>
+      screen.getByText("DPS in").closest("div")!.parentElement!;
+    // 100 incoming damage per 5 s bucket = 20/s → warn, not danger yet.
+    act(() => bucketsHandler!([{ ...makeBucket(1000, 0), damageIn: 100 }]));
+    expect(card().className).toContain("border-amber-500/60");
+    expect(card().className).not.toContain("animate-pulse");
+
+    // 300 per bucket = 60/s → danger, with the reduced-motion-safe pulse.
+    act(() => bucketsHandler!([{ ...makeBucket(1005, 0), damageIn: 300 }]));
+    expect(card().className).toContain("border-rose-500/70");
+    expect(card().className).toContain("motion-safe:animate-pulse");
+  });
+
+  it("leaves every card alone by default", async () => {
+    mockInvoke({ auth_characters: () => [] });
+    renderWithQuery(<DpsPage />);
+    await waitFor(() => expect(bucketsHandler).toBeDefined());
+    act(() => bucketsHandler!([{ ...makeBucket(1000, 0), damageIn: 5000 }]));
+    const card = screen.getByText("DPS in").closest("div")!.parentElement!;
+    expect(card.className).toContain("border-zinc-800");
   });
 });
