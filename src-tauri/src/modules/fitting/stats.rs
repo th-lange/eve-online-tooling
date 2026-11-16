@@ -1332,12 +1332,16 @@ pub(super) fn capacitor_of(
         let need = store.get(6);
         // Cap-using modules cycle on `duration` (73); weapons (lasers, hybrids)
         // cycle on rate of fire (`speed`, 51) instead, so fall back to it.
+        // A `moduleReactivationDelay` (669) sits between cycles and the module
+        // draws nothing during it, so the cap sim's period is cycle + delay —
+        // PYFA's `fullCycleTime` (#1272).
         let dur = {
             let d = store.get(73);
-            if d > 0.0 {
-                d
+            let base = if d > 0.0 { d } else { store.get(51) };
+            if base > 0.0 {
+                base + store.get(attr::MODULE_REACTIVATION_DELAY)
             } else {
-                store.get(51)
+                base
             }
         };
         if need > 0.0 && dur > 0.0 {
@@ -1355,6 +1359,8 @@ pub(super) fn capacitor_of(
                 cycle_ms: dur,
                 clip_shots,
                 reload_ms,
+                // Turrets fire as one volley, everything else spreads (#1272).
+                stagger: store.get(attr::DAMAGE_MULTIPLIER) <= 0.0,
             });
         }
         // Cap booster injection (#875): a Capacitor Booster module — never a
@@ -1377,6 +1383,9 @@ pub(super) fn capacitor_of(
                         cycle_ms: dur,
                         clip_shots: cycle.clip_shots,
                         reload_ms: cycle.reload_seconds * 1000.0,
+                        // Injections are never staggered (PYFA pushes each
+                        // booster at t=0): a charge is burned when wanted.
+                        stagger: false,
                     });
                 }
             }
