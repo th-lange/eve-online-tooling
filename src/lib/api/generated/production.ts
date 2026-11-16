@@ -73,17 +73,17 @@ export const commands = {
     }
   },
   /**
-   * The **manufacturing** cost index CCP applies to job fees in a solar system,
-   * from ESI `/industry/systems/` (public). The full list is fetched once and
-   * cached ~1h on disk, then looked up per system. `None` when the system isn't
-   * listed (e.g. wormhole space). Lets the production tab use the real index
-   * instead of a hand-entered guess. When the refresh fails but a map ≤24h past
-   * expiry sits on disk, the stale map is served instead of an error via the
-   * shared [`deduplicated_cached_fetch_with_stale_fallback`] helper (#774, #888).
+   * The cost indices CCP applies to job fees in a solar system, from ESI
+   * `/industry/systems/` (public). The full list is fetched once and cached ~1h
+   * on disk, then looked up per system. `None` when the system isn't listed
+   * (e.g. wormhole space). Lets the production tab use the real indices instead
+   * of a hand-entered guess. When the refresh fails but a map ≤24h past expiry
+   * sits on disk, the stale map is served instead of an error via the shared
+   * [`deduplicated_cached_fetch_with_stale_fallback`] helper (#774, #888).
    */
   async productionSystemCostIndex(
     systemId: number,
-  ): Promise<Result<number | null, AppError>> {
+  ): Promise<Result<CostIndices | null, AppError>> {
     try {
       return {
         status: "ok",
@@ -121,6 +121,17 @@ export type AppError =
    * Any other failure, carrying a human-readable message.
    */
   | { kind: "message"; message: string };
+/**
+ * The cost indices CCP applies to job fees in a solar system — one per
+ * industry activity (#1274). An activity the system doesn't list is `None`;
+ * the engine then falls back to `manufacturing`.
+ */
+export type CostIndices = {
+  manufacturing: number | null;
+  invention: number | null;
+  copying: number | null;
+  reaction: number | null;
+};
 /**
  * An invention decryptor and its outcome modifiers (read from the SDE).
  */
@@ -314,6 +325,13 @@ export type ProfitParams = {
    */
   ownedMe?: Partial<{ [key in number]: number }>;
   systemCostIndex?: number;
+  /**
+   * Per-activity cost indices (#1274). `None` = use `system_cost_index`,
+   * which is what a hand-entered index means.
+   */
+  inventionCostIndex?: number | null;
+  copyingCostIndex?: number | null;
+  reactionCostIndex?: number | null;
   facilityTax?: number;
   materialBasis?: PriceBasis | null;
   productBasis?: PriceBasis | null;

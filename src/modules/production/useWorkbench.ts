@@ -18,6 +18,7 @@ import {
 } from "../../lib/queryKeys";
 import { useTypeIdLists } from "../../lib/useSavedLists";
 import { classifyPaste, dedupNames, isExcludedMetaGroup } from "./helpers";
+import type { ActivityIndexPcts } from "./CostIndexField";
 import {
   bestResearchedMap,
   composeProfitParams,
@@ -58,6 +59,10 @@ export function useWorkbench(): WorkbenchState {
   const [rigTePct, setRigTePct] = useState(0);
   const [rigCostPct, setRigCostPct] = useState(0);
   const [costIndexPct, setCostIndexPct] = useState(5);
+  // Per-activity indices from the picked build system (percent); `null` = the
+  // manufacturing number above covers every activity (#1274).
+  const [activityIndexPcts, setActivityIndexPcts] =
+    useState<ActivityIndexPcts | null>(null);
   const [facilityTaxPct, setFacilityTaxPct] = useState(0);
   // Sale costs on the product: broker fee + sales tax, subtracted from revenue.
   const [includeSaleCost, setIncludeSaleCost] = useState(false);
@@ -158,6 +163,10 @@ export function useWorkbench(): WorkbenchState {
     rigTePct,
     rigCostPct,
     costIndexPct,
+    // Flattened, not the object: staleness compares values with `!==`.
+    inventionIndexPct: activityIndexPcts?.invention ?? null,
+    copyingIndexPct: activityIndexPcts?.copying ?? null,
+    reactionIndexPct: activityIndexPcts?.reaction ?? null,
     facilityTaxPct,
     includeSaleCost,
     sellBrokerPct,
@@ -199,6 +208,7 @@ export function useWorkbench(): WorkbenchState {
         stock: stock.data,
         buildComponents,
         costIndexPct,
+        activityIndexPcts,
         facilityTaxPct,
         includeSaleCost,
         sellTaxPct,
@@ -416,6 +426,8 @@ export function useWorkbench(): WorkbenchState {
     setRigCostPct,
     costIndexPct,
     setCostIndexPct,
+    activityIndexPcts,
+    setActivityIndexPcts,
     facilityTaxPct,
     setFacilityTaxPct,
     includeSaleCost,

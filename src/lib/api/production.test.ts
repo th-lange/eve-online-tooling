@@ -30,9 +30,15 @@ describe("production api wrapper", () => {
     expect(invokeMock).toHaveBeenCalledWith("production_decryptors");
   });
 
-  it("forwards systemId to production_system_cost_index", async () => {
-    invokeMock.mockResolvedValue(0.05);
-    await expect(productionSystemCostIndex(30000142)).resolves.toBe(0.05);
+  it("forwards systemId to production_system_cost_index and returns every activity", async () => {
+    const indices = {
+      manufacturing: 0.05,
+      invention: 0.19,
+      copying: 0.02,
+      reaction: null,
+    };
+    invokeMock.mockResolvedValue(indices);
+    await expect(productionSystemCostIndex(30000142)).resolves.toEqual(indices);
     expect(invokeMock).toHaveBeenCalledWith("production_system_cost_index", {
       systemId: 30000142,
     });

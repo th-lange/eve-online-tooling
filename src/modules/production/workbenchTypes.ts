@@ -10,6 +10,7 @@ import type {
   Region,
   SdeStatus,
 } from "../../lib/api";
+import type { ActivityIndexPcts } from "./CostIndexField";
 import type { PasteVerdictResult } from "./helpers";
 import type {
   ImportedBlueprint,
@@ -62,6 +63,8 @@ export interface WorkbenchState {
   setRigCostPct: (n: number) => void;
   costIndexPct: number;
   setCostIndexPct: (n: number) => void;
+  activityIndexPcts: ActivityIndexPcts | null;
+  setActivityIndexPcts: (p: ActivityIndexPcts | null) => void;
   facilityTaxPct: number;
   setFacilityTaxPct: (n: number) => void;
   includeSaleCost: boolean;

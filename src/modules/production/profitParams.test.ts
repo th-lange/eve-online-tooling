@@ -50,6 +50,7 @@ function baseInput(
     stock: undefined,
     buildComponents: false,
     costIndexPct: 5,
+    activityIndexPcts: null,
     facilityTaxPct: 0,
     includeSaleCost: false,
     sellTaxPct: 4.5,
@@ -236,6 +237,30 @@ describe("composeProfitParams", () => {
     expect(params.facilityTax).toBeCloseTo(0.02, 10);
     expect(params.salesTax).toBeCloseTo(0.045, 10);
     expect(params.brokerFee).toBeCloseTo(0.03, 10);
+  });
+
+  it("sends each activity's own index, and null when the system has none", () => {
+    const params = composeProfitParams(
+      baseInput({
+        costIndexPct: 5,
+        activityIndexPcts: { invention: 19, copying: 2, reaction: null },
+      }),
+    );
+    expect(params.systemCostIndex).toBeCloseTo(0.05, 10);
+    expect(params.inventionCostIndex).toBeCloseTo(0.19, 10);
+    expect(params.copyingCostIndex).toBeCloseTo(0.02, 10);
+    // Not listed for that system — the engine falls back to manufacturing.
+    expect(params.reactionCostIndex).toBeNull();
+  });
+
+  it("leaves every activity index null for a hand-entered cost index", () => {
+    const params = composeProfitParams(
+      baseInput({ costIndexPct: 7, activityIndexPcts: null }),
+    );
+    expect(params.systemCostIndex).toBeCloseTo(0.07, 10);
+    expect(params.inventionCostIndex).toBeNull();
+    expect(params.copyingCostIndex).toBeNull();
+    expect(params.reactionCostIndex).toBeNull();
   });
 
   it("folds structure + rig bonuses into the engine's meBonus/costBonus/structureTePct", () => {
