@@ -3,11 +3,54 @@ import { render, screen } from "@testing-library/react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import {
   CapGauge,
+  DpsBreakdownPanel,
   PricePanel,
   TankResists,
   TankResistsPanel,
 } from "./StatsPanels";
-import type { CapStats, FitPrice, TankStats } from "../../lib/api";
+import type {
+  CapStats,
+  DpsBreakdown,
+  FitPrice,
+  TankStats,
+} from "../../lib/api";
+
+function dps(overrides: Partial<DpsBreakdown> = {}): DpsBreakdown {
+  return {
+    turret: 200,
+    missile: 0,
+    drone: 0,
+    fighter: 0,
+    total: 200,
+    ...overrides,
+  };
+}
+
+describe("DpsBreakdownPanel", () => {
+  it("says applied leaves fighters out when the fit flies them (#1272)", () => {
+    render(
+      <DpsBreakdownPanel
+        skillLabel="all V"
+        dps={dps({ fighter: 800, total: 1000 })}
+        appliedDps={dps({ total: 180 })}
+        jammedActive={false}
+      />,
+    );
+    expect(screen.getByText(/fighters not applied/)).toBeInTheDocument();
+  });
+
+  it("says nothing about fighters on a fit without them", () => {
+    render(
+      <DpsBreakdownPanel
+        skillLabel="all V"
+        dps={dps()}
+        appliedDps={dps({ total: 180 })}
+        jammedActive={false}
+      />,
+    );
+    expect(screen.queryByText(/fighters not applied/)).toBeNull();
+  });
+});
 
 function cap(overrides: Partial<CapStats>): CapStats {
   return {

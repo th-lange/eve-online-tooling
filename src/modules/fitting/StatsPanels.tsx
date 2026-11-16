@@ -753,6 +753,15 @@ export function DpsBreakdownPanel({
                 {appliedDps.total.toFixed(0)} dps
               </span>{" "}
               (vs paper {dps.total.toFixed(0)} dps)
+              {dps.fighter > 0 && (
+                <span
+                  className="text-zinc-600"
+                  title="Fighter application isn't modelled yet (#877), so the fighters' share of the paper number is left out of applied — not scored as zero damage."
+                >
+                  {" "}
+                  · fighters not applied
+                </span>
+              )}
             </div>
           )}
           {dpsRangeCurve && dpsRangeCurve.length > 1 && (
