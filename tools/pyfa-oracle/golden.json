@@ -61,5 +61,29 @@
     "label": "Rifter + 3x Small Armor Repairer II",
     "capStable": false,
     "capState": 13.5
+  },
+  {
+    "label": "Vedmak + Heavy Entropic Disintegrator II / Occult L, spool 0.0",
+    "weaponDps": 516.5417
+  },
+  {
+    "label": "Vedmak + Heavy Entropic Disintegrator II / Occult L, spool 0.5",
+    "weaponDps": 1095.0683
+  },
+  {
+    "label": "Vedmak + Heavy Entropic Disintegrator II / Occult L, spool 1.0",
+    "weaponDps": 1614.1927
+  },
+  {
+    "label": "Rifter + 3x 200mm AutoCannon II / Barrage S, active",
+    "weaponDps": 107.1455
+  },
+  {
+    "label": "Rifter + 3x 200mm AutoCannon II / Barrage S, overheated",
+    "weaponDps": 123.2173
+  },
+  {
+    "label": "Rifter + Small EMP Smartbomb I",
+    "totalDps": 6.6667
   }
 ]

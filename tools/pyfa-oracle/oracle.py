@@ -44,12 +44,13 @@ _stub.gamedata_date = None
 sys.modules["config"] = _stub
 
 import eos.db  # noqa: E402
-from eos.const import FittingModuleState  # noqa: E402
+from eos.const import FittingModuleState, SpoolType  # noqa: E402
 from eos.saveddata.character import Character  # noqa: E402
 from eos.saveddata.drone import Drone  # noqa: E402
 from eos.saveddata.fit import Fit  # noqa: E402
 from eos.saveddata.module import Module  # noqa: E402
 from eos.saveddata.ship import Ship  # noqa: E402
+from eos.utils.spoolSupport import SpoolOptions  # noqa: E402
 
 
 def item(name):
@@ -59,7 +60,7 @@ def item(name):
     return it
 
 
-def build(ship_name, mods, drones=()):
+def build(ship_name, mods, drones=(), state=None):
     fit = Fit()
     fit.ship = Ship(item(ship_name))
     fit.character = Character.getAll5()
@@ -69,7 +70,7 @@ def build(ship_name, mods, drones=()):
         if charge:
             m.charge = item(charge)
         try:
-            m.state = FittingModuleState.ACTIVE
+            m.state = state or FittingModuleState.ACTIVE
         except Exception:
             pass
         fit.modules.append(m)
@@ -153,6 +154,31 @@ def comparison_rows():
             "capStable": bool(fit.capStable),
             "capState": round(fit.capState, 3),
         })
+    # Spool-up: a requested fraction resolves to whole cycles, never a linear
+    # interpolation, so 50% is not halfway between cold and hot.
+    vedmak = build("Vedmak", [("Heavy Entropic Disintegrator II", "Occult L")])
+    for amount in (0.0, 0.5, 1.0):
+        opts = SpoolOptions(SpoolType.SPOOL_SCALE, amount, True)
+        rows.append({
+            "label": f"Vedmak + Heavy Entropic Disintegrator II / Occult L, spool {amount}",
+            "weaponDps": round(vedmak.getWeaponDps(spoolOptions=opts).total, 4),
+        })
+    # Overheat: the bonus comes from each module group's own overload
+    # attributes, not one universal multiplier.
+    for label, state in (("active", FittingModuleState.ACTIVE),
+                         ("overheated", FittingModuleState.OVERHEATED)):
+        fit = build("Rifter", [("200mm AutoCannon II", "Barrage S")] * 3,
+                    state=state)
+        rows.append({
+            "label": f"Rifter + 3x 200mm AutoCannon II / Barrage S, {label}",
+            "weaponDps": round(fit.getWeaponDps().total, 4),
+        })
+    # Smartbombs: PYFA counts them in total DPS; we do not (#1293).
+    smartbomb = build("Rifter", ["Small EMP Smartbomb I"])
+    rows.append({
+        "label": "Rifter + Small EMP Smartbomb I",
+        "totalDps": round(smartbomb.getTotalDps().total, 4),
+    })
     return rows
 
 

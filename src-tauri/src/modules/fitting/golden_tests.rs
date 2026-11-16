@@ -1415,3 +1415,128 @@ fn thanatos_two_light_fighter_squadrons_matches_hand_computed_dps() {
         assert!((squadron.dps - expected / 2.0).abs() < 0.5);
     }
 }
+
+/// Spool-up, overheat and smartbombs against numbers recorded from PYFA
+/// itself (#1272): v2.70.0's `eve.db` through `eos` at source `b79cd90`,
+/// all-V character, via `tools/pyfa-oracle`.
+///
+/// | fit | PYFA |
+/// |---|---|
+/// | Vedmak + Heavy Entropic Disintegrator II / Occult L, spool 0 / 0.5 / 1 | 516.5417 / 1095.0683 / 1614.1927 dps |
+/// | Rifter + 3× 200mm AutoCannon II / Barrage S, active → overheated | 107.1455 → 123.2173 dps |
+/// | Rifter + Small EMP Smartbomb I | 6.6667 dps |
+///
+/// The spool row pins that a requested fraction resolves to **whole cycles**
+/// (50% is not halfway between cold and hot), and the overheat row that the
+/// bonus comes from the module group's own overload attributes rather than a
+/// universal multiplier. The smartbomb row is the known mismatch (#1293): we
+/// count no DPS for a weapon we don't model, where PYFA counts 6.67 — it is
+/// asserted as **zero** so the day smartbombs are implemented, this test is
+/// the reminder to re-pin it against PYFA.
+#[test]
+fn spool_overheat_and_smartbomb_match_pyfa() {
+    let Some((sde, dir)) = crate::test_support::test_sde() else {
+        return;
+    };
+    let dir = dir.as_path();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let all5 = |_: i64| 5.0;
+    let profile = DamageProfile([0.25, 0.25, 0.25, 0.25]);
+    let run = |ship: &str, items: Vec<FitItem>, spool: f64| {
+        let layout = sde.ship_layout(tid(ship)).unwrap().expect("layout");
+        run_dogma(
+            &sde,
+            dir,
+            &Fit {
+                id: "t".into(),
+                name: ship.into(),
+                ship_type_id: tid(ship),
+                items,
+                projected: Vec::new(),
+            },
+            &layout,
+            &all5,
+            &profile,
+            0.0,
+            None,
+            &[],
+            None,
+            None,
+            spool,
+            false,
+        )
+        .expect("dogma")
+    };
+    let gun = |type_id: i64, charge: Option<i64>, state: ModuleState, index: i32| FitItem {
+        type_id,
+        slot: SlotKind::High,
+        index,
+        state,
+        charge_type_id: charge,
+        quantity: 1,
+        active_drones: None,
+        mutation: None,
+        fighter_ability: None,
+    };
+
+    // Spool-up (#872): whole cycles, so the midpoint sits where the cycle
+    // count lands, not at (cold + hot) / 2.
+    for (spool, want) in [(0.0, 516.5417), (0.5, 1095.0683), (1.0, 1614.1927)] {
+        let got = run(
+            "Vedmak",
+            vec![gun(
+                tid("Heavy Entropic Disintegrator II"),
+                Some(tid("Occult L")),
+                ModuleState::Active,
+                0,
+            )],
+            spool,
+        )
+        .dps
+        .total;
+        assert!(
+            (got - want).abs() < 0.001,
+            "spool {spool}: {got} dps, pyfa says {want}"
+        );
+    }
+
+    // Overheat (#703): the bonus is the turret group's own
+    // `overloadDamageModifier`, nothing hard-coded.
+    let autocannons = |state: ModuleState| {
+        (0..3)
+            .map(|i| gun(tid("200mm AutoCannon II"), Some(tid("Barrage S")), state, i))
+            .collect::<Vec<_>>()
+    };
+    for (state, want) in [
+        (ModuleState::Active, 107.1455),
+        (ModuleState::Overheated, 123.2173),
+    ] {
+        let got = run("Rifter", autocannons(state), 1.0).dps.total;
+        assert!(
+            (got - want).abs() < 0.001,
+            "{state:?} autocannons: {got} dps, pyfa says {want}"
+        );
+    }
+
+    // Smartbombs (#1293): PYFA counts 6.6667 dps here; we model no smartbomb
+    // at all, and every DPS path agrees on that zero.
+    let smartbomb = run(
+        "Rifter",
+        vec![gun(
+            tid("Small EMP Smartbomb I"),
+            None,
+            ModuleState::Active,
+            0,
+        )],
+        1.0,
+    );
+    assert_eq!(
+        smartbomb.dps.total, 0.0,
+        "smartbomb DPS is unmodelled (#1293); re-pin against pyfa's 6.6667 when it lands"
+    );
+}
