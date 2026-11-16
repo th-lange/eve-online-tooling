@@ -28,7 +28,7 @@ import {
   subscribeMarketSearchItem,
   takePendingMarketSearchItem,
 } from "../../lib/deepLink";
-import { SEC_HEX, secBand } from "../../lib/security";
+import { SEC_COLOR, secBand } from "../../lib/security";
 import { AddToListButton } from "../../components/AddToListButton";
 import { Combo } from "../../components/Combo";
 import { PriceHistoryView } from "../../components/PriceHistory";
@@ -628,7 +628,7 @@ function OrderTable({
 
 function SecDot({ security }: { security: number }) {
   const s = Math.round(security * 10) / 10;
-  const color = SEC_HEX[secBand(security)];
+  const color = SEC_COLOR[secBand(security)];
   return (
     <span className="tabular-nums" style={{ color }}>
       {s.toFixed(1)}

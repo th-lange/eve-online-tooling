@@ -5,7 +5,7 @@ import {
   type SystemGraphNode,
 } from "../../components/SystemGraph";
 import type { EntrySearch as EntrySearchResult } from "../../lib/api";
-import { SEC_HEX, secBand } from "../../lib/security";
+import { SEC_COLOR, secBand } from "../../lib/security";
 import { ZkillSystemLink } from "../../components/ZkillLink";
 import { buildScanTree, computeGreenEdges, edgeKey, keptSets } from "./graph";
 
@@ -340,7 +340,7 @@ export function EntryResults({ data }: { data: EntrySearchResult }) {
                     <td className="px-3 py-1.5 text-zinc-500">{c.region}</td>
                     <td
                       className="px-3 py-1.5 text-right tabular-nums"
-                      style={{ color: SEC_HEX[band] }}
+                      style={{ color: SEC_COLOR[band] }}
                     >
                       {c.security.toFixed(1)}
                     </td>

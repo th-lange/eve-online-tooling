@@ -215,7 +215,7 @@ describe("Layout sidebar", () => {
       [id(PRODUCTION)]: "emerald",
     });
     expect(screen.getByRole("link", { name: PRODUCTION })).toHaveStyle({
-      boxShadow: "inset 3px 0 0 #34d399",
+      boxShadow: "inset 3px 0 0 var(--color-emerald-400)",
     });
 
     fireEvent.click(
@@ -234,7 +234,7 @@ describe("Layout sidebar", () => {
     );
     renderLayout();
     expect(screen.getByRole("link", { name: TRADING })).toHaveStyle({
-      boxShadow: "inset 3px 0 0 #38bdf8",
+      boxShadow: "inset 3px 0 0 var(--color-sky-400)",
     });
   });
 
