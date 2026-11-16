@@ -38,4 +38,27 @@ describe("no hard-coded neutral colours outside data palettes", () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  /** Chrome colours of any hue have the same problem (#1265): a literal
+   *  `#34d399` stays a pale dark-theme green on a white page, where
+   *  `var(--color-emerald-400)` is remapped to a readable shade. Faction,
+   *  militia and wormhole-class palettes are *data* — a Caldari blue is that
+   *  blue in both themes — so those files are listed below instead. */
+  const COLOUR_PALETTES = new Set([
+    "/src/modules/faction-warfare/fwConstants.ts",
+    "/src/modules/localintel/militiaColors.ts",
+  ]);
+  const ANY_HEX = /#[0-9a-f]{6}\b/gi;
+
+  it("keeps chrome colours out of raw hex entirely", () => {
+    const offenders: string[] = [];
+    for (const [file, text] of Object.entries(sources)) {
+      if (DATA_FALLBACKS.has(file) || COLOUR_PALETTES.has(file)) continue;
+      // Comments may quote a hex while explaining why it was replaced.
+      const code = text.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, "");
+      const hits = code.match(ANY_HEX);
+      if (hits) offenders.push(`${file}: ${[...new Set(hits)].join(", ")}`);
+    }
+    expect(offenders).toEqual([]);
+  });
 });
