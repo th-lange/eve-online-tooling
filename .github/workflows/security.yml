@@ -85,53 +85,28 @@ jobs:
     name: cargo audit
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # rustsec/audit-check reports through a check run (PRs/pushes) and an
-    # issue (schedule). With the workflow-wide read-only token it failed with
-    # "Resource not accessible by integration" while the job stayed green, so
-    # 41 advisories were never reported (#1198).
     permissions:
       contents: read
-      checks: write
-      issues: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      # Gating: the lockfile is clean apart from advisories ignored, with a
-      # written reason and an exit path, in src-tauri/.cargo/audit.toml.
-      # "Unmaintained" notices are warnings and don't fail the job.
-      # rustsec/audit-check does not read src-tauri/.cargo/audit.toml (its run
-      # showed `"ignore":[]`), so pass the same IDs through its `ignore` input.
-      # audit.toml stays the single source, with a written reason per ID.
-      - name: Collect ignored advisories from audit.toml
-        id: ignores
-        run: |
-          ids=$(grep -oE 'RUSTSEC-[0-9]{4}-[0-9]{4}' src-tauri/.cargo/audit.toml | sort -u | paste -sd, -)
-          echo "ids=$ids" >> "$GITHUB_OUTPUT"
-          echo "Ignoring: $ids"
-
-      # PRs and pushes gate on the `cargo-audit` CLI, which reads
-      # src-tauri/.cargo/audit.toml itself (one source for the ignores, each
-      # with a written reason) and reports through the exit code alone.
-      # rustsec/audit-check posts its findings as a *check run*, and that API
-      # call intermittently fails with "Not Found" even on a clean audit,
-      # turning a green audit into a red required check (seen on #1288 and
-      # #1291). No check run, no flake.
+      # Every event — PR, push and the weekly schedule — gates on the
+      # `cargo-audit` CLI, which reads src-tauri/.cargo/audit.toml itself, so
+      # the ignore list keeps its single source and its written reason per ID.
+      # A vulnerability fails the job; "unmaintained"/"unsound" notices are
+      # warnings and don't.
+      #
+      # rustsec/audit-check used to run here and is gone for two reasons: it
+      # posts findings as a *check run*, an API call that intermittently fails
+      # with "Not Found" and turned clean audits red (#1288, #1291); and on a
+      # schedule it opens one issue per finding including informational ones,
+      # which filed 18 issues for already-documented unmaintained crates in a
+      # single run (#1302-#1319). A red weekly run is the same alert without
+      # either failure mode.
       - name: Install cargo-audit
-        if: github.event_name != 'schedule'
         uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         with:
           tool: cargo-audit
       - name: Audit
-        if: github.event_name != 'schedule'
         working-directory: src-tauri
         run: cargo audit
-
-      # The weekly run keeps the action: on a schedule it files an issue for
-      # newly-disclosed advisories, which the CLI can't do. A failed check-run
-      # post there costs a red scheduled run, not a blocked merge.
-      - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
-        if: github.event_name == 'schedule'
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          working-directory: src-tauri
-          ignore: ${{ steps.ignores.outputs.ids }}
