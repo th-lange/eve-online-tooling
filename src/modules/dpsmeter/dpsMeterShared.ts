@@ -379,9 +379,9 @@ export const MINING_SMOOTH_SECS = 60;
  *  readouts (dpsOut/dpsIn) and the mining panel's amber, so the same color
  *  means the same thing everywhere on this page. */
 export const TIMELINE_COLORS = {
-  damageOut: "#34d399",
-  damageIn: "#f87171",
-  mining: "#fcd34d",
+  damageOut: "var(--color-emerald-400)",
+  damageIn: "var(--color-red-400)",
+  mining: "var(--color-amber-300)",
 } as const;
 
 // --- Overview segments (#985): fixed 1-minute grid, 10^x auto-fit zoom ---
@@ -496,13 +496,13 @@ export function eventToneClass(e: DpsEvent): string {
 /** Hit-quality tiers worst→best, with the colour each segment gets in the
  *  per-combatant distribution bar. Keys match {@link HitQuality}. */
 export const QUALITY_TIERS = [
-  { key: "misses", label: "Miss", color: "#6b7280" },
-  { key: "glances", label: "Glance", color: "#94a3b8" },
-  { key: "grazes", label: "Graze", color: "#38bdf8" },
-  { key: "hits", label: "Hit", color: "#22d3ee" },
-  { key: "penetrates", label: "Pen", color: "#34d399" },
-  { key: "smashes", label: "Smash", color: "#a3e635" },
-  { key: "wrecks", label: "Wreck", color: "#f472b6" },
+  { key: "misses", label: "Miss", color: "var(--color-gray-500)" },
+  { key: "glances", label: "Glance", color: "var(--color-slate-400)" },
+  { key: "grazes", label: "Graze", color: "var(--color-sky-400)" },
+  { key: "hits", label: "Hit", color: "var(--color-cyan-400)" },
+  { key: "penetrates", label: "Pen", color: "var(--color-emerald-400)" },
+  { key: "smashes", label: "Smash", color: "var(--color-lime-400)" },
+  { key: "wrecks", label: "Wreck", color: "var(--color-pink-400)" },
 ] as const satisfies readonly {
   key: keyof HitQuality;
   label: string;
