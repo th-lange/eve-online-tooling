@@ -17,7 +17,7 @@ import {
   systemsByRole,
 } from "./data";
 import { SEC_COLOR, secBand } from "../../lib/security";
-import { CLADE_HEX, CLADE_KRAI, ROLE_HEX, systemVisual } from "./visual";
+import { CLADE_COLOR, CLADE_KRAI, ROLE_COLOR, systemVisual } from "./visual";
 import { homeTriangleLayout } from "./graph";
 import { POCHVEN_SYSTEMS_MAP_STALE_TIME_MS } from "../../lib/refreshIntervals";
 
@@ -241,7 +241,7 @@ export function PochvenSystemsPopover() {
                       <span key={r} className="flex items-center gap-1">
                         <span
                           className="h-2.5 w-2.5 rounded-sm"
-                          style={{ backgroundColor: ROLE_HEX[r] }}
+                          style={{ backgroundColor: ROLE_COLOR[r] }}
                         />
                         {r}
                       </span>
@@ -252,7 +252,7 @@ export function PochvenSystemsPopover() {
                       <span key={c} className="flex items-center gap-1">
                         <span
                           className="h-2.5 w-2.5 rounded-sm border-2"
-                          style={{ borderColor: CLADE_HEX[c] }}
+                          style={{ borderColor: CLADE_COLOR[c] }}
                         />
                         {CLADE_KRAI[c]}
                       </span>

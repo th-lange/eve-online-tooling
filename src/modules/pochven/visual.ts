@@ -6,16 +6,16 @@ import type { EntryBands } from "../../lib/api";
 import { POCHVEN_META } from "./data";
 
 /** Fill colour by system role. */
-export const ROLE_HEX: Record<string, string> = {
-  Home: "#f59e0b",
-  Border: "#38bdf8",
-  Internal: "#94a3b8",
+export const ROLE_COLOR: Record<string, string> = {
+  Home: "var(--color-amber-500)",
+  Border: "var(--color-sky-400)",
+  Internal: "var(--color-slate-400)",
 };
 /** Ring (outline) colour by clade / constellation. */
-export const CLADE_HEX: Record<string, string> = {
-  Perun: "#fb7185",
-  Svarog: "#a78bfa",
-  Veles: "#2dd4bf",
+export const CLADE_COLOR: Record<string, string> = {
+  Perun: "var(--color-rose-400)",
+  Svarog: "var(--color-violet-400)",
+  Veles: "var(--color-teal-400)",
 };
 /** Constellation names, keyed by clade. */
 export const CLADE_KRAI: Record<string, string> = {
@@ -57,7 +57,7 @@ export function systemVisual(
         ? `${meta.clade} · ${meta.role}`
         : undefined,
     group: meta?.clade,
-    ...(meta?.role ? { fill: ROLE_HEX[meta.role] } : {}),
-    ...(meta?.clade ? { ring: CLADE_HEX[meta.clade] } : {}),
+    ...(meta?.role ? { fill: ROLE_COLOR[meta.role] } : {}),
+    ...(meta?.clade ? { ring: CLADE_COLOR[meta.clade] } : {}),
   };
 }

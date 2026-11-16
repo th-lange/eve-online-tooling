@@ -7,16 +7,16 @@ import type { ConnectionView } from "../../lib/api";
 
 /** Wormhole edge colour by mass status (fresh → reduced → critical). */
 function massEdgeColor(mass: string): string {
-  if (mass === "critical") return "#f43f5e";
-  if (mass === "reduced") return "#f59e0b";
-  return "#a855f7";
+  if (mass === "critical") return "var(--color-rose-500)";
+  if (mass === "reduced") return "var(--color-amber-500)";
+  return "var(--color-purple-500)";
 }
 
 /** The two special EVE-Scout hub systems → a distinctive node colour. Thera is
  * the shattered wormhole hub; Turnur is its lowsec counterpart. */
 const SPECIAL_HUBS: Record<string, string> = {
-  Thera: "#2dd4bf", // teal
-  Turnur: "#e879f9", // fuchsia
+  Thera: "var(--color-teal-400)", // teal
+  Turnur: "var(--color-fuchsia-400)", // fuchsia
 };
 
 /** Interactive node-edge view of the mapped chain. Click a node to load its
