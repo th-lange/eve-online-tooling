@@ -1,26 +1,55 @@
 """Headless PYFA (eos) oracle: build canonical fits and emit the stats the Rust
-engine's golden suite (#176) asserts against, as JSON on stdout.
+engine's golden suite (#176, #1272) asserts against, as JSON on stdout.
 
-Setup (one-time), from the Pyfa repo root:
-    python3 -m venv venv && . venv/bin/activate
-    pip install 'sqlalchemy==1.4.50' logbook python-dateutil pyyaml cryptography
-    # config.py imports wx only for wx.Colour - stub it:
-    #   echo 'class Colour:\n  def __init__(self,*a,**k): pass\ndef __getattr__(n): return Colour' > wxstub/wx.py
-    PYTHONPATH=wxstub python db_update.py            # builds eve.db (~100 MB)
-    PYTHONPATH=wxstub python oracle.py > golden.json
+Run it from a Pyfa checkout, with `PYFA_EVE_DB` pointing at a prebuilt
+`eve.db` (see README.md):
 
-Numbers are PYFA v2.67.0 against its bundled SDE, all-V character.
+    PYFA_EVE_DB=/path/to/eve.db /path/to/venv/bin/python oracle.py > golden.json
+
+Nothing here touches a user save DB: saveddata lives in memory, gamedata is
+read-only.
 """
 import json
+import os
+import sys
+import types
+
 import eos.config
+
+eos.config.gamedataCache = False
 eos.config.saveddata_connectionstring = "sqlite:///:memory:"
+_game_db = os.environ.get("PYFA_EVE_DB")
+if _game_db:
+    eos.config.gamedata_connectionstring = (
+        f"sqlite:///{_game_db}?check_same_thread=False")
+# The settings dict pyfa's GUI settings service normally fills. The RAH must
+# simulate rather than read a static profile, which is what #1272 compares.
+eos.config.settings = {
+    "useStaticAdaptiveArmorHardener": False,
+    "strictSkillLevels": True,
+    "globalDefaultSpoolupPercentage": 1.0,
+}
+
+# `eos.db` imports Pyfa's root `config`, which imports wx. Stand in for it with
+# the handful of attributes eos actually reads - no GUI, no wx stub module.
+_stub = types.ModuleType("config")
+_stub.savePath = os.environ.get("PYFA_ORACLE_SAVE", "/tmp/pyfa-oracle-save")
+os.makedirs(_stub.savePath, exist_ok=True)
+_stub.saveDB = os.path.join(_stub.savePath, "saveddata.db")
+_stub.debug = False
+_stub.gamedata_connectionstring = eos.config.gamedata_connectionstring
+_stub.saveddata_connectionstring = eos.config.saveddata_connectionstring
+_stub.gamedata_version = None
+_stub.gamedata_date = None
+sys.modules["config"] = _stub
+
 import eos.db  # noqa: E402
-from eos.saveddata.fit import Fit  # noqa: E402
-from eos.saveddata.ship import Ship  # noqa: E402
-from eos.saveddata.module import Module  # noqa: E402
-from eos.saveddata.drone import Drone  # noqa: E402
-from eos.saveddata.character import Character  # noqa: E402
 from eos.const import FittingModuleState  # noqa: E402
+from eos.saveddata.character import Character  # noqa: E402
+from eos.saveddata.drone import Drone  # noqa: E402
+from eos.saveddata.fit import Fit  # noqa: E402
+from eos.saveddata.module import Module  # noqa: E402
+from eos.saveddata.ship import Ship  # noqa: E402
 
 
 def item(name):
@@ -84,6 +113,49 @@ FITS = [
      lambda: build("Vexor", [], drones=[("Hammerhead II", 5)])),
 ]
 
+
+def armor_resonance(fit, profile):
+    """Armour resonance under a damage profile - the RAH's whole output (#1272).
+
+    `profile` is (em, thermal, kinetic, explosive); eos normalises it itself.
+    """
+    from eos.saveddata.damagePattern import DamagePattern
+
+    em, th, kin, ex = profile
+    fit.damagePattern = DamagePattern(
+        emAmount=em, thermalAmount=th, kineticAmount=kin, explosiveAmount=ex)
+    fit.calculateModifiedAttributes()
+    get = fit.ship.getModifiedItemAttr
+    return [round(get(a), 6) for a in (
+        "armorEmDamageResonance",
+        "armorThermalDamageResonance",
+        "armorKineticDamageResonance",
+        "armorExplosiveDamageResonance",
+    )]
+
+
+def comparison_rows():
+    """Fits recorded for the #1272 engine comparison: the RAH's cycle ordering
+    under mixed profiles, and the cap sim's staggering of identical modules (an
+    unstable fit reports seconds-to-empty in `capState`, not a percentage)."""
+    rows = []
+    for profile in [(30, 15, 15, 40), (25, 25, 25, 25), (100, 0, 0, 0)]:
+        rows.append({
+            "label": f"Rifter + Reactive Armor Hardener, profile {profile}",
+            "profile": list(profile),
+            "armorResonance": armor_resonance(
+                build("Rifter", ["Reactive Armor Hardener"]), profile),
+        })
+    for count in (1, 2, 3):
+        fit = build("Rifter", ["Small Armor Repairer II"] * count)
+        rows.append({
+            "label": f"Rifter + {count}x Small Armor Repairer II",
+            "capStable": bool(fit.capStable),
+            "capState": round(fit.capState, 3),
+        })
+    return rows
+
+
 if __name__ == "__main__":
     out = []
     for label, mk in FITS:
@@ -91,4 +163,5 @@ if __name__ == "__main__":
             out.append(stats(label, mk()))
         except Exception as e:  # keep going; report the failure inline
             out.append({"label": label, "error": f"{type(e).__name__}: {e}"})
+    out.extend(comparison_rows())
     print(json.dumps(out, indent=2))
