@@ -1,5 +1,5 @@
 import type { HitQuality } from "../../lib/api";
-import { formatInt } from "../../lib/format";
+import { compactNumber, formatInt } from "../../lib/format";
 import { QUALITY_TIERS } from "./dpsMeterShared";
 
 /** Compact stacked bar of a combatant's hit-quality distribution, worst
@@ -39,14 +39,37 @@ export function QualityBar({ q }: { q?: HitQuality }) {
   );
 }
 
-/** Session peak + hit-quality indicators under a primary DPS readout.
+/** Session max + total for one readout card: the busiest 5 s bucket as a rate,
+ *  and everything the series accumulated this session (damage dealt/taken, HP
+ *  repaired, GJ transferred). Both follow the pilot filter and reset with the
+ *  session, like the charts. */
+export function SessionExtras({
+  peak,
+  total,
+}: {
+  peak: number;
+  total: number;
+}) {
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] tabular-nums text-zinc-500">
+      <span title="Busiest 5 s bucket this session">
+        max {formatInt(Math.round(peak))}
+      </span>
+      <span title="Session total">total {compactNumber(total)}</span>
+    </div>
+  );
+}
+
+/** Session max/total + hit-quality indicators under a primary DPS readout.
  *  "pen"/"smash"/"wreck" count the high-quality hits inside the rolling
  *  window (from the gamelog's hit-quality suffix); dim when zero. */
 export function PrimaryExtras({
   peak,
+  total,
   quality,
 }: {
   peak: number;
+  total: number;
   quality?: HitQuality;
 }) {
   const q = quality ?? { penetrates: 0, smashes: 0, wrecks: 0 };
@@ -57,8 +80,11 @@ export function PrimaryExtras({
   );
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] tabular-nums">
-      <span className="text-zinc-500" title="Session peak">
+      <span className="text-zinc-500" title="Busiest 5 s bucket this session">
         max {formatInt(Math.round(peak))}
+      </span>
+      <span className="text-zinc-500" title="Session total">
+        total {compactNumber(total)}
       </span>
       {notable.map((t) => {
         const n = q[t.key];

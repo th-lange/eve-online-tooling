@@ -1,15 +1,22 @@
 import { useMemo, useRef } from "react";
 import type { DpsBucket, PilotRate } from "../../lib/api";
 import {
+  BUCKET_FIELD,
   BUCKET_SECS,
   BUCKET_SERIES_IN,
   BUCKET_SERIES_OUT,
   MINING_BARS,
   MINING_BUCKET_SECS,
   MINING_SMOOTH_SECS,
+  SERIES,
   SOURCE_COLORS,
   type BucketSeries,
+  type SeriesKey,
 } from "./dpsMeterShared";
+
+/** One number per series, keyed like {@link SERIES}: session totals in the
+ *  series' own units, or peaks as per-second rates. */
+export type SeriesStats = Record<SeriesKey, number>;
 
 /** Per-second rates for the readout tiles, keyed like the SERIES list. */
 export type LatestRates = {
@@ -127,16 +134,35 @@ export function useDpsPlaybackDerived({
     };
   }, [latestBucket, selectedPilot]);
 
-  // Session peaks: the busiest 5 s bucket so far (aggregate, not filtered).
-  const { peakOut, peakIn } = useMemo(() => {
-    let peakOut = 0;
-    let peakIn = 0;
-    for (const b of buckets) {
-      peakOut = Math.max(peakOut, b.damageOut / BUCKET_SECS);
-      peakIn = Math.max(peakIn, b.damageIn / BUCKET_SECS);
+  // Session totals (absolute units) and peaks (per-second) for every series,
+  // over exactly the buckets the charts draw — in playback that is what has
+  // been played so far, including a selected loop region. A pilot filter
+  // scopes the two damage series like the charts do; logi/cap carry no
+  // per-pilot breakdown and stay session-wide.
+  const { seriesTotals, seriesPeaks } = useMemo(() => {
+    const totals = {} as SeriesStats;
+    const peaks = {} as SeriesStats;
+    for (const s of SERIES) {
+      totals[s.key] = 0;
+      peaks[s.key] = 0;
     }
-    return { peakOut, peakIn };
-  }, [buckets]);
+    for (const b of buckets) {
+      const pilot = selectedPilot
+        ? b.byPilot.find((p) => p.name === selectedPilot)
+        : undefined;
+      for (const s of SERIES) {
+        const scoped =
+          selectedPilot && (s.key === "dpsOut" || s.key === "dpsIn");
+        // byPilot rows carry rates; the bucket's own fields are sums.
+        const sum = scoped
+          ? (pilot?.[s.key] ?? 0) * BUCKET_SECS
+          : (b[BUCKET_FIELD[s.key]] as number);
+        totals[s.key] += sum;
+        peaks[s.key] = Math.max(peaks[s.key], sum / BUCKET_SECS);
+      }
+    }
+    return { seriesTotals: totals, seriesPeaks: peaks };
+  }, [buckets, selectedPilot]);
 
   // byPilot rows scoped to the selection (all rows when unfiltered).
   const pilotRows: PilotRate[] = selectedPilot
@@ -209,8 +235,8 @@ export function useDpsPlaybackDerived({
     outSeries,
     inSeries,
     combinedSeries,
-    peakOut,
-    peakIn,
+    seriesTotals,
+    seriesPeaks,
     pilotRows,
     tackledBy,
     tackling,

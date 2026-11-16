@@ -148,7 +148,9 @@ export const BucketChart = memo(function BucketChart({
               log @ {formatClock(markTs)}
             </span>
           )}
-          <span>peak {formatInt(Math.round(max))}</span>
+          <span title="Highest point of the smoothed line — the readout's 'max' is the busiest raw 5 s bucket">
+            axis max {formatInt(Math.round(max))}
+          </span>
         </span>
       </div>
       <div className="flex items-stretch">
