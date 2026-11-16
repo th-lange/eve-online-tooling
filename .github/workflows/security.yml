@@ -108,7 +108,29 @@ jobs:
           ids=$(grep -oE 'RUSTSEC-[0-9]{4}-[0-9]{4}' src-tauri/.cargo/audit.toml | sort -u | paste -sd, -)
           echo "ids=$ids" >> "$GITHUB_OUTPUT"
           echo "Ignoring: $ids"
+
+      # PRs and pushes gate on the `cargo-audit` CLI, which reads
+      # src-tauri/.cargo/audit.toml itself (one source for the ignores, each
+      # with a written reason) and reports through the exit code alone.
+      # rustsec/audit-check posts its findings as a *check run*, and that API
+      # call intermittently fails with "Not Found" even on a clean audit,
+      # turning a green audit into a red required check (seen on #1288 and
+      # #1291). No check run, no flake.
+      - name: Install cargo-audit
+        if: github.event_name != 'schedule'
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: cargo-audit
+      - name: Audit
+        if: github.event_name != 'schedule'
+        working-directory: src-tauri
+        run: cargo audit
+
+      # The weekly run keeps the action: on a schedule it files an issue for
+      # newly-disclosed advisories, which the CLI can't do. A failed check-run
+      # post there costs a red scheduled run, not a blocked merge.
       - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+        if: github.event_name == 'schedule'
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: src-tauri
