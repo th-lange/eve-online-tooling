@@ -54,33 +54,56 @@ export type SeriesKey =
   | "capTransferIn";
 
 // The series we graph + read out. `out` series share warm colours, `in` cool.
+// Colours go through the palette variables rather than raw hex so Light's
+// remap reaches them (#1265): on white, `emerald-400` resolves to a shade
+// dark enough to read, where the literal #34d399 washes out.
 export const SERIES = [
-  { key: "dpsOut", label: "DPS out", color: "#34d399", primary: true },
-  { key: "dpsIn", label: "DPS in", color: "#f87171", primary: true },
-  { key: "logiOut", label: "Logi out", color: "#38bdf8", primary: false },
-  { key: "logiIn", label: "Logi in", color: "#a78bfa", primary: false },
+  {
+    key: "dpsOut",
+    label: "DPS out",
+    color: "var(--color-emerald-400)",
+    primary: true,
+  },
+  {
+    key: "dpsIn",
+    label: "DPS in",
+    color: "var(--color-red-400)",
+    primary: true,
+  },
+  {
+    key: "logiOut",
+    label: "Logi out",
+    color: "var(--color-sky-400)",
+    primary: false,
+  },
+  {
+    key: "logiIn",
+    label: "Logi in",
+    color: "var(--color-violet-400)",
+    primary: false,
+  },
   {
     key: "capWarfareOut",
     label: "Cap warfare out",
-    color: "#fbbf24",
+    color: "var(--color-amber-400)",
     primary: false,
   },
   {
     key: "capWarfareIn",
     label: "Cap warfare in",
-    color: "#fb923c",
+    color: "var(--color-orange-400)",
     primary: false,
   },
   {
     key: "capTransferOut",
     label: "Cap xfer out",
-    color: "#2dd4bf",
+    color: "var(--color-teal-400)",
     primary: false,
   },
   {
     key: "capTransferIn",
     label: "Cap xfer in",
-    color: "#c084fc",
+    color: "var(--color-purple-400)",
     primary: false,
   },
 ] as const satisfies readonly {
@@ -254,18 +277,19 @@ export function appendBuckets(
 
 // Palette for per-source (by-pilot) lines — distinct hues, assigned to each
 // source on first sighting and kept for the session so a source never changes
-// colour mid-fight. Wraps past 10 concurrent sources.
+// colour mid-fight. Wraps past 10 concurrent sources. Palette variables, not
+// hex, so Light's remap reaches them (#1265).
 export const SOURCE_COLORS = [
-  "#60a5fa", // blue
-  "#f472b6", // pink
-  "#4ade80", // green
-  "#facc15", // yellow
-  "#22d3ee", // cyan
-  "#fb923c", // orange
-  "#a78bfa", // violet
-  "#f87171", // red
-  "#2dd4bf", // teal
-  "#e879f9", // fuchsia
+  "var(--color-blue-400)",
+  "var(--color-pink-400)",
+  "var(--color-green-400)",
+  "var(--color-yellow-400)",
+  "var(--color-cyan-400)",
+  "var(--color-orange-400)",
+  "var(--color-violet-400)",
+  "var(--color-red-400)",
+  "var(--color-teal-400)",
+  "var(--color-fuchsia-400)",
 ];
 
 // Combat-log line cap for the PVP fight overlay's footer — a fight is
