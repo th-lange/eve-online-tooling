@@ -1173,21 +1173,34 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// Same guard against an absolute-path entry name. `zip::write` doesn't
-    /// sanitize the name it's given (only `enclosed_name()` on the read side
-    /// does), so a leading `/` round-trips into the archive unmodified and
-    /// exercises the same `Component::RootDir => return None` branch as a
-    /// real hostile archive built by a non-Rust tool would.
+    /// An absolute entry name (`/evil.txt`) must never write outside the
+    /// staging dir. `zip::write` keeps the leading `/` it is handed, but
+    /// `enclosed_name()` **normalises** it to a relative path inside the
+    /// archive rather than returning `None` (zip 9 behaviour; zip 2 rejected
+    /// it outright, which this test used to pin). Either way the entry is
+    /// enclosed — it lands under the plugin's own directory and nowhere
+    /// else, which is what this guards.
     #[test]
-    fn install_zip_rejects_an_absolute_path_entry() {
+    fn install_zip_contains_an_absolute_path_entry_inside_the_plugin_dir() {
         let root = tmp("zip-slip-abs");
         std::fs::create_dir_all(root.join("plugins")).unwrap();
         let zip_path = root.join("evil-abs.zip");
-        write_zip(&zip_path, &[("/evil-abs-636.txt", "pwned")]);
+        write_zip(
+            &zip_path,
+            &[
+                ("plugin.json", &manifest_json("abs-plugin")),
+                ("/evil-abs-636.txt", "pwned"),
+            ],
+        );
         let reg = PluginRegistry::load(&root);
-        let err = reg.install_zip(&zip_path).unwrap_err();
-        assert!(err.contains("unsafe path"), "unexpected error: {err}");
-        assert!(find_files_starting_with(&std::env::temp_dir(), "evil-abs-636").is_empty());
+        let id = reg.install_zip(&zip_path).unwrap();
+        assert_eq!(id, "abs-plugin");
+        // Normalised into the plugin's directory, not written at the
+        // filesystem root or into the temp dir.
+        assert!(root.join("plugins/abs-plugin/evil-abs-636.txt").exists());
+        assert!(!Path::new("/evil-abs-636.txt").exists());
+        // (The staging root itself lives under the temp dir, so a temp-wide
+        // scan would match the legitimately installed copy.)
         assert!(std::fs::read_dir(root.join("plugins"))
             .unwrap()
             .flatten()

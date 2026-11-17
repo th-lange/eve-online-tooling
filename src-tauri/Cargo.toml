@@ -67,7 +67,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["r
 rhai = { version = "1.25", features = ["sync", "serde"] }
 boa_engine = "0.21"
 # Plugin drag-and-drop install (folder or .zip) — extraction only.
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Native WebKitCache clearing (#1114) — same libwebkit2gtk already linked
