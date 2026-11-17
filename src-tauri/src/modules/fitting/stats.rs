@@ -753,6 +753,23 @@ pub(super) fn resolved_damage(store: &AttrStore) -> f64 {
     store.get(114) + store.get(116) + store.get(117) + store.get(118)
 }
 
+/// A chargeless module that nonetheless deals damage on a cycle is a
+/// smartbomb (#1293): it carries the four damage attributes itself and
+/// `duration` (73) rather than a rate of fire, and takes no ammunition —
+/// `commands::compatible_charges` returns nothing for one. Anything without
+/// both damage and a cycle isn't a weapon at all (a hardener, a prop mod),
+/// so it yields `None` and contributes nothing.
+fn smartbomb_weapon(store: &AttrStore) -> Option<Weapon> {
+    let damage_per_shot = resolved_damage(store);
+    let cycle_seconds = store.get(73) / 1000.0;
+    (damage_per_shot > 0.0 && cycle_seconds > 0.0).then_some(Weapon {
+        damage_mult: 1.0,
+        damage_per_shot,
+        rof_seconds: cycle_seconds,
+        count: 1,
+    })
+}
+
 /// How many of each fitted drone stack are actually active (deployed), given
 /// the ship's resolved drone bandwidth and the 5-in-space limit (assumed at
 /// Drones V, consistent with the app's all-V-by-default skill basis). Both
@@ -888,6 +905,7 @@ pub(super) fn fighter_of(
         missile: 0.0,
         drone: 0.0,
         fighter,
+        smartbomb: 0.0,
         total: fighter,
     };
     (
@@ -913,11 +931,15 @@ pub(super) fn dps_of(
 ) -> DpsBreakdown {
     let mut turrets = Vec::new();
     let mut missiles = Vec::new();
+    let mut smartbombs = Vec::new();
     for (i, store) in resolved.modules.iter().enumerate() {
         if module_items.get(i).is_some_and(|it| !is_running(it.state)) {
             continue; // active/overheated weapons fire; inactive/offline = none
         }
         let Some(Some(charge)) = resolved.charges.get(i) else {
+            if let Some(bomb) = smartbomb_weapon(store) {
+                smartbombs.push(bomb);
+            }
             continue;
         };
         let damage_per_shot = resolved_damage(charge);
@@ -952,7 +974,7 @@ pub(super) fn dps_of(
         })
         .collect();
 
-    damage(&turrets, &missiles, &drones)
+    damage(&turrets, &missiles, &drones, &smartbombs)
 }
 
 /// Sustained DPS (#871): the same weapon set/iteration as [`dps_of`], but
@@ -972,11 +994,17 @@ pub(super) fn dps_sustained_of(
 ) -> DpsBreakdown {
     let mut turrets = Vec::new();
     let mut missiles = Vec::new();
+    let mut smartbombs = Vec::new();
     for (i, store) in resolved.modules.iter().enumerate() {
         if module_items.get(i).is_some_and(|it| !is_running(it.state)) {
             continue; // active/overheated weapons fire; inactive/offline = none
         }
         let Some(Some(charge)) = resolved.charges.get(i) else {
+            // A smartbomb takes no charge, so it never reloads: burst and
+            // sustained are the same number (#1293).
+            if let Some(bomb) = smartbomb_weapon(store) {
+                smartbombs.push(bomb);
+            }
             continue;
         };
         let rof_seconds = store.get(51) / 1000.0;
@@ -1012,7 +1040,7 @@ pub(super) fn dps_sustained_of(
         })
         .collect();
 
-    damage(&turrets, &missiles, &drones)
+    damage(&turrets, &missiles, &drones, &smartbombs)
 }
 
 /// Shared applied-DPS math for one distance: turret/missile hit-quality
@@ -1181,8 +1209,11 @@ fn applied_dps_at(
         drone: drone_dps,
         // Fighter travel/application modeling is a documented follow-up
         // (#877 scope cut) — fighters never contribute to applied DPS or
-        // the DPS-vs-range curve today.
+        // the DPS-vs-range curve today. Smartbombs are excluded on purpose:
+        // they have no tracking or explosion radius to apply against a
+        // single target, only their own few-km radius (#1293).
         fighter: 0.0,
+        smartbomb: 0.0,
         total: turret_dps + missile_dps + drone_dps,
     }
 }

@@ -34,20 +34,26 @@ fn sum_dps(weapons: &[Weapon]) -> f64 {
     weapons.iter().map(Weapon::dps).sum()
 }
 
-/// Aggregate turret/missile/drone DPS into a breakdown.
-pub fn damage(turrets: &[Weapon], missiles: &[Weapon], drones: &[Weapon]) -> DpsBreakdown {
+/// Aggregate turret/missile/drone/smartbomb DPS into a breakdown.
+pub fn damage(
+    turrets: &[Weapon],
+    missiles: &[Weapon],
+    drones: &[Weapon],
+    smartbombs: &[Weapon],
+) -> DpsBreakdown {
     let turret = sum_dps(turrets);
     let missile = sum_dps(missiles);
     let drone = sum_dps(drones);
+    let smartbomb = sum_dps(smartbombs);
     DpsBreakdown {
         turret,
         missile,
         drone,
         // Fighters are computed separately (`stats::fighter_of`) and merged
-        // in by the caller — this aggregator only ever sees turret/missile/
-        // drone weapons.
+        // in by the caller — this aggregator only ever sees fitted weapons.
         fighter: 0.0,
-        total: turret + missile + drone,
+        smartbomb,
+        total: turret + missile + drone + smartbomb,
     }
 }
 
@@ -64,7 +70,7 @@ mod tests {
             rof_seconds: 3.75,
             count: 1,
         };
-        let d = damage(&[gun], &[], &[]);
+        let d = damage(&[gun], &[], &[], &[]);
         assert!((d.turret - 10.164).abs() < 1e-3, "turret = {}", d.turret);
         assert!((d.total - d.turret).abs() < 1e-9);
     }
@@ -78,7 +84,7 @@ mod tests {
             rof_seconds: 4.0,
             count: 5,
         };
-        let d = damage(&[], &[], &[drone]);
+        let d = damage(&[], &[], &[drone], &[]);
         assert!((d.drone - 48.0).abs() < 1e-6, "drone = {}", d.drone);
     }
 
@@ -91,7 +97,7 @@ mod tests {
             rof_seconds: 5.0,
             count: 1,
         };
-        let d = damage(&[], &[m], &[]);
+        let d = damage(&[], &[m], &[], &[]);
         assert!((d.missile - 6.0).abs() < 1e-9);
     }
 
@@ -103,6 +109,6 @@ mod tests {
             rof_seconds: 0.0,
             count: 1,
         };
-        assert_eq!(damage(&[bad], &[], &[]).total, 0.0);
+        assert_eq!(damage(&[bad], &[], &[], &[]).total, 0.0);
     }
 }

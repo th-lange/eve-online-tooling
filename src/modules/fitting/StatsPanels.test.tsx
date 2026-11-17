@@ -21,6 +21,7 @@ function dps(overrides: Partial<DpsBreakdown> = {}): DpsBreakdown {
     missile: 0,
     drone: 0,
     fighter: 0,
+    smartbomb: 0,
     total: 200,
     ...overrides,
   };
@@ -49,6 +50,33 @@ describe("DpsBreakdownPanel", () => {
       />,
     );
     expect(screen.queryByText(/fighters not applied/)).toBeNull();
+  });
+
+  it("breaks smartbomb damage out and keeps it out of applied (#1293)", () => {
+    render(
+      <DpsBreakdownPanel
+        skillLabel="all V"
+        dps={dps({ smartbomb: 27, total: 227 })}
+        appliedDps={dps({ total: 180 })}
+        jammedActive={false}
+      />,
+    );
+    expect(screen.getByText(/smartbomb 27/)).toBeInTheDocument();
+    expect(screen.getByText(/smartbombs not applied/)).toBeInTheDocument();
+  });
+
+  it("names both when a fit carries fighters and smartbombs", () => {
+    render(
+      <DpsBreakdownPanel
+        skillLabel="all V"
+        dps={dps({ fighter: 800, smartbomb: 27, total: 1027 })}
+        appliedDps={dps({ total: 180 })}
+        jammedActive={false}
+      />,
+    );
+    expect(
+      screen.getByText(/fighters and smartbombs not applied/),
+    ).toBeInTheDocument();
   });
 });
 

@@ -109,7 +109,14 @@ const STATS: FitStats = {
     rahActive: false,
     passiveShieldS: 0,
   },
-  dps: { turret: 45.5, missile: 0, drone: 0, fighter: 0, total: 45.5 },
+  dps: {
+    turret: 45.5,
+    missile: 0,
+    drone: 0,
+    fighter: 0,
+    smartbomb: 0,
+    total: 45.5,
+  },
   navigation: {
     maxVelocity: 480,
     alignTime: 3.2,

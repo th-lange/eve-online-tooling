@@ -218,6 +218,12 @@ pub struct DpsBreakdown {
     /// (travel/application modeling for fighters is a documented follow-up),
     /// so `applied_dps`/`dps_range_curve` always carry `0.0` here.
     pub fighter: f64,
+    /// Smartbomb DPS (#1293): damage per cycle ÷ cycle time, summed over
+    /// every running smartbomb. Counted in `total` as PYFA does, but never
+    /// in applied DPS — a smartbomb has no tracking and no explosion radius
+    /// to apply, it hits everything inside its own few-km sphere, so a
+    /// single-target applied number would be fiction.
+    pub smartbomb: f64,
     pub total: f64,
 }
 
