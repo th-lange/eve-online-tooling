@@ -1,5 +1,5 @@
 // Vitest global setup: extends `expect` with jest-dom matchers.
-import "@testing-library/jest-dom";
+import "@testing-library/jest-dom/vitest";
 
 // jsdom's default (opaque) origin doesn't expose Web Storage, so provide a
 // minimal in-memory `localStorage` for code/tests that persist UI state.
