@@ -2,10 +2,10 @@ name: Security
 
 # Code scanning + dependency-vulnerability audits, separate from the `CI`
 # test gate: these run on the same PR/push triggers plus a weekly schedule
-# (so newly-disclosed advisories surface even on an otherwise-quiet repo),
-# but are informational rather than merge-blocking for now — see the
-# `continue-on-error` notes below. Flip those off once the existing
-# findings (tracked separately) are triaged.
+# (so newly-disclosed advisories surface even on an otherwise-quiet repo).
+# Both audits are merge-blocking: the tree reports zero `npm audit`
+# high/critical findings and zero `cargo audit` vulnerabilities, so anything
+# new here is a regression rather than part of a backlog.
 on:
   pull_request:
     paths-ignore:
@@ -72,14 +72,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Informational for now: the current tree has known high/critical
-      # advisories (postcss, react-router, tinypool, …) that need a
-      # deliberate, tested dependency bump, not a silent CI-driven one.
-      # `continue-on-error` keeps this from blocking merges while that's
-      # pending; the step output still shows red in the run log.
+      # Blocking: the tree reports zero advisories as of #1324, so a new
+      # high/critical one is a regression to look at, not noise to wave
+      # through. Moderate and below stay out of the gate — they are tracked by
+      # the weekly run's output, not by failing a merge.
       - name: Audit
         run: npm audit --audit-level=high
-        continue-on-error: true
 
   cargo-audit:
     name: cargo audit
