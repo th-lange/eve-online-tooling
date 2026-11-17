@@ -32,14 +32,19 @@
 //! (PyYAML's list-of-tuples rendering of an ordered mapping), where `attrs`
 //! is itself a sequence of `[attrName, value]` pairs carrying `pre`, `post`,
 //! `state` (1 = shown, 0 = hidden), and `type`. This module reads that
-//! structure with `serde_yaml::Value` rather than deriving a `Deserialize`
+//! structure with `serde_norway::Value` rather than deriving a `Deserialize`
 //! struct — the tuple-of-tuples shape doesn't map cleanly onto Serde's model
 //! for real maps/structs.
+//!
+//! `serde_norway` is a maintained hard-fork of `serde_yaml`, whose final
+//! release calls itself `0.9.34+deprecated` and pulls the unmaintained
+//! `unsafe-libyaml` (RUSTSEC-2024-0449). The fork keeps the same API and
+//! carries its own maintained libyaml, so the swap was a rename.
 
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use serde_yaml::Value;
+use serde_norway::Value;
 
 /// A ship-label field EVE's overview can render. `Other` covers any label
 /// key this module doesn't need to capture (`faction`, security status,
@@ -129,7 +134,7 @@ fn attr_map(attrs: &Value) -> HashMap<&str, &Value> {
 /// overview export — missing either top-level key, or malformed shapes for
 /// them.
 pub fn parse_overview_export(yaml: &str) -> Result<ExtractionPlan, String> {
-    let root: Value = serde_yaml::from_str(yaml).map_err(|e| format!("invalid YAML: {e}"))?;
+    let root: Value = serde_norway::from_str(yaml).map_err(|e| format!("invalid YAML: {e}"))?;
 
     let order = root
         .get("shipLabelOrder")
