@@ -326,6 +326,14 @@ fn same_drain(a: &ModuleDrain, b: &ModuleDrain) -> bool {
 /// neut drain (#706). Samples `(ms, cap_gj)` at the start and after every
 /// processed event; stops at `horizon_ms` or the instant cap first goes
 /// negative (returned as `Some(seconds)`).
+///
+/// A booster charge that would overflow the capacitor is **held**, not burned
+/// (#1272): the module stays on its cadence and tries again next cycle, with
+/// its clip untouched. PYFA instead drops such a charge out of the schedule
+/// entirely until an activation would otherwise fail, which makes a fit coast
+/// to near-empty before the booster ever cycles and can kill a fit that holds
+/// comfortably when it cycles from the start. Clamping the overflow away (what
+/// this did before) wasted a charge the pilot would simply not have fired.
 fn simulate(
     capacity: f64,
     recharge_ms: f64,
@@ -374,6 +382,13 @@ fn simulate(
             cap -= neut_gjs * (t_now - t_last) / 1000.0;
         }
         t_last = t_now;
+        // An injection that would spill over the top is held for next cycle:
+        // the charge isn't spent, so a clip lasts as long as it does in the
+        // hands of a pilot watching the gauge.
+        if need < 0.0 && cap - need > cap_max {
+            events[i].t = t_now + events[i].cyc;
+            continue;
+        }
         cap -= need;
         if cap < 0.0 {
             samples.push((t_now, 0.0));
@@ -784,6 +799,45 @@ mod tests {
             .depletion_seconds
             .expect("unstable cap should report a time");
         assert!(t > 0.0, "depletion = {t}");
+    }
+
+    /// A charge that would overflow the capacitor is held, not burned
+    /// (#1272). The sim starts full, so the booster's first scheduled cycle
+    /// always overflows: if that charge were spent anyway, a one-shot clip
+    /// would be gone before it ever helped and the fit would die exactly when
+    /// the boosterless one does.
+    #[test]
+    fn a_full_capacitor_holds_the_booster_charge_instead_of_wasting_it() {
+        let booster = |clip_shots: f64| ModuleDrain {
+            need: 20.0,
+            cycle_ms: 6_000.0,
+            clip_shots,
+            reload_ms: 3_600_000.0, // an hour: one clip is all this fit gets
+            stagger: true,
+        };
+        let empty = time_to_empty(250.0, 125_000.0, &[drain(8.0, 1000.0)], 0.0, &[]);
+        let one_shot = time_to_empty(
+            250.0,
+            125_000.0,
+            &[drain(8.0, 1000.0)],
+            0.0,
+            &[booster(1.0)],
+        );
+        let two_shot = time_to_empty(
+            250.0,
+            125_000.0,
+            &[drain(8.0, 1000.0)],
+            0.0,
+            &[booster(2.0)],
+        );
+        assert!(
+            one_shot > empty,
+            "the held charge must still be spent later: {one_shot}s vs {empty}s unboosted"
+        );
+        assert!(
+            two_shot > one_shot,
+            "a second charge buys more time: {two_shot}s vs {one_shot}s"
+        );
     }
 
     /// The 120-point trajectory shows the injection sawtooth (#875) — cap
