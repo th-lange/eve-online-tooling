@@ -23,6 +23,17 @@
   color-scheme: dark;
 }
 
+/* Dark muted text (#1265). Tailwind's zinc-500 — the app's most common muted
+ * shade, used for section labels, hints and empty states — measures 4.12:1 on
+ * the page and 3.67:1 inside a panel, under WCAG AA for body text. Light
+ * already solves this in its own generator (which darkens its 500 past the
+ * plain mirror "so muted text keeps ~4.5:1"); this is the mirror image for
+ * Dark. The replacement stays visibly dimmer than zinc-400 (5.2:1 vs 6.9:1 on
+ * a panel) so the two shades don't collapse into one. */
+:root:not([data-theme="light"]) {
+  --color-zinc-500: #8a8a93;
+}
+
 :root[data-theme="light"] {
   color-scheme: light;
   --color-surface: #ffffff;
