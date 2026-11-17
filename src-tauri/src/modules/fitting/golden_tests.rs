@@ -1523,8 +1523,9 @@ fn spool_overheat_and_smartbomb_match_pyfa() {
         );
     }
 
-    // Smartbombs (#1293): PYFA counts 6.6667 dps here; we model no smartbomb
-    // at all, and every DPS path agrees on that zero.
+    // Smartbombs (#1293): counted in the paper total like PYFA does, and in
+    // their own bucket; never in applied DPS, which has no model for a
+    // radius weapon with no tracking.
     let smartbomb = run(
         "Rifter",
         vec![gun(
@@ -1535,8 +1536,18 @@ fn spool_overheat_and_smartbomb_match_pyfa() {
         )],
         1.0,
     );
+    assert!(
+        (smartbomb.dps.smartbomb - 6.6667).abs() < 0.001,
+        "smartbomb dps {}, pyfa says 6.6667",
+        smartbomb.dps.smartbomb
+    );
+    assert!(
+        (smartbomb.dps.total - 6.6667).abs() < 0.001,
+        "smartbomb must reach the paper total: {}",
+        smartbomb.dps.total
+    );
     assert_eq!(
-        smartbomb.dps.total, 0.0,
-        "smartbomb DPS is unmodelled (#1293); re-pin against pyfa's 6.6667 when it lands"
+        smartbomb.dps_sustained.smartbomb, smartbomb.dps.smartbomb,
+        "a smartbomb takes no charge, so it never reloads"
     );
 }

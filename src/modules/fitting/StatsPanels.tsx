@@ -735,7 +735,9 @@ export function DpsBreakdownPanel({
               {shown.turret > 0 && `turret ${shown.turret.toFixed(0)} `}
               {shown.missile > 0 && `· missile ${shown.missile.toFixed(0)} `}
               {shown.drone > 0 && `· drone ${shown.drone.toFixed(0)} `}
-              {shown.fighter > 0 && `· fighter ${shown.fighter.toFixed(0)}`}
+              {shown.fighter > 0 && `· fighter ${shown.fighter.toFixed(0)} `}
+              {shown.smartbomb > 0 &&
+                `· smartbomb ${shown.smartbomb.toFixed(0)}`}
             </div>
           )}
           {factorReload && dpsSustained && (
@@ -753,13 +755,20 @@ export function DpsBreakdownPanel({
                 {appliedDps.total.toFixed(0)} dps
               </span>{" "}
               (vs paper {dps.total.toFixed(0)} dps)
-              {dps.fighter > 0 && (
+              {(dps.fighter > 0 || dps.smartbomb > 0) && (
                 <span
                   className="text-zinc-600"
-                  title="Fighter application isn't modelled yet (#877), so the fighters' share of the paper number is left out of applied — not scored as zero damage."
+                  title="Applied covers weapons with a tracking/application model. Fighter application isn't modelled yet (#877); a smartbomb has none to model — it hits everything inside its own radius. Their share of the paper number is left out rather than scored as zero damage."
                 >
                   {" "}
-                  · fighters not applied
+                  ·{" "}
+                  {[
+                    dps.fighter > 0 ? "fighters" : null,
+                    dps.smartbomb > 0 ? "smartbombs" : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" and ")}{" "}
+                  not applied
                 </span>
               )}
             </div>

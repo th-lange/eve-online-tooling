@@ -221,6 +221,9 @@ export interface DpsBreakdown {
   /** Fighter squadron DPS (#877); not yet folded into applied-DPS/DPS-vs-
    *  range (travel/application modeling is a documented follow-up). */
   fighter: number;
+  /** Smartbomb DPS (#1293): in the paper total, never in applied DPS — a
+   *  radius weapon has no tracking or explosion radius to apply. */
+  smartbomb: number;
   total: number;
 }
 
