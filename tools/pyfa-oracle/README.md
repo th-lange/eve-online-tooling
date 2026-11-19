@@ -51,6 +51,11 @@ PYFA_EVE_DB=/tmp/pyfa-rel/squashfs-root/opt/pyfa/eve.db \
   get their `owner` back-populated, so the oracle sets `item.owner = fit`.
 - **`useStaticAdaptiveArmorHardener: False`** — makes the Reactive Armour
   Hardener *simulate* its resist shift, which is what #1272 compares against.
+- **graph code loaded by file** — applied fighter damage is not in `eos` but in
+  the GUI's graph code (`graphs/data/fitDamageStats/calc/application.py`),
+  whose imports reach the wx-backed settings and attribute services.
+  `oracle.py` stands in for those four modules and loads that one file
+  directly, so the maths that runs is still PYFA's `getFighterAbilityMult`.
 
 ## Output
 
@@ -59,9 +64,11 @@ PYFA_EVE_DB=/tmp/pyfa-rel/squashfs-root/opt/pyfa/eve.db \
 - the canonical fits: `{ label, weaponDps, droneDps, totalDps, ehp, capStable,
   capStatePct, maxVelocity, alignTime }`;
 - the #1272 comparison rows: a Rifter + Reactive Armour Hardener under three
-  damage profiles (`armorResonance`), and a Rifter with 1/2/3 Small Armour
+  damage profiles (`armorResonance`), a Rifter with 1/2/3 Small Armour
   Repairer IIs (`capState` — on an unstable fit PYFA reports **seconds to
-  empty**, not a percentage).
+  empty**, not a percentage), spool-up, overheat and smartbomb DPS, and each
+  damage ability of a Firbolg I squadron on a Thanatos against four target
+  signatures/speeds (`squadronDps`, `applicationMult`).
 
 Recorded with PYFA source `b79cd90` against v2.70.0's `eve.db`. The first three
 rows reproduce the values captured under the older v2.67.0 recipe exactly.

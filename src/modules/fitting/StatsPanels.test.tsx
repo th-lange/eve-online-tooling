@@ -28,28 +28,17 @@ function dps(overrides: Partial<DpsBreakdown> = {}): DpsBreakdown {
 }
 
 describe("DpsBreakdownPanel", () => {
-  it("says applied leaves fighters out when the fit flies them (#1272)", () => {
+  it("does not flag fighters as left out of applied (#1272)", () => {
     render(
       <DpsBreakdownPanel
         skillLabel="all V"
         dps={dps({ fighter: 800, total: 1000 })}
-        appliedDps={dps({ total: 180 })}
+        appliedDps={dps({ fighter: 600, total: 780 })}
         jammedActive={false}
       />,
     );
-    expect(screen.getByText(/fighters not applied/)).toBeInTheDocument();
-  });
-
-  it("says nothing about fighters on a fit without them", () => {
-    render(
-      <DpsBreakdownPanel
-        skillLabel="all V"
-        dps={dps()}
-        appliedDps={dps({ total: 180 })}
-        jammedActive={false}
-      />,
-    );
-    expect(screen.queryByText(/fighters not applied/)).toBeNull();
+    expect(screen.getByText(/780 dps/)).toBeInTheDocument();
+    expect(screen.queryByText(/not applied/)).toBeNull();
   });
 
   it("breaks smartbomb damage out and keeps it out of applied (#1293)", () => {
@@ -65,18 +54,17 @@ describe("DpsBreakdownPanel", () => {
     expect(screen.getByText(/smartbombs not applied/)).toBeInTheDocument();
   });
 
-  it("names both when a fit carries fighters and smartbombs", () => {
+  it("names only smartbombs when a fit carries fighters as well", () => {
     render(
       <DpsBreakdownPanel
         skillLabel="all V"
         dps={dps({ fighter: 800, smartbomb: 27, total: 1027 })}
-        appliedDps={dps({ total: 180 })}
+        appliedDps={dps({ fighter: 600, total: 780 })}
         jammedActive={false}
       />,
     );
-    expect(
-      screen.getByText(/fighters and smartbombs not applied/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/smartbombs not applied/)).toBeInTheDocument();
+    expect(screen.queryByText(/fighters/)).toBeNull();
   });
 });
 

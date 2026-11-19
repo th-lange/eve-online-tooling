@@ -4,7 +4,7 @@
 
 use super::engine::tank::DamageProfile;
 use super::stats::run_dogma;
-use super::types::{Fit, FitItem, ModuleState, SlotKind};
+use super::types::{Fit, FitItem, ModuleState, SlotKind, TargetProfile};
 
 /// Golden gate (#176): the live dogma engine vs PYFA-recorded numbers
 /// (`tools/pyfa-oracle/golden.json`, all-V, PYFA v2.67.0). Needs the
@@ -1416,6 +1416,108 @@ fn thanatos_two_light_fighter_squadrons_matches_hand_computed_dps() {
     }
 }
 
+/// Applied fighter damage against PYFA's own `getFighterAbilityMult`
+/// (#1272): v2.70.0's `eve.db` through source `b79cd90`, all-V character, one
+/// full Firbolg I squadron on a Thanatos, via `tools/pyfa-oracle`.
+///
+/// | ability | squadron dps | sig 400, 0 m/s | sig 125, 300 m/s | sig 40, 1000 m/s | sig 40, 4000 m/s |
+/// |---|---|---|---|---|---|
+/// | Rockets (`attackMissile`) | 316.4062 | 1 | 0.394870 | 0.087214 | 0.035694 |
+/// | Fighter Missiles (`missiles`) | 207.9241 | 1 | 0.084412 | 0.009238 | 0.002496 |
+///
+/// The two abilities carry their damage-reduction factor under differently
+/// named attribute pairs, and only Rockets has a falloff; both rows together
+/// pin that each family reads its own. The last column is a target the
+/// squadron (1116 m/s) cannot catch: at point-blank it is still inside the
+/// ability's optimal, so only the missile factor bites.
+///
+/// PYFA fires every damage ability of a squadron at once; we fire the one
+/// the pilot selected (#877), so the comparison is per ability.
+#[test]
+fn fighter_application_matches_pyfa() {
+    let Some((sde, dir)) = crate::test_support::test_sde() else {
+        return;
+    };
+    let dir = dir.as_path();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let all5 = |_: i64| 5.0;
+    let ship = tid("Thanatos");
+    let layout = sde.ship_layout(ship).unwrap().expect("layout");
+    let targets = [(400.0, 0.0), (125.0, 300.0), (40.0, 1000.0), (40.0, 4000.0)];
+    let recorded = [
+        (
+            "attackMissile",
+            316.4062,
+            [1.0, 0.394870, 0.087214, 0.035694],
+        ),
+        ("missiles", 207.9241, [1.0, 0.084412, 0.009238, 0.002496]),
+    ];
+    for (ability, squadron_dps, mults) in recorded {
+        let fit = Fit {
+            id: "t".into(),
+            name: "Thanatos".into(),
+            ship_type_id: ship,
+            items: vec![FitItem {
+                type_id: tid("Firbolg I"),
+                slot: SlotKind::Fighter,
+                index: 0,
+                state: ModuleState::Active,
+                charge_type_id: None,
+                quantity: 6,
+                active_drones: None,
+                mutation: None,
+                fighter_ability: Some(ability.into()),
+            }],
+            projected: Vec::new(),
+        };
+        for ((sig_radius, speed), want) in targets.into_iter().zip(mults) {
+            let target = TargetProfile {
+                sig_radius,
+                speed,
+                angular_velocity: 0.0,
+                drones_keep_pace: true,
+                missiles_need_overtake: false,
+            };
+            let d = run_dogma(
+                &sde,
+                dir,
+                &fit,
+                &layout,
+                &all5,
+                &DamageProfile::default(),
+                0.0,
+                Some(&target),
+                &[],
+                None,
+                None,
+                1.0,
+                false,
+            )
+            .expect("dogma");
+            assert!(
+                (d.dps.fighter - squadron_dps).abs() < 0.001,
+                "{ability}: squadron dps {}, pyfa says {squadron_dps}",
+                d.dps.fighter
+            );
+            let applied = d.applied_dps.expect("a target was given");
+            let got = applied.fighter / d.dps.fighter;
+            assert!(
+                (got - want).abs() < 1e-6,
+                "{ability} vs sig {sig_radius} at {speed} m/s: applies {got}, pyfa says {want}"
+            );
+            assert_eq!(
+                applied.total, applied.fighter,
+                "the squadron is the hull's only weapon"
+            );
+        }
+    }
+}
+
 /// Spool-up, overheat and smartbombs against numbers recorded from PYFA
 /// itself (#1272): v2.70.0's `eve.db` through `eos` at source `b79cd90`,
 /// all-V character, via `tools/pyfa-oracle`.
@@ -1429,10 +1531,9 @@ fn thanatos_two_light_fighter_squadrons_matches_hand_computed_dps() {
 /// The spool row pins that a requested fraction resolves to **whole cycles**
 /// (50% is not halfway between cold and hot), and the overheat row that the
 /// bonus comes from the module group's own overload attributes rather than a
-/// universal multiplier. The smartbomb row is the known mismatch (#1293): we
-/// count no DPS for a weapon we don't model, where PYFA counts 6.67 — it is
-/// asserted as **zero** so the day smartbombs are implemented, this test is
-/// the reminder to re-pin it against PYFA.
+/// universal multiplier. The smartbomb row was the known mismatch (#1293): we
+/// counted no DPS for a weapon we didn't model, where PYFA counts 6.67. It
+/// now has its own bucket and matches.
 #[test]
 fn spool_overheat_and_smartbomb_match_pyfa() {
     let Some((sde, dir)) = crate::test_support::test_sde() else {

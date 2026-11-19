@@ -85,5 +85,45 @@
   {
     "label": "Rifter + Small EMP Smartbomb I",
     "totalDps": 6.6667
+  },
+  {
+    "label": "Thanatos + Firbolg I, fighterAbilityMissiles vs sig 400 m at 0 m/s",
+    "squadronDps": 207.9241,
+    "applicationMult": 1
+  },
+  {
+    "label": "Thanatos + Firbolg I, fighterAbilityMissiles vs sig 125 m at 300 m/s",
+    "squadronDps": 207.9241,
+    "applicationMult": 0.084412
+  },
+  {
+    "label": "Thanatos + Firbolg I, fighterAbilityMissiles vs sig 40 m at 1000 m/s",
+    "squadronDps": 207.9241,
+    "applicationMult": 0.009238
+  },
+  {
+    "label": "Thanatos + Firbolg I, fighterAbilityMissiles vs sig 40 m at 4000 m/s",
+    "squadronDps": 207.9241,
+    "applicationMult": 0.002496
+  },
+  {
+    "label": "Thanatos + Firbolg I, fighterAbilityAttackMissile vs sig 400 m at 0 m/s",
+    "squadronDps": 316.4062,
+    "applicationMult": 1
+  },
+  {
+    "label": "Thanatos + Firbolg I, fighterAbilityAttackMissile vs sig 125 m at 300 m/s",
+    "squadronDps": 316.4062,
+    "applicationMult": 0.39487
+  },
+  {
+    "label": "Thanatos + Firbolg I, fighterAbilityAttackMissile vs sig 40 m at 1000 m/s",
+    "squadronDps": 316.4062,
+    "applicationMult": 0.087214
+  },
+  {
+    "label": "Thanatos + Firbolg I, fighterAbilityAttackMissile vs sig 40 m at 4000 m/s",
+    "squadronDps": 316.4062,
+    "applicationMult": 0.035694
   }
 ]
