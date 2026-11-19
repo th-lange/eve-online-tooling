@@ -125,5 +125,89 @@
     "label": "Thanatos + Firbolg I, fighterAbilityAttackMissile vs sig 40 m at 4000 m/s",
     "squadronDps": 316.4062,
     "applicationMult": 0.035694
+  },
+  {
+    "label": "Rifter < 1x Stasis Webifier II",
+    "maxVelocity": 182.5,
+    "signatureRadius": 35.0,
+    "maxTargetRange": 28125.0,
+    "scanResolution": 825.0
+  },
+  {
+    "label": "Rifter < 2x Stasis Webifier II",
+    "maxVelocity": 87.3314,
+    "signatureRadius": 35.0,
+    "maxTargetRange": 28125.0,
+    "scanResolution": 825.0
+  },
+  {
+    "label": "Rifter < 3x Stasis Webifier II",
+    "maxVelocity": 57.4335,
+    "signatureRadius": 35.0,
+    "maxTargetRange": 28125.0,
+    "scanResolution": 825.0
+  },
+  {
+    "label": "Rifter < 1x Target Painter II",
+    "maxVelocity": 456.25,
+    "signatureRadius": 45.5,
+    "maxTargetRange": 28125.0,
+    "scanResolution": 825.0
+  },
+  {
+    "label": "Rifter < 2x Target Painter II",
+    "maxVelocity": 456.25,
+    "signatureRadius": 57.3635,
+    "maxTargetRange": 28125.0,
+    "scanResolution": 825.0
+  },
+  {
+    "label": "Rifter < 3x Target Painter II",
+    "maxVelocity": 456.25,
+    "signatureRadius": 67.1827,
+    "maxTargetRange": 28125.0,
+    "scanResolution": 825.0
+  },
+  {
+    "label": "Rifter < 1x Remote Sensor Dampener II",
+    "maxVelocity": 456.25,
+    "signatureRadius": 35.0,
+    "maxTargetRange": 23821.875,
+    "scanResolution": 698.775
+  },
+  {
+    "label": "Rifter < 2x Remote Sensor Dampener II",
+    "maxVelocity": 456.25,
+    "signatureRadius": 35.0,
+    "maxTargetRange": 20654.1527,
+    "scanResolution": 605.8551
+  },
+  {
+    "label": "Rifter < 3x Remote Sensor Dampener II",
+    "maxVelocity": 456.25,
+    "signatureRadius": 35.0,
+    "maxTargetRange": 18851.0612,
+    "scanResolution": 552.9645
+  },
+  {
+    "label": "Rifter < 2x Stasis Webifier II, own 1MN Afterburner II",
+    "maxVelocity": 228.4019,
+    "signatureRadius": 35.0,
+    "maxTargetRange": 28125.0,
+    "scanResolution": 825.0
+  },
+  {
+    "label": "Rifter < 2x Target Painter II, own 5MN Microwarpdrive II",
+    "maxVelocity": 3240.4814,
+    "signatureRadius": 297.1542,
+    "maxTargetRange": 28125.0,
+    "scanResolution": 825.0
+  },
+  {
+    "label": "Rifter < 2x Remote Sensor Dampener II, own Sensor Booster II",
+    "maxVelocity": 456.25,
+    "signatureRadius": 35.0,
+    "maxTargetRange": 26850.3985,
+    "scanResolution": 787.6117
   }
 ]

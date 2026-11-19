@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import {
   productionSystemCostIndex,
   systemSearch,
@@ -40,8 +40,7 @@ export function CostIndexField({
   const [picked, setPicked] = useState<SystemMatch | null>(null);
   const idx = useQuery({
     queryKey: productionKeys.costIndex(picked?.id),
-    queryFn: picked ? () => productionSystemCostIndex(picked.id) : undefined,
-    enabled: picked != null,
+    queryFn: picked ? () => productionSystemCostIndex(picked.id) : skipToken,
     staleTime: 60 * 60 * 1000,
   });
   const live: CostIndices | null | undefined = idx.data;

@@ -47,7 +47,9 @@ const router = createBrowserRouter([
       { index: true, element: <Navigate to={`/${savedModule}`} replace /> },
       // One catch-all segment; the active module (built-in or an active plugin
       // UI) is chosen from the URL by Layout's ModuleHost, not enumerated here.
-      { path: ":moduleId" },
+      // The explicit `null` says so to the router, which otherwise warns on
+      // every navigation that the matched route renders nothing.
+      { path: ":moduleId", element: null },
     ],
   },
 ]);

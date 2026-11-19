@@ -1652,3 +1652,149 @@ fn spool_overheat_and_smartbomb_match_pyfa() {
         "a smartbomb takes no charge, so it never reloads"
     );
 }
+
+/// Effects projected onto a fit, and how they stack, against numbers recorded
+/// from PYFA (#1272): v2.70.0's `eve.db` through `eos` at source `b79cd90`,
+/// all-V Rifter, via `tools/pyfa-oracle`. Bare Rifter: 456.25 m/s, 35 m
+/// signature, 28 125 m lock range, 825 mm scan resolution.
+///
+/// | projected onto the Rifter | PYFA |
+/// |---|---|
+/// | 1 / 2 / 3 Stasis Webifier II | 182.5 / 87.3314 / 57.4335 m/s |
+/// | 1 / 2 / 3 Target Painter II | 45.5 / 57.3635 / 67.1827 m |
+/// | 1 / 2 / 3 Remote Sensor Dampener II | 23 821.875 / 20 654.1527 / 18 851.0612 m, 698.775 / 605.8551 / 552.9645 mm |
+/// | 2 webs, own 1MN Afterburner II | 228.4019 m/s |
+/// | 2 painters, own 5MN Microwarpdrive II | 297.1542 m |
+/// | 2 damps, own Sensor Booster II | 26 850.3985 m, 787.6117 mm |
+///
+/// The first three rows pin the stacking penalty across identical projected
+/// modules. The last three pin which of the fit's own modules share a
+/// penalty chain with them: an afterburner's speed bonus and a sensor
+/// booster's bonuses point the other way and are penalised separately, so the
+/// first web or damp still lands at full strength; a microwarpdrive's
+/// signature bloom points the same way as a painter and takes the first
+/// slot, pushing both painters down the chain.
+#[test]
+fn projected_stacking_matches_pyfa() {
+    let Some((sde, dir)) = crate::test_support::test_sde() else {
+        return;
+    };
+    let dir = dir.as_path();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let all5 = |_: i64| 5.0;
+    let ship = tid("Rifter");
+    let layout = sde.ship_layout(ship).unwrap().expect("layout");
+    let module = |name: &str, index: i32| FitItem {
+        type_id: tid(name),
+        slot: SlotKind::Mid,
+        index,
+        state: ModuleState::Active,
+        charge_type_id: None,
+        quantity: 1,
+        active_drones: None,
+        mutation: None,
+        fighter_ability: None,
+    };
+    let run = |own: &[&str], projected: &str, count: i32| {
+        run_dogma(
+            &sde,
+            dir,
+            &Fit {
+                id: "t".into(),
+                name: "Rifter".into(),
+                ship_type_id: ship,
+                items: own.iter().map(|name| module(name, 0)).collect(),
+                projected: (0..count).map(|i| module(projected, i)).collect(),
+            },
+            &layout,
+            &all5,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+            None,
+            None,
+            1.0,
+            false,
+        )
+        .expect("dogma")
+    };
+    let mut failures = Vec::new();
+    let mut check = |what: String, got: f64, want: f64| {
+        if (got - want).abs() > 0.001 {
+            failures.push(format!("{what}: {got:.4}, pyfa says {want:.4}"));
+        }
+    };
+
+    let web = "Stasis Webifier II";
+    for (count, want) in [(1, 182.5), (2, 87.3314), (3, 57.4335)] {
+        let d = run(&[], web, count);
+        check(
+            format!("{count} web velocity"),
+            d.navigation.max_velocity,
+            want,
+        );
+    }
+    let painter = "Target Painter II";
+    for (count, want) in [(1, 45.5), (2, 57.3635), (3, 67.1827)] {
+        let d = run(&[], painter, count);
+        check(
+            format!("{count} painter signature"),
+            d.navigation.signature_radius,
+            want,
+        );
+    }
+    let damp = "Remote Sensor Dampener II";
+    for (count, lock, scan) in [
+        (1, 23821.875, 698.775),
+        (2, 20654.1527, 605.8551),
+        (3, 18851.0612, 552.9645),
+    ] {
+        let d = run(&[], damp, count);
+        check(
+            format!("{count} damp lock range"),
+            d.targeting.lock_range,
+            lock,
+        );
+        check(
+            format!("{count} damp scan resolution"),
+            d.targeting.scan_resolution,
+            scan,
+        );
+    }
+
+    let d = run(&["1MN Afterburner II"], web, 2);
+    check(
+        "afterburner + 2 webs velocity".into(),
+        d.navigation.max_velocity,
+        228.4019,
+    );
+    let d = run(&["5MN Microwarpdrive II"], painter, 2);
+    check(
+        "microwarpdrive + 2 painters signature".into(),
+        d.navigation.signature_radius,
+        297.1542,
+    );
+    let d = run(&["Sensor Booster II"], damp, 2);
+    check(
+        "sensor booster + 2 damps lock range".into(),
+        d.targeting.lock_range,
+        26850.3985,
+    );
+    check(
+        "sensor booster + 2 damps scan resolution".into(),
+        d.targeting.scan_resolution,
+        787.6117,
+    );
+
+    assert!(
+        failures.is_empty(),
+        "projected mismatches vs PYFA:\n{}",
+        failures.join("\n")
+    );
+}
