@@ -209,5 +209,107 @@
     "signatureRadius": 35.0,
     "maxTargetRange": 26850.3985,
     "scanResolution": 787.6117
+  },
+  {
+    "label": "Rifter < 1x Small Remote Armor Repairer II",
+    "shieldRepair": 0,
+    "armorRepair": 21.3333,
+    "hullRepair": 0
+  },
+  {
+    "label": "Rifter < 2x Small Remote Armor Repairer II",
+    "shieldRepair": 0,
+    "armorRepair": 42.6663,
+    "hullRepair": 0
+  },
+  {
+    "label": "Rifter < 3x Small Remote Armor Repairer II",
+    "shieldRepair": 0,
+    "armorRepair": 63.9979,
+    "hullRepair": 0
+  },
+  {
+    "label": "Rifter < 5x Large Remote Armor Repairer II",
+    "shieldRepair": 0,
+    "armorRepair": 426.0707,
+    "hullRepair": 0
+  },
+  {
+    "label": "Rifter < 10x Large Remote Armor Repairer II",
+    "shieldRepair": 0,
+    "armorRepair": 847.8262,
+    "hullRepair": 0
+  },
+  {
+    "label": "Rifter < 4x Capital Remote Armor Repairer II",
+    "shieldRepair": 0,
+    "armorRepair": 233.2321,
+    "hullRepair": 0
+  },
+  {
+    "label": "Rifter < 1x Small Remote Shield Booster II",
+    "shieldRepair": 21.25,
+    "armorRepair": 0,
+    "hullRepair": 0
+  },
+  {
+    "label": "Rifter < 2x Small Remote Shield Booster II",
+    "shieldRepair": 42.4997,
+    "armorRepair": 0,
+    "hullRepair": 0
+  },
+  {
+    "label": "Rifter < 1x Small Remote Shield Booster II + 1x Large Remote Shield Booster II",
+    "shieldRepair": 106.2468,
+    "armorRepair": 0,
+    "hullRepair": 0
+  },
+  {
+    "label": "Rifter < 1x Small Remote Hull Repairer II",
+    "shieldRepair": 0,
+    "armorRepair": 0,
+    "hullRepair": 9.6667
+  },
+  {
+    "label": "Rifter < 1x Small Remote Armor Repairer II + 1x Small Remote Shield Booster II + 1x Small Remote Hull Repairer II",
+    "shieldRepair": 21.25,
+    "armorRepair": 21.3333,
+    "hullRepair": 9.6667
+  },
+  {
+    "label": "Rifter < 1x Small Ancillary Remote Armor Repairer",
+    "shieldRepair": 0,
+    "armorRepair": 12.3333,
+    "hullRepair": 0
+  },
+  {
+    "label": "Rifter < 1x Small Ancillary Remote Shield Booster",
+    "shieldRepair": 31.25,
+    "armorRepair": 0,
+    "hullRepair": 0
+  },
+  {
+    "label": "Rifter < 1x Heavy Mutadaptive Remote Armor Repairer II",
+    "shieldRepair": 0,
+    "armorRepair": 213.3333,
+    "hullRepair": 0
+  },
+  {
+    "label": "Rifter < 1x Small Armor Repairer II",
+    "shieldRepair": 0,
+    "armorRepair": 0,
+    "hullRepair": 0
+  },
+  {
+    "label": "Rifter + Small Remote Armor Repairer II (fitted, outgoing)",
+    "shieldRepair": 0,
+    "armorRepair": 0,
+    "hullRepair": 0
+  },
+  {
+    "label": "Rifter + Small Remote Shield Booster II (fitted, outgoing)",
+    "shieldRepair": 0,
+    "armorRepair": 0,
+    "hullRepair": 0
   }
 ]

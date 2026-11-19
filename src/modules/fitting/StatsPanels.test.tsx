@@ -136,6 +136,9 @@ function tank(overrides: Partial<TankStats>): TankStats {
     armorRepS: 0,
     shieldRepSSustained: 0,
     armorRepSSustained: 0,
+    remoteShieldRepS: 0,
+    remoteArmorRepS: 0,
+    remoteHullRepS: 0,
     shieldRrm: 1,
     armorRrm: 1,
     hullRrm: 1,
@@ -188,6 +191,24 @@ describe("TankResistsPanel", () => {
     const box = screen.getByText("Tank (all V)").closest("div");
     expect(box?.className).toContain("rounded-lg");
     expect(box?.className).toContain("border");
+  });
+
+  it("lists remote repair landing on the fit, per layer (#1331)", () => {
+    const { rerender } = render(
+      <TankResistsPanel skillLabel="all V" tank={tank({})} />,
+    );
+    expect(screen.queryByText("remote")).toBeNull();
+
+    rerender(
+      <TankResistsPanel
+        skillLabel="all V"
+        tank={tank({ remoteArmorRepS: 42.6663, remoteHullRepS: 9.6667 })}
+      />,
+    );
+    // Only the layers something lands on, each with its own rate.
+    expect(screen.getByText("remote").parentElement).toHaveTextContent(
+      /^remote\s*armor 42\.7\/s\s*hull 9\.7\/s$/,
+    );
   });
 });
 

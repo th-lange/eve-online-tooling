@@ -192,6 +192,13 @@ pub struct TankStats {
     /// out — the fit-defining number for an ASB/AAR-tanked ship.
     pub shield_rep_s_sustained: f64,
     pub armor_rep_s_sustained: f64,
+    /// Repair landing on each layer from remote repairers projected onto the
+    /// fit (#1331), HP/s, after the diminishing returns on stacked remote
+    /// repair. Raw hit points: multiply by the layer's `*_rrm` for what they
+    /// are worth against the selected damage profile.
+    pub remote_shield_rep_s: f64,
+    pub remote_armor_rep_s: f64,
+    pub remote_hull_rep_s: f64,
     /// Remote-rep multiplier per layer (#878): `1 / effective_resonance`,
     /// the same denominator EHP uses — how much a remote repair's raw GJ is
     /// amplified by this layer's resists against the selected profile.

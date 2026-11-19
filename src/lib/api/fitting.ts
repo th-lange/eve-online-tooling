@@ -200,6 +200,11 @@ export interface TankStats {
    *  `shieldRepS`/`armorRepS` for a rep with infinite ammo. */
   shieldRepSSustained: number;
   armorRepSSustained: number;
+  /** Repair landing on each layer from remote repairers projected onto the
+   *  fit, HP/s, after the diminishing returns on stacked remote repair. */
+  remoteShieldRepS: number;
+  remoteArmorRepS: number;
+  remoteHullRepS: number;
   /** Remote-rep multiplier per layer: `1 / effective resonance` — how much
    *  a remote repair's raw GJ is amplified by this layer's resists. */
   shieldRrm: number;

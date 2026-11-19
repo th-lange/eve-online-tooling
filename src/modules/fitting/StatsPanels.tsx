@@ -781,6 +781,17 @@ export function DpsBreakdownPanel({
   );
 }
 
+/** Incoming remote repair per layer, in the order the tank panel lists it. */
+const REMOTE_REP_LAYERS: {
+  layer: string;
+  rate: (tank: TankStats) => number;
+  color: string;
+}[] = [
+  { layer: "shield", rate: (t) => t.remoteShieldRepS, color: "text-sky-400" },
+  { layer: "armor", rate: (t) => t.remoteArmorRepS, color: "text-amber-400" },
+  { layer: "hull", rate: (t) => t.remoteHullRepS, color: "text-zinc-200" },
+];
+
 /** Tank section: EHP broken out per damage type (not blended against a
  *  chosen "incoming damage" profile — each number assumes 100% of the
  *  damage is that one type), active reps, and the per-layer resist table. */
@@ -864,6 +875,24 @@ export function TankResistsPanel({
                 {tank.passiveShieldS.toFixed(1)}/s
               </span>
             </span>
+          )}
+        </div>
+      )}
+      {REMOTE_REP_LAYERS.some(({ rate }) => rate(tank) > 0) && (
+        <div
+          className="flex flex-wrap gap-x-3 text-xs text-zinc-500"
+          title="Repair from remote repairers projected onto this fit, in raw HP/s after the diminishing returns on several repairers per layer. Multiply by the layer's RRM for what it is worth against incoming damage."
+        >
+          <span>remote</span>
+          {REMOTE_REP_LAYERS.filter(({ rate }) => rate(tank) > 0).map(
+            ({ layer, rate, color }) => (
+              <span key={layer}>
+                {layer}{" "}
+                <span className={`tabular-nums ${color}`}>
+                  {rate(tank).toFixed(1)}/s
+                </span>
+              </span>
+            ),
           )}
         </div>
       )}

@@ -71,7 +71,12 @@ PYFA_EVE_DB=/tmp/pyfa-rel/squashfs-root/opt/pyfa/eve.db \
   signatures/speeds (`squadronDps`, `applicationMult`), and a Rifter with
   1/2/3 webs, painters or damps projected onto it, alone and alongside its
   own afterburner, microwarpdrive or sensor booster (`maxVelocity`,
-  `signatureRadius`, `maxTargetRange`, `scanResolution`).
+  `signatureRadius`, `maxTargetRange`, `scanResolution`);
+- the #1331 remote-repair rows: remote armour, shield and hull repairers
+  projected onto a Rifter, singly and stacked up to ten per layer
+  (`shieldRepair`, `armorRepair`, `hullRepair` — HP/s after the diminishing
+  returns), and the same modules fitted to it, where they repair nothing of
+  its own.
 
 Recorded with PYFA source `b79cd90` against v2.70.0's `eve.db`. The first three
 rows reproduce the values captured under the older v2.67.0 recipe exactly.
