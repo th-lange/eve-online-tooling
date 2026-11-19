@@ -99,7 +99,7 @@ export function InfoPanel() {
           ) : undefined
         }
       />
-      <p className="mt-1 text-xs text-zinc-600">
+      <p className="mt-1 text-xs text-zinc-500">
         EVE Online Tooling v{__APP_VERSION__}
       </p>
       <InlineError

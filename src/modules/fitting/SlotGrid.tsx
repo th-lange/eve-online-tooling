@@ -830,7 +830,7 @@ function SlotBank({
       {cap != null && free > 0 && (
         <button
           onClick={() => onAddToSlot(slot)}
-          className="mt-0.5 flex items-center gap-1 rounded px-1 py-0.5 text-sm text-zinc-600 hover:bg-zinc-800/70 hover:text-zinc-300"
+          className="mt-0.5 flex items-center gap-1 rounded px-1 py-0.5 text-sm text-zinc-500 hover:bg-zinc-800/70 hover:text-zinc-300"
         >
           <Plus size={13} className="shrink-0" />
           Add to {label.toLowerCase()}

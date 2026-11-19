@@ -49,7 +49,7 @@ export function TankResists({ tank }: { tank: TankStats }) {
   return (
     <table className="w-full text-[11px] tabular-nums">
       <thead>
-        <tr className="text-zinc-600">
+        <tr className="text-zinc-500">
           <th className="text-left font-normal" />
           <th className="pr-1 text-right font-normal">HP</th>
           {DAMAGE_TYPES.map((d) => (
@@ -67,7 +67,7 @@ export function TankResists({ tank }: { tank: TankStats }) {
               {l.name}
               {l.rah && (
                 <span
-                  className="ml-1 text-[9px] uppercase text-amber-500"
+                  className="ml-1 text-[9px] uppercase text-amber-400"
                   title="Reactive Armor Hardener resists shifted toward the selected damage profile"
                 >
                   RAH
@@ -246,7 +246,7 @@ export function CapChart({
         <polygon points={area} fill={color} fillOpacity="0.12" stroke="none" />
         <polyline points={line} fill="none" stroke={color} strokeWidth="1.5" />
       </svg>
-      <div className="flex justify-between text-[10px] text-zinc-600">
+      <div className="flex justify-between text-[10px] text-zinc-500">
         <span>0s</span>
         <span>{formatDuration(endSecs)}</span>
       </div>
@@ -292,7 +292,7 @@ export function DpsRangeCurve({ curve }: { curve: [number, number][] }) {
         <polygon points={area} fill={color} fillOpacity="0.12" stroke="none" />
         <polyline points={line} fill="none" stroke={color} strokeWidth="1.5" />
       </svg>
-      <div className="flex justify-between text-[10px] text-zinc-600">
+      <div className="flex justify-between text-[10px] text-zinc-500">
         <span>0km</span>
         <span>{km(distMax)}</span>
       </div>
@@ -404,7 +404,7 @@ export function DpsRangeOverlayChart({ series }: { series: DpsRangeSeries[] }) {
           />
         ))}
       </svg>
-      <div className="flex justify-between text-[10px] text-zinc-600">
+      <div className="flex justify-between text-[10px] text-zinc-500">
         <span>0km</span>
         <span>{km(distMax)}</span>
       </div>
@@ -763,7 +763,7 @@ export function DpsBreakdownPanel({
               (vs paper {dps.total.toFixed(0)} dps)
               {dps.smartbomb > 0 && (
                 <span
-                  className="text-zinc-600"
+                  className="text-zinc-500"
                   title="Applied covers weapons with a tracking/application model. A smartbomb has none to model — it hits everything inside its own radius — so its share of the paper number is left out rather than scored as zero damage."
                 >
                   {" "}
@@ -839,7 +839,7 @@ export function TankResistsPanel({
                 {tank.shieldRepS.toFixed(1)}/s
               </span>
               {tank.shieldRepSSustained < tank.shieldRepS - 0.05 && (
-                <span className="text-zinc-600">
+                <span className="text-zinc-500">
                   {" "}
                   (
                   <span className="tabular-nums text-sky-600">
@@ -857,7 +857,7 @@ export function TankResistsPanel({
                 {tank.armorRepS.toFixed(1)}/s
               </span>
               {tank.armorRepSSustained < tank.armorRepS - 0.05 && (
-                <span className="text-zinc-600">
+                <span className="text-zinc-500">
                   {" "}
                   (
                   <span className="tabular-nums text-amber-600">
@@ -945,7 +945,7 @@ export function TargetingPanel({ targeting }: { targeting: TargetStats }) {
             <li key={l.label} className="flex justify-between gap-2">
               <span className="truncate">
                 {l.label}{" "}
-                <span className="text-zinc-600">
+                <span className="text-zinc-500">
                   {Math.round(l.sigRadius)}m
                 </span>
               </span>

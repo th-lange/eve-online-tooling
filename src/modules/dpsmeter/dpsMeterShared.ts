@@ -488,7 +488,7 @@ export function formatEventLine(e: DpsEvent): string {
  *  convention as the rate charts (see `SERIES`/`TIMELINE_COLORS`). Misses are
  *  dimmed regardless of direction — noise, not signal. */
 export function eventToneClass(e: DpsEvent): string {
-  if (e.quality === "Misses") return "text-zinc-600";
+  if (e.quality === "Misses") return "text-zinc-500";
   if (e.kind === "mining") return "text-amber-400";
   return e.kind.endsWith("Out") ? "text-sky-400" : "text-rose-400";
 }

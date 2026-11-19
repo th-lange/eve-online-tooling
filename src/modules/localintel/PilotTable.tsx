@@ -155,7 +155,7 @@ export const PilotTable = memo(function PilotTable({
 });
 
 function dot(threat: string): string {
-  if (threat === "red") return "text-rose-500";
+  if (threat === "red") return "text-rose-400";
   if (threat === "blue") return "text-sky-400";
   return "text-zinc-500";
 }

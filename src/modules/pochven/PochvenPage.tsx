@@ -39,7 +39,7 @@ export function PochvenPage() {
       <Logistics />
       <FilamentGuide />
 
-      <p className="mt-4 text-[11px] text-zinc-600">
+      <p className="mt-4 text-[11px] text-zinc-500">
         Entry data: Electus Matari Pochven entry manual. Hub distances computed
         live over the stargate graph.
       </p>

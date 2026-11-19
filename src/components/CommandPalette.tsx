@@ -207,7 +207,7 @@ export function CommandPalette() {
           ))}
         </div>
 
-        <div className="flex items-center justify-between border-t border-zinc-800 px-3 py-1.5 text-[10px] text-zinc-600">
+        <div className="flex items-center justify-between border-t border-zinc-800 px-3 py-1.5 text-[10px] text-zinc-500">
           <span>↑↓ navigate · ↵ open · esc close</span>
           <span>⌘K</span>
         </div>

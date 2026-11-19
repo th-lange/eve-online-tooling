@@ -179,7 +179,7 @@ export const BucketChart = memo(function BucketChart({
           >
             {n === 0 ? (
               <div
-                className="flex items-center justify-center text-xs text-zinc-600"
+                className="flex items-center justify-center text-xs text-zinc-500"
                 style={{ height: H }}
               >
                 Waiting for the first 5s bucket…
@@ -414,7 +414,7 @@ export const BucketChart = memo(function BucketChart({
                       </div>
                     ))}
                     {lines.length > 3 && (
-                      <div className="text-zinc-600">
+                      <div className="text-zinc-500">
                         +{lines.length - 3} more — click the bucket
                       </div>
                     )}

@@ -102,7 +102,7 @@ function FitView({ fit, community }: { fit: LostFit; community?: boolean }) {
           if (mods.length === 0) return null;
           return (
             <div key={slot} className="flex gap-2 text-[11px]">
-              <span className="w-12 shrink-0 text-zinc-600">
+              <span className="w-12 shrink-0 text-zinc-500">
                 {SLOT_LABEL[slot]}
               </span>
               <span className="text-zinc-300">
@@ -130,7 +130,7 @@ function FitView({ fit, community }: { fit: LostFit; community?: boolean }) {
               <span className="text-zinc-200">
                 {formatInt(Math.round(fit.analysis.dpsTotal))}
               </span>{" "}
-              <span className="text-zinc-600">
+              <span className="text-zinc-500">
                 (t{formatInt(Math.round(fit.analysis.dpsTurret))}/m
                 {formatInt(Math.round(fit.analysis.dpsMissile))}/d
                 {formatInt(Math.round(fit.analysis.dpsDrone))})
@@ -191,7 +191,7 @@ function FitView({ fit, community }: { fit: LostFit; community?: boolean }) {
               ))}
             </div>
           )}
-          <div className="mt-1 text-[10px] text-zinc-600">all-V estimate</div>
+          <div className="mt-1 text-[10px] text-zinc-500">all-V estimate</div>
         </div>
       )}
     </div>
@@ -266,7 +266,7 @@ function WeaponRow({
           if (hasAmmo) setOpen((o) => !o);
         }}
       >
-        <span className="w-12 shrink-0 text-zinc-600">Range</span>
+        <span className="w-12 shrink-0 text-zinc-500">Range</span>
         <span
           className={`text-zinc-300 ${
             hasAmmo
@@ -354,7 +354,7 @@ function TypicalFit({ hull }: { hull: HullUsage }) {
         className="self-start text-xs text-zinc-400 hover:text-zinc-200"
       >
         {open ? "−" : "+"} {hull.name}{" "}
-        <span className="text-zinc-600">typical fit</span>
+        <span className="text-zinc-500">typical fit</span>
       </button>
       {open &&
         (q.isLoading ? (
@@ -409,7 +409,7 @@ function LostFits({ p, fitLimit }: { p: PvpStats; fitLimit: number }) {
             <FitView key={f.killmailId} fit={f} />
           ))}
           {fits.data && fits.data.length > fitLimit && (
-            <span className="text-[11px] text-zinc-600">
+            <span className="text-[11px] text-zinc-500">
               +{fits.data.length - fitLimit} more (raise the limit above).
             </span>
           )}
@@ -522,7 +522,7 @@ function PilotCard({ p, fitLimit }: { p: PvpStats; fitLimit: number }) {
             ))}
           </div>
         ) : (
-          <p className="mt-1 text-xs text-zinc-600">
+          <p className="mt-1 text-xs text-zinc-500">
             No flown-ship data from zKill — they may fly ships they haven&apos;t
             killed in; check their lost fits.
           </p>

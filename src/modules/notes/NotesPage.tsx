@@ -439,7 +439,7 @@ function NotesWorkspace({ shared }: { shared: string | null }) {
           ) : (
             <p className="text-zinc-500">
               Saved on this device only
-              <span className="font-mono text-zinc-600">
+              <span className="font-mono text-zinc-500">
                 {" "}
                 ({location.data.root})
               </span>

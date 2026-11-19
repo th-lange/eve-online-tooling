@@ -423,7 +423,7 @@ function NeighbourhoodGraph({
     <div className="mt-4">
       <div className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">
         Neighbourhood map{" "}
-        <span className="normal-case tracking-normal text-zinc-600">
+        <span className="normal-case tracking-normal text-zinc-500">
           · click a system to re-centre · drag to rearrange
         </span>
       </div>
@@ -566,7 +566,7 @@ function TravelGraph({
     <div className="mt-3">
       <div className="mb-1 text-[11px] uppercase tracking-wide text-zinc-500">
         Travel graph{" "}
-        <span className="normal-case tracking-normal text-zinc-600">
+        <span className="normal-case tracking-normal text-zinc-500">
           · solid = direct gate · dashed = jumps skipped between polls · purple
           = wormhole/filament
         </span>

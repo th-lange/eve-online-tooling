@@ -23,7 +23,7 @@ export const HostileCorpsPanel = memo(function HostileCorpsPanel({
         player corps · red (standing &lt; 0)
       </div>
       {corps.length === 0 ? (
-        <div className="text-xs text-zinc-600">
+        <div className="text-xs text-zinc-500">
           {scanned ? "None in local." : "Scan to populate."}
         </div>
       ) : (

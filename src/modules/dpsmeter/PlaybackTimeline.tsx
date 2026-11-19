@@ -120,7 +120,7 @@ export function PlaybackTimeline({
           <TimelineLegend color={TIMELINE_COLORS.damageIn} label="dmg in" />
           <TimelineLegend color={TIMELINE_COLORS.mining} label="mining" />
           <span
-            className="text-zinc-600"
+            className="text-zinc-500"
             title="Bar width — segments group 10 at a time to fit"
           >
             {groupLabel(groupSecs)}/bar
@@ -148,7 +148,7 @@ export function PlaybackTimeline({
               </button>
             </>
           ) : (
-            <span className="italic text-zinc-600">drag to select a fight</span>
+            <span className="italic text-zinc-500">drag to select a fight</span>
           )}
         </span>
         <span>{formatClock(end)}</span>

@@ -74,7 +74,7 @@ export function NeighbourhoodPanel({
       </div>
 
       {locError || !here ? (
-        <div className="text-xs text-zinc-600">
+        <div className="text-xs text-zinc-500">
           Needs your in-game location (the{" "}
           <code>esi-location.read_location.v1</code> scope) — set an active
           character and re-login if just enabled.
@@ -100,7 +100,7 @@ export function NeighbourhoodPanel({
             </span>
           </div>
           {nearby.length === 0 ? (
-            <div className="text-xs text-zinc-600">
+            <div className="text-xs text-zinc-500">
               {loading ? "Loading…" : "Quiet — no kills nearby this hour."}
             </div>
           ) : (
@@ -125,7 +125,7 @@ export function NeighbourhoodPanel({
                     >
                       {n.name}
                     </a>{" "}
-                    <span className="text-zinc-600">{n.distance}j</span>
+                    <span className="text-zinc-500">{n.distance}j</span>
                   </span>
                   <span className="shrink-0 tabular-nums">
                     {n.podKills > 0 && (

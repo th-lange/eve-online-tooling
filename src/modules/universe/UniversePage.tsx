@@ -262,7 +262,7 @@ function Detail({ typeId }: { typeId: number }) {
             ))}
             {attrs.data?.length === 0 && (
               <tr>
-                <td className="px-2 py-2 text-center text-zinc-600">
+                <td className="px-2 py-2 text-center text-zinc-500">
                   No attributes.
                 </td>
               </tr>

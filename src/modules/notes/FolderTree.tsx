@@ -187,7 +187,7 @@ export function FolderTree(props: FolderTreeProps) {
               <Folder size={13} className="shrink-0 text-zinc-500" />
               <span className="truncate">{node.name}</span>
             </button>
-            <span className="shrink-0 text-xs text-zinc-600 group-hover:hidden group-focus-within:hidden">
+            <span className="shrink-0 text-xs text-zinc-500 group-hover:hidden group-focus-within:hidden">
               {node.noteCount}
             </span>
             <span className="hidden shrink-0 items-center gap-0.5 group-hover:flex group-focus-within:flex">
@@ -238,7 +238,7 @@ export function FolderTree(props: FolderTreeProps) {
           >
             <Library size={13} className="ml-4 shrink-0 text-zinc-500" />
             <span className="flex-1">All notes</span>
-            <span className="text-xs text-zinc-600">{totalNotes}</span>
+            <span className="text-xs text-zinc-500">{totalNotes}</span>
           </button>
         </li>
         <li>
@@ -254,7 +254,7 @@ export function FolderTree(props: FolderTreeProps) {
               <Folder size={13} className="shrink-0 text-zinc-500" />
               <span className="flex-1">Top level</span>
             </button>
-            <span className="text-xs text-zinc-600 group-hover:hidden group-focus-within:hidden">
+            <span className="text-xs text-zinc-500 group-hover:hidden group-focus-within:hidden">
               {root.noteCount}
             </span>
             <span className="hidden group-hover:flex group-focus-within:flex">

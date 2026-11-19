@@ -32,7 +32,7 @@ function ExitBadges({
 }) {
   if (exits == null) {
     return (
-      <div className="mt-1 text-zinc-600">
+      <div className="mt-1 text-zinc-500">
         {isLoading ? "Loading…" : "No data."}
       </div>
     );
@@ -236,7 +236,7 @@ export function PochvenSystemsPopover() {
                       restores
                     </span>
                     {/* Role — the tile fill. */}
-                    <span className="text-zinc-600">fill = role:</span>
+                    <span className="text-zinc-500">fill = role:</span>
                     {(["Home", "Border", "Internal"] as const).map((r) => (
                       <span key={r} className="flex items-center gap-1">
                         <span
@@ -247,7 +247,7 @@ export function PochvenSystemsPopover() {
                       </span>
                     ))}
                     {/* Constellation — the outline ring. */}
-                    <span className="text-zinc-600">ring = constellation:</span>
+                    <span className="text-zinc-500">ring = constellation:</span>
                     {(["Perun", "Svarog", "Veles"] as const).map((c) => (
                       <span key={c} className="flex items-center gap-1">
                         <span
@@ -257,7 +257,7 @@ export function PochvenSystemsPopover() {
                         {CLADE_KRAI[c]}
                       </span>
                     ))}
-                    <span className="text-zinc-600">
+                    <span className="text-zinc-500">
                       sub-label = k-space entries per band · click a system for
                       its Proximity Extraction exits
                     </span>
@@ -387,7 +387,7 @@ export function PochvenSystemsPopover() {
                                     </span>
                                   </li>
                                 </ul>
-                                <div className="mt-1 text-[11px] text-zinc-600">
+                                <div className="mt-1 text-[11px] text-zinc-500">
                                   Filaments land you in a random system of that
                                   role / clade (★ = this one); a C729 wormhole
                                   is the only way to target a specific system.
@@ -402,7 +402,7 @@ export function PochvenSystemsPopover() {
                                   exits={exitsByName.get(s.name)}
                                   isLoading={topo.isLoading}
                                 />
-                                <div className="mt-1 text-[11px] text-zinc-600">
+                                <div className="mt-1 text-[11px] text-zinc-500">
                                   Proximity 'Extraction' filaments drop you into
                                   k-space within 2.5 ly of here. A Glorification
                                   'Devana' filament instead drops you into one

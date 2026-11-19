@@ -173,7 +173,7 @@ export function OrdersPage() {
               </div>
             )}
             {costs.isError && (
-              <div className="mt-2 text-xs text-amber-500">
+              <div className="mt-2 text-xs text-amber-400">
                 Couldn't compute build costs — the Production static data may
                 not be installed.
               </div>
@@ -355,7 +355,7 @@ function OrdersTable({
                       copy {formatIsk(undercutPrice(r))}
                     </button>
                   ) : (
-                    <span className="text-xs text-emerald-500">top</span>
+                    <span className="text-xs text-emerald-400">top</span>
                   );
                 })()}
                 <button

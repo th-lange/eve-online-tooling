@@ -320,7 +320,7 @@ export function FeedbackPage() {
         )}
 
         <label className="flex flex-col gap-1 text-xs text-zinc-400">
-          Subject <span className="text-zinc-600">(optional)</span>
+          Subject <span className="text-zinc-500">(optional)</span>
           <input
             type="text"
             value={subject}
@@ -343,7 +343,7 @@ export function FeedbackPage() {
             placeholder={activeKind.hint}
             className="w-full rounded bg-zinc-800 px-2 py-1.5 text-sm text-zinc-100 outline-none placeholder:text-zinc-600"
           />
-          <span className="flex items-center justify-between text-[11px] text-zinc-600">
+          <span className="flex items-center justify-between text-[11px] text-zinc-500">
             <span>
               Supports Markdown — **bold**, lists, `code`, [links](url). It
               renders when I read it and on GitHub.
@@ -372,7 +372,7 @@ export function FeedbackPage() {
             ))}
             <option value="">Don't include a character (anonymous)</option>
           </select>
-          <span className="text-[11px] text-zinc-600">
+          <span className="text-[11px] text-zinc-500">
             Only the name is sent, and only so I can reply by EVE mail in-game.
           </span>
         </label>
@@ -489,10 +489,10 @@ export function FeedbackPage() {
                     </p>
                   )}
                   {entry.status === "pending" && entry.error && (
-                    <p className="mt-1 text-amber-500/80">{entry.error}</p>
+                    <p className="mt-1 text-amber-400">{entry.error}</p>
                   )}
                 </div>
-                <span className="shrink-0 text-zinc-600">
+                <span className="shrink-0 text-zinc-500">
                   {new Date(entry.submittedAt * 1000).toLocaleDateString()}
                 </span>
                 <button
@@ -507,7 +507,7 @@ export function FeedbackPage() {
             ))}
           </ul>
         ) : (
-          <p className="mt-3 text-xs text-zinc-600">Nothing yet.</p>
+          <p className="mt-3 text-xs text-zinc-500">Nothing yet.</p>
         )}
       </section>
     </Page>

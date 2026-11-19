@@ -266,7 +266,7 @@ export function EntryResults({ data }: { data: EntrySearchResult }) {
             jump(s)
           </span>
           <span>select a system → its prev/next legs</span>
-          <span className="text-zinc-600">ticked routes hidden</span>
+          <span className="text-zinc-500">ticked routes hidden</span>
           {visited.size > 0 && (
             <button
               onClick={clearVisited}

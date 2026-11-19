@@ -354,12 +354,12 @@ export function Warzone({
         {(() => {
           const active = PLAYSTYLE_OPTIONS.find((p) => p.key === playstyle);
           return active?.description ? (
-            <span className="text-xs text-zinc-600">{active.description}</span>
+            <span className="text-xs text-zinc-500">{active.description}</span>
           ) : null;
         })()}
       </div>
       {perspective && hotspots.isLoading && (
-        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-zinc-600">
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
           <span>Loading…</span>
         </div>
       )}
@@ -423,7 +423,7 @@ export function Warzone({
             </div>
           </>
         )}
-        <span className="text-xs text-zinc-600">
+        <span className="text-xs text-zinc-500">
           {tableSystems.length} of {playstyleSystems.length} systems
         </span>
       </div>
@@ -485,9 +485,9 @@ export function Warzone({
           />
           more kills
         </span>
-        <span className="text-zinc-600">· star map — drag to arrange</span>
+        <span className="text-zinc-500">· star map — drag to arrange</span>
         <span className="ml-auto flex items-center gap-1.5">
-          <span className="text-zinc-600">Size</span>
+          <span className="text-zinc-500">Size</span>
           <span className="flex overflow-hidden rounded border border-zinc-700">
             {FW_MAP_SIZES.map((s) => (
               <button

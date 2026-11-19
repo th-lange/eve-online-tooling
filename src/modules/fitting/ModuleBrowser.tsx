@@ -163,7 +163,7 @@ export function ModuleBrowser({
                 </li>
               ))}
               {noFitRows.length > 0 && (
-                <li className="px-2 pb-0.5 pt-2 text-[10px] uppercase tracking-wide text-zinc-600">
+                <li className="px-2 pb-0.5 pt-2 text-[10px] uppercase tracking-wide text-zinc-500">
                   Won't fit
                 </li>
               )}
@@ -176,7 +176,7 @@ export function ModuleBrowser({
                     className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-zinc-500 hover:bg-zinc-800 disabled:opacity-50"
                   >
                     <span className="flex-1 truncate">{r.name}</span>
-                    <span className="shrink-0 text-[10px] uppercase text-amber-500/70">
+                    <span className="shrink-0 text-[10px] uppercase text-amber-400">
                       {fitReason(infoOf.get(r.id), fitContext)}
                     </span>
                     <SlotBadge slot={infoOf.get(r.id)?.slot} />

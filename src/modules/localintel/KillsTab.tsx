@@ -49,7 +49,7 @@ function KillCard({
               {kill.victim.characterName || "Unknown"}
             </span>
             {kill.victim.corporationName && (
-              <span className="truncate text-xs text-zinc-600">
+              <span className="truncate text-xs text-zinc-500">
                 [{kill.victim.corporationName}]
               </span>
             )}
@@ -87,7 +87,7 @@ function KillCard({
             if (mods.length === 0) return null;
             return (
               <div key={slot} className="flex gap-2 text-[11px]">
-                <span className="w-10 shrink-0 text-zinc-600">
+                <span className="w-10 shrink-0 text-zinc-500">
                   {SLOT_LABEL[slot]}
                 </span>
                 <span className="text-zinc-300">
@@ -106,7 +106,7 @@ function KillCard({
       {/* Attackers — click any to profile them in the PVP module */}
       {kill.attackers.length > 0 && (
         <div className="mt-2 border-t border-zinc-800 pt-2">
-          <div className="text-[10px] uppercase tracking-wide text-zinc-600">
+          <div className="text-[10px] uppercase tracking-wide text-zinc-500">
             {kill.attackers.length} attacker
             {kill.attackers.length !== 1 ? "s" : ""}
             {finalBlow && (
@@ -254,7 +254,7 @@ export function KillsTab({
         />
       ))}
       {kills.data && kills.data.length > 0 && (
-        <div className="text-xs text-zinc-600">
+        <div className="text-xs text-zinc-500">
           {kills.data.length} kill{kills.data.length !== 1 ? "s" : ""}
           {autoRefresh ? " · auto-refreshes every 30 s" : ""}
         </div>
