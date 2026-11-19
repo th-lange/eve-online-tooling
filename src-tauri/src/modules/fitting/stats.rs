@@ -929,6 +929,16 @@ pub(super) struct FiringSquadron {
     speed: f64,
 }
 
+impl FiringSquadron {
+    /// Whether the squadron flies to the target and holds its own optimal,
+    /// so range costs it nothing — at least as fast as the target, with the
+    /// keep-pace assumption on (PYFA's "auto" drone mode). Otherwise it is
+    /// taken to shoot from the carrier, through its ability's range.
+    fn closes_range(&self, target: &TargetProfile) -> bool {
+        target.drones_keep_pace && self.speed >= target.speed
+    }
+}
+
 /// The squadrons that deal damage, each with the ability [`fighter_of`]
 /// picks for it. Pure support squadrons are left out.
 pub(super) fn firing_squadrons_of(
@@ -1241,18 +1251,15 @@ fn applied_dps_at(
     }
 
     // Fighters (#1272, PYFA `getFighterAbilityMult`): every damage ability is
-    // a missile attack, so it takes the missile factor. A squadron at least
-    // as fast as the target flies to it and range costs nothing — the same
-    // "auto" assumption, behind the same toggle, as drones above; a slower
-    // one is taken to shoot from the carrier, through its ability's range.
+    // a missile attack, so it takes the missile factor, and its range only
+    // matters to a squadron that can't close (see `closes_range`).
     let fighter_dps: f64 = squadrons
         .iter()
         .map(|s| {
-            let closes_range = target.drones_keep_pace && s.speed >= target_speed;
             s.ability.dps_per_fighter
                 * s.size
                 * s.ability
-                    .application(closes_range, target_sig, target_speed, distance)
+                    .application(s.closes_range(target), target_sig, target_speed, distance)
         })
         .sum();
 
@@ -1299,9 +1306,12 @@ pub(super) fn applied_dps_of(
 /// DPS-over-range curve (#701): 30 linearly spaced `(distance_m,
 /// total_applied_dps)` samples from 0 to the fit's maximum effective range
 /// (the largest turret optimal+3×falloff or missile flight range, capped at
-/// 1000km). Empty when the fit has no ranged weapon. `target`'s angular
-/// velocity applies unchanged at every sampled distance — only the falloff
-/// term (and missile flight-range gate) vary along the curve.
+/// 1000km). A fighter squadron that can't close on the target extends it to
+/// its ability's optimal+3×falloff as well; one that can is range-independent,
+/// like drones, and adds nothing to the extent. Empty when nothing on the fit
+/// is range-limited. `target`'s angular velocity applies unchanged at every
+/// sampled distance — only the falloff term (and missile flight-range gate)
+/// vary along the curve.
 pub(super) fn dps_range_curve_of(
     resolved: &ResolvedFit,
     module_items: &[&FitItem],
@@ -1317,6 +1327,12 @@ pub(super) fn dps_range_curve_of(
     let max_range = weapon_ranges
         .iter()
         .map(|wr| wr.optimal + 3.0 * wr.falloff)
+        .chain(
+            squadrons
+                .iter()
+                .filter(|s| !s.closes_range(target))
+                .map(|s| s.ability.optimal + 3.0 * s.ability.falloff),
+        )
         .fold(0.0_f64, f64::max)
         .min(MAX_RANGE_CAP);
     if max_range <= 0.0 {
@@ -2495,23 +2511,7 @@ mod tests {
     /// on it being able to fly to the target (#1272).
     #[test]
     fn fighter_squadrons_apply_through_their_ability() {
-        let fighter = store(&[
-            (2233, 5_000.0),  // rockets: 5 s cycle
-            (2226, 1.0),      // damage multiplier
-            (2228, 100.0),    // 100 thermal → 20 dps per fighter
-            (2234, 100.0),    // explosion radius
-            (2235, 100.0),    // explosion velocity
-            (2231, 2.0),      // reduction factor ┐ exponent ln2/ln4 = 0.5
-            (2232, 4.0),      // reduction sensitivity ┘
-            (2236, 10_000.0), // optimal
-            (2237, 5_000.0),  // falloff
-            (37, 1_000.0),    // squadron speed
-        ]);
-        let squadron = FitItem {
-            slot: SlotKind::Fighter,
-            ..drone_item(900, 6, None)
-        };
-        let squadrons = firing_squadrons_of(&[&squadron], &[fighter]);
+        let squadrons = rocket_squadron();
         let resolved = resolved_fit(Vec::new(), Vec::new(), Vec::new());
         let at = |target: &TargetProfile, distance: f64| {
             applied_dps_at(&resolved, &[], &[], &[], &squadrons, target, distance, &[])
@@ -2554,6 +2554,71 @@ mod tests {
             ..target
         };
         assert!((at(&toggle_off, 15_000.0).fighter - want / 2.0).abs() < 1e-9);
+    }
+
+    /// A fit whose only weapons are fighters gets a range curve exactly when
+    /// range costs the squadron something: flying to the target makes it
+    /// range-independent, like drones, and there is nothing to plot.
+    #[test]
+    fn a_range_limited_squadron_gets_a_range_curve() {
+        let squadrons = rocket_squadron();
+        let resolved = resolved_fit(Vec::new(), Vec::new(), Vec::new());
+        let curve = |target: &TargetProfile| {
+            dps_range_curve_of(&resolved, &[], &[], &[], &squadrons, target, &[])
+        };
+        // Big and stationary, so the missile factor is 1 and only range shows.
+        let catchable = TargetProfile {
+            sig_radius: 400.0,
+            speed: 0.0,
+            angular_velocity: 0.0,
+            drones_keep_pace: true,
+            missiles_need_overtake: false,
+        };
+        assert!(curve(&catchable).is_empty());
+
+        // Toggle off: the squadron shoots from the carrier. The curve runs
+        // to optimal + 3 × falloff = 25 km, full inside the 10 km optimal
+        // and 0.5^9 of that at the far end.
+        let from_the_carrier = curve(&TargetProfile {
+            drones_keep_pace: false,
+            ..catchable.clone()
+        });
+        assert_eq!(from_the_carrier.len(), 30);
+        let (first, last) = (from_the_carrier[0], from_the_carrier[29]);
+        assert_eq!(first, (0.0, 120.0));
+        assert_eq!(last.0, 25_000.0);
+        assert!((last.1 - 120.0 * 0.5f64.powi(9)).abs() < 1e-9);
+
+        // A target the squadron can't catch has the same effect.
+        let outrunning = curve(&TargetProfile {
+            speed: 2_000.0,
+            ..catchable
+        });
+        assert_eq!(outrunning.len(), 30);
+        assert_eq!(outrunning[29].0, 25_000.0);
+    }
+
+    /// One 6-fighter squadron firing rockets with round numbers: 20 dps per
+    /// fighter, 100 m explosion radius at 100 m/s, exponent 0.5, 10 km optimal
+    /// + 5 km falloff, flying 1000 m/s.
+    fn rocket_squadron() -> Vec<FiringSquadron> {
+        let fighter = store(&[
+            (2233, 5_000.0),  // rockets: 5 s cycle
+            (2226, 1.0),      // damage multiplier
+            (2228, 100.0),    // 100 thermal → 20 dps per fighter
+            (2234, 100.0),    // explosion radius
+            (2235, 100.0),    // explosion velocity
+            (2231, 2.0),      // reduction factor ┐ exponent ln2/ln4 = 0.5
+            (2232, 4.0),      // reduction sensitivity ┘
+            (2236, 10_000.0), // optimal
+            (2237, 5_000.0),  // falloff
+            (37, 1_000.0),    // squadron speed
+        ]);
+        let squadron = FitItem {
+            slot: SlotKind::Fighter,
+            ..drone_item(900, 6, None)
+        };
+        firing_squadrons_of(&[&squadron], &[fighter])
     }
 
     fn drone_item(type_id: i64, qty: i32, active: Option<i32>) -> FitItem {
