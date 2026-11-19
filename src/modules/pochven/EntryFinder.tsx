@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { MapPin } from "lucide-react";
 import {
   errorMessage,
@@ -30,8 +30,7 @@ export function EntryFinder() {
   });
   const result = useQuery({
     queryKey: pochvenKeys.search(system?.id ?? null, maxJumps),
-    queryFn: system ? () => pochvenSearch(system.id, maxJumps) : undefined,
-    enabled: system != null,
+    queryFn: system ? () => pochvenSearch(system.id, maxJumps) : skipToken,
     staleTime: POCHVEN_ROUTE_RESULT_STALE_TIME_MS,
   });
 
