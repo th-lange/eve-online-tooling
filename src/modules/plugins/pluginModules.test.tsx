@@ -108,6 +108,8 @@ describe("plugin UI modules", () => {
       "plugin://localhost/journal/index.html",
     );
     // No `allow-same-origin` — the frame stays cross-origin to the app.
-    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
+    // `allow-forms` only lets a `<form>`'s submit handler run (#1155); the
+    // served CSP's `form-action 'none'` still blocks sending form data.
+    expect(frame.getAttribute("sandbox")).toBe("allow-scripts allow-forms");
   });
 });
