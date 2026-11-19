@@ -186,6 +186,10 @@ pub fn tank(
         armor_rep_s,
         shield_rep_s_sustained,
         armor_rep_s_sustained,
+        // Filled by the caller, which knows what is projected onto the fit.
+        remote_shield_rep_s: 0.0,
+        remote_armor_rep_s: 0.0,
+        remote_hull_rep_s: 0.0,
         shield_rrm: shield.rrm(profile),
         armor_rrm: armor.rrm(profile),
         hull_rrm: hull.rrm(profile),

@@ -19,7 +19,8 @@ use super::engine::fighter;
 use super::engine::heat::{burnout_seconds, rack_heat, HeatSource};
 use super::engine::navigation::{lock_time_secs, navigation, prop_velocity, targeting};
 use super::engine::projection::{
-    apply_projection, apply_subsystem_slots, projected_from_attrs, ProjectedInput,
+    applied_remote_rep, apply_projection, apply_subsystem_slots, projected_from_attrs,
+    remote_rep_from_attrs, ProjectedInput, RemoteRep, RepairLayer,
 };
 use super::engine::resolve::{resolve, EntityInput, FitInput, ResolvedFit};
 use super::engine::spool::apply_spool;
@@ -313,8 +314,9 @@ pub(super) fn run_dogma(
         &|a| ctx.default_of(a),
     );
 
-    // Projected effects (#178): webs/paints/… modify this ship's attributes.
-    let projected: Vec<ProjectedInput> = fit
+    // Projected effects (#178): webs/paints/… modify this ship's attributes;
+    // remote repairers (#1331) deliver hit points, folded into the tank below.
+    let (projected, remote_reps): (Vec<ProjectedInput>, Vec<Option<RemoteRep>>) = fit
         .projected
         .iter()
         .map(|p| {
@@ -325,9 +327,11 @@ pub(super) fn run_dogma(
                 .unwrap_or_default()
                 .into_iter()
                 .collect();
-            projected_from_attrs(|id| a.get(&id).copied().unwrap_or(0.0))
+            let get = |id| a.get(&id).copied().unwrap_or(0.0);
+            (projected_from_attrs(get), remote_rep_from_attrs(get))
         })
-        .collect();
+        .unzip();
+    let remote_reps: Vec<RemoteRep> = remote_reps.into_iter().flatten().collect();
     apply_projection(&mut resolved.ship, &projected);
 
     // Abyssal Deadspace weather (#env-selector): hardcoded bonus/penalty pair,
@@ -566,7 +570,13 @@ pub(super) fn run_dogma(
         layout,
         activatable_types,
         capacitor: capacitor_of(&resolved, &module_items, neut_gjs, factor_reload),
-        tank: tank_of(&resolved, &module_items, damage_profile),
+        tank: {
+            let mut tank = tank_of(&resolved, &module_items, damage_profile);
+            tank.remote_shield_rep_s = applied_remote_rep(&remote_reps, RepairLayer::Shield);
+            tank.remote_armor_rep_s = applied_remote_rep(&remote_reps, RepairLayer::Armor);
+            tank.remote_hull_rep_s = applied_remote_rep(&remote_reps, RepairLayer::Hull);
+            tank
+        },
         dps,
         dps_sustained,
         weapon_ranges,
@@ -1576,6 +1586,12 @@ pub(super) fn tank_of(
         }
         let dur = store.get(73);
         if dur <= 0.0 {
+            continue;
+        }
+        // A repairer with a range (`maxRange` 54) mends another ship: remote
+        // boosters/repairers carry the same amount attributes as local ones,
+        // and none of what they deliver lands on the fit they are fitted to.
+        if store.get(54) > 0.0 {
             continue;
         }
         let rof_seconds = dur / 1000.0;
@@ -2865,6 +2881,27 @@ mod tests {
             em_heavy.ehp,
             even.ehp
         );
+    }
+
+    /// A remote repairer fitted to the ship mends somebody else (#1331): it
+    /// shares its amount attribute with a local repairer, and only its range
+    /// tells them apart. It used to be counted as the fit's own repair.
+    #[test]
+    fn tank_of_does_not_count_outgoing_remote_repair_as_local() {
+        let local = store(&[(84, 92.0), (73, 6_000.0)]);
+        let remote = store(&[(84, 64.0), (73, 3_000.0), (54, 8_400.0)]);
+        let remote_shield = store(&[(68, 85.0), (73, 4_000.0), (54, 4_800.0)]);
+        let resolved = ResolvedFit {
+            ship: AttrStore::new(),
+            modules: vec![local, remote, remote_shield],
+            drones: Vec::new(),
+            charges: vec![None, None, None],
+            unresolved: 0,
+            fighters: Vec::new(),
+        };
+        let tank = tank_of(&resolved, &[], &DamageProfile::default());
+        assert!((tank.armor_rep_s - 92.0 / 6.0).abs() < 1e-12);
+        assert_eq!(tank.shield_rep_s, 0.0);
     }
 
     /// Projected neut pressure (#706) shortens the discrete depletion sim vs

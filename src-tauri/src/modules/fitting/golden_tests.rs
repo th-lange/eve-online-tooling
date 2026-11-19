@@ -1798,3 +1798,161 @@ fn projected_stacking_matches_pyfa() {
         failures.join("\n")
     );
 }
+
+/// Remote repairers projected onto a fit, against numbers recorded from PYFA
+/// (#1331): v2.70.0's `eve.db` through `eos` at source `b79cd90`, all-V
+/// Rifter, via `tools/pyfa-oracle`. HP/s reaching the layer.
+///
+/// | projected onto the Rifter | shield | armor | hull |
+/// |---|---|---|---|
+/// | 1 / 2 / 3 Small Remote Armor Repairer II | | 21.3333 / 42.6663 / 63.9979 | |
+/// | 5 / 10 Large Remote Armor Repairer II | | 426.0707 / 847.8262 | |
+/// | 4 Capital Remote Armor Repairer II | | 233.2321 | |
+/// | 1 / 2 Small Remote Shield Booster II | 21.25 / 42.4997 | | |
+/// | Small + Large Remote Shield Booster II | 106.2468 | | |
+/// | Small Remote Hull Repairer II | | | 9.6667 |
+/// | one of each Small II | 21.25 | 21.3333 | 9.6667 |
+/// | Small Ancillary Remote Armor Repairer | | 12.3333 | |
+/// | Small Ancillary Remote Shield Booster | 31.25 | | |
+/// | Heavy Mutadaptive Remote Armor Repairer II | | 213.3333 | |
+/// | Small Armor Repairer II (a local module) | 0 | 0 | 0 |
+///
+/// Two and more repairers on a layer are where the diminishing returns show:
+/// three smalls deliver 63.9979, not 64, and ten larges 847.83, not 853.33.
+/// Layers don't share a pool — one of each loses nothing. The mutadaptive row
+/// pins the fully spooled default, the local-module row that a repairer with
+/// no range repairs nothing when projected.
+///
+/// The other direction is pinned too: a remote repairer *fitted* to the
+/// Rifter repairs somebody else, so it adds nothing to the Rifter's own tank
+/// (PYFA: 0).
+#[test]
+fn projected_remote_reps_match_pyfa() {
+    let Some((sde, dir)) = crate::test_support::test_sde() else {
+        return;
+    };
+    let dir = dir.as_path();
+    let tid = |name: &str| {
+        sde.type_by_name(name)
+            .unwrap()
+            .unwrap_or_else(|| panic!("unknown type: {name}"))
+            .0
+    };
+    let all5 = |_: i64| 5.0;
+    let ship = tid("Rifter");
+    let layout = sde.ship_layout(ship).unwrap().expect("layout");
+    let module = |name: &str, slot: SlotKind, index: usize| FitItem {
+        type_id: tid(name),
+        slot,
+        index: index as i32,
+        state: ModuleState::Active,
+        charge_type_id: None,
+        quantity: 1,
+        active_drones: None,
+        mutation: None,
+        fighter_ability: None,
+    };
+    let run = |own: &[&str], projected: &[&str]| {
+        run_dogma(
+            &sde,
+            dir,
+            &Fit {
+                id: "t".into(),
+                name: "Rifter".into(),
+                ship_type_id: ship,
+                items: own
+                    .iter()
+                    .enumerate()
+                    .map(|(i, name)| module(name, SlotKind::High, i))
+                    .collect(),
+                projected: projected
+                    .iter()
+                    .enumerate()
+                    .map(|(i, name)| module(name, SlotKind::Mid, i))
+                    .collect(),
+            },
+            &layout,
+            &all5,
+            &DamageProfile::default(),
+            0.0,
+            None,
+            &[],
+            None,
+            None,
+            1.0,
+            false,
+        )
+        .expect("dogma")
+        .tank
+    };
+
+    let small_armor = "Small Remote Armor Repairer II";
+    let large_armor = "Large Remote Armor Repairer II";
+    let small_shield = "Small Remote Shield Booster II";
+    let small_hull = "Small Remote Hull Repairer II";
+    // (projected modules, [shield, armor, hull] HP/s PYFA records)
+    let cases: Vec<(Vec<&str>, [f64; 3])> = vec![
+        (vec![small_armor], [0.0, 21.3333, 0.0]),
+        (vec![small_armor; 2], [0.0, 42.6663, 0.0]),
+        (vec![small_armor; 3], [0.0, 63.9979, 0.0]),
+        (vec![large_armor; 5], [0.0, 426.0707, 0.0]),
+        (vec![large_armor; 10], [0.0, 847.8262, 0.0]),
+        (
+            vec!["Capital Remote Armor Repairer II"; 4],
+            [0.0, 233.2321, 0.0],
+        ),
+        (vec![small_shield], [21.25, 0.0, 0.0]),
+        (vec![small_shield; 2], [42.4997, 0.0, 0.0]),
+        (
+            vec![small_shield, "Large Remote Shield Booster II"],
+            [106.2468, 0.0, 0.0],
+        ),
+        (vec![small_hull], [0.0, 0.0, 9.6667]),
+        (
+            vec![small_armor, small_shield, small_hull],
+            [21.25, 21.3333, 9.6667],
+        ),
+        (
+            vec!["Small Ancillary Remote Armor Repairer"],
+            [0.0, 12.3333, 0.0],
+        ),
+        (
+            vec!["Small Ancillary Remote Shield Booster"],
+            [31.25, 0.0, 0.0],
+        ),
+        (
+            vec!["Heavy Mutadaptive Remote Armor Repairer II"],
+            [0.0, 213.3333, 0.0],
+        ),
+        (vec!["Small Armor Repairer II"], [0.0, 0.0, 0.0]),
+    ];
+    let mut failures = Vec::new();
+    for (projected, want) in &cases {
+        let tank = run(&[], projected);
+        let got = [
+            tank.remote_shield_rep_s,
+            tank.remote_armor_rep_s,
+            tank.remote_hull_rep_s,
+        ];
+        if got.iter().zip(want).any(|(g, w)| (g - w).abs() > 0.0005) {
+            failures.push(format!("{projected:?}: {got:?}, pyfa says {want:?}"));
+        }
+    }
+
+    // Outgoing: fitted to the Rifter, these mend another ship.
+    for fitted in [small_armor, small_shield] {
+        let tank = run(&[fitted], &[]);
+        if tank.armor_rep_s != 0.0 || tank.shield_rep_s != 0.0 {
+            failures.push(format!(
+                "{fitted} fitted: counted as local repair (shield {}, armor {}), pyfa says 0",
+                tank.shield_rep_s, tank.armor_rep_s
+            ));
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "remote repair mismatches vs PYFA:\n{}",
+        failures.join("\n")
+    );
+}

@@ -239,6 +239,58 @@ def projected_rows():
     return rows
 
 
+def remote_rep_rows():
+    """Remote repairers and a Rifter (#1331): HP/s reaching each layer when
+    they are projected onto it, including the diminishing returns on several
+    repairers per layer; and nothing at all when one is fitted to it, since it
+    then repairs somebody else. Nothing on these fits repairs locally, so the
+    tank PYFA reports is the remote repair alone."""
+    small = {
+        "armor": "Small Remote Armor Repairer II",
+        "shield": "Small Remote Shield Booster II",
+        "hull": "Small Remote Hull Repairer II",
+    }
+    large_armor = "Large Remote Armor Repairer II"
+    projected = [
+        [small["armor"]], [small["armor"]] * 2, [small["armor"]] * 3,
+        [large_armor] * 5, [large_armor] * 10,
+        ["Capital Remote Armor Repairer II"] * 4,
+        [small["shield"]], [small["shield"]] * 2,
+        [small["shield"], "Large Remote Shield Booster II"],
+        [small["hull"]],
+        list(small.values()),
+        ["Small Ancillary Remote Armor Repairer"],
+        ["Small Ancillary Remote Shield Booster"],
+        ["Heavy Mutadaptive Remote Armor Repairer II"],
+        ["Small Armor Repairer II"],  # local module: repairs nothing projected
+    ]
+
+    def tank(label, fit):
+        reps = fit.sustainableTank
+        return {
+            "label": label,
+            "shieldRepair": round(reps["shieldRepair"], 4),
+            "armorRepair": round(reps["armorRepair"], 4),
+            "hullRepair": round(reps["hullRepair"], 4),
+        }
+
+    def counted(modules):
+        # ["A", "A", "B"] -> "2x A + 1x B"
+        return " + ".join(
+            f"{modules.count(m)}x {m}" for m in dict.fromkeys(modules))
+
+    rows = [
+        tank(f"Rifter < {counted(modules)}",
+             build("Rifter", [], projected=modules))
+        for modules in projected
+    ]
+    rows += [
+        tank(f"Rifter + {module} (fitted, outgoing)", build("Rifter", [module]))
+        for module in (small["armor"], small["shield"])
+    ]
+    return rows
+
+
 def comparison_rows():
     """Fits recorded for the #1272 engine comparison: the RAH's cycle ordering
     under mixed profiles, and the cap sim's staggering of identical modules (an
@@ -285,6 +337,7 @@ def comparison_rows():
     })
     rows.extend(fighter_application_rows())
     rows.extend(projected_rows())
+    rows.extend(remote_rep_rows())
     return rows
 
 

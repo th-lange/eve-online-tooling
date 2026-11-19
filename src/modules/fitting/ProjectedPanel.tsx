@@ -9,9 +9,10 @@ import {
 } from "./useFitEditorContext";
 
 /**
- * Add modules projected **onto** this fit (webs/paints/damps/…) — incoming
- * effects from a notional attacker, at the module's base strength (no
- * attacker hull or skills). Search-to-add plus a
+ * Add modules projected **onto** this fit (webs/paints/damps, remote
+ * repairers, …) — incoming effects from a notional attacker or logistics
+ * pilot, at the module's base strength (no projecting hull or skills).
+ * Search-to-add plus a
  * removable list; the stats recompute with the projected effects applied
  * (#178). Reads `fit.projected` + `nameOf` from `FitEditorContext` and
  * writes back through its `addProjected`/`removeProjected` mutations.
@@ -55,7 +56,7 @@ export function ProjectedPanel() {
       <input
         value={q}
         onChange={(e) => setQ(e.currentTarget.value)}
-        placeholder="project a web, painter, damp…"
+        placeholder="project a web, painter, damp, remote rep…"
         className="w-full rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-100 outline-none placeholder:text-zinc-500"
       />
       {q.trim().length >= 2 && (
