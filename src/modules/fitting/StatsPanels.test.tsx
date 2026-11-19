@@ -41,6 +41,29 @@ describe("DpsBreakdownPanel", () => {
     expect(screen.queryByText(/not applied/)).toBeNull();
   });
 
+  it("separates the weapon kinds it lists, with nothing before the first", () => {
+    const { rerender } = render(
+      <DpsBreakdownPanel
+        skillLabel="all V"
+        dps={dps({ turret: 0, fighter: 800, total: 800 })}
+        jammedActive={false}
+      />,
+    );
+    // A carrier's only weapons are its fighters: no stray leading separator.
+    expect(screen.getByText("fighter 800")).toBeInTheDocument();
+
+    rerender(
+      <DpsBreakdownPanel
+        skillLabel="all V"
+        dps={dps({ fighter: 800, smartbomb: 27, total: 1027 })}
+        jammedActive={false}
+      />,
+    );
+    expect(
+      screen.getByText("turret 200 · fighter 800 · smartbomb 27"),
+    ).toBeInTheDocument();
+  });
+
   it("breaks smartbomb damage out and keeps it out of applied (#1293)", () => {
     render(
       <DpsBreakdownPanel

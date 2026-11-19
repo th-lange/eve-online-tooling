@@ -622,6 +622,15 @@ export function ResourcesPanel({
   );
 }
 
+/** The weapon kinds of a [`DpsBreakdown`], in the order the split lists them. */
+const DPS_KINDS = [
+  "turret",
+  "missile",
+  "drone",
+  "fighter",
+  "smartbomb",
+] as const;
+
 /** DPS section: paper vs applied totals, per-weapon-kind split, and the
  *  DPS-vs-range curve when a target profile is set. */
 export function DpsBreakdownPanel({
@@ -732,12 +741,9 @@ export function DpsBreakdownPanel({
           </div>
           {shown.total > 0 && (
             <div className="text-xs text-zinc-500">
-              {shown.turret > 0 && `turret ${shown.turret.toFixed(0)} `}
-              {shown.missile > 0 && `· missile ${shown.missile.toFixed(0)} `}
-              {shown.drone > 0 && `· drone ${shown.drone.toFixed(0)} `}
-              {shown.fighter > 0 && `· fighter ${shown.fighter.toFixed(0)} `}
-              {shown.smartbomb > 0 &&
-                `· smartbomb ${shown.smartbomb.toFixed(0)}`}
+              {DPS_KINDS.filter((kind) => shown[kind] > 0)
+                .map((kind) => `${kind} ${shown[kind].toFixed(0)}`)
+                .join(" · ")}
             </div>
           )}
           {factorReload && dpsSustained && (
