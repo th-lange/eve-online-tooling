@@ -149,7 +149,7 @@ export function CombatLogPanel({
           className={`${maxHeightClass} overflow-y-auto border-t border-zinc-800 px-3 py-2 font-mono text-xs`}
         >
           {events.length === 0 ? (
-            <p className="py-2 text-zinc-600">No combat events yet.</p>
+            <p className="py-2 text-zinc-500">No combat events yet.</p>
           ) : (
             <>
               {groups.map((g, gi) => (
@@ -168,7 +168,7 @@ export function CombatLogPanel({
                       className={`flex items-center gap-2 pt-1 text-[10px] ${
                         cursor === minuteStartOf(g.start)
                           ? "text-indigo-400"
-                          : "text-zinc-600"
+                          : "text-zinc-500"
                       }`}
                     >
                       <span className="h-px flex-1 bg-zinc-800" />
@@ -182,7 +182,7 @@ export function CombatLogPanel({
                   )}
                   {g.events.map((e, i) => (
                     <div key={i} className={`py-0.5 ${eventToneClass(e)}`}>
-                      <span className="text-zinc-600">{formatClock(e.ts)}</span>{" "}
+                      <span className="text-zinc-500">{formatClock(e.ts)}</span>{" "}
                       {formatEventLine(e)}
                     </div>
                   ))}

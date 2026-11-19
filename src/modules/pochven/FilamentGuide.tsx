@@ -89,7 +89,7 @@ export function FilamentGuide() {
           </div>
         ))}
       </div>
-      <p className="mt-2 max-w-3xl text-[11px] text-zinc-600">
+      <p className="mt-2 max-w-3xl text-[11px] text-zinc-500">
         Want to land near a trade hub? The Logistics table above lists each
         Pochven system's C729 exit distance to Jita, Amarr, Dodixie, Rens and
         Hek.

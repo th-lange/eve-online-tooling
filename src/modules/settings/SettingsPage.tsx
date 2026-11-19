@@ -192,7 +192,7 @@ export function SettingsPage() {
                   !release.isError &&
                   !release.data &&
                   !checkForUpdates && (
-                    <span className="text-zinc-600">Not checked yet</span>
+                    <span className="text-zinc-500">Not checked yet</span>
                   )}
                 {release.data?.isOutdated && (
                   <button

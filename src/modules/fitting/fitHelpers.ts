@@ -91,7 +91,7 @@ export const DAMAGE_TYPES = ["EM", "Th", "Kin", "Exp"] as const;
 /** A resist % cell, tinted greener the higher the resistance (spot tank holes). */
 export function resistClass(v: number): string {
   if (v >= 0.5) return "text-emerald-400";
-  if (v >= 0.3) return "text-emerald-500/80";
+  if (v >= 0.3) return "text-emerald-400/80";
   if (v > 0) return "text-zinc-300";
   return "text-zinc-600";
 }

@@ -63,7 +63,7 @@ export function ChainGraph({
     <div className="mt-4">
       <div className="mb-1 flex items-center gap-3 text-[11px] uppercase tracking-wide text-zinc-500">
         <span>Chain map</span>
-        <span className="normal-case tracking-normal text-zinc-600">
+        <span className="normal-case tracking-normal text-zinc-500">
           click a system for its signatures · drag to rearrange (saved) · dashed
           = EOL · purple = wormhole ·{" "}
           <span style={{ color: SPECIAL_HUBS.Thera }}>teal = Thera</span> ·{" "}

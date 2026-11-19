@@ -395,7 +395,7 @@ function FightPanel({
             DPS
           </h3>
           <MiniDpsChart buckets={buckets} />
-          <div className="flex gap-3 text-[10px] text-zinc-600">
+          <div className="flex gap-3 text-[10px] text-zinc-500">
             <span>
               <span className="text-emerald-500">▬</span> out
             </span>

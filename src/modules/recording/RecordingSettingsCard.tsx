@@ -141,7 +141,7 @@ export function RecordingSettingsCard() {
                   </option>
                 )}
             </select>
-            <span className="text-xs text-zinc-600">
+            <span className="text-xs text-zinc-500">
               record only this character's fights (multi-boxing) — characters
               read from the logged-in roster and your gamelogs folder
             </span>

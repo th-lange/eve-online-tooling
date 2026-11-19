@@ -30,7 +30,7 @@ const WeaponTable = memo(function WeaponTable({
                     <span className="text-zinc-500"> · {r.kind}</span>
                   ) : null}
                   {r.damage ? (
-                    <span className="text-zinc-600"> [{r.damage}]</span>
+                    <span className="text-zinc-500"> [{r.damage}]</span>
                   ) : null}
                 </td>
                 <td className="py-1 text-right tabular-nums text-emerald-400">
@@ -60,7 +60,7 @@ function WeaponLines({ weapons }: { weapons?: WeaponRate[] }) {
             {wpn.name}
             {wpn.kind ? ` · ${wpn.kind}` : ""}
             {wpn.damage ? (
-              <span className="text-zinc-600"> [{wpn.damage}]</span>
+              <span className="text-zinc-500"> [{wpn.damage}]</span>
             ) : null}
           </span>
           <span className="shrink-0 tabular-nums">

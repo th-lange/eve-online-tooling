@@ -85,12 +85,12 @@ export function CostIndexField({
         </span>
       )}
       {picked && !idx.isLoading && live?.manufacturing != null && (
-        <span className="text-[10px] text-emerald-500">
+        <span className="text-[10px] text-emerald-400">
           {picked.name}: {(live.manufacturing * 100).toFixed(2)}% (live)
         </span>
       )}
       {picked && !idx.isLoading && live == null && (
-        <span className="text-[10px] text-amber-500">
+        <span className="text-[10px] text-amber-400">
           No live index for {picked.name} — keeping your value
         </span>
       )}

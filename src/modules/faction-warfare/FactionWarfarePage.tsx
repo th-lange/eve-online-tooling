@@ -208,7 +208,7 @@ export function FactionWarfarePage() {
           ))}
         </div>
         {!override && autoMilitia !== "observer" && (
-          <span className="text-xs text-zinc-600">
+          <span className="text-xs text-zinc-500">
             auto-detected from your enlisted character
           </span>
         )}
@@ -300,7 +300,7 @@ export function FactionWarfarePage() {
           <span className="rounded border border-zinc-700 px-3 py-1 text-zinc-300">
             {activeZone}
           </span>
-          <span className="text-zinc-600">derived from your perspective</span>
+          <span className="text-zinc-500">derived from your perspective</span>
         </div>
       ) : (
         warzones.length > 0 && (

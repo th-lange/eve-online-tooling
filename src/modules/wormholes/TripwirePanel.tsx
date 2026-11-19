@@ -116,11 +116,11 @@ export function TripwirePanel({
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <span className="text-xs text-zinc-400">
             Connected as <span className="text-zinc-200">{s.username}</span>
-            <span className="text-zinc-600"> @ {s.baseUrl}</span>
+            <span className="text-zinc-500"> @ {s.baseUrl}</span>
             {s.mask ? (
-              <span className="text-zinc-600"> · mask {s.mask}</span>
+              <span className="text-zinc-500"> · mask {s.mask}</span>
             ) : (
-              <span className="text-zinc-600"> · personal mask</span>
+              <span className="text-zinc-500"> · personal mask</span>
             )}
           </span>
           <button

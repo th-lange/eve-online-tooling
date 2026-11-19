@@ -469,7 +469,7 @@ function StatRow({
           : "";
         const marker = differs ? (
           <span
-            className="mr-1 text-amber-500"
+            className="mr-1 text-amber-400"
             title={`Differs from ${label} in Fit 1`}
             aria-label="differs from baseline"
           >

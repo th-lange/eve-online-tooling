@@ -169,7 +169,7 @@ describe("formatEventLine", () => {
 describe("eventToneClass", () => {
   it("dims misses regardless of direction", () => {
     expect(eventToneClass(ev({ kind: "damageOut", quality: "Misses" }))).toBe(
-      "text-zinc-600",
+      "text-zinc-500",
     );
   });
 

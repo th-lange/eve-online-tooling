@@ -384,7 +384,7 @@ function SiteCard({
         </span>
       </div>
       <p className="mt-2 text-xs leading-relaxed text-zinc-400">{site.notes}</p>
-      <span className="mt-2 block text-[10px] uppercase tracking-wide text-zinc-600">
+      <span className="mt-2 block text-[10px] uppercase tracking-wide text-zinc-500">
         Click for loot &amp; damage →
       </span>
     </button>
@@ -600,7 +600,7 @@ export function ExplorationPage() {
       />
 
       <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-xs text-zinc-400">
-        <span className="text-[10px] uppercase tracking-wide text-zinc-600">
+        <span className="text-[10px] uppercase tracking-wide text-zinc-500">
           Click a tag to hide
         </span>
         <FilterToggle
@@ -688,7 +688,7 @@ export function ExplorationPage() {
         );
       })}
 
-      <p className="mt-8 max-w-3xl text-xs text-zinc-600">
+      <p className="mt-8 max-w-3xl text-xs text-zinc-500">
         Only DED-rated complexes and faction combat sites escalate — relic, data
         and plain combat anomalies never do. In wormhole space everything is
         Sleeper-guarded and there's no local, so treat every site as hostile.

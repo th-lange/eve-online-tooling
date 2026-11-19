@@ -138,7 +138,7 @@ export function SyncSettingsCard() {
                 {hasFolder ? (
                   folder
                 ) : (
-                  <span className="text-zinc-600">Choose a folder…</span>
+                  <span className="text-zinc-500">Choose a folder…</span>
                 )}
               </span>
             </button>
