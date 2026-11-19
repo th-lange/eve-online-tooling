@@ -18,6 +18,10 @@ use super::manifest::id_is_safe;
 ///
 /// Windows/Android serve the protocol as `http(s)://plugin.localhost` rather
 /// than `plugin://localhost`, so every source list names both forms (#1155).
+///
+/// `form-action 'none'` is load-bearing: the host frame is sandboxed with
+/// `allow-forms` so that a UI's `submit` handlers run (`PluginHost.tsx`), and
+/// this directive is what keeps a form from actually posting anywhere.
 pub const PLUGIN_FRAME_CSP: &str = "default-src 'none'; \
      script-src 'unsafe-inline' 'unsafe-eval' plugin: http://plugin.localhost https://plugin.localhost; \
      style-src 'unsafe-inline' plugin: http://plugin.localhost https://plugin.localhost; \
@@ -137,6 +141,15 @@ mod tests {
             assert!(d.contains("https://plugin.localhost"), "{directive}: {d}");
         }
         assert!(PLUGIN_FRAME_CSP.contains("connect-src 'none'"));
+    }
+
+    #[test]
+    fn frame_csp_forbids_form_submission() {
+        // The frame's sandbox carries `allow-forms`; without this directive a
+        // plugin UI could send form data to any origin.
+        assert!(PLUGIN_FRAME_CSP
+            .split(';')
+            .any(|d| d.trim() == "form-action 'none'"));
     }
 
     fn tmp(tag: &str) -> PathBuf {

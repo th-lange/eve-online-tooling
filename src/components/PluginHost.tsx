@@ -6,15 +6,23 @@ import { useResolvedTheme } from "../lib/useTheme";
 /**
  * Renders an untrusted plugin's UI (issue #501).
  *
- * The UI loads from the `plugin://` origin inside a `sandbox="allow-scripts"`
- * iframe — **no** `allow-same-origin`, so the frame is a unique opaque origin
- * that cannot read the app DOM, its `localStorage`, or call `invoke`. Its only
- * channel to the app is `postMessage`: the guest posts capability requests, this
- * host validates them and forwards to `plugins_invoke` **against this plugin's own
- * id only**, so a UI can drive nothing but its own (already sandboxed, broker-
- * gated) logic. The served `plugin://` document also carries `connect-src 'none'`,
- * so the iframe itself has no network — foreign data flows through the plugin's
- * WASM (`net:fetch`), never the UI.
+ * The UI loads from the `plugin://` origin inside a
+ * `sandbox="allow-scripts allow-forms"` iframe — **no** `allow-same-origin`, so
+ * the frame is a unique opaque origin that cannot read the app DOM, its
+ * `localStorage`, or call `invoke`. Its only channel to the app is
+ * `postMessage`: the guest posts capability requests, this host validates them
+ * and forwards to `plugins_invoke` **against this plugin's own id only**, so a
+ * UI can drive nothing but its own (already sandboxed, broker-gated) logic. The
+ * served `plugin://` document also carries `connect-src 'none'`, so the iframe
+ * itself has no network — foreign data flows through the plugin's WASM
+ * (`net:fetch`), never the UI.
+ *
+ * `allow-forms` is there for the `submit` *event*, not for submitting: without
+ * it Chromium (WebView2 on Windows) drops the submission before any listener
+ * runs, so a UI built the ordinary way — a `<form>` with a submit handler —
+ * does nothing when its button is pressed (#1155). Sending form data anywhere
+ * stays impossible: the served document's CSP has `form-action 'none'`
+ * (`PLUGIN_FRAME_CSP`), and the two must be kept together.
  */
 
 /** Wire channel shared with the guest SDK (`plugin-ui-sdk.js` in
@@ -163,7 +171,7 @@ export function PluginHost({
       ref={ref}
       title={`plugin-${pluginId}`}
       src={pluginFrameUrl(pluginId)}
-      sandbox="allow-scripts"
+      sandbox="allow-scripts allow-forms"
       onLoad={sendTheme}
       className={className ?? "h-full w-full border-0"}
     />

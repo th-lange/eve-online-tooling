@@ -289,18 +289,25 @@ the plugin is activated. Declare it in the manifest and name the entry document
 "ui": "index.html"
 ```
 
-The UI loads from a distinct `plugin://` origin in a `sandbox="allow-scripts"`
-iframe with **no `allow-same-origin`** — a unique opaque origin that can't read
-the app's DOM or `localStorage`, call `invoke`, or reach the network
-(`connect-src 'none'`). Its only channel to the app is a `postMessage` bridge.
+The UI loads from a distinct `plugin://` origin in a
+`sandbox="allow-scripts allow-forms"` iframe with **no `allow-same-origin`** — a
+unique opaque origin that can't read the app's DOM or `localStorage`, call
+`invoke`, or reach the network (`connect-src 'none'`). Its only channel to the
+app is a `postMessage` bridge.
+
+Forms work as controls, not as a way out: a `<form>`'s `submit` handler runs, so
+Enter-to-submit and a submit button behave as usual, but the frame's CSP has
+`form-action 'none'`, so a form can't send its data anywhere. Handle the event
+and call `preventDefault()`.
 
 On Windows (WebView2) Tauri serves the protocol as `http://plugin.localhost`
-instead of `plugin://localhost`; the host and the frame CSP accept both. Known
+instead of `plugin://localhost`; the host and the frame CSP accept both, and
+`index.html` loading this way is confirmed on Windows with v0.84.0. Known
 caveat: on Windows, sub-resources requested from inside an iframe served by a
 custom protocol may fail with "connection refused"
-([tauri-apps/tauri#11505](https://github.com/tauri-apps/tauri/issues/11505)) —
-`index.html` itself loads. Until that is resolved, a **single-file UI** (inline
-script and styles) is the safe choice on Windows. Not yet verified on Windows.
+([tauri-apps/tauri#11505](https://github.com/tauri-apps/tauri/issues/11505)).
+Until that is resolved, a **single-file UI** (inline script and styles) is the
+safe choice on Windows; multi-file UIs are not yet verified there.
 
 ### The bridge
 
