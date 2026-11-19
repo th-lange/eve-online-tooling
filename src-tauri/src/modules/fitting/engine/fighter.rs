@@ -16,6 +16,7 @@
 //! (e.g. an energy-neutralizer-only support fighter) carries neither and
 //! contributes no DPS, matching the game.
 
+use super::application::{missile_application, turret_chance_to_hit};
 use super::attr::{attr, AttrStore};
 use super::cycle::cycle_of;
 
@@ -33,6 +34,18 @@ struct AbilityAttrs {
     therm: i64,
     kin: i64,
     exp: i64,
+    /// `fighterAbility*ExplosionRadius` / `…ExplosionVelocity`: the ability is
+    /// a missile attack, applied like one (#1272).
+    explosion_radius: i64,
+    explosion_velocity: i64,
+    /// `…ReductionFactor` / `…ReductionSensitivity`: the damage-reduction
+    /// factor comes in two halves on fighters, combined in [`aggregated_drf`].
+    reduction_factor: i64,
+    reduction_sensitivity: i64,
+    /// `…RangeOptimal` (or plain `…Range`), and `…RangeFalloff` where the
+    /// ability has one (`0` = none).
+    range_optimal: i64,
+    range_falloff: i64,
 }
 
 /// The two damage-ability families real fighter types carry today (#877).
@@ -40,27 +53,39 @@ const FAMILIES: [AbilityAttrs; 2] = [
     AbilityAttrs {
         key: "attackMissile",
         label: "Rockets",
-        duration: 2233,    // fighterAbilityAttackMissileDuration
-        damage_mult: 2226, // fighterAbilityAttackMissileDamageMultiplier
-        em: 2227,          // fighterAbilityAttackMissileDamageEM
-        therm: 2228,       // fighterAbilityAttackMissileDamageTherm
-        kin: 2229,         // fighterAbilityAttackMissileDamageKin
-        exp: 2230,         // fighterAbilityAttackMissileDamageExp
+        duration: 2233,              // fighterAbilityAttackMissileDuration
+        damage_mult: 2226,           // fighterAbilityAttackMissileDamageMultiplier
+        em: 2227,                    // fighterAbilityAttackMissileDamageEM
+        therm: 2228,                 // fighterAbilityAttackMissileDamageTherm
+        kin: 2229,                   // fighterAbilityAttackMissileDamageKin
+        exp: 2230,                   // fighterAbilityAttackMissileDamageExp
+        explosion_radius: 2234,      // fighterAbilityAttackMissileExplosionRadius
+        explosion_velocity: 2235,    // fighterAbilityAttackMissileExplosionVelocity
+        reduction_factor: 2231,      // fighterAbilityAttackMissileReductionFactor
+        reduction_sensitivity: 2232, // fighterAbilityAttackMissileReductionSensitivity
+        range_optimal: 2236,         // fighterAbilityAttackMissileRangeOptimal
+        range_falloff: 2237,         // fighterAbilityAttackMissileRangeFalloff
     },
     AbilityAttrs {
         key: "missiles",
         label: "Fighter Missiles",
-        duration: 2182,    // fighterAbilityMissilesDuration
-        damage_mult: 2130, // fighterAbilityMissilesDamageMultiplier
-        em: 2131,          // fighterAbilityMissilesDamageEM
-        therm: 2132,       // fighterAbilityMissilesDamageTherm
-        kin: 2133,         // fighterAbilityMissilesDamageKin
-        exp: 2134,         // fighterAbilityMissilesDamageExp
+        duration: 2182,              // fighterAbilityMissilesDuration
+        damage_mult: 2130,           // fighterAbilityMissilesDamageMultiplier
+        em: 2131,                    // fighterAbilityMissilesDamageEM
+        therm: 2132,                 // fighterAbilityMissilesDamageTherm
+        kin: 2133,                   // fighterAbilityMissilesDamageKin
+        exp: 2134,                   // fighterAbilityMissilesDamageExp
+        explosion_radius: 2125,      // fighterAbilityMissilesExplosionRadius
+        explosion_velocity: 2126,    // fighterAbilityMissilesExplosionVelocity
+        reduction_factor: 2127,      // fighterAbilityMissilesDamageReductionFactor
+        reduction_sensitivity: 2128, // fighterAbilityMissilesDamageReductionSensitivity
+        range_optimal: 2149,         // fighterAbilityMissilesRange
+        range_falloff: 0,            // no falloff attribute on this ability
     },
 ];
 
 /// One resolved ability's DPS at a single fighter (before squadron-size
-/// scaling).
+/// scaling), plus what it takes to apply that damage to a target.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FighterAbility {
     pub key: &'static str,
@@ -73,6 +98,27 @@ pub struct FighterAbility {
     /// derating is wired through for any future ability that gains a clip,
     /// not currently exercised.
     pub sustained_dps_per_fighter: f64,
+    /// Explosion radius (m) and velocity (m/s) of the ability's missile.
+    pub explosion_radius: f64,
+    pub explosion_velocity: f64,
+    /// Damage reduction factor in the single-number form the missile formula
+    /// takes — see [`aggregated_drf`].
+    pub drf: f64,
+    /// Optimal and falloff (m) of the ability; falloff is `0` when it has none.
+    pub optimal: f64,
+    pub falloff: f64,
+}
+
+/// Fighters carry the missile damage-reduction factor as two attributes,
+/// `reductionFactor` and `reductionSensitivity`; the application formula wants
+/// the one exponent `ln(factor) / ln(sensitivity)` (PYFA `_calcAggregatedDrf`).
+/// `0` when either half is missing or degenerate, which makes
+/// `missile_application` skip the speed term instead of producing NaN.
+pub fn aggregated_drf(reduction_factor: f64, reduction_sensitivity: f64) -> f64 {
+    if reduction_factor <= 0.0 || reduction_sensitivity <= 0.0 || reduction_sensitivity == 1.0 {
+        return 0.0;
+    }
+    reduction_factor.ln() / reduction_sensitivity.ln()
 }
 
 /// Which fighter-tube category a squadron belongs to (#877) — the hull's
@@ -110,9 +156,55 @@ pub fn abilities_of(store: &AttrStore) -> Vec<FighterAbility> {
                 label: f.label,
                 dps_per_fighter: burst,
                 sustained_dps_per_fighter: burst * factor,
+                explosion_radius: store.get(f.explosion_radius),
+                explosion_velocity: store.get(f.explosion_velocity),
+                drf: aggregated_drf(
+                    store.get(f.reduction_factor),
+                    store.get(f.reduction_sensitivity),
+                ),
+                optimal: store.get(f.range_optimal),
+                falloff: if f.range_falloff > 0 {
+                    store.get(f.range_falloff)
+                } else {
+                    0.0
+                },
             })
         })
         .collect()
+}
+
+impl FighterAbility {
+    /// Fraction of this ability's paper damage that lands on a target (PYFA
+    /// `getFighterAbilityMult`): the missile explosion-radius/velocity factor,
+    /// times a range factor.
+    ///
+    /// `closes_range` says the squadron can fly to the target and hold its own
+    /// optimal — range then costs nothing. Otherwise the squadron is taken to
+    /// sit on the carrier and shoot from `distance`, so the ability's optimal
+    /// and falloff apply (an ability without falloff simply stops at optimal).
+    pub fn application(
+        &self,
+        closes_range: bool,
+        target_sig: f64,
+        target_speed: f64,
+        distance: f64,
+    ) -> f64 {
+        let range = if closes_range {
+            1.0
+        } else {
+            // Tracking terms zeroed: what is left of the turret formula is
+            // exactly the optimal/falloff curve.
+            turret_chance_to_hit(self.optimal, self.falloff, 0.0, 0.0, 0.0, 0.0, distance)
+        };
+        range
+            * missile_application(
+                self.explosion_radius,
+                self.explosion_velocity,
+                self.drf,
+                target_sig,
+                target_speed,
+            )
+    }
 }
 
 /// Pick one ability to fire: the pilot's explicit choice (`selected`, a key
@@ -226,5 +318,73 @@ mod tests {
         let mut s = AttrStore::new();
         s.set_base(attr::FIGHTER_SQUADRON_IS_SUPPORT, 1.0);
         assert_eq!(category_of(&s), Some(FighterCategory::Support));
+    }
+
+    /// A rocket ability with round application numbers: 100 m explosion
+    /// radius, 100 m/s explosion velocity, 10 km optimal + 5 km falloff, and
+    /// reduction factor/sensitivity chosen so the exponent is exactly 0.5
+    /// (`ln 2 / ln 4`).
+    fn rockets() -> FighterAbility {
+        let mut s = firbolg();
+        s.set_base(2234, 100.0); // explosion radius
+        s.set_base(2235, 100.0); // explosion velocity
+        s.set_base(2231, 2.0); // reduction factor
+        s.set_base(2232, 4.0); // reduction sensitivity
+        s.set_base(2236, 10_000.0); // optimal
+        s.set_base(2237, 5_000.0); // falloff
+        *abilities_of(&s)
+            .iter()
+            .find(|a| a.key == "attackMissile")
+            .unwrap()
+    }
+
+    #[test]
+    fn the_two_reduction_attributes_fold_into_one_exponent() {
+        assert!((rockets().drf - 0.5).abs() < 1e-12);
+        // A missing or degenerate half must not turn into NaN or infinity.
+        assert_eq!(aggregated_drf(0.0, 4.0), 0.0);
+        assert_eq!(aggregated_drf(2.0, 0.0), 0.0);
+        assert_eq!(aggregated_drf(2.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn a_big_slow_target_takes_full_fighter_damage() {
+        assert_eq!(rockets().application(true, 400.0, 0.0, 0.0), 1.0);
+    }
+
+    #[test]
+    fn a_small_target_takes_the_signature_fraction() {
+        // sig 40 against a 100 m explosion radius, standing still: 40 %.
+        assert!((rockets().application(true, 40.0, 0.0, 0.0) - 0.4).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_fast_target_takes_the_speed_term() {
+        // sig 100 at 400 m/s: (100·100 / (100·400))^0.5 = 0.5, below the
+        // signature term's 1.0.
+        assert!((rockets().application(true, 100.0, 400.0, 0.0) - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_squadron_that_cannot_close_range_shoots_through_its_falloff() {
+        let r = rockets();
+        // Inside optimal: range costs nothing either way.
+        assert_eq!(r.application(false, 400.0, 0.0, 10_000.0), 1.0);
+        // One falloff past optimal: half.
+        assert!((r.application(false, 400.0, 0.0, 15_000.0) - 0.5).abs() < 1e-12);
+        // The same distance costs nothing once the squadron flies there.
+        assert_eq!(r.application(true, 400.0, 0.0, 15_000.0), 1.0);
+    }
+
+    #[test]
+    fn an_ability_without_falloff_stops_at_its_range() {
+        let mut s = firbolg();
+        s.set_base(2125, 100.0); // explosion radius
+        s.set_base(2149, 20_000.0); // fighterAbilityMissilesRange
+        let abilities = abilities_of(&s);
+        let missiles = abilities.iter().find(|a| a.key == "missiles").unwrap();
+        assert_eq!(missiles.falloff, 0.0);
+        assert_eq!(missiles.application(false, 400.0, 0.0, 20_000.0), 1.0);
+        assert_eq!(missiles.application(false, 400.0, 0.0, 20_001.0), 0.0);
     }
 }

@@ -303,7 +303,8 @@ export interface AppliedBuff {
  *  drone tracking loss directly, independent of range — falloff and missile
  *  range gating come from the DPS-vs-range curve, which sweeps distance.
  *  `dronesKeepPace`: drones at/above the target's speed assume perfect
- *  application instead of the tracking formula (PYFA's "auto" drone mode).
+ *  application instead of the tracking formula, and fighter squadrons that
+ *  fast pay no range penalty (PYFA's "auto" drone mode).
  *  `missilesNeedOvertake`: missiles slower than the target's speed never
  *  connect at all — not modeled by PYFA, off by default to match it. */
 export interface TargetProfile {

@@ -9,6 +9,8 @@ Run it from a Pyfa checkout, with `PYFA_EVE_DB` pointing at a prebuilt
 Nothing here touches a user save DB: saveddata lives in memory, gamedata is
 read-only.
 """
+import enum
+import importlib.util
 import json
 import os
 import sys
@@ -47,6 +49,7 @@ import eos.db  # noqa: E402
 from eos.const import FittingModuleState, SpoolType  # noqa: E402
 from eos.saveddata.character import Character  # noqa: E402
 from eos.saveddata.drone import Drone  # noqa: E402
+from eos.saveddata.fighter import Fighter  # noqa: E402
 from eos.saveddata.fit import Fit  # noqa: E402
 from eos.saveddata.module import Module  # noqa: E402
 from eos.saveddata.ship import Ship  # noqa: E402
@@ -60,7 +63,7 @@ def item(name):
     return it
 
 
-def build(ship_name, mods, drones=(), state=None):
+def build(ship_name, mods, drones=(), state=None, fighters=()):
     fit = Fit()
     fit.ship = Ship(item(ship_name))
     fit.character = Character.getAll5()
@@ -80,6 +83,10 @@ def build(ship_name, mods, drones=(), state=None):
         d.amount = d.amountActive = qty
         fit.drones.append(d)
         d.owner = fit
+    for fname in fighters:
+        f = Fighter(item(fname))  # a full squadron
+        fit.fighters.append(f)
+        f.owner = fit
     fit.calculateModifiedAttributes()
     return fit
 
@@ -135,6 +142,65 @@ def armor_resonance(fit, profile):
     )]
 
 
+def _fighter_ability_mult():
+    """PYFA's own `getFighterAbilityMult`, loaded without its GUI.
+
+    It lives in the graph code, whose module pulls in the wx-backed settings
+    and attribute services. Stand in for those four imports and load the file
+    directly, so the application maths that runs is still PYFA's. The stand-in
+    settings pick the default "auto" drone mode."""
+    class Mode(enum.IntEnum):
+        auto = 1
+        followAttacker = 2
+        followTarget = 3
+
+    settings = types.SimpleNamespace(get=lambda key: Mode.auto)
+    stubs = {
+        "graphs": {},
+        "graphs.calc": {"checkLockRange": None, "checkDroneControlRange": None},
+        "service": {},
+        "service.attribute": {"Attribute": None},
+        "service.const": {"GraphDpsDroneMode": Mode},
+        "service.settings": {
+            "GraphSettings": types.SimpleNamespace(getInstance=lambda: settings)},
+    }
+    for name, attrs in stubs.items():
+        mod = types.ModuleType(name)
+        mod.__dict__.update(attrs)
+        sys.modules[name] = mod
+    spec = importlib.util.spec_from_file_location(
+        "pyfa_application", "graphs/data/fitDamageStats/calc/application.py")
+    application = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(application)
+    return application.getFighterAbilityMult
+
+
+def fighter_application_rows():
+    """Applied fighter damage (#1272): each damage ability of a Firbolg I
+    squadron on a Thanatos against a few target signatures and speeds, at
+    point-blank range. `squadronDps` is the ability's paper DPS for the full
+    squadron, `applicationMult` the fraction of it PYFA lands."""
+    mult_of = _fighter_ability_mult()
+    fit = build("Thanatos", [], fighters=["Firbolg I"])
+    squadron = fit.fighters[0]
+    src = types.SimpleNamespace(
+        item=fit, getRadius=lambda: fit.ship.getModifiedItemAttr("radius"))
+    tgt = types.SimpleNamespace(isFit=False)
+    rows = []
+    for ability in squadron.abilities:
+        if not ability.dealsDamage:
+            continue
+        for sig, speed in ((400, 0), (125, 300), (40, 1000), (40, 4000)):
+            rows.append({
+                "label": f"Thanatos + Firbolg I, {ability.attrPrefix} "
+                         f"vs sig {sig} m at {speed} m/s",
+                "squadronDps": round(ability.getDps().total, 4),
+                "applicationMult": round(
+                    mult_of(squadron, ability, src, tgt, 0, speed, sig), 6),
+            })
+    return rows
+
+
 def comparison_rows():
     """Fits recorded for the #1272 engine comparison: the RAH's cycle ordering
     under mixed profiles, and the cap sim's staggering of identical modules (an
@@ -179,6 +245,7 @@ def comparison_rows():
         "label": "Rifter + Small EMP Smartbomb I",
         "totalDps": round(smartbomb.getTotalDps().total, 4),
     })
+    rows.extend(fighter_application_rows())
     return rows
 
 

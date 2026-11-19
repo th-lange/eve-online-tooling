@@ -755,20 +755,13 @@ export function DpsBreakdownPanel({
                 {appliedDps.total.toFixed(0)} dps
               </span>{" "}
               (vs paper {dps.total.toFixed(0)} dps)
-              {(dps.fighter > 0 || dps.smartbomb > 0) && (
+              {dps.smartbomb > 0 && (
                 <span
                   className="text-zinc-600"
-                  title="Applied covers weapons with a tracking/application model. Fighter application isn't modelled yet (#877); a smartbomb has none to model — it hits everything inside its own radius. Their share of the paper number is left out rather than scored as zero damage."
+                  title="Applied covers weapons with a tracking/application model. A smartbomb has none to model — it hits everything inside its own radius — so its share of the paper number is left out rather than scored as zero damage."
                 >
                   {" "}
-                  ·{" "}
-                  {[
-                    dps.fighter > 0 ? "fighters" : null,
-                    dps.smartbomb > 0 ? "smartbombs" : null,
-                  ]
-                    .filter(Boolean)
-                    .join(" and ")}{" "}
-                  not applied
+                  · smartbombs not applied
                 </span>
               )}
             </div>

@@ -214,9 +214,8 @@ pub struct DpsBreakdown {
     pub missile: f64,
     pub drone: f64,
     /// Fighter squadron DPS (#877) — each squadron's selected ability ×
-    /// squadron size. Not yet folded into applied-DPS/DPS-vs-range
-    /// (travel/application modeling for fighters is a documented follow-up),
-    /// so `applied_dps`/`dps_range_curve` always carry `0.0` here.
+    /// squadron size. In `applied_dps`/`dps_range_curve` it is scaled by the
+    /// ability's missile application against the target (#1272).
     pub fighter: f64,
     /// Smartbomb DPS (#1293): damage per cycle ÷ cycle time, summed over
     /// every running smartbomb. Counted in `total` as PYFA does, but never
@@ -274,7 +273,10 @@ pub struct TargetProfile {
     /// calc — mirrors PYFA's "auto" drone mode ("hard to simulate drone
     /// behavior, so assume chance to hit is 1 for mobile drones which catch
     /// up with target"). A drone slower than the target still runs the
-    /// tracking formula (driven by `speed`, see `angular_velocity`).
+    /// tracking formula (driven by `speed`, see `angular_velocity`). Fighter
+    /// squadrons take the same assumption (#1272): fast enough, they fly to
+    /// the target and their ability's range costs nothing; slower, they shoot
+    /// from the carrier through its optimal/falloff.
     pub drones_keep_pace: bool,
     /// Missiles slower than the target's own speed (attr 37, the missile's
     /// flight velocity — not `explosionVelocity`) can never catch it: zero

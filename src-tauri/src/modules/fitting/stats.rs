@@ -439,12 +439,14 @@ pub(super) fn run_dogma(
     };
 
     let weapon_ranges = weapon_ranges_of(&resolved, &module_items);
+    let squadrons = firing_squadrons_of(&fighter_items, &resolved.fighters);
     let (applied_dps, dps_range_curve) = if let Some(target) = target_profile {
         let applied = applied_dps_of(
             &resolved,
             &module_items,
             &drone_items,
             &drone_active_counts,
+            &squadrons,
             target,
             &weapon_ranges,
         );
@@ -453,6 +455,7 @@ pub(super) fn run_dogma(
             &module_items,
             &drone_items,
             &drone_active_counts,
+            &squadrons,
             target,
             &weapon_ranges,
         );
@@ -496,6 +499,7 @@ pub(super) fn run_dogma(
                 &module_items,
                 &drone_items,
                 &drone_active_counts,
+                &squadrons,
                 &a.target,
                 &weapon_ranges,
             )
@@ -916,6 +920,36 @@ pub(super) fn fighter_of(
     )
 }
 
+/// One squadron's firing ability with what applying it needs (#1272): how
+/// many fighters are in it and how fast they fly.
+pub(super) struct FiringSquadron {
+    ability: fighter::FighterAbility,
+    size: f64,
+    /// `maxVelocity` (37) of one fighter, m/s.
+    speed: f64,
+}
+
+/// The squadrons that deal damage, each with the ability [`fighter_of`]
+/// picks for it. Pure support squadrons are left out.
+pub(super) fn firing_squadrons_of(
+    fighter_items: &[&FitItem],
+    fighters: &[AttrStore],
+) -> Vec<FiringSquadron> {
+    fighter_items
+        .iter()
+        .zip(fighters)
+        .filter_map(|(item, store)| {
+            let abilities = fighter::abilities_of(store);
+            let ability = *fighter::selected_ability(&abilities, item.fighter_ability.as_deref())?;
+            Some(FiringSquadron {
+                ability,
+                size: item.quantity.max(0) as f64,
+                speed: store.get(37),
+            })
+        })
+        .collect()
+}
+
 /// DPS from a resolved fit (#174, #176). Turrets read finalized `damageMultiplier`
 /// (64) + `speed` (51) and the loaded charge's base damage; **missiles** ride on
 /// the *resolved* charge, so missile-damage skills and ship role bonuses (applied
@@ -1046,16 +1080,19 @@ pub(super) fn dps_sustained_of(
 /// Shared applied-DPS math for one distance: turret/missile hit-quality
 /// (#701) folded onto the paper per-weapon DPS, mirroring [`dps_of`]'s
 /// iteration but scaling each weapon by its `application` factor at
-/// `distance`. `weapon_ranges` gates missiles beyond their flight range.
+/// `distance`. `weapon_ranges` gates missiles beyond their flight range;
+/// `squadrons` are the fighter squadrons that fire (#1272).
 /// `target.speed` feeds the missile explosion-velocity comparison;
 /// `target.angular_velocity` (rad/s, distance-independent) feeds turret/
 /// drone tracking loss — see [`TargetProfile`], including its two optional
 /// speed-vs-target gates (`drones_keep_pace`, `missiles_need_overtake`).
+#[allow(clippy::too_many_arguments)] // one arg per independent sim input; a struct would just rename them
 fn applied_dps_at(
     resolved: &ResolvedFit,
     module_items: &[&FitItem],
     drone_items: &[&FitItem],
     drone_active: &[i32],
+    squadrons: &[FiringSquadron],
     target: &TargetProfile,
     distance: f64,
     weapon_ranges: &[WeaponRange],
@@ -1203,18 +1240,32 @@ fn applied_dps_at(
         drone_dps += mult * damage_per_shot * count as f64 / rof_seconds * app;
     }
 
+    // Fighters (#1272, PYFA `getFighterAbilityMult`): every damage ability is
+    // a missile attack, so it takes the missile factor. A squadron at least
+    // as fast as the target flies to it and range costs nothing — the same
+    // "auto" assumption, behind the same toggle, as drones above; a slower
+    // one is taken to shoot from the carrier, through its ability's range.
+    let fighter_dps: f64 = squadrons
+        .iter()
+        .map(|s| {
+            let closes_range = target.drones_keep_pace && s.speed >= target_speed;
+            s.ability.dps_per_fighter
+                * s.size
+                * s.ability
+                    .application(closes_range, target_sig, target_speed, distance)
+        })
+        .sum();
+
     DpsBreakdown {
         turret: turret_dps,
         missile: missile_dps,
         drone: drone_dps,
-        // Fighter travel/application modeling is a documented follow-up
-        // (#877 scope cut) — fighters never contribute to applied DPS or
-        // the DPS-vs-range curve today. Smartbombs are excluded on purpose:
-        // they have no tracking or explosion radius to apply against a
-        // single target, only their own few-km radius (#1293).
-        fighter: 0.0,
+        fighter: fighter_dps,
+        // Smartbombs are excluded on purpose: they have no tracking or
+        // explosion radius to apply against a single target, only their own
+        // few-km radius (#1293).
         smartbomb: 0.0,
-        total: turret_dps + missile_dps + drone_dps,
+        total: turret_dps + missile_dps + drone_dps + fighter_dps,
     }
 }
 
@@ -1229,6 +1280,7 @@ pub(super) fn applied_dps_of(
     module_items: &[&FitItem],
     drone_items: &[&FitItem],
     drone_active: &[i32],
+    squadrons: &[FiringSquadron],
     target: &TargetProfile,
     weapon_ranges: &[WeaponRange],
 ) -> DpsBreakdown {
@@ -1237,6 +1289,7 @@ pub(super) fn applied_dps_of(
         module_items,
         drone_items,
         drone_active,
+        squadrons,
         target,
         0.0,
         weapon_ranges,
@@ -1254,6 +1307,7 @@ pub(super) fn dps_range_curve_of(
     module_items: &[&FitItem],
     drone_items: &[&FitItem],
     drone_active: &[i32],
+    squadrons: &[FiringSquadron],
     target: &TargetProfile,
     weapon_ranges: &[WeaponRange],
 ) -> Vec<(f64, f64)> {
@@ -1277,6 +1331,7 @@ pub(super) fn dps_range_curve_of(
                 module_items,
                 drone_items,
                 drone_active,
+                squadrons,
                 target,
                 distance,
                 weapon_ranges,
@@ -2240,7 +2295,7 @@ mod tests {
         };
 
         let paper = dps_of(&resolved, &module_items, &[], &[]);
-        let applied = applied_dps_of(&resolved, &module_items, &[], &[], &target, &[]);
+        let applied = applied_dps_of(&resolved, &module_items, &[], &[], &[], &target, &[]);
         assert!(
             applied.turret < paper.turret,
             "applied {} should be below paper {}",
@@ -2291,7 +2346,7 @@ mod tests {
             missiles_need_overtake: false,
         };
 
-        let curve = dps_range_curve_of(&resolved, &module_items, &[], &[], &target, &ranges);
+        let curve = dps_range_curve_of(&resolved, &module_items, &[], &[], &[], &target, &ranges);
         assert_eq!(curve.len(), 30);
         let (d0, dps0) = curve[0];
         assert_eq!(d0, 0.0, "first sample is point-blank");
@@ -2333,7 +2388,7 @@ mod tests {
             drones_keep_pace: true,
             missiles_need_overtake: false,
         };
-        let applied = applied_dps_of(&resolved, &[], &drone_items, &[1], &target, &[]);
+        let applied = applied_dps_of(&resolved, &[], &drone_items, &[1], &[], &target, &[]);
         // Full application (cth 1.0) → multiplier 0.03 + 0.99·0.995 = 1.01505
         // (pyfa parity; the issue table rounds it to 1.015).
         assert!(
@@ -2346,7 +2401,7 @@ mod tests {
             drones_keep_pace: false,
             ..target
         };
-        let applied_off = applied_dps_of(&resolved, &[], &drone_items, &[1], &target_off, &[]);
+        let applied_off = applied_dps_of(&resolved, &[], &drone_items, &[1], &[], &target_off, &[]);
         assert!(
             applied_off.drone < applied.drone,
             "toggle off: the tracking formula bites as usual"
@@ -2383,7 +2438,7 @@ mod tests {
             drones_keep_pace: true,
             missiles_need_overtake: false,
         };
-        let applied = applied_dps_of(&resolved, &[], &drone_items, &[1], &target, &[]);
+        let applied = applied_dps_of(&resolved, &[], &drone_items, &[1], &[], &target, &[]);
         assert_eq!(
             applied.drone, 0.0,
             "an inescapably fast target should crush drone application to (near) zero"
@@ -2418,7 +2473,7 @@ mod tests {
             drones_keep_pace: false,
             missiles_need_overtake: true,
         };
-        let applied = applied_dps_of(&resolved, &module_items, &[], &[], &target, &[]);
+        let applied = applied_dps_of(&resolved, &module_items, &[], &[], &[], &target, &[]);
         assert_eq!(
             applied.missile, 0.0,
             "a missile slower than the target should never connect"
@@ -2428,11 +2483,77 @@ mod tests {
             missiles_need_overtake: false,
             ..target
         };
-        let applied_off = applied_dps_of(&resolved, &module_items, &[], &[], &target_off, &[]);
+        let applied_off = applied_dps_of(&resolved, &module_items, &[], &[], &[], &target_off, &[]);
         assert!(
             applied_off.missile > 0.0,
             "toggle off: falls back to the explosion-velocity model"
         );
+    }
+
+    /// A squadron applies its selected ability's paper DPS × its size × the
+    /// ability's missile factor, and whether range costs it anything depends
+    /// on it being able to fly to the target (#1272).
+    #[test]
+    fn fighter_squadrons_apply_through_their_ability() {
+        let fighter = store(&[
+            (2233, 5_000.0),  // rockets: 5 s cycle
+            (2226, 1.0),      // damage multiplier
+            (2228, 100.0),    // 100 thermal → 20 dps per fighter
+            (2234, 100.0),    // explosion radius
+            (2235, 100.0),    // explosion velocity
+            (2231, 2.0),      // reduction factor ┐ exponent ln2/ln4 = 0.5
+            (2232, 4.0),      // reduction sensitivity ┘
+            (2236, 10_000.0), // optimal
+            (2237, 5_000.0),  // falloff
+            (37, 1_000.0),    // squadron speed
+        ]);
+        let squadron = FitItem {
+            slot: SlotKind::Fighter,
+            ..drone_item(900, 6, None)
+        };
+        let squadrons = firing_squadrons_of(&[&squadron], &[fighter]);
+        let resolved = resolved_fit(Vec::new(), Vec::new(), Vec::new());
+        let at = |target: &TargetProfile, distance: f64| {
+            applied_dps_at(&resolved, &[], &[], &[], &squadrons, target, distance, &[])
+        };
+
+        let target = TargetProfile {
+            sig_radius: 40.0,
+            speed: 500.0, // slower than the squadron
+            angular_velocity: 0.0,
+            drones_keep_pace: true,
+            missiles_need_overtake: false,
+        };
+        // 6 × 20 dps on paper. Signature term 40/100 = 0.4; speed term
+        // (100·40 / (100·500))^0.5 = √0.08 ≈ 0.283, the smaller of the two.
+        let want = 120.0 * 0.08f64.sqrt();
+        let applied = at(&target, 0.0);
+        assert!(
+            (applied.fighter - want).abs() < 1e-9,
+            "got {}, want {want}",
+            applied.fighter
+        );
+        assert_eq!(applied.total, applied.fighter, "fighters reach the total");
+        assert_eq!(
+            at(&target, 15_000.0).fighter,
+            applied.fighter,
+            "a squadron that catches its target is not range-limited"
+        );
+
+        // One falloff past optimal halves the damage once the squadron can't
+        // close: because the target outruns it, or because the toggle is off.
+        let outrunning = TargetProfile {
+            speed: 2_000.0,
+            ..target.clone()
+        };
+        assert!(
+            (at(&outrunning, 15_000.0).fighter - at(&outrunning, 0.0).fighter / 2.0).abs() < 1e-9
+        );
+        let toggle_off = TargetProfile {
+            drones_keep_pace: false,
+            ..target
+        };
+        assert!((at(&toggle_off, 15_000.0).fighter - want / 2.0).abs() < 1e-9);
     }
 
     fn drone_item(type_id: i64, qty: i32, active: Option<i32>) -> FitItem {

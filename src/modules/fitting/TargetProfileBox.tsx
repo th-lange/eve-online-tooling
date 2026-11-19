@@ -298,7 +298,7 @@ export function TargetProfileBox() {
         <div className="mt-2 space-y-1 text-xs text-zinc-400">
           <label
             className="flex items-center gap-2"
-            title="Drones at or above the target's speed assume perfect application instead of running the tracking formula — PYFA's &quot;auto&quot; drone mode."
+            title="Drones and fighter squadrons at or above the target's speed fly to it: drones assume perfect application instead of running the tracking formula, fighters pay no range penalty — PYFA's &quot;auto&quot; drone mode."
           >
             <input
               type="checkbox"
@@ -306,7 +306,7 @@ export function TargetProfileBox() {
               onChange={(e) => set({ dronesKeepPace: e.currentTarget.checked })}
               className="accent-amber-500"
             />
-            Drones keep pace with the target
+            Drones and fighters keep pace with the target
           </label>
           <label
             className="flex items-center gap-2"
