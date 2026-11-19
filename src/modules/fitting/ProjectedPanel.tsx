@@ -10,7 +10,8 @@ import {
 
 /**
  * Add modules projected **onto** this fit (webs/paints/damps/…) — incoming
- * effects from a notional attacker, modelled at all-V. Search-to-add plus a
+ * effects from a notional attacker, at the module's base strength (no
+ * attacker hull or skills). Search-to-add plus a
  * removable list; the stats recompute with the projected effects applied
  * (#178). Reads `fit.projected` + `nameOf` from `FitEditorContext` and
  * writes back through its `addProjected`/`removeProjected` mutations.
