@@ -63,7 +63,7 @@ def item(name):
     return it
 
 
-def build(ship_name, mods, drones=(), state=None, fighters=()):
+def build(ship_name, mods, drones=(), state=None, fighters=(), projected=()):
     fit = Fit()
     fit.ship = Ship(item(ship_name))
     fit.character = Character.getAll5()
@@ -87,6 +87,13 @@ def build(ship_name, mods, drones=(), state=None, fighters=()):
         f = Fighter(item(fname))  # a full squadron
         fit.fighters.append(f)
         f.owner = fit
+    for pname in projected:
+        # A bare module projected onto the fit: no projecting ship or pilot,
+        # so it acts with its base attributes.
+        p = Module(item(pname))
+        p.state = FittingModuleState.ACTIVE
+        fit.projectedModules.append(p)
+        p.owner = fit
     fit.calculateModifiedAttributes()
     return fit
 
@@ -201,6 +208,37 @@ def fighter_application_rows():
     return rows
 
 
+def projected_rows():
+    """Effects projected onto a Rifter and how they stack (#1272): identical
+    webs, painters and damps, then each alongside one of the fit's own modules
+    that touches the same attribute."""
+    cases = [([], "Stasis Webifier II", n) for n in (1, 2, 3)]
+    cases += [([], "Target Painter II", n) for n in (1, 2, 3)]
+    cases += [([], "Remote Sensor Dampener II", n) for n in (1, 2, 3)]
+    cases += [
+        (["1MN Afterburner II"], "Stasis Webifier II", 2),
+        (["5MN Microwarpdrive II"], "Target Painter II", 2),
+        (["Sensor Booster II"], "Remote Sensor Dampener II", 2),
+    ]
+    rows = []
+    for own, module, count in cases:
+        ship = build("Rifter", own, projected=[module] * count).ship
+        label = f"Rifter < {count}x {module}"
+        if own:
+            label += f", own {own[0]}"
+        rows.append({
+            "label": label,
+            "maxVelocity": round(ship.getModifiedItemAttr("maxVelocity"), 4),
+            "signatureRadius": round(
+                ship.getModifiedItemAttr("signatureRadius"), 4),
+            "maxTargetRange": round(
+                ship.getModifiedItemAttr("maxTargetRange"), 4),
+            "scanResolution": round(
+                ship.getModifiedItemAttr("scanResolution"), 4),
+        })
+    return rows
+
+
 def comparison_rows():
     """Fits recorded for the #1272 engine comparison: the RAH's cycle ordering
     under mixed profiles, and the cap sim's staggering of identical modules (an
@@ -239,13 +277,14 @@ def comparison_rows():
             "label": f"Rifter + 3x 200mm AutoCannon II / Barrage S, {label}",
             "weaponDps": round(fit.getWeaponDps().total, 4),
         })
-    # Smartbombs: PYFA counts them in total DPS; we do not (#1293).
+    # Smartbombs: counted in total DPS, in a bucket of their own (#1293).
     smartbomb = build("Rifter", ["Small EMP Smartbomb I"])
     rows.append({
         "label": "Rifter + Small EMP Smartbomb I",
         "totalDps": round(smartbomb.getTotalDps().total, 4),
     })
     rows.extend(fighter_application_rows())
+    rows.extend(projected_rows())
     return rows
 
 

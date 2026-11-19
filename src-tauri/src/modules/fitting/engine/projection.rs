@@ -2,8 +2,11 @@
 //!
 //! These are procedural effects: their application isn't in `modifierInfo`, so
 //! each projected module reads a known attribute and post-percent modifies a
-//! target-ship attribute (stacking-penalized across modules). Modelled at all-V
-//! (no source-ship bonuses), matching a bare projected module in PYFA.
+//! target-ship attribute (stacking-penalized across modules). A projected
+//! module acts with its **base** attributes: there is no projecting ship or
+//! pilot, so neither hull bonuses nor skills (Signature Focusing, Signal
+//! Suppression, …) apply. That is what a bare projected module does in PYFA,
+//! and the stacking is pinned against it (`projected_stacking_matches_pyfa`).
 
 use super::attr::{attr, AttrStore};
 use super::modifier::Op;
