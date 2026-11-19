@@ -66,9 +66,12 @@ PYFA_EVE_DB=/tmp/pyfa-rel/squashfs-root/opt/pyfa/eve.db \
 - the #1272 comparison rows: a Rifter + Reactive Armour Hardener under three
   damage profiles (`armorResonance`), a Rifter with 1/2/3 Small Armour
   Repairer IIs (`capState` — on an unstable fit PYFA reports **seconds to
-  empty**, not a percentage), spool-up, overheat and smartbomb DPS, and each
+  empty**, not a percentage), spool-up, overheat and smartbomb DPS, each
   damage ability of a Firbolg I squadron on a Thanatos against four target
-  signatures/speeds (`squadronDps`, `applicationMult`).
+  signatures/speeds (`squadronDps`, `applicationMult`), and a Rifter with
+  1/2/3 webs, painters or damps projected onto it, alone and alongside its
+  own afterburner, microwarpdrive or sensor booster (`maxVelocity`,
+  `signatureRadius`, `maxTargetRange`, `scanResolution`).
 
 Recorded with PYFA source `b79cd90` against v2.70.0's `eve.db`. The first three
 rows reproduce the values captured under the older v2.67.0 recipe exactly.
