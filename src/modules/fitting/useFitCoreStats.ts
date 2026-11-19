@@ -1,5 +1,9 @@
 import { useMemo } from "react";
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import {
+  skipToken,
+  useQuery,
+  type UseQueryResult,
+} from "@tanstack/react-query";
 import {
   fittingShipLayout,
   fittingSimulate,
@@ -47,8 +51,7 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
 
   const layout = useQuery({
     queryKey: fittingKeys.layout(fit?.shipTypeId),
-    queryFn: fit ? () => fittingShipLayout(fit.shipTypeId) : undefined,
-    enabled: fit != null,
+    queryFn: fit ? () => fittingShipLayout(fit.shipTypeId) : skipToken,
   });
 
   // Names for every fitted type id (+ charges), to show names not ids.
@@ -141,8 +144,7 @@ export function useFitCoreStats(state: FitStateSlice): FitStatsSlice {
             sim.spoolPct,
             sim.factorReload,
           )
-      : undefined,
-    enabled: simFit != null,
+      : skipToken,
     // Keep the previous numbers on screen (dimmed by StatsAside) while the next
     // result computes — but only for the same hull: another ship's layout and
     // slot counts must never stand in for this one's.

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { skipToken, useQueries, useQuery } from "@tanstack/react-query";
 import {
   errorMessage,
   marketAllRegions,
@@ -132,7 +132,7 @@ function Workbench() {
   });
   const price = useQuery({
     queryKey: marketSearchKeys.price(historyRegionId, picked?.id),
-    queryFn: picked ? () => marketPrice(historyRegionId, picked.id) : undefined,
+    queryFn: picked ? () => marketPrice(historyRegionId, picked.id) : skipToken,
     enabled: tab === "history" && picked != null,
   });
 
@@ -161,12 +161,12 @@ function Workbench() {
     queryKey: orderKey("sell"),
     queryFn: picked
       ? () => marketSellOrders(orderParams(picked.id))
-      : undefined,
+      : skipToken,
     enabled: tab === "search" && picked != null,
   });
   const buyOrders = useQuery({
     queryKey: orderKey("buy"),
-    queryFn: picked ? () => marketBuyOrders(orderParams(picked.id)) : undefined,
+    queryFn: picked ? () => marketBuyOrders(orderParams(picked.id)) : skipToken,
     enabled: tab === "search" && picked != null,
   });
 
@@ -187,7 +187,7 @@ function Workbench() {
             stationId: station?.id ?? null,
             excludeScams,
           })
-      : undefined,
+      : skipToken,
     enabled: tab === "search" && picked != null,
   });
 

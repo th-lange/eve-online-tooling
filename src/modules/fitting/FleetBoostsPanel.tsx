@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { Plus, Trash2, X } from "lucide-react";
 import {
   fittingCompatibleCharges,
@@ -117,8 +117,7 @@ export function FleetBoostsPanel() {
     queryKey: fittingKeys.compatibleCharges(pickedModule?.id),
     queryFn: pickedModule
       ? () => fittingCompatibleCharges(pickedModule.id)
-      : undefined,
-    enabled: pickedModule != null,
+      : skipToken,
   });
 
   function reset() {
