@@ -15,3 +15,23 @@ ignore = [
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
 ]
+
+# Not ignored, recorded: RUSTSEC-2024-0429 / GHSA-wrw7-89jp-8q8g, glib 0.18.5
+# (Linux only). `cargo audit` reports it as an "unsound" warning, which does
+# not fail the gate; GitHub's Dependabot raises it as an alert, dismissed there
+# as "vulnerable code not used". The reasoning, so it isn't redone from scratch:
+#
+# - The bug is in the `Iterator`/`DoubleEndedIterator` impls of
+#   `glib::VariantStrIter`, which only `Variant::array_iter_str()` constructs.
+# - Nothing calls either: not this crate, and no crate in the Linux dependency
+#   tree other than glib itself (checked 2026-11-20 by searching the sources of
+#   all 578 crates.io packages `cargo tree --target x86_64-unknown-linux-gnu`
+#   lists).
+# - It cannot be fixed by upgrading yet. Patched glib (>= 0.20) arrives with
+#   the GTK 3 bindings' gtk 0.19, which webkit2gtk 3.0 already uses — but
+#   tauri (2.12 and the 3.0 alphas), wry 0.57, tao 0.37 and muda 0.21 all still
+#   require gtk ^0.18, and with it glib 0.18.
+#
+# Exit path: gone once Tauri's Linux stack (tauri, wry, tao, muda) moves to
+# gtk 0.19. Re-check the "nothing calls it" claim if a dependency starts
+# reading GVariant string arrays.
