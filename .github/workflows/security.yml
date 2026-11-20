@@ -6,12 +6,12 @@ name: Security
 # Both audits are merge-blocking: the tree reports zero `npm audit`
 # high/critical findings and zero `cargo audit` vulnerabilities, so anything
 # new here is a regression rather than part of a backlog.
+#
+# No path filter on `pull_request`: `cargo audit` is a required status check
+# on `main`, and a required check that never reports (a docs-only PR skipped
+# by `paths-ignore`) would leave that PR unmergeable forever.
 on:
   pull_request:
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-      - "LICENSE"
   push:
     branches:
       - main
